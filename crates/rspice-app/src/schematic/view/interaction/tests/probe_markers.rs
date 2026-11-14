@@ -3,19 +3,15 @@
 //! authority that refuses one without mutating the document.
 
 use super::*;
+use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
 
 #[test]
 fn empty_space_probe_retains_one_unbound_marker_and_undo_removes_it() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let position = Point::new(30, 40);
 
-    let id = retain_probe_flag(
-        &mut crate::schematic::view::canvas_parts(&mut state),
-        position,
-        None,
-        None,
-    )
-    .expect("editable active schematic");
+    let id = retain_probe_flag(&mut canvas_parts(&mut state), position, None, None)
+        .expect("editable active schematic");
     assert_eq!(state.model.schematic.document().probes.len(), 1);
     assert_eq!(state.model.schematic.document().probes[0].id, id);
     assert_eq!(
@@ -42,11 +38,11 @@ fn empty_space_probe_retains_one_unbound_marker_and_undo_removes_it() {
 
 #[test]
 fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() {
-    let mut read_only = AppState::default();
+    let mut read_only = DesignTestHost::default();
     read_only.model.schematic.session.read_only = true;
     assert!(
         retain_probe_flag(
-            &mut crate::schematic::view::canvas_parts(&mut read_only),
+            &mut canvas_parts(&mut read_only),
             Point::origin(),
             None,
             None
@@ -56,7 +52,7 @@ fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() 
     assert!(read_only.model.schematic.document().probes.is_empty());
     assert!(!read_only.model.schematic.can_undo());
 
-    let mut read_only_reference = AppState::default();
+    let mut read_only_reference = DesignTestHost::default();
     read_only_reference
         .model
         .workspace
@@ -64,7 +60,7 @@ fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() 
         .set_active_read_only_reference(true);
     assert!(
         retain_probe_flag(
-            &mut crate::schematic::view::canvas_parts(&mut read_only_reference),
+            &mut canvas_parts(&mut read_only_reference),
             Point::origin(),
             None,
             None
@@ -81,11 +77,11 @@ fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() 
     );
     assert!(!read_only_reference.model.schematic.can_undo());
 
-    let mut replaced = AppState::default();
+    let mut replaced = DesignTestHost::default();
     replaced.model.workspace.content.active_view.view = "symbol".to_owned();
     assert!(
         retain_probe_flag(
-            &mut crate::schematic::view::canvas_parts(&mut replaced),
+            &mut canvas_parts(&mut replaced),
             Point::origin(),
             None,
             None
@@ -98,9 +94,9 @@ fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() 
 
 #[test]
 fn bound_probe_marker_retains_the_exact_source_expression() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     retain_probe_flag(
-        &mut crate::schematic::view::canvas_parts(&mut state),
+        &mut canvas_parts(&mut state),
         Point::new(10, 20),
         Some(&OccurrenceProbeSpelling::verbatim("V(OUT)")),
         None,
@@ -121,30 +117,22 @@ fn bound_probe_marker_retains_the_exact_source_expression() {
 
 #[test]
 fn probe_placed_while_descended_names_the_occurrence() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.workspace.descend_into(
         "X1".to_owned(),
         crate::state::CellViewRef::new("user", "amp", "schematic"),
         ViewType::Schematic,
     );
 
-    let spelling = probe_spelling_for(
-        &crate::schematic::view::canvas_parts(&mut state),
-        "n1",
-        "V(n1)",
-    )
-    .expect("an ASCII occurrence spells");
+    let spelling = probe_spelling_for(&canvas_parts(&mut state), "n1", "V(n1)")
+        .expect("an ASCII occurrence spells");
 
     assert_eq!(spelling.display(), "V(/X1/n1)");
     assert_eq!(spelling.engine(), "V(x1.n1)");
     assert_eq!(
-        probe_spelling_for(
-            &crate::schematic::view::canvas_parts(&mut state),
-            "V(x1.n1)",
-            "V(x1.n1)"
-        )
-        .expect("an exact expression is not re-scoped")
-        .display(),
+        probe_spelling_for(&canvas_parts(&mut state), "V(x1.n1)", "V(x1.n1)")
+            .expect("an exact expression is not re-scoped")
+            .display(),
         "V(x1.n1)",
         "an expression that already names a node must be used as written"
     );
@@ -152,7 +140,7 @@ fn probe_placed_while_descended_names_the_occurrence() {
 
 #[test]
 fn an_occurrence_probe_saves_the_display_name_and_requests_the_engine_node() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let spelling = OccurrenceProbeSpelling::for_leaf(
         &crate::state::InstancePath::parse("/X1").expect("one descent"),
         'V',
@@ -161,10 +149,7 @@ fn an_occurrence_probe_saves_the_display_name_and_requests_the_engine_node() {
     .expect("an ASCII occurrence spells");
 
     assert!(matches!(
-        request_probe_signal(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            &spelling
-        ),
+        request_probe_signal(&mut canvas_parts(&mut state), &spelling),
         ProbeSignalOutcome::SavedOutputCreated { .. }
     ));
 
@@ -177,7 +162,7 @@ fn an_occurrence_probe_saves_the_display_name_and_requests_the_engine_node() {
     );
 
     retain_probe_flag(
-        &mut crate::schematic::view::canvas_parts(&mut state),
+        &mut canvas_parts(&mut state),
         Point::new(10, 20),
         Some(&spelling),
         None,
@@ -197,20 +182,19 @@ fn an_occurrence_probe_saves_the_display_name_and_requests_the_engine_node() {
 
 #[test]
 fn bound_probe_marker_retains_stable_plan_output_identity() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     assert!(matches!(
         request_probe_signal(
-            &mut crate::schematic::view::canvas_parts(&mut state),
+            &mut canvas_parts(&mut state),
             &OccurrenceProbeSpelling::verbatim("V(OUT)")
         ),
         ProbeSignalOutcome::SavedOutputCreated { .. }
     ));
     let binding =
-        current_probe_output_binding(&crate::schematic::view::canvas_parts(&mut state), "V(OUT)")
-            .expect("output binding");
+        current_probe_output_binding(&canvas_parts(&mut state), "V(OUT)").expect("output binding");
 
     retain_probe_flag(
-        &mut crate::schematic::view::canvas_parts(&mut state),
+        &mut canvas_parts(&mut state),
         Point::new(10, 20),
         Some(&OccurrenceProbeSpelling::verbatim("V(OUT)")),
         Some(binding),
@@ -231,10 +215,10 @@ fn bound_probe_marker_retains_stable_plan_output_identity() {
 
 #[test]
 fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let position = Point::new(10, 20);
     let id = retain_probe_flag(
-        &mut crate::schematic::view::canvas_parts(&mut state),
+        &mut canvas_parts(&mut state),
         position,
         Some(&OccurrenceProbeSpelling::verbatim("V(OUT)")),
         None,
@@ -243,7 +227,7 @@ fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
     state.model.schematic.clear_undo_history();
 
     let repeated = retain_probe_flag(
-        &mut crate::schematic::view::canvas_parts(&mut state),
+        &mut canvas_parts(&mut state),
         position,
         Some(&OccurrenceProbeSpelling::verbatim(" v ( out ) ")),
         None,
@@ -267,7 +251,7 @@ fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
 
 #[test]
 fn late_safe_mode_activation_rejects_probe_marker_without_mutation() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
@@ -278,7 +262,7 @@ fn late_safe_mode_activation_rejects_probe_marker_without_mutation() {
 
     assert!(
         retain_probe_flag(
-            &mut crate::schematic::view::canvas_parts(&mut state),
+            &mut canvas_parts(&mut state),
             Point::new(10, 20),
             None,
             None

@@ -154,10 +154,11 @@ mod tests {
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::state::{Component, ComponentType, Point};
+    use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
 
     #[test]
     fn armed_array_commit_creates_one_transaction_and_returns_to_select() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -233,7 +234,7 @@ mod tests {
                         handle_armed_array_selection(
                             ui,
                             &response,
-                            &mut crate::schematic::view::canvas_parts(&mut state),
+                            &mut canvas_parts(&mut state),
                             &viewport,
                             grid_size,
                             &symbols,
@@ -352,7 +353,7 @@ mod tests {
 
     #[test]
     fn rejected_array_candidate_stays_armed_without_mutating_the_document() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -380,10 +381,7 @@ mod tests {
         state.model.schematic.arm_tool(Tool::ArraySelection);
         let symbols = schematic_symbol_context(&state);
 
-        commit_armed_array_selection(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            &symbols,
-        );
+        commit_armed_array_selection(&mut canvas_parts(&mut state), &symbols);
 
         assert_eq!(state.model.schematic.document().components.len(), 1);
         assert!(state.design.array_selection.armed);

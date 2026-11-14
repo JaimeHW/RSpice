@@ -49,6 +49,7 @@ mod tests {
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::workbench::app_state::SchematicKeyboardFocus;
+    use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
     use egui::{Context, Event, Id, Key, Modifiers, Popup, RawInput, Rect, Sense, pos2, vec2};
     use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
 
@@ -468,7 +469,7 @@ mod tests {
     #[test]
     fn queued_keyboard_requests_cannot_follow_reused_occurrences_or_new_selections() {
         use crate::state::{CellViewRef, ViewType};
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.document_mut_for_test().components = components();
         state
             .model
@@ -483,7 +484,7 @@ mod tests {
             .model
             .workspace
             .descend_into("X1".into(), master.clone(), ViewType::Schematic);
-        let capture = |state: &AppState, action| EditorRequest {
+        let capture = |state: &DesignTestHost, action| EditorRequest {
             source: editor_request_source(state),
             selection: state.model.schematic.session.editor.selection.clone(),
             action,
@@ -517,15 +518,9 @@ mod tests {
         assert_eq!(delete.source.content_version, current.content_version);
         assert_eq!(delete.source.topology_version, current.topology_version);
         assert_ne!(delete.source.occurrence, current.occurrence);
-        apply_editor_request(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            delete,
-        );
-        apply_editor_request(&mut crate::schematic::view::canvas_parts(&mut state), focus);
-        apply_editor_request(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            pointer,
-        );
+        apply_editor_request(&mut canvas_parts(&mut state), delete);
+        apply_editor_request(&mut canvas_parts(&mut state), focus);
+        apply_editor_request(&mut canvas_parts(&mut state), pointer);
         assert_eq!(state.model.schematic.document().components, components());
         assert_eq!(
             state
@@ -547,10 +542,7 @@ mod tests {
             .editor
             .selection
             .select_only_component(33);
-        apply_editor_request(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            delete,
-        );
+        apply_editor_request(&mut canvas_parts(&mut state), delete);
         assert_eq!(state.model.schematic.document().components, components());
         assert_eq!(
             state
@@ -566,18 +558,12 @@ mod tests {
 
         let delete = capture(&state, EditorAction::DeleteSelection);
         state.model.schematic.session.read_only = true;
-        apply_editor_request(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            delete,
-        );
+        apply_editor_request(&mut canvas_parts(&mut state), delete);
         assert_eq!(state.model.schematic.document().components, components());
         assert!(!state.model.schematic.can_undo());
         state.model.schematic.session.read_only = false;
         let delete = capture(&state, EditorAction::DeleteSelection);
-        apply_editor_request(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            delete,
-        );
+        apply_editor_request(&mut canvas_parts(&mut state), delete);
         assert_eq!(state.model.schematic.document().components.len(), 2);
         assert_eq!(
             state.model.schematic.undo_description(),

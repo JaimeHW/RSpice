@@ -550,6 +550,7 @@ mod tests {
     use crate::state::{Component, ComponentType, Point};
     use crate::state::{Junction, Wire};
     use crate::workbench::app::delete_schematic_selection;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// The scope is a reading position over the one membership authority: it
     /// narrows what a dock lists and decides nothing else, so `AllSheets` must
@@ -569,7 +570,7 @@ mod tests {
     /// cell view with no catalog at all has less than that.
     #[test]
     fn only_a_cell_view_above_one_sheet_offers_a_catalog_to_scope_by() {
-        let mut single = AppState::default();
+        let mut single = DesignTestHost::default();
         assert!(multi_sheet_catalog(&single).is_none());
 
         let key = single

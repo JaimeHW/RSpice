@@ -922,6 +922,7 @@ mod tests {
         SymbolParameterVisibility, SymbolPinDefinition, SymbolPinSide, SymbolSourceContract, Wire,
     };
     use crate::workbench::app::project_transactions::WholeStateValidation;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// The preview's fallback timing names the plan's default transient, and
     /// the type that owns that default lives above the layer the preview does,
@@ -944,7 +945,7 @@ mod tests {
 
     #[test]
     fn the_preview_reads_the_plans_transient_and_falls_back_when_there_is_none() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let planned = stimulus_preview_timing(&state.model);
         assert!(
             planned.from_analysis,
@@ -1194,7 +1195,7 @@ mod tests {
 
     #[test]
     fn selected_bus_and_tap_open_the_generic_transaction() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let bus = Bus::segment(
             41,
             Point::new(0, 0),
@@ -1274,7 +1275,7 @@ mod tests {
 
     #[test]
     fn selected_net_label_opens_the_guarded_object_properties_transaction() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let label = NetLabel::new(43, Point::new(-12, 34), "afe.out");
         state
             .model
@@ -1313,7 +1314,7 @@ mod tests {
 
     #[test]
     fn selected_named_wire_opens_net_scoped_properties_and_unnamed_wire_fails_closed() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -1377,7 +1378,7 @@ mod tests {
 
     #[test]
     fn interface_port_object_properties_preserve_the_full_typed_editor() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -1414,7 +1415,7 @@ mod tests {
 
     #[test]
     fn selected_design_note_opens_the_guarded_object_properties_transaction() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let note = DesignNote::new(
             44,
             Point::new(-12, 34),
@@ -1458,7 +1459,7 @@ mod tests {
 
     #[test]
     fn generic_properties_refuses_read_only_schematics() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -1484,7 +1485,7 @@ mod tests {
 
     #[test]
     fn selected_probe_routes_to_the_inspector_even_in_read_only_mode() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.document_mut_for_test().probes.push(
             SchematicProbe::new(74, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
                 .unwrap(),
@@ -1518,7 +1519,7 @@ mod tests {
 
     #[test]
     fn stale_selected_object_ids_fail_closed_without_opening_a_dialog() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -1578,7 +1579,7 @@ mod tests {
 
     #[test]
     fn a_retained_property_transaction_cannot_be_overwritten_by_another_owner() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let bus = Bus::segment(
             1,
             Point::new(0, 0),

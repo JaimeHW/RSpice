@@ -75,7 +75,9 @@ pub(crate) use self::parts::{
     CanvasFacts, CanvasFrame, CanvasParts, canvas_frame_in, canvas_parts, canvas_parts_in,
 };
 #[cfg(test)]
-pub(crate) use self::parts::{canvas_application_modal_open, canvas_facts, canvas_frame};
+pub(crate) use self::parts::{
+    canvas_application_modal_open, canvas_facts, canvas_facts_lent, canvas_frame, canvas_parts_lent,
+};
 pub(crate) use self::requests::{DesignSurfaceRequest, SelectProbedTrace};
 pub(crate) use self::shelf_drag::{
     SchematicShelfDragPayload, handle_pre_render_placement_transform,
@@ -543,6 +545,7 @@ mod tests {
         Cell, Component, ComponentType, Library, LibraryCellInstance, Point, PortDirection,
         PortSpec, SchematicState, SymbolDocument, SymbolPin, View, ViewType,
     };
+    use crate::workbench::design::test_host::{DesignTestHost, canvas_facts};
 
     fn port(name: &str, direction: PortDirection) -> PortSpec {
         PortSpec {
@@ -551,8 +554,8 @@ mod tests {
         }
     }
 
-    fn state_with_probed_wire() -> AppState {
-        let mut state = AppState::default();
+    fn state_with_probed_wire() -> DesignTestHost {
+        let mut state = DesignTestHost::default();
         let a = Point::new(0, 0);
         let b = Point::new(40, 0);
         state
@@ -588,7 +591,7 @@ mod tests {
 
     #[test]
     fn a_scoped_trace_name_locates_the_conductor_by_its_leaf() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.workspace.descend_into(
             "X1".to_owned(),
             crate::state::CellViewRef::new("user", "amp", "schematic"),
@@ -681,7 +684,7 @@ mod tests {
 
     #[test]
     fn second_refresh_resolves_cell_added_after_initial_interaction_refresh() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let mut library = Library::new("work");
         let mut cell = Cell::new("amp");
         cell.add_view(View::new("schematic", ViewType::Schematic));
@@ -738,8 +741,8 @@ mod tests {
 
     /// A library holding authored masters `amp` and `buf`, whose output pins
     /// sit at different offsets, and one placed instance of `amp`.
-    fn state_with_amp_instance() -> (AppState, u64) {
-        let mut state = AppState::default();
+    fn state_with_amp_instance() -> (DesignTestHost, u64) {
+        let mut state = DesignTestHost::default();
         let mut library = Library::new("work");
         for (master, reach) in [("amp", 40), ("buf", 60)] {
             let mut cell = Cell::new(master);
@@ -782,7 +785,7 @@ mod tests {
     #[test]
     fn every_symbol_input_resolves_the_frame_context_afresh() {
         let (mut state, id) = state_with_amp_instance();
-        let refreshed = |state: &mut AppState, change: &dyn Fn(&mut AppState)| {
+        let refreshed = |state: &mut DesignTestHost, change: &dyn Fn(&mut DesignTestHost)| {
             let before = frame_symbol_context(&mut state.model);
             change(state);
             let after = frame_symbol_context(&mut state.model);
@@ -815,7 +818,7 @@ mod tests {
             );
         }));
 
-        let terminals = |state: &mut AppState| {
+        let terminals = |state: &mut DesignTestHost| {
             let context = frame_symbol_context(&mut state.model);
             let component = state
                 .model
@@ -850,7 +853,7 @@ mod tests {
 
     #[test]
     fn symbol_context_does_not_accept_an_interface_generated_substitute() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let mut binding = LibraryCellInstance::new("missing", "amp", "schematic");
         binding.bind_interface(&[
             port("IN", PortDirection::In),
@@ -876,7 +879,7 @@ mod tests {
 
     #[test]
     fn symbol_context_revision_tracks_library_and_schematic_interface_sources() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let baseline = symbol_context_revision(&state);
 
         state
@@ -904,7 +907,7 @@ mod tests {
     fn accessibility_description_summarizes_scene_and_tool_without_selection_churn() {
         use crate::state::{Junction, NetLabel, Wire};
 
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic

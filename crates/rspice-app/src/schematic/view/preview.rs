@@ -592,6 +592,7 @@ mod tests {
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::state::ComponentType;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// Two resistors, the first selected, on the first of two sheets, with a
     /// wire off its terminal that a stretch can take.
@@ -815,7 +816,7 @@ mod tests {
 
     #[test]
     fn wire_preview_snap_resolution_uses_resolved_cell_terminals() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let mut binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
         binding.bind_interface(&[crate::state::PortSpec {
             name: "IN".to_string(),
@@ -860,7 +861,7 @@ mod tests {
 
     #[test]
     fn pending_library_cell_preview_uses_selected_authored_symbol() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let mut library = crate::state::Library::new("work");
         let mut cell = crate::state::Cell::new("amp");
         cell.add_view(crate::state::View::new(

@@ -327,7 +327,7 @@ pub(super) fn handle_placement_transform_keys(
 mod tests {
     use super::*;
     use crate::state::{Rotation, SchematicState, Tool};
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
     use egui::{Context, Event, Id, RawInput, Rect, Sense, pos2, vec2};
 
     fn placement_key_input(key: Key, modifiers: Modifiers) -> RawInput {
@@ -347,7 +347,7 @@ mod tests {
     fn run_transform_frame(
         ctx: &Context,
         input: RawInput,
-        state: &mut AppState,
+        state: &mut DesignTestHost,
         shelf_drag_over_canvas: bool,
     ) -> (bool, bool) {
         let mut outcome = (false, false);
@@ -359,7 +359,7 @@ mod tests {
                 response.request_focus();
                 let handled = handle_placement_transform_keys(
                     &response,
-                    &mut crate::schematic::view::canvas_parts(state),
+                    &mut canvas_parts(state),
                     shelf_drag_over_canvas,
                 );
                 let m_still_available = ui
@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn primitive_drop_commits_rotation_and_mirror_as_one_undoable_placement() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.session.editor.preview_rotation = Rotation::R90;
         state.model.schematic.session.editor.preview_mirror_h = true;
         state.model.schematic.session.editor.tool = Tool::Place(ComponentType::Capacitor);
@@ -405,11 +405,7 @@ mod tests {
             SchematicShelfDragPayload::primitive(ComponentType::Resistor).expect("placeable");
 
         assert_eq!(
-            commit_shelf_drop(
-                &mut crate::schematic::view::canvas_parts(&mut state),
-                &payload,
-                Point::new(30, 40)
-            ),
+            commit_shelf_drop(&mut canvas_parts(&mut state), &payload, Point::new(30, 40)),
             ShelfDropOutcome::Placed
         );
 
@@ -436,17 +432,13 @@ mod tests {
 
     #[test]
     fn library_drop_uses_payload_binding_and_preserves_a_non_placement_tool() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.session.editor.tool = Tool::Wire;
         let binding = LibraryCellInstance::new("work", "ota", "schematic");
         let payload = SchematicShelfDragPayload::library_cell(binding.clone());
 
         assert_eq!(
-            commit_shelf_drop(
-                &mut crate::schematic::view::canvas_parts(&mut state),
-                &payload,
-                Point::new(10, 20)
-            ),
+            commit_shelf_drop(&mut canvas_parts(&mut state), &payload, Point::new(10, 20)),
             ShelfDropOutcome::Placed
         );
 
@@ -461,18 +453,14 @@ mod tests {
 
     #[test]
     fn read_only_drop_is_a_no_op_and_preserves_the_active_tool() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.session.read_only = true;
         state.model.schematic.session.editor.tool = Tool::Place(ComponentType::Resistor);
         let payload =
             SchematicShelfDragPayload::primitive(ComponentType::Capacitor).expect("placeable");
 
         assert_eq!(
-            commit_shelf_drop(
-                &mut crate::schematic::view::canvas_parts(&mut state),
-                &payload,
-                Point::origin()
-            ),
+            commit_shelf_drop(&mut canvas_parts(&mut state), &payload, Point::origin()),
             ShelfDropOutcome::ReadOnly
         );
         assert!(state.model.schematic.document().components.is_empty());
@@ -499,7 +487,7 @@ mod tests {
     #[test]
     fn focused_click_placement_consumes_direct_r_and_m_canvas_gestures() {
         let ctx = Context::default();
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.session.editor.tool = Tool::Place(ComponentType::Resistor);
 
         let (handled, _) = run_transform_frame(
@@ -528,7 +516,7 @@ mod tests {
     #[test]
     fn shelf_drag_owns_transform_keys_without_canvas_pointer_focus() {
         let ctx = Context::default();
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.session.editor.tool = Tool::Select;
 
         let (handled, _) = run_transform_frame(
@@ -546,16 +534,13 @@ mod tests {
     #[test]
     fn pre_render_transform_wins_before_the_global_r_shortcut() {
         let ctx = Context::default();
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.session.editor.tool = Tool::Place(ComponentType::Capacitor);
 
         let mut handled = false;
         let _ = ctx.run_ui(placement_key_input(Key::R, Modifiers::NONE), |ctx| {
-            handled = handle_pre_render_placement_transform(
-                ctx,
-                &mut crate::schematic::view::canvas_parts(&mut state),
-                true,
-            );
+            handled =
+                handle_pre_render_placement_transform(ctx, &mut canvas_parts(&mut state), true);
         });
 
         assert!(handled);

@@ -975,13 +975,14 @@ mod tests {
         OperatingPointValue, SimulationRun, ViewType, Wire,
     };
     use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::{DesignTestHost, canvas_facts};
     use std::collections::HashMap;
 
     /// Two conductor groups with no wire between them, each carrying the same
     /// authored name. The netlister joins them into one node; a canvas that
     /// traced the drawing itself would see two.
-    fn separated_same_name_groups() -> AppState {
-        let mut state = AppState::default();
+    fn separated_same_name_groups() -> DesignTestHost {
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -1015,10 +1016,7 @@ mod tests {
     #[test]
     fn separated_groups_one_name_joins_take_one_net_colour() {
         let state = separated_same_name_groups();
-        let colors = net_class_colors(
-            &crate::schematic::view::canvas_facts(&state),
-            &crate::ui::palette::INSTRUMENT_DARK,
-        );
+        let colors = net_class_colors(&canvas_facts(&state), &crate::ui::palette::INSTRUMENT_DARK);
         assert!(
             colors.contains_key(&11),
             "an authored conductor carries a class colour"
@@ -1036,10 +1034,7 @@ mod tests {
     #[test]
     fn no_net_the_deck_solves_is_split_across_colours() {
         let state = separated_same_name_groups();
-        let colors = net_class_colors(
-            &crate::schematic::view::canvas_facts(&state),
-            &crate::ui::palette::INSTRUMENT_DARK,
-        );
+        let colors = net_class_colors(&canvas_facts(&state), &crate::ui::palette::INSTRUMENT_DARK);
         let connectivity =
             rspice_design::connectivity::extract_with_hierarchy(&state.model.schematic, None);
         for net in &connectivity.nets {
@@ -1063,11 +1058,8 @@ mod tests {
         }
         state.sync_active_schematic_to_workspace();
         assert!(
-            net_class_colors(
-                &crate::schematic::view::canvas_facts(&state),
-                &crate::ui::palette::INSTRUMENT_DARK
-            )
-            .is_empty()
+            net_class_colors(&canvas_facts(&state), &crate::ui::palette::INSTRUMENT_DARK)
+                .is_empty()
         );
     }
 
@@ -1075,7 +1067,7 @@ mod tests {
     /// rather than being handed an arbitrary palette entry.
     #[test]
     fn an_autonamed_conductor_takes_no_class_colour() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -1084,11 +1076,8 @@ mod tests {
             .push(Wire::segment(31, Point::new(0, 0), Point::new(40, 0)));
         state.sync_active_schematic_to_workspace();
         assert!(
-            net_class_colors(
-                &crate::schematic::view::canvas_facts(&state),
-                &crate::ui::palette::INSTRUMENT_DARK
-            )
-            .is_empty()
+            net_class_colors(&canvas_facts(&state), &crate::ui::palette::INSTRUMENT_DARK)
+                .is_empty()
         );
     }
 
@@ -1423,7 +1412,7 @@ mod tests {
 
         let master = CellViewRef::new("user", "amp", "schematic");
         let point = Point::new(10, 20);
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.simulation.source.cross_probe.update(
             master.clone(),
             HashMap::from([(point, "n1".to_owned())]),
@@ -1432,27 +1421,18 @@ mod tests {
             state.model.schematic.topology_version(),
         );
 
-        let unprepared =
-            occurrence_cross_probe_index(&crate::schematic::view::canvas_facts(&state));
+        let unprepared = occurrence_cross_probe_index(&canvas_facts(&state));
         assert!(
             unprepared.is_none(),
             "a run with no prepared receipt names no occurrence"
         );
         assert_eq!(
-            occurrence_net_points(
-                &crate::schematic::view::canvas_facts(&state),
-                unprepared.as_ref(),
-                "n1"
-            ),
+            occurrence_net_points(&canvas_facts(&state), unprepared.as_ref(), "n1"),
             Some(&vec![point]),
             "the retained map is the design root's own reading"
         );
         assert_eq!(
-            occurrence_net_points(
-                &crate::schematic::view::canvas_facts(&state),
-                unprepared.as_ref(),
-                "x1.n1"
-            ),
+            occurrence_net_points(&canvas_facts(&state), unprepared.as_ref(), "x1.n1"),
             None,
             "another occurrence's node must not reach the root drawing"
         );
@@ -1460,7 +1440,7 @@ mod tests {
         let run = SimulationRun::new_prepared(1, receipt_for_two_occurrences(&master));
         state.model.simulation.retained.runs.insert(0, run);
         state.model.simulation.view.active_run_idx = Some(0);
-        let index = occurrence_cross_probe_index(&crate::schematic::view::canvas_facts(&state))
+        let index = occurrence_cross_probe_index(&canvas_facts(&state))
             .expect("a prepared run names its map");
         assert_eq!(index.for_occurrence(&InstancePath::root()).len(), 1);
         assert_eq!(
@@ -1471,20 +1451,12 @@ mod tests {
         );
 
         assert_eq!(
-            occurrence_net_points(
-                &crate::schematic::view::canvas_facts(&state),
-                Some(&index),
-                "n1"
-            ),
+            occurrence_net_points(&canvas_facts(&state), Some(&index), "n1"),
             Some(&vec![point]),
             "the root tab reads the root's own spelling"
         );
         assert_eq!(
-            occurrence_net_points(
-                &crate::schematic::view::canvas_facts(&state),
-                Some(&index),
-                "x1.n1"
-            ),
+            occurrence_net_points(&canvas_facts(&state), Some(&index), "x1.n1"),
             None,
             "an occurrence's node must not reach the tab opened at the root"
         );
@@ -1494,35 +1466,23 @@ mod tests {
             .workspace
             .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
         assert_eq!(
-            occurrence_net_points(
-                &crate::schematic::view::canvas_facts(&state),
-                Some(&index),
-                "x1.n1"
-            ),
+            occurrence_net_points(&canvas_facts(&state), Some(&index), "x1.n1"),
             Some(&vec![point]),
             "the descended tab reads its own occurrence"
         );
         assert_eq!(
-            occurrence_net_points(
-                &crate::schematic::view::canvas_facts(&state),
-                Some(&index),
-                "x2.n1"
-            ),
+            occurrence_net_points(&canvas_facts(&state), Some(&index), "x2.n1"),
             None,
             "a sibling occurrence of the same master is a different node"
         );
         assert_eq!(
-            occurrence_net_points(
-                &crate::schematic::view::canvas_facts(&state),
-                Some(&index),
-                "n1"
-            ),
+            occurrence_net_points(&canvas_facts(&state), Some(&index), "n1"),
             None,
             "the root's spelling names no node inside a descended occurrence"
         );
 
         assert_eq!(
-            occurrence_net_points(&crate::schematic::view::canvas_facts(&state), None, "n1"),
+            occurrence_net_points(&canvas_facts(&state), None, "n1"),
             None,
             "a descended tab with no receipt borrows nothing from the root"
         );

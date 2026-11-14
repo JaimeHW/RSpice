@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::state::{Point, PortDirection, SymbolPin, SymbolShape};
+use crate::workbench::design::test_host::{DesignTestHost, canvas_facts};
 use crate::workbench::{AppState, SymbolTool};
 
 #[test]
@@ -75,7 +76,7 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
 
 #[test]
 fn symbol_canvas_accessibility_label_reports_editing_contract() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.design.symbol.editor.tool = SymbolTool::Circle;
     state.design.symbol.editor.select_shape(0);
     let document = SymbolDocument {
@@ -93,7 +94,7 @@ fn symbol_canvas_accessibility_label_reports_editing_contract() {
 
     let label = symbol_canvas_accessibility_label(
         &document,
-        &crate::schematic::view::canvas_facts(&state),
+        &canvas_facts(&state),
         false,
         crate::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,

@@ -610,6 +610,7 @@ mod tests {
     };
     use crate::state::{GeneratedProvenance, GenerationInput};
     use crate::workbench::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// The end-frame step as the shell runs it: the projection, applied
     /// through the results' and the netlist's own fns.
@@ -685,7 +686,7 @@ mod tests {
 
     #[test]
     fn wireless_semantic_net_beats_its_incident_component_projection() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic

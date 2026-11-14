@@ -27,13 +27,13 @@ pub(super) fn resolve_bus_tap_candidate_on_active_sheet(
 
 #[cfg(test)]
 mod tests {
-    use super::super::AppState;
     use super::*;
     use crate::state::{Bus, BusDeclaration, BusSlice, BusTapOrientation, Wire};
+    use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
     #[test]
     fn non_lattice_source_projection_preview_always_commits_exactly() {
         let declaration = BusDeclaration::parse("DATA[7:0]").unwrap();
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.document_mut_for_test().buses.push(
             Bus::segment(
                 1,
@@ -63,7 +63,7 @@ mod tests {
         );
 
         let candidate = resolve_bus_tap_candidate_on_active_sheet(
-            &crate::schematic::view::canvas_parts(&mut state),
+            &canvas_parts(&mut state),
             Point::new(5, 2),
             6,
         )

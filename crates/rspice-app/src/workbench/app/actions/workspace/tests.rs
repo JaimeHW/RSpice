@@ -18,12 +18,13 @@ use crate::state::{
 use crate::workbench::ChoicePreference;
 use crate::workbench::app::copy_active_schematic_selection;
 use crate::workbench::app_state::AppState;
+use crate::workbench::design::test_host::DesignTestHost;
 use crate::workbench::state::Workspace;
 use rspice_design::resolved_symbol::ResolvedSymbolSource;
 
 #[test]
 fn generated_symbol_sync_advances_the_catalog_only_for_real_changes() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let empty_revision = state.model.library_manager.revision();
 
     state.sync_active_schematic_to_workspace();
@@ -143,7 +144,7 @@ fn new_document_inherits_snap_targets_and_reconciles_the_preferred_pitch() {
 
 #[test]
 fn schematic_edit_authority_includes_late_safe_mode_project_read_only() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     assert!(!state.model.schematic_edit_read_only());
 
     state.model.safe_mode.activate(
@@ -325,7 +326,7 @@ fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppStat
 
 #[test]
 fn leaving_symbol_view_does_not_save_stale_schematic_under_symbol_key() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
@@ -375,7 +376,7 @@ fn leaving_symbol_view_does_not_save_stale_schematic_under_symbol_key() {
 
 #[test]
 fn active_symbol_ports_read_the_paired_schematic_contract() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
@@ -407,7 +408,7 @@ fn active_symbol_ports_read_the_paired_schematic_contract() {
 
 #[test]
 fn generating_active_symbol_document_writes_symbol_view_metadata() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
@@ -1222,7 +1223,7 @@ fn read_only_symbol_edit_paths_use_consistent_refusal_text() {
 
 #[test]
 fn opening_symbol_view_loads_the_paired_schematic_context() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
@@ -1670,7 +1671,7 @@ fn rename_top_cell_then_serialize_succeeds() {
 
 #[test]
 fn create_library_rejects_a_canonical_identity_collision() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let before = state.model.library_manager.library_count();
 
     state

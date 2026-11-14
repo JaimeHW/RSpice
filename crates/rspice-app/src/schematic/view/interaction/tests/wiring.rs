@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::schematic::view::sheet_visibility::two_sheet_state;
+use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
 
 fn crossing(state: &mut AppState, first: u64, second: u64) {
     state.model.schematic.document_mut_for_test().wires.extend([
@@ -53,7 +54,7 @@ fn resistor_with_first_pin_at(pin: Point) -> Point {
 /// splits and the pin owns the vertex, with the dot three conductors earn.
 #[test]
 fn a_part_dropped_with_a_pin_inside_a_wire_splits_it() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -63,7 +64,7 @@ fn a_part_dropped_with_a_pin_inside_a_wire_splits_it() {
     state.model.schematic.init_undo_history();
 
     place_component(
-        &mut crate::schematic::view::canvas_parts(&mut state),
+        &mut canvas_parts(&mut state),
         ComponentType::Resistor,
         resistor_with_first_pin_at(Point::origin()),
     );
