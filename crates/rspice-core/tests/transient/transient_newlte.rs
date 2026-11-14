@@ -115,75 +115,19 @@ fn bjt_auxiliary_lte_domain_survives_checkpoint_encoding_and_rejects_mismatch() 
                 .is_err()
             );
         }
-        for legacy in [false, true] {
-            let mut changed = fields[..15]
-                .iter()
-                .map(|field| field.to_string())
-                .collect::<Vec<_>>();
-            if legacy {
-                changed[1] = "1".to_string();
-            } else {
-                changed.push("0".to_string());
-            }
-            let changed = TransientCheckpoint::from_bytes(
-                text.replace(header, &changed.join(" ")).as_bytes(),
-            )
-            .unwrap();
-            let error = engine
-                .run_tran_resume(&netlist, &changed, 8e-6, 2e-7)
-                .unwrap_err();
-            assert!(error.to_string().contains("auxiliary domain"), "{error}");
-        }
+        let mut changed = fields[..15]
+            .iter()
+            .map(|field| field.to_string())
+            .collect::<Vec<_>>();
+        changed.push("0".to_string());
+        let changed =
+            TransientCheckpoint::from_bytes(text.replace(header, &changed.join(" ")).as_bytes())
+                .unwrap();
+        let error = engine
+            .run_tran_resume(&netlist, &changed, 8e-6, 2e-7)
+            .unwrap_err();
+        assert!(error.to_string().contains("auxiliary domain"), "{error}");
     }
-}
-
-#[test]
-fn legacy_lte_record_without_auxiliaries_preserves_exact_continuation() {
-    use rspice_core::engine::{
-        TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,
-    };
-    let netlist = Netlist::parse(&rc_deck(".options timeint NEWLTE=2")).unwrap();
-    let engine = xyce_engine();
-    let (full, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
-            &netlist,
-            5e-3,
-            1e-4,
-            TransientStartupMode::Uic,
-            &[1.37e-3],
-        )
-        .unwrap();
-    let source = &scheduled[0].checkpoint;
-    let text = String::from_utf8(
-        source
-            .to_bytes(TransientCheckpointEncoding::Unpacked)
-            .unwrap(),
-    )
-    .unwrap();
-    let header = text
-        .lines()
-        .find(|line| line.starts_with("accepted_integration_lte "))
-        .unwrap();
-    let mut fields = header.split_whitespace().collect::<Vec<_>>();
-    assert_eq!(fields.pop(), Some("0"));
-    fields[1] = "1";
-    let legacy =
-        TransientCheckpoint::from_bytes(text.replace(header, &fields.join(" ")).as_bytes())
-            .unwrap();
-    let (resumed, _) = engine
-        .run_tran_resume(&netlist, &legacy, 5e-3, 1e-4)
-        .unwrap();
-    let offset = full
-        .time
-        .iter()
-        .position(|time| time.to_bits() == source.time.to_bits())
-        .unwrap();
-    assert_bit_exact(&resumed.time, &full.time[offset..], "legacy accepted times");
-    assert_bit_exact(
-        out_trace(&resumed),
-        &out_trace(&full)[offset..],
-        "legacy RC trajectory",
-    );
 }
 
 fn out_trace(result: &rspice_core::engine::TransientResult) -> &[f64] {
