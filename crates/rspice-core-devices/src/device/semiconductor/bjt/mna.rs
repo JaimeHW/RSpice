@@ -1343,7 +1343,7 @@ impl Bjt {
                 self.mna_rbi_branch.is_some(),
             );
         }
-        let terminal_currents = self.external_terminal_branches(eval);
+        let terminal_currents = self.external_terminal_branches(&eval);
 
         self.vc_ext = vc;
         self.vb_ext = vb;
@@ -1630,7 +1630,7 @@ impl Bjt {
             return self
                 .mna_terminal_rows
                 .0
-                .unwrap_or_else(|| self.external_terminal_branches(*eval))
+                .unwrap_or_else(|| self.external_terminal_branches(eval))
                 .map(|branch| branch.current);
         }
         let eval = self.evaluate_state_with_rbi_current(
@@ -1652,7 +1652,7 @@ impl Bjt {
                 .map(|_| Self::node_voltage(solution, self.mna_rbi_matrix_node)),
         );
         let mut terminal = self
-            .external_terminal_branches(eval)
+            .external_terminal_branches(&eval)
             .map(|branch| branch.current);
         if self.uses_vbic_dynamic_charges() && self.td > 0.0 {
             // The accepted solution owns the delay coordinates. Cached Newton
@@ -1867,7 +1867,7 @@ impl Bjt {
             },
         );
         let external_nodes = self.external_terminal_nodes();
-        self.visit_external_kcl_terms(eval, external_rbi_port, |row, terms| {
+        self.visit_external_kcl_terms(&eval, external_rbi_port, |row, terms| {
             for term in terms {
                 stamper.stamp_rhs(external_nodes[row], -term.current);
             }
@@ -2097,11 +2097,11 @@ impl Bjt {
         let terminal_currents = self
             .mna_terminal_rows
             .0
-            .unwrap_or_else(|| self.external_terminal_branches(*eval));
+            .unwrap_or_else(|| self.external_terminal_branches(eval));
         debug_assert!(
             terminal_currents
                 .iter()
-                .zip(self.external_terminal_branches(*eval))
+                .zip(self.external_terminal_branches(eval))
                 .all(
                     |(kept, summed)| kept.current.to_bits() == summed.current.to_bits()
                         && same_bits(&kept.d_internal, &summed.d_internal)
@@ -2733,7 +2733,7 @@ mod tests {
                 for (node, branch) in bjt
                     .external_terminal_nodes()
                     .into_iter()
-                    .zip(bjt.external_terminal_branches(bjt.mna_eval.unwrap()))
+                    .zip(bjt.external_terminal_branches(bjt.mna_eval.as_ref().unwrap()))
                 {
                     if node != 0 {
                         expected[node - 1] += branch.current;
@@ -3812,7 +3812,7 @@ mod tests {
             }
             targets.stamp_rhs_lanes(row_node, z_i[row].map(|source| sign * source));
         }
-        let terminal_currents = bjt.external_terminal_branches(eval);
+        let terminal_currents = bjt.external_terminal_branches(&eval);
         for row in 0..EXTERNAL_DIM {
             let row_node = external_nodes[row];
             let branch = terminal_currents[row];

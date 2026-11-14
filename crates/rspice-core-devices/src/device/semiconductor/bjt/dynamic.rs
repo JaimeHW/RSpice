@@ -1483,7 +1483,7 @@ impl Bjt {
             },
             state.vrth,
         );
-        let terminal = self.external_terminal_branches(eval);
+        let terminal = self.external_terminal_branches(&eval);
         [
             terminal[EXT_C].current,
             terminal[EXT_B].current,

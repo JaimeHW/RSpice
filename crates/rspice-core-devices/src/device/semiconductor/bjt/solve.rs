@@ -436,7 +436,7 @@ impl Bjt {
 
     pub(super) fn external_terminal_branches(
         &self,
-        eval: EvaluatedBjtState,
+        eval: &EvaluatedBjtState,
     ) -> [BranchLinearization; EXTERNAL_DIM] {
         let mut rows = [BranchLinearization::default(); EXTERNAL_DIM];
         self.visit_external_kcl_terms(eval, false, |index, terms| {
@@ -455,11 +455,11 @@ impl Bjt {
 
     pub(super) fn visit_external_kcl_terms(
         &self,
-        eval: EvaluatedBjtState,
+        eval: &EvaluatedBjtState,
         external_rbi_port: bool,
         mut visit: impl FnMut(usize, &[BranchLinearization]),
     ) {
-        let [collector, base, emitter] = self.intrinsic_terminal_branches(&eval);
+        let [collector, base, emitter] = self.intrinsic_terminal_branches(eval);
         let negative = |branch| Self::scale_branch(branch, -1.0);
         let rbi = if external_rbi_port {
             BranchLinearization::default()
@@ -477,7 +477,7 @@ impl Bjt {
                     } else {
                         collector
                     },
-                    negative(self.parasitic_base_collector_branch(&eval)),
+                    negative(self.parasitic_base_collector_branch(eval)),
                     negative(eval.igcx),
                 ],
             );

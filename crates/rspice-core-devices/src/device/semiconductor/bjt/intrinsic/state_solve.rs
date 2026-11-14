@@ -1164,7 +1164,7 @@ impl Bjt {
     ) -> BjtReducedLinearization {
         let (g_ii, g_ie, z_i_static) =
             self.internal_kcl_linearization_from_eval(state, eval, vc, vb, ve, vs);
-        let terminal_currents = self.external_terminal_branches(eval);
+        let terminal_currents = self.external_terminal_branches(&eval);
         let (g_ei, g_ee, g_reduced) =
             Self::linearized_terminal_conductance_matrices(&g_ii, &g_ie, &terminal_currents);
         let internal = [

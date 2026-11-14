@@ -2859,7 +2859,7 @@ impl NonlinearDevice for Bjt {
             state.vrth,
         );
         let reduced = self.reduced_linearization_from_state_and_eval(state, eval, vc, vb, ve, vs);
-        let terminal_currents = self.external_terminal_branches(eval);
+        let terminal_currents = self.external_terminal_branches(&eval);
         self.vc_ext = vc;
         self.vb_ext = vb;
         self.ve_ext = ve;
