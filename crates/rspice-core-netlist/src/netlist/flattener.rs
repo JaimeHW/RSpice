@@ -296,7 +296,7 @@ struct FlattenScope<'a> {
     depth: usize,
     /// The flattened netlist's card origins, which locate an expansion
     /// error at the card that raised it.
-    origins: &'a HashMap<String, NetlistSourceLocation>,
+    origins: &'a super::ElementOrigins,
     /// The subcircuit whose body holds the card being flattened, as
     /// `origins` files it; `None` for the root deck.
     holder: Option<&'a str>,
@@ -515,7 +515,7 @@ impl<'a> Flattener<'a> {
     /// came from: `subcircuit` holds the card, or none for the root deck.
     /// An error already located deeper in the hierarchy keeps its card.
     fn locate_expansion_error(
-        origins: &HashMap<String, NetlistSourceLocation>,
+        origins: &super::ElementOrigins,
         error: ParseWithAbortError,
         subcircuit: Option<&str>,
         name: &str,

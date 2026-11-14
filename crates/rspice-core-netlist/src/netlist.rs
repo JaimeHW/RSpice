@@ -330,6 +330,10 @@ pub(crate) fn element_origin_key(subcircuit: Option<&str>, name: &str) -> String
     key
 }
 
+/// Where each authored card was read, keyed by [`element_origin_key`].
+/// Fx-hashed: the parser files every card of a deck here.
+pub(crate) type ElementOrigins = rustc_hash::FxHashMap<String, NetlistSourceLocation>;
+
 /// Whether two optional names are both absent or equal ignoring ASCII case.
 pub(crate) fn optional_names_eq(left: Option<&str>, right: Option<&str>) -> bool {
     match (left, right) {
@@ -1257,7 +1261,7 @@ pub struct Netlist {
     /// Where each authored card was read, keyed by
     /// [`element_origin_key`], so an error found while expanding the
     /// hierarchy can name the card behind it. Not part of electrical identity.
-    pub(crate) element_origins: HashMap<String, NetlistSourceLocation>,
+    pub(crate) element_origins: ElementOrigins,
     /// Authored PSpice E/G CHEBYSHEV card count retained independently from
     /// the variable-size synthesized element realization.
     pub(crate) pspice_chebyshev_source_count: usize,
@@ -3917,7 +3921,7 @@ impl Default for Netlist {
             control_dispositions: Vec::new(),
             control_script: None,
             unread_source: Vec::new(),
-            element_origins: HashMap::new(),
+            element_origins: ElementOrigins::default(),
             pspice_chebyshev_source_count: 0,
             source_text: None,
             monte_carlo_source_cards: Vec::new(),

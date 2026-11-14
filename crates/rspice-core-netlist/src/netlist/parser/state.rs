@@ -145,7 +145,7 @@ pub(super) struct ParseState {
     /// Source lines skipped so far, and why.
     pub(super) unread_source: Vec<UnreadSourceRegion>,
     /// Where each authored card was read; see `Netlist::element_origins`.
-    pub(super) element_origins: HashMap<String, NetlistSourceLocation>,
+    pub(super) element_origins: crate::netlist::ElementOrigins,
     pub(super) mutual_inductor_records: Vec<MutualInductorSemanticRecord>,
     /// Unknown dot-commands and `.options` keys already warned about, so a
     /// deck repeating one card does not flood the log.
@@ -204,7 +204,7 @@ impl ParseState {
             subckt_stack: Vec::new(),
             conditional_stack: Vec::new(),
             unread_source: Vec::new(),
-            element_origins: HashMap::new(),
+            element_origins: crate::netlist::ElementOrigins::default(),
             mutual_inductor_records: Vec::new(),
             unknown_warned: HashSet::new(),
             open_machine: None,
