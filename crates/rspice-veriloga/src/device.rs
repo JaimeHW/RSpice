@@ -2098,7 +2098,7 @@ impl CanonicalNoiseRuntimePlan {
             };
             let endpoint = |node: Option<usize>| -> Result<usize, VmError> {
                 match node {
-                    None => Ok(usize::MAX),
+                    None => Ok(crate::expr_converter::GROUND_NODE),
                     Some(node) if node < context.voltages.len() => Ok(node),
                     Some(node) => Err(VmError::InvalidModel(format!(
                         "canonical grouped-noise metadata reads unsupported internal-node branch flow {node}"
@@ -9909,10 +9909,10 @@ impl VerilogADevice {
     }
 
     /// Voltage of a unified node index (terminals first, then internal
-    /// nodes; usize::MAX is the global reference)
+    /// nodes; `GROUND_NODE` is the global reference)
     fn unified_node_voltage(context: &VmContext, node: usize) -> f64 {
         let num_terminals = context.terminal_count();
-        if node == usize::MAX {
+        if node == crate::expr_converter::GROUND_NODE {
             0.0
         } else if node < num_terminals {
             context.voltages.get(node).copied().unwrap_or(0.0)

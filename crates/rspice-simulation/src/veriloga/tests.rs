@@ -763,3 +763,59 @@ fn each_selection_seals_an_artifact_of_its_own() {
         "a stripped selection is refused"
     );
 }
+
+/// Every way a module names ground: a one-node probe and contribution, a
+/// branch from an internal node to ground, a noise source into ground and a
+/// charge on a one-node branch.
+const GROUND_REFERENCE_SOURCE: &str = r#"`include "disciplines.vams"
+module ground_refs(a, b);
+  inout a, b;
+  electrical a, b, n;
+  parameter real r = 1e3;
+  analog begin
+    I(a) <+ V(a) / r + I(b, a) * 0.0;
+    I(b, a) <+ V(b, a) / r;
+    I(n) <+ V(n) / r - V(a) / r;
+    I(a) <+ white_noise(4.0e-21, "thermal");
+    I(b) <+ ddt(1.0e-12 * V(b));
+  end
+endmodule
+"#;
+
+/// A runtime is sealed on one machine and read on another: the browser
+/// worker that reads it is 32-bit. So neither payload may hold an integer a
+/// 32-bit `usize` cannot: ground, the node index the compiler writes for
+/// "no node", is 4294967295 on every target, and a natively sealed model
+/// decodes in the worker to the values (and digest) it would seal itself.
+/// Ground was `usize::MAX`, which this host wrote 18446744073709551615.
+#[test]
+fn a_sealed_runtime_holds_no_index_wider_than_the_worker_reads() {
+    fn widest(value: &serde_json::Value) -> u64 {
+        match value {
+            serde_json::Value::Number(number) => number.as_u64().unwrap_or(0),
+            serde_json::Value::Array(items) => items.iter().map(widest).max().unwrap_or(0),
+            serde_json::Value::Object(fields) => fields.values().map(widest).max().unwrap_or(0),
+            _ => 0,
+        }
+    }
+    let runtime = seal_runtime("ground.va", "ground_refs", GROUND_REFERENCE_SOURCE);
+    for (what, payload) in [
+        ("model", runtime.model_json.as_str()),
+        ("canonical IR", runtime.canonical_ir_json.as_str()),
+    ] {
+        let value: serde_json::Value = serde_json::from_str(payload).expect("payload parses");
+        assert!(
+            widest(&value) <= u64::from(u32::MAX),
+            "the sealed {what} holds {}, wider than a 32-bit index",
+            widest(&value)
+        );
+    }
+    let ground = u32::MAX.to_string();
+    assert!(
+        runtime
+            .model_json
+            .contains(&format!("\"PushVoltage\":[0,{ground}]")),
+        "ground is written as {ground}: {}",
+        runtime.model_json
+    );
+}

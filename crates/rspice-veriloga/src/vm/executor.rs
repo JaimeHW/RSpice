@@ -1986,9 +1986,14 @@ mod tests {
         let mut context = VmContext::new(1);
         context.voltages[0] = 3.25;
 
-        let value =
-            execute_with_context(&mut context, vec![Instruction::PushVoltage(0, usize::MAX)])
-                .expect("terminal-to-ground voltage should evaluate");
+        let value = execute_with_context(
+            &mut context,
+            vec![Instruction::PushVoltage(
+                0,
+                crate::expr_converter::GROUND_NODE,
+            )],
+        )
+        .expect("terminal-to-ground voltage should evaluate");
 
         assert_eq!(value, 3.25);
     }
@@ -1997,8 +2002,14 @@ mod tests {
     fn missing_internal_node_voltage_in_push_voltage_is_a_vm_error() {
         let mut context = VmContext::new(1);
 
-        let err = execute_with_context(&mut context, vec![Instruction::PushVoltage(1, usize::MAX)])
-            .expect_err("missing internal-node voltage must not evaluate as zero");
+        let err = execute_with_context(
+            &mut context,
+            vec![Instruction::PushVoltage(
+                1,
+                crate::expr_converter::GROUND_NODE,
+            )],
+        )
+        .expect_err("missing internal-node voltage must not evaluate as zero");
 
         assert!(
             matches!(err, VmError::InvalidInstruction(_)),
@@ -2035,16 +2046,26 @@ mod tests {
     #[test]
     fn terminal_to_ground_current_uses_exact_pair_and_orientation() {
         let mut context = VmContext::new(2);
-        context.set_branch_current(0, usize::MAX, 3.5);
+        context.set_branch_current(0, crate::expr_converter::GROUND_NODE, 3.5);
 
-        let forward =
-            execute_with_context(&mut context, vec![Instruction::PushCurrent(0, usize::MAX)])
-                .expect("terminal-to-ground current should evaluate");
+        let forward = execute_with_context(
+            &mut context,
+            vec![Instruction::PushCurrent(
+                0,
+                crate::expr_converter::GROUND_NODE,
+            )],
+        )
+        .expect("terminal-to-ground current should evaluate");
         assert_eq!(forward, 3.5);
 
-        let reverse =
-            execute_with_context(&mut context, vec![Instruction::PushCurrent(usize::MAX, 0)])
-                .expect("ground-to-terminal current should evaluate");
+        let reverse = execute_with_context(
+            &mut context,
+            vec![Instruction::PushCurrent(
+                crate::expr_converter::GROUND_NODE,
+                0,
+            )],
+        )
+        .expect("ground-to-terminal current should evaluate");
         assert_eq!(reverse, -3.5);
     }
 

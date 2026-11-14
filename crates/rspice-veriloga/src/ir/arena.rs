@@ -1011,7 +1011,7 @@ impl ExprArena {
 
 /// The `usize` a terminal pair uses for ground (`expr_converter::GROUND_NODE`),
 /// packed into a node's `u32` slots as `PACKED_GROUND`.
-const GROUND_INDEX: usize = usize::MAX;
+const GROUND_INDEX: usize = crate::expr_converter::GROUND_NODE;
 /// Ground's packed spelling. No real index may take this value.
 const PACKED_GROUND: u32 = u32::MAX;
 
@@ -1019,7 +1019,7 @@ const PACKED_GROUND: u32 = u32::MAX;
 ///
 /// The converter speaks `usize` because that is what
 /// `expr_converter::ConversionContext` resolves a node name to, and
-/// `GROUND_NODE` is `usize::MAX`; the four packed payloads hold a `u32`. This
+/// `GROUND_NODE` is a `usize`; the four packed payloads hold a `u32`. This
 /// is the only way to write one, so a producer cannot cast a ground sentinel
 /// into a real terminal index by accident.
 pub fn pack_index(value: usize) -> u32 {

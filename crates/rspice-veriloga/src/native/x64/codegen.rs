@@ -8708,7 +8708,10 @@ mod tests {
     fn generated_value_leaf_handles_ground_voltage_without_memory_load() {
         let program = native_program(
             EntryKind::StampValue,
-            vec![Instruction::PushVoltage(usize::MAX, 0)],
+            vec![Instruction::PushVoltage(
+                crate::expr_converter::GROUND_NODE,
+                0,
+            )],
             1,
         );
         let bytes = compile_value_function(&program).expect("compile ground voltage function");
@@ -8731,12 +8734,12 @@ mod tests {
             ("terminal-internal", Instruction::PushVoltage(0, 2), 3.0_f64),
             (
                 "ground-internal",
-                Instruction::PushVoltage(usize::MAX, 2),
+                Instruction::PushVoltage(crate::expr_converter::GROUND_NODE, 2),
                 -7.0_f64,
             ),
             (
                 "internal-ground",
-                Instruction::PushVoltage(3, usize::MAX),
+                Instruction::PushVoltage(3, crate::expr_converter::GROUND_NODE),
                 3.0_f64,
             ),
             ("internal-internal", Instruction::PushVoltage(2, 3), 4.0_f64),
@@ -9087,7 +9090,7 @@ mod tests {
         let program = native_program_with_available_current_pairs(
             EntryKind::StampValue,
             vec![
-                Instruction::PushCurrent(0, usize::MAX),
+                Instruction::PushCurrent(0, crate::expr_converter::GROUND_NODE),
                 Instruction::PushConst(0.25),
                 Instruction::Mul,
             ],
@@ -10814,7 +10817,7 @@ mod tests {
             &BytecodeProgram {
                 instructions: vec![
                     Instruction::PushTemperature,
-                    Instruction::PushVoltage(0, usize::MAX),
+                    Instruction::PushVoltage(0, crate::expr_converter::GROUND_NODE),
                     Instruction::PushConst(0.5),
                     Instruction::AbsDelayState(0),
                     Instruction::Add,
@@ -10883,7 +10886,7 @@ mod tests {
             &BytecodeProgram {
                 instructions: vec![
                     Instruction::PushTemperature,
-                    Instruction::PushVoltage(0, usize::MAX),
+                    Instruction::PushVoltage(0, crate::expr_converter::GROUND_NODE),
                     Instruction::PushConst(1.0),
                     Instruction::PushConst(0.0),
                     Instruction::PushConst(0.0),

@@ -60,7 +60,8 @@ pub(crate) fn pin_limiter_history(
     }
 }
 
-pub const CURRENT_PAIR_GROUND: usize = usize::MAX;
+/// Ground as a terminal-pair endpoint: [`crate::expr_converter::GROUND_NODE`].
+pub const CURRENT_PAIR_GROUND: usize = crate::expr_converter::GROUND_NODE;
 
 pub fn terminal_pair_current_index(pos: usize, neg: usize, num_terminals: usize) -> Option<usize> {
     if pos == CURRENT_PAIR_GROUND && neg == CURRENT_PAIR_GROUND {
@@ -2217,7 +2218,7 @@ impl VmContext {
     }
 
     /// Get the voltage difference between two nodes in the unified node
-    /// space (terminals first, then internal nodes; usize::MAX is the
+    /// space (terminals first, then internal nodes; `GROUND_NODE` is the
     /// global reference node).
     #[inline]
     pub fn voltage(&self, pos: usize, neg: usize) -> f64 {
@@ -2233,7 +2234,7 @@ impl VmContext {
     /// Checked potential of a unified node index against the global reference.
     #[inline]
     pub fn try_node_potential(&self, node: usize) -> Result<f64, VmError> {
-        if node == usize::MAX {
+        if node == crate::expr_converter::GROUND_NODE {
             return Ok(0.0);
         }
         let num_terminals = self.voltages.len();

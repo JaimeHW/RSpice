@@ -1401,8 +1401,8 @@ impl DeviceIR {
                 site,
                 process_id,
                 branch: BranchRef {
-                    pos_terminal: usize::MAX,
-                    neg_terminal: usize::MAX,
+                    pos_terminal: crate::expr_converter::GROUND_NODE,
+                    neg_terminal: crate::expr_converter::GROUND_NODE,
                 },
                 is_current: true,
                 branch_ordinal: None,
@@ -2184,7 +2184,7 @@ pub mod autodiff {
     /// Bit for a unified node index appearing in a probe (the ground
     /// sentinel is not an axis)
     fn node_bit(node: usize) -> AxisMask {
-        if node == usize::MAX {
+        if node == crate::expr_converter::GROUND_NODE {
             0
         } else if node >= 128 {
             ALL_AXES

@@ -51,13 +51,11 @@ impl Frame {
 }
 
 /// What one task's run in the worker gave: its result, the transient states
-/// it streamed, and its engine log lines; or, with no run, why this harness
-/// could not send it ([`pointer_width_gap`]).
+/// it streamed, and its engine log lines.
 pub(super) struct WorkerRun {
     pub outcome: Result<SimulationResult, SimulationError>,
     pub checkpoints: Vec<Arc<[u8]>>,
     pub log: Vec<String>,
-    pub gap: Option<String>,
 }
 
 /// The worker, up and ready, for one case's tasks in turn.
@@ -156,7 +154,6 @@ impl WorkerHost {
             outcome: Err(SimulationError::Aborted),
             checkpoints: Vec::new(),
             log: Vec::new(),
-            gap: None,
         };
         // The worker reports locations on the expanded deck it solved; they
         // are read back to the files that wrote them, as the application's
@@ -169,10 +166,6 @@ impl WorkerHost {
                 return run;
             }
         };
-        run.gap = pointer_width_gap(&request.metadata);
-        if run.gap.is_some() {
-            return run;
-        }
         let header = serde_json::json!({
             "id": id,
             "protocol": request.protocol,
@@ -289,58 +282,6 @@ impl Drop for WorkerHost {
 
 /// The worker's answer as the browser host reads it: its transport revision,
 /// its metadata and its numeric buffers.
-/// Why this harness cannot send a request whose Verilog-A it sealed: a
-/// sealed payload holds an integer a 32-bit index cannot hold.
-///
-/// The compiler writes an index that names no node as `usize::MAX`, so a
-/// runtime this 64-bit host seals carries 18446744073709551615 where the
-/// browser, sealing in the 32-bit worker image's own address width, writes
-/// 4294967295, and the worker refuses the payload. The harness prepares on
-/// this host and has no 32-bit sealing step, so it names the module and does
-/// not send the request.
-fn pointer_width_gap(metadata: &str) -> Option<String> {
-    fn wide(value: &serde_json::Value) -> Option<u64> {
-        match value {
-            serde_json::Value::Number(number) => number
-                .as_u64()
-                .filter(|&integer| integer > u64::from(u32::MAX)),
-            serde_json::Value::Array(items) => items.iter().find_map(wide),
-            serde_json::Value::Object(fields) => fields.values().find_map(wide),
-            _ => None,
-        }
-    }
-    let payload = |text: Option<&str>| {
-        text.and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-            .as_ref()
-            .and_then(wide)
-    };
-    let request: serde_json::Value = serde_json::from_str(metadata).ok()?;
-    let runtimes = &request["request"]["project_veriloga_runtimes"];
-    let devices = runtimes["runtimes"].as_array().into_iter().flatten();
-    let found = devices
-        .filter_map(|runtime| {
-            let integer = payload(runtime["model_json"].as_str())
-                .or_else(|| payload(runtime["canonical_ir_json"].as_str()))?;
-            Some((runtime["module_name"].as_str().unwrap_or("?"), integer))
-        })
-        .chain(
-            runtimes["connections"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|library| {
-                    let integer = wide(&library["artifact"])?;
-                    Some((library["netlist_alias"].as_str().unwrap_or("?"), integer))
-                }),
-        )
-        .next()?;
-    Some(format!(
-        "Verilog-A module '{}' sealed on this 64-bit host holds the index {}, which the \
-         32-bit worker cannot read; the browser seals in the worker's own address width",
-        found.0, found.1
-    ))
-}
-
 fn answer(frame: &Frame) -> Result<(u8, &str, Vec<Vec<f64>>), String> {
     let protocol = frame.header["protocol"]
         .as_u64()
@@ -429,30 +370,6 @@ fn read_u32(input: &mut impl Read) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_payload_with_an_index_wider_than_32_bits_is_a_gap_naming_its_module() {
-        let request = |model: &str| {
-            serde_json::json!({"request": {"project_veriloga_runtimes": {
-                "runtimes": [
-                    {"module_name": "quiet", "model_json": "{\"n\":[0,4294967295]}",
-                     "canonical_ir_json": "{}"},
-                    {"module_name": "sk_va", "model_json": model, "canonical_ir_json": "{}"},
-                ],
-                "connections": [],
-            }}})
-            .to_string()
-        };
-        let gap = pointer_width_gap(&request(
-            r#"{"i":[{"PushVoltage":[0,18446744073709551615]}]}"#,
-        ))
-        .expect("a gap");
-        assert!(
-            gap.contains("'sk_va'") && gap.contains("18446744073709551615"),
-            "{gap}"
-        );
-        assert_eq!(pointer_width_gap(&request(r#"{"x":1.5e300,"n":-7}"#)), None);
-    }
 
     #[test]
     fn a_frame_reads_back_as_it_was_written() {

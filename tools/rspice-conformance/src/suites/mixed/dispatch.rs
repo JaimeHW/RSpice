@@ -364,16 +364,6 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
             let runner = match worker.as_mut() {
                 Some(worker) => {
                     let run = worker.run(resolved, &abort);
-                    if let Some(reason) = run.gap {
-                        let gap = ErrorRecord {
-                            category: super::classify::HARNESS_GAP.into(),
-                            detail: reason.clone(),
-                            display: reason,
-                            stage: Some("preparation".into()),
-                            ..Default::default()
-                        };
-                        return fail(&mut active, result, gap);
-                    }
                     for line in &run.log {
                         if result.warnings.len() < 64 {
                             result.warnings.push(line.clone());

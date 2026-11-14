@@ -367,7 +367,14 @@ fn optional_string_arg(
 ///
 /// `V(a)` measures the potential of `a` against this reference, never
 /// against terminal 0.
-pub const GROUND_NODE: usize = usize::MAX;
+///
+/// It is `u32::MAX` on every target, not `usize::MAX`. A compiled model is
+/// sealed as JSON on one machine and read on another, and the browser worker
+/// that reads it is 32-bit: `usize::MAX` would be written 18446744073709551615
+/// by a 64-bit host and 4294967295 by the worker, so a natively sealed model
+/// would neither decode there nor keep its digest. No model has four billion
+/// nodes, so no real index reaches this value.
+pub const GROUND_NODE: usize = u32::MAX as usize;
 
 /// The bare identifiers [`ExprConverter`] reads as built-in constants.
 ///

@@ -8,7 +8,7 @@
 use crate::canonical_ir::{CanonicalIrArtifact, MirEquationKind, MirModel, NodeId};
 use crate::codegen::{CompiledModel, StampIndex, StampProgram};
 
-const GROUND_ENDPOINT: usize = usize::MAX;
+const GROUND_ENDPOINT: usize = crate::expr_converter::GROUND_NODE;
 
 pub(crate) fn validate_canonical_artifact_identity_for_model(
     model: &CompiledModel,

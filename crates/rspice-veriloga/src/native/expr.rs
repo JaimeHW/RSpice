@@ -9212,7 +9212,7 @@ fn lower_voltage_node(
     terminal_count: usize,
     internal_node_count: usize,
 ) -> JitResult<VoltageNode> {
-    if node == usize::MAX {
+    if node == crate::expr_converter::GROUND_NODE {
         return Ok(VoltageNode::Ground);
     }
 
@@ -14742,7 +14742,10 @@ endmodule
     #[test]
     fn lowers_terminal_to_ground_voltage_without_usize_sentinel() {
         let program = BytecodeProgram {
-            instructions: vec![Instruction::PushVoltage(0, usize::MAX)],
+            instructions: vec![Instruction::PushVoltage(
+                0,
+                crate::expr_converter::GROUND_NODE,
+            )],
         };
 
         let lowered =
@@ -14762,7 +14765,10 @@ endmodule
     #[test]
     fn lowers_ground_to_terminal_voltage_without_usize_sentinel() {
         let program = BytecodeProgram {
-            instructions: vec![Instruction::PushVoltage(usize::MAX, 0)],
+            instructions: vec![Instruction::PushVoltage(
+                crate::expr_converter::GROUND_NODE,
+                0,
+            )],
         };
 
         let lowered =
@@ -14801,7 +14807,10 @@ endmodule
     #[test]
     fn lowering_rejects_unified_voltage_index_outside_known_nodes() {
         let program = BytecodeProgram {
-            instructions: vec![Instruction::PushVoltage(3, usize::MAX)],
+            instructions: vec![Instruction::PushVoltage(
+                3,
+                crate::expr_converter::GROUND_NODE,
+            )],
         };
 
         let error =
@@ -14852,9 +14861,16 @@ endmodule
     #[test]
     fn lowers_terminal_to_ground_current_probe_when_pair_is_available() {
         let program = BytecodeProgram {
-            instructions: vec![Instruction::PushCurrent(0, usize::MAX)],
+            instructions: vec![Instruction::PushCurrent(
+                0,
+                crate::expr_converter::GROUND_NODE,
+            )],
         };
-        let available = [current_pair_index("probe".into(), 0, usize::MAX, 2).unwrap()];
+        let available =
+            [
+                current_pair_index("probe".into(), 0, crate::expr_converter::GROUND_NODE, 2)
+                    .unwrap(),
+            ];
 
         let lowered = NativeProgram::from_bytecode(
             "probe",
@@ -14872,9 +14888,16 @@ endmodule
     #[test]
     fn lowers_ground_to_terminal_current_probe_when_pair_is_available() {
         let program = BytecodeProgram {
-            instructions: vec![Instruction::PushCurrent(usize::MAX, 0)],
+            instructions: vec![Instruction::PushCurrent(
+                crate::expr_converter::GROUND_NODE,
+                0,
+            )],
         };
-        let available = [current_pair_index("probe".into(), usize::MAX, 0, 2).unwrap()];
+        let available =
+            [
+                current_pair_index("probe".into(), crate::expr_converter::GROUND_NODE, 0, 2)
+                    .unwrap(),
+            ];
 
         let lowered = NativeProgram::from_bytecode(
             "probe",
@@ -14924,11 +14947,14 @@ endmodule
     #[test]
     fn lowers_unified_current_probe_from_prior_contribution_alias() {
         let program = BytecodeProgram {
-            instructions: vec![Instruction::PushCurrent(2, usize::MAX)],
+            instructions: vec![Instruction::PushCurrent(
+                2,
+                crate::expr_converter::GROUND_NODE,
+            )],
         };
         let probes = [PriorCurrentProbe {
             pos: 2,
-            neg: usize::MAX,
+            neg: crate::expr_converter::GROUND_NODE,
             current_index: 7,
             inverted: false,
         }];
@@ -14950,10 +14976,13 @@ endmodule
     #[test]
     fn lowers_reversed_prior_current_probe_alias() {
         let program = BytecodeProgram {
-            instructions: vec![Instruction::PushCurrent(usize::MAX, 2)],
+            instructions: vec![Instruction::PushCurrent(
+                crate::expr_converter::GROUND_NODE,
+                2,
+            )],
         };
         let probes = [PriorCurrentProbe {
-            pos: usize::MAX,
+            pos: crate::expr_converter::GROUND_NODE,
             neg: 2,
             current_index: 3,
             inverted: true,
@@ -14978,18 +15007,21 @@ endmodule
     #[test]
     fn lowers_multiple_prior_current_probe_aliases_as_sum() {
         let program = BytecodeProgram {
-            instructions: vec![Instruction::PushCurrent(2, usize::MAX)],
+            instructions: vec![Instruction::PushCurrent(
+                2,
+                crate::expr_converter::GROUND_NODE,
+            )],
         };
         let probes = [
             PriorCurrentProbe {
                 pos: 2,
-                neg: usize::MAX,
+                neg: crate::expr_converter::GROUND_NODE,
                 current_index: 1,
                 inverted: false,
             },
             PriorCurrentProbe {
                 pos: 2,
-                neg: usize::MAX,
+                neg: crate::expr_converter::GROUND_NODE,
                 current_index: 4,
                 inverted: false,
             },

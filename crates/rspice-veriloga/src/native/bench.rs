@@ -899,7 +899,7 @@ fn benchmark_stamp_index(index: &StampIndex) -> Result<Option<usize>, String> {
 
 fn benchmark_axis_value(context: &VmContext, axis: &ColumnAxis) -> Result<f64, String> {
     match axis {
-        ColumnAxis::Node(node) if *node == usize::MAX => Ok(0.0),
+        ColumnAxis::Node(node) if *node == crate::expr_converter::GROUND_NODE => Ok(0.0),
         ColumnAxis::Node(node) if *node < context.terminal_count() => context
             .voltages
             .get(*node)
