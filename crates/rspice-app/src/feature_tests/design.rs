@@ -9,6 +9,7 @@ mod cell_deletion_transactions;
 mod connectivity_manager_drawn;
 mod context_menu;
 mod create_model_bound_symbol_drawn;
+mod design_checks;
 mod design_note_placement_drawn;
 mod design_review_comments;
 mod design_surface_drawn;
@@ -53,6 +54,7 @@ mod selection_drag;
 mod selection_rename_drawn;
 mod sheet_membership;
 mod shelf;
+mod show_in_netlist;
 mod stimulus_browser;
 mod stimulus_browser_drawn;
 mod stimulus_link_drawn;
@@ -64,6 +66,7 @@ mod symbol_actions_drawn;
 mod symbol_in_place;
 mod symbol_inspector;
 mod symbol_inspector_drawn;
+mod symbol_pin_checks;
 mod touch_flow;
 mod visibility_options_drawn;
 mod wiring;
@@ -111,6 +114,25 @@ pub(crate) fn app_state_of(host: DesignTestHost) -> AppState {
     state.workbench = workbench;
     state.runs = runs;
     state
+}
+
+pub(crate) fn state_with_work_cell(cell_name: &str) -> AppState {
+    let mut state = AppState::default();
+    let mut library = Library::new("work");
+    let mut cell = Cell::new(cell_name);
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    library.add_cell(cell);
+    state.model.library_manager.add_library(library);
+    state.open_workspace_view(CellViewRef::new("work", cell_name, "schematic"));
+    state
+}
+
+/// [`state_with_populated_user_library`](crate::workbench::app::actions::workspace::tests::state_with_populated_user_library)
+/// made a whole application.
+pub(crate) fn state_with_populated_user_library() -> AppState {
+    app_state_of(
+        crate::workbench::app::actions::workspace::tests::state_with_populated_user_library(),
+    )
 }
 
 /// The application made of a new host is a new application, on the four

@@ -1,11 +1,11 @@
 //! Copying and renaming cells, libraries and views carries their physical layouts, run
 //! through the whole application.
 
+use super::{state_with_populated_user_library, state_with_work_cell};
 use crate::state::{
     Cell, CellViewRef, LayoutEdit, LayoutInstance, LayoutObjectId, LayoutOrientation, LayoutPoint,
     LayoutTransform, View, ViewType,
 };
-use crate::workbench::app::actions::workspace::tests::*;
 
 #[test]
 fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters() {

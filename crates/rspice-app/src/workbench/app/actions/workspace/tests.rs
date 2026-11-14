@@ -4,7 +4,6 @@
 //! importantly - what a read-only document refuses to let it do.
 
 mod deletion_integrity;
-mod show_in_netlist;
 mod symbol_wire_remap;
 
 use crate::diagnostics::LogAnchor;
@@ -15,7 +14,6 @@ use crate::state::{
 };
 use crate::workbench::ChoicePreference;
 use crate::workbench::app::copy_active_schematic_selection;
-use crate::workbench::app_state::AppState;
 use crate::workbench::design::test_host::DesignTestHost;
 use crate::workbench::state::Workspace;
 use rspice_design::resolved_symbol::ResolvedSymbolSource;
@@ -201,17 +199,6 @@ fn state_with_amp_symbol(document: SymbolDocument) -> DesignTestHost {
     state
 }
 
-pub(crate) fn state_with_work_cell(cell_name: &str) -> AppState {
-    let mut state = AppState::default();
-    let mut library = Library::new("work");
-    let mut cell = Cell::new(cell_name);
-    cell.add_view(View::new("schematic", ViewType::Schematic));
-    library.add_cell(cell);
-    state.model.library_manager.add_library(library);
-    state.open_workspace_view(CellViewRef::new("work", cell_name, "schematic"));
-    state
-}
-
 #[test]
 fn production_copy_uses_authored_symbol_terminal_geometry() {
     let mut state = state_with_amp_symbol(symbol_document(&[
@@ -260,8 +247,8 @@ fn production_copy_uses_authored_symbol_terminal_geometry() {
     );
 }
 
-fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppState {
-    let mut state = AppState::default();
+pub(crate) fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> DesignTestHost {
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
@@ -663,57 +650,6 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
     assert!(matches!(resolved.source(), ResolvedSymbolSource::Generated));
 }
 
-/// A pin finding is a canonical record routed to the pin it is about.
-///
-/// The check used to stop at `dialogs.drc_results`, so its findings reached
-/// no count, no listing and no selection: the Problems page claimed to be the
-/// one list of every standing condition and had nothing of theirs on it.
-#[test]
-fn symbol_pin_checks_publish_records_routed_to_the_failing_pin() {
-    use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRoute};
-
-    let mut state = state_with_amp_symbol_pin("IN", None);
-    state.open_project_session();
-
-    let facts = state.slot_facts();
-    super::symbol_document::run_active_symbol_pin_checks(&mut state.model, facts);
-
-    let subject = CellViewRef::new("work", "amp", "symbol");
-    let batch = state
-        .model
-        .diagnostics
-        .batches()
-        .find(|batch| {
-            batch.inputs
-                == DiagnosticInputs::SymbolPins {
-                    subject: subject.clone(),
-                }
-        })
-        .expect("the pin checks publish their own batch");
-    let unplaced = batch
-        .records
-        .iter()
-        .find(|record| record.canonical.code.as_ref() == "SYMBOL-UNPLACED-PIN")
-        .expect("the unplaced pin is one of the findings");
-    assert_eq!(unplaced.subject.cell_view.as_ref(), Some(&subject));
-    // Routed through the one resolver every "go to this finding" surface
-    // shares, so following the row lands on the pin rather than on the
-    // document that holds it.
-    assert!(matches!(
-        &unplaced.route,
-        Some(DiagnosticRoute::Anchor(LogAnchor::Symbol { pin_name, .. })) if pin_name == "IN"
-    ));
-
-    let listed = crate::workbench::app_state::diagnostic_store::listing::listing(&state);
-    assert_eq!(listed.counts().errors, batch.records.len());
-    let row = (0..listed.len())
-        .filter_map(|index| listed.row(index))
-        .find(|row| row.id == unplaced.canonical.diagnostic_id)
-        .expect("the finding is on the page");
-    assert_eq!(row.subject, "pin IN");
-    assert_eq!(row.location, subject.display_path());
-}
-
 #[test]
 fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
     let mut state = state_with_amp_symbol_pin("IN", Some(Point::new(-30, 0)));
@@ -998,8 +934,8 @@ fn create_library_rejects_a_canonical_identity_collision() {
 /// The default project owns `user/top/schematic`; this adds the second cell,
 /// the instance that binds it, its owned source, and its sheet catalog, so one
 /// rename has something to move in every propagation row.
-pub(crate) fn state_with_populated_user_library() -> AppState {
-    let mut state = AppState::default();
+pub(crate) fn state_with_populated_user_library() -> DesignTestHost {
+    let mut state = DesignTestHost::default();
     let top = CellViewRef::new("user", "top", "schematic");
     let amp = CellViewRef::new("user", "amp", "schematic");
     if let Some(library) = state.model.library_manager.get_library_mut("user") {

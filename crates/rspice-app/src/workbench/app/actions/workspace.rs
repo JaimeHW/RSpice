@@ -5,10 +5,10 @@
 //! rather than on one selected object, and they are the actions that a
 //! read-only schematic refuses.
 
-pub(in crate::workbench) mod design_checks;
+pub(crate) mod design_checks;
 pub(in crate::workbench) mod history;
 mod navigation;
-pub(in crate::workbench) mod symbol_document;
+pub(crate) mod symbol_document;
 pub(in crate::workbench) mod symbol_in_place;
 pub(in crate::workbench) mod waivers;
 

@@ -1,8 +1,8 @@
 //! Copying a cell leaves its review history behind and deleting one takes its layouts,
 //! run through the whole application.
 
+use super::state_with_work_cell;
 use crate::state::{CellViewRef, ComponentType, Point, ValidatedRevisionJournal, View, ViewType};
-use crate::workbench::app::actions::workspace::tests::*;
 
 #[test]
 fn copy_cell_resets_the_validated_revision_journal() {

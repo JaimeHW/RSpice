@@ -2,12 +2,10 @@
 //! renaming and deleting cells, libraries and views, and what each leaves outside the
 //! model (the code slot's Verilog-A evidence among it).
 
+use super::{state_with_populated_user_library, state_with_work_cell};
 use crate::state::{
     Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
     ViewType,
-};
-use crate::workbench::app::actions::workspace::tests::{
-    state_with_populated_user_library, state_with_work_cell,
 };
 use crate::workbench::app_state::AppState;
 

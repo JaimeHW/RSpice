@@ -1,11 +1,16 @@
-//! Locating a schematic instance in the deck the project generates.
+//! Locating a schematic instance in the deck the project generates, run through the whole
+//! application: the jump opens the code slot's netlist document.
 //!
 //! The jump reads the generated artifact's source map backwards, so these pin
 //! what a caller is told when the deck cannot answer, that the card the caret
 //! lands on is the instance's own, and that the round trip back through the
 //! netlist returns the instance it started from.
 
-use super::*;
+use crate::state::ComponentType;
+use crate::state::Point;
+use crate::workbench::app_state::AppState;
+use crate::workbench::state::Workspace;
+
 const DECK: &str = "show-in-netlist fixture\nV1 in 0 1\nR1 in out 1k\n+ tc1=0\n.op\n.end\n";
 
 /// A project whose retained generated deck states two of its three instances,
