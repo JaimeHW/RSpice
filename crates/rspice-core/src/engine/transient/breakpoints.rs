@@ -1844,10 +1844,15 @@ mod tests {
                 SourceBreakpointGeometry::Authored,
             )
             .unwrap();
+            // The omitted PER is the source basis's TSTOP (1 s), not the
+            // window's 2.5 s, in both dialects (ngspice manual section 4.1.1,
+            // Xyce 7.10). ngspice reads the zero edges as TSTEP.
             let expected = if dialect == SpiceDialect::Xyce {
                 &[0.1, 0.3, 1.1, 1.3, 2.1, 2.3][..]
             } else {
-                &[0.1, 0.11, 0.31, 0.32, 0.33, 0.53, 0.54][..]
+                &[
+                    0.1, 0.11, 0.31, 0.32, 1.1, 1.11, 1.31, 1.32, 2.1, 2.11, 2.31, 2.32,
+                ][..]
             };
             for &time in expected {
                 assert!(
@@ -1905,13 +1910,13 @@ mod tests {
         spec: &crate::netlist::SourceSpec,
         tstop: Value,
         tstep_hint: Value,
-        dialect: crate::engine::SpiceDialect,
+        rules: impl Into<crate::netlist::SourceRules>,
     ) -> Vec<Value> {
         let mut breakpoints = BreakpointManager::new_with_tolerance(tolerance);
         let window = BreakpointWindow {
             tstop,
             tstep_hint,
-            rules: dialect.into(),
+            rules: rules.into(),
         };
         Engine::add_source_spec_breakpoints(&mut breakpoints, spec, window);
         breakpoints.times().to_vec()
@@ -2091,13 +2096,12 @@ mod tests {
         }
     }
 
-    /// PW omitted defaults the width to zero, and with PER omitted too the
-    /// only period the defaults could derive is the two edges. A one-shot has
-    /// three breakpoints — the delay and the two edge ends — and nothing after
-    /// them, because the waveform is flat at V1 for the rest of the run.
-    /// Scheduling a repeat there would force timesteps at times where nothing
-    /// happens. See `pulse_with_no_width_and_no_period_fires_once` for the
-    /// waveform side and the reference deck that pins it.
+    /// `PULSE(0 1 1n 2n 3n)` fires once. Under RSpice's own rules the omitted
+    /// PW is TSTOP, as QSPICE runs it, so the source rises and holds past the
+    /// window: two breakpoints. Under RSPICE_SOURCE=LTSPICE the PW is 0, as
+    /// LTspice 26 runs it, and the one-shot is a triangle: the delay and the
+    /// two edge ends, then nothing, because the waveform is flat at V1 for
+    /// the rest of the run.
     #[test]
     fn pulse_with_only_rise_and_fall_schedules_one_shot_breakpoints() {
         let spec = crate::netlist::SourceSpec::Pulse {
@@ -2118,15 +2122,27 @@ mod tests {
             0.5e-9,
             crate::engine::SpiceDialect::BestAvailable,
         );
+        assert_delays_close(&times, &[1.0e-9, 3.0e-9]);
+        let times = source_breakpoints(
+            1.0e-21,
+            &spec,
+            20.0e-9,
+            0.5e-9,
+            crate::netlist::SourceRules::new(
+                crate::engine::SpiceDialect::BestAvailable,
+                Some(crate::netlist::SourceSimulator::Ltspice),
+            ),
+        );
         assert_delays_close(&times, &[1.0e-9, 3.0e-9, 6.0e-9]);
     }
 
-    /// An authored PW still supplies a period worth repeating on, so the
-    /// train keeps scheduling edges for the whole run. This is the case
-    /// `tests/ngspice/general/rtlinv.cir` measures, and it is what keeps the
-    /// one-shot rule above narrow.
+    /// An omitted PER is TSTOP, so a pulse with an authored PW fires once:
+    /// QSPICE, LTspice 26, Xyce 7.10 and ngspice-47 all run it so, and the
+    /// ngspice manual (section 4.1.1) states it. ngspice-46 repeated it every
+    /// TR + PW + TF; `tests/ngspice/general/rtlinv.cir`, re-recorded with
+    /// ngspice-47, pins the single pulse.
     #[test]
-    fn pulse_with_authored_width_and_omitted_period_still_repeats() {
+    fn pulse_with_authored_width_and_omitted_period_fires_once() {
         let times = source_breakpoints(
             1.0e-21,
             &pulse([0.0, 1.0, 1.0e-9, 2.0e-9, 3.0e-9, 4.0e-9, Value::NAN, 0.0]),
@@ -2134,12 +2150,9 @@ mod tests {
             0.5e-9,
             crate::engine::SpiceDialect::BestAvailable,
         );
-        // Period is TR + PW + TF = 9 ns: edges at TD, +TR, +TR+PW, +TR+PW+TF,
-        // then the same four one period later, and the start of the third.
-        assert_delays_close(
-            &times,
-            &[1.0e-9, 3.0e-9, 7.0e-9, 10.0e-9, 12.0e-9, 16.0e-9, 19.0e-9],
-        );
+        // Edges at TD, +TR, +TR+PW, +TR+PW+TF; the next period would start at
+        // TD + TSTOP, past the window.
+        assert_delays_close(&times, &[1.0e-9, 3.0e-9, 7.0e-9, 10.0e-9]);
     }
 
     #[test]
@@ -2218,8 +2231,11 @@ mod tests {
         assert!(times.is_empty());
     }
 
+    /// The ngspice manual (section 4.1.1) defaults an omitted PER to TSTOP,
+    /// and ngspice-47 fires the pulse once; ngspice-46 repeated it every
+    /// TR + PW + TF.
     #[test]
-    fn ngspice_pulse_omitted_period_breakpoints_repeat_after_waveform_duration() {
+    fn ngspice_pulse_omitted_period_breakpoints_use_transient_stop_default() {
         let times = source_breakpoints(
             1.0e-15,
             &pulse([0.0, 1.0, 10.0e-6, 1.0e-6, 1.0e-6, 100.0e-3, Value::NAN, 0.0]),
@@ -2227,13 +2243,7 @@ mod tests {
             0.5e-6,
             crate::engine::SpiceDialect::Ngspice,
         );
-        assert_delays_close(
-            &times,
-            &[
-                10.0e-6, 11.0e-6, 100.011e-3, 100.012e-3, 100.013e-3, 200.013e-3, 200.014e-3,
-                200.015e-3, 300.015e-3, 300.016e-3, 300.017e-3,
-            ],
-        );
+        assert_delays_close(&times, &[10.0e-6, 11.0e-6, 100.011e-3, 100.012e-3]);
     }
 
     /// A bounded train schedules the edges of the periods it runs for and

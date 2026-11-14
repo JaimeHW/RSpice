@@ -3186,6 +3186,19 @@ mod tests {
             phase: 0.0,
             cycles: None,
         });
+        // Xyce 7.10 refuses a SIN without FREQ ("V0, VA and FREQ are
+        // required"), so the Xyce dialect takes the precedence default,
+        // LTspice 26's 0 Hz: a constant waveform with no device cap. A deck
+        // written for ngspice keeps the manual's 1/TSTOP and its cap.
+        assert_eq!(sources.xyce_max_timestep_at(0.0), None);
+        sources.set_transient_context_with_dialect(
+            1.0e-9,
+            100.0e-9,
+            crate::netlist::SourceRules::new(
+                crate::config::SpiceDialect::Xyce,
+                Some(crate::netlist::SourceSimulator::Ngspice),
+            ),
+        );
         assert_close(
             sources
                 .xyce_max_timestep_at(0.0)
