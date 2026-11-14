@@ -6787,6 +6787,11 @@ impl Engine {
             self.config.spice_dialect == SpiceDialect::Xyce,
             reference,
             &module_conduction,
+            &model_policy::CodeModelNodes::classify(
+                netlist,
+                &circuit.xspice_registry,
+                &flat_elements,
+            ),
         );
         if !floating_nodes.analysis_complete {
             log::debug!(

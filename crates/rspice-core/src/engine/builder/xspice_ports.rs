@@ -506,7 +506,7 @@ fn vector_connection_len_allowed(port_spec: &crate::xspice::PortSpec, len: usize
     true
 }
 
-fn explicit_xspice_port_type(
+pub(in crate::engine::builder) fn explicit_xspice_port_type(
     parsed_port: &crate::netlist::XspicePort,
 ) -> Option<crate::xspice::PortType> {
     use crate::netlist::XspicePort;

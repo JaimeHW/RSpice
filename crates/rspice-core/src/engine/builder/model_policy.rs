@@ -2253,6 +2253,7 @@ pub(super) fn native_bsim4_model_params_upper_map(
 /// floating components that the operating point must refuse.
 ///
 /// [`analyze_dc_ground_paths`]: crate::netlist::analyze_dc_ground_paths
+#[allow(clippy::too_many_arguments)]
 pub(super) fn collect_floating_nodes(
     flat_elements: &[crate::netlist::Element],
     has_global_rshunt: bool,
@@ -2262,6 +2263,7 @@ pub(super) fn collect_floating_nodes(
     module_conduction: &dyn Fn(
         &crate::netlist::Element,
     ) -> Option<crate::netlist::ModuleDcConduction>,
+    code_model_nodes: &CodeModelNodes,
 ) -> crate::netlist::DcGroundPathDiagnostics {
     let report = !topology_already_reported();
     if report && let Ok(diagnostics) = crate::netlist::analyze_xyce_connectivity(flat_elements) {
@@ -2292,11 +2294,112 @@ pub(super) fn collect_floating_nodes(
         return crate::netlist::DcGroundPathDiagnostics::default();
     };
     if report {
-        for node in diagnostics.reported_no_dc_path_nodes() {
+        let accounted = code_model_nodes.accounted_floating_nodes(&diagnostics);
+        for node in diagnostics
+            .reported_no_dc_path_nodes()
+            .filter(|node| !accounted.contains(*node))
+        {
             log::warn!("Voltage Node ({node}) does not have a DC path to ground");
         }
     }
     diagnostics
+}
+
+/// What the code models' port types say about nodes the DC walk cannot see
+/// through: the walk leaves every XSPICE terminal undecided, so it reports a
+/// node a `dac_bridge` drives, and a digital net, as lacking a DC path.
+///
+/// Only the no-DC-path warning reads this. The engine's floating components
+/// are the walk's own.
+#[derive(Debug, Default)]
+pub(super) struct CodeModelNodes {
+    /// Nodes on a `dac_bridge`'s single-ended voltage output, which drives
+    /// them from ground.
+    bridge_driven: BTreeSet<String>,
+    /// Nodes only event ports (digital or real) reach: event nets, which
+    /// carry no voltage.
+    event_only: BTreeSet<String>,
+}
+
+impl CodeModelNodes {
+    /// Classify every code-model terminal by the port type it resolves to:
+    /// an explicit `%` type, else the port's default. A node any other
+    /// element or analog port reaches is not an event net.
+    pub(super) fn classify(
+        netlist: &Netlist,
+        registry: &crate::xspice::CodeModelRegistry,
+        flat_elements: &[crate::netlist::Element],
+    ) -> Self {
+        let mut nodes = Self::default();
+        let mut event = BTreeSet::new();
+        let mut analog = BTreeSet::new();
+        for element in flat_elements {
+            let ElementKind::Xspice { model, ports, .. } = &element.kind else {
+                analog.extend(element.nodes.iter().map(|node| node.to_ascii_uppercase()));
+                continue;
+            };
+            let model_type = find_model_def(netlist, model)
+                .map_or(model.as_str(), |definition| definition.model_type.as_str());
+            let Some(code_model) = registry.get(model_type) else {
+                for port in ports {
+                    analog.extend(
+                        port.node_names()
+                            .iter()
+                            .map(|node| node.to_ascii_uppercase()),
+                    );
+                }
+                continue;
+            };
+            let bridge = model_type.eq_ignore_ascii_case("dac_bridge");
+            let mut specs = code_model.ports().iter();
+            for port in ports {
+                let names = port.node_names();
+                let names = names.iter().map(|node| node.to_ascii_uppercase());
+                let Some(spec) = specs.next() else {
+                    analog.extend(names);
+                    continue;
+                };
+                let port_type = super::xspice_ports::explicit_xspice_port_type(port)
+                    .unwrap_or(spec.default_type);
+                if port_type.is_event_driven() {
+                    event.extend(names);
+                } else if bridge
+                    && spec.name == "out"
+                    && port_type == crate::xspice::PortType::Voltage
+                {
+                    nodes.bridge_driven.extend(names.clone());
+                    analog.extend(names);
+                } else {
+                    analog.extend(names);
+                }
+            }
+        }
+        nodes.event_only = event.difference(&analog).cloned().collect();
+        nodes
+    }
+
+    /// The no-DC-path nodes the code models account for: event nets, and
+    /// every node of a floating component a bridge drives.
+    fn accounted_floating_nodes(
+        &self,
+        diagnostics: &crate::netlist::DcGroundPathDiagnostics,
+    ) -> BTreeSet<String> {
+        let mut accounted: BTreeSet<String> = diagnostics
+            .no_dc_path_nodes
+            .iter()
+            .filter(|node| self.event_only.contains(*node))
+            .cloned()
+            .collect();
+        for component in &diagnostics.floating_components {
+            if component
+                .iter()
+                .any(|node| self.bridge_driven.contains(node))
+            {
+                accounted.extend(component.iter().cloned());
+            }
+        }
+        accounted
+    }
 }
 
 /// Whether only resistors and capacitors have a terminal on each of the

@@ -642,3 +642,44 @@ fn a_repeated_warning_is_shown_five_times_then_suppressed() {
         "{stderr}"
     );
 }
+
+/// The no-DC-path warning names a node nothing holds at DC and none a code
+/// model accounts for. A `dac_bridge` output drives its node from ground, so
+/// neither that node nor the RC load behind it floats; a digital net carries
+/// no voltage at all. A capacitor midpoint still floats and is still warned.
+#[test]
+fn a_bridge_driven_node_and_a_digital_net_have_no_dc_path_warning() {
+    let directory = common::test_dir("dc_path_bridge");
+    std::fs::write(
+        directory.join("bridge.cir"),
+        "* dac_bridge into an RC load beside a floating capacitor midpoint\n\
+         vc cntl 0 0.5\n\
+         aosc cntl dosc osc1\n\
+         .model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] duty_cycle=0.5 \
+         init_phase=0 rise_delay=1e-10 fall_delay=1e-10)\n\
+         abr [dosc] [dd] dac1\n\
+         .model dac1 dac_bridge(out_low=0 out_high=1 t_rise=1n t_fall=1n)\n\
+         r1 dd out 1k\n\
+         c1 out 0 1p\n\
+         c2 cntl mid 1n\n\
+         c3 mid 0 1n\n\
+         .tran 1n 2u\n\
+         .end\n",
+    )
+    .unwrap();
+    let output = rspice_in(
+        &directory,
+        &["run", "bridge.cir", "-f", "csv", "-o", "out.csv"],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let warned: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("does not have a DC path to ground"))
+        .collect();
+    assert_eq!(warned.len(), 1, "{stderr}");
+    assert!(
+        warned[0].ends_with("Voltage Node (MID) does not have a DC path to ground"),
+        "{stderr}"
+    );
+}
