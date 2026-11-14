@@ -3844,7 +3844,9 @@ impl CircuitData {
     /// bias, as an operating point seeds it: each `ddt` holds its charge
     /// there with no companion current, and each limiter is anchored there.
     /// A shooting period starts from this state, so nothing a previous
-    /// period or derivative probe accepted reaches the next.
+    /// period or derivative probe accepted reaches the next. The evaluation
+    /// is the operating point's initial step, so a value a model sets in
+    /// `@(initial_step)` from its parameters holds through the period.
     ///
     /// The evaluation stamps into a one-entry sink: every write a generated
     /// model makes is position- or index-checked, so only its state is left.
@@ -3865,7 +3867,7 @@ impl CircuitData {
             0.0,
             crate::device::veriloga_builtins::GeneratedDdtCoefficients::inactive(),
         );
-        devices.set_analysis_step(false, false);
+        devices.set_analysis_step(true, false);
         devices
             .stamp_all_with_task_recording(
                 &mut sink,

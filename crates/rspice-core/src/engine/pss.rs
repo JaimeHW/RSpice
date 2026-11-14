@@ -2274,6 +2274,13 @@ impl Engine {
         // construction, so stale or structurally tampered states fail closed.
         // No fresh DC solve is performed on this path.
         self.ensure_dc_paths_to_ground(&circuit)?;
+        // The operating point is the analysis's initial step, as a
+        // transient's is: a generated model sets its `@(initial_step)`
+        // values there, and every later step of the period keeps them.
+        #[cfg(feature = "veriloga-builtins-base")]
+        circuit
+            .generated_veriloga_devices_mut()
+            .set_analysis_step(true, false);
         let initial_solution = match dc_seed {
             Some(seed) => {
                 seed.validate_for_circuit(&circuit)?;
