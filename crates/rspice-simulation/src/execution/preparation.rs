@@ -731,11 +731,7 @@ fn expand_manual_deck<R, A>(
             "Relative .include/.inc/.lib sources require an imported deck origin before they can be sealed",
         ));
     }
-    let crate::netlist_preparation::SealedDeckHdl {
-        source: composed,
-        runtimes: deck_hdl_runtimes,
-        dependencies: deck_hdl_dependencies,
-    } = if seal_hdl {
+    let sealed_hdl = if seal_hdl {
         crate::netlist_preparation::seal_deck_hdl_sources(
             &composed,
             origin,
@@ -747,8 +743,20 @@ fn expand_manual_deck<R, A>(
             ..Default::default()
         }
     };
-    let (expanded, canonical_origin, sealed_source_dependencies) =
-        expand_manual_dependencies(&composed, origin, &inputs.include_search(), &sealed_models)?;
+    // A source line an included file writes is sealed where the expansion
+    // puts it, by the file and line that wrote it.
+    let (expanded, canonical_origin, sealed_source_dependencies) = expand_manual_dependencies(
+        &sealed_hdl.source,
+        origin,
+        &inputs.include_search(),
+        &sealed_models,
+        &|location| sealed_hdl.included_line(location),
+    )?;
+    let crate::netlist_preparation::SealedDeckHdl {
+        runtimes: deck_hdl_runtimes,
+        dependencies: deck_hdl_dependencies,
+        ..
+    } = sealed_hdl;
     let expanded = owned_source::bind_execution_profile(
         descriptor.and_then(|descriptor| descriptor.execution_profile),
         expanded,
@@ -1316,7 +1324,8 @@ mod tests {
     /// as an unsealed external source. Its file is now read from beside the
     /// deck, sealed, and named by key in the deck the run executes; the read
     /// is a dependency of the run, and a file that cannot be read is refused
-    /// with its line before anything is solved.
+    /// with its line before anything is solved. A source line of an included
+    /// file is sealed too, read relative to that file.
     #[test]
     fn a_manual_decks_verilog_a_source_is_sealed_on_the_prepared_route() {
         let dir = std::env::temp_dir().join(format!("rspice-manual-hdl-{}", std::process::id()));
@@ -1358,22 +1367,35 @@ mod tests {
         assert_eq!(error.line(), Some(2), "{error}");
         assert!(error.to_string().contains("gone.va"), "{error}");
 
-        // A source line an included file holds is not the deck's own, and is
-        // refused by that file and its own line, not a line of the expanded
-        // text.
-        std::fs::write(dir.join("sub.inc"), "* models\n.hdl \"vres.va\" vres\n")
-            .expect("write the include");
-        let included =
-            "divider\n.include \"sub.inc\"\nV1 in 0 1\nR1 in out 1k\nX1 out 0 vres\n.op\n.end\n";
-        let error = build_prepared_manual_deck(&inputs, manual(included, &deck_path))
-            .expect_err("an included source line is not sealed");
-        let text = error.to_string();
+        // A source line an included file holds is read relative to that file
+        // and sealed where the expansion puts it; the include and the source
+        // are both dependencies of the run.
+        std::fs::create_dir_all(dir.join("models")).expect("create the model directory");
+        std::fs::rename(dir.join("vres.va"), dir.join("models").join("vres.va"))
+            .expect("move the model beside its include");
+        std::fs::write(
+            dir.join("models").join("sub.inc"),
+            "* models\n.hdl \"vres.va\" vres\n",
+        )
+        .expect("write the include");
+        let included = "divider\n.include \"models/sub.inc\"\nV1 in 0 1\nR1 in out 1k\n\
+                        X1 out 0 vres\n.op\n.end\n";
+        let snapshot = build_prepared_manual_deck(&inputs, manual(included, &deck_path))
+            .unwrap_or_else(|error| panic!("the included source line is sealed: {error}"));
+        let executable = snapshot.executable_netlist();
         assert!(
-            text.contains("line 2 of '")
-                && text.contains("sub.inc': the Verilog-A source 'vres.va' is named inside"),
-            "{text}"
+            executable.contains("/vres/vres/vres.va\" vres") && !executable.contains(".hdl"),
+            "{executable}"
         );
-        assert_eq!(error.line(), None, "{text}");
+        let read: Vec<&str> = snapshot
+            .sealed_source_dependencies()
+            .iter()
+            .map(|dependency| dependency.requested_path())
+            .collect();
+        assert!(
+            read.contains(&"models/sub.inc") && read.iter().any(|path| path.ends_with("vres.va")),
+            "{read:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

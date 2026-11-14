@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use rspice_core::ElaborationErrorKind;
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::netlist::{
-    IncludeProcessor, NetlistParseOptions, ParseError, ParseWithAbortError,
+    IncludeProcessor, NetlistParseOptions, NetlistSourceLocation, ParseError, ParseWithAbortError,
     ResolvedIncludeDependency, VerilogAInclude,
 };
 use rspice_veriloga::ExternalCell;
@@ -36,6 +36,8 @@ use crate::veriloga::{
     PreparedVerilogAConnectionLibrary, PreparedVerilogARuntime, PreparedVerilogARuntimeSet,
 };
 
+mod closure;
+
 /// A deck whose Verilog-A source lines name sealed runtimes.
 #[derive(Debug, Clone, Default)]
 pub struct SealedDeckHdl {
@@ -46,9 +48,27 @@ pub struct SealedDeckHdl {
     pub source: String,
     /// The runtimes and connection libraries the rewritten lines name.
     pub runtimes: PreparedVerilogARuntimeSet,
-    /// Every source exactly as it was read and sealed, with the chain that
-    /// found it, so a run can ask later whether the host still gives it.
+    /// Every source and header exactly as it was read and sealed, with the
+    /// chain that found it, so a run can ask later whether the host still
+    /// gives it.
     pub dependencies: Vec<ResolvedIncludeDependency>,
+    /// The sealed directive for each source line an included file writes,
+    /// by that file's canonical path and the line's 1-based number there.
+    pub included: BTreeMap<(PathBuf, usize), String>,
+}
+
+impl SealedDeckHdl {
+    /// The sealed directive for the line `location` names, when it is a
+    /// source line of an included file this deck sealed: what an expansion
+    /// of the deck's includes puts in its place
+    /// (`IncludeProcessor::expand_content_rewriting`).
+    pub fn included_line(&self, location: &NetlistSourceLocation) -> Option<String> {
+        if self.included.is_empty() {
+            return None;
+        }
+        let path = canonical(location.path.as_deref()?);
+        self.included.get(&(path, location.line)).cloned()
+    }
 }
 
 /// Why a Verilog-A source a deck names could not be sealed.
@@ -59,8 +79,10 @@ pub struct SealedDeckHdl {
 pub struct DeckHdlRefusal {
     /// What kind of failure, in the engine's own taxonomy.
     pub kind: ElaborationErrorKind,
-    /// The 1-based deck line that names the source.
+    /// The 1-based line that names the source, in the deck or in `file`.
     pub line: usize,
+    /// The included file that writes the line; `None` for the deck's own.
+    pub file: Option<PathBuf>,
     /// The file the line names: where it resolved, or as written when it
     /// resolved nowhere.
     pub path: PathBuf,
@@ -81,10 +103,17 @@ impl DeckHdlRefusal {
         Self {
             kind,
             line,
+            file: None,
             path: path.to_path_buf(),
             module: module.map(str::to_owned),
             detail: detail.into(),
         }
+    }
+
+    /// The refusal of a line the included file `file` writes.
+    fn in_file(mut self, file: Option<&Path>) -> Self {
+        self.file = file.map(Path::to_path_buf);
+        self
     }
 
     /// The file name the refusal is about.
@@ -108,7 +137,10 @@ impl std::fmt::Display for DeckHdlRefusal {
             Some(module) => format!("module '{module}' of '{}'", self.path.display()),
             None => format!("'{}'", self.path.display()),
         };
-        let line = self.line;
+        let line = match &self.file {
+            Some(file) => format!("{} of '{}'", self.line, file.display()),
+            None => self.line.to_string(),
+        };
         let detail = &self.detail;
         match self.kind {
             ElaborationErrorKind::MissingSource => write!(
@@ -131,36 +163,77 @@ impl std::error::Error for DeckHdlRefusal {}
 
 impl From<DeckHdlRefusal> for PreparationError {
     fn from(refusal: DeckHdlRefusal) -> Self {
-        let line = refusal.line;
-        PreparationError::new(PreparationStage::SourceChecks, refusal.to_string())
-            .at_line(Some(line))
+        // A line of an included file is no line of the deck; the message
+        // names its file.
+        let line = refusal.file.is_none().then_some(refusal.line);
+        PreparationError::new(PreparationStage::SourceChecks, refusal.to_string()).at_line(line)
     }
 }
 
-/// Seal every Verilog-A source the deck `source` names on a line of its own,
-/// reading each through `include_search` from the directory of `origin`, the
-/// deck's file.
+/// Seal every Verilog-A source the deck `source` names, on its own lines and
+/// on the lines of the files it includes or selects from a library, reading
+/// each through `include_search` from the file that names it: `origin`, the
+/// deck's file, for its own lines.
 ///
-/// A deck that names none is returned as it is, without being read further.
-/// A line inside a false `.if` branch, or after the terminal `.end`, names
-/// nothing and is left alone. A line that names a sealed runtime's key is
-/// already sealed. A source a file the deck includes names is not this
-/// deck's line; preparation refuses it as the unsealed source it is.
+/// The sources compile as the engine compiles a deck's HDL. The files no
+/// line gives macros (`define=`), and that are not connect-rule libraries,
+/// are one compilation unit, read in the order the deck names them, when
+/// there are several (IEEE 1364-2005 clause 19), so a module of one may
+/// instantiate a module of another; every other file compiles alone. A
+/// source's `` `include `` headers are sealed by content with it, so a host
+/// with no file system runs what was compiled here.
+///
+/// A deck that names none is returned as it is. A line inside a false `.if`
+/// branch, in a `.lib` section nothing selects, or after the terminal `.end`
+/// names nothing and is left alone. A line that names a sealed runtime's key
+/// is already sealed. The deck's own lines are rewritten in
+/// [`SealedDeckHdl::source`]; an included file's lines are rewritten where
+/// an expansion of the deck's includes puts them
+/// ([`SealedDeckHdl::included_line`]).
 pub fn seal_deck_hdl_sources(
     source: &str,
     origin: Option<&Path>,
     include_search: &IncludeSearchChain,
 ) -> Result<SealedDeckHdl, DeckHdlRefusal> {
-    let mut sites = deck_hdl_sites(source);
-    if sites.is_empty() {
+    let own = deck_hdl_sites(source);
+    if own.is_empty() && !includes_name_hdl_sources(source, origin, include_search) {
         return Ok(SealedDeckHdl {
             source: source.to_owned(),
             ..SealedDeckHdl::default()
         });
     }
     let deck = DeckContext::read(source, origin, include_search);
-    if let Some(active) = &deck.active_lines {
-        sites.retain(|(line, _)| active.contains(line));
+    let sites = match &deck.sites {
+        // The parse names every line the run reads, in the engine's order;
+        // the deck's own keep the spelling they were written with.
+        Some(parsed) => parsed
+            .iter()
+            .filter_map(|site| match &site.owner {
+                Some(_) => Some(site.clone()),
+                None => own
+                    .iter()
+                    .find(|(line, _)| *line == site.line)
+                    .map(|(line, directive)| Site {
+                        line: *line,
+                        owner: None,
+                        directive: directive.clone(),
+                    }),
+            })
+            .collect::<Vec<_>>(),
+        None => own
+            .into_iter()
+            .map(|(line, directive)| Site {
+                line,
+                owner: None,
+                directive,
+            })
+            .collect(),
+    };
+    if sites.is_empty() {
+        return Ok(SealedDeckHdl {
+            source: source.to_owned(),
+            ..SealedDeckHdl::default()
+        });
     }
     let owner = origin.map(|origin| {
         super::dependencies::absolute_source_identity(origin)
@@ -169,24 +242,32 @@ pub fn seal_deck_hdl_sources(
     let mut processor = IncludeProcessor::new(owner.as_deref().unwrap_or(Path::new(".")));
     include_search.apply_to(&mut processor);
 
+    let mut reads = Vec::with_capacity(sites.len());
+    for site in &sites {
+        let read_from = site.owner.as_deref().or(owner.as_deref());
+        reads.push(read_source(&mut processor, read_from, site)?);
+    }
     let mut sealer = Sealer {
         deck: &deck,
-        prepared: HashMap::new(),
+        sets: Vec::new(),
+        placed: HashMap::new(),
         runtimes: Vec::new(),
         connections: Vec::new(),
         aliases: BTreeMap::new(),
         rewritten: BTreeMap::new(),
+        included: BTreeMap::new(),
         appended: Vec::new(),
     };
-    for (line, directive) in &sites {
-        let dependency = read_source(&mut processor, owner.as_deref(), *line, directive)?;
-        sealer.seal(*line, directive, &dependency)?;
+    sealer.compile(&mut processor, &sites, &reads)?;
+    for (site, read) in sites.iter().zip(&reads) {
+        sealer.seal(site, read)?;
     }
-    let last_line = sites.last().map_or(0, |(line, _)| *line);
+    let last = sites.last().expect("a site was sealed");
     let Sealer {
         runtimes,
         connections,
         rewritten,
+        included,
         appended,
         ..
     } = sealer;
@@ -194,11 +275,12 @@ pub fn seal_deck_hdl_sources(
         .map_err(|error| {
             DeckHdlRefusal::new(
                 ElaborationErrorKind::CompileRefusal,
-                last_line,
+                last.line,
                 Path::new(""),
                 None,
                 error,
             )
+            .in_file(last.owner.as_deref())
         })?;
     let mut sealed = String::with_capacity(source.len());
     for (index, physical) in source.split_inclusive('\n').enumerate() {
@@ -218,7 +300,42 @@ pub fn seal_deck_hdl_sources(
         source: sealed,
         runtimes,
         dependencies: processor.resolved_dependencies().to_vec(),
+        included,
     })
+}
+
+/// Whether a file the deck includes, or a `.lib` section it selects, writes
+/// a line that names a Verilog-A source, as the expansion of its includes
+/// reads them. A deck with no include, or no file, has none.
+fn includes_name_hdl_sources(
+    source: &str,
+    origin: Option<&Path>,
+    include_search: &IncludeSearchChain,
+) -> bool {
+    let Some(origin) = origin else {
+        return false;
+    };
+    if !super::contains_external_include_directive(source) {
+        return false;
+    }
+    let origin = super::dependencies::absolute_source_identity(origin)
+        .unwrap_or_else(|_| origin.to_path_buf());
+    let root = canonical(&origin);
+    let mut processor = IncludeProcessor::new(&origin);
+    include_search.apply_to(&mut processor);
+    let mut found = false;
+    // An expansion that fails is refused by the same expansion when the deck
+    // is prepared; there is nothing to seal from it here.
+    let _ = processor.expand_content_rewriting(source, &origin, &mut |location, text| {
+        found |= location
+            .path
+            .as_deref()
+            .is_some_and(|path| canonical(path) != root)
+            && rspice_core::netlist::parse_veriloga_source_directive(text)
+                .is_some_and(|directive| !names_sealed_runtime(&directive.file_path));
+        None
+    });
+    found
 }
 
 /// Each line of the deck that names a Verilog-A source file, with its 1-based
@@ -247,12 +364,13 @@ fn deck_hdl_sites(source: &str) -> Vec<(usize, VerilogAInclude)> {
 /// The refusal for a Verilog-A source line a file the deck includes holds,
 /// named by that file and its own line.
 ///
-/// Only the deck's own lines are sealed, so a source line left in the
-/// expanded deck `expanded` came from one of the included files
-/// `includes`. Preparation refuses it either way; counted in the expanded
-/// text its line number points nowhere the author can look, so this finds
-/// the file and line that hold it. `None` when no such line is left, or when
-/// no included file holds it as written.
+/// Every line the run reads is sealed where it stands, so a source line
+/// left in the expanded deck `expanded` from one of the included files
+/// `includes` is one the seal did not read, such as a line in a false `.if`
+/// branch. Preparation refuses it either way; counted in the expanded text
+/// its line number points nowhere the author can look, so this finds the
+/// file and line that hold it. `None` when no such line is left, or when no
+/// included file holds it as written.
 pub(crate) fn included_hdl_source_refusal(
     expanded: &str,
     includes: &[ResolvedIncludeDependency],
@@ -273,9 +391,9 @@ pub(crate) fn included_hdl_source_refusal(
                 Some(PreparationError::new(
                     PreparationStage::SourceChecks,
                     format!(
-                        "line {number} of '{}': the Verilog-A source '{}' is named inside an \
-                         included file, and a run seals only the sources the deck's own lines \
-                         name; name it in the deck",
+                        "line {number} of '{}': the Verilog-A source '{}' is named on a line \
+                         the run's seal did not read, such as one in a false .if branch, and a \
+                         run executes sealed sources only",
                         include.resolved_path().display(),
                         directive.file_path.display()
                     ),
@@ -310,9 +428,12 @@ struct DeckContext {
     external_cells: Option<Vec<ExternalCell>>,
     delay_select: DigitalDelaySelect,
     wreal_resolution: DigitalRealResolution,
-    /// The deck lines whose source directive the parse keeps; `None` when
-    /// the deck does not parse, and every line is taken as written.
-    active_lines: Option<std::collections::HashSet<usize>>,
+    /// Every line the parse keeps that names a source, in the engine's
+    /// order, the deck's own and its included files'; `None` when the deck
+    /// does not parse, and its own lines are taken as written.
+    sites: Option<Vec<Site>>,
+    /// The deck's `.options hdl_libmap`, which a sealed run cannot carry.
+    library_map: Option<String>,
     /// The masters the deck's instances and model cards name, upper case.
     masters: std::collections::HashSet<String>,
 }
@@ -331,22 +452,29 @@ impl DeckContext {
                 external_cells: None,
                 delay_select: DigitalDelaySelect::default(),
                 wreal_resolution: DigitalRealResolution::default(),
-                active_lines: None,
+                sites: None,
+                library_map: None,
                 masters: Default::default(),
             };
         };
         let root = origin.map(canonical);
-        let active_lines = netlist
+        let sites = netlist
             .veriloga_includes
             .iter()
-            .filter(|include| {
-                include
+            .filter(|include| !names_sealed_runtime(&include.file_path))
+            .map(|include| {
+                let owner = include
                     .origin
                     .path
                     .as_deref()
-                    .is_none_or(|path| Some(canonical(path)) == root)
+                    .map(canonical)
+                    .filter(|path| Some(path) != root.as_ref());
+                Site {
+                    line: include.origin.line,
+                    owner,
+                    directive: include.clone(),
+                }
             })
-            .map(|include| include.origin.line)
             .collect();
         let mut masters = std::collections::HashSet::new();
         let mut subcircuits = netlist.subcircuits.iter().collect::<Vec<_>>();
@@ -374,7 +502,8 @@ impl DeckContext {
                 ),
             ),
             wreal_resolution: rspice_core::engine::hdl_wreal_resolution(&netlist),
-            active_lines: Some(active_lines),
+            sites: Some(sites),
+            library_map: netlist.options.hdl_libmap.clone(),
             masters,
         }
     }
@@ -384,22 +513,22 @@ fn canonical(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Read the source one deck line names, through the chain from the deck's
-/// file. A deck with no file can name a source only by its full path.
+/// Read the source one line names, through the chain from the file that
+/// names it, `owner`. A deck with no file can name a source only by its full
+/// path.
 fn read_source(
     processor: &mut IncludeProcessor,
     owner: Option<&Path>,
-    line: usize,
-    directive: &VerilogAInclude,
+    site: &Site,
 ) -> Result<ResolvedIncludeDependency, DeckHdlRefusal> {
+    let directive = &site.directive;
     let spelling = directive.file_path.to_string_lossy().into_owned();
     let owner = match owner {
         Some(owner) => owner.to_path_buf(),
         None if directive.file_path.is_absolute() => directive.file_path.clone(),
         None => {
-            return Err(DeckHdlRefusal::new(
+            return Err(site.refusal(
                 ElaborationErrorKind::MissingSource,
-                line,
                 &directive.file_path,
                 None,
                 "the deck has not been saved to a file, so a relative path has no directory to \
@@ -408,15 +537,14 @@ fn read_source(
         }
     };
     processor
-        .read_verilog_source_with_abort(&owner, line, &spelling, &NoAbort)
+        .read_verilog_source_with_abort(&owner, site.line, &spelling, &NoAbort)
         .map_err(|error| {
             let detail = match error {
                 ParseWithAbortError::Parse(ParseError::Syntax { message, .. }) => message,
                 other => other.to_string(),
             };
-            DeckHdlRefusal::new(
+            site.refusal(
                 ElaborationErrorKind::MissingSource,
-                line,
                 &directive.file_path,
                 None,
                 detail,
@@ -424,61 +552,243 @@ fn read_source(
         })
 }
 
-/// One source file, prepared once for every line that names it under the
-/// same macros.
-struct PreparedSource {
-    file_name: String,
-    digest: ContentDigest,
-    /// What was compiled: the bytes, the line's macros and the deck's `wreal`
-    /// resolution. The cells and the min:typ:max selection are part of every
-    /// runtime's own identity.
-    identity: ContentDigest,
-    prepared: rspice_veriloga::PreparedVirtualSource,
+/// One line that names a Verilog-A source: the deck's own, or a line of a
+/// file the deck includes.
+#[derive(Debug, Clone)]
+struct Site {
+    /// The 1-based line, in the deck or in `owner`.
+    line: usize,
+    /// The included file that writes the line; `None` for the deck's own.
+    owner: Option<PathBuf>,
+    directive: VerilogAInclude,
+}
+
+impl Site {
+    fn refusal(
+        &self,
+        kind: ElaborationErrorKind,
+        path: &Path,
+        module: Option<&str>,
+        detail: impl Into<String>,
+    ) -> DeckHdlRefusal {
+        DeckHdlRefusal::new(kind, self.line, path, module, detail).in_file(self.owner.as_deref())
+    }
 }
 
 /// A source file under the `define=` macros of the line that names it.
 type SourceUnderMacros = (PathBuf, Vec<(String, Option<String>)>);
 
+/// The files the engine compiles together, prepared once from their sealed
+/// bytes for every line that names one of them.
+struct CompileSet {
+    prepared: rspice_veriloga::PreparedVirtualSource,
+    /// What was compiled: every file's name and bytes, the macros and the
+    /// deck's `wreal` resolution. The cells and the min:typ:max selection are
+    /// part of every runtime's own identity.
+    identity: ContentDigest,
+    /// The modules each file of the set declares, with what an `include of
+    /// its own declares, in the set's order.
+    modules: Vec<Vec<String>>,
+    /// Whether the set is a compilation unit of several files.
+    unit: bool,
+}
+
 struct Sealer<'a> {
     deck: &'a DeckContext,
-    prepared: HashMap<SourceUnderMacros, PreparedSource>,
+    sets: Vec<CompileSet>,
+    /// The set each source is compiled in, and its place in that set.
+    placed: HashMap<SourceUnderMacros, (usize, usize)>,
     runtimes: Vec<PreparedVerilogARuntime>,
     connections: Vec<PreparedVerilogAConnectionLibrary>,
     /// Each alias bound so far: its artifact and the line that bound it.
     aliases: BTreeMap<String, (ContentDigest, usize)>,
-    /// The sealed directive each rewritten line now carries.
+    /// The sealed directive each rewritten line of the deck now carries.
     rewritten: BTreeMap<usize, String>,
+    /// The sealed directive each rewritten line of an included file carries.
+    included: BTreeMap<(PathBuf, usize), String>,
     /// Directives for further modules of a line's source.
     appended: Vec<String>,
 }
 
 impl Sealer<'_> {
+    /// Prepare the deck's sources as the engine groups them: one compile per
+    /// file under the macros of the lines that name it, and the files no line
+    /// gives macros, and that hold no connect rules, as one unit when there
+    /// are several. Each compile reads its files' headers from the host.
+    fn compile(
+        &mut self,
+        processor: &mut IncludeProcessor,
+        sites: &[Site],
+        reads: &[ResolvedIncludeDependency],
+    ) -> Result<(), DeckHdlRefusal> {
+        let mut groups: Vec<(SourceUnderMacros, usize)> = Vec::new();
+        for (index, (site, read)) in sites.iter().zip(reads).enumerate() {
+            let key = (
+                read.resolved_path().to_path_buf(),
+                site.directive.defines.clone(),
+            );
+            if !groups.iter().any(|(known, _)| *known == key) {
+                groups.push((key, index));
+            }
+        }
+        let (unit, alone): (Vec<_>, Vec<_>) = groups.into_iter().partition(|((_, defines), at)| {
+            defines.is_empty() && !declares_connect_items(reads[*at].source())
+        });
+        if let (Some(map), Some((_, at))) = (&self.deck.library_map, unit.first()) {
+            let site = &sites[*at];
+            return Err(site.refusal(
+                ElaborationErrorKind::CompileRefusal,
+                reads[*at].resolved_path(),
+                None,
+                format!(
+                    "the deck's `.options hdl_libmap={map}` places its Verilog files in \
+                     libraries, which a run's sealed sources do not carry; run the deck from the \
+                     command line"
+                ),
+            ));
+        }
+        let (unit, mut alone) = if unit.len() > 1 {
+            (unit, alone)
+        } else {
+            (Vec::new(), [unit, alone].concat())
+        };
+        alone.sort_by_key(|(_, at)| *at);
+        // The engine prepares the files that compile alone first, then the
+        // unit; a refusal names the first that fails in that order.
+        for (key, at) in alone {
+            self.prepare_set(processor, &[(key, at)], sites, reads)?;
+        }
+        if !unit.is_empty() {
+            self.prepare_set(processor, &unit, sites, reads)?;
+        }
+        Ok(())
+    }
+
+    fn prepare_set(
+        &mut self,
+        processor: &mut IncludeProcessor,
+        members: &[(SourceUnderMacros, usize)],
+        sites: &[Site],
+        reads: &[ResolvedIncludeDependency],
+    ) -> Result<(), DeckHdlRefusal> {
+        let (first_key, first) = &members[0];
+        let site = &sites[*first];
+        let defines = &first_key.1;
+        let refusal = |detail: String| {
+            site.refusal(
+                ElaborationErrorKind::CompileRefusal,
+                reads[*first].resolved_path(),
+                None,
+                detail,
+            )
+        };
+        let roots: Vec<closure::HostSource> = members
+            .iter()
+            .map(|(_, at)| closure::HostSource {
+                path: reads[*at].resolved_path().to_path_buf(),
+                text: reads[*at].source().to_owned(),
+            })
+            .collect();
+        let sources = closure::read_closure(processor, &roots, defines).map_err(&refusal)?;
+        let (bundle, names) = closure::bundle(&sources).map_err(&refusal)?;
+        let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+            external_cells: self.deck.external_cells.clone(),
+            delay_select: self.deck.delay_select,
+            wreal_resolution: self.deck.wreal_resolution,
+            defines: defines.clone(),
+            ..crate::compilation::unified_runtime_compiler_options()
+        });
+        let limits = crate::project_veriloga::project_virtual_compile_limits();
+        let unit = members.len() > 1;
+        let prepared = if unit {
+            let root_names: Vec<&str> = roots
+                .iter()
+                .map(|root| {
+                    let index = sources
+                        .iter()
+                        .position(|source| source.path == root.path)
+                        .expect("every root is read");
+                    names[index].as_str()
+                })
+                .collect();
+            compiler.prepare_virtual_unit_runtime_source(&bundle, &root_names, limits)
+        } else {
+            compiler.prepare_virtual_runtime_source(&bundle, limits)
+        }
+        .map_err(|failure| refusal(failure.to_string()))?;
+        closure::same_closure(&prepared, &names).map_err(&refusal)?;
+        let modules = if unit {
+            prepared
+                .unit_files()
+                .iter()
+                .map(|file| {
+                    file.modules
+                        .iter()
+                        .map(|module| module.to_string())
+                        .collect()
+                })
+                .collect()
+        } else {
+            vec![prepared.module_names().map(str::to_owned).collect()]
+        };
+        let identity = compile_identity(
+            &sources,
+            &names,
+            roots.len(),
+            defines,
+            self.deck.wreal_resolution,
+        );
+        let set = self.sets.len();
+        for (position, (key, _)) in members.iter().enumerate() {
+            self.placed.insert(key.clone(), (set, position));
+        }
+        self.sets.push(CompileSet {
+            prepared,
+            identity,
+            modules,
+            unit,
+        });
+        Ok(())
+    }
+
     fn seal(
         &mut self,
-        line: usize,
-        directive: &VerilogAInclude,
-        dependency: &ResolvedIncludeDependency,
+        site: &Site,
+        read: &ResolvedIncludeDependency,
     ) -> Result<(), DeckHdlRefusal> {
-        let path = dependency.resolved_path().to_path_buf();
-        let deck = self.deck;
-        let key = (path.clone(), directive.defines.clone());
-        if !self.prepared.contains_key(&key) {
-            let source = prepare(deck, line, directive, dependency)?;
-            self.prepared.insert(key.clone(), source);
+        let path = read.resolved_path().to_path_buf();
+        let directive = &site.directive;
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("source.va")
+            .to_owned();
+        let (set_index, position) = self.placed[&(path.clone(), directive.defines.clone())];
+        let set = &self.sets[set_index];
+        let identity = set.identity;
+        let refusal =
+            |kind, module: Option<&str>, detail: String| site.refusal(kind, &path, module, detail);
+        let modules = set.modules[position].clone();
+        if modules.is_empty() && set.unit {
+            // A file of a unit may declare no module: the macros and
+            // `timescale` the files after it read. It has no model, and its
+            // line stays a line.
+            if let Some(module) = &directive.selected_module {
+                return Err(refusal(
+                    ElaborationErrorKind::UnknownModule,
+                    None,
+                    format!(
+                        "this source declares no device module, so module '{module}' cannot be selected"
+                    ),
+                ));
+            }
+            self.rewrite(site, format!("* {}", directive_text(site)));
+            return Ok(());
         }
-        let source = &self.prepared[&key];
-        let refusal = |kind, module: Option<&str>, detail: String| {
-            DeckHdlRefusal::new(kind, line, &path, module, detail)
-        };
-        let modules = source
-            .prepared
-            .module_names()
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
         // A source of connect rules and connect modules alone contributes
         // rules, not instances, as the engine reads it.
         if modules.is_empty() && directive.selected_module.is_none() {
-            let artifact = source.prepared.connection_artifact().ok_or_else(|| {
+            let artifact = set.prepared.connection_artifact().ok_or_else(|| {
                 refusal(
                     ElaborationErrorKind::UnknownModule,
                     None,
@@ -489,18 +799,17 @@ impl Sealer<'_> {
             let alias = directive
                 .model_name
                 .clone()
-                .unwrap_or_else(|| connection_alias(&source.file_name));
-            let source_key =
-                deck_source_key(source.identity, "connections", &alias, &source.file_name);
+                .unwrap_or_else(|| connection_alias(&file_name));
+            let source_key = deck_source_key(identity, "connections", &alias, &file_name);
             let library = PreparedVerilogAConnectionLibrary::try_new(
                 source_key.clone(),
-                source.digest,
+                identity,
                 alias.clone(),
                 artifact,
             )
             .map_err(|error| refusal(ElaborationErrorKind::CompileRefusal, None, error))?;
             let artifact = library.binding().artifact_digest();
-            self.bind_alias(&alias, artifact, line, &path)?;
+            self.bind_alias(&alias, artifact, site, &path)?;
             if !self.connections.iter().any(|known| {
                 known
                     .binding()
@@ -509,15 +818,14 @@ impl Sealer<'_> {
             }) {
                 self.connections.push(library);
             }
-            self.rewritten
-                .insert(line, super::project_veriloga_directive(&source_key, &alias));
+            self.rewrite(site, super::project_veriloga_directive(&source_key, &alias));
             return Ok(());
         }
         let selected = select_modules(directive, &modules, &self.deck.masters)
             .map_err(|detail| refusal(ElaborationErrorKind::ModuleNotSelected, None, detail))?;
         for (index, module) in selected.iter().enumerate() {
-            let source = &self.prepared[&key];
-            let compilation = source.prepared.compile_runtime(module).map_err(|failure| {
+            let set = &self.sets[set_index];
+            let compilation = set.prepared.compile_runtime(module).map_err(|failure| {
                 refusal(
                     ElaborationErrorKind::CompileRefusal,
                     Some(module),
@@ -528,14 +836,14 @@ impl Sealer<'_> {
                 (Some(alias), 1) => alias.clone(),
                 _ => module.clone(),
             };
-            let source_key = deck_source_key(source.identity, module, &alias, &source.file_name);
+            let source_key = deck_source_key(identity, module, &alias, &file_name);
             // Sealed with the deck's cells it was compiled against, which a
             // design with a leaf carries in its identity and install key, and
             // with the selection it was compiled under, which every design
             // does.
             let runtime = PreparedVerilogARuntime::try_from_virtual_compilation_against(
                 source_key.clone(),
-                source.digest,
+                identity,
                 alias.clone(),
                 &compilation,
                 self.deck.external_cells.as_deref(),
@@ -548,7 +856,7 @@ impl Sealer<'_> {
                     error.to_string(),
                 )
             })?;
-            self.bind_alias(&alias, runtime.artifact_digest(), line, &path)?;
+            self.bind_alias(&alias, runtime.artifact_digest(), site, &path)?;
             if !self
                 .runtimes
                 .iter()
@@ -558,7 +866,7 @@ impl Sealer<'_> {
             }
             let sealed = super::project_veriloga_directive(&source_key, &alias);
             if index == 0 {
-                self.rewritten.insert(line, sealed);
+                self.rewrite(site, sealed);
             } else {
                 self.appended.push(sealed);
             }
@@ -566,19 +874,31 @@ impl Sealer<'_> {
         Ok(())
     }
 
+    /// Put `directive` on the line `site` stands on.
+    fn rewrite(&mut self, site: &Site, directive: String) {
+        match &site.owner {
+            None => {
+                self.rewritten.insert(site.line, directive);
+            }
+            Some(owner) => {
+                self.included
+                    .insert((canonical(owner), site.line), directive);
+            }
+        }
+    }
+
     /// One deck names one master per alias.
     fn bind_alias(
         &mut self,
         alias: &str,
         artifact: ContentDigest,
-        line: usize,
+        site: &Site,
         path: &Path,
     ) -> Result<(), DeckHdlRefusal> {
         match self.aliases.get(&alias.to_ascii_uppercase()) {
             Some((bound, _)) if *bound == artifact => Ok(()),
-            Some((_, first)) => Err(DeckHdlRefusal::new(
+            Some((_, first)) => Err(site.refusal(
                 ElaborationErrorKind::ModuleNotSelected,
-                line,
                 path,
                 None,
                 format!(
@@ -587,64 +907,37 @@ impl Sealer<'_> {
             )),
             None => {
                 self.aliases
-                    .insert(alias.to_ascii_uppercase(), (artifact, line));
+                    .insert(alias.to_ascii_uppercase(), (artifact, site.line));
                 Ok(())
             }
         }
     }
 }
 
-/// Prepare one source under the deck's options and its line's macros.
-fn prepare(
-    deck: &DeckContext,
-    line: usize,
-    directive: &VerilogAInclude,
-    dependency: &ResolvedIncludeDependency,
-) -> Result<PreparedSource, DeckHdlRefusal> {
-    let path = dependency.resolved_path();
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("source.va")
-        .to_owned();
-    let text = dependency.source();
-    let digest = ContentDigest::from_bytes(Sha256::digest(text.as_bytes()).into());
-    let identity = compile_identity(digest, &directive.defines, deck.wreal_resolution);
-    let refusal = |detail: String| {
-        DeckHdlRefusal::new(
-            ElaborationErrorKind::CompileRefusal,
-            line,
-            path,
-            None,
-            detail,
-        )
-    };
-    let bundle = rspice_veriloga::VirtualSourceBundle::new(
-        file_name.clone(),
-        [rspice_veriloga::VirtualSourceFile::new(
-            file_name.clone(),
-            text,
-        )],
+/// The line a site was written as, for a line that keeps its place as a
+/// comment.
+fn directive_text(site: &Site) -> String {
+    let directive = &site.directive;
+    format!(
+        ".hdl \"{}\" (sealed into the deck's Verilog unit)",
+        directive.file_path.display()
     )
-    .map_err(|error| refusal(error.to_string()))?;
-    let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
-        external_cells: deck.external_cells.clone(),
-        delay_select: deck.delay_select,
-        wreal_resolution: deck.wreal_resolution,
-        defines: directive.defines.clone(),
-        ..crate::compilation::unified_runtime_compiler_options()
-    });
-    let prepared = compiler
-        .prepare_virtual_runtime_source(
-            &bundle,
-            crate::project_veriloga::project_virtual_compile_limits(),
-        )
-        .map_err(|failure| refusal(failure.to_string()))?;
-    Ok(PreparedSource {
-        file_name,
-        digest,
-        identity,
-        prepared,
+}
+
+/// Whether a source declares connect rules or connect modules, which make it
+/// a connection library the engine compiles on its own, never in a unit. A
+/// word test, as the engine's own.
+fn declares_connect_items(text: &str) -> bool {
+    let identifier =
+        |character: char| character.is_ascii_alphanumeric() || "_$".contains(character);
+    ["connectmodule", "connectrules"].iter().any(|word| {
+        text.match_indices(word).any(|(at, _)| {
+            !text[..at].chars().next_back().is_some_and(identifier)
+                && !text[at + word.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(identifier)
+        })
     })
 }
 
@@ -687,22 +980,31 @@ fn select_modules(
     Ok(instantiated)
 }
 
-/// The identity of one compile: the source's bytes, the macros its line
-/// defines and the deck's `wreal` resolution. The deck's cells and its
-/// min:typ:max selection are part of the sealed runtime's own identity.
+/// The identity of one compile: every file it read, by its name in the
+/// sealed bundle and its bytes, how many of them are the roots it compiled,
+/// the macros the roots' lines define and the deck's `wreal` resolution. The
+/// deck's cells and its min:typ:max selection are part of the sealed
+/// runtime's own identity.
 fn compile_identity(
-    digest: ContentDigest,
+    sources: &[closure::HostSource],
+    names: &[String],
+    roots: usize,
     defines: &[(String, Option<String>)],
     wreal_resolution: DigitalRealResolution,
 ) -> ContentDigest {
     let mut hasher = Sha256::new();
-    hasher.update(b"rspice.deck-hdl-source/v1\0");
+    hasher.update(b"rspice.deck-hdl-source/v2\0");
     let mut field = |bytes: &[u8]| {
         hasher.update((bytes.len() as u64).to_le_bytes());
         hasher.update(bytes);
     };
-    field(digest.as_bytes());
     field(wreal_resolution.keyword().as_bytes());
+    field(&(roots as u64).to_le_bytes());
+    field(&(sources.len() as u64).to_le_bytes());
+    for (source, name) in sources.iter().zip(names) {
+        field(name.as_bytes());
+        field(source.text.as_bytes());
+    }
     field(&(defines.len() as u64).to_le_bytes());
     for (name, value) in defines {
         field(name.as_bytes());

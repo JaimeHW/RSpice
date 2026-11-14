@@ -166,11 +166,16 @@ pub fn execution_current_directory() -> Result<PathBuf, PreparationError> {
     }
 }
 
+/// Expand the manual deck `source` saved at `origin` through its include
+/// chain. `rewrite` names the line each written line becomes, by the file and
+/// line that wrote it: a sealed Verilog-A source line an included file
+/// writes.
 pub fn expand_manual_dependencies(
     source: &str,
     origin: Option<&Path>,
     include_search: &IncludeSearchChain,
     sealed_sources: &SealedModelExecutionSources,
+    rewrite: &dyn Fn(&rspice_core::netlist::NetlistSourceLocation) -> Option<String>,
 ) -> Result<
     (
         String,
@@ -187,8 +192,9 @@ pub fn expand_manual_dependencies(
     #[cfg(target_arch = "wasm32")]
     {
         // The browser resolves only through the authenticated bundle, which
-        // carries its own edges; a host directory chain has nothing to add.
-        let _ = include_search;
+        // carries its own edges; a host directory chain has nothing to add,
+        // and nothing read from the host was sealed to rewrite.
+        let _ = (include_search, rewrite);
         let (expanded, dependencies) = sealed_sources
             .expand_root_dependencies(
                 &absolute_origin,
@@ -209,7 +215,9 @@ pub fn expand_manual_dependencies(
         let mut processor = IncludeProcessor::new(&absolute_origin);
         include_search.apply_to(&mut processor);
         let expanded = processor
-            .expand_content(source, &absolute_origin)
+            .expand_content_rewriting(source, &absolute_origin, &mut |location, _| {
+                rewrite(location)
+            })
             .map_err(|error| {
                 PreparationError::new(
                     PreparationStage::SourceChecks,

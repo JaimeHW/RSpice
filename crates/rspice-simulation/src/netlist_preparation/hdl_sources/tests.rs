@@ -331,6 +331,161 @@ fn a_crlf_deck_keeps_its_line_endings() {
     );
 }
 
+const LEAF: &str = "`timescale 1ns/1ps\nmodule leaf(y);\n  output y;\n  reg y;\n  initial y = 1'b0;\n  always #5 y = ~y;\nendmodule\n";
+const TOP: &str =
+    "`timescale 1ns/1ps\nmodule top(q);\n  output q;\n  wire q;\n  leaf u1(.y(q));\nendmodule\n";
+
+/// Two files the deck names with no macros are one compilation unit, as the
+/// engine compiles them: a module of one instantiates a module of the
+/// other, and both runtimes carry the unit's identity in their keys. Given
+/// macros, a file compiles alone and cannot see the other's module.
+#[test]
+fn files_named_without_macros_compile_as_one_unit() {
+    let scratch = Scratch::new("unit");
+    scratch.write("rtl/top.v", TOP);
+    scratch.write("lib/leaf.v", LEAF);
+    let circuit = "t\n.hdl \"rtl/top.v\"\n.hdl \"lib/leaf.v\"\nX1 q top\nR1 q 0 1k\n.end\n";
+    let sealed = seal(circuit, &scratch.deck());
+
+    let keys = device_keys(&sealed);
+    assert_eq!(keys.len(), 2, "{keys:?}");
+    assert!(keys[0].ends_with("/leaf/leaf/leaf.v"), "{keys:?}");
+    assert!(keys[1].ends_with("/top/top/top.v"), "{keys:?}");
+    let identity = |key: &str| key.split('/').nth(2).map(str::to_owned);
+    assert_eq!(
+        identity(&keys[0]),
+        identity(&keys[1]),
+        "one unit, one identity"
+    );
+    let lines = sealed.source.lines().collect::<Vec<_>>();
+    assert_eq!(lines[1], sealed_line(&keys[1], "top"));
+    assert_eq!(lines[2], sealed_line(&keys[0], "leaf"));
+
+    let refusal = refuse(
+        "t\n.hdl \"rtl/top.v\" define=X\n.hdl \"lib/leaf.v\"\nX1 q top\n.end\n",
+        &scratch.deck(),
+    );
+    assert_eq!(
+        refusal.kind,
+        ElaborationErrorKind::CompileRefusal,
+        "{refusal}"
+    );
+    assert_eq!(refusal.line, 2);
+    assert!(refusal.detail.contains("leaf"), "{refusal}");
+}
+
+/// A file of a unit that declares no module, only the macros the files
+/// after it read, has no runtime; its line keeps its place as a comment.
+#[test]
+fn a_unit_file_of_directives_alone_keeps_its_line_as_a_comment() {
+    let scratch = Scratch::new("directives");
+    scratch.write("defs.v", "`define HALF 5\n");
+    scratch.write("leaf.v", &LEAF.replace("#5", "#`HALF"));
+    let circuit = "t\n.hdl \"defs.v\"\n.hdl \"leaf.v\"\nX1 q leaf\n.end\n";
+    let sealed = seal(circuit, &scratch.deck());
+    let [key] = device_keys(&sealed).try_into().expect("one runtime");
+    let lines = sealed.source.lines().collect::<Vec<_>>();
+    assert!(lines[1].starts_with("* "), "{}", sealed.source);
+    assert_eq!(lines[2], sealed_line(&key, "leaf"));
+}
+
+/// A source's own `include` of a header beside it is read from the host,
+/// recorded as a dependency of the run, and sealed by content with the
+/// source: the header's bytes are part of what the key names.
+#[test]
+fn a_local_include_header_is_sealed_with_its_source() {
+    let scratch = Scratch::new("header");
+    scratch.write("models/half.vh", "`define HALF 5\n");
+    scratch.write(
+        "models/leaf.v",
+        &format!("`include \"half.vh\"\n{}", LEAF.replace("#5", "#`HALF")),
+    );
+    let circuit = "t\n.hdl \"models/leaf.v\"\nX1 q leaf\n.end\n";
+    let sealed = seal(circuit, &scratch.deck());
+    let [key] = device_keys(&sealed).try_into().expect("one runtime");
+    let header = sealed
+        .dependencies
+        .iter()
+        .find(|dependency| dependency.resolved_path().ends_with("half.vh"))
+        .unwrap_or_else(|| panic!("the header is a dependency: {:?}", sealed.dependencies));
+    assert_eq!(header.source(), "`define HALF 5\n");
+    assert!(header.owner_path().ends_with("leaf.v"), "{header:?}");
+    assert_eq!(header.directive_line(), 1);
+
+    scratch.write("models/half.vh", "`define HALF 7\n");
+    let [changed] = device_keys(&seal(circuit, &scratch.deck()))
+        .try_into()
+        .expect("one runtime");
+    assert_ne!(key, changed, "the header's bytes are part of the key");
+
+    std::fs::remove_file(scratch.0.join("models/half.vh")).expect("remove the header");
+    let refusal = refuse(circuit, &scratch.deck());
+    assert_eq!(
+        refusal.kind,
+        ElaborationErrorKind::CompileRefusal,
+        "{refusal}"
+    );
+    assert!(refusal.detail.contains("half.vh"), "{refusal}");
+}
+
+/// A source line an included file writes is read relative to that file and
+/// sealed by that file and its line; the deck's own text is not touched,
+/// and a refusal names the included file.
+#[test]
+fn a_source_line_of_an_included_file_is_sealed_where_it_stands() {
+    let scratch = Scratch::new("included-line");
+    scratch.write("models/leaf.v", LEAF);
+    let include = scratch.write("models/leaf.inc", "* leaf\n.hdl \"leaf.v\"\n");
+    let circuit = "t\n.include \"models/leaf.inc\"\nX1 q leaf\nR1 q 0 1k\n.end\n";
+    let sealed = seal(circuit, &scratch.deck());
+    assert_eq!(sealed.source, circuit);
+    let [key] = device_keys(&sealed).try_into().expect("one runtime");
+    let canonical = include.canonicalize().expect("canonical include");
+    assert_eq!(
+        sealed.included.get(&(canonical.clone(), 2)),
+        Some(&sealed_line(&key, "leaf"))
+    );
+    let location = rspice_core::netlist::NetlistSourceLocation {
+        path: Some(include.clone()),
+        line: 2,
+    };
+    assert_eq!(
+        sealed.included_line(&location),
+        Some(sealed_line(&key, "leaf"))
+    );
+    let read = sealed
+        .dependencies
+        .iter()
+        .find(|dependency| dependency.resolved_path().ends_with("leaf.v"))
+        .expect("the source is a dependency");
+    assert_eq!(read.owner_path(), canonical);
+    assert_eq!(read.directive_line(), 2);
+
+    scratch.write("models/leaf.inc", "* leaf\n.hdl \"leaf.v\" module=absent\n");
+    let refusal = refuse(circuit, &scratch.deck());
+    assert_eq!(refusal.line, 2);
+    assert!(
+        refusal.to_string().starts_with("line 2 of '") && refusal.to_string().contains("leaf.inc'"),
+        "{refusal}"
+    );
+    assert_eq!(PreparationError::from(refusal).line(), None);
+}
+
+/// A library map places a unit's files in libraries, which no sealed run
+/// carries; the deck is refused by the option.
+#[test]
+fn a_deck_with_a_library_map_is_refused() {
+    let scratch = Scratch::new("libmap");
+    scratch.write("rtl/top.v", TOP);
+    scratch.write("lib/leaf.v", LEAF);
+    let refusal = refuse(
+        "t\n.options hdl_libmap=lib.map\n.hdl \"rtl/top.v\"\n.hdl \"lib/leaf.v\"\nX1 q top\n.end\n",
+        &scratch.deck(),
+    );
+    assert_eq!(refusal.line, 3);
+    assert!(refusal.detail.contains("hdl_libmap"), "{refusal}");
+}
+
 #[test]
 fn the_compilers_leading_location_is_recovered() {
     assert_eq!(
