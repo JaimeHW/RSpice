@@ -79,6 +79,23 @@ pub enum WorkbenchIcon {
     Pin,
     Text,
     Probe,
+    /// A symbol's pin: a lead from the body edge to its terminal, the
+    /// symbol editor's pin tool.
+    SymbolPin,
+    /// A straight segment between two points, the symbol editor's line tool.
+    Line,
+    /// The symbol editor's rectangle tool.
+    Rectangle,
+    /// The symbol editor's circle tool.
+    Circle,
+    /// A half circle between two points, the symbol editor's arc tool.
+    Arc,
+    /// An irregular closed outline, the symbol editor's polygon tool.
+    Polygon,
+    /// A magnet: snap to grid.
+    Snap,
+    /// A sheet with a part placed on it: preview as placed.
+    Preview,
     Rotate,
     Mirror,
     MirrorVertical,
@@ -412,6 +429,66 @@ impl WorkbenchIcon {
             Self::Probe => {
                 painter.circle_stroke(p(10.0, 10.0), 5.5 * scale, stroke);
                 line(&[(14.5, 14.5), (20.0, 20.0)]);
+            }
+            Self::SymbolPin => {
+                line(&[(19.0, 4.0), (19.0, 20.0)]);
+                line(&[(8.0, 12.0), (19.0, 12.0)]);
+                closed(&[(4.0, 10.0), (8.0, 10.0), (8.0, 14.0), (4.0, 14.0)]);
+            }
+            Self::Line => {
+                line(&[(5.0, 19.0), (19.0, 5.0)]);
+                painter.circle_filled(p(5.0, 19.0), 1.6 * scale, color);
+                painter.circle_filled(p(19.0, 5.0), 1.6 * scale, color);
+            }
+            Self::Rectangle => {
+                closed(&[(4.0, 6.0), (20.0, 6.0), (20.0, 18.0), (4.0, 18.0)]);
+            }
+            Self::Circle => {
+                painter.circle_stroke(p(12.0, 12.0), 8.0 * scale, stroke);
+            }
+            Self::Arc => {
+                painter.add(Shape::line(
+                    (0..=12)
+                        .map(|i| {
+                            let a = std::f32::consts::PI * i as f32 / 12.0;
+                            p(12.0 - 8.0 * a.cos(), 16.0 - 8.0 * a.sin())
+                        })
+                        .collect(),
+                    stroke,
+                ));
+                painter.circle_filled(p(4.0, 16.0), 1.6 * scale, color);
+                painter.circle_filled(p(20.0, 16.0), 1.6 * scale, color);
+            }
+            Self::Polygon => {
+                closed(&[
+                    (12.0, 4.0),
+                    (20.0, 10.0),
+                    (17.0, 20.0),
+                    (7.0, 20.0),
+                    (4.0, 10.0),
+                ]);
+            }
+            Self::Snap => {
+                let mut magnet = vec![p(6.0, 4.0)];
+                magnet.extend((0..=12).map(|i| {
+                    let a = std::f32::consts::PI * i as f32 / 12.0;
+                    p(12.0 - 6.0 * a.cos(), 13.0 + 6.0 * a.sin())
+                }));
+                magnet.push(p(18.0, 4.0));
+                painter.add(Shape::line(magnet, stroke));
+                line(&[(4.0, 8.0), (8.0, 8.0)]);
+                line(&[(16.0, 8.0), (20.0, 8.0)]);
+            }
+            Self::Preview => {
+                closed(&[
+                    (5.0, 3.0),
+                    (15.0, 3.0),
+                    (19.0, 7.0),
+                    (19.0, 21.0),
+                    (5.0, 21.0),
+                ]);
+                line(&[(15.0, 3.0), (15.0, 7.0), (19.0, 7.0)]);
+                closed(&[(8.0, 10.0), (8.0, 18.0), (15.0, 14.0)]);
             }
             // Selection transforms share their art with the design-system
             // icon set so the toolbar, the inspector action stack, and the

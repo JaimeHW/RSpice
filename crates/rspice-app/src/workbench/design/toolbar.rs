@@ -107,32 +107,32 @@ const SYMBOL_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, SymbolTool); 
     ),
     (
         DesignCommand::SymbolPinTool.key(),
-        WorkbenchIcon::Probe,
+        WorkbenchIcon::SymbolPin,
         SymbolTool::PlacePin,
     ),
     (
         DesignCommand::SymbolPolylineTool.key(),
-        WorkbenchIcon::Wire,
+        WorkbenchIcon::Line,
         SymbolTool::Line,
     ),
     (
         DesignCommand::SymbolRectangleTool.key(),
-        WorkbenchIcon::Grid,
+        WorkbenchIcon::Rectangle,
         SymbolTool::Rectangle,
     ),
     (
         DesignCommand::SymbolCircleTool.key(),
-        WorkbenchIcon::Target,
+        WorkbenchIcon::Circle,
         SymbolTool::Circle,
     ),
     (
         DesignCommand::SymbolArcTool.key(),
-        WorkbenchIcon::Refresh,
+        WorkbenchIcon::Arc,
         SymbolTool::Arc,
     ),
     (
         DesignCommand::SymbolPolygonTool.key(),
-        WorkbenchIcon::Layers,
+        WorkbenchIcon::Polygon,
         SymbolTool::Polygon,
     ),
     (
@@ -394,43 +394,29 @@ fn symbol_in_place(reads: &Reads<'_, DesignFeature>) -> bool {
     in_place_session(&reads.state.symbol.in_place, reads.model).is_some()
 }
 
+/// The symbol row's toggles, each drawn as its icon under its name: show
+/// grid, snap to grid, and preview as placed.
+const SYMBOL_TOGGLES: [(WorkbenchIcon, &str); 3] = [
+    (WorkbenchIcon::Grid, "Show grid"),
+    (WorkbenchIcon::Snap, "Snap to grid"),
+    (WorkbenchIcon::Preview, "Preview as placed on a sheet"),
+];
+
 fn show_grid_toggle(cx: &mut Cx<'_, DesignFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
-    symbol_toggle(
-        ui,
-        &mut cx.state.symbol.editor.show_grid,
-        WorkbenchIcon::Grid,
-        "Show grid",
-        layout,
-    );
+    symbol_toggle(ui, &mut cx.state.symbol.editor.show_grid, 0, layout);
 }
 
 fn snap_to_grid_toggle(cx: &mut Cx<'_, DesignFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
-    symbol_toggle(
-        ui,
-        &mut cx.state.symbol.editor.snap_to_grid,
-        WorkbenchIcon::Check,
-        "Snap to grid",
-        layout,
-    );
+    symbol_toggle(ui, &mut cx.state.symbol.editor.snap_to_grid, 1, layout);
 }
 
 fn preview_as_placed_toggle(cx: &mut Cx<'_, DesignFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
-    symbol_toggle(
-        ui,
-        &mut cx.state.symbol.editor.preview_as_placed,
-        WorkbenchIcon::Focus,
-        "Preview as placed on a sheet",
-        layout,
-    );
+    symbol_toggle(ui, &mut cx.state.symbol.editor.preview_as_placed, 2, layout);
 }
 
-fn symbol_toggle(
-    ui: &mut egui::Ui,
-    value: &mut bool,
-    icon: WorkbenchIcon,
-    label: &'static str,
-    layout: LayoutSpec,
-) {
+/// The symbol row's toggle `index` of [`SYMBOL_TOGGLES`], flipping `value`.
+fn symbol_toggle(ui: &mut egui::Ui, value: &mut bool, index: usize, layout: LayoutSpec) {
+    let (icon, label) = SYMBOL_TOGGLES[index];
     let response = icon_button(ui, icon, label, *value, toolbar_icon_button_size(layout));
     if response.clicked() {
         *value = !*value;
@@ -487,3 +473,33 @@ const STIMULUS: &[ToolbarEntry<DesignFeature>] = &[
         WorkbenchIcon::Target,
     ),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every control in the symbol row wears an icon of its own, so no two
+    /// read as the same thing.
+    #[test]
+    fn no_icon_stands_twice_in_the_symbol_row() {
+        fn icons(entries: &[ToolbarEntry<DesignFeature>], out: &mut Vec<WorkbenchIcon>) {
+            for entry in entries {
+                match entry {
+                    ToolbarEntry::Icon(icon) => out.push(icon.icon),
+                    ToolbarEntry::Tool(tool) => out.push(tool.icon),
+                    ToolbarEntry::Only(_, nested) => icons(nested, out),
+                    ToolbarEntry::Separator | ToolbarEntry::Control(_) => {}
+                }
+            }
+        }
+        let mut row = Vec::new();
+        icons(SYMBOL, &mut row);
+        row.extend(SYMBOL_TOGGLES.map(|(icon, _)| icon));
+        for (index, icon) in row.iter().enumerate() {
+            assert!(
+                !row[index + 1..].contains(icon),
+                "{icon:?} stands twice in the symbol row"
+            );
+        }
+    }
+}
