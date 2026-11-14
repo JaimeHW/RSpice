@@ -4459,6 +4459,118 @@ impl VerilogADevice {
             .collect()
     }
 
+    /// The `idt`, `laplace_*` and `absdelay` sites of the analog body, each
+    /// once, in family and slot order: the operators with state a periodic
+    /// solver carries as unknowns of its own (see
+    /// [`Self::try_install_periodic_operator_frame`]).
+    pub fn periodic_operator_sites(&self) -> Vec<crate::vm::PeriodicOperatorSite> {
+        use crate::vm::{PeriodicOperatorKind as Kind, PeriodicOperatorSite as Site};
+
+        let mut sites = std::collections::BTreeSet::new();
+        Self::for_each_bytecode_program(&self.model, false, &mut |program| {
+            for instruction in &program.instructions {
+                let (kind, slot) = match instruction {
+                    Instruction::IdtState(slot) | Instruction::IdtDerivativeState(slot) => {
+                        (Kind::Integral, *slot)
+                    }
+                    Instruction::LaplaceState(filter)
+                    | Instruction::LaplaceStateDerivative(filter) => (Kind::Laplace, *filter),
+                    Instruction::AbsDelayState(buffer)
+                    | Instruction::AbsDelayStateMax(buffer)
+                    | Instruction::AbsDelayStateDerivative(buffer)
+                    | Instruction::AbsDelayStateDerivativeMax(buffer)
+                    | Instruction::AbsDelayStateMixedDerivative(buffer)
+                    | Instruction::AbsDelayStateMixedDerivativeMax(buffer) => {
+                        (Kind::Delay, *buffer)
+                    }
+                    _ => continue,
+                };
+                sites.insert(Site { kind, slot });
+            }
+        });
+        sites.into_iter().collect()
+    }
+
+    /// Evaluate `sites` at supplied outputs from now on.
+    ///
+    /// While the frame is installed, every stamp of this instance runs its
+    /// bytecode on the interpreter, whatever route compiled it, and each
+    /// listed site pushes the output [`Self::set_periodic_operator_outputs`]
+    /// supplied, records its input, and leaves its own state untouched; see
+    /// [`crate::vm::PeriodicOperatorRecord`]. Refuses a site the analog body
+    /// does not use.
+    pub fn try_install_periodic_operator_frame(
+        &mut self,
+        sites: &[crate::vm::PeriodicOperatorSite],
+    ) -> Result<(), VmError> {
+        let used = self.periodic_operator_sites();
+        if let Some(site) = sites.iter().find(|site| !used.contains(site)) {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "periodic operator site {site:?} is not used by module '{}'",
+                self.model.name
+            )));
+        }
+        let columns: std::sync::Arc<[Option<crate::vm::PeriodicOperatorAxis>]> = self
+            .model
+            .variable_names
+            .iter()
+            .map(|name| {
+                // Only a first-order shadow holds a first derivative.
+                if name.matches("@d").count() != 1 {
+                    return None;
+                }
+                match crate::vm::shadow_columns(std::slice::from_ref(name), 1)[0] {
+                    crate::vm::Column::Axis(axis) => crate::vm::PeriodicOperatorAxis::of(axis),
+                    _ => None,
+                }
+            })
+            .collect();
+        self.context.periodic_frame = Some(Box::new(crate::vm::PeriodicOperatorFrame::new(
+            sites.into(),
+            columns,
+        )));
+        Ok(())
+    }
+
+    /// Supply each framed site's output for the next stamp, the site whose
+    /// output tangent is one in it (`None`: every tangent is zero), and clear
+    /// the record. Does nothing without a frame.
+    pub fn set_periodic_operator_outputs(&mut self, outputs: &[f64], seed: Option<usize>) {
+        if let Some(frame) = self.context.periodic_frame.as_deref_mut() {
+            frame.prepare(outputs, seed);
+        }
+    }
+
+    /// What the last stamp under the frame saw, or `None` without a frame.
+    pub fn periodic_operator_record(&self) -> Option<&crate::vm::PeriodicOperatorRecord> {
+        self.context
+            .periodic_frame
+            .as_deref()
+            .map(|frame| &frame.record)
+    }
+
+    /// The 0-based matrix row or column of a derivative axis, or `None` for
+    /// ground.
+    pub fn periodic_operator_axis_index(
+        &self,
+        axis: crate::vm::PeriodicOperatorAxis,
+    ) -> Option<usize> {
+        let axis = match axis {
+            crate::vm::PeriodicOperatorAxis::Node(node) => crate::vm::Axis::Node(node),
+            crate::vm::PeriodicOperatorAxis::Branch(branch) => crate::vm::Axis::Branch(branch),
+        };
+        match self.descriptor_axis_index(axis)? {
+            crate::vm::DescriptorIndex::Circuit(index) => Some(index),
+            _ => None,
+        }
+    }
+
+    /// The realization of Laplace filter `filter`, whose transfer harmonic
+    /// balance applies at each harmonic.
+    pub fn laplace_filter(&self, filter: usize) -> Option<&crate::laplace::StateSpaceFilter> {
+        self.context.laplace_filters.get(filter)
+    }
+
     /// Which of `operators` the analog body's bytecode uses.
     fn analog_operators_present<const N: usize>(
         &self,
@@ -6703,14 +6815,18 @@ impl VerilogADevice {
         })
     }
 
-    /// Run one value-returning native entry point.
+    /// Run one value-returning native entry point, or the program itself on
+    /// the interpreter while a periodic operator frame is installed.
     #[cfg(feature = "native")]
     fn run_value_program(
         vm: &mut Vm<'_>,
-        _program: &crate::codegen::BytecodeProgram,
+        program: &crate::codegen::BytecodeProgram,
         native: &NativeModel,
         entry: NativeValueEntry,
     ) -> Result<f64, VmError> {
+        if vm.context.periodic_frame.is_some() {
+            return vm.execute(program);
+        }
         Self::ensure_native_prelude_slots(vm.context, native)?;
         Self::validate_native_storage(vm.context, native)?;
         let dependencies = Self::native_entry_dependencies(native, entry)?;
@@ -7074,10 +7190,13 @@ impl VerilogADevice {
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
     fn run_value_program(
         vm: &mut Vm<'_>,
-        _program: &crate::codegen::BytecodeProgram,
+        program: &crate::codegen::BytecodeProgram,
         wasm: &WasmJitExecutable,
         entry: WasmJitExecutableEntry,
     ) -> Result<f64, VmError> {
+        if vm.context.periodic_frame.is_some() {
+            return vm.execute(program);
+        }
         wasm.run_entry(entry, vm.context).map_err(VmError::WasmJit)
     }
 
@@ -7100,6 +7219,9 @@ impl VerilogADevice {
         model: &CompiledModel,
         native: &NativeModel,
     ) -> Result<(), VmError> {
+        if vm.context.periodic_frame.is_some() {
+            return Self::run_interpreted_assignment_pass(vm, model);
+        }
         Self::run_variable_assignment_pass(vm, model, native)?;
         // The CFG prelude writes the residual/Jacobian slots once per
         // numerical evaluation. Static topology queries never read them.
@@ -7214,7 +7336,8 @@ impl VerilogADevice {
         model: &CompiledModel,
         native: &NativeModel,
     ) -> Result<(), VmError> {
-        if !native.has_post_assignment_pass() {
+        // The interpreter's assignment pass has no separate post-current half.
+        if vm.context.periodic_frame.is_some() || !native.has_post_assignment_pass() {
             return Ok(());
         }
         if vm.context.variables.len() < model.num_variables {
@@ -7253,6 +7376,9 @@ impl VerilogADevice {
         model: &CompiledModel,
         wasm: &WasmJitExecutable,
     ) -> Result<(), VmError> {
+        if vm.context.periodic_frame.is_some() {
+            return Self::run_interpreted_assignment_pass(vm, model);
+        }
         Self::run_variable_assignment_pass(vm, model, wasm)?;
         wasm.run_prelude(vm.context).map_err(VmError::WasmJit)
     }
@@ -7275,6 +7401,9 @@ impl VerilogADevice {
         model: &CompiledModel,
         wasm: &WasmJitExecutable,
     ) -> Result<(), VmError> {
+        if vm.context.periodic_frame.is_some() {
+            return Ok(());
+        }
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
@@ -7288,6 +7417,16 @@ impl VerilogADevice {
         not(all(feature = "wasm-jit", target_arch = "wasm32"))
     ))]
     fn run_assignment_pass(vm: &mut Vm<'_>, model: &CompiledModel) -> Result<(), VmError> {
+        Self::run_interpreted_assignment_pass(vm, model)
+    }
+
+    /// The assignment pass on the bytecode interpreter: the interpreter
+    /// route's evaluation, and every route's while a periodic operator frame
+    /// is installed.
+    fn run_interpreted_assignment_pass(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+    ) -> Result<(), VmError> {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
@@ -7420,6 +7559,9 @@ impl VerilogADevice {
                             "assignment target variable is outside runtime storage",
                         ));
                     }
+                    if let Some(frame) = vm.context.periodic_frame.as_deref_mut() {
+                        frame.set_assignment_column(assignment.var_index);
+                    }
                     let value = vm.execute(&assignment.program)?;
                     vm.context.record_analog_occurrence(
                         assignment.var_index,
@@ -7436,6 +7578,9 @@ impl VerilogADevice {
                     value,
                     occurrence_source,
                 } => {
+                    if let Some(frame) = vm.context.periodic_frame.as_deref_mut() {
+                        frame.set_column(None);
+                    }
                     let slot = vm
                         .execute(index)
                         .and_then(|raw| Vm::array_slot(raw, *base, *len, *lower));
@@ -7445,6 +7590,9 @@ impl VerilogADevice {
                             "indexed assignment target is outside runtime storage",
                         ));
                     }
+                    if let Some(frame) = vm.context.periodic_frame.as_deref_mut() {
+                        frame.set_assignment_column(slot);
+                    }
                     let value = vm.execute(value)?;
                     vm.context
                         .record_analog_occurrence(slot, value, *occurrence_source)?;
@@ -7453,6 +7601,9 @@ impl VerilogADevice {
                 crate::codegen::AssignmentStep::Loop { condition, body } => {
                     let mut iterations = 0usize;
                     loop {
+                        if let Some(frame) = vm.context.periodic_frame.as_deref_mut() {
+                            frame.set_column(None);
+                        }
                         let active = vm.execute(condition)?;
                         if active == 0.0 {
                             break;
@@ -7715,7 +7866,7 @@ impl VerilogADevice {
     {
         self.try_initialize_analysis()?;
         #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
-        if self.fused_stamp_driver_is_active() {
+        if self.context.periodic_frame.is_none() && self.fused_stamp_driver_is_active() {
             let result = self.try_stamp_fused_kernel(circuit_voltages, matrix_add, rhs_add, mode);
             self.context.numerical_evaluation_valid = result.is_ok();
             return result;
@@ -8060,6 +8211,9 @@ impl VerilogADevice {
 
             // Compute the contribution value (branch current for current
             // contributions, source voltage for potential contributions).
+            if let Some(frame) = vm.context.periodic_frame.as_deref_mut() {
+                frame.set_column(None);
+            }
             let value = Self::run_value_program(
                 &mut vm,
                 &program.value_program,
@@ -8136,6 +8290,16 @@ impl VerilogADevice {
 
             for jacobian_entry in &matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
+                if let Some(frame) = vm.context.periodic_frame.as_deref_mut() {
+                    frame.set_column(Some(match model_entry.col_axis {
+                        crate::codegen::ColumnAxis::Node(node) => {
+                            crate::vm::PeriodicOperatorAxis::Node(node)
+                        }
+                        crate::codegen::ColumnAxis::Branch(ordinal) => {
+                            crate::vm::PeriodicOperatorAxis::Branch(ordinal)
+                        }
+                    }));
+                }
                 let deriv = Self::run_value_program(
                     &mut vm,
                     &model_entry.program,

@@ -1112,6 +1112,57 @@ impl StateSpaceFilter {
         Ok((response.re, response.im))
     }
 
+    /// `H(jω)` at a signed angular frequency, as `(re, im)`. A real filter's
+    /// response at `-ω` is the conjugate of its response at `ω`.
+    pub fn transfer_at(&self, omega: f64) -> Result<(f64, f64), LaplaceError> {
+        if !omega.is_finite() {
+            return Err(LaplaceError::InvalidEvaluation(format!(
+                "angular frequency must be finite, got {omega}"
+            )));
+        }
+        let (real, imaginary) = self.frequency_response_rectangular(omega.abs() / (2.0 * PI))?;
+        Ok(if omega < 0.0 {
+            (real, -imaginary)
+        } else {
+            (real, imaginary)
+        })
+    }
+
+    /// `(H(jω₁) - H(jω₀)) / (j(ω₁ - ω₀))`, or `dH/d(jω)` at `ω₀` when the two
+    /// are equal, as `(re, im)`.
+    ///
+    /// The resolvent identity `R(s₁) - R(s₀) = (s₀ - s₁) R(s₁) R(s₀)`, with
+    /// `R(s) = (sI - A)⁻¹`, gives the difference as `-C R(s₁) R(s₀) B`
+    /// without subtracting two responses, so it keeps its accuracy however
+    /// close the two frequencies are.
+    pub fn transfer_divided_difference(
+        &self,
+        omega0: f64,
+        omega1: f64,
+    ) -> Result<(f64, f64), LaplaceError> {
+        self.validate_structure()?;
+        if !omega0.is_finite() || !omega1.is_finite() {
+            return Err(LaplaceError::InvalidEvaluation(format!(
+                "angular frequencies must be finite, got {omega0} and {omega1}"
+            )));
+        }
+        if self.order == 0 {
+            return Ok((0.0, 0.0));
+        }
+        let first = solve_complex_system(&self.a, &self.b, omega0)?;
+        let second = solve_complex_resolvent(&self.a, first, omega1)?;
+        let mut difference = Complex64::new(0.0, 0.0);
+        for (&c, value) in self.c.iter().zip(&second) {
+            difference -= Complex64::new(c, 0.0) * *value;
+        }
+        if !difference.re.is_finite() || !difference.im.is_finite() {
+            return Err(LaplaceError::InvalidEvaluation(
+                "frequency-response difference is non-finite".into(),
+            ));
+        }
+        Ok((difference.re, difference.im))
+    }
+
     /// Compute frequency-response magnitude and phase at `freq_hz`.
     #[cfg(test)]
     pub fn frequency_response(&self, freq_hz: f64) -> Result<(f64, f64), LaplaceError> {
@@ -1200,16 +1251,27 @@ fn solve_complex_system(
     b: &[f64],
     omega: f64,
 ) -> Result<Vec<Complex64>, LaplaceError> {
-    let n = b.len();
+    solve_complex_resolvent(
+        a,
+        b.iter().map(|&value| Complex64::new(value, 0.0)).collect(),
+        omega,
+    )
+}
+
+/// Solve `(jω I - A) x = rhs`.
+fn solve_complex_resolvent(
+    a: &[Vec<f64>],
+    mut rhs: Vec<Complex64>,
+    omega: f64,
+) -> Result<Vec<Complex64>, LaplaceError> {
+    let n = rhs.len();
     if n == 0 {
         return Ok(Vec::new());
     }
 
     let mut mat = vec![vec![Complex64::new(0.0, 0.0); n]; n];
-    let mut rhs = vec![Complex64::new(0.0, 0.0); n];
 
     for i in 0..n {
-        rhs[i] = Complex64::new(b[i], 0.0);
         for j in 0..n {
             let imag = if i == j { omega } else { 0.0 };
             mat[i][j] = Complex64::new(-a[i][j], imag);

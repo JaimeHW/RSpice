@@ -9,6 +9,7 @@ mod descriptor;
 mod error;
 mod executor;
 mod filters;
+mod periodic;
 mod small_signal;
 
 #[cfg(any(feature = "native", all(feature = "wasm-jit", test)))]
@@ -43,5 +44,9 @@ pub(crate) use filters::{
     SlewCheckpoint, TransitionCheckpoint, TransitionSegmentCheckpoint, timer_event_evaluation,
 };
 pub use filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
+pub(crate) use periodic::PeriodicOperatorFrame;
+pub use periodic::{
+    PeriodicOperatorAxis, PeriodicOperatorKind, PeriodicOperatorRecord, PeriodicOperatorSite,
+};
 pub use rspice_veriloga_runtime::AnalogAnalysisPhase;
 pub(crate) use small_signal::SmallSignalVm;

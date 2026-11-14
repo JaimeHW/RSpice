@@ -430,6 +430,10 @@ pub struct VmContext {
     pub analysis_phase: AnalogAnalysisPhase,
     /// Limiter behavior for the current device evaluation.
     pub evaluation_mode: VerilogAEvaluationMode,
+    /// Outputs a periodic solver supplies for the operators with state it
+    /// carries as unknowns, and the record of what the evaluation saw. While
+    /// one is installed every program runs on the interpreter.
+    pub(crate) periodic_frame: Option<Box<super::PeriodicOperatorFrame>>,
     /// Set when any named limiter changed its proposal during the latest
     /// limited Newton evaluation.
     pub(crate) limiter_active: u8,
@@ -515,6 +519,7 @@ impl Default for VmContext {
             analysis_type: 0, // DC by default
             analysis_phase: AnalogAnalysisPhase::Point,
             evaluation_mode: VerilogAEvaluationMode::NewtonLimited,
+            periodic_frame: None,
             limiter_active: 0,
             analysis_initial_step: false,
             analysis_final_step: false,
@@ -751,6 +756,7 @@ impl VmContext {
             analysis_type: 0,
             analysis_phase: AnalogAnalysisPhase::Point,
             evaluation_mode: VerilogAEvaluationMode::NewtonLimited,
+            periodic_frame: None,
             limiter_active: 0,
             analysis_initial_step: false,
             analysis_final_step: false,

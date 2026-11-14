@@ -10,7 +10,7 @@
 //! backend produce is expected to agree with it numerically.
 
 use super::context::{INTEGRATION_CANDIDATE_FAILED, INTEGRATION_CANDIDATE_VALID};
-use super::{VmContext, VmError};
+use super::{PeriodicOperatorKind, VmContext, VmError};
 use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
 use crate::codegen::{BytecodeProgram, Instruction};
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
@@ -735,6 +735,14 @@ impl<'a> Vm<'a> {
                 };
                 let ic = self.pop()?;
                 let input = self.pop()?;
+                if !wrapped
+                    && let Some(frame) = self.context.periodic_frame.as_deref_mut()
+                    && let Some(site) = frame.site(PeriodicOperatorKind::Integral, *idx)
+                {
+                    let output = frame.primal(site, input, Some(ic), None);
+                    self.stack.push(output);
+                    return Ok(());
+                }
                 let static_dae = !self.context.evaluation_mode.dynamic_operators_enabled();
                 let frozen = static_dae
                     || (matches!(self.context.analysis_type, 1 | 3)
@@ -893,6 +901,14 @@ impl<'a> Vm<'a> {
                     return Err(VmError::InvalidNumericResult(
                         "integral derivative operands must be finite".into(),
                     ));
+                }
+                if !wrapped
+                    && let Some(frame) = self.context.periodic_frame.as_deref_mut()
+                    && let Some(site) = frame.site(PeriodicOperatorKind::Integral, *idx)
+                {
+                    let tangent = frame.derivative(site, input_derivative, ic_derivative);
+                    self.stack.push(tangent);
+                    return Ok(());
                 }
                 if !self.context.evaluation_mode.dynamic_operators_enabled()
                     || (matches!(self.context.analysis_type, 1 | 3)
@@ -1056,6 +1072,13 @@ impl<'a> Vm<'a> {
             Instruction::AbsDelayState(buffer_id) => {
                 let delay_time = self.pop()?;
                 let current_value = self.pop()?;
+                if let Some(frame) = self.context.periodic_frame.as_deref_mut()
+                    && let Some(site) = frame.site(PeriodicOperatorKind::Delay, *buffer_id)
+                {
+                    let output = frame.primal(site, current_value, None, Some(delay_time));
+                    self.stack.push(output);
+                    return Ok(());
+                }
                 let current_time = self.context.time;
                 let is_transient = self.context.analysis_type == 2;
 
@@ -1089,6 +1112,14 @@ impl<'a> Vm<'a> {
                 let max_delay = self.pop()?;
                 let delay_time = self.pop()?;
                 let current_value = self.pop()?;
+                if let Some(frame) = self.context.periodic_frame.as_deref_mut()
+                    && let Some(site) = frame.site(PeriodicOperatorKind::Delay, *buffer_id)
+                {
+                    let _ = max_delay;
+                    let output = frame.primal(site, current_value, None, Some(delay_time));
+                    self.stack.push(output);
+                    return Ok(());
+                }
                 let current_time = self.context.time;
                 let is_transient = self.context.analysis_type == 2;
                 let buffer = self
@@ -1148,6 +1179,18 @@ impl<'a> Vm<'a> {
                 let delay_time = self.pop()?;
                 let input_derivative = self.pop()?;
                 let input = self.pop()?;
+                if let Some(frame) = self.context.periodic_frame.as_deref_mut()
+                    && let Some(site) = frame.site(PeriodicOperatorKind::Delay, *buffer_id)
+                {
+                    // A second-order action carries no first-order tangent.
+                    let tangent = if mixed {
+                        0.0
+                    } else {
+                        frame.derivative(site, input_derivative, delay_derivative)
+                    };
+                    self.stack.push(tangent);
+                    return Ok(());
+                }
                 let evaluate =
                     |evaluation: rspice_veriloga_runtime::transport_delay::DelayEvaluation| {
                         if mixed {
@@ -1572,6 +1615,13 @@ impl<'a> Vm<'a> {
             // Stack: [input] -> [filtered_output]
             Instruction::LaplaceState(filter_id) => {
                 let input = self.pop()?;
+                if let Some(frame) = self.context.periodic_frame.as_deref_mut()
+                    && let Some(site) = frame.site(PeriodicOperatorKind::Laplace, *filter_id)
+                {
+                    let output = frame.primal(site, input, None, None);
+                    self.stack.push(output);
+                    return Ok(());
+                }
                 let coefficients = self.context.state_integration_coefficients();
                 let dynamic = self.context.evaluation_mode.dynamic_operators_enabled();
                 let filter = self
@@ -1604,6 +1654,13 @@ impl<'a> Vm<'a> {
             // Static DAE observations retain only the direct input action.
             Instruction::LaplaceStateDerivative(filter_id) => {
                 let input_derivative = self.pop()?;
+                if let Some(frame) = self.context.periodic_frame.as_deref_mut()
+                    && let Some(site) = frame.site(PeriodicOperatorKind::Laplace, *filter_id)
+                {
+                    let tangent = frame.derivative(site, input_derivative, 0.0);
+                    self.stack.push(tangent);
+                    return Ok(());
+                }
                 let coefficients = self.context.state_integration_coefficients();
                 let filter = self
                     .context
