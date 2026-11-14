@@ -827,11 +827,10 @@ fn current_display(component: &Component) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::state::{Component, ComponentType};
+    use crate::workbench::design::test_host::DesignTestHost;
 
-    use crate::workbench::app_state::AppState;
-
-    pub(crate) fn placed_source(params: &str) -> AppState {
-        let mut state = AppState::default();
+    pub(crate) fn placed_source(params: &str) -> DesignTestHost {
+        let mut state = DesignTestHost::default();
         let id = state
             .model
             .schematic
@@ -859,7 +858,7 @@ pub(crate) mod tests {
 
     #[test]
     fn replacement_is_unavailable_without_exactly_one_instance() {
-        let state = AppState::default();
+        let state = DesignTestHost::default();
         assert!(!replace_instance_available(
             &state.design.property_registry,
             &state.model
@@ -875,7 +874,7 @@ pub(crate) mod tests {
 
     #[test]
     fn voltage_source_variants_offer_a_real_compatible_replacement() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let id = state
             .model
             .schematic
@@ -914,7 +913,7 @@ pub(crate) mod tests {
 
     #[test]
     fn ambiguous_authored_master_fails_closed() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let id = state
             .model
             .schematic
@@ -951,7 +950,7 @@ pub(crate) mod tests {
 
     #[test]
     fn unrelated_library_revision_does_not_invalidate_the_reviewed_master() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let id = state
             .model
             .schematic
@@ -1045,7 +1044,7 @@ pub(crate) mod tests {
 
     #[test]
     fn validation_cache_does_not_hide_a_commit_failure() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let id = state
             .model
             .schematic

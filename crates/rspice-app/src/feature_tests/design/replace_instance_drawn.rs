@@ -1,9 +1,11 @@
 //! Replacing an instance, drawn through a whole application.
 
+use crate::state::ComponentType;
+use crate::state::Point;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::replace_instance::tests::placed_source;
 use crate::workbench::app::dialogs::replace_instance::*;
 use crate::workbench::app::open_replace_instance_dialog;
+use crate::workbench::app_state::AppState;
 use egui::Context;
 
 /// Replace instance is a wide command form: Current, a pick list of the
@@ -83,4 +85,31 @@ fn replace_instance_is_a_command_form_with_a_pick_list_and_a_mapping_table() {
         })
         .collect::<Vec<_>>();
     assert!(wizard.is_empty(), "the wizard is back: {wizard:?}");
+}
+
+pub(crate) fn placed_source(params: &str) -> AppState {
+    let mut state = AppState::default();
+    let id = state
+        .model
+        .schematic
+        .add_component(ComponentType::VoltageSource, Point::origin());
+    if !params.is_empty() {
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .expect("the placed source is retained")
+            .params = params.to_owned();
+    }
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(id);
+    state
 }
