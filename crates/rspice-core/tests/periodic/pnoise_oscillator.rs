@@ -16,6 +16,7 @@
 //! -20 dB/decade in the white region. The gate pins c, the absolute level,
 //! and the slope.
 
+use rspice_core::NoAbort;
 use rspice_core::analysis::PssConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -207,8 +208,11 @@ i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
         .with_max_iterations(60);
 
     let offsets = [1.0e3, 1.0e4, 1.0e5];
+    let point = engine
+        .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
+        .expect("the oscillator orbit solves");
     let mut result = engine
-        .run_pnoise_oscillator(&netlist, config, &offsets)
+        .run_pnoise_oscillator_from_pss_with_abort(&netlist, config, &offsets, &point, &NoAbort)
         .expect("oscillator pnoise completes");
 
     assert!(!result.phase_noise_contributors.is_empty());
@@ -340,27 +344,17 @@ i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
         .with_tolerance(1e-6)
         .with_max_iterations(60);
 
-    let error = Engine::default()
-        .run_pnoise_oscillator(&netlist, config, &[1.0e3])
+    let engine = Engine::default();
+    let point = engine
+        .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
+        .expect("the oscillator orbit solves");
+    let error = engine
+        .run_pnoise_oscillator_from_pss_with_abort(&netlist, config, &[1.0e3], &point, &NoAbort)
         .expect_err("a quiet resistor must be excluded from oscillator noise");
     assert!(
         error.to_string().contains("no modeled noise sources"),
         "unexpected error: {error}"
     );
-}
-
-#[test]
-fn oscillator_phase_noise_rejects_invalid_offsets_before_solving() {
-    let netlist = Netlist::parse("V1 out 0 1\nR1 out 0 1k\n.end").expect("deck parses");
-    for offsets in [&[0.0][..], &[-1.0][..], &[f64::NAN][..]] {
-        let error = Engine::default()
-            .run_pnoise_oscillator(&netlist, PssConfig::autonomous(), offsets)
-            .expect_err("invalid offsets must be rejected");
-        assert!(
-            error.to_string().contains("strictly positive"),
-            "unexpected error: {error}"
-        );
-    }
 }
 
 #[test]

@@ -92,7 +92,13 @@ fn port_covariance_uses_the_same_coherent_process_amplitude() {
     );
     let netlist = Netlist::parse(&deck).expect("coherent port-noise deck parses");
     let result = Engine::default()
-        .run_port_noise_correlation(&netlist, &["VPORT".to_string()], &[1.0e3], 300.15)
+        .run_port_noise_correlation_with_abort(
+            &netlist,
+            &["VPORT".to_string()],
+            &[1.0e3],
+            300.15,
+            &rspice_core::NoAbort,
+        )
         .expect("port-noise covariance succeeds");
     let covariance = result[0].current_correlation[0][0];
     assert!(covariance.im.abs() < 1.0e-12);
@@ -135,7 +141,13 @@ fn port_covariance_retains_small_residual_between_large_injections() {
     );
     let netlist = Netlist::parse(&deck).expect("dynamic-range port deck parses");
     let result = Engine::default()
-        .run_port_noise_correlation(&netlist, &["VPORT".to_string()], &[1.0e3], 300.15)
+        .run_port_noise_correlation_with_abort(
+            &netlist,
+            &["VPORT".to_string()],
+            &[1.0e3],
+            300.15,
+            &rspice_core::NoAbort,
+        )
         .expect("dynamic-range port covariance succeeds");
     let covariance = result[0].current_correlation[0][0];
     assert!(covariance.im.abs() < 1.0e-12);
@@ -243,7 +255,13 @@ endmodule
     );
     let port = Netlist::parse(&port_deck).expect("port legacy deck parses");
     let result = Engine::default()
-        .run_port_noise_correlation(&port, &["VPORT".to_string()], &[1.0e3], 300.15)
+        .run_port_noise_correlation_with_abort(
+            &port,
+            &["VPORT".to_string()],
+            &[1.0e3],
+            300.15,
+            &rspice_core::NoAbort,
+        )
         .expect("port legacy scalar noise succeeds");
     assert!((result[0].current_correlation[0][0].re - 2.0).abs() < 1.0e-10);
     let _ = std::fs::remove_file(model_path);

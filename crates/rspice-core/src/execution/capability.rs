@@ -295,42 +295,6 @@ const fn quasiperiodic_capability(result: AnalysisResultKind) -> AnalysisResultC
     }
 }
 
-/// Exhaustive result-to-row lookup. A new `AnalysisResultKind` variant makes
-/// this match fail compilation until its surface declarations are added.
-pub const fn analysis_result_capability(
-    kind: AnalysisResultKind,
-) -> &'static AnalysisResultCapability {
-    match kind {
-        AnalysisResultKind::OperatingPoint => &ANALYSIS_CAPABILITY_MATRIX[0],
-        AnalysisResultKind::DcSweep => &ANALYSIS_CAPABILITY_MATRIX[1],
-        AnalysisResultKind::Ac => &ANALYSIS_CAPABILITY_MATRIX[2],
-        AnalysisResultKind::Transient => &ANALYSIS_CAPABILITY_MATRIX[3],
-        AnalysisResultKind::Noise => &ANALYSIS_CAPABILITY_MATRIX[4],
-        AnalysisResultKind::SParameters => &ANALYSIS_CAPABILITY_MATRIX[5],
-        AnalysisResultKind::PortNoise => &ANALYSIS_CAPABILITY_MATRIX[6],
-        AnalysisResultKind::Distortion => &ANALYSIS_CAPABILITY_MATRIX[7],
-        AnalysisResultKind::TransferFunction => &ANALYSIS_CAPABILITY_MATRIX[8],
-        AnalysisResultKind::Stability => &ANALYSIS_CAPABILITY_MATRIX[9],
-        AnalysisResultKind::Sensitivity => &ANALYSIS_CAPABILITY_MATRIX[10],
-        AnalysisResultKind::PoleZero => &ANALYSIS_CAPABILITY_MATRIX[11],
-        AnalysisResultKind::Fourier => &ANALYSIS_CAPABILITY_MATRIX[12],
-        AnalysisResultKind::Fft => &ANALYSIS_CAPABILITY_MATRIX[13],
-        AnalysisResultKind::MonteCarlo => &ANALYSIS_CAPABILITY_MATRIX[14],
-        AnalysisResultKind::Pss => &ANALYSIS_CAPABILITY_MATRIX[15],
-        AnalysisResultKind::Pac => &ANALYSIS_CAPABILITY_MATRIX[16],
-        AnalysisResultKind::Pxf => &ANALYSIS_CAPABILITY_MATRIX[17],
-        AnalysisResultKind::PNoise => &ANALYSIS_CAPABILITY_MATRIX[18],
-        AnalysisResultKind::Pstb => &ANALYSIS_CAPABILITY_MATRIX[19],
-        AnalysisResultKind::HarmonicBalance => &ANALYSIS_CAPABILITY_MATRIX[20],
-        AnalysisResultKind::Envelope => &ANALYSIS_CAPABILITY_MATRIX[21],
-        AnalysisResultKind::DcMatch => &ANALYSIS_CAPABILITY_MATRIX[22],
-        AnalysisResultKind::Qpss => &ANALYSIS_CAPABILITY_MATRIX[23],
-        AnalysisResultKind::Qpac => &ANALYSIS_CAPABILITY_MATRIX[24],
-        AnalysisResultKind::Qpxf => &ANALYSIS_CAPABILITY_MATRIX[25],
-        AnalysisResultKind::Qpnoise => &ANALYSIS_CAPABILITY_MATRIX[26],
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SignalCapability {
     pub signal: SignalKind,
@@ -403,7 +367,7 @@ pub const SIGNAL_CAPABILITY_MATRIX: [SignalCapability; 5] = [
 ];
 
 /// Exhaustive signal-to-row lookup. This is the signal-schema counterpart of
-/// `analysis_result_capability`.
+/// the result rows in [`ANALYSIS_CAPABILITY_MATRIX`].
 #[cfg(test)]
 pub const fn signal_capability(kind: SignalKind) -> &'static SignalCapability {
     match kind {
@@ -435,7 +399,10 @@ mod tests {
         );
         let mut seen = BTreeSet::new();
         for kind in AnalysisResultKind::ALL {
-            let row = analysis_result_capability(kind);
+            let row = ANALYSIS_CAPABILITY_MATRIX
+                .iter()
+                .find(|row| row.result == kind)
+                .expect("every result kind has a row");
             assert_eq!(row.result, kind);
             assert!(seen.insert(row.result), "duplicate row for {kind:?}");
             for surface in NonUiSurface::ALL {
@@ -500,7 +467,11 @@ mod tests {
         for kind in kinds {
             let result = analysis_result_kind(kind)
                 .expect("every kind listed here is one a deck can request");
-            assert_eq!(analysis_result_capability(result).result, result);
+            assert!(
+                ANALYSIS_CAPABILITY_MATRIX
+                    .iter()
+                    .any(|row| row.result == result)
+            );
         }
     }
 

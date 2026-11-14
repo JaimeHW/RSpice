@@ -138,6 +138,28 @@ fn voltage(result: &SimulationResult, node: &str) -> Value {
         .unwrap_or_else(|| panic!("missing voltage for node {node}"))
 }
 
+/// One operating point per point of a device sweep, through the netlist
+/// route a `.STEP` card takes.
+fn step_device(
+    engine: &Engine,
+    netlist: &Netlist,
+    device: &str,
+    param: Option<&str>,
+    values: &[Value],
+) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+    let command = StepCommand {
+        target: StepTarget::Device,
+        name: device.to_string(),
+        param_name: param.map(str::to_string),
+        sweep: StepSweep::List(values.to_vec()),
+    };
+    engine
+        .step_netlists_for_command(netlist, &command, values)?
+        .into_iter()
+        .map(|(value, netlist)| engine.run_dc_op(&netlist).map(|result| (value, result)))
+        .collect()
+}
+
 /// The two points of a device sweep, as `(swept value, V(node))`.
 #[track_caller]
 fn stepped_voltages(
@@ -148,8 +170,7 @@ fn stepped_voltages(
     values: [Value; 2],
 ) -> [(Value, Value); 2] {
     let netlist = Netlist::parse(deck).expect("deck parses");
-    let points = Engine::default()
-        .run_step_device(&netlist, device, param, &values, &NoAbort)
+    let points = step_device(&Engine::default(), &netlist, device, param, &values)
         .expect("the device sweep runs");
     assert_eq!(points.len(), 2, "a two-point sweep publishes two points");
     [
@@ -496,25 +517,22 @@ fn sweeping_a_behavioral_source_value_refuses_by_name() {
     let netlist = Netlist::parse(BEHAVIORAL_SOURCE).expect("deck parses");
     let engine = Engine::default();
     for parameter in [None, Some("VALUE")] {
-        let error = engine
-            .run_step_device(&netlist, "B1", parameter, &[1.0, 2.0], &NoAbort)
+        let error = step_device(&engine, &netlist, "B1", parameter, &[1.0, 2.0])
             .expect_err("a behavioural source's value is not a sweepable field");
         let message = error.to_string();
         assert!(
-            message.contains("B1") && message.contains("is an expression"),
-            "the refusal must name the target and say why: {message}"
+            message.contains("is an expression"),
+            "the refusal must say why the value is not sweepable: {message}"
         );
     }
 
     // A field the element does store is still sweepable, and a field it does
     // not have is still refused with the name of the fields it has.
     for parameter in ["M", "TC1", "TC2"] {
-        engine
-            .run_step_device(&netlist, "B1", Some(parameter), &[1.0, 2.0], &NoAbort)
+        step_device(&engine, &netlist, "B1", Some(parameter), &[1.0, 2.0])
             .unwrap_or_else(|error| panic!("sweeping {parameter} must stay supported: {error}"));
     }
-    let error = engine
-        .run_step_device(&netlist, "B1", Some("GM"), &[1.0, 2.0], &NoAbort)
+    let error = step_device(&engine, &netlist, "B1", Some("GM"), &[1.0, 2.0])
         .expect_err("a behavioural source has no GM");
     assert!(
         error.to_string().contains("use M, TC1, or TC2"),

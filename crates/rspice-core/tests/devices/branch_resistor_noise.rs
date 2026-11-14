@@ -248,11 +248,12 @@ fn resistor_flicker_preserves_signed_exponents_and_zero_current_contract() {
             for ef in [-1.0_f64, 0.0, 1.0] {
                 for voltage in [0.0_f64, 2.0] {
                     let deck = Netlist::parse(&format!("Signed resistor flicker\nVP p 0 {voltage}\nR1 p 0 RM 1\n.model RM R(KF=1 AF={af} EF={ef})\n.options device zeroresistancetol={tolerance}\n.end\n")).unwrap();
-                    let result = Engine::default().run_port_noise_correlation(
+                    let result = Engine::default().run_port_noise_correlation_with_abort(
                         &deck,
                         &["VP".into()],
                         &[10.0],
                         TEMPERATURE,
+                        &rspice_core::NoAbort,
                     );
                     if voltage == 0.0 && af < 0.0 {
                         assert!(result.is_err(), "zero-current negative AF is singular");
@@ -287,7 +288,13 @@ fn resistor_flicker_geometry_uses_instance_presence_and_dimension_defaults() {
             let tolerance = if branch_form { 10 } else { 0 };
             let deck = Netlist::parse(&format!("Resistor noise geometry\nVP p 0 1\nR1 p 0 RM 1 {instance}\n.model RM R(KF=1e-6 AF=2 EF=1 {model})\n.options device zeroresistancetol={tolerance}\n.end\n")).unwrap();
             let actual = Engine::default()
-                .run_port_noise_correlation(&deck, &["VP".into()], &[10.0], TEMPERATURE)
+                .run_port_noise_correlation_with_abort(
+                    &deck,
+                    &["VP".into()],
+                    &[10.0],
+                    TEMPERATURE,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap()[0]
                 .current_correlation[0][0]
                 .re;
@@ -385,7 +392,13 @@ fn resistor_flicker_retains_coefficients_beyond_binary64() {
     ] {
         let deck = Netlist::parse(&format!("Scaled resistor flicker\nVP p 0 1\nR1 p 0 RM {resistance} {instance}\n.model RM R({model})\n.end\n")).unwrap();
         let actual = Engine::default()
-            .run_port_noise_correlation(&deck, &["VP".into()], &[frequency], TEMPERATURE)
+            .run_port_noise_correlation_with_abort(
+                &deck,
+                &["VP".into()],
+                &[frequency],
+                TEMPERATURE,
+                &rspice_core::NoAbort,
+            )
             .unwrap()[0]
             .current_correlation[0][0]
             .re;
@@ -404,7 +417,13 @@ fn resistor_flicker_multiplicity_counts_independent_parallel_instances() {
                     "Parallel resistor flicker\nVP p 0 1.2\nR1 p 0 RM 0.6 M={multiplicity}\n.model RM R(KF=1e-6 AF={af} EF=.8)\n.options device zeroresistancetol={tolerance}\n.end\n"
                 )).unwrap();
                 let result = Engine::default()
-                    .run_port_noise_correlation(&deck, &["VP".into()], &[10.0], TEMPERATURE)
+                    .run_port_noise_correlation_with_abort(
+                        &deck,
+                        &["VP".into()],
+                        &[10.0],
+                        TEMPERATURE,
+                        &rspice_core::NoAbort,
+                    )
                     .unwrap();
                 // Each parallel copy carries 2 A, with independent noise.
                 let expected = multiplicity
@@ -434,7 +453,13 @@ fn resistor_flicker_preserves_cancelling_power_laws() {
                  .model RM R(KF=1 AF={af} EF={ef})\n.options device zeroresistancetol={tolerance}\n.end\n"
             )).unwrap();
             let result = Engine::default()
-                .run_port_noise_correlation(&netlist, &["VP".into()], &[frequency], TEMPERATURE)
+                .run_port_noise_correlation_with_abort(
+                    &netlist,
+                    &["VP".into()],
+                    &[frequency],
+                    TEMPERATURE,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             // Thermal noise is negligible here; both resistor forms must
             // preserve the independent exact-input power-law reference.

@@ -420,6 +420,7 @@ pub fn unregister_data_file(path: &str) -> Result<(), String> {
 }
 
 /// Clear all virtual XSPICE data files.
+#[cfg(test)]
 pub fn clear_registered_data_files() -> Result<(), String> {
     let mut files = lock_virtual_files();
     if files.files.is_empty() {

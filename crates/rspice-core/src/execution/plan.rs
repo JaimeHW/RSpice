@@ -2939,7 +2939,7 @@ mod tests {
 
     #[test]
     fn every_periodic_kind_selects_its_registered_capability_row() {
-        use crate::execution::{analysis_result_capability, analysis_result_kind};
+        use crate::execution::{ANALYSIS_CAPABILITY_MATRIX, analysis_result_kind};
 
         for kind in [
             AnalysisKind::Pss,
@@ -2949,7 +2949,11 @@ mod tests {
         ] {
             let result = analysis_result_kind(kind)
                 .expect("every periodic kind here is one a deck can request");
-            assert_eq!(analysis_result_capability(result).result, result);
+            assert!(
+                ANALYSIS_CAPABILITY_MATRIX
+                    .iter()
+                    .any(|row| row.result == result)
+            );
         }
     }
 }

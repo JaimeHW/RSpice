@@ -236,7 +236,13 @@ endmodule
     ))
     .expect("port-noise lifecycle deck parses");
     let port_results = Engine::default()
-        .run_port_noise_correlation(&port_deck, &["VPORT".to_owned()], &frequencies, T_NOM)
+        .run_port_noise_correlation_with_abort(
+            &port_deck,
+            &["VPORT".to_owned()],
+            &frequencies,
+            T_NOM,
+            &rspice_core::NoAbort,
+        )
         .expect("port-noise lifecycle run");
     for result in port_results {
         let density = result.current_correlation[0][0];
@@ -384,7 +390,13 @@ endmodule
         let mut config = SimulationConfig::default();
         config.resource_limits.max_parallel_workers = workers;
         Engine::new(config)
-            .run_port_noise_correlation(&port_deck, &["VPORT".to_owned()], &frequencies, T_NOM)
+            .run_port_noise_correlation_with_abort(
+                &port_deck,
+                &["VPORT".to_owned()],
+                &frequencies,
+                T_NOM,
+                &rspice_core::NoAbort,
+            )
             .expect("port final-step noise runs")
     };
     let port_serial = port_run(1);
@@ -978,7 +990,13 @@ endmodule
     // shorted, the Norton current is the source current scaled by the 1 mS
     // link over the same complex total admittance.
     let port = engine
-        .run_port_noise_correlation(&netlist, &["VPORT".to_owned()], &frequencies, T_NOM)
+        .run_port_noise_correlation_with_abort(
+            &netlist,
+            &["VPORT".to_owned()],
+            &frequencies,
+            T_NOM,
+            &rspice_core::NoAbort,
+        )
         .expect("SP port noise runs");
     for point in &port {
         let density = point.current_correlation[0][0];

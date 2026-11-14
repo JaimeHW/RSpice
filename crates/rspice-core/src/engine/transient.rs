@@ -13506,43 +13506,12 @@ impl Engine {
         Ok((result, end, scheduled_checkpoints))
     }
 
-    /// Run transient analysis with waveform compression
+    /// Run transient analysis with waveform compression for one explicitly
+    /// selected startup contract.
     ///
     /// Uses multi-channel Ramer-Douglas-Peucker decimation. Every discarded
     /// sample is checked against the linearly interpolated retained waveform,
     /// using the configured absolute-plus-relative error bound.
-    pub fn run_tran_compressed(
-        &self,
-        netlist: &Netlist,
-        tstop: Value,
-        max_step: Value,
-        compression: CompressionConfig,
-    ) -> Result<TransientResultCompressed, SimulationError> {
-        self.run_tran_compressed_with_abort(netlist, tstop, max_step, compression, &NoAbort)
-    }
-
-    /// Run compressed transient analysis with abort signal for cancellation.
-    pub fn run_tran_compressed_with_abort(
-        &self,
-        netlist: &Netlist,
-        tstop: Value,
-        max_step: Value,
-        compression: CompressionConfig,
-        abort: &dyn AbortSignal,
-    ) -> Result<TransientResultCompressed, SimulationError> {
-        let startup_mode = Self::inferred_transient_startup_mode(netlist)?;
-        self.run_tran_compressed_with_startup_mode_and_abort(
-            netlist,
-            tstop,
-            max_step,
-            startup_mode,
-            compression,
-            abort,
-        )
-    }
-
-    /// Run compressed transient analysis for one explicitly selected startup
-    /// contract.
     pub fn run_tran_compressed_with_startup_mode_and_abort(
         &self,
         netlist: &Netlist,
@@ -17020,7 +16989,14 @@ D1 D 0 DMOD
         assert!(normalized_expression.coherent_gain < 0.5);
 
         let compressed = Engine::new(SimulationConfig::default())
-            .run_tran_compressed(&netlist, 1.0e-3, 1.0e-6, CompressionConfig::default())
+            .run_tran_compressed_with_startup_mode_and_abort(
+                &netlist,
+                1.0e-3,
+                1.0e-6,
+                crate::engine::TransientStartupMode::OperatingPoint,
+                CompressionConfig::default(),
+                &crate::NoAbort,
+            )
             .expect("compressed transient retains pre-decimation FFT results");
         assert_eq!(compressed.post_results.fft, result.fft_results);
         let expanded = compressed

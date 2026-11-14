@@ -3,8 +3,7 @@
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{
-    CodeModelRegistry, PortConnection, XspiceInstance, clear_registered_data_files,
-    register_data_file,
+    CodeModelRegistry, PortConnection, XspiceInstance, register_data_file, unregister_data_file,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -22,14 +21,14 @@ impl DataFileRegistryGuard {
         let lock = DATA_FILE_REGISTRY_LOCK
             .lock()
             .expect("lock XSPICE data-file registry test guard");
-        clear_registered_data_files().expect("clear XSPICE data-file registry");
+        unregister_data_file("virtual://filesource/stim").expect("clear XSPICE data-file registry");
         Self { _lock: lock }
     }
 }
 
 impl Drop for DataFileRegistryGuard {
     fn drop(&mut self) {
-        let _ = clear_registered_data_files();
+        let _ = unregister_data_file("virtual://filesource/stim");
     }
 }
 

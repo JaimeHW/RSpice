@@ -88,7 +88,14 @@ fn check_live_transport_storage(startup_event: bool) {
     );
     assert_limit(
         limited
-            .run_tran_compressed(&netlist, 1e-9, 1e-12, CompressionConfig::default())
+            .run_tran_compressed_with_startup_mode_and_abort(
+                &netlist,
+                1e-9,
+                1e-12,
+                rspice_core::engine::TransientStartupMode::OperatingPoint,
+                CompressionConfig::default(),
+                &rspice_core::NoAbort,
+            )
             .unwrap_err(),
         bytes - 1,
     );

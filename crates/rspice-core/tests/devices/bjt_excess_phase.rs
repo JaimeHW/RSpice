@@ -27,11 +27,12 @@ fn primitive_noise_absolute_densities_use_each_dialects_constants() {
         let forward = 1e-16 * (0.7 / vt).exp_m1();
         let expected = [4.0 * k * temperature / 750.0, 2.0 * q * forward];
         let results = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
-            .run_port_noise_correlation(
+            .run_port_noise_correlation_with_abort(
                 &source,
                 &["VR".into(), "VC".into()],
                 &[1e3, 1e9],
                 temperature,
+                &rspice_core::NoAbort,
             )
             .unwrap();
         for result in results {
@@ -133,11 +134,12 @@ fn gp_excess_phase_noise_matches_independent_complex_port_covariance() {
                 if internal { rb } else { 0.0 }
             )).unwrap();
                 let noise = engine(temperature)
-                    .run_port_noise_correlation(
+                    .run_port_noise_correlation_with_abort(
                         &source,
                         &["VB".into(), "VC".into()],
                         &[1e4, 1e7, 1e8, 1e9],
                         temperature,
+                        &rspice_core::NoAbort,
                     )
                     .unwrap();
                 for point in noise {

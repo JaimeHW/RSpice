@@ -217,11 +217,13 @@ fn a_transient_lists_a_module_branch_as_a_current_and_no_unnamed_unknown() {
         .run_tran(&netlist, 2e-9, 0.2e-9)
         .expect("transient runs");
     let expanded = Engine::default()
-        .run_tran_compressed(
+        .run_tran_compressed_with_startup_mode_and_abort(
             &netlist,
             2e-9,
             0.2e-9,
+            rspice_core::engine::TransientStartupMode::OperatingPoint,
             rspice_core::engine::CompressionConfig::default(),
+            &rspice_core::NoAbort,
         )
         .expect("compressed transient runs")
         .try_into_transient()

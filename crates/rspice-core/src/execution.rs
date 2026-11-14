@@ -47,7 +47,7 @@ pub use bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 pub use capability::{
     ANALYSIS_CAPABILITY_MATRIX, AnalysisResultCapability, AnalysisResultKind, MappingStatus,
     NonUiSurface, SIGNAL_CAPABILITY_MATRIX, SignalCapability, SurfaceCapability,
-    analysis_result_capability, analysis_result_kind,
+    analysis_result_kind,
 };
 pub use event_bus::{
     BusEventTable, BusMemberHistory, BusReassemblyTooLarge, MAX_BUS_EVENT_CELLS, bus_events,

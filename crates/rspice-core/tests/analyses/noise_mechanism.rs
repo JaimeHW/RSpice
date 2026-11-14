@@ -283,19 +283,21 @@ fn classic_mos_signed_noise_reaches_output_and_port_analyses() {
                         )
                         .unwrap();
                     let port = engine
-                        .run_port_noise_correlation(
+                        .run_port_noise_correlation_with_abort(
                             &make(1e-24, true),
                             &["VD".into()],
                             &frequencies,
                             300.15,
+                            &rspice_core::NoAbort,
                         )
                         .unwrap();
                     let quiet = engine
-                        .run_port_noise_correlation(
+                        .run_port_noise_correlation_with_abort(
                             &make(0.0, true),
                             &["VD".into()],
                             &frequencies,
                             300.15,
+                            &rspice_core::NoAbort,
                         )
                         .unwrap();
                     let cox = 3.9 * 8.854_214_871e-12 / 20e-9;
@@ -377,7 +379,13 @@ fn extreme_mos_flicker_power_reaches_output_and_port_analyses() {
             );
             if af < 0.0 {
                 let port = engine
-                    .run_port_noise_correlation(&deck(true), &["VD".into()], &[1000.0], 300.15)
+                    .run_port_noise_correlation_with_abort(
+                        &deck(true),
+                        &["VD".into()],
+                        &[1000.0],
+                        300.15,
+                        &rspice_core::NoAbort,
+                    )
                     .unwrap();
                 // Here flicker is more than 150 decades above thermal noise.
                 let density = port[0].current_correlation[0][0].re;
@@ -415,11 +423,12 @@ fn mos1_nlev3_channel_noise_matches_charge_in_triode_and_saturation() {
                                     "MOS channel charge noise\nVD d 0 {}\nVS s 0 {}\nVG g 0 {}\nVB b 0 {}\nM1 d g s b mm W=2u L=1u M=2.5 NF=2\n.model mm {kind}(LEVEL=1 VTO={p} KP=100u LD=0.1u GAMMA=0.4 PHI=0.6 LAMBDA=0.1 IS=0 NLEV={nlev} GDSNOI={gdsnoi})\n.options GMIN=0\n.end\n",
                                     if inverse {0.0} else {p*vds},if inverse {p*vds} else {0.0},p*1.4,p*body)).unwrap();
                                 let value = engine
-                                    .run_port_noise_correlation(
+                                    .run_port_noise_correlation_with_abort(
                                         &netlist,
                                         &["VD".into()],
                                         &[1000.0],
                                         300.15,
+                                        &rspice_core::NoAbort,
                                     )
                                     .unwrap()[0]
                                     .current_correlation[0][0]
@@ -474,7 +483,13 @@ fn invalid_mos_channel_noise_controls_fail_in_stationary_and_periodic_analyses()
         let engine = Engine::default();
         let errors = [
             engine
-                .run_port_noise_correlation(&netlist, &["VD".into()], &[1000.0], 300.15)
+                .run_port_noise_correlation_with_abort(
+                    &netlist,
+                    &["VD".into()],
+                    &[1000.0],
+                    300.15,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap_err(),
             engine
                 .run_pnoise(&netlist, 1e6, &[1e4], "d", None, None, 0)
@@ -534,11 +549,12 @@ fn mos_flicker_coefficients_outside_f64_range_preserve_in_band_noise() {
                         )
                         .unwrap();
                     let port = engine
-                        .run_port_noise_correlation(
+                        .run_port_noise_correlation_with_abort(
                             &make(true),
                             &["VD".into()],
                             &frequencies,
                             300.15,
+                            &rspice_core::NoAbort,
                         )
                         .unwrap();
                     for (i, &frequency) in frequencies.iter().enumerate() {
@@ -596,15 +612,22 @@ fn vbic_flicker_port_spectrum_preserves_multiplicity_range() {
                 // Retain the complete unit-port transfer: VBIC 1.3 inserts
                 // finite internal resistances even when authored as zero.
                 let reference = engine
-                    .run_port_noise_correlation(
+                    .run_port_noise_correlation_with_abort(
                         &make(1.0, kfn),
                         &["Vb".into()],
                         &frequencies,
                         300.15,
+                        &rspice_core::NoAbort,
                     )
                     .unwrap();
                 let points = engine
-                    .run_port_noise_correlation(&make(m, kfn), &["Vb".into()], &frequencies, 300.15)
+                    .run_port_noise_correlation_with_abort(
+                        &make(m, kfn),
+                        &["Vb".into()],
+                        &frequencies,
+                        300.15,
+                        &rspice_core::NoAbort,
+                    )
                     .unwrap();
                 for ((point, reference), frequency) in
                     points.iter().zip(&reference).zip(frequencies)
@@ -674,18 +697,25 @@ fn semiconductor_flicker_preserves_signed_exponents_floor_and_multiplicity() {
                 .abs()
                 .max(1e-38);
                 let white = engine
-                    .run_port_noise_correlation(
+                    .run_port_noise_correlation_with_abort(
                         &semiconductor_flicker_deck(family, 1.0, 0.0, 1.0, zero),
                         &["VP".into()],
                         &frequencies,
                         300.15,
+                        &rspice_core::NoAbort,
                     )
                     .unwrap();
                 for af in [-1.0, 0.0, 0.5, 3.0] {
                     for m in [1.0, 4.0, 1e-200] {
                         let deck = semiconductor_flicker_deck(family, m, 1e20, af, zero);
                         let noise = engine
-                            .run_port_noise_correlation(&deck, &["VP".into()], &frequencies, 300.15)
+                            .run_port_noise_correlation_with_abort(
+                                &deck,
+                                &["VP".into()],
+                                &frequencies,
+                                300.15,
+                                &rspice_core::NoAbort,
+                            )
                             .unwrap_or_else(|error| {
                                 panic!("{dialect:?} {family} zero={zero} AF={af} M={m:e}: {error}")
                             });
@@ -727,7 +757,13 @@ fn semiconductor_flicker_rejects_invalid_active_controls() {
                 .unwrap()
                 .1 = value;
             let error = Engine::default()
-                .run_port_noise_correlation(&deck, &["VP".into()], &[1e3], 300.15)
+                .run_port_noise_correlation_with_abort(
+                    &deck,
+                    &["VP".into()],
+                    &[1e3],
+                    300.15,
+                    &rspice_core::NoAbort,
+                )
                 .expect_err("invalid authored controls must not disappear");
             assert!(
                 error.to_string().contains(name),
@@ -743,7 +779,13 @@ fn semiconductor_flicker_rejects_invalid_active_controls() {
             .unwrap()
             .1 = f64::NAN;
         Engine::default()
-            .run_port_noise_correlation(&deck, &["VP".into()], &[1e3], 300.15)
+            .run_port_noise_correlation_with_abort(
+                &deck,
+                &["VP".into()],
+                &[1e3],
+                300.15,
+                &rspice_core::NoAbort,
+            )
             .unwrap();
     }
 }
@@ -767,7 +809,13 @@ fn semiconductor_flicker_retains_coefficients_outside_f64_range() {
         ] {
             let deck = semiconductor_flicker_deck(family, m, kf, af, true);
             let noise = engine
-                .run_port_noise_correlation(&deck, &["VP".into()], &[frequency], 300.15)
+                .run_port_noise_correlation_with_abort(
+                    &deck,
+                    &["VP".into()],
+                    &[frequency],
+                    300.15,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             let actual = noise[0].current_correlation[0][0].re;
             assert!(
@@ -788,7 +836,13 @@ fn semiconductor_flicker_frequency_extension_preserves_signed_ef() {
         for ef in [-2.0, 0.0, 1.5, f64::NAN, f64::INFINITY] {
             let mut deck = semiconductor_flicker_deck(family, 4.0, 1e-12, 0.0, true);
             deck.models[0].params.push(("EF".into(), ef));
-            let noise = engine.run_port_noise_correlation(&deck, &["VP".into()], &[1e3], 300.15);
+            let noise = engine.run_port_noise_correlation_with_abort(
+                &deck,
+                &["VP".into()],
+                &[1e3],
+                300.15,
+                &rspice_core::NoAbort,
+            );
             if ef.is_finite() {
                 let actual = noise.unwrap()[0].current_correlation[0][0].re;
                 let expected = 4e-12 / 1e3_f64.powf(ef);
@@ -979,19 +1033,21 @@ fn legacy_bjt_base_noise_matches_explicit_network_and_port_correlation() {
                 };
                 let sources = "VB b 0 0 AC 1\nVC c 0 0";
                 let actual = engine
-                    .run_port_noise_correlation(
+                    .run_port_noise_correlation_with_abort(
                         &make(&model, sources),
                         &["VB".into(), "VC".into()],
                         &frequencies,
                         temperature,
+                        &rspice_core::NoAbort,
                     )
                     .unwrap();
                 let expected = engine
-                    .run_port_noise_correlation(
+                    .run_port_noise_correlation_with_abort(
                         &make(equivalent, sources),
                         &["VB".into(), "VC".into()],
                         &frequencies,
                         temperature,
+                        &rspice_core::NoAbort,
                     )
                     .unwrap();
                 for (a, b) in actual.iter().zip(&expected) {
@@ -1074,19 +1130,21 @@ fn legacy_private_resistor_noise_matches_full_port_covariance() {
                 let frequencies = [1e3, 1e6, 1e9];
                 for temperature in [233.15, 343.15] {
                     let actual = engine
-                        .run_port_noise_correlation(
+                        .run_port_noise_correlation_with_abort(
                             &make(&model, sources),
                             &ports,
                             &frequencies,
                             temperature,
+                            &rspice_core::NoAbort,
                         )
                         .unwrap();
                     let expected = engine
-                        .run_port_noise_correlation(
+                        .run_port_noise_correlation_with_abort(
                             &make(&reference, sources),
                             &ports,
                             &frequencies,
                             temperature,
+                            &rspice_core::NoAbort,
                         )
                         .unwrap();
                     for (a, b) in actual.iter().zip(expected) {

@@ -122,10 +122,7 @@ pub use data_file::native_input_candidates as data_file_input_candidates;
 pub use data_file::read_to_string as read_data_file_to_string;
 #[doc(hidden)]
 pub use data_file::read_to_string_limited as read_data_file_to_string_limited;
-pub use data_file::{
-    clear_registered_data_files, register_data_file, register_data_file_with_limits,
-    unregister_data_file,
-};
+pub use data_file::{register_data_file, register_data_file_with_limits, unregister_data_file};
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
 pub(crate) use event::EventNodeMap;
 pub use event::EventValue;

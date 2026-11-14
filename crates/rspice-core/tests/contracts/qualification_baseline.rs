@@ -632,10 +632,11 @@ fn gates() -> Vec<Gate> {
 
     // --- Compression --------------------------------------------------------
     let compressed = serialized(|| {
-        engine.run_tran_compressed_with_abort(
+        engine.run_tran_compressed_with_startup_mode_and_abort(
             &netlist,
             2.0e-5,
             2.0e-8,
+            rspice_core::engine::TransientStartupMode::OperatingPoint,
             // Loose enough that the decimator actually decimates: at 1e-9
             // absolute the RC waveform retains every accepted point, and a
             // compression gate whose ratio is exactly one measures nothing.

@@ -209,8 +209,14 @@ fn xyce_resistor_level2_explicit_r_participates_in_bare_device_step() {
         ref other => panic!("bare resistor .STEP should parse as linear sweep, got {other:?}"),
     }
 
-    let stepped = Engine::default()
-        .run_step_command(&netlist, step, &[500.0, 1000.0])
+    let engine = Engine::default();
+    let stepped = engine
+        .step_netlists_for_command(&netlist, step, &[500.0, 1000.0])
+        .and_then(|runs| {
+            runs.into_iter()
+                .map(|(value, run)| engine.run_dc_op(&run).map(|result| (value, result)))
+                .collect::<Result<Vec<_>, _>>()
+        })
         .expect("bare .STEP R3 should run modeled LEVEL=2 resistor OPs");
     assert_eq!(stepped.len(), 2);
 
@@ -248,8 +254,14 @@ fn xyce_colon_resistor_instance_parameter_step_updates_multiplier() {
             .is_some_and(|param| param.eq_ignore_ascii_case("m"))
     );
 
-    let stepped = Engine::default()
-        .run_step_command(&netlist, step, &[1.0, 2.0])
+    let engine = Engine::default();
+    let stepped = engine
+        .step_netlists_for_command(&netlist, step, &[1.0, 2.0])
+        .and_then(|runs| {
+            runs.into_iter()
+                .map(|(value, run)| engine.run_dc_op(&run).map(|result| (value, result)))
+                .collect::<Result<Vec<_>, _>>()
+        })
         .expect(".STEP R1:M should run modeled resistor OPs");
     assert_eq!(stepped.len(), 2);
 

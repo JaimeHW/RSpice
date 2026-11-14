@@ -78,7 +78,7 @@
 //! Interpolating it across the whole step dates it wherever two iterates
 //! happen to differ, which can be *before* the edge that caused it — an effect
 //! preceding its cause, and a `$abstime` no physics produced. So it is dated
-//! where its cause is, and [`MixedSignalHost::trial_boundary_refinement_time`]
+//! where its cause is, and [`MixedSignalHost::boundary_refinement_time`]
 //! asks the controller for no interior root on such a step. A crossing with no
 //! such feedback before it in the same trial is the circuit's own: it keeps
 //! the interpolated instant and the nearest-tick rule above, because dating it
@@ -184,8 +184,8 @@ use rspice_veriloga::four_state::FourStateBit;
 use rspice_veriloga::vm::IntegrationCoefficients;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
+use super::DigitalRunError;
 use super::host::DigitalHost;
-use super::{DigitalRunError, parse_four_state};
 use crate::xspice::event_scheduler::{Instant, SchedulerError, SchedulerLimits, TimeResolution};
 use crate::xspice::models::OFFICIAL_BRIDGE_TIMING_MIN;
 use crate::xspice::settle_cost;
@@ -3688,23 +3688,6 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    /// Configure work allowed in one standalone interpolated observer trial.
-    /// Circuit-owned models use the engine's ResourceLimits instead.
-    pub fn set_observer_interval_event_limit(
-        &mut self,
-        limit: usize,
-    ) -> Result<(), MixedSignalError> {
-        self.require_idle("configure observer interval budget")?;
-        let standalone =
-            self.standalone
-                .as_mut()
-                .ok_or_else(|| MixedSignalError::TrialProtocol {
-                    detail: "this host does not own an interpolated observer coordinator".into(),
-                })?;
-        standalone.set_interval_event_limit(limit);
-        Ok(())
-    }
-
     /// Earliest exact event time the analog stepper must use as a breakpoint.
     ///
     /// A tick's seconds, not a floored analog time: this is the value D5
@@ -4232,6 +4215,7 @@ impl MixedSignalHost {
     /// Apply co-timed external digital input drives during the active trial.
     /// An interpolated observer host queues each bank at the candidate endpoint,
     /// so earlier observations cannot see a future external input.
+    #[cfg(test)]
     pub fn force_digital(&mut self, drives: &[(&str, &str)]) -> Result<(), MixedSignalError> {
         if self.state.digital.is_view() && self.standalone.is_none() {
             return Err(MixedSignalError::TrialProtocol {
@@ -4244,10 +4228,11 @@ impl MixedSignalHost {
         let mut parsed = Vec::with_capacity(drives.len());
         for &(name, spelling) in drives {
             let signal = self.state.digital.signal(name)?;
-            let value =
-                parse_four_state(spelling).ok_or_else(|| MixedSignalError::InvalidBridge {
+            let value = super::parse_four_state(spelling).ok_or_else(|| {
+                MixedSignalError::InvalidBridge {
                     detail: format!("`{spelling}` is not a four-state value for `{name}`"),
-                })?;
+                }
+            })?;
             parsed.push((signal, value));
         }
         if let Some(standalone) = &mut self.standalone {
@@ -4479,18 +4464,10 @@ impl MixedSignalHost {
     /// cases: land one minimum step past the accepted point. A crossing the
     /// step caused is already there and is the endpoint's own; one the circuit
     /// causes later is not, and the next interval interpolates it from a sample
-    /// that is the right limit. This standalone entry answers for this
-    /// instance's own drives; the circuit asks for every instance at once.
-    pub fn trial_boundary_refinement_time(
-        &self,
-        minimum_timestep: f64,
-    ) -> Result<Option<f64>, MixedSignalError> {
-        self.boundary_refinement_time(minimum_timestep, self.accepted_point_stepped_a_drive())
-    }
-
-    /// [`Self::trial_boundary_refinement_time`], with whether any drive in the
-    /// circuit stepped at the accepted point supplied by the caller: one
-    /// instance's D/A bridge and another's A/D bridge can share a deck node.
+    /// that is the right limit. Whether any drive in the circuit stepped at the
+    /// accepted point is supplied by the caller, `opened_on_drive_step`: one
+    /// instance's D/A bridge and another's A/D bridge can share a deck node, so
+    /// the circuit asks for every instance at once.
     #[doc(hidden)]
     pub fn boundary_refinement_time(
         &self,
@@ -6140,7 +6117,7 @@ impl MixedSignalHost {
     /// is inside the chord, and the chord dates a crossing the drive caused at
     /// its first instant somewhere in the middle of the interval — a root the
     /// refinement would then walk towards the accepted point one halving at a
-    /// time. See [`Self::trial_boundary_refinement_time`].
+    /// time. See [`Self::boundary_refinement_time`].
     ///
     /// Read from the accepted histories: their two newest values are the bit
     /// before and after the accepted point.
@@ -6506,7 +6483,7 @@ impl MixedSignalHost {
 /// Written once and called from every site that asks the question, so "this
 /// crossing is the endpoint" cannot be answered two ways that disagree by a few
 /// ulps. Two derivations of one number is how `settle_into` and
-/// [`MixedSignalHost::trial_boundary_refinement_time`] came to be able to
+/// [`MixedSignalHost::boundary_refinement_time`] came to be able to
 /// disagree about whether a landing had been reached.
 fn endpoint_root_window(time: f64, start: f64, floor: f64) -> f64 {
     (64.0 * f64::EPSILON * time.abs().max(start.abs())).max(floor)
@@ -8525,7 +8502,7 @@ endmodule
             .expect("bridges settle")
         {}
         let target = host
-            .trial_boundary_refinement_time(1.0e-20)
+            .boundary_refinement_time(1.0e-20, host.accepted_point_stepped_a_drive())
             .expect("the inspection succeeds");
         host.reject_trial().expect("a settled trial rolls back");
         target
@@ -8720,7 +8697,7 @@ endmodule
             .expect("bridges settle")
         {}
         let target = host
-            .trial_boundary_refinement_time(1.0e-20)
+            .boundary_refinement_time(1.0e-20, host.accepted_point_stepped_a_drive())
             .expect("the inspection succeeds");
         host.reject_trial().expect("a settled trial rolls back");
         let target = target.expect("`ca`'s own crossing is still an interior root");
@@ -9001,7 +8978,7 @@ endmodule
             "the tick-3 activation must run inside this trial for it to be a control"
         );
         let target = host
-            .trial_boundary_refinement_time(1.0e-20)
+            .boundary_refinement_time(1.0e-20, host.accepted_point_stepped_a_drive())
             .expect("the inspection succeeds");
         host.reject_trial().expect("a settled trial rolls back");
         let target = target.expect(

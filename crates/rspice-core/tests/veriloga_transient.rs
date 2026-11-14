@@ -1352,11 +1352,13 @@ endmodule
         }
     }
     let compressed = Engine::default()
-        .run_tran_compressed(
+        .run_tran_compressed_with_startup_mode_and_abort(
             &netlist,
             10e-6,
             0.2e-6,
+            rspice_core::engine::TransientStartupMode::OperatingPoint,
             rspice_core::engine::CompressionConfig::default(),
+            &rspice_core::NoAbort,
         )
         .expect("partial FFT status survives waveform compression");
     assert_eq!(compressed.post_results.fft, result.fft_results);
@@ -1403,11 +1405,13 @@ fn transient_finish_fft_uses_the_last_required_sample_not_the_exclusive_stop() {
             );
         }
         let compressed = Engine::default()
-            .run_tran_compressed(
+            .run_tran_compressed_with_startup_mode_and_abort(
                 &netlist,
                 8.0,
                 1.0,
+                rspice_core::engine::TransientStartupMode::OperatingPoint,
                 rspice_core::engine::CompressionConfig::default(),
+                &rspice_core::NoAbort,
             )
             .unwrap();
         assert_eq!(compressed.post_results.fft, result.fft_results);

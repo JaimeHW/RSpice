@@ -204,6 +204,7 @@ impl MixedDigital {
             Self::View(_) => Ok(()),
         }
     }
+    #[cfg(test)]
     pub(super) fn force_many(
         &mut self,
         drives: &[(DigitalSignalId, FourStateValue)],
@@ -864,6 +865,7 @@ impl MixedDigitalCoordinator {
     }
 
     /// Translate and validate an external input bank for a one-host adapter.
+    #[cfg(test)]
     pub(super) fn standalone_input_bank(
         &self,
         drives: &[(DigitalSignalId, FourStateValue)],

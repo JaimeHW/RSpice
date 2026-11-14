@@ -28,7 +28,7 @@
 
 use super::pss::{PssCompanionStep, PssTraversal};
 use super::{Engine, SimulationError};
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::analysis::{NoiseSource, NoiseSourceType, PssConfig};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::numerics::integration::IntegrationMethod;
@@ -410,40 +410,14 @@ impl Engine {
     }
 
     /// Compute oscillator single-sideband phase noise at the given carrier
-    /// offsets.
+    /// offsets from an exact retained autonomous shooting-PSS state.
     ///
-    /// Runs autonomous PSS (period as a shooting unknown), extracts the
-    /// adjoint unity Floquet mode along the orbit, projects the complete
-    /// device-noise source set through the instantaneous linearized network,
-    /// and evaluates Demir's white- and colored-noise coefficients. This
-    /// includes disabled/noisy resistor semantics, temperature offsets,
+    /// Extracts the adjoint unity Floquet mode along the orbit, projects the
+    /// complete device-noise source set through the instantaneous linearized
+    /// network, and evaluates Demir's white- and colored-noise coefficients.
+    /// This includes disabled/noisy resistor semantics, temperature offsets,
     /// diode and BJT shot noise, MOS/JFET/EKV/BSIM channel and flicker noise,
-    /// tabulated and Verilog-A sources, and correlated BSIM4 thermal noise.
-    pub fn run_pnoise_oscillator(
-        &self,
-        netlist: &Netlist,
-        config: PssConfig,
-        offsets: &[Value],
-    ) -> Result<OscPnoiseResult, SimulationError> {
-        self.run_pnoise_oscillator_with_abort(netlist, config, offsets, &NoAbort)
-    }
-
-    /// Compute oscillator phase noise with cooperative cancellation across
-    /// PSS, finite-difference trajectories, adjoint propagation, and source
-    /// projection.
-    pub fn run_pnoise_oscillator_with_abort(
-        &self,
-        netlist: &Netlist,
-        config: PssConfig,
-        offsets: &[Value],
-        abort: &dyn AbortSignal,
-    ) -> Result<OscPnoiseResult, SimulationError> {
-        let engine = self.resolved_for_netlist(netlist);
-        engine.run_pnoise_oscillator_impl(netlist, config, offsets, None, abort)
-    }
-
-    /// Compute oscillator phase noise from an exact retained shooting-PSS
-    /// state. Circuit structures are rebuilt from the same authenticated
+    /// tabulated and Verilog-A sources, and correlated BSIM4 thermal noise. Circuit structures are rebuilt from the same authenticated
     /// netlist, but the periodic orbit is never solved again.
     pub fn run_pnoise_oscillator_from_pss_with_abort(
         &self,
@@ -454,7 +428,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<OscPnoiseResult, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
-        engine.run_pnoise_oscillator_impl(netlist, config, offsets, Some(operating_point), abort)
+        engine.run_pnoise_oscillator_impl(netlist, config, offsets, operating_point, abort)
     }
 
     fn run_pnoise_oscillator_impl(
@@ -462,7 +436,7 @@ impl Engine {
         netlist: &Netlist,
         config: PssConfig,
         offsets: &[Value],
-        operating_point: Option<&super::PssOperatingPoint>,
+        operating_point: &super::PssOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<OscPnoiseResult, SimulationError> {
         if abort.is_aborted() {
@@ -491,11 +465,9 @@ impl Engine {
         config
             .validate()
             .map_err(|error| SimulationError::Circuit(format!("Invalid PSS config: {error}")))?;
-        if let Some(point) = operating_point {
-            point.authenticate_for_reuse(netlist, &self.config, &config)?;
-        }
+        operating_point.authenticate_for_reuse(netlist, &self.config, &config)?;
 
-        let (period, mut circuit, mut matrix, x0) = if let Some(operating_point) = operating_point {
+        let (period, mut circuit, mut matrix, x0) = {
             let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
             circuit.set_independent_source_context(
                 crate::circuit::SourceTimeBasis {
@@ -539,10 +511,6 @@ impl Engine {
                 matrix,
                 operating_point.shooting_state().to_vec(),
             )
-        } else {
-            let (pss, circuit, matrix, x0) =
-                self.run_pss_with_state_abort(netlist, config.clone(), abort)?;
-            (pss.period, circuit, matrix, x0)
         };
         Self::ensure_pss_noise_delay_supported(&circuit)?;
         let source_integral_count = circuit.behavioral_sources.integral_count();

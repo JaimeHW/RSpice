@@ -141,7 +141,14 @@ fn gp_phase_support_covers_preflight_checkpoint_compression_and_continuation() {
         assert_eq!(continued.time.first(), first.time.last());
         assert_eq!(final_checkpoint.time, 2e-9);
         let compressed = engine
-            .run_tran_compressed(&source, 2e-9, 4e-12, CompressionConfig::default())
+            .run_tran_compressed_with_startup_mode_and_abort(
+                &source,
+                2e-9,
+                4e-12,
+                rspice_core::engine::TransientStartupMode::OperatingPoint,
+                CompressionConfig::default(),
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         assert_eq!(compressed.time.last(), Some(&2e-9));
         compressed.validate().unwrap();

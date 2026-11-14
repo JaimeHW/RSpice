@@ -631,7 +631,13 @@ fn sp_noise_conversion_preserves_standalone_probes_and_cancellation() {
     let temperature = 300.15;
     let kt4 = 4.0 * 1.380649e-23 * temperature;
     let standalone = engine
-        .run_port_noise_correlation(&netlist, &["P1".into()], &[10.0], temperature)
+        .run_port_noise_correlation_with_abort(
+            &netlist,
+            &["P1".into()],
+            &[10.0],
+            temperature,
+            &rspice_core::NoAbort,
+        )
         .unwrap();
     // The standalone API observes current through the actual voltage source:
     // both resistors remain in series and both contribute thermal noise.
@@ -694,7 +700,13 @@ fn sp_physical_ports_preserve_generated_diode_noise_at_the_same_bias() {
     .unwrap();
     let frequencies = [1e3, 1e6];
     let reference = engine
-        .run_port_noise_correlation(&ideal, &["V1".into()], &frequencies, 300.15)
+        .run_port_noise_correlation_with_abort(
+            &ideal,
+            &["V1".into()],
+            &frequencies,
+            300.15,
+            &rspice_core::NoAbort,
+        )
         .unwrap();
     let actual = engine
         .run_sp_over_grid_with_abort(&physical, &frequencies, true, &rspice_core::NoAbort)

@@ -4569,11 +4569,12 @@ mod tests {
         )
         .expect("current-noise deck parses");
         let current = Engine::default()
-            .run_port_noise_correlation(
+            .run_port_noise_correlation_with_abort(
                 &current_netlist,
                 &["VPORT".to_owned()],
                 &[1.0e3],
                 temperature,
+                &crate::NoAbort,
             )
             .expect("RSHUNT port noise solves");
         let expected_current = 4.0 * crate::constants::K_BOLTZMANN * temperature / resistance;
@@ -4841,7 +4842,13 @@ mod tests {
         );
 
         let error = engine
-            .run_port_noise_correlation(&netlist, &["VPORT".to_string()], &[1.0e3], 300.15)
+            .run_port_noise_correlation_with_abort(
+                &netlist,
+                &["VPORT".to_string()],
+                &[1.0e3],
+                300.15,
+                &crate::NoAbort,
+            )
             .expect_err("negative absolute source temperature must fail port noise");
         assert!(
             error.to_string().contains("R1"),
@@ -4998,7 +5005,13 @@ R2 out 0 1k
              .END\n",
         );
         let results = xyce_engine()
-            .run_port_noise_correlation(&netlist, &["VPORT".to_string()], &[10.0, 10_000.0], 300.15)
+            .run_port_noise_correlation_with_abort(
+                &netlist,
+                &["VPORT".to_string()],
+                &[10.0, 10_000.0],
+                300.15,
+                &crate::NoAbort,
+            )
             .expect("frequency-dependent port-noise transfer solves");
         let low = results[0].current_correlation[0][0].re;
         let high = results[1].current_correlation[0][0].re;
@@ -5570,7 +5583,13 @@ r1 a 0 rmod
         let frequencies = [1.0e3, 1.0e9];
         let ports = vec!["V1".to_string(), "v2".to_string()];
         let results = Engine::default()
-            .run_port_noise_correlation(&netlist, &ports, &frequencies, temperature)
+            .run_port_noise_correlation_with_abort(
+                &netlist,
+                &ports,
+                &frequencies,
+                temperature,
+                &crate::NoAbort,
+            )
             .expect("port-noise analysis runs");
         assert_eq!(results.len(), frequencies.len());
 
@@ -5596,14 +5615,26 @@ r1 a 0 rmod
         let engine = Engine::default();
         let duplicate = vec!["V1".to_string(), "v1".to_string()];
         let error = engine
-            .run_port_noise_correlation(&netlist, &duplicate, &[1.0e3], 300.15)
+            .run_port_noise_correlation_with_abort(
+                &netlist,
+                &duplicate,
+                &[1.0e3],
+                300.15,
+                &crate::NoAbort,
+            )
             .expect_err("duplicate port is rejected")
             .to_string();
         assert!(error.contains("listed more than once"), "{error}");
 
         let missing = vec!["Vmissing".to_string()];
         let error = engine
-            .run_port_noise_correlation(&netlist, &missing, &[1.0e3], 300.15)
+            .run_port_noise_correlation_with_abort(
+                &netlist,
+                &missing,
+                &[1.0e3],
+                300.15,
+                &crate::NoAbort,
+            )
             .expect_err("unknown port is rejected")
             .to_string();
         assert!(error.contains("was not found"), "{error}");

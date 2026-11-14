@@ -92,8 +92,14 @@ fn step_temp_list_rebuilds_operating_point_at_each_temperature() {
     assert_eq!(step.target, StepTarget::Temp);
 
     let values = step_values(step);
-    let stepped = Engine::default()
-        .run_step_command(&netlist, step, &values)
+    let engine = Engine::default();
+    let stepped = engine
+        .step_netlists_for_command(&netlist, step, &values)
+        .and_then(|runs| {
+            runs.into_iter()
+                .map(|(value, run)| engine.run_dc_op(&run).map(|result| (value, result)))
+                .collect::<Result<Vec<_>, _>>()
+        })
         .expect(".STEP TEMP should execute OP runs at each requested temperature");
 
     assert_eq!(stepped.len(), 2, "both temperature points should solve");

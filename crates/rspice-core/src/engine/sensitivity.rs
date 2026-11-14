@@ -5052,7 +5052,7 @@ R2 out 0 1k\n\
             sweep: StepSweep::List(Vec::new()),
         };
         let err = Engine::default()
-            .run_step_command(&netlist, &command, &[])
+            .step_netlists_for_command(&netlist, &command, &[])
             .expect_err("empty model step sweep must not report success");
         assert!(
             err.to_string().contains("no sweep values"),
@@ -5070,8 +5070,14 @@ R2 out 0 1k\n\
             sweep: StepSweep::List(vec![100.0, 200.0]),
         };
 
-        let results = Engine::default()
-            .run_step_command(&netlist, &command, &[100.0, 200.0])
+        let engine = Engine::default();
+        let results = engine
+            .step_netlists_for_command(&netlist, &command, &[100.0, 200.0])
+            .and_then(|runs| {
+                runs.into_iter()
+                    .map(|(value, run)| engine.run_dc_op(&run).map(|result| (value, result)))
+                    .collect::<Result<Vec<_>, _>>()
+            })
             .expect("device-style model:param step target should resolve to the model");
 
         assert_eq!(results.len(), 2);

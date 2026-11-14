@@ -595,7 +595,14 @@ fn compression_stops_after_the_transient_it_compresses() {
         engine.run_tran_with_abort(&netlist, 2.0e-5, 2.0e-8, abort)
     });
     let with_compression = poll_count("compressed transient", |abort| {
-        engine.run_tran_compressed_with_abort(&netlist, 2.0e-5, 2.0e-8, compression(), abort)
+        engine.run_tran_compressed_with_startup_mode_and_abort(
+            &netlist,
+            2.0e-5,
+            2.0e-8,
+            rspice_core::engine::TransientStartupMode::OperatingPoint,
+            compression(),
+            abort,
+        )
     });
     assert!(
         with_compression > transient_only,
@@ -604,10 +611,11 @@ fn compression_stops_after_the_transient_it_compresses() {
     );
 
     assert_stops_exactly_at("compression", transient_only, |abort| {
-        aborted(engine.run_tran_compressed_with_abort(
+        aborted(engine.run_tran_compressed_with_startup_mode_and_abort(
             &netlist,
             2.0e-5,
             2.0e-8,
+            rspice_core::engine::TransientStartupMode::OperatingPoint,
             compression(),
             abort,
         ))

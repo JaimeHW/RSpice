@@ -30,7 +30,6 @@ disallowed-methods = [
 
     # Transient
     { path = "rspice_core::engine::Engine::run_tran", reason = "use run_tran_with_abort (plan rule 6)" },
-    { path = "rspice_core::engine::Engine::run_tran_compressed", reason = "use run_tran_compressed_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_tran_checkpointed", reason = "use run_tran_checkpointed_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_tran_checkpointed_with_startup_mode", reason = "use run_tran_checkpointed_with_startup_mode_and_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_tran_checkpoint_schedule_with_startup_mode", reason = "use the _and_abort form (plan rule 6)" },
@@ -44,7 +43,6 @@ disallowed-methods = [
     { path = "rspice_core::engine::Engine::run_ac_data", reason = "use run_ac_data_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_noise", reason = "use run_noise_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_noise_with_input_source", reason = "use run_noise_with_input_source_and_abort (plan rule 6)" },
-    { path = "rspice_core::engine::Engine::run_port_noise_correlation", reason = "use run_port_noise_correlation_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_stb", reason = "use run_stb_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_pz_ports", reason = "use run_pz_ports_with_abort (plan rule 6)" },
 
@@ -58,7 +56,6 @@ disallowed-methods = [
     { path = "rspice_core::engine::Engine::run_tran_from_hb_envelope_state", reason = "use the _with_abort form (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_pac", reason = "use run_pac_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_pnoise", reason = "use run_pnoise_with_abort (plan rule 6)" },
-    { path = "rspice_core::engine::Engine::run_pnoise_oscillator", reason = "use run_pnoise_oscillator_with_abort (plan rule 6)" },
 
     # Statistical and parametric
     { path = "rspice_core::engine::Engine::run_monte_carlo_with_options", reason = "use run_monte_carlo_with_options_and_abort (plan rule 6)" },
@@ -67,7 +64,6 @@ disallowed-methods = [
     { path = "rspice_core::engine::Engine::run_sensitivity_ac_complete", reason = "use run_sensitivity_ac_complete_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_sensitivity_linearized", reason = "use run_sensitivity_linearized_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::run_step", reason = "use run_step_with_abort (plan rule 6)" },
-    { path = "rspice_core::engine::Engine::run_step_command", reason = "use run_step_command_with_abort (plan rule 6)" },
     { path = "rspice_core::engine::Engine::step_netlists_for_command", reason = "use step_netlists_for_command_with_abort (plan rule 6)" },
     { path = "rspice_core::execution::topology_fingerprint", reason = "use topology_fingerprint_with_abort (plan rule 6)" },
 

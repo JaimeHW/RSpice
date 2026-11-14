@@ -2,9 +2,10 @@
 //!
 //! Circuit-derived noise is evaluated by the engine using the physical device
 //! equations and an authenticated periodic operating point. Driven conversion
-//! noise uses [`crate::Engine::run_pnoise`]; oscillator phase noise uses
-//! [`crate::Engine::run_pnoise_oscillator`]. Their retained-state variants reuse
-//! a previously solved PSS or HB orbit. Authored `.PNOISE` cards use
+//! noise uses [`crate::Engine::run_pnoise`]; oscillator phase noise is
+//! evaluated on a solved autonomous PSS orbit by
+//! [`crate::Engine::run_pnoise_oscillator_from_pss_with_abort`]. The driven
+//! retained-state variants reuse a previously solved PSS or HB orbit. Authored `.PNOISE` cards use
 //! [`crate::netlist::PnoiseCard`].
 //!
 //! Floquet stability evidence is shared by PSS and PSTB through

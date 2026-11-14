@@ -56,7 +56,6 @@ use determinism_fingerprint::{
 };
 use model_outcome::RunWithOutcome;
 use rspice_core::NoAbort;
-use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::pac::PacConfig;
 use rspice_core::engine::{
     ScheduledTransientCheckpoint, TransientCheckpoint, TransientCheckpointEncoding,
@@ -2032,17 +2031,6 @@ fn every_periodic_small_signal_analysis_refuses_a_mixed_module_first() {
         engine
             .run_pnoise(&netlist, 1.0e6, &[1.0e3], "p", None, None, 1)
             .map(|_| "a driven pnoise spectrum".to_string()),
-    );
-    refusal(
-        "oscillator pnoise",
-        "PSS analysis",
-        engine
-            .run_pnoise_oscillator(
-                &netlist,
-                PssConfig::autonomous().with_period_guess(1.0e-6),
-                &[1.0e3],
-            )
-            .map(|_| "an oscillator phase-noise spectrum".to_string()),
     );
 }
 
@@ -4042,7 +4030,7 @@ endmodule
 /// refinement drives it: accept a point, open the next trial over the whole
 /// interval to it, settle, accept.
 ///
-/// Refinement is deliberately absent. `trial_boundary_refinement_time` asks
+/// Refinement is deliberately absent. `boundary_refinement_time` asks
 /// the engine to re-solve on an interior crossing, which drives the accepted
 /// endpoint onto the crossing and hides the distinction being measured here;
 /// an interval a controller chose for truncation error does not, and that is
@@ -4546,7 +4534,7 @@ endmodule
 /// What is pinned here is the consequence the deck can see: cause and effect
 /// are published into one tick, so both reactions come due together and `yb`
 /// rises once rather than chattering. The *mechanism* — that
-/// `trial_boundary_refinement_time` offers the controller no root towards the
+/// `boundary_refinement_time` offers the controller no root towards the
 /// interpolated instant — is asserted directly in `mixed.rs`'s own
 /// `a_crossing_a_rolled_back_probe_fed_back_into_is_dated_where_its_cause_is`,
 /// which reproduces the seam this deck actually re-solves across: the write

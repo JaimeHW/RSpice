@@ -70,7 +70,8 @@ impl PreparedPortNoise {
 }
 
 impl Engine {
-    /// Compute the short-circuit port-current noise correlation matrix.
+    /// Compute the short-circuit port-current noise correlation matrix `Cy`,
+    /// with cooperative cancellation.
     ///
     /// Every entry is a complex cross-power spectral density in A²/Hz using
     /// `E[I_i * conj(I_j)]`. Each named port must be an independent voltage
@@ -79,23 +80,6 @@ impl Engine {
     /// A source behind a series resistor observes loaded current noise,
     /// including that resistor's noise. Use the SP runner to refer such a
     /// physical port to the DUT reference plane.
-    pub fn run_port_noise_correlation(
-        &self,
-        netlist: &Netlist,
-        port_sources: &[String],
-        frequencies: &[Value],
-        temperature: Value,
-    ) -> Result<Vec<PortNoiseCorrelationResult>, SimulationError> {
-        self.run_port_noise_correlation_with_abort(
-            netlist,
-            port_sources,
-            frequencies,
-            temperature,
-            &NoAbort,
-        )
-    }
-
-    /// Compute `Cy` with cooperative cancellation.
     pub fn run_port_noise_correlation_with_abort(
         &self,
         netlist: &Netlist,

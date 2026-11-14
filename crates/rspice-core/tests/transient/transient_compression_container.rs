@@ -66,7 +66,14 @@ fn run_pair(
         .run_tran(&netlist, tstop, max_step)
         .expect("uncompressed transient solves");
     let compressed = engine
-        .run_tran_compressed(&netlist, tstop, max_step, compression())
+        .run_tran_compressed_with_startup_mode_and_abort(
+            &netlist,
+            tstop,
+            max_step,
+            rspice_core::engine::TransientStartupMode::OperatingPoint,
+            compression(),
+            &rspice_core::NoAbort,
+        )
         .expect("compressed transient solves");
     (uncompressed, compressed)
 }
@@ -268,7 +275,14 @@ fn compressed_post_results_match_the_uncompressed_trajectory() {
         .run_tran(&netlist, 20.0e-6, 100.0e-9)
         .expect("uncompressed transient solves");
     let compressed = engine
-        .run_tran_compressed(&netlist, 20.0e-6, 100.0e-9, compression())
+        .run_tran_compressed_with_startup_mode_and_abort(
+            &netlist,
+            20.0e-6,
+            100.0e-9,
+            rspice_core::engine::TransientStartupMode::OperatingPoint,
+            compression(),
+            &rspice_core::NoAbort,
+        )
         .expect("compressed transient solves");
 
     let expected = evaluate_transient_post_results(
@@ -390,7 +404,14 @@ fn compression_retains_every_sample_the_interval_lattice_reads() {
         .run_tran(&netlist, 20.0e-6, 100.0e-9)
         .expect("uncompressed transient solves");
     let compressed = engine
-        .run_tran_compressed(&netlist, 20.0e-6, 100.0e-9, compression())
+        .run_tran_compressed_with_startup_mode_and_abort(
+            &netlist,
+            20.0e-6,
+            100.0e-9,
+            rspice_core::engine::TransientStartupMode::OperatingPoint,
+            compression(),
+            &rspice_core::NoAbort,
+        )
         .expect("an authored interval lattice composes with compression");
 
     assert!(

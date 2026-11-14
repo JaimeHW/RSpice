@@ -64,10 +64,6 @@ impl StandaloneExecution {
         self.coordinator.start()
     }
 
-    pub(super) fn set_interval_event_limit(&mut self, limit: usize) {
-        self.coordinator.set_interval_event_limit(limit);
-    }
-
     pub(super) fn retain_policy_from(&mut self, current: &Self) {
         self.coordinator
             .set_interval_event_limit(current.coordinator.interval_event_limit());
@@ -99,6 +95,7 @@ impl StandaloneExecution {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn queue_forces(
         &mut self,
         drives: &[(DigitalSignalId, FourStateValue)],

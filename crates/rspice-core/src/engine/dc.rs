@@ -2670,8 +2670,14 @@ mod tests {
         );
 
         let expected = [0.05, 0.10, 0.15];
-        let points = xyce_engine()
-            .run_step_command(&netlist, command, &expected)
+        let engine = xyce_engine();
+        let points = engine
+            .step_netlists_for_command(&netlist, command, &expected)
+            .and_then(|runs| {
+                runs.into_iter()
+                    .map(|(value, run)| engine.run_dc_op(&run).map(|result| (value, result)))
+                    .collect::<Result<Vec<_>, _>>()
+            })
             .expect("nonlinear CORE model-parameter STEP solves");
         assert_eq!(points.len(), expected.len());
         for ((actual, result), expected) in points.iter().zip(expected) {

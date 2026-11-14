@@ -11,8 +11,8 @@ use rspice_core::execution::result_document::{
     FftCompatibilityModeTag, ResultPayload, ScalarValue, SeriesValues,
 };
 use rspice_core::execution::{
-    ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION, AnalysisResultDocument,
-    AnalysisResultKind, MappingStatus, ResultSignal, SignalUnit, analysis_result_capability,
+    ANALYSIS_CAPABILITY_MATRIX, ANALYSIS_RESULT_DOCUMENT_SCHEMA, ANALYSIS_RESULT_DOCUMENT_VERSION,
+    AnalysisResultDocument, AnalysisResultKind, MappingStatus, ResultSignal, SignalUnit,
 };
 use rspice_engine_adapter::axis_execution_document::{
     AxisAnalysisKind, AxisAssignmentKind, AxisExecutionDocument,
@@ -574,7 +574,11 @@ fn family_expectation(kind: AnalysisResultKind) -> FamilyExpectation {
 #[test]
 fn every_result_family_matches_its_engine_adapter_capability_declaration() {
     for kind in AnalysisResultKind::ALL {
-        let declared = analysis_result_capability(kind).engine_adapter;
+        let declared = ANALYSIS_CAPABILITY_MATRIX
+            .iter()
+            .find(|row| row.result == kind)
+            .expect("every result kind has a capability row")
+            .engine_adapter;
         match family_expectation(kind) {
             FamilyExpectation::Unsupported { request_kind } => {
                 assert_eq!(

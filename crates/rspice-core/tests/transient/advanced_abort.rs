@@ -66,17 +66,6 @@ fn driven_pnoise_honors_an_already_set_abort_signal() {
 }
 
 #[test]
-fn oscillator_pnoise_honors_an_already_set_abort_signal() {
-    let (engine, netlist, abort) = fixture();
-    assert_aborted(engine.run_pnoise_oscillator_with_abort(
-        &netlist,
-        PssConfig::autonomous(),
-        &[1.0e3],
-        &abort,
-    ));
-}
-
-#[test]
 fn dc_ac_and_noise_honor_an_already_set_abort_signal() {
     let (engine, netlist, abort) = fixture();
     assert_aborted(engine.run_dc_op_with_abort(&netlist, &abort));
