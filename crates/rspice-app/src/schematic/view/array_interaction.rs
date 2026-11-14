@@ -49,7 +49,10 @@ pub(super) fn handle_armed_array_selection(
     }
 }
 
-fn capture(state: &CanvasParts<'_>, transition: TransformInputTransition) -> ArrayInputRequest {
+pub(crate) fn capture(
+    state: &CanvasParts<'_>,
+    transition: TransformInputTransition,
+) -> ArrayInputRequest {
     let draft = &state.design.array_selection;
     ArrayInputRequest {
         source: editor_request_source(state),
@@ -62,7 +65,7 @@ fn capture(state: &CanvasParts<'_>, transition: TransformInputTransition) -> Arr
     }
 }
 
-fn apply(
+pub(crate) fn apply(
     state: &mut CanvasParts<'_>,
     symbols: &SchematicSymbolContext,
     request: ArrayInputRequest,
@@ -150,7 +153,6 @@ fn commit_armed_array_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::super::AppState;
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::state::{Component, ComponentType, Point};
@@ -258,7 +260,12 @@ mod tests {
 
     /// Arm Create array on the selected parts and wires with `pitch`, and
     /// commit it.
-    fn commit_array_of(state: &mut AppState, components: &[u64], wires: &[u64], pitch: Point) {
+    fn commit_array_of(
+        state: &mut DesignTestHost,
+        components: &[u64],
+        wires: &[u64],
+        pitch: Point,
+    ) {
         let selection = &mut state.model.schematic.session.editor.selection;
         selection.clear();
         for id in components {
@@ -280,7 +287,7 @@ mod tests {
         state.design.array_selection.canvas.preview_delta = pitch;
         state.model.schematic.arm_tool(Tool::ArraySelection);
         let symbols = schematic_symbol_context(state);
-        commit_armed_array_selection(&mut crate::schematic::view::canvas_parts(state), &symbols);
+        commit_armed_array_selection(&mut canvas_parts(state), &symbols);
     }
 
     #[test]
@@ -288,7 +295,7 @@ mod tests {
         use crate::state::Wire;
         // R1 on the active sheet; on Sheet 2, a wire right where the
         // first replica will stand.
-        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[2]);
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_host(&[1], &[2]);
         let drawing = state.model.schematic.document_mut_for_test();
         drawing
             .components
@@ -315,7 +322,7 @@ mod tests {
         // wire. Sheet 2 reuses the layout: a wire joins its two parts at the
         // same points, and a junction sits on the selected wire's line.
         let mut state =
-            crate::schematic::view::sheet_visibility::two_sheet_state(&[1, 3, 5], &[2, 6]);
+            crate::schematic::view::sheet_visibility::two_sheet_host(&[1, 3, 5], &[2, 6]);
         let r3 = Component::new(1, ComponentType::Resistor, Point::origin());
         let r4 = Component::new(3, ComponentType::Resistor, Point::new(100, 0));
         let r3_right = r3.terminal_positions()[1].1;
@@ -405,7 +412,7 @@ mod tests {
         let pin = part.terminal_positions()[1].1;
         let stub_end = Point::new(pin.x + 20, pin.y);
         for (case, stub, touch) in [("stub end", true, stub_end), ("pin", false, pin)] {
-            let mut state = AppState::default();
+            let mut state = DesignTestHost::default();
             let drawing = state.model.schematic.document_mut_for_test();
             drawing.components.push(part.clone());
             if stub {
@@ -416,7 +423,7 @@ mod tests {
                 Point::new(touch.x, touch.y + 50),
                 Point::new(touch.x, touch.y + 150),
             ));
-            let wire_points = |state: &AppState| -> Vec<Vec<Point>> {
+            let wire_points = |state: &DesignTestHost| -> Vec<Vec<Point>> {
                 let document = state.model.schematic.document();
                 document
                     .wires
@@ -442,117 +449,6 @@ mod tests {
             assert!(document.junctions.is_empty(), "{case}");
             assert_eq!(wire_points(&state), before, "{case}");
             assert!(!state.model.schematic.can_undo(), "{case}");
-        }
-    }
-
-    #[test]
-    fn array_requests_recheck_the_source_draft_and_operation_without_cancelling_a_replacement() {
-        for change in [
-            "none",
-            "document",
-            "selection",
-            "kind",
-            "count",
-            "naming",
-            "draft",
-            "modal",
-            "read-only",
-            "tool",
-            "replacement",
-        ] {
-            let mut state = AppState::default();
-            let id = state
-                .model
-                .schematic
-                .add_component(ComponentType::Resistor, Point::origin());
-            state
-                .model
-                .schematic
-                .session
-                .editor
-                .selection
-                .select_only_component(id);
-            state.model.schematic.clear_undo_history();
-            crate::workbench::app::open_array_selection_dialog_in(
-                &mut state.design.array_selection,
-                &mut state.design.move_selection,
-                &mut state.design.stretch_selection,
-                &mut state.model,
-                &mut state.workbench,
-            );
-            state.design.array_selection.arm();
-            state.model.schematic.arm_tool(Tool::ArraySelection);
-            let expected = state.design.array_selection.canvas.clone();
-            let mut next = expected.clone();
-            next.preview_delta = Point::new(100, 0);
-            let request = capture(
-                &crate::schematic::view::canvas_parts(&mut state),
-                TransformInputTransition {
-                    expected,
-                    next,
-                    commit: true,
-                },
-            );
-            match change {
-                "document" => state.model.active_schematic_epoch += 1,
-                "selection" => state.model.schematic.session.editor.selection.clear(),
-                "kind" => {
-                    state.design.array_selection.kind =
-                        crate::state::SchematicArrayKind::Rectangular
-                }
-                "count" => state.design.array_selection.count = "4".to_owned(),
-                "naming" => state.design.array_selection.naming = "R20…R27".to_owned(),
-                "draft" => state.design.array_selection.canvas.anchor = Some(Point::new(10, 0)),
-                "modal" => state.settings.preferences_open = true,
-                "read-only" => state.model.schematic.session.read_only = true,
-                "tool" => state.model.schematic.arm_tool(Tool::Select),
-                "replacement" => {
-                    crate::workbench::app::cancel_armed_array_selection_in(
-                        &mut state.design.array_selection,
-                        &mut state.model,
-                    );
-                    crate::workbench::app::open_array_selection_dialog_in(
-                        &mut state.design.array_selection,
-                        &mut state.design.move_selection,
-                        &mut state.design.stretch_selection,
-                        &mut state.model,
-                        &mut state.workbench,
-                    );
-                    state.design.array_selection.arm();
-                    state.model.schematic.arm_tool(Tool::ArraySelection);
-                    assert_eq!(
-                        request.transition.expected,
-                        state.design.array_selection.canvas
-                    );
-                    assert_eq!(request.source, editor_request_source(&state));
-                    assert_ne!(request.generation, state.design.array_selection.generation);
-                }
-                "none" => {}
-                _ => unreachable!(),
-            }
-            let canvas = state.design.array_selection.canvas.clone();
-            let symbols = schematic_symbol_context(&state);
-            apply(
-                &mut crate::schematic::view::canvas_parts(&mut state),
-                &symbols,
-                request,
-            );
-            if change == "none" {
-                assert_eq!(state.model.schematic.document().components.len(), 8);
-                assert_eq!(
-                    state.model.schematic.undo_description(),
-                    Some("create array")
-                );
-            } else {
-                assert_eq!(
-                    state.model.schematic.document().components.len(),
-                    1,
-                    "{change}"
-                );
-                assert!(!state.model.schematic.can_undo(), "{change}");
-                assert_eq!(state.design.array_selection.canvas, canvas, "{change}");
-                assert!(state.design.array_selection.armed, "{change}");
-            }
         }
     }
 }

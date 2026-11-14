@@ -2,10 +2,10 @@
 //! joins.
 
 use super::*;
-use crate::schematic::view::sheet_visibility::two_sheet_state;
+use crate::schematic::view::sheet_visibility::two_sheet_host;
 use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
 
-fn crossing(state: &mut AppState, first: u64, second: u64) {
+fn crossing(state: &mut DesignTestHost, first: u64, second: u64) {
     state.model.schematic.document_mut_for_test().wires.extend([
         Wire::segment(first, Point::new(-100, 0), Point::new(100, 0)),
         Wire::segment(second, Point::new(0, -100), Point::new(0, 100)),
@@ -16,15 +16,15 @@ fn crossing(state: &mut AppState, first: u64, second: u64) {
 /// the tool refuses it there and accepts it anywhere along either wire.
 #[test]
 fn the_label_tool_refuses_an_unmarked_crossing() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     crossing(&mut state, 1, 2);
 
     assert!(label_anchor_on_unmarked_crossing(
-        &crate::schematic::view::canvas_parts(&mut state),
+        &canvas_parts(&mut state),
         Point::origin()
     ));
     assert!(!label_anchor_on_unmarked_crossing(
-        &crate::schematic::view::canvas_parts(&mut state),
+        &canvas_parts(&mut state),
         Point::new(40, 0)
     ));
 
@@ -35,10 +35,7 @@ fn the_label_tool_refuses_an_unmarked_crossing() {
         .junctions
         .push(Junction::new(3, Point::origin()));
     assert!(
-        !label_anchor_on_unmarked_crossing(
-            &crate::schematic::view::canvas_parts(&mut state),
-            Point::origin()
-        ),
+        !label_anchor_on_unmarked_crossing(&canvas_parts(&mut state), Point::origin()),
         "a junction says the wires are one net"
     );
 }
@@ -99,7 +96,7 @@ fn a_part_dropped_with_a_pin_inside_a_wire_splits_it() {
 /// Sheet 2's wire under the dropped pin is on another page: it stays whole.
 #[test]
 fn a_part_dropped_over_another_sheets_wire_leaves_it_whole() {
-    let mut state = two_sheet_state(&[], &[1]);
+    let mut state = two_sheet_host(&[], &[1]);
     let hidden = Wire::segment(1, Point::new(-100, 0), Point::new(100, 0));
     state
         .model
@@ -110,7 +107,7 @@ fn a_part_dropped_over_another_sheets_wire_leaves_it_whole() {
     state.model.schematic.init_undo_history();
 
     place_component(
-        &mut crate::schematic::view::canvas_parts(&mut state),
+        &mut canvas_parts(&mut state),
         ComponentType::Resistor,
         resistor_with_first_pin_at(Point::origin()),
     );
@@ -123,11 +120,11 @@ fn a_part_dropped_over_another_sheets_wire_leaves_it_whole() {
 /// split, and the design check asks which one it means.
 #[test]
 fn a_part_dropped_on_an_unmarked_crossing_splits_neither_wire() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     crossing(&mut state, 1, 2);
 
     place_component(
-        &mut crate::schematic::view::canvas_parts(&mut state),
+        &mut canvas_parts(&mut state),
         ComponentType::Resistor,
         resistor_with_first_pin_at(Point::origin()),
     );
@@ -148,7 +145,7 @@ fn a_part_dropped_on_an_unmarked_crossing_splits_neither_wire() {
 /// folded into one, and the hidden wire keeps its id and points.
 #[test]
 fn a_route_drawn_along_another_sheets_wire_is_not_folded_into_it() {
-    let mut state = two_sheet_state(&[], &[1]);
+    let mut state = two_sheet_host(&[], &[1]);
     let hidden = Wire::segment(1, Point::new(0, 0), Point::new(40, 0));
     state
         .model
@@ -171,11 +168,11 @@ fn a_route_drawn_along_another_sheets_wire_is_not_folded_into_it() {
 /// the same point is on another page.
 #[test]
 fn another_sheets_wire_makes_no_crossing_for_the_label_tool() {
-    let mut state = two_sheet_state(&[1], &[2]);
+    let mut state = two_sheet_host(&[1], &[2]);
     crossing(&mut state, 1, 2);
 
     assert!(!label_anchor_on_unmarked_crossing(
-        &crate::schematic::view::canvas_parts(&mut state),
+        &canvas_parts(&mut state),
         Point::origin()
     ));
 }

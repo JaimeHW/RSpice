@@ -588,16 +588,15 @@ pub(super) fn draw_shelf_drag_preview(
 
 #[cfg(test)]
 mod tests {
-    use super::super::AppState;
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::state::ComponentType;
-    use crate::workbench::design::test_host::DesignTestHost;
+    use crate::workbench::design::test_host::{DesignTestHost, canvas_facts, canvas_parts};
 
     /// Two resistors, the first selected, on the first of two sheets, with a
     /// wire off its terminal that a stretch can take.
-    fn movable_state() -> AppState {
-        let mut state = super::super::sheet_visibility::two_sheet_state(&[1, 2, 3], &[4]);
+    fn movable_state() -> DesignTestHost {
+        let mut state = super::super::sheet_visibility::two_sheet_host(&[1, 2, 3], &[4]);
         let document = state.model.schematic.document_mut_for_test();
         document.components.push(crate::state::Component::new(
             1,
@@ -644,7 +643,7 @@ mod tests {
         let mode = state.design.move_selection.mode;
         let delta = Point::new(40, 0);
         let first = held_diff(move_preview_diff(
-            &mut crate::schematic::view::canvas_parts(&mut state),
+            &mut canvas_parts(&mut state),
             &symbols,
             delta,
             mode,
@@ -652,23 +651,23 @@ mod tests {
         assert!(Arc::ptr_eq(
             &first,
             &held_diff(move_preview_diff(
-                &mut crate::schematic::view::canvas_parts(&mut state),
+                &mut canvas_parts(&mut state),
                 &symbols,
                 delta,
                 mode
             ))
         ));
 
-        let fresh = |state: &mut AppState, delta: Point, mode| {
+        let fresh = |state: &mut DesignTestHost, delta: Point, mode| {
             let symbols = schematic_symbol_context(state);
             let before = held_diff(move_preview_diff(
-                &mut crate::schematic::view::canvas_parts(state),
+                &mut canvas_parts(state),
                 &symbols,
                 Point::new(40, 0),
                 mode,
             ));
             let after = held_diff(move_preview_diff(
-                &mut crate::schematic::view::canvas_parts(state),
+                &mut canvas_parts(state),
                 &symbols,
                 delta,
                 mode,
@@ -682,20 +681,20 @@ mod tests {
             crate::state::MoveSelectionMode::Connected
         };
         let before = held_diff(move_preview_diff(
-            &mut crate::schematic::view::canvas_parts(&mut state),
+            &mut canvas_parts(&mut state),
             &symbols,
             delta,
             mode,
         ));
         let after = held_diff(move_preview_diff(
-            &mut crate::schematic::view::canvas_parts(&mut state),
+            &mut canvas_parts(&mut state),
             &symbols,
             delta,
             other_mode,
         ));
         assert!(!Arc::ptr_eq(&before, &after), "mode");
 
-        type Change = (&'static str, fn(&mut AppState));
+        type Change = (&'static str, fn(&mut DesignTestHost));
         let changes: [Change; 5] = [
             ("selection", |state| {
                 state
@@ -745,7 +744,7 @@ mod tests {
             let mut state = movable_state();
             let symbols = schematic_symbol_context(&state);
             let before = held_diff(move_preview_diff(
-                &mut crate::schematic::view::canvas_parts(&mut state),
+                &mut canvas_parts(&mut state),
                 &symbols,
                 delta,
                 mode,
@@ -753,7 +752,7 @@ mod tests {
             change(&mut state);
             let symbols = schematic_symbol_context(&state);
             let after = held_diff(move_preview_diff(
-                &mut crate::schematic::view::canvas_parts(&mut state),
+                &mut canvas_parts(&mut state),
                 &symbols,
                 delta,
                 mode,
@@ -782,9 +781,9 @@ mod tests {
             .expect("a segment to stretch");
         let policy = crate::state::StretchOrthogonalPolicy::default();
         let symbols = schematic_symbol_context(&state);
-        let diff = |state: &mut AppState, delta: Point| {
+        let diff = |state: &mut DesignTestHost, delta: Point| {
             held_diff(stretch_preview_diff(
-                &mut crate::schematic::view::canvas_parts(state),
+                &mut canvas_parts(state),
                 &symbols,
                 delta,
                 target,
@@ -798,7 +797,7 @@ mod tests {
             preview::TransformCandidateDiff::between(
                 state.model.schematic.document(),
                 &stretch_preview_candidate(
-                    &crate::schematic::view::canvas_facts(&state),
+                    &canvas_facts(&state),
                     &symbols,
                     Point::new(0, 20),
                     target,

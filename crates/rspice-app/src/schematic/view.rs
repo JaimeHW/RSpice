@@ -15,7 +15,7 @@ use crate::workbench::{slots::DesignState, state::WorkbenchSession};
 
 use super::symbols::SymbolLibrary;
 
-mod array_interaction;
+pub(crate) mod array_interaction;
 mod bus_interaction;
 pub(crate) mod context_menu;
 pub(crate) mod drawing_sheet;
@@ -27,16 +27,16 @@ pub(crate) mod frame_cost;
 pub(crate) mod gesture_commits;
 pub(crate) mod grid_snap_selection;
 pub(crate) mod interaction;
-mod keyboard_navigation;
+pub(crate) mod keyboard_navigation;
 pub(crate) mod mobile_controls;
-mod move_interaction;
+pub(crate) mod move_interaction;
 mod parts;
 mod pick_chooser;
 mod preview;
 pub(crate) mod requests;
 pub(crate) use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
 use rspice_schematic_editor::view::symbol_context::SelectionWindow;
-mod scene;
+pub(crate) mod scene;
 pub(crate) mod selection_drag;
 pub(crate) mod selection_layout;
 pub(crate) mod selection_transform;
@@ -44,7 +44,7 @@ pub(crate) mod sheet_visibility;
 mod shelf_drag;
 mod snap_resolution;
 pub(crate) mod standard_value_snap;
-mod stretch_interaction;
+pub(crate) mod stretch_interaction;
 pub(crate) mod violations;
 mod zoom_box;
 

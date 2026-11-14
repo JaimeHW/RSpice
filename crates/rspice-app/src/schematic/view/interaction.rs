@@ -381,7 +381,7 @@ fn select_double_click_action(
     }
 }
 
-fn activate_requirement_link(
+pub(crate) fn activate_requirement_link(
     state: &mut CanvasParts<'_>,
     note_id: u64,
     ctx: &egui::Context,
@@ -750,7 +750,7 @@ fn handle_documentation_shape_keyboard(
     }
 }
 
-fn capture_shape_input(
+pub(crate) fn capture_shape_input(
     state: &CanvasParts<'_>,
     transition: ShapeInputTransition,
 ) -> ShapeInputRequest {
@@ -768,7 +768,7 @@ fn capture_shape_input(
     }
 }
 
-fn apply_shape_input(state: &mut CanvasParts<'_>, request: ShapeInputRequest) {
+pub(crate) fn apply_shape_input(state: &mut CanvasParts<'_>, request: ShapeInputRequest) {
     if request.source != super::requests::editor_request_source(state)
         || request.kind
             != state

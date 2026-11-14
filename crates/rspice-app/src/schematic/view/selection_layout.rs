@@ -111,12 +111,13 @@ fn apply_request(
 
 #[cfg(test)]
 mod tests {
-    use super::super::{AppState, schematic_symbol_context};
+    use super::super::schematic_symbol_context;
     use super::*;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// [`apply_selection_layout`] over the session's parts.
     fn apply(
-        state: &mut AppState,
+        state: &mut DesignTestHost,
         symbols: &SchematicSymbolContext,
         command: SelectionLayoutCommand,
     ) -> Result<bool, SelectionLayoutError> {
@@ -133,8 +134,8 @@ mod tests {
         Component, ComponentType, SchematicProbe, SheetDefinition, SheetPortPolicy, SheetTemplate,
     };
 
-    fn selected_components(positions: &[(u64, i32, i32)]) -> AppState {
-        let mut state = AppState::default();
+    fn selected_components(positions: &[(u64, i32, i32)]) -> DesignTestHost {
+        let mut state = DesignTestHost::default();
         for &(id, x, y) in positions {
             state
                 .model
@@ -313,7 +314,7 @@ mod tests {
                 command,
                 AlignTop | AlignMiddle | AlignBottom | DistributeVertical
             );
-            let mut state = AppState::default();
+            let mut state = DesignTestHost::default();
             for (id, kind, position) in [
                 (1, ComponentType::Resistor, Point::new(100, 0)),
                 (2, ComponentType::VoltageSource, Point::new(200, 100)),
@@ -513,7 +514,7 @@ mod tests {
 
     #[test]
     fn probe_layout_is_non_electrical_and_undoable() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.document_mut_for_test().probes = vec![
             SchematicProbe::new(20, Point::new(10, 10), "V(out)", None).unwrap(),
             SchematicProbe::new(21, Point::new(40, 30), "V(out)", None).unwrap(),
@@ -553,7 +554,7 @@ mod tests {
     /// lying on a moved pin's old position, where it was.
     #[test]
     fn aligning_parts_leaves_another_sheets_wire_end_in_place() {
-        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1, 2], &[90]);
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_host(&[1, 2], &[90]);
         for (id, position) in [(1, Point::new(10, 10)), (2, Point::new(40, 50))] {
             state
                 .model

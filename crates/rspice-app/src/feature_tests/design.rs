@@ -2,9 +2,14 @@
 //! draws, opened as its command opens it and drawn by the real frame through
 //! the feature's own context.
 
+mod armed_array_requests;
+mod armed_move_requests;
+mod armed_stretch_requests;
 mod bulk_edit;
 mod bus_tap_placement_drawn;
 mod canvas;
+mod canvas_input;
+mod canvas_keyboard;
 mod cell_deletion_transactions;
 mod connectivity_manager_drawn;
 mod context_menu;
@@ -70,6 +75,7 @@ mod symbol_inspector_drawn;
 mod symbol_pin_checks;
 mod symbol_surface_requests;
 mod touch_flow;
+mod transient_annotations;
 mod visibility_options_drawn;
 mod wiring;
 

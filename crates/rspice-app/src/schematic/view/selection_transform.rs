@@ -81,7 +81,7 @@ mod tests {
     fn turning_a_part_leaves_another_sheets_wires_whole() {
         use crate::state::{Component, ComponentType, Rotation, Wire};
 
-        let mut state = super::super::sheet_visibility::two_sheet_state(&[10], &[20, 21]);
+        let mut state = super::super::sheet_visibility::two_sheet_host(&[10], &[20, 21]);
         let part = Component::new(10, ComponentType::Resistor, Point::new(100, 100));
         let symbols = super::super::schematic_symbol_context(&state);
         let pin = symbols.terminal_points(&part)[0];

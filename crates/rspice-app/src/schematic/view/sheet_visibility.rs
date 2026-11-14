@@ -501,6 +501,18 @@ pub(crate) fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppStat
     state
 }
 
+/// A cell view with two sheets ([`seed_two_sheets`]) on a new design test
+/// host. Shared by the canvas modules' tests.
+#[cfg(test)]
+pub(crate) fn two_sheet_host(
+    active_ids: &[u64],
+    hidden_ids: &[u64],
+) -> crate::workbench::design::test_host::DesignTestHost {
+    let mut state = crate::workbench::design::test_host::DesignTestHost::default();
+    seed_two_sheets(&mut state.model, active_ids, hidden_ids);
+    state
+}
+
 /// Give the model's active cell view two sheets: `active_ids` stay on the
 /// active Sheet 1 and `hidden_ids` belong to Sheet 2. What the model holds
 /// is all a sheet is, so the design test host and the whole application are
@@ -552,14 +564,14 @@ mod tests {
     use crate::state::{Component, ComponentType, Point};
     use crate::state::{Junction, Wire};
     use crate::workbench::app::delete_schematic_selection;
-    use crate::workbench::design::test_host::DesignTestHost;
+    use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
 
     /// The scope is a reading position over the one membership authority: it
     /// narrows what a dock lists and decides nothing else, so `AllSheets` must
     /// admit an object the active sheet does not own.
     #[test]
     fn a_scope_narrows_the_cell_view_to_the_active_sheet_and_defaults_to_neither() {
-        let state = two_sheet_state(&[10], &[20]);
+        let state = two_sheet_host(&[10], &[20]);
 
         assert_eq!(SheetScope::default(), SheetScope::AllSheets);
         assert!(object_is_in_scope(&state, SheetScope::AllSheets, 10));
@@ -590,19 +602,19 @@ mod tests {
             .expect("the fixture cell view takes a sheet catalog");
         assert!(multi_sheet_catalog(&single).is_none());
 
-        assert!(multi_sheet_catalog(&two_sheet_state(&[10], &[20])).is_some());
+        assert!(multi_sheet_catalog(&two_sheet_host(&[10], &[20])).is_some());
     }
 
     #[test]
     fn overlapping_hidden_object_is_removed_before_marquee_selection() {
-        let mut state = two_sheet_state(&[10], &[20]);
+        let mut state = two_sheet_host(&[10], &[20]);
         state.model.schematic.document_mut_for_test().components = vec![
             Component::new(20, ComponentType::Capacitor, Point::new(10, 10)),
             Component::new(10, ComponentType::Resistor, Point::new(10, 10)),
         ];
 
         select_in_rect_on_active_sheet(
-            &mut crate::schematic::view::canvas_parts(&mut state),
+            &mut canvas_parts(&mut state),
             &SchematicSymbolContext::default(),
             SelectionWindow::new(0, 0, 20, 20, false),
             false,
@@ -630,7 +642,7 @@ mod tests {
 
     #[test]
     fn select_all_and_sheet_switch_selection_are_membership_aware() {
-        let mut state = two_sheet_state(&[10], &[20]);
+        let mut state = two_sheet_host(&[10], &[20]);
         state.model.schematic.document_mut_for_test().components = vec![
             Component::new(10, ComponentType::Resistor, Point::origin()),
             Component::new(20, ComponentType::Capacitor, Point::origin()),
@@ -672,7 +684,7 @@ mod tests {
 
     #[test]
     fn select_all_honors_the_persisted_schematic_selection_filter() {
-        let mut state = two_sheet_state(&[10, 11], &[]);
+        let mut state = two_sheet_host(&[10, 11], &[]);
         state.model.schematic.document_mut_for_test().components =
             vec![Component::new(10, ComponentType::Resistor, Point::origin())];
         state.model.schematic.document_mut_for_test().wires =
@@ -698,7 +710,7 @@ mod tests {
 
     #[test]
     fn topology_operation_restores_hidden_conductors_unchanged() {
-        let mut state = two_sheet_state(&[10, 11], &[20, 21]);
+        let mut state = two_sheet_host(&[10, 11], &[20, 21]);
         let origin = Point::new(10, 10);
         let destination = Point::new(15, 15);
         state.model.schematic.document_mut_for_test().wires = vec![
@@ -762,7 +774,7 @@ mod tests {
     /// keeps its id and points, gets no dot, and undo needs nothing from it.
     #[test]
     fn a_route_drawn_on_one_sheet_leaves_another_sheets_wire_whole() {
-        let mut state = two_sheet_state(&[], &[20]);
+        let mut state = two_sheet_host(&[], &[20]);
         let hidden = Wire::segment(20, Point::new(0, 100), Point::new(200, 100));
         state.model.schematic.document_mut_for_test().wires = vec![hidden.clone()];
         state.model.schematic.init_undo_history();
@@ -786,7 +798,7 @@ mod tests {
     /// page: Sheet 1's two wires become one and Sheet 2's stays as drawn.
     #[test]
     fn joining_collinear_wires_leaves_another_sheets_wire_whole() {
-        let mut state = two_sheet_state(&[1, 2], &[3]);
+        let mut state = two_sheet_host(&[1, 2], &[3]);
         let hidden = Wire::segment(3, Point::new(100, 0), Point::new(160, 0));
         state.model.schematic.document_mut_for_test().wires = vec![
             Wire::segment(1, Point::new(0, 0), Point::new(40, 0)),
@@ -815,7 +827,7 @@ mod tests {
     /// sheet: Sheet 2's resistor under Sheet 1's route corner joins nothing.
     #[test]
     fn another_sheets_pin_under_a_route_corner_adds_no_dot() {
-        let mut state = two_sheet_state(&[], &[20]);
+        let mut state = two_sheet_host(&[], &[20]);
         state
             .model
             .schematic
@@ -849,7 +861,7 @@ mod tests {
     /// sheets.
     #[test]
     fn a_deletion_keeps_another_sheets_objects_and_undo_restores_both_sheets() {
-        let mut state = two_sheet_state(&[10], &[21]);
+        let mut state = two_sheet_host(&[10], &[21]);
         state.model.schematic.document_mut_for_test().wires =
             vec![Wire::segment(10, Point::origin(), Point::new(20, 0))];
         state.model.schematic.document_mut_for_test().junctions =

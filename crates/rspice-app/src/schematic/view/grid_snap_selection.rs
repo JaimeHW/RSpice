@@ -259,7 +259,7 @@ mod tests {
     /// where it is when the part is snapped.
     #[test]
     fn snapping_leaves_another_sheets_wire_whole() {
-        let mut state = super::super::sheet_visibility::two_sheet_state(&[1], &[2]);
+        let mut state = super::super::sheet_visibility::two_sheet_host(&[1], &[2]);
         let part = Component::new(1, ComponentType::Resistor, Point::new(103, 47));
         let symbols = super::super::schematic_symbol_context(&state);
         let pin = symbols.terminal_points(&part)[0];

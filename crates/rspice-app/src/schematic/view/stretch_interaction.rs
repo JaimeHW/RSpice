@@ -52,7 +52,7 @@ pub(super) fn handle_armed_stretch_selection(
     }
 }
 
-fn capture(
+pub(crate) fn capture(
     state: &CanvasParts<'_>,
     transition: TransformInputTransition<StretchCanvasSession>,
 ) -> StretchInputRequest {
@@ -65,7 +65,7 @@ fn capture(
     }
 }
 
-fn apply(
+pub(crate) fn apply(
     state: &mut CanvasParts<'_>,
     symbols: &SchematicSymbolContext,
     request: StretchInputRequest,
@@ -172,17 +172,17 @@ pub(super) fn commit_armed_stretch_selection(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::AppState;
+pub(crate) mod tests {
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::state::{Junction, Wire};
+    use crate::workbench::design::test_host::{DesignTestHost, canvas_facts, canvas_parts};
 
-    fn selected_stretch_wire() -> AppState {
-        selected_stretch_wire_in(AppState::default())
+    pub(crate) fn selected_stretch_wire() -> DesignTestHost {
+        selected_stretch_wire_in(DesignTestHost::default())
     }
 
-    fn selected_stretch_wire_in(mut state: AppState) -> AppState {
+    fn selected_stretch_wire_in(mut state: DesignTestHost) -> DesignTestHost {
         state
             .model
             .schematic
@@ -208,7 +208,7 @@ mod tests {
         state
     }
 
-    fn arm_test_stretch(state: &mut AppState) {
+    fn arm_test_stretch(state: &mut DesignTestHost) {
         crate::workbench::app::arm_stretch_selection_in(
             &mut state.design.stretch_selection,
             &mut state.design.move_selection,
@@ -276,7 +276,7 @@ mod tests {
                         handle_armed_stretch_selection(
                             ui,
                             &response,
-                            &mut crate::schematic::view::canvas_parts(&mut state),
+                            &mut canvas_parts(&mut state),
                             &viewport,
                             &symbols,
                         );
@@ -364,7 +364,7 @@ mod tests {
     #[test]
     fn another_sheets_junction_neither_anchors_nor_follows_a_stretch() {
         let mut state = selected_stretch_wire_in(
-            crate::schematic::view::sheet_visibility::two_sheet_state(&[7], &[21]),
+            crate::schematic::view::sheet_visibility::two_sheet_host(&[7], &[21]),
         );
         let hidden = Junction::new(21, Point::new(10, 20));
         state
@@ -377,10 +377,7 @@ mod tests {
         state.design.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
         let symbols = schematic_symbol_context(&state);
 
-        commit_armed_stretch_selection(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            &symbols,
-        );
+        commit_armed_stretch_selection(&mut canvas_parts(&mut state), &symbols);
 
         assert_eq!(
             state.model.schematic.document().wires[0].points[1],
@@ -398,7 +395,7 @@ mod tests {
     /// wiring, so it neither follows the corner nor pins it.
     #[test]
     fn a_route_stretches_with_its_neighbour_and_leaves_another_sheets_wire() {
-        let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[7, 8], &[21]);
+        let mut state = crate::schematic::view::sheet_visibility::two_sheet_host(&[7, 8], &[21]);
         let hidden = Wire::segment(21, Point::new(20, 20), Point::new(20, 0));
         state.model.schematic.document_mut_for_test().wires = vec![
             Wire::segment(8, Point::new(0, 0), Point::new(0, 20)),
@@ -417,10 +414,7 @@ mod tests {
         state.design.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
         let symbols = schematic_symbol_context(&state);
 
-        commit_armed_stretch_selection(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            &symbols,
-        );
+        commit_armed_stretch_selection(&mut canvas_parts(&mut state), &symbols);
 
         let wire = |id: u64| {
             state
@@ -448,7 +442,7 @@ mod tests {
     #[test]
     fn another_sheets_junction_does_not_refuse_the_stretch_preview() {
         let mut state = selected_stretch_wire_in(
-            crate::schematic::view::sheet_visibility::two_sheet_state(&[7], &[21]),
+            crate::schematic::view::sheet_visibility::two_sheet_host(&[7], &[21]),
         );
         let hidden = Junction::new(21, Point::new(10, 20));
         state
@@ -460,7 +454,7 @@ mod tests {
         let symbols = schematic_symbol_context(&state);
 
         let candidate = crate::schematic::view::preview::stretch_preview_candidate(
-            &crate::schematic::view::canvas_facts(&state),
+            &canvas_facts(&state),
             &symbols,
             Point::new(0, 10),
             crate::state::StretchTarget::WireSegment {
@@ -489,10 +483,7 @@ mod tests {
         state.design.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
         let symbols = schematic_symbol_context(&state);
 
-        commit_armed_stretch_selection(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            &symbols,
-        );
+        commit_armed_stretch_selection(&mut canvas_parts(&mut state), &symbols);
 
         assert_eq!(state.model.schematic.document().wires[0], baseline);
         assert!(
@@ -519,93 +510,5 @@ mod tests {
                 .is_some()
         );
         assert!(!state.model.schematic.can_undo());
-    }
-    #[test]
-    fn stretch_requests_recheck_source_target_and_policy_without_cancelling_a_replacement() {
-        for change in [
-            "none",
-            "document",
-            "selection",
-            "target",
-            "policy",
-            "draft",
-            "modal",
-            "read-only",
-            "tool",
-            "replacement",
-        ] {
-            let mut state = selected_stretch_wire();
-            arm_test_stretch(&mut state);
-            let expected = state.design.stretch_selection.canvas.clone();
-            let mut next = expected.clone();
-            next.gesture.preview_delta = Point::new(0, 10);
-            let request = capture(
-                &crate::schematic::view::canvas_parts(&mut state),
-                TransformInputTransition {
-                    expected,
-                    next,
-                    commit: true,
-                },
-            );
-            match change {
-                "document" => state.model.active_schematic_epoch += 1,
-                "selection" => state.model.schematic.session.editor.selection.clear(),
-                "target" => state.design.stretch_selection.canvas.target = None,
-                "policy" => {
-                    state.design.stretch_selection.policy =
-                        crate::state::StretchOrthogonalPolicy::AllowDiagonal
-                }
-                "draft" => {
-                    state.design.stretch_selection.canvas.gesture.anchor = Some(Point::new(10, 0))
-                }
-                "modal" => state.settings.preferences_open = true,
-                "read-only" => state.model.schematic.session.read_only = true,
-                "tool" => state.model.schematic.arm_tool(Tool::Select),
-                "replacement" => {
-                    cancel_armed_stretch_selection_in(
-                        &mut state.design.stretch_selection,
-                        &mut state.model,
-                    );
-                    arm_test_stretch(&mut state);
-                    assert_eq!(
-                        request.transition.expected,
-                        state.design.stretch_selection.canvas
-                    );
-                    assert_eq!(request.source, editor_request_source(&state));
-                    assert_ne!(
-                        request.generation,
-                        state.design.stretch_selection.generation
-                    );
-                }
-                "none" => {}
-                _ => unreachable!(),
-            }
-            let canvas = state.design.stretch_selection.canvas.clone();
-            let symbols = schematic_symbol_context(&state);
-            apply(
-                &mut crate::schematic::view::canvas_parts(&mut state),
-                &symbols,
-                request,
-            );
-            if change == "none" {
-                assert_eq!(
-                    state.model.schematic.document().wires[0].points[1],
-                    Point::new(0, 30)
-                );
-                assert_eq!(
-                    state.model.schematic.undo_description(),
-                    Some("stretch selection")
-                );
-            } else {
-                assert_eq!(
-                    state.model.schematic.document().wires[0].points[1],
-                    Point::new(0, 20),
-                    "{change}"
-                );
-                assert!(!state.model.schematic.can_undo(), "{change}");
-                assert_eq!(state.design.stretch_selection.canvas, canvas, "{change}");
-                assert!(state.design.stretch_selection.armed, "{change}");
-            }
-        }
     }
 }

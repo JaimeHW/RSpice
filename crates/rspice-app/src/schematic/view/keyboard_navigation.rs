@@ -9,7 +9,7 @@ use rspice_schematic_editor::view::keyboard_navigation::{
 use super::{SchematicSymbolContext, parts::CanvasParts};
 use crate::workbench::TogglePreference;
 
-pub(super) fn handle_keyboard_object_navigation(
+pub(crate) fn handle_keyboard_object_navigation(
     response: &Response,
     state: &mut CanvasParts<'_>,
     symbol_context: &SchematicSymbolContext,
@@ -44,18 +44,17 @@ pub(super) fn handle_keyboard_object_navigation(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::AppState;
+pub(crate) mod tests {
     use super::*;
     use crate::schematic::view::schematic_symbol_context;
     use crate::workbench::app_state::SchematicKeyboardFocus;
     use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
-    use egui::{Context, Event, Id, Key, Modifiers, Popup, RawInput, Rect, Sense, pos2, vec2};
+    use egui::{Context, Event, Id, Key, Modifiers, RawInput, Rect, Sense, pos2, vec2};
     use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
 
     use crate::state::{Component, ComponentType, Point};
 
-    fn components() -> Vec<Component> {
+    pub(crate) fn components() -> Vec<Component> {
         vec![
             Component::new(11, ComponentType::Resistor, Point::new(10, 20)),
             Component::new(22, ComponentType::Capacitor, Point::new(30, 40)),
@@ -66,7 +65,7 @@ mod tests {
     #[test]
     fn probe_focus_is_visible_state_and_traversal_continues_into_annotations() {
         let ctx = Context::default();
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -143,7 +142,7 @@ mod tests {
             (Key::ArrowDown, 33),
         ] {
             let ctx = Context::default();
-            let mut state = AppState::default();
+            let mut state = DesignTestHost::default();
             state.model.schematic.document_mut_for_test().components = components();
             state
                 .model
@@ -169,7 +168,7 @@ mod tests {
         }
     }
 
-    fn key_input(key: Key, modifiers: Modifiers) -> RawInput {
+    pub(crate) fn key_input(key: Key, modifiers: Modifiers) -> RawInput {
         RawInput {
             screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 480.0))),
             events: vec![Event::Key {
@@ -187,7 +186,7 @@ mod tests {
         ctx: &Context,
         key: Key,
         modifiers: Modifiers,
-        state: &mut AppState,
+        state: &mut DesignTestHost,
         focus_canvas: bool,
     ) -> (bool, bool) {
         let mut outcome = (false, false);
@@ -207,7 +206,7 @@ mod tests {
                 let symbol_context = schematic_symbol_context(state);
                 let handled = handle_keyboard_object_navigation(
                     &response,
-                    &mut crate::schematic::view::canvas_parts(state),
+                    &mut canvas_parts(state),
                     &symbol_context,
                 );
                 let key_still_available = ui
@@ -222,7 +221,7 @@ mod tests {
     #[test]
     fn focused_canvas_consumes_arrow_and_changes_only_selection() {
         let ctx = Context::default();
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.document_mut_for_test().components = components();
         state
             .model
@@ -278,7 +277,7 @@ mod tests {
     #[test]
     fn unfocused_canvas_and_modified_arrow_do_not_navigate_or_consume() {
         let ctx = Context::default();
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.document_mut_for_test().components = components();
         state
             .model
@@ -329,7 +328,7 @@ mod tests {
     #[test]
     fn empty_canvas_and_disabled_preference_leave_arrows_unconsumed() {
         let ctx = Context::default();
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
 
         let (handled, key_still_available) =
             run_navigation_frame(&ctx, Key::ArrowRight, Modifiers::NONE, &mut state, true);
@@ -365,88 +364,9 @@ mod tests {
     }
 
     #[test]
-    fn modal_and_context_popup_owners_block_navigation() {
-        let ctx = Context::default();
-        let mut state = AppState::default();
-        state.model.schematic.document_mut_for_test().components = components();
-        state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_only_component(11);
-        state.shell.about = true;
-
-        let (handled, key_still_available) =
-            run_navigation_frame(&ctx, Key::ArrowRight, Modifiers::NONE, &mut state, true);
-        assert!(!handled);
-        assert!(key_still_available);
-        assert_eq!(
-            state
-                .model
-                .schematic
-                .session
-                .editor
-                .selection
-                .single_component(),
-            Some(11)
-        );
-
-        state.shell.about = false;
-        Popup::open_id(&ctx, Id::new("test-context-owner"));
-        let (handled, key_still_available) =
-            run_navigation_frame(&ctx, Key::ArrowRight, Modifiers::NONE, &mut state, true);
-        assert!(!handled);
-        assert!(key_still_available);
-        assert_eq!(
-            state
-                .model
-                .schematic
-                .session
-                .editor
-                .selection
-                .single_component(),
-            Some(11)
-        );
-        Popup::close_all(&ctx);
-    }
-
-    #[test]
-    fn focused_select_canvas_backspace_deletes_immediately_in_one_undo_entry() {
-        let ctx = Context::default();
-        let mut state = AppState::default();
-        state.model.schematic.document_mut_for_test().components = components();
-        state.sync_active_schematic_to_workspace();
-        state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_only_component(22);
-        state.model.schematic.init_undo_history();
-
-        let (handled, key_still_available) =
-            run_navigation_frame(&ctx, Key::Backspace, Modifiers::NONE, &mut state, true);
-
-        assert!(handled);
-        assert!(!key_still_available);
-        assert_eq!(state.model.schematic.document().components.len(), 2);
-        assert!(!state.dialog_modal_open());
-        assert_eq!(
-            state.model.schematic.undo_description(),
-            Some("delete selection")
-        );
-        assert!(state.model.schematic.undo());
-        assert_eq!(state.model.schematic.document().components.len(), 3);
-        assert!(!state.model.schematic.can_undo());
-    }
-
-    #[test]
     fn focused_select_canvas_consumes_backspace_but_never_edits_read_only_content() {
         let ctx = Context::default();
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.document_mut_for_test().components = components();
         state
             .model

@@ -849,7 +849,7 @@ pub(super) fn badge_quantity(value: f64, unit: &str) -> String {
     }
 }
 
-pub(super) fn operating_point_annotations(
+pub(crate) fn operating_point_annotations(
     state: &CanvasFacts<'_>,
 ) -> Vec<OperatingPointCanvasAnnotation> {
     let Some((dc_op, retained_annotation, device_op)) = annotated_operating_point(state) else {
@@ -968,13 +968,12 @@ fn device_power<'a>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::state::{
         AnalysisResult, AnalysisType, CellViewRef, Component, ComponentType, DcOpResult, Junction,
         OperatingPointValue, SimulationRun, ViewType, Wire,
     };
-    use crate::workbench::app_state::AppState;
     use crate::workbench::design::test_host::{DesignTestHost, canvas_facts, canvas_parts};
     use std::collections::HashMap;
 
@@ -1119,8 +1118,8 @@ mod tests {
         );
     }
 
-    fn state_with_operating_point() -> AppState {
-        let mut state = AppState::default();
+    pub(crate) fn state_with_operating_point() -> DesignTestHost {
+        let mut state = DesignTestHost::default();
         let mut component = Component::new(1, ComponentType::VoltageSource, Point::new(40, 30));
         component.name = "VBIAS".to_owned();
         state
@@ -1174,7 +1173,7 @@ mod tests {
     }
 
     /// A badge's text, its lines joined.
-    fn text(annotation: &OperatingPointCanvasAnnotation) -> String {
+    pub(crate) fn text(annotation: &OperatingPointCanvasAnnotation) -> String {
         annotation.lines.join(" · ")
     }
 
@@ -1184,8 +1183,7 @@ mod tests {
     #[test]
     fn operating_point_policy_maps_latest_values_to_exact_schematic_points() {
         let state = state_with_operating_point();
-        let annotations =
-            operating_point_annotations(&crate::schematic::view::canvas_facts(&state));
+        let annotations = operating_point_annotations(&canvas_facts(&state));
 
         assert_eq!(annotations.len(), 2);
         assert_eq!(
@@ -1219,8 +1217,7 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(crate::state::NetLabel::new(9, Point::new(20, 10), "OUT"));
-        let annotations =
-            operating_point_annotations(&crate::schematic::view::canvas_facts(&state));
+        let annotations = operating_point_annotations(&canvas_facts(&state));
         assert_eq!(
             annotations[0].subject,
             BadgeSubject::Net {
@@ -1274,15 +1271,10 @@ mod tests {
         let mut state = state_with_operating_point();
         state.design.schematic_visibility.back_annotation =
             SchematicBackAnnotationContent::VoltagesOnly;
-        assert_eq!(
-            operating_point_annotations(&crate::schematic::view::canvas_facts(&state)).len(),
-            1
-        );
+        assert_eq!(operating_point_annotations(&canvas_facts(&state)).len(), 1);
 
         state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
-        assert!(
-            operating_point_annotations(&crate::schematic::view::canvas_facts(&state)).is_empty()
-        );
+        assert!(operating_point_annotations(&canvas_facts(&state)).is_empty());
     }
 
     #[test]
@@ -1301,8 +1293,7 @@ mod tests {
         state.design.schematic_visibility.back_annotation =
             SchematicBackAnnotationContent::VoltagesCurrentsAndPower;
 
-        let annotations =
-            operating_point_annotations(&crate::schematic::view::canvas_facts(&state));
+        let annotations = operating_point_annotations(&canvas_facts(&state));
 
         assert!(text(&annotations[1]).contains("P(vbias)"));
         assert!(text(&annotations[1]).ends_with('W'));
@@ -1354,8 +1345,7 @@ mod tests {
             }],
         });
 
-        let annotations =
-            operating_point_annotations(&crate::schematic::view::canvas_facts(&state));
+        let annotations = operating_point_annotations(&canvas_facts(&state));
         assert_eq!(annotations.len(), 2, "voltage plus selected device OP");
         assert!(text(&annotations[1]).contains("VBIAS [SOURCE]"));
         assert!(text(&annotations[1]).contains("id=2mA"));
@@ -1687,15 +1677,11 @@ mod tests {
     #[test]
     fn topology_edit_invalidates_retained_operating_point_positions() {
         let mut state = state_with_operating_point();
-        assert!(
-            !operating_point_annotations(&crate::schematic::view::canvas_facts(&state)).is_empty()
-        );
+        assert!(!operating_point_annotations(&canvas_facts(&state)).is_empty());
 
         state.model.schematic.bump_topology_version();
 
-        assert!(
-            operating_point_annotations(&crate::schematic::view::canvas_facts(&state)).is_empty()
-        );
+        assert!(operating_point_annotations(&canvas_facts(&state)).is_empty());
     }
 
     #[test]
@@ -1718,69 +1704,13 @@ mod tests {
         );
 
         state.model.simulation.view.active_analysis_idx = Some(1);
-        let hot = operating_point_annotations(&crate::schematic::view::canvas_facts(&state));
+        let hot = operating_point_annotations(&canvas_facts(&state));
         assert!(text(&hot[0]).contains("2.5"), "{hot:?}");
         assert!(text(&hot[1]).contains("4 mA"), "{hot:?}");
 
         state.model.simulation.view.active_analysis_idx = Some(0);
-        let nominal = operating_point_annotations(&crate::schematic::view::canvas_facts(&state));
+        let nominal = operating_point_annotations(&canvas_facts(&state));
         assert!(text(&nominal[0]).contains("1.25"));
         assert!(text(&nominal[1]).contains("2 mA"));
-    }
-
-    /// Transient voltages badge the nets and the selected device as the DC
-    /// operating point does, from the run's transient read at results cursor
-    /// A, linearly between time points, and at the run's last time point
-    /// while A is off the run; never from the DC operating point beside it.
-    #[test]
-    fn transient_voltages_annotate_the_transient_at_cursor_a() {
-        let mut state = state_with_operating_point();
-        state.model.simulation.retained.runs[0].add_analysis(
-            AnalysisResult::new(2, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-                crate::state::RetainedTrace::new(
-                    "V(out)",
-                    vec![0.0, 1.0e-3, 2.0e-3],
-                    vec![0.0, 1.0, 3.0],
-                    "#ffbd2e",
-                ),
-                crate::state::RetainedTrace::new(
-                    "I(vbias)",
-                    vec![0.0, 1.0e-3, 2.0e-3],
-                    vec![0.0, -1.0e-3, -3.0e-3],
-                    "#4fc1ff",
-                ),
-            ]),
-        );
-        state.design.schematic_visibility.annotations =
-            SchematicAnnotationVisibility::TransientVoltages;
-        let read = |state: &AppState| {
-            operating_point_annotations(&crate::schematic::view::canvas_facts(state))
-                .iter()
-                .map(text)
-                .collect::<Vec<_>>()
-        };
-
-        assert_eq!(read(&state), ["out 3 V", "I(vbias) = -3 mA"]);
-        assert_eq!(
-            transient_annotation_status(&state.model, state.results.results.session.cursors.a),
-            "Transient voltages at 2 ms, the end of the run. Place cursor A to choose another instant."
-        );
-
-        state.results.results.session.cursors.a = Some(1.5e-3);
-        assert_eq!(read(&state), ["out 2 V", "I(vbias) = -2 mA"]);
-        assert_eq!(
-            transient_annotation_status(&state.model, state.results.results.session.cursors.a),
-            "Transient voltages at 1.5 ms, cursor A."
-        );
-
-        state.results.results.session.cursors.a = Some(5.0);
-        assert_eq!(read(&state), ["out 3 V", "I(vbias) = -3 mA"]);
-
-        state.model.simulation.retained.runs[0].analyses.truncate(1);
-        assert!(read(&state).is_empty());
-        assert_eq!(
-            transient_annotation_status(&state.model, state.results.results.session.cursors.a),
-            "No transient result is selected: run a transient analysis to annotate its voltages."
-        );
     }
 }
