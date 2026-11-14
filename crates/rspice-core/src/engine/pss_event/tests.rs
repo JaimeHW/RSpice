@@ -274,8 +274,8 @@ fn event_shooting_holds_a_veriloga_samplers_crossing() {
 }
 
 /// A divider whose output toggles at every clock edge comes back only every
-/// second period, and is refused by name with the fundamental that would
-/// close it.
+/// second period: PSS hands it to event shooting, which refuses it by name
+/// with the fundamental that would close it.
 #[cfg(feature = "veriloga")]
 #[test]
 fn a_discrete_state_that_repeats_every_second_period_is_refused_by_name() {
@@ -303,7 +303,7 @@ fn a_discrete_state_that_repeats_every_second_period_is_refused_by_name() {
     );
     let netlist = Netlist::parse(&deck).expect("the deck parses");
     let error = Engine::new(SimulationConfig::default())
-        .run_event_pss(&netlist, &PssConfig::new(1.0e6), None, &NoAbort)
+        .run_pss_operating_point_with_abort(&netlist, PssConfig::new(1.0e6), &NoAbort)
         .expect_err("a divide-by-two orbit is not periodic at the clock");
     let text = error.to_string();
     assert!(
@@ -416,4 +416,81 @@ fn event_pac_meets_the_sampled_data_transfer_of_the_switched_capacitor_twin() {
             assert!((converted - got).norm() <= 1.0e-12 * got.norm().max(1.0e-30));
         }
     }
+}
+
+/// A gain an `@(initial_step)` block sets is state neither native shooting
+/// nor harmonic balance carries: both evaluated the module with the gain at
+/// its declared zero and returned a flat orbit, 0 V where the transient
+/// swings 1.69 V. Both now refuse the module by name, and PSS hands it to
+/// event shooting, whose orbit meets the closed form
+/// 2 mA/V · 1 V · |1 kΩ ∥ 100 pF| at 1 MHz = 1.69347 V.
+#[cfg(feature = "veriloga")]
+#[test]
+fn a_gain_an_initial_step_sets_is_carried_by_event_shooting_alone() {
+    let model = write_module(
+        "va_initial_gain",
+        "`include \"disciplines.vams\"\n\
+         module va_initial_gain(inp, out);\n\
+         input inp;\n\
+         output out;\n\
+         electrical inp, out;\n\
+         real gain;\n\
+         analog begin\n\
+         @(initial_step) gain = 2.0;\n\
+         I(out) <+ -gain * V(inp) * 1m;\n\
+         end\n\
+         endmodule\n",
+    );
+    let deck = format!(
+        "va initial gain\n\
+         vin inp 0 sin(0 1 1meg)\n\
+         XG inp out va_initial_gain\n\
+         rl out 0 1k\n\
+         cl out 0 100p\n\
+         .va \"{model}\" va_initial_gain\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    for (analysis, error) in [
+        (
+            "native shooting",
+            engine
+                .run_pss_with_continuation_state_abort(&netlist, PssConfig::new(1.0e6), &NoAbort)
+                .map(|_| ())
+                .expect_err("native shooting does not carry the gain"),
+        ),
+        (
+            "harmonic balance",
+            engine
+                .run_hb(
+                    &netlist,
+                    crate::analysis::HbConfig::new(1.0e6).with_harmonics(4),
+                )
+                .map(|_| ())
+                .expect_err("harmonic balance does not carry the gain"),
+        ),
+    ] {
+        let text = error.to_string();
+        assert!(
+            text.contains("analysis.periodic.veriloga")
+                && text.contains("'XG'")
+                && text.contains("`gain` is written by an event"),
+            "{analysis}: {text}"
+        );
+    }
+    let point = engine
+        .run_pss_operating_point_with_abort(&netlist, PssConfig::new(1.0e6), &NoAbort)
+        .expect("event shooting carries the gain");
+    assert!(point.is_event_orbit(), "the gain is event-shot");
+    let peak = waveform(&point.analysis().result, "out")
+        .iter()
+        .fold(0.0_f64, |peak, value| peak.max(value.abs()));
+    let omega_rc = 2.0 * std::f64::consts::PI * 1.0e6 * 1.0e3 * 100.0e-12;
+    let expected = 2.0e-3 * 1.0e3 / (1.0 + omega_rc * omega_rc).sqrt();
+    eprintln!("initial-step gain: peak {peak} against {expected}");
+    assert!(
+        (peak - expected).abs() <= 1.0e-3 * expected,
+        "peak {peak} against {expected}"
+    );
 }

@@ -1283,6 +1283,79 @@ fn retained_state_refusal(
     None
 }
 
+/// A periodic analysis refuses a runtime Verilog-A instance with a variable
+/// an event block writes, naming the variables.
+///
+/// A variable an `@(initial_step)` block or a located event sets holds that
+/// value between the events that write it (VAMS-2023 section 5.10), and no
+/// path need read it before assigning it, so [`retained_state_refusal`] does
+/// not see it. Neither the shooting period map nor a harmonic-balance
+/// spectrum carries it: both evaluate the instance with the variable at its
+/// declared start, and a gain an `@(initial_step)` sets would give a flat
+/// orbit. Event shooting carries it, so PSS dispatches such a circuit there.
+fn event_written_state_refusal(
+    circuit: &CircuitData,
+    analysis: CapabilityAnalysis,
+) -> Option<UnsupportedCapabilityError> {
+    #[cfg(feature = "veriloga")]
+    {
+        if !solves_a_periodic_steady_state(analysis) {
+            return None;
+        }
+        for device in circuit.veriloga_devices().iter() {
+            let mut names: Vec<&str> = Vec::new();
+            for (slot, (name, _)) in device.variables().enumerate() {
+                let base = name.split_once('[').map_or(name, |(base, _)| base);
+                if device.discrete_state_value(slot).is_some() && !names.contains(&base) {
+                    names.push(base);
+                }
+            }
+            let Some((last, rest)) = names.split_last() else {
+                continue;
+            };
+            let listed = if rest.is_empty() {
+                format!(
+                    "`{last}` is written by an event, so it holds the value that event gave it \
+                     until another writes it"
+                )
+            } else {
+                let rest = rest
+                    .iter()
+                    .map(|name| format!("`{name}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "{rest} and `{last}` are written by events, so they hold the values those \
+                     events gave them until others write them"
+                )
+            };
+            let instance = device.name.to_string();
+            let module = device.model_name().to_owned();
+            return Some(
+                UnsupportedCapabilityError::new(
+                    PERIODIC_VERILOGA,
+                    format!(
+                        "{} '{instance}' (module '{module}') cannot take part in {}: {listed}, \
+                         which {} periodic solution does not carry",
+                        CapabilityFamily::VerilogARuntime.label(),
+                        analysis.label(),
+                        if matches!(analysis, CapabilityAnalysis::Pss) {
+                            "native shooting's"
+                        } else {
+                            "this analysis's"
+                        },
+                    ),
+                )
+                .for_analysis_kind(analysis.kind())
+                .for_instance(instance)
+                .for_module(module),
+            );
+        }
+    }
+    let _ = (circuit, analysis);
+    None
+}
+
 /// The token of [`non_rational_transfer_refusal`].
 const NON_RATIONAL_LAPLACE: &str = "analysis.laplace.non_rational";
 
@@ -1395,6 +1468,7 @@ impl Engine {
         carrier: Option<PeriodicCarrier>,
     ) -> Result<(), SimulationError> {
         if let Some(refusal) = retained_state_refusal(circuit, analysis)
+            .or_else(|| event_written_state_refusal(circuit, analysis))
             .or_else(|| non_rational_transfer_refusal(circuit, analysis))
         {
             return Err(refusal.into());
@@ -1485,12 +1559,13 @@ impl Engine {
 
 /// Whether native shooting refuses a runtime Verilog-A module of `circuit`
 /// for state its period map does not carry: an event operator, `$abstime`,
-/// a variable kept between time points, `idt`, a `ddt` it does not
-/// contribute as a charge, or a voltage contribution. Event shooting carries
+/// a variable kept between time points or written by an event, `idt`, a
+/// `ddt` it does not contribute as a charge, or a voltage contribution. Event shooting carries
 /// that state through the transient itself.
 pub(in crate::engine) fn native_shooting_refuses_runtime_veriloga(circuit: &CircuitData) -> bool {
     pss_veriloga_refusal(circuit, CapabilityAnalysis::Pss).is_some()
         || retained_state_refusal(circuit, CapabilityAnalysis::Pss).is_some()
+        || event_written_state_refusal(circuit, CapabilityAnalysis::Pss).is_some()
 }
 
 /// Native shooting's refusal of a runtime Verilog-A operator whose history
