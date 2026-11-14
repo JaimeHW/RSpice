@@ -41,7 +41,20 @@ impl ValidationResult {
 }
 
 /// Execute the check command
-pub fn execute(args: CheckArgs, config: &Config, quiet: bool) -> Result<(), CliError> {
+pub fn execute(mut args: CheckArgs, config: &Config, quiet: bool) -> Result<(), CliError> {
+    let timings = args.timings.clone().map(|path| {
+        let collector = crate::timings::RunTimings::new();
+        args.phase_timings = Some(std::sync::Arc::clone(&collector));
+        (collector, path, args.input.clone())
+    });
+    let checked = check(args, config, quiet);
+    let timings_written = timings.map_or(Ok(()), |(collector, path, input)| {
+        collector.write(&path, "check", &input)
+    });
+    checked.and(timings_written)
+}
+
+fn check(args: CheckArgs, config: &Config, quiet: bool) -> Result<(), CliError> {
     if !quiet && !args.json {
         crate::console::line(format_args!("Checking: {}", args.input.display()))?;
     }
@@ -139,20 +152,24 @@ fn validation_failure(error: CliError, issues: &[ValidationIssue]) -> CliError {
 fn validate_input(args: &CheckArgs, config: &Config) -> Result<ValidationResult, CliError> {
     use rspice_core::execution::{DeckPlan, DeckPlanError, MaterializedRunError};
     let limits = config.resources.limits();
-    let source = crate::commands::read_netlist_input(&args.input, &args.netlist_options, config)?;
-    let decks = rspice_core::netlist::multi_run::try_expand_multi_run_with_limits_and_abort(
-        &source,
-        limits,
-        &crate::abort::ProcessAbort,
-    )
-    .map_err(|error| {
-        if error.is_aborted() {
-            return CliError::Interrupted;
-        }
-        if let Some(limit) = error.resource_limit_error() {
-            return rspice_core::SimulationError::ResourceLimit(limit).into();
-        }
-        CliError::parse_error(error.to_string())
+    let timings = args.phase_timings.as_deref();
+    let decks = crate::timings::time(timings, crate::timings::Phase::Expand, || {
+        let source =
+            crate::commands::read_netlist_input(&args.input, &args.netlist_options, config)?;
+        rspice_core::netlist::multi_run::try_expand_multi_run_with_limits_and_abort(
+            &source,
+            limits,
+            &crate::abort::ProcessAbort,
+        )
+        .map_err(|error| {
+            if error.is_aborted() {
+                return CliError::Interrupted;
+            }
+            if let Some(limit) = error.resource_limit_error() {
+                return rspice_core::SimulationError::ResourceLimit(limit).into();
+            }
+            CliError::parse_error(error.to_string())
+        })
     })?;
     let plan_error = |error| match error {
         DeckPlanError::Aborted => CliError::Interrupted,
@@ -176,14 +193,17 @@ fn validate_input(args: &CheckArgs, config: &Config) -> Result<ValidationResult,
         let mut validate = || -> Result<Vec<(String, ValidationResult)>, CliError> {
             let options =
                 crate::commands::input::parse_options(&args.netlist_options, limits, true);
-            let netlist = crate::commands::input::parse_source(
-                &deck.source,
-                &args.input,
-                &args.netlist_options,
-                config,
-                options,
-                None,
-            )?;
+            let netlist = crate::timings::time(timings, crate::timings::Phase::Parse, || {
+                crate::commands::input::parse_source(
+                    &deck.source,
+                    &args.input,
+                    &args.netlist_options,
+                    config,
+                    options,
+                    None,
+                )
+            })?;
+            let preflight_started = timings.map(|_| std::time::Instant::now());
             let plan =
                 DeckPlan::from_netlist_with_abort(&netlist, &limits, &crate::abort::ProcessAbort)
                     .map_err(plan_error)?;
@@ -205,6 +225,9 @@ fn validate_input(args: &CheckArgs, config: &Config) -> Result<ValidationResult,
                     },
                 )
                 .into());
+            }
+            if let (Some(timings), Some(started)) = (timings, preflight_started) {
+                timings.add(crate::timings::Phase::Preflight, started.elapsed());
             }
             let mut results = Vec::new();
             for index in 0..materializer.len() {
@@ -259,11 +282,15 @@ fn validation_engine(
             .map(crate::cli::SpiceDialectArg::simulation_dialect),
         ..Default::default()
     };
-    let simulation_config = rspice_core::resolve_simulation_config(
+    let mut simulation_config = rspice_core::resolve_simulation_config(
         &config.core_simulation_config(),
         Some(&netlist.options),
         &overrides,
     );
+    simulation_config.phase_timings = args
+        .phase_timings
+        .as_deref()
+        .map(crate::timings::RunTimings::engine);
     Ok(Engine::try_new_with_resolved_config(simulation_config)?)
 }
 
@@ -274,18 +301,23 @@ fn validate_netlist(
 ) -> Result<ValidationResult, CliError> {
     let engine = validation_engine(netlist, args, config)?;
     let resource_limits = engine.config().resource_limits;
-    let deferred = super::preflight::check_requests(netlist, &args.input, resource_limits)?;
+    let timings = args.phase_timings.as_deref();
+    let deferred = crate::timings::time(timings, crate::timings::Phase::Preflight, || {
+        super::preflight::check_requests(netlist, &args.input, resource_limits)
+    })?;
     rspice_core::netlist::validate_output_symbols_with_abort(netlist, &crate::abort::ProcessAbort)
         .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
-    let flattened = rspice_core::netlist::flatten_netlist_with_models_config_with_abort(
-        netlist,
-        rspice_core::netlist::FlattenerConfig {
-            max_depth: resource_limits.max_hierarchy_depth,
-            max_elements: resource_limits.max_flattened_elements,
-            ..Default::default()
-        },
-        &crate::abort::ProcessAbort,
-    )
+    let flattened = crate::timings::time(timings, crate::timings::Phase::Flatten, || {
+        rspice_core::netlist::flatten_netlist_with_models_config_with_abort(
+            netlist,
+            rspice_core::netlist::FlattenerConfig {
+                max_depth: resource_limits.max_hierarchy_depth,
+                max_elements: resource_limits.max_flattened_elements,
+                ..Default::default()
+            },
+            &crate::abort::ProcessAbort,
+        )
+    })
     .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
     let mut result = ValidationResult::default();
     for line in deferred {
@@ -953,6 +985,8 @@ mod tests {
             strict: false,
             converters: false,
             json: false,
+            timings: None,
+            phase_timings: None,
         };
         for mode in ["default", "fast", "robust"] {
             let mut config = Config::default();
@@ -1000,6 +1034,8 @@ mod tests {
                 strict: false,
                 converters: false,
                 json: false,
+                timings: None,
+                phase_timings: None,
             },
             &Config::default(),
             true,
@@ -1047,6 +1083,8 @@ mod tests {
                 strict: false,
                 converters: false,
                 json: false,
+                timings: None,
+                phase_timings: None,
             },
             &Config::default(),
             true,

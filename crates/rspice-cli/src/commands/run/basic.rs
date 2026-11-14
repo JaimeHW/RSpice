@@ -1222,6 +1222,12 @@ pub(super) fn finish_transient_result(
     )?;
 
     if let Some(resolved) = ctx.resolve_output("tran") {
+        // The transient publishes here rather than through
+        // `publish_analysis_result`, so its output is timed here.
+        let _output_timing = crate::timings::guard(
+            ctx.args.phase_timings.as_deref(),
+            crate::timings::Phase::Output,
+        );
         let analysis_id = resolved.analysis("tran")?;
         let output_path = resolved.path;
         let projection = output_projection()?;

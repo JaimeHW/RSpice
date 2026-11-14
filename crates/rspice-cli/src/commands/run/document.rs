@@ -87,25 +87,29 @@ pub(super) fn publish_analysis_result(
     document: impl FnOnce() -> Result<AnalysisResultDocumentBuilder, ResultDocumentError>,
     flat: impl FnOnce(&Path, OutputFormat) -> Result<(), CliError>,
 ) -> Result<(), CliError> {
-    let published = match ctx.format {
-        OutputFormat::Json => {
-            let builder = document().map_err(|error| document_error(ctx, analysis_id, error))?;
-            let built = finish(ctx, analysis_id, builder)?;
-            let published = typed_publication(path, &built)?;
-            write_document(ctx, path, &built)?;
-            published
-        }
-        format => {
-            flat(path, format)?;
-            PublishedResult {
-                analysis_id: analysis_id.tag(),
-                result_kind: None,
-                schema,
-                artifact: path.to_path_buf(),
-                source_sample_presence: None,
+    let timings = ctx.args.phase_timings.as_deref();
+    let published = crate::timings::time(timings, crate::timings::Phase::Output, || {
+        Ok::<_, CliError>(match ctx.format {
+            OutputFormat::Json => {
+                let builder =
+                    document().map_err(|error| document_error(ctx, analysis_id, error))?;
+                let built = finish(ctx, analysis_id, builder)?;
+                let published = typed_publication(path, &built)?;
+                write_document(ctx, path, &built)?;
+                published
             }
-        }
-    };
+            format => {
+                flat(path, format)?;
+                PublishedResult {
+                    analysis_id: analysis_id.tag(),
+                    result_kind: None,
+                    schema,
+                    artifact: path.to_path_buf(),
+                    source_sample_presence: None,
+                }
+            }
+        })
+    })?;
     ctx.record_published(published);
     Ok(())
 }

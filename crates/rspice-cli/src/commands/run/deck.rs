@@ -593,6 +593,10 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
         timing_checks: args.hdl_timing_checks.unwrap_or(true),
         ..base.hdl
     };
+    base.phase_timings = args
+        .phase_timings
+        .as_deref()
+        .map(crate::timings::RunTimings::engine);
 
     // Configured presets belong to the base layer. Only an explicit CLI
     // selection may replace convergence controls authored in the deck.

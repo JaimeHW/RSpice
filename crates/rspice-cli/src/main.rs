@@ -37,6 +37,7 @@ mod hdf5;
 mod input_file;
 mod observability;
 mod report;
+mod timings;
 
 use cli::{Cli, Commands, Config};
 

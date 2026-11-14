@@ -548,6 +548,15 @@ pub struct RunArgs {
     #[arg(long, value_name = "FILE")]
     pub summary: Option<PathBuf>,
 
+    /// Write phase timings as JSON to PATH (`-` for stderr)
+    #[arg(long, value_name = "PATH", long_help = crate::timings::TIMINGS_HELP)]
+    pub timings: Option<PathBuf>,
+
+    /// The collector `--timings` reports from, shared by every engine the
+    /// run builds.
+    #[arg(skip)]
+    pub(crate) phase_timings: Option<std::sync::Arc<crate::timings::RunTimings>>,
+
     // =========================================================================
     // Advanced RF/Analog Analysis Options
     // =========================================================================
@@ -831,6 +840,14 @@ pub struct CheckArgs {
     /// Output in JSON format
     #[arg(long)]
     pub json: bool,
+
+    /// Write phase timings as JSON to PATH (`-` for stderr)
+    #[arg(long, value_name = "PATH", long_help = crate::timings::TIMINGS_HELP)]
+    pub timings: Option<PathBuf>,
+
+    /// The collector `--timings` reports from.
+    #[arg(skip)]
+    pub(crate) phase_timings: Option<std::sync::Arc<crate::timings::RunTimings>>,
 }
 
 /// Arguments for the `convert` subcommand

@@ -156,7 +156,17 @@ struct DeckOutcome {
     outputs: Vec<PathBuf>,
 }
 
-pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Result<(), CliError> {
+pub fn execute(
+    mut args: RunArgs,
+    config: &Config,
+    verbose: bool,
+    quiet: bool,
+) -> Result<(), CliError> {
+    let timings = args.timings.clone().map(|path| {
+        let collector = crate::timings::RunTimings::new();
+        args.phase_timings = Some(std::sync::Arc::clone(&collector));
+        (collector, path, args.input.clone())
+    });
     let quiet = quiet || args.summary.as_deref() == Some(std::path::Path::new("-"));
     let verbose = verbose && !quiet;
     let from_stdin = crate::commands::is_stdin(&args.input);
@@ -210,10 +220,13 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         destinations.clone(),
         destination_scope,
     );
+    let timings_written = timings.map_or(Ok(()), |(collector, path, input)| {
+        collector.write(&path, "run", &input)
+    });
     // Publication can wrap a collision in an I/O or simulation error. Keep its
     // argument-error category even when execution exits before writing reports.
     destinations.finish()?;
-    result
+    result.and(timings_written)
 }
 
 fn execute_with_destinations(
@@ -266,6 +279,8 @@ fn execute_with_destinations(
     let resource_limits = config.resources.limits();
     let parse_options = parse_options_for_run(&args, resource_limits);
     log::info!("Loading netlist: {}", args.input.display());
+    let timings = args.phase_timings.as_deref();
+    let expand_started = timings.map(|_| Instant::now());
     let source = if from_stdin {
         crate::commands::read_stdin_source_with_limits_and_abort(
             resource_limits,
@@ -289,18 +304,26 @@ fn execute_with_destinations(
         &crate::abort::ProcessAbort,
     )
     .map_err(|error| map_multi_run_error(error, args.timeout))?;
+    if let (Some(timings), Some(started)) = (timings, expand_started) {
+        timings.add(crate::timings::Phase::Expand, started.elapsed());
+    }
     naming::disambiguate_run_labels(&mut plan);
     let multi_run = plan.len() > 1;
     let mut prepared = Vec::with_capacity(plan.len());
     let mut concrete_runs = 0usize;
     for deck in &plan {
-        let prepared_deck = planning::PreparedDeck::prepare(&deck.source, &args, config)?
-            .preflight(
-                &args,
-                config,
-                multi_run || args.corners.is_some(),
-                deck.label.as_deref(),
-            )?;
+        let parsed = crate::timings::time(timings, crate::timings::Phase::Parse, || {
+            planning::PreparedDeck::prepare(&deck.source, &args, config)
+        })?;
+        let prepared_deck =
+            crate::timings::time(timings, crate::timings::Phase::Preflight, || {
+                parsed.preflight(
+                    &args,
+                    config,
+                    multi_run || args.corners.is_some(),
+                    deck.label.as_deref(),
+                )
+            })?;
         concrete_runs = concrete_runs.saturating_add(prepared_deck.runs());
         prepared.push(prepared_deck);
         if concrete_runs > resource_limits.max_batch_runs {
@@ -911,7 +934,12 @@ fn run_recorded_deck(
             }
 
             ran_analysis = true;
-            if let Err(e) = ctx.run_analysis(analysis) {
+            let ran = crate::timings::analysis(
+                args.phase_timings.as_deref(),
+                naming::analysis_output_tag(analysis).unwrap_or("other"),
+                || ctx.run_analysis(analysis),
+            );
+            if let Err(e) = ran {
                 if is_run_setup_or_output_error(&e) {
                     return Err(e);
                 }
@@ -928,7 +956,10 @@ fn run_recorded_deck(
                     "No analysis commands - running default DC OP..."
                 ))?;
             }
-            if let Err(e) = basic::run_dc_op(&ctx) {
+            let ran = crate::timings::analysis(args.phase_timings.as_deref(), "op", || {
+                basic::run_dc_op(&ctx)
+            });
+            if let Err(e) = ran {
                 if is_run_setup_or_output_error(&e) {
                     return Err(e);
                 }
