@@ -426,7 +426,7 @@ const fn pss_admissible_generated() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::HbAdmissibleVerilogA,
         token: HB_VERILOGA_OPERATOR,
-        condition: "every generated compact model harmonic balance admits (residual F(x) + dQ(x)/dt with nothing kept between evaluations); its charges are integrated over the period from the state the period starts at",
+        condition: "every generated compact model harmonic balance admits whose residual is F(x) + dQ(x)/dt with nothing kept between evaluations, no `ddt` carried as an unknown of its own and no voltage contribution; its charges are integrated over the period from the state the period starts at",
         evidence: PSS_GENERATED_EVIDENCE,
     }
 }
@@ -1004,6 +1004,15 @@ const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[
 const PSS_GENERATED_SOURCE_BRANCH: &str = "it has a voltage contribution (a source branch), which \
      ties nodes the shooting coordinates would each fix at the period start";
 
+/// Why shooting refuses a generated model with an operator site harmonic
+/// balance carries as an unknown of its own: its period map integrates the
+/// charges F(x) + dQ(x)/dt holds, and no settled transient has confirmed it
+/// on a residual of another form.
+#[cfg(feature = "veriloga-builtins-base")]
+const PSS_GENERATED_CARRIED_SITE: &str = "its residual is not F(x) + dQ(x)/dt: harmonic balance \
+     carries a `ddt` or `idt` of it as an unknown of its own, and no settled transient has \
+     confirmed shooting's period map on it";
+
 /// Harmonic balance refuses a generated compact model whose generator could
 /// not prove its residual `F(x) + dQ(x)/dt`, with the generator's reason, or
 /// one whose harmonics have not been checked, with what is missing.
@@ -1020,6 +1029,11 @@ fn hb_generated_refusal(
                     .iter()
                     .find(|(model, _)| *model == device.model_name)
                     .map(|(_, reason)| *reason)
+            })
+            .or_else(|| {
+                (matches!(analysis, CapabilityAnalysis::Pss)
+                    && !device.harmonic_balance_periodic_sites().is_empty())
+                .then_some(PSS_GENERATED_CARRIED_SITE)
             })
             .or_else(|| {
                 (matches!(analysis, CapabilityAnalysis::Pss)

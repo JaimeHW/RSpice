@@ -571,8 +571,10 @@ Q1 cx bx 0 0 qmod
             .expect_err("MEXTRAM's residual is not F(x) + dQ(x)/dt")
             .to_string();
         assert!(
-            pss.contains("it scales a `ddt` by a quantity that varies with bias"),
-            "the shooting PSS must name the generator's reason: {pss}"
+            pss.contains(
+                "harmonic balance carries a `ddt` or `idt` of it as an unknown of its own"
+            ),
+            "the shooting PSS must name the site it does not take: {pss}"
         );
     }
 }

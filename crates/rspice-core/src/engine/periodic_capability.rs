@@ -362,6 +362,12 @@ const RUNTIME_VERILOGA_HB_RESIDUAL: &str = "an analog body of memoryless equatio
 const GENERATED_VERILOGA_HB_RESIDUAL: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \
      charges it contributes, F(x) + dQ(x)/dt, with every other `ddt` carried as an unknown \
      of its own, no `idt`, no event operator and no variable the next evaluation reads back";
+/// The condition behind the state shooting's period map carries for a
+/// generated compact model: the charges of F(x) + dQ(x)/dt and nothing else.
+const GENERATED_VERILOGA_PSS_STATE: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \
+     charges it contributes, F(x) + dQ(x)/dt, with no `ddt` or `idt` carried as an unknown \
+     of its own, no voltage contribution, no event operator and no variable the next \
+     evaluation reads back";
 /// One reason covers all six contracts for a mixed Verilog-AMS module, so it
 /// is stated once instead of six near-identical times.
 const MIXED_SIGNAL_INTERLEAVE: &str = "periodic steady state with running discrete state (P7): a mixed Verilog-AMS module's \
@@ -696,7 +702,7 @@ pub(crate) const fn periodic_capability_descriptor(
             dynamic_state: Complete,
             small_signal: Inapplicable,
             noise: Absent("periodic generated Verilog-A noise sources are not declared"),
-            pss_state: Restricted(GENERATED_VERILOGA_HB_RESIDUAL),
+            pss_state: Restricted(GENERATED_VERILOGA_PSS_STATE),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         // A mixed module refuses all six outright, and for one reason rather
@@ -1370,11 +1376,10 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
                 }
                 F::GeneratedVerilogA => {
                     #[cfg(feature = "veriloga-builtins-base")]
-                    if circuit
-                        .generated_veriloga_devices
-                        .iter()
-                        .any(|device| device.harmonic_balance_refusal().is_some())
-                    {
+                    if circuit.generated_veriloga_devices.iter().any(|device| {
+                        device.harmonic_balance_refusal().is_some()
+                            || !device.harmonic_balance_periodic_sites().is_empty()
+                    }) {
                         gaps.push(CapabilityGap::new(
                             family,
                             "generated Verilog-A integration state outside F(x) + dQ(x)/dt",
