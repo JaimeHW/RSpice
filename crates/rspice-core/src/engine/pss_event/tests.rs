@@ -313,8 +313,8 @@ fn a_discrete_state_that_repeats_every_second_period_is_refused_by_name() {
     );
 }
 
-/// A module whose `absdelay` history no coordinate carries is refused by
-/// name, with its instance and module.
+/// A module whose `absdelay` history no coordinate carries keeps native
+/// shooting's refusal, which names the operator where the module wrote it.
 #[cfg(feature = "veriloga")]
 #[test]
 fn a_delay_history_is_refused_as_opaque_state() {
@@ -342,7 +342,7 @@ fn a_delay_history_is_refused_as_opaque_state() {
         .expect_err("a delay history is refused");
     let text = error.to_string();
     assert!(
-        text.contains("analysis.pss.opaque_model_state") && text.contains("absdelay"),
+        text.contains("analysis.pss.veriloga_operator") && text.contains("`absdelay` at"),
         "{text}"
     );
 }

@@ -776,9 +776,12 @@ fn a_veriloga_laplace_low_pass_gives_its_native_rc_twins_harmonics() {
 }
 
 /// A variable read before it is assigned keeps its value from the last
-/// accepted time point, which no periodic solution carries. Shooting and
-/// harmonic balance both refuse the instance before solving, as SpectreRF
-/// does, and name every such variable so the author knows which to assign.
+/// accepted time point, which no harmonic-balance spectrum carries. Harmonic
+/// balance refuses the instance before solving, as SpectreRF does, and names
+/// every such variable so the author knows which to assign. PSS carries them
+/// as coordinates of event shooting's period map: it solves the hold, and
+/// refuses by name the counter of accepted points, which changes at every
+/// instant of the period.
 #[test]
 fn periodic_analyses_refuse_retained_variables_by_name_before_solving() {
     for (module, body, named) in [
@@ -831,46 +834,51 @@ fn periodic_analyses_refuse_retained_variables_by_name_before_solving() {
         );
         let netlist = Netlist::parse(&deck).expect("parse");
         let engine = Engine::new(SimulationConfig::default());
-        for (error, kind, label, token) in [
-            (
-                engine
-                    .run_pss(&netlist, PssConfig::new(1.0e6).with_harmonics(2))
-                    .map(drop)
-                    .expect_err("PSS must refuse a retained variable"),
-                AnalysisKind::Pss,
-                "PSS analysis",
-                "analysis.periodic.veriloga",
-            ),
-            (
-                engine
-                    .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(2))
-                    .map(drop)
-                    .expect_err("HB must refuse a retained variable"),
-                AnalysisKind::HarmonicBalance,
-                "harmonic-balance analysis",
-                "analysis.hb.veriloga_operator",
-            ),
-        ] {
+        let pss = engine.run_pss(&netlist, PssConfig::new(1.0e6).with_harmonics(2));
+        if module == "va_periodic_retained" {
+            let error = pss
+                .map(drop)
+                .expect_err("PSS must refuse a counter of accepted points");
             let SimulationError::UnsupportedCapability(refusal) = &error else {
                 panic!("{module}: expected a capability refusal, got {error}");
             };
-            let UnsupportedCapabilityError {
-                capability,
-                analysis_kind,
-                instance,
-                module: refused_module,
-                detail,
-                ..
-            } = refusal.as_ref();
-            assert_eq!(*capability, token, "{error}");
-            assert_eq!(*analysis_kind, Some(kind), "{error}");
-            assert_eq!(instance.as_deref(), Some("XVA"), "{error}");
-            assert_eq!(refused_module.as_deref(), Some(module), "{error}");
-            assert!(
-                detail.contains(label) && detail.contains(named),
-                "{module}: the refusal must name {label} and the retained variables: {detail}"
+            assert_eq!(
+                refusal.capability, "analysis.pss.no_quiet_boundary",
+                "{error}"
             );
+            assert!(refusal.detail.contains("XVA.points"), "{error}");
+        } else {
+            pss.unwrap_or_else(|error| {
+                panic!("{module}: event shooting carries the hold: {error}")
+            });
         }
+        let error = engine
+            .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(2))
+            .map(drop)
+            .expect_err("HB must refuse a retained variable");
+        let SimulationError::UnsupportedCapability(refusal) = &error else {
+            panic!("{module}: expected a capability refusal, got {error}");
+        };
+        let UnsupportedCapabilityError {
+            capability,
+            analysis_kind,
+            instance,
+            module: refused_module,
+            detail,
+            ..
+        } = refusal.as_ref();
+        assert_eq!(*capability, "analysis.hb.veriloga_operator", "{error}");
+        assert_eq!(
+            *analysis_kind,
+            Some(AnalysisKind::HarmonicBalance),
+            "{error}"
+        );
+        assert_eq!(instance.as_deref(), Some("XVA"), "{error}");
+        assert_eq!(refused_module.as_deref(), Some(module), "{error}");
+        assert!(
+            detail.contains("harmonic-balance analysis") && detail.contains(named),
+            "{module}: the refusal must name the analysis and the retained variables: {detail}"
+        );
         let _ = std::fs::remove_file(model);
     }
 }
@@ -1186,16 +1194,16 @@ fn a_charge_form_module_reaches_its_settled_transient_by_shooting() {
     }
 }
 
-/// Shooting refuses a runtime module whose operator keeps state that is not
-/// a node voltage, before solving, by the operator's own name and the line
-/// the module wrote it on (the analog body is the sixth line of each module
-/// file), with the instance, the module and shooting's own token.
+/// Shooting refuses a runtime module whose operator keeps a history neither
+/// native nor event shooting carries, before solving, by the operator's own
+/// name and the line the module wrote it on (the analog body is the sixth
+/// line of each module file), with the instance, the module and shooting's
+/// own token. An `idt` output is a coordinate of event shooting's period map.
 #[test]
 fn shooting_refuses_each_operator_with_state_by_name() {
     const STATE: &str = "whose operator state is not a node voltage the shooting state fixes at \
                          the period start";
     for (operator, body) in [
-        ("idt", "I(out) <+ 1.0e-3 * idt(V(in), 0.0);"),
         (
             "laplace_nd",
             "I(out) <+ 1.0e-3 * laplace_nd(V(in), '{1.0}, '{1.0, 1.0e-7});",

@@ -1491,6 +1491,43 @@ pub(in crate::engine) fn native_shooting_refuses_runtime_veriloga(circuit: &Circ
         || retained_state_refusal(circuit, CapabilityAnalysis::Pss).is_some()
 }
 
+/// Native shooting's refusal of a runtime Verilog-A operator whose history
+/// event shooting does not carry either (`idtmod`, a `laplace_*` or `zi_*`
+/// filter, `absdelay`), naming the operator where the module wrote it.
+#[cfg(feature = "veriloga")]
+pub(in crate::engine) fn event_shooting_operator_refusal(
+    circuit: &CircuitData,
+) -> Option<UnsupportedCapabilityError> {
+    for device in circuit.veriloga_devices().iter() {
+        let inventory = device.analog_operator_inventory();
+        let Some(operator) = ["idtmod", "laplace_*", "zi_*", "absdelay"]
+            .into_iter()
+            .find(|operator| inventory.contains(operator))
+        else {
+            continue;
+        };
+        let why = pss_operator_reason(operator)?;
+        let analysis = CapabilityAnalysis::Pss;
+        let instance = device.name.to_string();
+        let module = device.model_name().to_owned();
+        return Some(
+            UnsupportedCapabilityError::new(
+                PSS_VERILOGA_OPERATOR,
+                format!(
+                    "{} does not support Verilog-A instance '{instance}' (module '{module}'): \
+                     it uses {}, {why}",
+                    analysis.label(),
+                    written_operator(device, operator)
+                ),
+            )
+            .for_analysis_kind(analysis.kind())
+            .for_instance(instance)
+            .for_module(module),
+        );
+    }
+    None
+}
+
 /// The PSS capability gate as event shooting answers it: every family keeps
 /// native shooting's cell and token except the runtime Verilog-A modules,
 /// whose state event shooting reads from the transient's own image and

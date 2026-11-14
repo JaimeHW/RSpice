@@ -261,6 +261,11 @@ pub(in crate::engine) fn admission_refusal(
 /// shooting coordinate carries.
 #[cfg(feature = "veriloga")]
 fn opaque_veriloga_refusal(circuit: &CircuitData) -> Option<SimulationError> {
+    if let Some(refusal) =
+        crate::engine::analysis_capability::event_shooting_operator_refusal(circuit)
+    {
+        return Some(refusal.into());
+    }
     let states = circuit.runtime_veriloga_checkpoint_states().ok()?;
     for (checkpoint, device) in states.iter().zip(circuit.veriloga_devices().iter()) {
         let accepted = &checkpoint.accepted;
