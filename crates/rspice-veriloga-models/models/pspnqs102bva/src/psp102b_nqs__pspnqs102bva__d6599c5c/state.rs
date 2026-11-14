@@ -1046,6 +1046,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([90, 233, 76, 177, 22, 201, 37, 193, 244, 81, 86, 197, 51, 187, 180, 158, 65, 243, 4, 158, 228, 116, 143, 160, 67, 217, 89, 230, 197, 191, 90, 144]);
 	pub const EVENT_STATE_COUNT: usize = 18;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
+	pub const HB_ADMISSIBLE: bool = false;
+	pub const HB_REFUSAL: Option<&'static str> = Some("it uses `idt`, whose integral the generated model accumulates as accepted transient history rather than as an unknown the analysis solves for");
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "3092d9166e20d7377b3298fffe57d49fd6494b278a46f92f99c1722413deb602";

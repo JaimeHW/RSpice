@@ -3057,6 +3057,26 @@ fn write_registry(
         }
         out.push_str("    }\n\n");
     }
+    // Why harmonic balance cannot sample the model, as the generator decided.
+    out.push_str("    pub fn harmonic_balance_refusal(&self) -> Option<&'static str> {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str(
+            "        unreachable!(\"empty generated Verilog-A registry has no model capability\")\n",
+        );
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(_) => {}::Instance::HB_REFUSAL,",
+                devices[index].folder_name,
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str(
         "    pub fn transient_step_bound(&self) -> Result<Option<crate::Value>, String> {\n",
     );

@@ -843,6 +843,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([102, 103, 128, 251, 204, 58, 19, 171, 205, 114, 52, 157, 68, 92, 14, 56, 131, 213, 81, 82, 198, 56, 41, 23, 115, 108, 37, 142, 173, 172, 7, 55]);
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
+	pub const HB_ADMISSIBLE: bool = false;
+	pub const HB_REFUSAL: Option<&'static str> = Some("it scales a `ddt` by a quantity that varies with bias, so its residual is not F(x) + dQ(x)/dt");
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Conditional(rspice_veriloga_runtime::GroundReferenceGraph { group_count: 2, port_groups: &[1], joins: &[rspice_veriloga_runtime::GroundJoin { groups: [1, 0], guard: [0, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 0], guard: [1, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 0], guard: [2, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 0], guard: [3, 1] }], guards: &[rspice_veriloga_runtime::GroundGuardOp::PortConnected(0), rspice_veriloga_runtime::GroundGuardOp::PortConnected(1), rspice_veriloga_runtime::GroundGuardOp::PortConnected(2), rspice_veriloga_runtime::GroundGuardOp::PortConnected(3)] });
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "56b52fab3aa6a4fc91c54b1d3b7d3e3a88d6117d304bef73d35bcb9ccda86bf9";

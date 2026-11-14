@@ -553,6 +553,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([200, 56, 10, 41, 70, 99, 181, 157, 239, 224, 249, 235, 131, 26, 203, 104, 248, 245, 6, 2, 238, 62, 121, 82, 128, 48, 30, 187, 95, 63, 229, 178]);
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
+	pub const HB_ADMISSIBLE: bool = true;
+	pub const HB_REFUSAL: Option<&'static str> = None;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Conditional(rspice_veriloga_runtime::GroundReferenceGraph { group_count: 3, port_groups: &[1], joins: &[rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [0, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [1, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [2, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [3, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 0], guard: [4, 1] }], guards: &[rspice_veriloga_runtime::GroundGuardOp::PortConnected(0), rspice_veriloga_runtime::GroundGuardOp::PortConnected(1), rspice_veriloga_runtime::GroundGuardOp::PortConnected(2), rspice_veriloga_runtime::GroundGuardOp::PortConnected(3), rspice_veriloga_runtime::GroundGuardOp::PortConnected(4)] });
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "1b109f5f10fb3cad09643cb4ccd7ef99cd19f811d6223fa39075f73292addf24";

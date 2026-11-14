@@ -2227,6 +2227,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([204, 176, 92, 104, 113, 245, 29, 151, 54, 229, 136, 84, 157, 206, 124, 57, 240, 15, 13, 67, 80, 73, 161, 114, 154, 79, 245, 179, 104, 216, 22, 180]);
 	pub const EVENT_STATE_COUNT: usize = 9;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
+	pub const HB_ADMISSIBLE: bool = false;
+	pub const HB_REFUSAL: Option<&'static str> = Some("it uses `ddt` on something other than a charge it contributes, so its residual is not F(x) + dQ(x)/dt");
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "09b8008893923791e002444c623c84f15d0b0854f62a005c1ed318930d6a074d";

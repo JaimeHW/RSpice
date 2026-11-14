@@ -492,6 +492,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([145, 141, 157, 210, 154, 190, 168, 77, 122, 92, 239, 254, 18, 43, 147, 48, 173, 166, 20, 241, 191, 109, 164, 244, 128, 58, 190, 233, 215, 217, 8, 1]);
 	pub const EVENT_STATE_COUNT: usize = 10;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
+	pub const HB_ADMISSIBLE: bool = false;
+	pub const HB_REFUSAL: Option<&'static str> = Some("`cjorgat2nd`, `vbirgat2nd`, `pgat2nd`, `phiggat2nd`, `phigrgat2nd`, `vbiinvgat2nd`, `one_minus_pgat2nd`, `one_over_one_minus_pgat2nd`, `qprefgat2nd` and `qpref2gat2nd` are read before they are assigned, so they keep their values from the last accepted time point, which no harmonic-balance spectrum carries");
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "005fc2123632446f80e52649d7d0c67470d681906c63cdc78cac78a60e095abf";

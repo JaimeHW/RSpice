@@ -611,6 +611,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([3, 59, 2, 6, 148, 77, 126, 76, 9, 62, 1, 59, 156, 81, 118, 19, 73, 208, 122, 145, 124, 52, 199, 161, 203, 206, 227, 197, 139, 131, 57, 152]);
 	pub const EVENT_STATE_COUNT: usize = 20;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
+	pub const HB_ADMISSIBLE: bool = false;
+	pub const HB_REFUSAL: Option<&'static str> = Some("`tiniK`, `Iikr`, `Iikp`, `Ihrcf`, `Ivtf`, `Iitf`, `sltf`, `VmaxExp`, `VBICtype`, `gminMod` and `imaxMod` are read before they are assigned, so they keep their values from the last accepted time point, which no harmonic-balance spectrum carries");
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "27eb6713a3e4ace39e34dcec84d3fe0574a269af475ba3855952c7cb3714335b";

@@ -1044,6 +1044,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([139, 44, 63, 45, 184, 119, 55, 68, 75, 104, 49, 11, 179, 244, 192, 198, 72, 71, 61, 250, 215, 170, 221, 200, 129, 30, 196, 134, 191, 217, 97, 22]);
 	pub const EVENT_STATE_COUNT: usize = 14;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
+	pub const HB_ADMISSIBLE: bool = false;
+	pub const HB_REFUSAL: Option<&'static str> = Some("`idmult`, `vj`, `zinv`, `vjsrh`, `vav`, `vbi_minus_vjsrh`, `wsrh`, `wdep` and `asrh` are read before they are assigned, so they keep their values from the last accepted time point, which no harmonic-balance spectrum carries");
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "f1035b7e31906765c84c05c9924dce7668e44aea378dadfbde32c0ff2f0122c9";

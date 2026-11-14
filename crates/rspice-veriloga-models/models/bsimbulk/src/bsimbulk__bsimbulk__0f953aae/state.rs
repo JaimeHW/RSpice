@@ -2499,6 +2499,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([251, 133, 204, 49, 214, 76, 105, 81, 206, 194, 23, 150, 229, 82, 239, 50, 144, 55, 5, 156, 178, 45, 31, 91, 184, 32, 195, 4, 223, 139, 100, 120]);
 	pub const EVENT_STATE_COUNT: usize = 14;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
+	pub const HB_ADMISSIBLE: bool = false;
+	pub const HB_REFUSAL: Option<&'static str> = Some("`LINTNOI_i`, `LH1` and `idrift_sat_s` are read before they are assigned, so they keep their values from the last accepted time point, which no harmonic-balance spectrum carries");
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "8555ce87f900dcfd82d43e3626900f132d0a173a0fe9842f76044f3e81160fc5";

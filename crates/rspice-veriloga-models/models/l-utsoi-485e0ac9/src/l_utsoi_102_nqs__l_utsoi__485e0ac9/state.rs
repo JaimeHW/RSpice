@@ -1317,6 +1317,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([101, 2, 29, 1, 209, 245, 64, 156, 10, 221, 210, 116, 172, 207, 88, 252, 18, 8, 228, 138, 167, 221, 140, 215, 212, 65, 50, 204, 203, 199, 163, 201]);
 	pub const EVENT_STATE_COUNT: usize = 4;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
+	pub const HB_ADMISSIBLE: bool = true;
+	pub const HB_REFUSAL: Option<&'static str> = None;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "c7698be82f2e52203e74ca6d3323dd01ab45037e9155e535c48c8eca5fc8cbfd";

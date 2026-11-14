@@ -151,17 +151,7 @@ enum ChargeOp {
 /// DAG as a tree — which on a compact model is both exponential and, if it were
 /// bounded to stop that, silently wrong for anything deeper than the bound.
 pub(crate) fn values_reaching_a_ddt(function: &CfgFunction) -> Vec<bool> {
-    let incoming = {
-        let mut incoming: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
-        for block in &function.blocks {
-            for (target, args) in outgoing_edges(block) {
-                for (param, argument) in function.block(target).params.iter().zip(args) {
-                    incoming.entry(*param).or_default().push(argument);
-                }
-            }
-        }
-        incoming
-    };
+    let incoming = block_parameter_arguments(function);
     let mut reaches = vec![false; function.values.len()];
     loop {
         let mut changed = false;
@@ -189,6 +179,20 @@ pub(crate) fn values_reaching_a_ddt(function: &CfgFunction) -> Vec<bool> {
             return reaches;
         }
     }
+}
+
+/// The arguments each edge passes to each block parameter: the values a
+/// merge chooses among.
+pub(crate) fn block_parameter_arguments(function: &CfgFunction) -> HashMap<ValueId, Vec<ValueId>> {
+    let mut incoming: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
+    for block in &function.blocks {
+        for (target, args) in outgoing_edges(block) {
+            for (param, argument) in function.block(target).params.iter().zip(args) {
+                incoming.entry(*param).or_default().push(argument);
+            }
+        }
+    }
+    incoming
 }
 
 fn outgoing_edges(block: &crate::canonical_ir::cfg::CfgBlock) -> Vec<(BlockId, Vec<ValueId>)> {
@@ -554,13 +558,58 @@ pub(crate) fn push_value(
     id
 }
 
+/// What keeps a module's residual from being `F(x) + dQ(x)/dt` with every
+/// `Q` a charge it contributes, the first such obstacle a proof meets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChargeSplitObstacle {
+    /// The body does not lower to a CFG.
+    Unlowered,
+    /// A branch condition or a switch-branch form depends on a `ddt` value.
+    DerivativeSteersControl,
+    /// A readback, an event-state candidate, a timestep bound, a
+    /// discontinuity, a noise magnitude or an analog task reads a `ddt`
+    /// value, and would see the weighted numerical one.
+    DerivativeObserved,
+    /// Another operator with state takes a `ddt` value: a nested derivative.
+    NestedDerivative,
+    /// The body reads a branch current, which sees whatever the branch's
+    /// `ddt` contributions evaluate to.
+    FlowProbe,
+    /// A residual reaches a `ddt` whose charge the walk cannot recover.
+    UnrecoveredCharge,
+    /// A `ddt` is scaled by a quantity that varies with bias, so its term is
+    /// `k(x) dq/dt`, not the derivative of a charge.
+    BiasScaledDerivative,
+}
+
 /// Prove that replacing each contributed derivative by its weighted charge
 /// difference cannot change control, effects, state inputs or public readbacks.
 /// Failure selects the ordinary companion formulation; it does not refuse the model.
 pub(crate) fn one_step_dae_split_safe(artifact: &super::CanonicalIrArtifact) -> bool {
+    charge_split_obstacle(artifact, true).is_none()
+}
+
+/// Prove that the module's residual is `F(x) + dQ(x)/dt`, where every `Q` is
+/// a charge it contributes, so that a static stamp and a companion stamp of
+/// the same point sample `F` and `Q` exactly. A periodic solver reads only
+/// the residual: what a readback, a noise magnitude or a task makes of a
+/// `ddt` value does not enter it.
+#[cfg(feature = "rust-codegen")]
+pub(crate) fn residual_charge_split_obstacle(
+    artifact: &super::CanonicalIrArtifact,
+) -> Option<ChargeSplitObstacle> {
+    charge_split_obstacle(artifact, false)
+}
+
+/// The first obstacle to the weighted F/Q split; `observed` also counts the
+/// values a readback, a noise magnitude or a task observes.
+fn charge_split_obstacle(
+    artifact: &super::CanonicalIrArtifact,
+    observed: bool,
+) -> Option<ChargeSplitObstacle> {
     let Ok(mut cfg) = super::CfgModel::from_hir_with_observations(&artifact.hir, &artifact.mir)
     else {
-        return false;
+        return Some(ChargeSplitObstacle::Unlowered);
     };
     let reaches = values_reaching_a_ddt(&cfg.function);
     let reaches_ddt = |id: ValueId| reaches[usize::from(id)];
@@ -568,18 +617,21 @@ pub(crate) fn one_step_dae_split_safe(artifact: &super::CanonicalIrArtifact) -> 
         matches!(
             block.terminator, CfgTerminator::Branch { condition, .. } if reaches_ddt(condition)
         )
-    }) || cfg
-        .activations
-        .iter()
-        .flatten()
-        .chain(&cfg.event_state_candidates)
-        .chain(&cfg.observation_roots)
-        .chain(cfg.timestep_bound.iter())
-        .chain(cfg.discontinuity.iter())
-        .copied()
-        .any(reaches_ddt)
+    }) || cfg.activations.iter().flatten().copied().any(reaches_ddt)
     {
-        return false;
+        return Some(ChargeSplitObstacle::DerivativeSteersControl);
+    }
+    if observed
+        && cfg
+            .event_state_candidates
+            .iter()
+            .chain(&cfg.observation_roots)
+            .chain(cfg.timestep_bound.iter())
+            .chain(cfg.discontinuity.iter())
+            .copied()
+            .any(reaches_ddt)
+    {
+        return Some(ChargeSplitObstacle::DerivativeObserved);
     }
     // Noise magnitudes are retained separately from the deterministic residual.
     // Their inputs must see the physical derivative, never the doubled DDT rule.
@@ -602,28 +654,32 @@ pub(crate) fn one_step_dae_split_safe(artifact: &super::CanonicalIrArtifact) -> 
             )
             .any(reaches_ddt)
     });
-    if noise_reads_ddt {
-        return false;
+    if observed && noise_reads_ddt {
+        return Some(ChargeSplitObstacle::DerivativeObserved);
     }
     for value in &cfg.function.values {
         let kind = &value.kind;
         // A nested derivative has no first-order Q projection. A derivative
         // fed to another state operator or a task would observe the doubled
         // numerical value rather than merely contributing it to an equation.
-        if (kind.state_site().is_some()
-            || matches!(
-                kind,
-                CfgValueKind::AnalogTask(_) | CfgValueKind::AnalogCounter { .. }
-            ))
-            && kind.operands().into_iter().any(reaches_ddt)
-        {
-            return false;
+        if kind.operands().into_iter().any(reaches_ddt) {
+            if kind.state_site().is_some() {
+                return Some(ChargeSplitObstacle::NestedDerivative);
+            }
+            if observed
+                && matches!(
+                    kind,
+                    CfgValueKind::AnalogTask(_) | CfgValueKind::AnalogCounter { .. }
+                )
+            {
+                return Some(ChargeSplitObstacle::DerivativeObserved);
+            }
         }
         if matches!(
             kind,
             CfgValueKind::BranchFlow(_) | CfgValueKind::ContributedCurrent { .. }
         ) {
-            return false;
+            return Some(ChargeSplitObstacle::FlowProbe);
         }
     }
     let (charges, complete) = recover_stored_charges(&mut cfg.function, &cfg.residuals);
@@ -634,7 +690,7 @@ pub(crate) fn one_step_dae_split_safe(artifact: &super::CanonicalIrArtifact) -> 
             .zip(charges)
             .any(|(residual, charge)| reaches_ddt(*residual) && charge.is_none())
     {
-        return false;
+        return Some(ChargeSplitObstacle::UnrecoveredCharge);
     }
     let scopes: Vec<_> = artifact
         .mir
@@ -643,15 +699,16 @@ pub(crate) fn one_step_dae_split_safe(artifact: &super::CanonicalIrArtifact) -> 
         .map(|parameter| parameter.scope)
         .collect();
     let schedule = super::schedule::schedule_with_parameter_scopes(&cfg.function, &scopes);
-    cfg.function.values.iter().all(|value| {
-        !matches!(
+    let frozen_varies = cfg.function.values.iter().any(|value| {
+        matches!(
             value.kind,
             CfgValueKind::Unary {
                 op: CfgUnaryOp::FreezeDerivative,
                 ..
             }
-        ) || schedule.class(value.id) <= super::schedule::InvalidationClass::Temperature
-    })
+        ) && schedule.class(value.id) > super::schedule::InvalidationClass::Temperature
+    });
+    frozen_varies.then_some(ChargeSplitObstacle::BiasScaledDerivative)
 }
 
 #[cfg(test)]

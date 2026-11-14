@@ -56,7 +56,8 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
-use crate::canonical_ir::charge::recover_stored_charges;
+use super::harmonic_balance;
+use crate::canonical_ir::charge::{ChargeSplitObstacle, recover_stored_charges};
 pub(crate) use crate::canonical_ir::charge::{stored_charges, values_reaching_a_ddt};
 
 use crate::canonical_ir::ad::{DifferentiationError, differentiate_with_control_for_roots};
@@ -1017,6 +1018,9 @@ struct ModelPlan {
     /// Models with `idt`, nonlinear use of `ddt`, or `ddt`-dependent control
     /// flow remain on OneStep order one rather than changing their equations.
     one_step_dae_split_safe: bool,
+    /// Why harmonic balance cannot sample this model's residual as
+    /// `F(x) + dQ(x)/dt`, or `None` when it can.
+    harmonic_balance_refusal: Option<String>,
     requires_nodeset_phase: bool,
 }
 
@@ -1194,15 +1198,26 @@ impl ModelPlan {
         // readbacks compact is important for large compact-model op-point
         // sections, whose predicates must be correct without inflating the
         // executable stamp with solver-invisible Hessians.
+        let charges_complete = first_order_complete
+            && residuals.iter().zip(&charges).all(|(residual, charge)| {
+                !values_reaching_ddt[usize::from(*residual)] || charge.is_some()
+            });
         let mut one_step_dae_split_safe =
             crate::canonical_ir::charge::one_step_dae_split_safe(artifact)
                 && idt_slots.is_empty()
                 && idtmod_slots.is_empty()
                 && !ddt_controls_flow
-                && first_order_complete
-                && residuals.iter().zip(&charges).all(|(residual, charge)| {
-                    !values_reaching_ddt[usize::from(*residual)] || charge.is_some()
-                });
+                && charges_complete;
+        let residual_split = crate::canonical_ir::charge::residual_charge_split_obstacle(artifact)
+            .or_else(|| ddt_controls_flow.then_some(ChargeSplitObstacle::DerivativeSteersControl))
+            .or_else(|| (!charges_complete).then_some(ChargeSplitObstacle::UnrecoveredCharge));
+        let mut harmonic_balance_refusal = harmonic_balance::harmonic_balance_refusal(
+            artifact,
+            &cfg,
+            &cfg.residuals,
+            &cfg.activations,
+            residual_split,
+        );
         cfg.function
             .validate()
             .map_err(|error| unsupported(artifact, format!("charge recovery: {error}")))?;
@@ -1564,7 +1579,7 @@ impl ModelPlan {
         // A coefficient held during AC differentiation can still vary between
         // timepoints or Newton iterates. Its reactive primitive is not a
         // conservative charge suitable for OneStep's F/Q history split.
-        one_step_dae_split_safe &= function.values.iter().all(|value| {
+        let frozen_coefficients_static = function.values.iter().all(|value| {
             !matches!(
                 value.kind,
                 CfgValueKind::Unary {
@@ -1573,6 +1588,13 @@ impl ModelPlan {
                 }
             ) || schedule.class(value.id) <= InvalidationClass::Temperature
         });
+        one_step_dae_split_safe &= frozen_coefficients_static;
+        if !frozen_coefficients_static && harmonic_balance_refusal.is_none() {
+            harmonic_balance_refusal = Some(
+                harmonic_balance::split_refusal(ChargeSplitObstacle::BiasScaledDerivative)
+                    .to_owned(),
+            );
+        }
         measurements.metrics_mut().kernel_regions =
             kernel_region_metrics(artifact, &function, &schedule);
         let structural_guards = structural_guards(&function, &schedule, &parameter_scopes);
@@ -1726,6 +1748,7 @@ impl ModelPlan {
             timer_slots,
             limit_slots,
             one_step_dae_split_safe,
+            harmonic_balance_refusal,
             requires_nodeset_phase,
         })
     }
@@ -4920,6 +4943,7 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
     ) -> state_file::StateFileExtensions {
         let mut extensions = state_file::StateFileExtensions {
             idtmod_state_count: self.idtmod_slots.len(),
+            harmonic_balance_refusal: self.harmonic_balance_refusal.clone(),
             uses_analog_tasks: self.has_analog_tasks(),
             uses_point_analog_tasks: self.has_newton_tasks(),
             uses_initialization: !self.initialization.is_empty(),

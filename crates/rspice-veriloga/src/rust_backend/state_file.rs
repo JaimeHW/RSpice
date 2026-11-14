@@ -49,6 +49,9 @@ pub(super) fn generate_mod_file() -> String {
 #[derive(Debug, Clone)]
 pub(super) struct StateFileExtensions {
     pub idtmod_state_count: usize,
+    /// Why harmonic balance cannot sample the model's residual, or `None`
+    /// when the generator proved it `F(x) + dQ(x)/dt`.
+    pub harmonic_balance_refusal: Option<String>,
     /// Whether generated state uses accepted/candidate `cross`, `above`, or `last_crossing`
     /// detector records and therefore needs their runtime helpers imported.
     pub uses_cross_event_state: bool,
@@ -94,6 +97,7 @@ impl Default for StateFileExtensions {
     fn default() -> Self {
         Self {
             idtmod_state_count: 0,
+            harmonic_balance_refusal: Some("the generator did not decide it".to_owned()),
             uses_cross_event_state: false,
             uses_analog_tasks: false,
             uses_point_analog_tasks: false,
@@ -463,6 +467,21 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&format!(
         "    pub const ONE_STEP_DAE_SPLIT_SAFE: bool = {one_step_dae_split_safe};\n"
     ));
+    writeln!(
+        out,
+        "    pub const HB_ADMISSIBLE: bool = {};",
+        extensions.harmonic_balance_refusal.is_none()
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub const HB_REFUSAL: Option<&'static str> = {};",
+        extensions
+            .harmonic_balance_refusal
+            .as_ref()
+            .map_or_else(|| "None".to_owned(), |reason| format!("Some({reason:?})"))
+    )
+    .unwrap();
     out.push_str(&format!(
         "    pub const REQUIRES_NODESET_PHASE: bool = {requires_nodeset_phase};\n"
     ));

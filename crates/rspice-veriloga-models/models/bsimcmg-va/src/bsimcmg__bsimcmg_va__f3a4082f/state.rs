@@ -3956,6 +3956,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([107, 49, 89, 130, 62, 152, 26, 131, 251, 223, 72, 104, 80, 158, 94, 61, 195, 253, 54, 202, 117, 48, 68, 106, 40, 9, 218, 100, 120, 213, 88, 91]);
 	pub const EVENT_STATE_COUNT: usize = 35;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
+	pub const HB_ADMISSIBLE: bool = false;
+	pub const HB_REFUSAL: Option<&'static str> = Some("`ETA0CV_t`, `UACV_t`, `UDCV_t`, `qis_cv`, `qid_cv`, `qia_cv`, `qia2_cv`, `dqi_cv`, `u0_cv`, `ETA0CV_i`, `U0CV_i`, `UACV_i`, `UCCV_i`, `UDCV_i`, `UA1CV_i`, `UA2CV_i`, `UC1CV_i`, `UD1CV_i`, `UD2CV_i`, `UTECV_i`, `UTE1CV_i` and `UTLCV_i` are read before they are assigned, so they keep their values from the last accepted time point, which no harmonic-balance spectrum carries");
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "982766450bfee0b78baeaba18a8f5163defd9bfa4e27abb0ec1901945c36274b";

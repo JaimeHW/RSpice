@@ -1130,6 +1130,14 @@ impl BuiltinVerilogAInstance {
         &self.instance_name
     }
 
+    /// Why harmonic balance cannot sample this model's residual, as the
+    /// generator decided for the model: `None` when it proved the residual
+    /// `F(x) + dQ(x)/dt` with nothing kept between evaluations.
+    #[doc(hidden)]
+    pub fn harmonic_balance_refusal(&self) -> Option<&'static str> {
+        self.kind.harmonic_balance_refusal()
+    }
+
     /// Whether this instance's contributions connect an electrical port to
     /// node 0: the generator's reading of its module, decided with this
     /// instance's parameter values and the terminals its card connected.

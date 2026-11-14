@@ -638,6 +638,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([103, 190, 16, 40, 23, 0, 39, 242, 211, 190, 178, 194, 87, 24, 80, 152, 87, 13, 93, 239, 110, 177, 235, 181, 69, 175, 6, 222, 97, 233, 162, 197]);
 	pub const EVENT_STATE_COUNT: usize = 2;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
+	pub const HB_ADMISSIBLE: bool = false;
+	pub const HB_REFUSAL: Option<&'static str> = Some("`pterm` is read before it is assigned, so it keeps its value from the last accepted time point, which no harmonic-balance spectrum carries");
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "4f117edaa6f949f4a0b1275c9aa0518d38a7569f0e0a0ef3e15c73f554245e89";

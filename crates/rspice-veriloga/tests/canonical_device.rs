@@ -8893,3 +8893,114 @@ instance.validate_parameters().unwrap();
         .unwrap();
     }
 }
+
+/// The generator decides once per model whether harmonic balance can sample
+/// its residual, and states the reason when it cannot: an operator with state
+/// in time, `$abstime`, a variable the next evaluation reads back after the
+/// body assigned it, or a `ddt` that is not the derivative of a contributed
+/// charge. A variable an event body writes but the body recomputes before
+/// every read is not history.
+#[test]
+fn generated_models_state_whether_harmonic_balance_can_sample_them() {
+    for (index, declarations, body, expected) in [
+        (0, "", "I(p,n) <+ V(p,n)/1k + ddt(1p*V(p,n));", None),
+        (
+            1,
+            "real g;",
+            "@(initial_step) g = 1.0; g = 2.0e-3; I(p,n) <+ g*V(p,n);",
+            None,
+        ),
+        (
+            2,
+            "real x;",
+            "I(p,n) <+ x*V(p,n); x = V(p,n);",
+            Some(
+                "`x` is read before it is assigned, so it keeps its value from the last \
+                 accepted time point, which no harmonic-balance spectrum carries",
+            ),
+        ),
+        (
+            3,
+            "real g;",
+            "@(initial_step) g = 1.0e-3; I(p,n) <+ g*V(p,n);",
+            Some("`g` is read before it is assigned"),
+        ),
+        (
+            4,
+            "",
+            "I(p,n) <+ idtmod(V(p,n), 0.0, 1.0);",
+            Some(
+                "it uses `idtmod`, whose integral wraps at its modulus, which is state outside \
+                 the waveform's spectrum",
+            ),
+        ),
+        (5, "", "I(p,n) <+ idt(V(p,n), 0.0);", Some("it uses `idt`")),
+        (
+            6,
+            "real s;",
+            "@(cross(V(p,n), 1)) s = 1.0; I(p,n) <+ V(p,n);",
+            Some(
+                "it uses `cross`, which schedules events in time that a harmonic-balance \
+                 spectrum does not carry; transient analysis runs it",
+            ),
+        ),
+        (
+            7,
+            "real s;",
+            "@(timer(1.0e-9)) s = 1.0; I(p,n) <+ V(p,n);",
+            Some("it uses `timer`"),
+        ),
+        (
+            8,
+            "",
+            "I(p,n) <+ V(p,n)*$abstime;",
+            Some("it reads `$abstime`"),
+        ),
+        (
+            9,
+            "",
+            "I(p,n) <+ V(p,n)*ddt(V(p,n));",
+            Some("so its residual is not F(x) + dQ(x)/dt"),
+        ),
+        (
+            10,
+            "",
+            "if (ddt(V(p,n)) > 0) I(p,n) <+ V(p,n); else I(p,n) <+ 2.0*V(p,n);",
+            Some(
+                "a branch or a switch-branch form depends on a `ddt` value, so its residual is \
+                 not F(x) + dQ(x)/dt",
+            ),
+        ),
+    ] {
+        let source = format!(
+            "module hb_admission(p,n); inout p,n; electrical p,n; {declarations} analog begin \
+             {body} end endmodule"
+        );
+        let name = format!("harmonic-balance admission {index}");
+        let (state, _, _) = generated_parts(&source, &name);
+        let refusal = state
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix("pub const HB_REFUSAL: Option<&'static str> = ")
+            })
+            .unwrap_or_else(|| panic!("{name}: no HB_REFUSAL was generated"));
+        let admissible = state
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("pub const HB_ADMISSIBLE: bool = "))
+            .unwrap_or_else(|| panic!("{name}: no HB_ADMISSIBLE was generated"));
+        match expected {
+            None => {
+                assert_eq!(refusal, "None;", "{name}: {body}");
+                assert_eq!(admissible, "true;", "{name}: {body}");
+            }
+            Some(reason) => {
+                assert!(
+                    refusal.starts_with("Some(\"") && refusal.contains(reason),
+                    "{name}: {body}: expected a refusal naming `{reason}`, got {refusal}"
+                );
+                assert_eq!(admissible, "false;", "{name}: {body}");
+            }
+        }
+    }
+}

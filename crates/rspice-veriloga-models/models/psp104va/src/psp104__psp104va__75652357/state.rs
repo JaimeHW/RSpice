@@ -2106,6 +2106,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([81, 54, 227, 177, 223, 133, 237, 17, 59, 134, 17, 7, 95, 21, 237, 108, 208, 32, 6, 190, 39, 143, 0, 59, 188, 70, 236, 15, 115, 218, 87, 1]);
 	pub const EVENT_STATE_COUNT: usize = 34;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
+	pub const HB_ADMISSIBLE: bool = false;
+	pub const HB_REFUSAL: Option<&'static str> = Some("`cjorgat2nd`, `vbirgat2nd`, `pgat2nd`, `phiggat2nd`, `phigrgat2nd`, `vbiinvgat2nd`, `one_minus_pgat2nd`, `one_over_one_minus_pgat2nd`, `qprefgat2nd`, `qpref2gat2nd`, `cjorgat2nd_d`, `vbirgat2nd_d`, `pgat2nd_d`, `phiggat2nd_d`, `phigrgat2nd_d`, `vbiinvgat2nd_d`, `one_minus_pgat2nd_d`, `one_over_one_minus_pgat2nd_d`, `qprefgat2nd_d`, `qpref2gat2nd_d`, `GCQOVD`, `t1`, `sqt2`, `t2`, `r`, `lcinv2` and `g_ideal` are read before they are assigned, so they keep their values from the last accepted time point, which no harmonic-balance spectrum carries");
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "b2c7e3b5fd02ac210857a8831a64715186a4c0d81530cc160633d683b63af474";

@@ -34,6 +34,7 @@ pub mod emit;
 mod error;
 mod expr;
 mod files;
+mod harmonic_balance;
 mod manifest;
 mod names;
 mod noise;
