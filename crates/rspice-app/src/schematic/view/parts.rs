@@ -84,16 +84,43 @@ pub(crate) fn canvas_parts(state: &mut AppState) -> CanvasParts<'_> {
 /// The canvas's parts of the design feature's context, with its modal facts
 /// as the shell lent them.
 pub(crate) fn canvas_parts_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasParts<'a> {
-    let application_modal = canvas_application_modal_open_in(cx);
-    let dialog_modal = cx.dialog_modal_open()
-        || own_modal_dialog_open(cx.state, true)
-        || asked_dialog_waits(cx.wb);
+    let application_modal_open = cx.application_modal_open();
+    let dialog_modal_open = cx.dialog_modal_open();
+    canvas_parts_lent(
+        &mut *cx.state,
+        &mut *cx.model,
+        &mut *cx.wb,
+        &mut *cx.runs,
+        cx.peers.results(),
+        application_modal_open,
+        dialog_modal_open,
+    )
+}
+
+/// The canvas's parts over the design slot, the model, the session, the
+/// runs and the results workspace, with the two modal facts lent as
+/// `application_modal_open` and `dialog_modal_open`: a modal dialog of the
+/// design feature's own, or one the surface asked for that waits, counts as
+/// well.
+pub(crate) fn canvas_parts_lent<'a>(
+    state: &'a mut DesignState,
+    model: &'a mut Model,
+    wb: &'a mut WorkbenchSession,
+    runs: &'a mut RunsState,
+    results: &'a dyn ResultsPort,
+    application_modal_open: bool,
+    dialog_modal_open: bool,
+) -> CanvasParts<'a> {
+    let application_modal =
+        application_modal_open || own_modal_dialog_open(state, false) || asked_dialog_waits(wb);
+    let dialog_modal =
+        dialog_modal_open || own_modal_dialog_open(state, true) || asked_dialog_waits(wb);
     CanvasParts {
-        design: &mut *cx.state,
-        model: &mut *cx.model,
-        workbench: &mut *cx.wb,
-        runs: &mut *cx.runs,
-        results: cx.peers.results(),
+        design: &mut *state,
+        model: &mut *model,
+        workbench: &mut *wb,
+        runs: &mut *runs,
+        results,
         application_modal,
         dialog_modal,
     }
