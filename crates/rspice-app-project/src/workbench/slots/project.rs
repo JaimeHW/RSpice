@@ -59,6 +59,8 @@ pub struct ProjectState {
     pub new_view_name: String,
     /// New View type selection
     pub new_view_type: crate::state::ViewType,
+    /// New View opened as Create symbol: titled for it, its type fixed.
+    pub new_view_creates_symbol: bool,
     /// New View validation error message
     pub new_view_error: Option<String>,
     /// Exact library catalog revision captured when New View opened.

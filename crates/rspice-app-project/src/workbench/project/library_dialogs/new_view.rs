@@ -96,11 +96,44 @@ impl ProjectState {
         self.new_view_cell = cell.to_owned();
         self.new_view_name = view_type.display_name().to_owned();
         self.new_view_type = view_type;
+        self.new_view_creates_symbol = false;
         self.new_view_error = None;
         self.new_view_library_revision = model.library_manager.revision();
         self.new_view_dialog = true;
         Ok(())
     }
+
+    /// Open Create symbol on the exact cell `library`/`cell`: New View with
+    /// its type fixed to a symbol, titled for it.
+    pub fn open_create_symbol_dialog(
+        &mut self,
+        model: &Model,
+        library: &str,
+        cell: &str,
+    ) -> Result<(), String> {
+        self.open_new_view_dialog(model, library, cell, Some(crate::state::ViewType::Symbol))?;
+        self.new_view_creates_symbol = true;
+        Ok(())
+    }
+}
+
+/// The symbol view the cell `library`/`cell` already has, the one named
+/// `symbol` first, which Create symbol opens rather than offering a second.
+pub fn existing_symbol_view(
+    model: &Model,
+    library: &str,
+    cell: &str,
+) -> Option<crate::state::CellViewRef> {
+    let cell_target = model.library_manager.get_library(library)?.get_cell(cell)?;
+    let mut symbols = cell_target
+        .views_sorted()
+        .into_iter()
+        .filter(|view| view.view_type == crate::state::ViewType::Symbol)
+        .collect::<Vec<_>>();
+    symbols.sort_by_key(|view| view.name != crate::state::ViewType::Symbol.display_name());
+    symbols
+        .first()
+        .map(|view| crate::state::CellViewRef::new(library, cell, &view.name))
 }
 
 /// The view type New View opens on for the exact cell `library`/`cell`:
@@ -140,6 +173,9 @@ pub(crate) fn new_view_opening(
 
 /// Why Create is waiting while the view has no name.
 pub const NEW_VIEW_NAME_MISSING: &str = "Enter a name for the view.";
+
+/// What New View is called when Create symbol opens it.
+pub const CREATE_SYMBOL_TITLE: &str = "Create symbol";
 
 /// What the footer says about the view name when Create cannot run on it.
 pub enum NameLine {
@@ -187,12 +223,20 @@ impl ProjectFeature {
             .iter()
             .position(|view_type| *view_type == dialogs.new_view_type)
             .unwrap_or_default();
+        let creates_symbol = dialogs.new_view_creates_symbol;
 
         // The five types are one row of equal segments, which the 420 pt
-        // card would run past its edge.
-        let choice = CommandForm::new("New view", "Create")
-            .option_columns()
-            .describe("Create a named view of the selected type in this library cell.")
+        // card would run past its edge. Create symbol offers no type, so it
+        // keeps the card.
+        let form = if creates_symbol {
+            CommandForm::new(CREATE_SYMBOL_TITLE, "Create")
+                .describe("Create a symbol for this cell from its schematic's pins.")
+        } else {
+            CommandForm::new("New view", "Create")
+                .option_columns()
+                .describe("Create a named view of the selected type in this library cell.")
+        };
+        let choice = form
             .primary_enabled(can_create)
             // What Create waits for, or why it refuses the name, stands in
             // the footer beside it, as New cell's does, so the rows keep one
@@ -207,12 +251,14 @@ impl ProjectFeature {
                 rows.value_mono("Library", &dialogs.new_view_library);
                 rows.value_mono("Cell", &dialogs.new_view_cell);
                 rows.text("View name", name_id, &mut dialogs.new_view_name, "");
-                if rows.segmented_columns(
-                    "Type",
-                    "library.new-view.type",
-                    &type_names,
-                    &mut type_index,
-                ) {
+                if !creates_symbol
+                    && rows.segmented_columns(
+                        "Type",
+                        "library.new-view.type",
+                        &type_names,
+                        &mut type_index,
+                    )
+                {
                     dialogs.new_view_type = CREATABLE_VIEW_TYPES[type_index];
                 }
                 Some(name_id)
@@ -231,6 +277,7 @@ impl ProjectFeature {
         if should_close {
             cx.state.new_view_dialog = false;
             cx.state.new_view_name.clear();
+            cx.state.new_view_creates_symbol = false;
             cx.state.new_view_error = None;
         }
     }
@@ -767,7 +814,8 @@ fn validate_unique_ports(source: &str, ports: &[crate::state::PortSpec]) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Cell, Library, View, ViewType};
+    use crate::state::{Cell, CellViewRef, Library, View, ViewType};
+    use crate::workbench::project::commands::ProjectCommand;
     use crate::workbench::project::tests::harness;
 
     #[test]
@@ -820,6 +868,74 @@ mod tests {
         assert!(harness.state.new_view_dialog);
         assert_eq!(harness.state.new_view_type, ViewType::Symbol);
         assert_eq!(harness.state.new_view_name, "symbol");
+    }
+
+    /// Create symbol opens New view titled for it, its type fixed to a
+    /// symbol, on the cell whose schematic is in front.
+    #[test]
+    fn create_symbol_opens_on_the_cell_in_front_with_its_type_fixed() {
+        let mut harness = harness();
+        let top = harness.model.workspace.content.active_view.clone();
+
+        harness.execute(ProjectCommand::CreateSymbol.key());
+
+        assert!(harness.state.new_view_dialog);
+        assert!(harness.state.new_view_creates_symbol);
+        assert_eq!(
+            (
+                harness.state.new_view_library.as_str(),
+                harness.state.new_view_cell.as_str(),
+                harness.state.new_view_name.as_str(),
+                harness.state.new_view_type,
+            ),
+            (
+                top.library.as_str(),
+                top.cell.as_str(),
+                "symbol",
+                ViewType::Symbol
+            )
+        );
+        assert!(harness.wb.outbox.peek::<ProjectRequest>().is_none());
+
+        harness
+            .state
+            .open_new_view_dialog(&harness.model, &top.library, &top.cell, None)
+            .expect("writable target");
+        assert!(
+            !harness.state.new_view_creates_symbol,
+            "New view opened afterwards offers every type again"
+        );
+    }
+
+    /// Create symbol on a cell that already has a symbol opens that symbol
+    /// and offers no second one.
+    #[test]
+    fn create_symbol_opens_the_symbol_a_cell_already_has() {
+        let mut harness = harness();
+        let top = harness.model.workspace.content.active_view.clone();
+        harness
+            .model
+            .library_manager
+            .edit_library(&top.library)
+            .expect("the project library")
+            .add_view(&top.cell, View::new("alt", ViewType::Symbol))
+            .expect("the top cell");
+        harness
+            .model
+            .library_manager
+            .edit_library(&top.library)
+            .expect("the project library")
+            .add_view(&top.cell, View::new("symbol", ViewType::Symbol))
+            .expect("the top cell");
+
+        harness.execute(ProjectCommand::CreateSymbol.key());
+
+        assert!(!harness.state.new_view_dialog);
+        assert!(matches!(
+            harness.wb.outbox.take::<ProjectRequest>(),
+            Some(ProjectRequest::OpenView(reference, ViewType::Symbol))
+                if reference == CellViewRef::new(&top.library, &top.cell, "symbol")
+        ));
     }
 
     #[test]

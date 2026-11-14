@@ -44,7 +44,8 @@ use crate::workbench::lifecycle::project_lifecycle::{
 use crate::workbench::slots::ProjectState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
-use commands::ProjectCommand;
+use commands::{ProjectCommand, ProjectRequest};
+use library_dialogs::new_view::existing_symbol_view;
 use library_dialogs::new_view_target;
 use revision_history::open_project_revision_history;
 use workspace_state::{ProjectLauncherFilter, ProjectLauncherPage, ProjectPage};
@@ -510,16 +511,19 @@ fn open_design_management(
     }
 }
 
-/// Open New View on the cell whose schematic is in front, preset to a
-/// symbol; why it cannot open there is stated on the status bar.
+/// Open the symbol of the cell whose schematic is in front, or Create
+/// symbol on that cell when it has none; why it cannot open there is stated
+/// on the status bar.
 fn open_create_symbol_dialog(project: &mut ProjectState, model: &Model, wb: &mut WorkbenchSession) {
     let reference = model.workspace.content.active_schematic_reference();
-    if let Err(error) = project.open_new_view_dialog(
-        model,
-        &reference.library,
-        &reference.cell,
-        Some(ViewType::Symbol),
-    ) {
+    if let Some(symbol) = existing_symbol_view(model, &reference.library, &reference.cell) {
+        wb.outbox
+            .push(ProjectRequest::OpenView(symbol, ViewType::Symbol));
+        return;
+    }
+    if let Err(error) =
+        project.open_create_symbol_dialog(model, &reference.library, &reference.cell)
+    {
         wb.prompt(error);
     }
 }
