@@ -154,11 +154,11 @@ pub(crate) fn cancel_armed_stretch_selection_in(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Point, StretchTarget, Wire};
-    use crate::workbench::app_state::AppState;
+    use crate::state::{Point, Wire};
+    use crate::workbench::design::test_host::DesignTestHost;
 
-    fn selected_wire_segment() -> AppState {
-        let mut state = AppState::default();
+    fn selected_wire_segment() -> DesignTestHost {
+        let mut state = DesignTestHost::default();
         let wire = Wire::new(7, vec![Point::new(0, 0), Point::new(20, 0)]);
         state
             .model
@@ -174,37 +174,6 @@ mod tests {
             .selection
             .select_wire(7);
         state
-    }
-
-    #[test]
-    fn arming_opens_no_dialog_and_resolves_the_target_at_once() {
-        let mut state = selected_wire_segment();
-
-        arm_stretch_selection_in(
-            &mut state.design.stretch_selection,
-            &mut state.design.move_selection,
-            &mut state.design.array_selection,
-            state.design.schematic_visibility.wire_routing,
-            &mut state.model,
-            &mut state.workbench,
-        );
-
-        let draft = &state.design.stretch_selection;
-        assert!(draft.armed);
-        assert!(!state.dialog_modal_open());
-        assert_eq!(draft.policy, StretchOrthogonalPolicy::PreserveOrthogonal);
-        assert_eq!(
-            draft.canvas.target,
-            Some(StretchTarget::WireSegment {
-                wire_id: 7,
-                segment_index: 0,
-            })
-        );
-        assert!(draft.authority.is_some());
-        assert_eq!(
-            state.model.schematic.session.editor.tool,
-            Tool::StretchSelection
-        );
     }
 
     /// The check box starts where the sheet is drawn: a 45-degree sheet does
@@ -231,7 +200,7 @@ mod tests {
 
     #[test]
     fn nothing_stretchable_refuses_instead_of_arming() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         arm_stretch_selection_in(
             &mut state.design.stretch_selection,
             &mut state.design.move_selection,

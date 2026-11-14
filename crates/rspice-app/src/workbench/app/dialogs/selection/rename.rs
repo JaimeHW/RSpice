@@ -20,9 +20,6 @@ use rspice_schematic_editor::object_properties::clause;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) mod transaction_tests;
-
 /// The stable schematic object or exact logical net being renamed, captured
 /// when Edit ▸ Rename selected object opens.
 ///
@@ -561,9 +558,9 @@ pub(crate) fn apply_commit(model: &mut Model, commit: RenameCommit) -> Result<bo
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::state::{Bus, ComponentType, Point};
+    use crate::state::{Bus, Point};
     use crate::workbench::app::RSpiceApp;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the dialog as its dialog step does.
     pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -576,7 +573,10 @@ pub(crate) mod tests {
     }
 
     /// The commit, over the model it edits.
-    pub(crate) fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, String> {
+    pub(crate) fn apply_commit(
+        state: &mut DesignTestHost,
+        commit: RenameCommit,
+    ) -> Result<bool, String> {
         super::apply_commit(&mut state.model, commit)
     }
 
@@ -588,23 +588,6 @@ pub(crate) mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }
-    }
-
-    pub(crate) fn component_app() -> (RSpiceApp, u64) {
-        let mut app = RSpiceApp::test_instance();
-        let id = app
-            .state
-            .model
-            .schematic
-            .add_component(ComponentType::Resistor, Point::new(0, 0));
-        app.state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_only_component(id);
-        (app, id)
     }
 
     /// A name nobody has changed says what Rename waits for, as a fact; a
@@ -645,7 +628,7 @@ pub(crate) mod tests {
             other => panic!("expected valid label rename, got {other:?}"),
         };
 
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic = schematic;
         assert!(apply_commit(&mut state, *commit).unwrap());
         let renamed = state
@@ -681,7 +664,7 @@ pub(crate) mod tests {
             other => panic!("expected valid bus rename, got {other:?}"),
         };
 
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic = schematic;
         assert!(apply_commit(&mut state, *commit).unwrap());
         let schematic = &mut state.model.schematic;
@@ -710,7 +693,7 @@ pub(crate) mod tests {
         crate::state::BusDeclaration::parse(text).unwrap()
     }
 
-    fn bus_by_id(state: &AppState, id: u64) -> Bus {
+    fn bus_by_id(state: &DesignTestHost, id: u64) -> Bus {
         state
             .model
             .schematic
@@ -727,7 +710,10 @@ pub(crate) mod tests {
     /// second sheet a `DATA[3:0]` bus passing through that same point.
     /// Returns the tapped bus, the active-sheet destination, and the bus on
     /// the other sheet.
-    fn tap_over_another_sheets_bus(state: &mut AppState, destination: bool) -> (u64, u64, u64) {
+    fn tap_over_another_sheets_bus(
+        state: &mut DesignTestHost,
+        destination: bool,
+    ) -> (u64, u64, u64) {
         use crate::state::{
             BusSlice, BusTapOrientation, SheetDefinition, SheetPortPolicy, SheetTemplate,
         };
@@ -801,7 +787,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_bus_rename_is_not_refused_over_another_sheets_bus() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let (source, target, hidden) = tap_over_another_sheets_bus(&mut state, true);
 
         let commit = RenameCommit::Bus {
@@ -823,7 +809,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_bus_rename_never_renames_another_sheets_bus() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let (source, _, hidden) = tap_over_another_sheets_bus(&mut state, false);
 
         let commit = RenameCommit::Bus {

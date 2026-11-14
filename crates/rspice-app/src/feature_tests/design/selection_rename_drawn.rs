@@ -1,11 +1,10 @@
 //! Renaming a selection, drawn through a whole application.
 
+use crate::feature_tests::design::rename::{apply_commit, component_app};
 use crate::state::Component;
 use crate::state::{ComponentType, NetLabel, Point, Wire};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::selection::rename::tests::{
-    apply_commit, component_app, key_event, render,
-};
+use crate::workbench::app::dialogs::selection::rename::tests::{key_event, render};
 use crate::workbench::app::dialogs::selection::rename::*;
 use egui::Context;
 

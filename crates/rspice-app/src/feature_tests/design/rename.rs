@@ -1,7 +1,9 @@
 //! The rename dialog drawn and committed through a whole application.
 
-use crate::workbench::app::dialogs::selection::rename::tests::{apply_commit, component_app};
+use crate::state::{ComponentType, Point};
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::selection::rename::*;
+use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 
 #[test]
@@ -207,4 +209,26 @@ fn instance_rename_remaps_configuration_paths_and_saved_outputs() {
             .source_expression,
         "I(RLOAD)"
     );
+}
+
+/// The commit, over the model it edits.
+pub(crate) fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, String> {
+    crate::workbench::app::dialogs::selection::rename::apply_commit(&mut state.model, commit)
+}
+
+pub(crate) fn component_app() -> (RSpiceApp, u64) {
+    let mut app = RSpiceApp::test_instance();
+    let id = app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(0, 0));
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(id);
+    (app, id)
 }

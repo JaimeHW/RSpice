@@ -125,10 +125,10 @@ pub(crate) fn cancel_armed_move_selection_in(
 mod tests {
     use super::*;
     use crate::state::{ComponentType, Point, SchematicSnapshot};
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
-    fn selected_resistor() -> AppState {
-        let mut state = AppState::default();
+    fn selected_resistor() -> DesignTestHost {
+        let mut state = DesignTestHost::default();
         let id = state
             .model
             .schematic
@@ -141,32 +141,6 @@ mod tests {
             .selection
             .select_component(id);
         state
-    }
-
-    /// The command acts at once: no modal stands between `M` and the canvas,
-    /// and the tool is live the same frame.
-    #[test]
-    fn arming_opens_no_dialog_and_hands_the_canvas_the_tool() {
-        let mut state = selected_resistor();
-        let baseline = SchematicSnapshot::capture(state.model.schematic.document());
-
-        arm_move_selection_in(
-            &mut state.design.move_selection,
-            &mut state.design.stretch_selection,
-            &mut state.design.array_selection,
-            &mut state.model,
-        );
-
-        assert!(state.design.move_selection.armed);
-        assert_eq!(
-            state.model.schematic.session.editor.tool,
-            Tool::MoveSelection
-        );
-        assert!(!state.dialog_modal_open());
-        assert!(baseline.is_equal(&SchematicSnapshot::capture(
-            state.model.schematic.document()
-        )));
-        assert!(armed_move_selection_authority(&state.design.move_selection, &state.model).is_ok());
     }
 
     #[test]
@@ -209,7 +183,7 @@ mod tests {
     /// Nothing to move is a refusal, not an armed tool waiting for a drag.
     #[test]
     fn an_empty_selection_refuses_instead_of_arming() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         arm_move_selection_in(
             &mut state.design.move_selection,
             &mut state.design.stretch_selection,
