@@ -11,6 +11,9 @@ use egui::{Context, Response};
 use crate::state::command_catalog::CommandKey;
 use crate::state::{Point, Tool, ViewType};
 use crate::workbench::app_state::ContextTarget;
+// The menu's tests name the shell's vocabulary through `super::*` until
+// they move to feature_tests/design.
+#[cfg(test)]
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::Workspace;
 use crate::workbench::{
@@ -159,13 +162,13 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::Cut,
         icon: ContextIcon::Copy,
         label: "Cut selection",
-        shortcut_command: Some(Command::Cut.key()),
+        shortcut_command: Some(ids::CUT),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Copy,
         icon: ContextIcon::Copy,
         label: "Copy selection",
-        shortcut_command: Some(Command::Copy.key()),
+        shortcut_command: Some(ids::COPY),
     }),
     // Where the menu was opened, which is the point a reader right-clicks
     // to say "here".
@@ -173,19 +176,19 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::Paste,
         icon: ContextIcon::Copy,
         label: "Paste here",
-        shortcut_command: Some(Command::Paste.key()),
+        shortcut_command: Some(ids::PASTE),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Duplicate,
         icon: ContextIcon::Copy,
         label: "Duplicate",
-        shortcut_command: Some(Command::Duplicate.key()),
+        shortcut_command: Some(ids::DUPLICATE),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Delete,
         icon: ContextIcon::Trash,
         label: "Delete",
-        shortcut_command: Some(Command::Delete.key()),
+        shortcut_command: Some(ids::DELETE),
     }),
     ContextEntry::Separator,
     // The instance-master slot: what the menu's subject has for a master.
@@ -263,7 +266,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::ZoomBox,
         icon: ContextIcon::ZoomBox,
         label: "Zoom box",
-        shortcut_command: Some(Command::ZoomBox.key()),
+        shortcut_command: Some(ids::ZOOM_BOX),
     }),
     ContextEntry::Separator,
     ContextEntry::Command(ContextCommand {
