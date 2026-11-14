@@ -158,6 +158,7 @@ pub(crate) use threshold::AnalogBandLaw;
 #[cfg(feature = "veriloga")]
 #[doc(hidden)]
 pub use threshold::LocatedCrossing;
+pub(crate) use threshold::ThresholdQuiet;
 pub use threshold::{AnalogInputThreshold, AnalogThresholdBehavior};
 
 pub use traits::{

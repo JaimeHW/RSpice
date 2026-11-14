@@ -1187,6 +1187,55 @@ fn edges(result: &rspice_core::engine::TransientResult, node: &str) -> Vec<(f64,
         .collect()
 }
 
+/// A clock read through the shipped 1 V connect rules (band 0.3-0.7 V, 1 ns
+/// X timeout) whose accepted points fall on the band's edges:
+/// a breakpoint at the instant each ramp enters the band. The crossing is
+/// then at the accepted point, which the next candidate decides; the root
+/// once landed one solver floor past it at every entry. No step is a floor
+/// step, and every edge is at its band exit.
+#[test]
+fn a_band_entry_at_an_accepted_point_takes_no_floor_step() {
+    const CYCLES: usize = 40;
+    let source = AmsFile::new(TOGGLE);
+    let text = format!(
+        "band entry on a breakpoint\n\
+         .hdl \"{}\"\n\
+         .options connectrules=rspice_1v0_fast\n\
+         vclk clk 0 pulse(0 1 0 2n 2n 3n 10n)\n\
+         vrise br 0 pulse(0 1 0.6n 1p 1p 1n 10n)\n\
+         rrise br 0 1k\n\
+         vfall bf 0 pulse(0 1 5.6n 1p 1p 1n 10n)\n\
+         rfall bf 0 1k\n\
+         xt clk q toggle\n\
+         .tran 0.1n 400n\n\
+         .end\n",
+        source.path()
+    );
+    let deck = Netlist::parse(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
+    let result = Engine::default().run_tran(&deck, 400.0e-9, 0.1e-9).unwrap();
+    let shortest = result
+        .time
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .fold(f64::INFINITY, f64::min);
+    assert!(shortest > 1.0e-15, "a step of {shortest:e} s");
+    let clk = edges(&result, "clk");
+    assert!(clk.len() >= 2 * CYCLES, "{} edges", clk.len());
+    for (index, (time, high)) in clk.iter().enumerate().take(2 * CYCLES) {
+        let period = (index / 2) as f64 * 10.0e-9;
+        let (want, level) = if index % 2 == 0 {
+            (period + 1.4e-9, true)
+        } else {
+            (period + 6.4e-9, false)
+        };
+        assert_eq!(*high, level, "edge {index} at {time:e}");
+        assert!(
+            (time - want).abs() < 1.0e-15,
+            "edge {index} at {time:e}, not {want:e}"
+        );
+    }
+}
+
 /// The `#1` the HDL schedules off a code model's clock and the code model's
 /// own 1 ns gate delay are one instant: on every edge the converter puts on
 /// its tick image, both are the exact image a nanosecond later, and the

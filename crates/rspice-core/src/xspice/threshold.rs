@@ -26,6 +26,25 @@ pub struct AnalogInputThreshold {
     pub high: Value,
     /// The model's decision law.
     pub behavior: AnalogThresholdBehavior,
+    /// How long after a crossing out of the band, and after one into it, the
+    /// model does nothing that crossing caused: its shortest edge delay, and
+    /// its band's timeout before the X. Zero when the model does not say,
+    /// which never lets a crossing's consequence fall before the instant it
+    /// is decided at.
+    #[cfg_attr(
+        not(feature = "veriloga"),
+        expect(dead_code, reason = "only a coupled run's converter roots read it")
+    )]
+    pub(crate) quiet: ThresholdQuiet,
+}
+
+/// [`AnalogInputThreshold::quiet`], in seconds.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct ThresholdQuiet {
+    /// After a crossing that changes the output's level.
+    pub(crate) edge: Value,
+    /// After a crossing into the band, whose X comes at its timeout.
+    pub(crate) band: Value,
 }
 
 /// The A/D decision law of every built-in converter: hysteresis between the

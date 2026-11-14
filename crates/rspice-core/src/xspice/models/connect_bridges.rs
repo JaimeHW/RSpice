@@ -62,7 +62,8 @@ use crate::xspice::verilog::store::BitDrive;
 use crate::xspice::{
     AnalogBandLaw, AnalogInputThreshold, AnalogThresholdBehavior, CmContext, CmError, CmResult,
     CodeModel, DigitalState, DigitalStrength, DigitalValue, EvaluationPhase, ParamSpec,
-    PortDirection, PortSpec, PortType, XspiceCheckpointSupport, XspiceSmallSignalDescriptor,
+    PortDirection, PortSpec, PortType, ThresholdQuiet, XspiceCheckpointSupport,
+    XspiceSmallSignalDescriptor,
 };
 use rspice_veriloga::canonical_ir::digital::DigitalStrengthLevel;
 use rspice_veriloga::four_state::FourStateBit;
@@ -227,6 +228,8 @@ fn supply_threshold(supply_min: Value, behavior: AnalogThresholdBehavior) -> Ana
         low: supply_min,
         high: supply_min,
         behavior,
+        // A located supply crossing publishes its X at the crossing itself.
+        quiet: ThresholdQuiet::default(),
     }
 }
 
@@ -346,6 +349,10 @@ impl AdcLaw {
     /// only when the edges coincide; see [`Self::crossing`].
     fn thresholds(self, port: &str, width: usize, tracking: bool) -> Vec<AnalogInputThreshold> {
         let behavior = self.root_behavior();
+        let quiet = ThresholdQuiet {
+            edge: self.rise.min(self.fall),
+            band: self.band.timeout,
+        };
         let mut thresholds = Vec::new();
         for element in 0..width {
             let threshold = |low, high| AnalogInputThreshold {
@@ -354,6 +361,7 @@ impl AdcLaw {
                 low,
                 high,
                 behavior,
+                quiet,
             };
             if !tracking {
                 thresholds.push(threshold(self.low.absolute, self.high.absolute));

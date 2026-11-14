@@ -660,8 +660,12 @@ struct HeldCrossing {
     bit: FourStateBit,
     /// The threshold crossed.
     threshold: f64,
+    /// Which way the input crossed it: `1.0` upward, `-1.0` downward.
+    direction: f64,
     /// The latest candidate that is the root's landing: where
-    /// [`MixedSignalHost::boundary_refinement_time`] puts it.
+    /// [`MixedSignalHost::boundary_refinement_time`] puts it. For a crossing
+    /// before the first instant the root may land on, the candidate that
+    /// found it.
     landing: f64,
     /// The candidate this crossing last decided, if any.
     decided_at: Option<f64>,
@@ -693,7 +697,10 @@ impl HeldCrossing {
         }
         let toward = self.threshold - start_sample;
         if toward == 0.0 {
-            return false;
+            // The accepted sample sits on the threshold, so the crossing is
+            // the accepted point itself: it decides every later candidate
+            // whose sample has left the threshold the way it was crossed.
+            return self.time <= start && (sample - self.threshold) * self.direction > 0.0;
         }
         let progress = (sample - start_sample) * toward.signum();
         progress > 0.0 && (self.threshold - sample).abs() / progress * (time - start) <= window
@@ -1051,6 +1058,9 @@ struct AdcBridge {
     /// Whether the converter decides by the crossing this root located,
     /// so the root may too; see [`CandidateLedger`]'s "located crossings".
     decides_by_located: bool,
+    /// How long after its crossings the converter does nothing they caused;
+    /// zero for every bridge that is not a root detector.
+    quiet: crate::xspice::ThresholdQuiet,
 }
 
 impl AdcBridge {
@@ -3559,6 +3569,7 @@ impl MixedSignalHost {
             converter_input: None,
             converter_threshold: 0,
             decides_by_located: false,
+            quiet: crate::xspice::ThresholdQuiet::default(),
         });
         self.state.accepted_adc_voltages.push(0.0);
         self.state.accepted_adc_decisions.push(None);
@@ -3617,6 +3628,7 @@ impl MixedSignalHost {
             converter_input: Some(input),
             converter_threshold: ordinal,
             decides_by_located,
+            quiet: threshold.quiet,
         });
         self.state.accepted_adc_voltages.push(0.0);
         self.state.accepted_adc_decisions.push(None);
@@ -4531,11 +4543,12 @@ impl MixedSignalHost {
             let target = event.max(first_allowed);
             (target < time && time - target > tolerance).then_some(target)
         });
-        for (moved, crossing) in trial
+        for (index, (moved, crossing)) in trial
             .vectors
             .adc_moved
             .iter()
             .zip(&trial.vectors.transition_times)
+            .enumerate()
         {
             // A bridge that did not move this trial keeps the accepted
             // transition time it was opened with, which is not this interval's.
@@ -4546,6 +4559,11 @@ impl MixedSignalHost {
                 continue;
             };
             if time - crossing <= tolerance {
+                continue;
+            }
+            // A converter root's crossing that already decided this
+            // candidate needs no landing; see `settle_analog_bridges`.
+            if self.scratch.ledger.decided(index, time).is_some() {
                 continue;
             }
             // Land on the entering side of a representable root, as the analog
@@ -4838,11 +4856,13 @@ impl MixedSignalHost {
                 // the state just past the threshold crossed, which is not
                 // `bit` where one step crossed both edges of a band.
                 let start = self.state.accepted_time;
-                let past = if voltage > self.state.accepted_adc_voltages[index] {
+                let rising = voltage > self.state.accepted_adc_voltages[index];
+                let past = if rising {
                     threshold.next_up()
                 } else {
                     threshold.next_down()
                 };
+                let first_landing = first_landing_after(start, self.analog_step_floor);
                 if bridge.decides_by_located
                     && !carried
                     && time_seconds - crossing
@@ -4850,17 +4870,35 @@ impl MixedSignalHost {
                     && let Some((past, _)) = bridge.decision(past, previous, held)
                     && held != Some(past)
                 {
+                    // A crossing before the first instant the root may land
+                    // on, at the accepted point itself or within a solver
+                    // floor of it, has no interior to land in: the root would
+                    // take a floor step only to date it where it is dated
+                    // now. It decides this candidate instead, when nothing
+                    // it causes the converter to do comes before the
+                    // candidate: its edge's delay, or for an entry into the
+                    // band the timeout before the X. A ramp whose accepted
+                    // point fell exactly on a band edge took a floor step at
+                    // each entry.
+                    let quiet = if past == FourStateBit::Unknown {
+                        bridge.quiet.band
+                    } else {
+                        bridge.quiet.edge
+                    };
+                    let decided_here = crossing < first_landing && time_seconds - start <= quiet;
                     scratch.ledger.locate(
                         index,
                         HeldCrossing {
                             time: crossing,
                             bit: past,
                             threshold,
-                            landing: crossing
-                                .max(start)
-                                .next_up()
-                                .max(first_landing_after(start, self.analog_step_floor)),
-                            decided_at: None,
+                            direction: if rising { 1.0 } else { -1.0 },
+                            landing: if decided_here {
+                                time_seconds
+                            } else {
+                                crossing.max(start).next_up().max(first_landing)
+                            },
+                            decided_at: decided_here.then_some(time_seconds),
                         },
                     );
                 }
@@ -8567,6 +8605,7 @@ endmodule
             time: crossing,
             bit: FourStateBit::One,
             threshold: 0.5,
+            direction: 1.0,
             landing,
             decided_at: None,
         };
@@ -8610,6 +8649,45 @@ endmodule
         ledger.clear();
         assert!(ledger.located_at(3, landing).is_none());
         assert!(!ledger.has_pending_candidate(), "an acceptance forgets it");
+    }
+
+    /// A crossing at the accepted point, where the accepted sample sits on
+    /// the threshold, decides each later candidate whose sample has left the
+    /// threshold the way it was crossed, so a band a ramp's accepted point
+    /// enters exactly is entered there rather than one solver floor later.
+    #[test]
+    fn a_crossing_at_the_accepted_point_decides_the_samples_past_it() {
+        let (start, floor): (f64, f64) = (6.0e-10, 1.953_125e-17);
+        let candidate = start + 4.0e-10;
+        let window = endpoint_root_window(candidate, start, floor);
+        for direction in [1.0, -1.0] {
+            let held = HeldCrossing {
+                time: start,
+                bit: FourStateBit::Unknown,
+                threshold: 0.3,
+                direction,
+                landing: candidate,
+                decided_at: Some(candidate),
+            };
+            let mut ledger = CandidateLedger::default();
+            ledger.locate(0, held);
+            assert!(ledger.decided(0, candidate).is_some());
+            let located = ledger
+                .located_at(0, start + 2.0e-10)
+                .expect("a shorter retry lies between it and the candidate");
+            for (offset, decides, why) in [
+                (0.2, true, "well past"),
+                (1.0e-15, true, "a rounding past"),
+                (0.0, false, "still on the threshold"),
+                (-0.2, false, "back the other way"),
+            ] {
+                assert_eq!(
+                    located.decides(candidate, start, 0.3, 0.3 + direction * offset, window),
+                    decides,
+                    "{why} ({direction})"
+                );
+            }
+        }
     }
 
     /// A step a D/A bridge moved in carries no interior A/D root.

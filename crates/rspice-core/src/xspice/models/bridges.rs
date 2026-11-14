@@ -121,6 +121,7 @@ fn adc_input_thresholds(
             low,
             high,
             behavior,
+            quiet: crate::xspice::ThresholdQuiet::default(),
         })
         .collect())
 }
