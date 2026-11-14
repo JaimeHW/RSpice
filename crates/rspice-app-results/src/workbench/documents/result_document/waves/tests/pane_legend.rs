@@ -367,12 +367,13 @@ fn a_logic_expression_chip_offers_analog() {
     );
 }
 
-/// Both axes' log toggles are one chip, lit while the axis is logarithmic:
-/// the pane's reads "log" in its header, the shared X axis's "log X" in the
-/// strip header, which owns that axis, clear of cursor A's flag with A on
+/// Both axes' log toggles are one chip naming its axis, lit while the axis
+/// is logarithmic: the pane's reads "log Y" in its header, the shared X
+/// axis's "log X" in the strip header, which owns that axis, clear of
+/// cursor A's flag with A on
 /// the plot's left edge, with lanes beside the panes and without.
 #[test]
-fn the_axes_log_toggles_read_alike_and_clear_cursor_a() {
+fn the_y_log_toggle_names_its_axis_and_the_x_toggle_clears_cursor_a() {
     for lanes in [true, false] {
         let mut state = if lanes {
             sar_strip(BusRadix::Unsigned, false).0
@@ -391,7 +392,7 @@ fn the_axes_log_toggles_read_alike_and_clear_cursor_a() {
                 .count()
         };
         assert_eq!(
-            (count("log"), count("log X")),
+            (count("log Y"), count("log X")),
             (1, 1),
             "the Y toggle and the X toggle (lanes: {lanes})"
         );
@@ -491,7 +492,7 @@ fn a_pane_with_nothing_plotted_offers_no_axis_controls() {
             })
             .count()
     };
-    for name in ["log", "Fit Y to the traces in view"] {
+    for name in ["log Y", "Fit Y to the traces in view"] {
         assert_eq!(on_row(volts, name), 1, "the volts pane offers {name:?}");
         assert_eq!(
             on_row(currents, name),

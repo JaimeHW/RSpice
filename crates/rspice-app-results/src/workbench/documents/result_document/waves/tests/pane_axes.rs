@@ -1,6 +1,7 @@
 //! A pane's chrome and its Y axis, judged through the frame the reader sees:
-//! the header carries the legend and no unit tag, a click anywhere on a pane
-//! makes it the active one, the panes of a strip share its height equally,
+//! the header carries the legend and no unit tag, its scale toggle stands in
+//! the strip's one column of them, a click anywhere on a pane makes it the
+//! active one, the panes of a strip share its height equally,
 //! every Y tick is labelled with the unit stated above the column, and the
 //! automatic Y fit follows the X window until the reader pins a Y of their
 //! own.
@@ -200,24 +201,30 @@ fn pane_key(state: &mut ResultsTestHost, unit: &str) -> WavePanePresentationKey 
 
 /// Where the control named `name` is.
 fn control(output: &egui::FullOutput, name: &str) -> egui::Rect {
-    output
+    controls(output, name)
+        .first()
+        .copied()
+        .unwrap_or_else(|| panic!("the frame publishes {name:?}"))
+}
+
+/// Every control of the frame named `name`, top to bottom.
+fn controls(output: &egui::FullOutput, name: &str) -> Vec<egui::Rect> {
+    let mut found: Vec<egui::Rect> = output
         .platform_output
         .accesskit_update
-        .as_ref()
-        .and_then(|update| {
-            update.nodes.iter().find_map(|(_, node)| {
-                (node.label() == Some(name))
-                    .then(|| node.bounds())
-                    .flatten()
-            })
-        })
+        .iter()
+        .flat_map(|update| &update.nodes)
+        .filter(|(_, node)| node.label() == Some(name))
+        .filter_map(|(_, node)| node.bounds())
         .map(|bounds| {
             egui::Rect::from_min_max(
                 egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
                 egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
             )
         })
-        .unwrap_or_else(|| panic!("the frame publishes {name:?}"))
+        .collect();
+    found.sort_by(|a, b| a.top().total_cmp(&b.top()));
+    found
 }
 
 /// No pane header carries its unit: each unit is stated once, as its axis'
@@ -318,6 +325,51 @@ fn the_panes_of_a_strip_take_equal_heights() {
                 "{count} panes: heights {:?}",
                 areas.iter().map(|area| area.height()).collect::<Vec<_>>()
             );
+        }
+    }
+}
+
+/// Every scale toggle of a strip stands in one right-hand column: each
+/// pane's row ends with its icon under the strip header's window control,
+/// and its "log Y" chip the strip header's chip gap left of that, at every
+/// pane count and at a narrow width. The strip header's own "log X" chip,
+/// where it has one, ends on the same edge.
+#[test]
+fn the_scale_toggles_of_a_strip_stand_in_one_column() {
+    let ctx = context(crate::ui::Theme::default());
+    let units = ["V", "A", "W"];
+    for (count, size) in [
+        (1, FRAME),
+        (2, FRAME),
+        (3, FRAME),
+        (3, egui::vec2(520.0, FRAME.y)),
+    ] {
+        let mut state = panes_of(&units[..count]);
+        let output = settled(&ctx, &mut state, size);
+        let window = control(&output, "Maximize strip");
+        let icons = controls(&output, "Fit Y to the traces in view");
+        let chips = controls(&output, "log Y");
+        assert_eq!(icons.len(), count, "{count} panes at {size:?}: {icons:?}");
+        assert_eq!(chips.len(), count, "{count} panes at {size:?}: {chips:?}");
+        for (icon, chip) in icons.iter().zip(&chips) {
+            assert!(
+                (icon.left() - window.left()).abs() <= 0.5
+                    && (icon.right() - window.right()).abs() <= 0.5,
+                "{count} panes at {size:?}: the pane icon {icon:?} stands under the \
+                 strip's window control {window:?}"
+            );
+            assert!(
+                (icon.left() - chip.right() - 5.0).abs() <= 0.5,
+                "{count} panes at {size:?}: \"log Y\" {chip:?} ends the strip header's \
+                 chip gap left of its icon {icon:?}"
+            );
+            for log_x in controls(&output, "log X") {
+                assert!(
+                    (log_x.right() - chip.right()).abs() <= 0.5,
+                    "{count} panes at {size:?}: \"log X\" {log_x:?} and \"log Y\" \
+                     {chip:?} end on one edge"
+                );
+            }
         }
     }
 }

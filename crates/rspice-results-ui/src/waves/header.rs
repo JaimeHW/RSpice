@@ -17,6 +17,15 @@ use std::borrow::Cow;
 
 pub const WAVE_PANE_HEADER_HEIGHT: f32 = 25.0;
 
+/// The strip header's icon side and the gap between its trailing actions:
+/// the pane's icon takes the same rectangle as the strip's maximize icon
+/// above it.
+const ACTION_ICON_SIDE: f32 = 22.0;
+const ACTION_ITEM_GAP: f32 = 1.0;
+/// The space, beyond the item gap, between the icon and the scale chip left
+/// of it, as the strip header spaces its own chip.
+const SCALE_CHIP_SPACE: f32 = 4.0;
+
 /// Source-qualified actions applied immediately in legend order.
 ///
 /// Selection is queried for each chip, including after an earlier chip changes it.
@@ -288,8 +297,22 @@ pub fn show_header(
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
             |ui| {
                 ui.set_clip_rect(space);
+                // The row ends as the strip header above it does: the icon
+                // in the strip's icon column, then the axis' scale chip the
+                // same gap to its left, so every scale toggle of the strip
+                // stands in one right-hand column.
+                ui.spacing_mut().item_spacing.x = ACTION_ITEM_GAP;
+                if IconButton::new(Icon::ZoomFit)
+                    .side(ACTION_ICON_SIDE)
+                    .tooltip("Fit Y to the traces in view")
+                    .show(ui)
+                    .clicked()
+                {
+                    output.autoscale_y = true;
+                }
+                ui.add_space(SCALE_CHIP_SPACE);
                 let log = ui
-                    .add_enabled_ui(log_y_available, |ui| chip(ui, "log", log_y))
+                    .add_enabled_ui(log_y_available, |ui| chip(ui, "log Y", log_y))
                     .inner
                     .on_hover_text(if log_y_available {
                         "Toggle logarithmic Y axis"
@@ -298,14 +321,6 @@ pub fn show_header(
                     });
                 if log.clicked() {
                     output.toggle_log_y = true;
-                }
-                if IconButton::new(Icon::ZoomFit)
-                    .side(19.0)
-                    .tooltip("Fit Y to the traces in view")
-                    .show(ui)
-                    .clicked()
-                {
-                    output.autoscale_y = true;
                 }
             },
         );
