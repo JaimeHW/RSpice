@@ -96,8 +96,8 @@ fn cut_paste_commands_preserve_order_unique_pin_names_and_undo() {
     assert_eq!(pasted.body.len(), 4);
     let pin = pasted.pin("IN_copy2").unwrap();
     assert_eq!(pin.position, Some(Point::new(0, 30)));
-    assert_eq!(pin.side(), before.pins[0].side());
-    assert_eq!(pin.offset(), 30);
+    assert_eq!(pin.side, before.pins[0].side);
+    assert_eq!(pin.length, before.pins[0].length);
     assert_eq!(
         app.state.design.symbol.editor.effective_selection().shapes,
         [2, 3].into()
@@ -144,9 +144,10 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     );
     let after = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(after.pin("IN").unwrap().position, Some(Point::new(20, -30)));
+    // The pin turns with the selection: a pin on the left comes up on top.
     assert_eq!(
-        after.pin("IN").unwrap().side(),
-        before.pin("IN").unwrap().side()
+        after.pin("IN").unwrap().side,
+        before.pin("IN").unwrap().side.turned_clockwise()
     );
     assert_eq!(after.name_anchor, Point::new(-10, 40));
     assert_eq!(
@@ -188,6 +189,17 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     app.execute_command_key(DesignCommand::RotateSelection.key());
     let rotated = pin_at(&app);
     assert_ne!(rotated, placed, "Rotate turns the selected pin");
+    assert_eq!(
+        app.state
+            .model
+            .load_active_symbol_document()
+            .unwrap()
+            .pin("IN")
+            .unwrap()
+            .side,
+        crate::state::SymbolPinSide::Top,
+        "its lead turns with it"
+    );
     app.execute_command_key(DesignCommand::MirrorSelectionHorizontal.key());
     assert_ne!(pin_at(&app), rotated, "Mirror flips the selected pin");
     assert!(app.state.undo_active_symbol_document().unwrap());

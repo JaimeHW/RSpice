@@ -1701,6 +1701,7 @@ impl Builder<'_> {
                 .collect(),
             ..SymbolDocument::default()
         };
+        document.settle_drawn_pins();
         // An LTspice pin names itself as RSpice letters a pin on the edge
         // its justification puts it on. A pin RSpice reads onto another
         // edge, one inside the box around a slanted or stepped body, keeps
@@ -1718,7 +1719,7 @@ impl Builder<'_> {
                             (_, 1) => SymbolPinSide::Top,
                             _ => SymbolPinSide::Bottom,
                         };
-                        document.pin_side(pin) == side
+                        pin.side == side
                     })
                 })
                 .collect::<Vec<_>>();
@@ -2768,11 +2769,13 @@ fn terminal_symbol(
     {
         terminals.push(terminal(tied, *position));
     }
-    SymbolDocument {
+    let mut document = SymbolDocument {
         pins: terminals,
         body,
         ..SymbolDocument::default()
-    }
+    };
+    document.settle_drawn_pins();
+    document
 }
 
 /// Draws a native part whose source symbol could not be read: RSpice's glyph

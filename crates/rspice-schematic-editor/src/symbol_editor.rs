@@ -29,6 +29,7 @@ use rspice_design_model::{
     Point,
     cell_view::CellViewRef,
     port::{PortDirection, PortSpec},
+    symbol_pin::SymbolPinSide,
 };
 use rspice_ui_kit::{
     theme::{self, FontWeight},
@@ -612,17 +613,12 @@ fn draw_pins(
         .iter()
         .map(|port| port.name.to_ascii_lowercase())
         .collect();
-    let body = document.drawn_body_bounds();
     for pin in &document.pins {
-        let Some(position) = pin.position else {
+        let (Some(position), Some(inner)) = (pin.position, pin.lead_inner()) else {
             continue;
         };
         let start = viewport.world_to_screen(position);
-        let inner = viewport.world_to_screen(rspice_design::symbol_generation::lead_inner(
-            position,
-            document.pin_side(pin),
-            body,
-        ));
+        let inner = viewport.world_to_screen(inner);
         let orphan = !ports.is_empty() && !port_names.contains(&pin.name.to_ascii_lowercase());
         let color = if orphan { t.color.err } else { t.color.wire };
         let stroke = Stroke::new(1.2, color);
@@ -636,7 +632,7 @@ fn draw_pins(
             stroke
         };
         painter.rect_stroke(pad, 0.0, pad_stroke, egui::StrokeKind::Inside);
-        let label_pos = pin_label_pos(position, viewport);
+        let label_pos = pin_label_pos(position, pin.side, viewport);
         painter.text(
             label_pos,
             Align2::CENTER_CENTER,
@@ -644,7 +640,7 @@ fn draw_pins(
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.symbol,
         );
-        draw_direction_mark(painter, viewport, document, pin, color);
+        draw_direction_mark(painter, viewport, pin, color);
     }
 }
 
@@ -997,15 +993,13 @@ pub fn snap_to_terminal_grid(point: Point) -> Point {
     Point::new(snap(point.x), snap(point.y))
 }
 
-/// Where a pin's name stands: out past its terminal, on the side the
-/// terminal faces once the symbol is turned.
-fn pin_label_pos(position: Point, viewport: SymbolViewport) -> Pos2 {
+/// Where a pin's name stands: out past its terminal, away from the body on
+/// the side the pin sits on, as that side faces once the symbol is turned.
+fn pin_label_pos(position: Point, side: SymbolPinSide, viewport: SymbolViewport) -> Pos2 {
     let pad = SYMBOL_TERMINAL_GRID as f32 * viewport.zoom * 0.75;
     let base = viewport.world_to_screen(position);
-    let outward = match (position.x.signum(), position.y.signum()) {
-        (0, y) => viewport.screen_direction(0.0, if y < 0 { -1.0 } else { 1.0 }),
-        (x, _) => viewport.screen_direction(x as f32, 0.0),
-    };
+    let inward = rspice_design::symbol_generation::inward_step(side);
+    let outward = viewport.screen_direction(-inward.x as f32, -inward.y as f32);
     if outward.x.abs() > outward.y.abs() {
         base + vec2(pad * outward.x.signum(), -8.0)
     } else {
@@ -1018,22 +1012,17 @@ fn pin_label_pos(position: Point, viewport: SymbolViewport) -> Pos2 {
 fn draw_direction_mark(
     painter: &egui::Painter,
     viewport: SymbolViewport,
-    document: &SymbolDocument,
     pin: &SymbolPin,
     color: Color32,
 ) {
     if !matches!(pin.direction, PortDirection::In | PortDirection::Out) {
         return;
     }
-    let Some(position) = pin.position else {
+    let (Some(position), Some(inner)) = (pin.position, pin.lead_inner()) else {
         return;
     };
     let terminal = viewport.world_to_screen(position);
-    let inner = viewport.world_to_screen(rspice_design::symbol_generation::lead_inner(
-        position,
-        document.pin_side(pin),
-        document.drawn_body_bounds(),
-    ));
+    let inner = viewport.world_to_screen(inner);
     let lead = inner - terminal;
     let inward = lead.normalized();
     if !inward.is_finite() {

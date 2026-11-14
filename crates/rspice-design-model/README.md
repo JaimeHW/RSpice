@@ -16,7 +16,7 @@ without depending on each other.
 | `port` | `PortSpec` and `PortDirection`, the interface-port identity symbols and port lists read |
 | `bus` | `BusDeclaration`, `BusSlice`, the bounded bus-name parser, `declared_vector` and `declared_width` |
 | `symbol_geometry` | `SymbolShape`, symbol text size, alignment and placement, and `symbol_text_bounds` |
-| `symbol_pin` | `SymbolElectricalType` and `SymbolPinSide`, shared by authored and model-bound symbols |
+| `symbol_pin` | `SymbolElectricalType`, `SymbolPinSide` and `SymbolPinStyle`, shared by authored and model-bound symbols |
 | `design_management` | `DesignManagementCatalog`: schematic sheet catalogs and cross-sheet ports, drawing-sheet formats, presets and lettering metrics, assembly variants, reference annotation, and hierarchy audit receipts. Mutations validate a cloned candidate before committing, and each persisted structure carries its own schema version and explicit `MAX_*` bounds |
 | `sheet_authoring` | `custom_format` and `validate_dimensions`: a custom drawing-sheet format derived from a `StartingFrame`, which decides margins, border and title block |
 | `sheet_package` | The drawing-sheet preset package: build, encode and parse, with a content digest that import recomputes |

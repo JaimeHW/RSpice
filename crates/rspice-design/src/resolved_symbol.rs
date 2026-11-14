@@ -4,10 +4,13 @@ use std::collections::HashSet;
 
 use rspice_design_model::Point;
 use rspice_design_model::port::{PortDirection, PortSpec};
-use rspice_design_model::symbol_pin::SymbolPinSide;
+use rspice_design_model::symbol_pin::{SymbolPinSide, SymbolPinStyle};
 
 use crate::schematic::label_layout::TextEdge;
-use crate::symbol::{PinNamePlacement, SymbolDocument, SymbolShape};
+use crate::symbol::{
+    PinDrawing, PinNamePlacement, SymbolDocument, SymbolPin, SymbolShape, lead_inner_end,
+    pin_drawing, pin_name_anchor,
+};
 use crate::symbol_generation::GeneratedSymbol;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,10 +38,16 @@ pub struct ResolvedSymbolIssue {
 pub struct ResolvedSymbolPin {
     pub name: String,
     pub direction: PortDirection,
-    /// Body edge the pin is drawn against. Its lead and its name both follow
-    /// this, so neither can be inferred from the terminal coordinate alone.
+    /// The side of the symbol the pin sits on. Its lead and its name both
+    /// follow this, so neither can be inferred from the terminal coordinate
+    /// alone.
     pub side: SymbolPinSide,
+    /// The tip, where wires attach.
     pub offset: Point,
+    /// How far the lead runs from the tip toward the body.
+    pub length: i32,
+    /// The mark drawn where the lead meets the body.
+    pub style: SymbolPinStyle,
     /// The symbol letters no name at this pin.
     pub name_hidden: bool,
     /// How far in from the terminal the symbol starts this pin's name.
@@ -46,6 +55,35 @@ pub struct ResolvedSymbolPin {
     /// Where the symbol letters this pin's name, when the drawing it came
     /// from sets the place itself.
     pub name_at: Option<PinNamePlacement>,
+}
+
+impl ResolvedSymbolPin {
+    /// `pin`, placed at `tip`, under the name and direction its interface
+    /// gives it.
+    fn of(pin: &SymbolPin, name: &str, direction: PortDirection, tip: Point) -> Self {
+        Self {
+            name: name.to_owned(),
+            direction,
+            side: pin.side,
+            offset: tip,
+            length: pin.length,
+            style: pin.style,
+            name_hidden: pin.name_hidden,
+            name_offset: pin.name_offset,
+            name_at: pin.name_at,
+        }
+    }
+
+    /// The document pin this resolved pin stands for.
+    pub fn to_symbol_pin(&self) -> SymbolPin {
+        SymbolPin::new(self.name.clone(), self.direction, Some(self.offset))
+            .with_side(self.side)
+            .with_length(self.length)
+            .with_style(self.style)
+            .with_name_hidden(self.name_hidden)
+            .with_name_offset(self.name_offset)
+            .with_name_at(self.name_at)
+    }
 }
 
 /// How a pin's name hangs off its anchor on a placed part.
@@ -91,25 +129,27 @@ impl ResolvedCellSymbol {
         self.effective_point(pin.offset)
     }
 
-    /// Inner end of a pin's lead, where it meets the body outline.
+    /// Inner end of a pin's lead, where it meets the body: the tip stepped
+    /// toward the body by the lead's length.
     pub fn pin_lead_inner(&self, pin: &ResolvedSymbolPin) -> Point {
-        self.effective_point(crate::symbol_generation::lead_inner(
-            pin.offset,
-            pin.side,
-            self.document.drawn_body_bounds(),
-        ))
+        self.effective_point(lead_inner_end(pin.offset, pin.side, pin.length))
     }
 
-    /// Where a pin's name is drawn: inside the body, clear of the outline and
-    /// of the pin's lead.
+    /// What a pin draws, lead and marks, in the placed symbol's coordinates.
+    pub fn pin_drawing(&self, pin: &ResolvedSymbolPin) -> PinDrawing {
+        pin_drawing(pin.offset, pin.side, pin.length, pin.style)
+            .shifted(Point::origin() - self.document.origin)
+    }
+
+    /// Where a pin's name is drawn: a gutter past the body end of its lead,
+    /// clear of the mark it ends in.
     ///
     /// A symbol that draws its leads as artwork (an imported LTspice or SVG
-    /// symbol) has a body that reaches out to every terminal, so the lead the
-    /// renderer would draw has no length and the name would start on the
-    /// artwork's lead. The name steps past the end of that lead instead, as a
-    /// generated symbol's steps past the end of the lead it draws. A pin that
-    /// sets its own distance for the name starts it there when that is
-    /// farther in.
+    /// symbol) has pins with no lead of their own, so the name would start
+    /// on the artwork's lead at the terminal. The name steps past the end of
+    /// that lead instead, as it steps past the end of a lead the pin draws.
+    /// A pin that sets its own distance for the name starts it there when
+    /// that is farther in.
     pub fn pin_label_anchor(&self, pin: &ResolvedSymbolPin) -> Point {
         // A name the drawing placed itself stands where it was placed.
         if let Some(at) = pin.name_at {
@@ -118,11 +158,7 @@ impl ResolvedCellSymbol {
                 pin.offset.y + at.offset.y,
             ));
         }
-        let anchor = crate::symbol_generation::pin_label_anchor(
-            pin.offset,
-            pin.side,
-            self.document.drawn_body_bounds(),
-        );
+        let anchor = pin_name_anchor(pin.offset, pin.side, pin.length, pin.style);
         let step = crate::symbol_generation::inward_step(pin.side);
         let inward =
             |point: Point| (point.x - pin.offset.x) * step.x + (point.y - pin.offset.y) * step.y;
@@ -153,15 +189,9 @@ impl ResolvedCellSymbol {
         if ports.is_empty() {
             for pin in &document.pins {
                 match pin.position {
-                    Some(offset) => pins.push(ResolvedSymbolPin {
-                        name: pin.name.clone(),
-                        direction: pin.direction,
-                        side: document.pin_side(pin),
-                        offset,
-                        name_hidden: pin.name_hidden,
-                        name_offset: pin.name_offset,
-                        name_at: pin.name_at,
-                    }),
+                    Some(offset) => {
+                        pins.push(ResolvedSymbolPin::of(pin, &pin.name, pin.direction, offset))
+                    }
                     None => issues.push(ResolvedSymbolIssue {
                         kind: ResolvedSymbolIssueKind::UnplacedPin,
                         pin_name: pin.name.clone(),
@@ -176,15 +206,12 @@ impl ResolvedCellSymbol {
                     .pin(&port.name)
                     .and_then(|pin| pin.position.map(|offset| (pin, offset)))
                 {
-                    Some((pin, offset)) => pins.push(ResolvedSymbolPin {
-                        name: port.name.clone(),
-                        direction: port.direction,
-                        side: document.pin_side(pin),
+                    Some((pin, offset)) => pins.push(ResolvedSymbolPin::of(
+                        pin,
+                        &port.name,
+                        port.direction,
                         offset,
-                        name_hidden: pin.name_hidden,
-                        name_offset: pin.name_offset,
-                        name_at: pin.name_at,
-                    }),
+                    )),
                     None => issues.push(ResolvedSymbolIssue {
                         kind: ResolvedSymbolIssueKind::UnplacedPin,
                         pin_name: port.name.clone(),
@@ -251,14 +278,8 @@ impl ResolvedCellSymbol {
             .iter()
             .filter_map(|port| {
                 document.pin(&port.name).and_then(|pin| {
-                    pin.position.map(|offset| ResolvedSymbolPin {
-                        name: port.name.clone(),
-                        direction: port.direction,
-                        side: document.pin_side(pin),
-                        offset,
-                        name_hidden: pin.name_hidden,
-                        name_offset: pin.name_offset,
-                        name_at: pin.name_at,
+                    pin.position.map(|offset| {
+                        ResolvedSymbolPin::of(pin, &port.name, port.direction, offset)
                     })
                 })
             })
@@ -348,7 +369,6 @@ fn port_name_set(ports: &[PortSpec]) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbol::SymbolPin;
 
     /// An 80 x 60 box whose body draws its own 10-wu leads out to IN
     /// (-40, 0), OUT (40, 0) and BIAS (0, 40), as an imported symbol does.
@@ -359,9 +379,9 @@ mod tests {
         };
         SymbolDocument {
             pins: vec![
-                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 0))),
-                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(40, 0))),
-                SymbolPin::new("BIAS", PortDirection::In, Some(Point::new(0, 40))),
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 0))).with_length(0),
+                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(40, 0))).with_length(0),
+                SymbolPin::new("BIAS", PortDirection::In, Some(Point::new(0, 40))).with_length(0),
             ],
             body: vec![
                 SymbolShape::Polyline {
@@ -411,10 +431,12 @@ mod tests {
         let document = SymbolDocument {
             pins: vec![
                 SymbolPin::new("CLK", PortDirection::In, Some(Point::new(-30, 0)))
+                    .with_length(0)
                     .with_name_offset(Some(10)),
                 SymbolPin::new("D", PortDirection::In, Some(Point::new(-30, 20)))
+                    .with_length(0)
                     .with_name_offset(Some(1)),
-                SymbolPin::new("Q", PortDirection::Out, Some(Point::new(30, 0))),
+                SymbolPin::new("Q", PortDirection::Out, Some(Point::new(30, 0))).with_length(0),
             ],
             body: vec![
                 SymbolShape::Polyline {
@@ -431,15 +453,11 @@ mod tests {
             ],
             ..SymbolDocument::default()
         };
-        let symbol = ResolvedCellSymbol::from_authored_document(document.clone(), &[]);
+        let symbol = ResolvedCellSymbol::from_authored_document(document, &[]);
         let anchors = symbol
             .connectable_pins()
             .map(|pin| {
-                let standard = crate::symbol_generation::pin_label_anchor(
-                    pin.offset,
-                    pin.side,
-                    document.drawn_body_bounds(),
-                );
+                let standard = pin_name_anchor(pin.offset, pin.side, pin.length, pin.style);
                 (pin.name.as_str(), symbol.pin_label_anchor(pin), standard)
             })
             .collect::<Vec<_>>();
@@ -458,20 +476,13 @@ mod tests {
     #[test]
     fn an_outline_edge_through_a_terminal_is_not_a_lead() {
         let mut document = artwork_leads();
-        document.pins = vec![SymbolPin::new(
-            "C",
-            PortDirection::In,
-            Some(Point::new(-30, -30)),
-        )];
-        let symbol = ResolvedCellSymbol::from_authored_document(document.clone(), &[]);
+        document.pins =
+            vec![SymbolPin::new("C", PortDirection::In, Some(Point::new(-30, -30))).with_length(0)];
+        let symbol = ResolvedCellSymbol::from_authored_document(document, &[]);
         let pin = symbol.connectable_pins().next().expect("one pin");
         assert_eq!(
             symbol.pin_label_anchor(pin),
-            crate::symbol_generation::pin_label_anchor(
-                pin.offset,
-                pin.side,
-                document.drawn_body_bounds()
-            )
+            pin_name_anchor(pin.offset, pin.side, pin.length, pin.style)
         );
     }
 }

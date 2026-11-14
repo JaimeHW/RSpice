@@ -360,9 +360,9 @@ mod symbol_document_tests {
              for the author to find in the unplaced list"
         );
         assert_ne!(
-            added.offset,
-            doc.pin("INP").expect("INP exists").offset,
-            "a new pin takes a free offset rather than stacking on one in use"
+            added.position.map(|tip| tip.y),
+            Some(-10),
+            "a new pin takes a free place along its side rather than stacking on one in use"
         );
         assert!(doc.pin_summary(&SymbolInterface::Declared(ports)).matches());
     }

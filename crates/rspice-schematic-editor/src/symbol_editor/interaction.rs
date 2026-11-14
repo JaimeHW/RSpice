@@ -4,11 +4,8 @@ use egui::Pos2;
 use rspice_design::occurrence::DocumentOccurrence;
 use rspice_design::symbol::{
     SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolShape,
-    pin_side_against_body,
 };
-use rspice_design_model::{
-    Point, cell_view::CellViewRef, port::PortDirection, symbol_pin::SymbolPinSide,
-};
+use rspice_design_model::{Point, cell_view::CellViewRef};
 use rspice_vocabulary::product::ProjectId;
 
 use super::session::{
@@ -548,7 +545,7 @@ fn toggle_or_select(
 /// Whether the object under `pointer` is one of several already selected.
 ///
 /// A single-object selection is not a group: dragging it must keep the
-/// established single-object behaviour, including its side/offset snapping.
+/// established single-object behaviour, including its terminal-grid snapping.
 fn grab_belongs_to_group(
     edit: &CanvasEdit<'_>,
     document: &SymbolDocument,
@@ -591,10 +588,8 @@ fn group_lands_on_a_pin(edit: &CanvasEdit<'_>, document: &SymbolDocument, delta:
 ///
 /// Terminals travel by the same delta rounded to the terminal pitch, so a
 /// group moved on a fine display grid arrives with its pins still on the
-/// lattice a parent schematic wires to. Each pin keeps the side it was
-/// authored on: a group move is a translation, and re-deriving the edge from
-/// the new coordinates would turn a lead through ninety degrees whenever the
-/// selection carried the body past it.
+/// lattice a parent schematic wires to. Each pin keeps its side and lead: a
+/// group move is a translation.
 fn translate_selection(
     edit: &mut CanvasEdit<'_>,
     document: &mut SymbolDocument,
@@ -607,17 +602,9 @@ fn translate_selection(
         let Some(position) = document.pin(name).and_then(|pin| pin.position) else {
             continue;
         };
-        let moved = position + pin_delta;
-        let Some(pin) = document.pin_mut(name) else {
-            continue;
-        };
-        let side = pin.side();
-        pin.side = Some(side);
-        pin.position = Some(moved);
-        pin.offset = match side {
-            SymbolPinSide::Left | SymbolPinSide::Right => moved.y,
-            SymbolPinSide::Top | SymbolPinSide::Bottom => moved.x,
-        };
+        if let Some(pin) = document.pin_mut(name) {
+            pin.position = Some(position + pin_delta);
+        }
     }
     for index in &selection.shapes {
         if let Some(shape) = document.body.get_mut(*index) {
@@ -732,28 +719,14 @@ fn select_last_shape(session: &mut SymbolEditorSession, document: &SymbolDocumen
     }
 }
 
-/// The edge a dropped terminal belongs to.
-///
-/// A terminal placed clear of the body belongs to the edge it stands off
-/// from — not merely the edge whose coordinate it happens to sit closest to,
-/// which on a tall body reads an outer left pin as a rail.
-fn inferred_side_from_point(point: Point, bounds: (Point, Point)) -> SymbolPinSide {
-    pin_side_against_body(point, PortDirection::InOut, Some(bounds))
-}
-
-/// Pin `name` as it would stand if dropped at `point`.
+/// Pin `name` with its tip at `point`. A pin being placed for the first time
+/// takes the side the body beside it suggests; a placed pin keeps the side,
+/// lead and style it has, wherever it is moved.
 fn pin_placed_at(document: &SymbolDocument, name: &str, point: Point) -> Option<SymbolPin> {
     let mut pin = document.pin(name)?.clone();
-    let bounds = document.body_bounds();
-    let side = inferred_side_from_point(point, bounds);
-    let offset = match side {
-        SymbolPinSide::Left | SymbolPinSide::Right => point.y,
-        SymbolPinSide::Top | SymbolPinSide::Bottom => point.x,
-    };
-    pin.set_side_and_offset(side, offset, bounds);
-    // Its side says which way the lead runs. The terminal itself stands where
-    // it was dropped: a body is not always a box, and a point on a triangle's
-    // shoulder is not one the box around it has.
+    if pin.position.is_none() {
+        pin.side = document.suggested_pin_side(point);
+    }
     pin.position = Some(point);
     Some(pin)
 }

@@ -33,7 +33,7 @@ use rspice_design_model::{
     Point,
     bus::{BusDeclaration, declared_vector, declared_width},
     port::{PinRole, PortDirection, PortSpec},
-    symbol_pin::{SymbolElectricalType, SymbolPinSide},
+    symbol_pin::{SymbolElectricalType, SymbolPinSide, SymbolPinStyle},
 };
 
 #[cfg(any(test, feature = "symbol-test-observation"))]
@@ -92,23 +92,33 @@ pub const MAX_SYMBOL_REVISION_RECORDS: usize = 4_096;
 /// one schematic unit renders as four px at the symbol editor's 100% scale.
 pub const SYMBOL_TERMINAL_GRID: i32 = 10;
 
+/// The lead a new pin is given: two terminal pitches.
+pub const SYMBOL_PIN_LENGTH: i32 = SYMBOL_TERMINAL_GRID * 2;
+
+/// A pin is its tip, the side of the symbol it sits on, the length of the
+/// lead that runs from the tip toward the body, and the mark its lead ends
+/// in. Every one of them is stored: nothing about a pin is worked out from
+/// the artwork once it is placed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SymbolPin {
     pub name: String,
     pub direction: PortDirection,
+    /// The tip: the terminal a wire attaches to. `None` while unplaced.
     pub position: Option<Point>,
-    /// Rich electrical semantics retained by model-bound symbols.
-    ///
-    /// Legacy documents omit this field and derive it from `direction`.
+    /// Rich electrical semantics retained by model-bound symbols; absent,
+    /// the direction implies them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub electrical_type: Option<SymbolElectricalType>,
-    /// Authored body side. Legacy documents infer it from terminal geometry.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub side: Option<SymbolPinSide>,
-    /// Distance along the authored body side in symbol coordinates.
-    #[serde(default)]
-    pub offset: i32,
+    /// The side of the symbol the pin sits on. Its lead runs from the tip
+    /// toward the body, away from this side.
+    pub side: SymbolPinSide,
+    /// How far the lead runs from the tip toward the body, in symbol units.
+    /// Zero makes the pin a bare connection point: no lead and no mark.
+    pub length: i32,
+    /// The mark drawn where the lead meets the body.
+    #[serde(default, skip_serializing_if = "SymbolPinStyle::is_plain")]
+    pub style: SymbolPinStyle,
     /// The drawing letters no name at this pin: its body's artwork marks it
     /// instead, or the drawing it came from showed none. The name still
     /// names the terminal everywhere else.
@@ -140,30 +150,47 @@ pub struct PinNamePlacement {
 }
 
 impl SymbolPin {
+    /// A pin with the standard lead, on the side its tip suggests: the axis
+    /// the tip stands farther out along, or, unplaced, the side its
+    /// direction takes.
     pub fn new(name: impl Into<String>, direction: PortDirection, position: Option<Point>) -> Self {
         Self {
             name: name.into(),
             direction,
             position,
             electrical_type: Some(default_electrical_type(direction)),
-            side: Some(default_pin_side(direction, position)),
-            offset: pin_offset(default_pin_side(direction, position), position),
+            side: default_pin_side(direction, position),
+            length: SYMBOL_PIN_LENGTH,
+            style: SymbolPinStyle::Plain,
             name_hidden: false,
             name_offset: None,
             name_at: None,
         }
     }
 
-    /// Stand this pin's terminal on `column`, the line of the terminals on
-    /// its side, when there is one.
-    fn stand_in_column(&mut self, column: Option<i32>) {
-        let (Some(column), Some(position)) = (column, self.position) else {
-            return;
-        };
-        self.position = Some(match self.side() {
-            SymbolPinSide::Left | SymbolPinSide::Right => Point::new(column, position.y),
-            SymbolPinSide::Top | SymbolPinSide::Bottom => Point::new(position.x, column),
-        });
+    /// The same pin on `side`.
+    pub fn with_side(mut self, side: SymbolPinSide) -> Self {
+        self.side = side;
+        self
+    }
+
+    /// The same pin with a lead `length` long.
+    pub fn with_length(mut self, length: i32) -> Self {
+        self.length = length;
+        self
+    }
+
+    /// The same pin drawing `style` where its lead meets the body.
+    pub fn with_style(mut self, style: SymbolPinStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Where the lead meets the body: the tip stepped toward the body by the
+    /// lead's length. The tip itself for a bare connection point.
+    pub fn lead_inner(&self) -> Option<Point> {
+        self.position
+            .map(|tip| lead_inner_end(tip, self.side, self.length))
     }
 
     /// Whether this pin states the direction of a port declaring `declared`.
@@ -193,34 +220,20 @@ impl SymbolPin {
         self
     }
 
+    /// The same pin with `electrical_type`, on `side`.
     pub fn with_contract(
         mut self,
         electrical_type: SymbolElectricalType,
         side: SymbolPinSide,
-        offset: i32,
     ) -> Self {
         self.electrical_type = Some(electrical_type);
-        self.side = Some(side);
-        self.offset = offset;
+        self.side = side;
         self
     }
 
     pub fn electrical_type(&self) -> SymbolElectricalType {
         self.electrical_type
             .unwrap_or_else(|| default_electrical_type(self.direction))
-    }
-
-    pub fn side(&self) -> SymbolPinSide {
-        self.side
-            .unwrap_or_else(|| default_pin_side(self.direction, self.position))
-    }
-
-    pub fn offset(&self) -> i32 {
-        if self.side.is_some() {
-            self.offset
-        } else {
-            pin_offset(self.side(), self.position)
-        }
     }
 
     pub fn set_electrical_contract(
@@ -230,17 +243,6 @@ impl SymbolPin {
     ) {
         self.electrical_type = Some(electrical_type);
         self.direction = direction;
-    }
-
-    pub fn set_side_and_offset(
-        &mut self,
-        side: SymbolPinSide,
-        offset: i32,
-        body_bounds: (Point, Point),
-    ) {
-        self.side = Some(side);
-        self.offset = offset;
-        self.position = Some(pin_position_for_geometry(side, offset, body_bounds));
     }
 
     pub fn terminal_on_grid(&self) -> bool {
@@ -343,27 +345,138 @@ fn edge_standoff(position: Point, (min, max): (Point, Point), side: SymbolPinSid
     }
 }
 
-fn pin_offset(side: SymbolPinSide, position: Option<Point>) -> i32 {
-    let Some(position) = position else {
-        return 0;
-    };
-    match side {
-        SymbolPinSide::Left | SymbolPinSide::Right => position.y,
-        SymbolPinSide::Top | SymbolPinSide::Bottom => position.x,
+/// The body end of a lead `length` long from `tip`, on a pin on `side`.
+pub fn lead_inner_end(tip: Point, side: SymbolPinSide, length: i32) -> Point {
+    let step = crate::symbol_generation::inward_step(side);
+    Point::new(
+        tip.x.saturating_add(step.x.saturating_mul(length)),
+        tip.y.saturating_add(step.y.saturating_mul(length)),
+    )
+}
+
+/// How long a lead from `tip`, on a pin on `side`, must be to reach the edge
+/// of `body`: zero where the tip is on or inside that edge.
+///
+/// A suggestion for a pin being placed, never a reading of a placed one.
+pub fn lead_length_to_body(tip: Point, side: SymbolPinSide, body: (Point, Point)) -> i32 {
+    edge_standoff(tip, body, side).max(0)
+}
+
+/// Radius of an inverted pin's bubble, in symbol units.
+pub const PIN_BUBBLE_RADIUS: i32 = 3;
+/// Half the height of a clock pin's wedge, across its lead.
+pub const PIN_WEDGE_HALF: i32 = 3;
+/// How far a clock pin's wedge reaches into the body.
+pub const PIN_WEDGE_DEPTH: i32 = 4;
+
+/// What a placed pin draws: its lead, and the marks its style puts where the
+/// lead meets the body. A bare connection point draws none of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PinDrawing {
+    /// The lead, tip first. It stops at the bubble when there is one.
+    pub lead: Option<(Point, Point)>,
+    /// The bubble's centre and radius, just outside the body.
+    pub bubble: Option<(Point, i32)>,
+    /// The wedge, its two ends on the body edge and its point inside.
+    pub wedge: Option<[Point; 3]>,
+}
+
+impl PinDrawing {
+    /// The same drawing moved by `delta`.
+    #[must_use]
+    pub fn shifted(self, delta: Point) -> Self {
+        Self {
+            lead: self.lead.map(|(from, to)| (from + delta, to + delta)),
+            bubble: self.bubble.map(|(centre, radius)| (centre + delta, radius)),
+            wedge: self
+                .wedge
+                .map(|corners| corners.map(|corner| corner + delta)),
+        }
     }
 }
 
-fn pin_position_for_geometry(
+/// The lead and marks of a pin at `tip` on `side`, `length` long, in
+/// `style`.
+pub fn pin_drawing(
+    tip: Point,
     side: SymbolPinSide,
-    offset: i32,
-    (min, max): (Point, Point),
+    length: i32,
+    style: SymbolPinStyle,
+) -> PinDrawing {
+    if length <= 0 {
+        return PinDrawing {
+            lead: None,
+            bubble: None,
+            wedge: None,
+        };
+    }
+    let inner = lead_inner_end(tip, side, length);
+    let step = crate::symbol_generation::inward_step(side);
+    let across = Point::new(step.y, step.x);
+    let at = |along: i32, aside: i32| {
+        Point::new(
+            inner.x + step.x * along + across.x * aside,
+            inner.y + step.y * along + across.y * aside,
+        )
+    };
+    let bubble_span = if style.bubble() {
+        (2 * PIN_BUBBLE_RADIUS).min(length)
+    } else {
+        0
+    };
+    let lead_end = at(-bubble_span, 0);
+    PinDrawing {
+        lead: (lead_end != tip).then_some((tip, lead_end)),
+        bubble: style
+            .bubble()
+            .then(|| (at(-bubble_span / 2, 0), bubble_span / 2)),
+        wedge: style.wedge().then(|| {
+            [
+                at(0, PIN_WEDGE_HALF),
+                at(PIN_WEDGE_DEPTH, 0),
+                at(0, -PIN_WEDGE_HALF),
+            ]
+        }),
+    }
+}
+
+/// Where a pin's name starts by default: a gutter past the body end of its
+/// lead, and past the wedge of a clock.
+pub fn pin_name_anchor(
+    tip: Point,
+    side: SymbolPinSide,
+    length: i32,
+    style: SymbolPinStyle,
 ) -> Point {
-    let stub = SYMBOL_TERMINAL_GRID * 2;
+    let inner = lead_inner_end(tip, side, length);
+    let wedge = if length > 0 && style.wedge() {
+        PIN_WEDGE_DEPTH
+    } else {
+        0
+    };
+    lead_inner_end(
+        inner,
+        side,
+        wedge + crate::symbol_generation::GENERATED_LABEL_GUTTER,
+    )
+}
+
+/// The coordinate a tip on `side` is placed by along that side.
+fn along_side(side: SymbolPinSide, tip: Point) -> i32 {
     match side {
-        SymbolPinSide::Left => Point::new(min.x.saturating_sub(stub), offset),
-        SymbolPinSide::Right => Point::new(max.x.saturating_add(stub), offset),
-        SymbolPinSide::Top => Point::new(offset, min.y.saturating_sub(stub)),
-        SymbolPinSide::Bottom => Point::new(offset, max.y.saturating_add(stub)),
+        SymbolPinSide::Left | SymbolPinSide::Right => tip.y,
+        SymbolPinSide::Top | SymbolPinSide::Bottom => tip.x,
+    }
+}
+
+/// The tip of a pin on `side` standing `length` off that edge of `body`,
+/// `along` the edge.
+fn tip_off_body(side: SymbolPinSide, along: i32, length: i32, (min, max): (Point, Point)) -> Point {
+    match side {
+        SymbolPinSide::Left => Point::new(min.x.saturating_sub(length), along),
+        SymbolPinSide::Right => Point::new(max.x.saturating_add(length), along),
+        SymbolPinSide::Top => Point::new(along, min.y.saturating_sub(length)),
+        SymbolPinSide::Bottom => Point::new(along, max.y.saturating_add(length)),
     }
 }
 
@@ -822,24 +935,20 @@ impl SymbolDocument {
             .collect();
         let name_anchor = generated.name_anchor();
         let value_anchor = generated.value_anchor();
-        // The generator already knows which edge every pin belongs to; record
-        // it, so nothing downstream has to re-derive the edge from a terminal
-        // coordinate that cannot express it.
+        let body_box = generated.body_bounds();
+        // The generator knows which edge every pin belongs to and how far its
+        // terminal stands off the body; both are stored, so nothing
+        // downstream re-derives either from the artwork.
         let pins = generated
             .pins
             .into_iter()
             .zip(generated.labels)
             .map(|(pin, label)| {
-                let offset = pin.offset;
+                let tip = pin.offset;
                 let side = pin.side;
-                let pin = SymbolPin::new(pin.name, pin.direction, Some(offset)).with_contract(
-                    default_electrical_type(pin.direction),
-                    side,
-                    match side {
-                        SymbolPinSide::Left | SymbolPinSide::Right => offset.y,
-                        SymbolPinSide::Top | SymbolPinSide::Bottom => offset.x,
-                    },
-                );
+                let pin = SymbolPin::new(pin.name, pin.direction, Some(tip))
+                    .with_contract(default_electrical_type(pin.direction), side)
+                    .with_length(lead_length_to_body(tip, side, body_box));
                 match label {
                     PinLabel::Inside => pin,
                     PinLabel::InsideFrom(reach) => pin.with_name_offset(Some(reach)),
@@ -981,13 +1090,17 @@ impl SymbolDocument {
                     "Invalid symbol metadata: duplicate pin name '{name}'"
                 ));
             }
+            if pin.length < 0 {
+                return Err(format!(
+                    "Invalid symbol metadata: pin '{name}' has a negative lead length {}",
+                    pin.length
+                ));
+            }
             if let Some(position) = pin.position {
                 validate_symbol_point(position, &format!("pin '{name}' terminal"))?;
             }
-            if pin.offset().unsigned_abs() > MAX_SYMBOL_COORDINATE_ABS as u32 {
-                return Err(format!(
-                    "Invalid symbol metadata: pin '{name}' offset is outside the supported range"
-                ));
+            if let Some(inner) = pin.lead_inner() {
+                validate_symbol_point(inner, &format!("pin '{name}' lead"))?;
             }
         }
 
@@ -1129,20 +1242,19 @@ impl SymbolDocument {
                 None => false,
             };
             let side = default_pin_side(port.direction, None);
-            let offset = self.next_free_offset(side);
-            let column = self.terminal_column(side);
+            let (tip, length) = self.free_place(side, bounds);
             if known {
                 if let Some(pin) = self.pin_mut(&port.name) {
-                    pin.set_side_and_offset(side, offset, bounds);
-                    pin.stand_in_column(column);
+                    pin.side = side;
+                    pin.position = Some(tip);
+                    pin.length = length;
                 }
                 continue;
             }
             let electrical = stated.unwrap_or_else(|| default_electrical_type(port.direction));
-            let mut pin = SymbolPin::new(&port.name, port.direction, None)
-                .with_contract(electrical, side, offset);
-            pin.set_side_and_offset(side, offset, bounds);
-            pin.stand_in_column(column);
+            let pin = SymbolPin::new(&port.name, port.direction, Some(tip))
+                .with_contract(electrical, side)
+                .with_length(length);
             self.pins.push(pin);
         }
 
@@ -1163,12 +1275,39 @@ impl SymbolDocument {
         });
     }
 
+    /// Place the unplaced pin `name` on `side`, where [`Self::free_place`]
+    /// puts a new pin there. A placed pin is left where it is.
+    pub fn place_pin_on_side(&mut self, name: &str, side: SymbolPinSide) {
+        let (tip, length) = self.free_place(side, self.body_bounds());
+        if let Some(pin) = self.pin_mut(name).filter(|pin| pin.position.is_none()) {
+            pin.side = side;
+            pin.position = Some(tip);
+            pin.length = length;
+        }
+    }
+
+    /// Where a pin newly placed on `side` stands, and the lead that carries it
+    /// to `body`: on the next free terminal-grid place along that side, in
+    /// line with the terminals already there, or the standard lead off the
+    /// body when there are none.
+    fn free_place(&self, side: SymbolPinSide, body: (Point, Point)) -> (Point, i32) {
+        let along = self.next_free_along(side);
+        let mut tip = tip_off_body(side, along, SYMBOL_PIN_LENGTH, body);
+        if let Some(column) = self.terminal_column(side) {
+            tip = match side {
+                SymbolPinSide::Left | SymbolPinSide::Right => Point::new(column, tip.y),
+                SymbolPinSide::Top | SymbolPinSide::Bottom => Point::new(tip.x, column),
+            };
+        }
+        (tip, lead_length_to_body(tip, side, body))
+    }
+
     /// The line the outermost terminals on `side` stand on, when any do.
     fn terminal_column(&self, side: SymbolPinSide) -> Option<i32> {
         let reach = self
             .pins
             .iter()
-            .filter(|pin| pin.side() == side)
+            .filter(|pin| pin.side == side)
             .filter_map(|pin| pin.position)
             .map(|position| match side {
                 SymbolPinSide::Left | SymbolPinSide::Right => position.x,
@@ -1180,17 +1319,18 @@ impl SymbolDocument {
         }
     }
 
-    /// The next terminal-grid offset on `side` that no placed pin occupies.
-    fn next_free_offset(&self, side: SymbolPinSide) -> i32 {
+    /// The next terminal-grid place along `side` that no placed pin occupies.
+    fn next_free_along(&self, side: SymbolPinSide) -> i32 {
         let used: HashSet<i32> = self
             .pins
             .iter()
-            .filter(|pin| pin.position.is_some() && pin.side() == side)
-            .map(SymbolPin::offset)
+            .filter(|pin| pin.side == side)
+            .filter_map(|pin| pin.position)
+            .map(|tip| along_side(side, tip))
             .collect();
         (0..=MAX_SYMBOL_PINS as i32)
             .map(|step| step * SYMBOL_TERMINAL_GRID)
-            .find(|offset| !used.contains(offset))
+            .find(|along| !used.contains(along))
             .unwrap_or(0)
     }
 
@@ -1275,105 +1415,129 @@ impl SymbolDocument {
         (!self.body.is_empty()).then(|| self.body_bounds())
     }
 
-    /// Which body edge a pin is drawn against.
-    ///
-    /// The authored side wins wherever the artwork agrees it could be that
-    /// edge. Geometry only steps in for a terminal that stands off a
-    /// different edge entirely — a document written before the side was
-    /// recorded, or one derived from a terminal list — so that no lead is
-    /// ever drawn away from the body it is supposed to reach.
-    pub fn pin_side(&self, pin: &SymbolPin) -> SymbolPinSide {
-        let (Some(position), Some(bounds)) = (pin.position, self.drawn_body_bounds()) else {
-            return pin.side();
-        };
-        if let Some(declared) = pin.side
-            && edge_standoff(position, bounds, declared) >= 0
-        {
-            return declared;
-        }
-        pin_side_against_body(position, pin.direction, Some(bounds))
-    }
-
-    /// Body-only bounds used for side/offset pin placement.
-    ///
-    /// Pins, attributes and the editing origin are intentionally excluded:
-    /// moving one terminal must never recursively expand the body it is
-    /// anchored to.
-    pub fn body_bounds(&self) -> (Point, Point) {
-        let mut xs = Vec::new();
-        let mut ys = Vec::new();
-        for shape in &self.body {
-            match shape {
-                SymbolShape::Polyline { points, .. } => {
-                    for point in points {
-                        xs.push(point.x);
-                        ys.push(point.y);
-                    }
-                }
-                SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
-                    xs.extend([
-                        center.x.saturating_sub(*radius),
-                        center.x.saturating_add(*radius),
-                    ]);
-                    ys.extend([
-                        center.y.saturating_sub(*radius),
-                        center.y.saturating_add(*radius),
-                    ]);
-                }
-                SymbolShape::Arc { center, radius, .. } => {
-                    xs.extend([
-                        center.x.saturating_sub(*radius),
-                        center.x.saturating_add(*radius),
-                    ]);
-                    ys.extend([
-                        center.y.saturating_sub(*radius),
-                        center.y.saturating_add(*radius),
-                    ]);
-                }
-                SymbolShape::Curve(curve) => {
-                    let (least, greatest) = curve.whole_unit_bounds();
-                    xs.extend([least.x, greatest.x]);
-                    ys.extend([least.y, greatest.y]);
-                }
-                SymbolShape::Arrow { tip, .. } => {
-                    xs.extend([
-                        tip.x.saturating_sub(SYMBOL_TERMINAL_GRID),
-                        tip.x.saturating_add(SYMBOL_TERMINAL_GRID),
-                    ]);
-                    ys.extend([
-                        tip.y.saturating_sub(SYMBOL_TERMINAL_GRID),
-                        tip.y.saturating_add(SYMBOL_TERMINAL_GRID),
-                    ]);
-                }
-                SymbolShape::Text {
-                    anchor,
-                    text,
-                    size,
-                    align,
-                } => {
-                    let (min, max) = symbol_text_bounds(*anchor, text, *size, *align);
-                    xs.extend([min.x, max.x]);
-                    ys.extend([min.y, max.y]);
-                }
-            }
-        }
-        if xs.is_empty() {
-            return (
-                Point::new(-SYMBOL_TERMINAL_GRID * 4, -SYMBOL_TERMINAL_GRID * 4),
-                Point::new(SYMBOL_TERMINAL_GRID * 4, SYMBOL_TERMINAL_GRID * 4),
-            );
-        }
-        (
-            Point::new(
-                xs.iter().min().copied().unwrap_or(-40),
-                ys.iter().min().copied().unwrap_or(-40),
-            ),
-            Point::new(
-                xs.iter().max().copied().unwrap_or(40),
-                ys.iter().max().copied().unwrap_or(40),
-            ),
+    /// The side suggested for a pin first placed with its tip at `point`:
+    /// judged against the drawn shape nearest the point, so a stray line
+    /// elsewhere in the artwork cannot turn a pin placed beside the body.
+    pub fn suggested_pin_side(&self, point: Point) -> SymbolPinSide {
+        let nearest = self
+            .body
+            .iter()
+            .filter_map(|shape| shapes_bounds([shape]))
+            .min_by_key(|bounds| box_distance(point, *bounds));
+        pin_side_against_body(
+            point,
+            PortDirection::InOut,
+            Some(nearest.unwrap_or_else(|| self.body_bounds())),
         )
     }
+
+    /// Settle the pins of a symbol another tool drew: each takes the side
+    /// its drawing puts it on and no lead of its own, because the drawing's
+    /// lead, where it has one, is artwork.
+    ///
+    /// The side a pin was given stands wherever the artwork agrees it could
+    /// be that edge; a terminal that stands off a different edge entirely
+    /// takes the edge it stands off. This reads the artwork once, as the
+    /// symbol arrives, and never again.
+    pub fn settle_drawn_pins(&mut self) {
+        let bounds = self.drawn_body_bounds();
+        for pin in &mut self.pins {
+            pin.length = 0;
+            let (Some(position), Some(bounds)) = (pin.position, bounds) else {
+                continue;
+            };
+            if edge_standoff(position, bounds, pin.side) < 0 {
+                pin.side = pin_side_against_body(position, pin.direction, Some(bounds));
+            }
+        }
+    }
+
+    /// Body-only bounds, which suggest the side and lead of a pin as it is
+    /// first placed.
+    ///
+    /// Pins, attributes and the editing origin are intentionally excluded:
+    /// placing one terminal must never expand the body the next one is
+    /// placed against.
+    pub fn body_bounds(&self) -> (Point, Point) {
+        shapes_bounds(&self.body).unwrap_or((
+            Point::new(-SYMBOL_TERMINAL_GRID * 4, -SYMBOL_TERMINAL_GRID * 4),
+            Point::new(SYMBOL_TERMINAL_GRID * 4, SYMBOL_TERMINAL_GRID * 4),
+        ))
+    }
+}
+
+/// The box around `shapes`; `None` when they draw nothing.
+fn shapes_bounds<'a>(shapes: impl IntoIterator<Item = &'a SymbolShape>) -> Option<(Point, Point)> {
+    let mut xs = Vec::new();
+    let mut ys = Vec::new();
+    for shape in shapes {
+        match shape {
+            SymbolShape::Polyline { points, .. } => {
+                for point in points {
+                    xs.push(point.x);
+                    ys.push(point.y);
+                }
+            }
+            SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
+                xs.extend([
+                    center.x.saturating_sub(*radius),
+                    center.x.saturating_add(*radius),
+                ]);
+                ys.extend([
+                    center.y.saturating_sub(*radius),
+                    center.y.saturating_add(*radius),
+                ]);
+            }
+            SymbolShape::Arc { center, radius, .. } => {
+                xs.extend([
+                    center.x.saturating_sub(*radius),
+                    center.x.saturating_add(*radius),
+                ]);
+                ys.extend([
+                    center.y.saturating_sub(*radius),
+                    center.y.saturating_add(*radius),
+                ]);
+            }
+            SymbolShape::Curve(curve) => {
+                let (least, greatest) = curve.whole_unit_bounds();
+                xs.extend([least.x, greatest.x]);
+                ys.extend([least.y, greatest.y]);
+            }
+            SymbolShape::Arrow { tip, .. } => {
+                xs.extend([
+                    tip.x.saturating_sub(SYMBOL_TERMINAL_GRID),
+                    tip.x.saturating_add(SYMBOL_TERMINAL_GRID),
+                ]);
+                ys.extend([
+                    tip.y.saturating_sub(SYMBOL_TERMINAL_GRID),
+                    tip.y.saturating_add(SYMBOL_TERMINAL_GRID),
+                ]);
+            }
+            SymbolShape::Text {
+                anchor,
+                text,
+                size,
+                align,
+            } => {
+                let (min, max) = symbol_text_bounds(*anchor, text, *size, *align);
+                xs.extend([min.x, max.x]);
+                ys.extend([min.y, max.y]);
+            }
+        }
+    }
+    Some((
+        Point::new(xs.iter().min().copied()?, ys.iter().min().copied()?),
+        Point::new(xs.iter().max().copied()?, ys.iter().max().copied()?),
+    ))
+}
+
+/// How far `point` lies outside `bounds`, in whole units along each axis
+/// summed; zero inside.
+fn box_distance(point: Point, (min, max): (Point, Point)) -> i64 {
+    let outside = |value: i32, low: i32, high: i32| {
+        i64::from(low.saturating_sub(value).max(0)) + i64::from(value.saturating_sub(high).max(0))
+    };
+    outside(point.x, min.x, max.x) + outside(point.y, min.y, max.y)
 }
 
 fn validate_symbol_point(point: Point, label: &str) -> Result<(), String> {
@@ -1466,20 +1630,30 @@ mod validation_tests {
     }
 
     #[test]
-    fn a_symbol_written_before_vectors_existed_still_loads_and_reads_its_widths() {
-        // The three fields a legacy pin never wrote are still absent, and the
-        // width comes from the name, so no migration stands between an old
-        // document and a correct answer.
-        let legacy = serde_json::json!({
+    fn a_stored_pin_states_its_side_and_lead_and_reads_its_width_from_its_name() {
+        let stored = serde_json::json!({
             "name": "DATA[3:0]",
             "direction": "InOut",
-            "position": { "x": -40, "y": 0 }
+            "position": { "x": -40, "y": 0 },
+            "side": "left",
+            "length": 0
         });
-        let restored: SymbolPin = serde_json::from_value(legacy).expect("a legacy pin loads");
+        let restored: SymbolPin = serde_json::from_value(stored).expect("a stored pin loads");
         assert!(restored.electrical_type.is_none());
-        assert!(restored.side.is_none());
-        assert_eq!(restored.offset, 0);
+        assert_eq!(restored.side, SymbolPinSide::Left);
+        assert_eq!(restored.length, 0);
+        assert_eq!(restored.style, SymbolPinStyle::Plain);
         assert_eq!(restored.width(), 4);
+
+        // Nothing about a pin is worked out from the drawing: a pin that does
+        // not say which side it is on is not a pin.
+        let sideless = serde_json::json!({
+            "name": "EN",
+            "direction": "In",
+            "position": { "x": -40, "y": 0 },
+            "length": 20
+        });
+        assert!(serde_json::from_value::<SymbolPin>(sideless).is_err());
     }
 
     #[test]
@@ -1568,9 +1742,12 @@ mod validation_tests {
         assert!(error.contains("bounds exceed the coordinate representation"));
     }
 
+    /// The lead runs from the tip toward the body by its own length on every
+    /// side, whatever artwork the body holds: a stray line far from the body
+    /// moves no lead.
     #[test]
-    fn pin_side_and_offset_produce_canonical_terminal_geometry() {
-        let document = SymbolDocument {
+    fn a_pins_lead_reaches_from_its_tip_by_its_stored_length() {
+        let mut document = SymbolDocument {
             body: vec![SymbolShape::Polyline {
                 points: vec![
                     Point::new(-20, -20),
@@ -1580,16 +1757,80 @@ mod validation_tests {
                 ],
                 closed: true,
             }],
+            pins: vec![
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 0)))
+                    .with_side(SymbolPinSide::Left),
+                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(40, 10)))
+                    .with_side(SymbolPinSide::Right),
+                SymbolPin::new("VDD", PortDirection::Supply, Some(Point::new(0, -40)))
+                    .with_side(SymbolPinSide::Top),
+                SymbolPin::new("VSS", PortDirection::Supply, Some(Point::new(0, 40)))
+                    .with_side(SymbolPinSide::Bottom)
+                    .with_length(0),
+            ],
             ..SymbolDocument::default()
         };
-        let mut pin = SymbolPin::new("OUT", PortDirection::Out, None);
+        let leads = |document: &SymbolDocument| {
+            document
+                .pins
+                .iter()
+                .map(|pin| pin.lead_inner())
+                .collect::<Vec<_>>()
+        };
+        let expected = [
+            Some(Point::new(-20, 0)),
+            Some(Point::new(20, 10)),
+            Some(Point::new(0, -20)),
+            Some(Point::new(0, 40)),
+        ];
+        assert_eq!(leads(&document), expected);
 
-        pin.set_side_and_offset(SymbolPinSide::Right, 10, document.body_bounds());
+        document.body.push(SymbolShape::Polyline {
+            points: vec![Point::new(-200, 150), Point::new(-190, 150)],
+            closed: false,
+        });
+        assert_eq!(leads(&document), expected);
+        document.validate().expect("the document stays valid");
+    }
 
-        assert_eq!(pin.side(), SymbolPinSide::Right);
-        assert_eq!(pin.offset(), 10);
-        assert_eq!(pin.position, Some(Point::new(40, 10)));
-        assert!(pin.terminal_on_grid());
+    #[test]
+    fn a_negative_lead_length_is_refused() {
+        let document = SymbolDocument {
+            pins: vec![
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 0))).with_length(-10),
+            ],
+            ..SymbolDocument::default()
+        };
+        let error = document
+            .validate()
+            .expect_err("a lead cannot run away from the body");
+        assert!(error.contains("negative lead length"), "{error}");
+    }
+
+    /// A port the symbol has no pin for is placed in line with the pins
+    /// already on its side, its lead reaching the body.
+    #[test]
+    fn reconciling_places_a_new_pin_in_line_with_its_side() {
+        let port = |name: &str, direction| PortSpec {
+            name: name.to_owned(),
+            direction,
+        };
+        let mut document = SymbolDocument::generated_from_ports(&[
+            port("a", PortDirection::In),
+            port("y", PortDirection::Out),
+        ]);
+        let column = document.pin("a").and_then(|pin| pin.position).expect("a").x;
+        document.reconcile_ports(&[
+            port("a", PortDirection::In),
+            port("y", PortDirection::Out),
+            port("b", PortDirection::In),
+        ]);
+        let added = document.pin("b").expect("b is added");
+        let tip = added.position.expect("b is placed");
+        assert_eq!(added.side, SymbolPinSide::Left);
+        assert_eq!(tip.x, column);
+        let (min, _) = document.body_bounds();
+        assert_eq!(added.lead_inner().map(|inner| inner.x), Some(min.x));
     }
 
     #[test]

@@ -628,3 +628,56 @@ fn a_right_click_leaves_the_shape_being_drawn_alone() {
     }
     assert!(requests.is_empty(), "{requests:?}");
 }
+
+/// A body box with a stray line far below and to its left, drawn before any
+/// pin was placed: the artwork that once turned a pin placed beside the
+/// body onto the wrong side.
+fn body_with_stray_artwork() -> SymbolDocument {
+    SymbolDocument {
+        pins: vec![SymbolPin::new(
+            "A",
+            rspice_design_model::port::PortDirection::In,
+            None,
+        )],
+        body: vec![
+            rectangle_shape(Point::new(-20, -20), Point::new(20, 20)),
+            SymbolShape::Polyline {
+                points: vec![Point::new(-200, 150), Point::new(-190, 150)],
+                closed: false,
+            },
+        ],
+        ..SymbolDocument::default()
+    }
+}
+
+/// A pin placed beside the body takes the side of the body it stands
+/// beside, whatever stray artwork is elsewhere, and keeps that side and its
+/// lead: dragging moves its tip and nothing else, and artwork drawn later
+/// moves nothing.
+#[test]
+fn a_pin_placed_beside_stray_artwork_keeps_its_side_and_its_lead() {
+    use rspice_design_model::symbol_pin::SymbolPinSide;
+    let mut document = body_with_stray_artwork();
+    let mut session = armed(SymbolTool::PlacePin);
+    session.select_pin("A");
+    assert!(click(&mut session, &mut document, Point::new(-40, 0)));
+    let pin = document.pin("A").expect("A");
+    assert_eq!(pin.side, SymbolPinSide::Left);
+    assert_eq!(pin.lead_inner(), Some(Point::new(-20, 0)));
+
+    document.body.push(SymbolShape::Polyline {
+        points: vec![Point::new(-60, -90), Point::new(-60, 90)],
+        closed: false,
+    });
+    session.tool = SymbolTool::Select;
+    drag(
+        &mut session,
+        &mut document,
+        Point::new(-40, 0),
+        Point::new(-40, -50),
+    );
+    let pin = document.pin("A").expect("A");
+    assert_eq!(pin.position, Some(Point::new(-40, -50)));
+    assert_eq!(pin.side, SymbolPinSide::Left);
+    assert_eq!(pin.lead_inner(), Some(Point::new(-20, -50)));
+}

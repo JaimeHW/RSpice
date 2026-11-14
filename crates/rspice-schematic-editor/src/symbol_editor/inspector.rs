@@ -462,35 +462,35 @@ fn pin_section(
         changed = true;
     }
 
-    let mut side = document.pins[order].side();
+    if let Some(mut tip) = document.pins[order].position {
+        let moved = coordinate_row(ui, edit, &before, "X", &mut tip.x)
+            | coordinate_row(ui, edit, &before, "Y", &mut tip.y);
+        if moved {
+            document.pins[order].position = Some(tip);
+            changed = true;
+        }
+    }
+
+    let side = document.pins[order].side;
     let mut side_value = side.label().to_owned();
     let side_options = SymbolPinSide::ALL
         .into_iter()
         .map(|side| (side.label().to_owned(), side.label().to_owned()))
         .collect::<Vec<_>>();
-    let side_changed = property_row_combo(
+    if property_row_combo(
         ui,
         "Side",
         ("symbol-pin-side", order),
         &mut side_value,
         &side_options,
         true,
-    );
-    if side_changed
-        && let Some(new_side) = SymbolPinSide::ALL
-            .into_iter()
-            .find(|candidate| candidate.label() == side_value)
+    ) && let Some(new_side) = SymbolPinSide::ALL
+        .into_iter()
+        .find(|candidate| candidate.label() == side_value)
+        && new_side != side
     {
         record_once(edit, &before);
-        side = new_side;
-        changed = true;
-    }
-
-    let mut offset = document.pins[order].offset();
-    let offset_changed = coordinate_row(ui, edit, &before, "Offset", &mut offset);
-    if side_changed || offset_changed {
-        let bounds = document.body_bounds();
-        document.pins[order].set_side_and_offset(side, offset, bounds);
+        document.pins[order].side = new_side;
         changed = true;
     }
 
@@ -534,8 +534,8 @@ fn pin_section(
         .clicked()
     {
         edit.record_undo(&before);
-        let bounds = document.body_bounds();
-        document.pins[order].set_side_and_offset(side, offset, bounds);
+        let side = document.pins[order].side;
+        document.place_pin_on_side(&active_name, side);
         edit.session.undo_recorded = false;
         changed = true;
     }

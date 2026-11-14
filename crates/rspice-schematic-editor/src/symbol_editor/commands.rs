@@ -82,6 +82,7 @@ pub fn apply_edit(
                         &selection,
                         "Rotate",
                         rotate_point_cw_about,
+                        SymbolPinSide::turned_clockwise,
                         rotate_shape_cw_about,
                         &mut outcome,
                     ),
@@ -91,6 +92,7 @@ pub fn apply_edit(
                         &selection,
                         "Rotate",
                         rotate_point_ccw_about,
+                        SymbolPinSide::turned_counter_clockwise,
                         rotate_shape_ccw_about,
                         &mut outcome,
                     ),
@@ -100,6 +102,7 @@ pub fn apply_edit(
                         &selection,
                         "Mirror",
                         mirror_point_h_about,
+                        SymbolPinSide::mirrored_horizontally,
                         mirror_shape_h_about,
                         &mut outcome,
                     ),
@@ -109,6 +112,7 @@ pub fn apply_edit(
                         &selection,
                         "Mirror",
                         mirror_point_v_about,
+                        SymbolPinSide::mirrored_vertically,
                         mirror_shape_v_about,
                         &mut outcome,
                     ),
@@ -231,10 +235,6 @@ fn paste(
         if let Some(position) = pin.position.as_mut() {
             *position = *position + delta;
         }
-        pin.offset = pin.position.map_or(0, |position| match pin.side() {
-            SymbolPinSide::Left | SymbolPinSide::Right => position.y,
-            SymbolPinSide::Top | SymbolPinSide::Bottom => position.x,
-        });
         selection.pins.insert(pin.name.clone());
         document.pins.push(pin);
     }
@@ -318,6 +318,7 @@ fn transform_selection(
     selection: &SymbolSelection,
     verb: &str,
     pin_transform: impl Fn(Point, Point) -> Point,
+    side_transform: impl Fn(SymbolPinSide) -> SymbolPinSide,
     shape_transform: impl Fn(&mut SymbolShape, Point),
     outcome: &mut SymbolEditOutcome,
 ) {
@@ -334,12 +335,10 @@ fn transform_selection(
         if let Some(pin) = document.pin_mut(name)
             && let Some(position) = pin.position
         {
-            let transformed = pin_transform(position, origin);
-            pin.position = Some(transformed);
-            pin.offset = match pin.side() {
-                SymbolPinSide::Left | SymbolPinSide::Right => transformed.y,
-                SymbolPinSide::Top | SymbolPinSide::Bottom => transformed.x,
-            };
+            // The pin turns with the selection: its lead still runs toward
+            // the body that turned with it.
+            pin.position = Some(pin_transform(position, origin));
+            pin.side = side_transform(pin.side);
             changed = true;
         }
     }

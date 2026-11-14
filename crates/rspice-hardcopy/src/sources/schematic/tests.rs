@@ -3,6 +3,7 @@ use rspice_design::library::{Cell, Library, LibraryCatalog, View, ViewType};
 use rspice_design::schematic::{
     component::LibraryCellInstance, document::SchematicDocument, wire::Wire,
 };
+use rspice_design::symbol::SymbolPin;
 use rspice_design_model::design_management::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 use rspice_design_model::port::PortDirection;
 use rspice_hardcopy_contract::sources::HardcopyPublicationIdentity;

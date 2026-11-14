@@ -3,6 +3,8 @@
 use super::*;
 
 pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> SymbolDocument {
+    /// Each templated pin's lead, from its terminal to the body edge.
+    const LEAD: i32 = crate::symbol::SYMBOL_PIN_LENGTH;
     let half_width = 40;
     let half_height = 40.max(((definition.pins.len() as i32 + 1) / 2) * 10);
     let body = if let Some(imported) = &definition.imported_graphic {
@@ -33,32 +35,29 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
     if let Some(imported) = &definition.imported_graphic
         && !imported.pin_anchors.is_empty()
     {
-        let pins =
-            if definition.pins.is_empty() {
-                imported
-                    .pin_anchors
-                    .iter()
-                    .map(|anchor| {
-                        SymbolPin::new(&anchor.name, PortDirection::InOut, Some(anchor.position))
-                    })
-                    .collect()
-            } else {
-                let mut ordered = definition.pins.iter().collect::<Vec<_>>();
-                ordered.sort_by_key(|pin| pin.order);
-                ordered
-                    .into_iter()
-                    .zip(&imported.pin_anchors)
-                    .map(|(pin, anchor)| {
-                        let offset = match pin.side {
-                            SymbolPinSide::Left | SymbolPinSide::Right => anchor.position.y,
-                            SymbolPinSide::Top | SymbolPinSide::Bottom => anchor.position.x,
-                        };
-                        SymbolPin::new(&pin.name, pin.direction, Some(anchor.position))
-                            .with_contract(pin.electrical_type, pin.side, offset)
-                    })
-                    .collect()
-            };
-        return SymbolDocument {
+        let pins = if definition.pins.is_empty() {
+            imported
+                .pin_anchors
+                .iter()
+                .map(|anchor| {
+                    SymbolPin::new(&anchor.name, PortDirection::InOut, Some(anchor.position))
+                })
+                .collect()
+        } else {
+            let mut ordered = definition.pins.iter().collect::<Vec<_>>();
+            ordered.sort_by_key(|pin| pin.order);
+            ordered
+                .into_iter()
+                .zip(&imported.pin_anchors)
+                .map(|(pin, anchor)| {
+                    SymbolPin::new(&pin.name, pin.direction, Some(anchor.position))
+                        .with_contract(pin.electrical_type, pin.side)
+                })
+                .collect()
+        };
+        // The imported drawing draws its own leads: each pin is the bare
+        // connection point the drawing marks.
+        let mut document = SymbolDocument {
             pins,
             body,
             origin: Point::origin(),
@@ -67,6 +66,8 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
             pin_name_size: None,
             waivers: crate::drc::DrcWaivers::default(),
         };
+        document.settle_drawn_pins();
+        return document;
     }
     let mut side_counts = HashMap::<SymbolPinSide, usize>::new();
     for pin in &definition.pins {
@@ -83,16 +84,14 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
             let centered = (*index as i32 * 2 + 1 - count as i32) * 10;
             *index += 1;
             let position = match pin.side {
-                SymbolPinSide::Left => Point::new(-half_width - 20, centered),
-                SymbolPinSide::Right => Point::new(half_width + 20, centered),
-                SymbolPinSide::Top => Point::new(centered, -half_height - 20),
-                SymbolPinSide::Bottom => Point::new(centered, half_height + 20),
+                SymbolPinSide::Left => Point::new(-half_width - LEAD, centered),
+                SymbolPinSide::Right => Point::new(half_width + LEAD, centered),
+                SymbolPinSide::Top => Point::new(centered, -half_height - LEAD),
+                SymbolPinSide::Bottom => Point::new(centered, half_height + LEAD),
             };
-            SymbolPin::new(&pin.name, pin.direction, Some(position)).with_contract(
-                pin.electrical_type,
-                pin.side,
-                centered,
-            )
+            SymbolPin::new(&pin.name, pin.direction, Some(position))
+                .with_contract(pin.electrical_type, pin.side)
+                .with_length(LEAD)
         })
         .collect();
     SymbolDocument {

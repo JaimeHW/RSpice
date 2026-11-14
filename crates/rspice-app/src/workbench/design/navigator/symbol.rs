@@ -99,11 +99,8 @@ fn pins_section(
             let before = document.clone();
             let name = next_pin_name(document);
             document.pins.push(
-                SymbolPin::new(&name, PortDirection::InOut, None).with_contract(
-                    SymbolElectricalType::Analog,
-                    SymbolPinSide::Right,
-                    0,
-                ),
+                SymbolPin::new(&name, PortDirection::InOut, None)
+                    .with_contract(SymbolElectricalType::Analog, SymbolPinSide::Right),
             );
             record_symbol_edit(
                 &mut cx.state.symbol,

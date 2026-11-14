@@ -480,15 +480,13 @@ pub fn inward_step(side: SymbolPinSide) -> Point {
     }
 }
 
-/// Inner end of a pin's lead: the point on the body outline that the pin's
-/// own edge puts it against.
+/// Inner end of a generated pin's lead: the point on the generated body box
+/// that the pin's own edge puts it against.
 ///
-/// The edge decides the axis — never the terminal's own coordinates, which
-/// say the wrong thing the moment a body is taller than it is wide, turning
-/// an outer side pin's lead through ninety degrees so it never arrives. The
-/// body decides the length, so a lead always lands on the outline instead of
-/// stopping a fixed distance short of it. Without a body to reach, the lead
-/// falls back to one stub length.
+/// The generator knows its own body box, so the lead it draws lands on the
+/// outline. A symbol document stores each pin's lead length instead, and
+/// its renderers read that; this is for a generated block drawn without one.
+/// Without a body to reach, the lead falls back to one stub length.
 pub fn lead_inner(terminal: Point, side: SymbolPinSide, body: Option<(Point, Point)>) -> Point {
     let step = inward_step(side);
     let Some((min, max)) = body else {
@@ -505,9 +503,10 @@ pub fn lead_inner(terminal: Point, side: SymbolPinSide, body: Option<(Point, Poi
     }
 }
 
-/// Where a pin's name is drawn: just inside the body outline, on the pin's
-/// own lead axis. The renderer aligns the text away from this point, so the
-/// name reads into the body and never crosses the outline it belongs to.
+/// Where a generated pin's name is drawn: just inside the generated body
+/// box, on the pin's own lead axis. The renderer aligns the text away from
+/// this point, so the name reads into the body and never crosses the outline
+/// it belongs to.
 pub fn pin_label_anchor(
     terminal: Point,
     side: SymbolPinSide,

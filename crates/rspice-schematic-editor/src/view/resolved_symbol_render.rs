@@ -922,6 +922,7 @@ mod tests {
                 SymbolDocument {
                     pins: vec![
                         SymbolPin::new("IN", PortDirection::In, Some(Point::new(-30, 0)))
+                            .with_length(10)
                             .with_name_hidden(hidden),
                     ],
                     body: vec![SymbolShape::Polyline {

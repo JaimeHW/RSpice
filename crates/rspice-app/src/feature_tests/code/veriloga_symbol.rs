@@ -87,7 +87,7 @@ fn a_compiled_amplifier_draws_the_triangle_with_its_supplies_top_and_bottom() {
     assert_eq!(terminal(&drawn, "vdd"), Point::new(0, -40));
     assert_eq!(terminal(&drawn, "vss"), Point::new(0, 40));
     assert_eq!(
-        drawn.pin("vdd").and_then(|pin| pin.side),
+        drawn.pin("vdd").map(|pin| pin.side),
         Some(SymbolPinSide::Top)
     );
 }

@@ -2,10 +2,9 @@
 
 use super::*;
 use rspice_design::resolved_symbol::{
-    ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolSource,
+    ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolPin, ResolvedSymbolSource,
 };
 use rspice_design::schematic::{component_type::ComponentType, owned::Schematic};
-use rspice_design::symbol::SymbolPin;
 use rspice_design::symbol_resolver::SymbolResolver;
 use rspice_design_model::design_management::{
     DesignSheet, DrawingSheetInheritance, DrawingSheetTitleFieldId, SheetCatalog, SheetId,
@@ -583,11 +582,7 @@ fn printable_symbol(resolved: &ResolvedCellSymbol) -> SymbolDocument {
     let mut printable_document = resolved.document().clone();
     printable_document.pins = resolved
         .connectable_pins()
-        .map(|pin| {
-            SymbolPin::new(pin.name.clone(), pin.direction, Some(pin.offset))
-                .with_name_hidden(pin.name_hidden)
-                .with_name_offset(pin.name_offset)
-        })
+        .map(ResolvedSymbolPin::to_symbol_pin)
         .collect();
     printable_document
 }
