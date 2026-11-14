@@ -17,6 +17,7 @@ test-support = [
     "dep:base64",
     "rspice-design/schematic-test-fixtures",
     "rspice-design/symbol-test-observation",
+    "rspice-design/test-support",
     "rspice-model-library/catalog-test-observation",
     "rspice-model-library/test-support",
     "rspice-project/test-support",
