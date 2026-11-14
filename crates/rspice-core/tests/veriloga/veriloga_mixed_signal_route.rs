@@ -1382,13 +1382,23 @@ fn a_net_a_module_and_a_code_model_both_drive_and_a_resistor_reads_is_refused() 
                 "the refusal names {fragment}: {error}"
             );
         }
+        // The refusal is located at the X card, whose line moves with the
+        // card order; everything after the location is the contract.
+        let (located, contract) = error
+            .split_once(": ")
+            .expect("an elaboration refusal has a location prefix");
+        assert!(
+            located.starts_with("Elaboration error at "),
+            "the refusal names the card that wrote x1: {error}"
+        );
+        let contract = contract.to_owned();
         if let Some(previous) = previous_error {
             assert_eq!(
-                error, previous,
+                contract, previous,
                 "card order must not change the connection contract"
             );
         }
-        previous_error = Some(error);
+        previous_error = Some(contract);
     }
 }
 
@@ -1438,13 +1448,23 @@ fn a_discrete_port_meeting_unlike_event_domains_on_a_loaded_net_is_refused() {
                 "the refusal names {fragment}: {error}"
             );
         }
+        // The refusal is located at the X card, whose line moves with the
+        // card order; everything after the location is the contract.
+        let (located, contract) = error
+            .split_once(": ")
+            .expect("an elaboration refusal has a location prefix");
+        assert!(
+            located.starts_with("Elaboration error at "),
+            "the refusal names the card that wrote x1: {error}"
+        );
+        let contract = contract.to_owned();
         if let Some(previous) = previous_error {
             assert_eq!(
-                error, previous,
+                contract, previous,
                 "card order must not change the connection contract"
             );
         }
-        previous_error = Some(error);
+        previous_error = Some(contract);
     }
 }
 
