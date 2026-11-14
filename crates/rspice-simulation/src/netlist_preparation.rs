@@ -18,12 +18,14 @@ pub mod owned_source;
 
 mod external_sources;
 mod hdl_sources;
+mod process_programs;
 pub use external_sources::{
     contains_external_include_directive, deferred_external_source_reason, executable_logical_lines,
     reject_deferred_external_sources_with_project_runtimes,
 };
 pub(crate) use hdl_sources::included_hdl_source_refusal;
 pub use hdl_sources::{DeckHdlRefusal, SealedDeckHdl, deck_source_key, seal_deck_hdl_sources};
+pub(crate) use process_programs::resolve_process_programs;
 
 mod parsing;
 pub use parsing::{

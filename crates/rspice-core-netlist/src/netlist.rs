@@ -3201,7 +3201,11 @@ fn normalize_source_spec_file_paths(spec: &mut SourceSpec, source_base_dir: &Pat
     }
 }
 
-pub(crate) fn normalize_model_string_path_value(
+/// A model's file-valued string parameter as a deck read from `source_base_dir`
+/// resolves it: a relative path joins the directory, keeping a `d_process`
+/// program's `|`/`||` pipe suffix; an absolute path, a URL, an empty value,
+/// or a parameter that names no file is returned as written.
+pub fn normalize_model_string_path_value(
     name: &str,
     value: &str,
     source_base_dir: Option<&Path>,

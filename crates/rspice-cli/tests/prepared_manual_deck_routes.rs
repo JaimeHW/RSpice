@@ -166,19 +166,19 @@ fn same_bits(what: &str, cli: &[f64], prepared: &[f64]) {
     }
 }
 
-/// The result document's state and strength tags of a digital event's
-/// value code, as the CLI writes them.
-fn state_and_strength(code: u8) -> (String, String) {
+/// The XSPICE event code of a CLI digital point's state and strength: the
+/// code the prepared route records for the same value.
+fn event_code(point: &serde_json::Value) -> u8 {
     use rspice_core::execution::result_document::{DigitalStateTag, DigitalStrengthTag};
-    let value = rspice_core::xspice::DigitalValue::from_event_code(code)
-        .unwrap_or_else(|| panic!("{code} is not an event code"));
-    let tag = |value: serde_json::Value| value.as_str().expect("a tag").to_owned();
-    (
-        tag(serde_json::to_value(DigitalStateTag::from(value.state)).expect("a state tag")),
-        tag(
-            serde_json::to_value(DigitalStrengthTag::from(value.strength)).expect("a strength tag"),
-        ),
-    )
+    let state: DigitalStateTag =
+        serde_json::from_value(point["state"].clone()).expect("a state tag");
+    let strength: DigitalStrengthTag =
+        serde_json::from_value(point["strength"].clone()).expect("a strength tag");
+    rspice_core::xspice::DigitalValue {
+        state: state.into(),
+        strength: strength.into(),
+    }
+    .event_code()
 }
 
 /// The CLI's transient and the prepared route's agree: the same time axis,
@@ -238,29 +238,27 @@ fn assert_same_transient(deck: &Path, node: &str) -> Vec<(f64, String)> {
             .iter()
             .find(|history| history.node_name.eq_ignore_ascii_case(name))
             .unwrap_or_else(|| panic!("the prepared route has no digital {name}"));
-        let cli_events: Vec<(u64, String, String)> = trace["points"]
-            .as_array()
-            .expect("points")
+        let points = trace["points"].as_array().expect("points");
+        let cli_events: Vec<(u64, u8)> = points
             .iter()
             .map(|point| {
-                let text = |key: &str| point[key].as_str().expect("a tag").to_owned();
                 let time = point["time"].as_f64().expect("a time");
-                (time.to_bits(), text("state"), text("strength"))
+                (time.to_bits(), event_code(point))
             })
             .collect();
-        let prepared_events: Vec<(u64, String, String)> = history
+        let prepared_events: Vec<(u64, u8)> = history
             .points
             .iter()
-            .map(|point| {
-                let (state, strength) = state_and_strength(point.value_code);
-                (point.time_s.to_bits(), state, strength)
-            })
+            .map(|point| (point.time_s.to_bits(), point.value_code))
             .collect();
         assert_eq!(cli_events, prepared_events, "digital {name}");
         if name.eq_ignore_ascii_case(node) {
-            seen = cli_events
-                .into_iter()
-                .map(|(time, state, _)| (f64::from_bits(time), state))
+            seen = points
+                .iter()
+                .map(|point| {
+                    let time = point["time"].as_f64().expect("a time");
+                    (time, point["state"].as_str().expect("a state").to_owned())
+                })
                 .collect();
         }
     }
@@ -350,4 +348,51 @@ fn source_lines_of_an_included_file_give_the_clis_numbers() {
         &format!("included sources\n.include \"models/clock.inc\"\n{CIRCUIT}"),
     );
     assert_clock(&assert_same_transient(&dir.join("deck.cir"), "q"));
+}
+
+/// The toggle peer of the `d_process` protocol: it echoes the header, then
+/// answers each clocked packet (an 8-byte time and one input byte) with a
+/// bit that flips on every call.
+#[cfg(unix)]
+const TOGGLE_PEER: &str = "#!/bin/sh\nhead -c 3\nq=0\nwhile :; do\n  \
+                           n=$(head -c 9 | wc -c)\n  [ $n -eq 9 ] || exit 0\n  \
+                           q=$((1 - q))\n  if [ $q -eq 1 ]; then printf '\\001'; \
+                           else printf '\\000'; fi\ndone\n";
+
+/// A `d_process` names its program relative to the deck: both routes start
+/// it from the deck's directory and give the same events and voltages.
+#[cfg(unix)]
+#[test]
+fn a_d_process_program_beside_the_deck_gives_the_clis_numbers() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = test_dir("prepared-process");
+    write(&dir, "toggle", TOGGLE_PEER);
+    std::fs::set_permissions(dir.join("toggle"), std::fs::Permissions::from_mode(0o755))
+        .expect("make the peer executable");
+    write(
+        &dir,
+        "deck.cir",
+        "d_process toggle peer\nvc cntl 0 0.5\naosc cntl dosc osc1\n\
+         .model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] duty_cycle=0.5 init_phase=0 \
+         rise_delay=1e-10 fall_delay=1e-10)\n\
+         aproc [dosc] dosc null [d] proc1\n\
+         .model proc1 d_process(process_file=\"toggle\" clk_delay=1e-9 reset_delay=1e-9)\n\
+         abr [d] [dd] dac1\n\
+         .model dac1 dac_bridge(out_low=0 out_high=1 t_rise=1n t_fall=1n)\n\
+         r1 dd out 1k\nc1 out 0 1p\n.tran 10n 5u 0 100n\n.end\n",
+    );
+    let events = assert_same_transient(&dir.join("deck.cir"), "d");
+    // One toggle a clock delay after each rising edge of the 1 MHz clock.
+    let toggles: Vec<_> = events.iter().skip(1).collect();
+    assert_eq!(toggles.len(), 5, "{events:?}");
+    for (edge, (time, state)) in toggles.iter().enumerate() {
+        let expected = (edge as f64 + 0.5) * 1e-6 + 1e-9;
+        assert!((time - expected).abs() < 1e-15, "{events:?}");
+        assert_eq!(
+            state,
+            if edge % 2 == 0 { "one" } else { "zero" },
+            "{events:?}"
+        );
+    }
 }

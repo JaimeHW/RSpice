@@ -757,6 +757,12 @@ fn expand_manual_deck<R, A>(
         dependencies: deck_hdl_dependencies,
         ..
     } = sealed_hdl;
+    // A `d_process` program starts from the deck's directory, as the CLI
+    // starts it, though the run solves with no source path.
+    let expanded = crate::netlist_preparation::resolve_process_programs(
+        expanded,
+        origin.and_then(Path::parent),
+    );
     let expanded = owned_source::bind_execution_profile(
         descriptor.and_then(|descriptor| descriptor.execution_profile),
         expanded,

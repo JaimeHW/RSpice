@@ -27,7 +27,7 @@ fn every_runtime_external_input_category_fails_closed() {
         ".load prior.raw",
         "Vstim in 0 PWL FILE \"wave.csv\"",
         ".measure tran fit ERROR V(out) FILE reference.prn DEPVARCOL 2",
-        ".model process d_process (process_file = worker)",
+        ".model process d_process (process_file = worker)\nAproc [in] [out] null process",
         "Aproc [in] [out] null process process_file = worker",
         ".model cosim d_cosim (simulation = \"payload.dll\")",
         "Aco [in] [out] null cosim simulation = provider",
@@ -66,7 +66,7 @@ fn continuation_folding_cannot_hide_external_dependencies() {
         "deck\nBlookup out 0 V=table\n+ (\"C:/curves/transfer.tbl\")\n.end\n",
         "deck\nVstim in 0 PWL(\n+ FILE = \"C:/stimulus/wave.csv\"\n+ )\n.end\n",
         "deck\n.model cosim d_cosim (simulation\n* comment between continued records\n+ = \"C:/plugins/payload.dll\")\n.end\n",
-        "deck\n.model process d_process (process_file\n+ = 'C:/workers/stimulus.exe')\n.end\n",
+        "deck\n.model process d_process (process_file\n+ = 'workers/stimulus.exe')\nAproc [in] [out] null process\n.end\n",
     ] {
         let error = reject_deferred_external_sources(source)
             .expect_err("continued external dependency must fail closed");
@@ -172,5 +172,60 @@ fn code_model_data_files_are_left_to_preparation_to_seal() {
             &Default::default(),
         )
         .unwrap_or_else(|error| panic!("{line}: {error}"));
+    }
+}
+
+fn process_deck(program: &str) -> String {
+    format!(
+        "deck\n.model peer d_process (process_file = \"{program}\")\n\
+         Aone [clk] clk null [q] peer\nAtwo [clk] clk null [r] peer\n.end\n"
+    )
+}
+
+#[test]
+fn a_d_process_program_named_absolutely_passes_where_programs_start() {
+    let program = std::env::temp_dir().join("toggle");
+    let program = program.to_string_lossy();
+    reject_deferred_external_sources_on(&process_deck(&program), &Default::default(), true)
+        .unwrap_or_else(|error| {
+            panic!("an absolute program is started as the CLI starts it: {error}")
+        });
+    let error =
+        reject_deferred_external_sources_on(&process_deck("toggle"), &Default::default(), true)
+            .expect_err("a relative program no deck directory resolved is refused");
+    assert_eq!(error.stage(), PreparationStage::SourceChecks);
+    assert!(
+        error
+            .message()
+            .contains("'toggle' is named relative to no deck directory")
+            && error.message().contains("line 2"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_host_that_cannot_start_programs_refuses_each_d_process_instance_by_name() {
+    let program = std::env::temp_dir().join("toggle");
+    let program = program.to_string_lossy();
+    let error =
+        reject_deferred_external_sources_on(&process_deck(&program), &Default::default(), false)
+            .expect_err("a browser run cannot start a program");
+    assert_eq!(error.stage(), PreparationStage::SourceChecks);
+    let message = error.message();
+    assert!(
+        message.contains("d_process instance 'Aone', 'Atwo' starts the program")
+            && message.contains(&*program)
+            && message.contains("line 2")
+            && message.contains("cannot start a program"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_d_process_model_no_instance_names_starts_nothing() {
+    let deck = "deck\n.model peer d_process (process_file = \"toggle\")\n.end\n";
+    for starts_programs in [true, false] {
+        reject_deferred_external_sources_on(deck, &Default::default(), starts_programs)
+            .unwrap_or_else(|error| panic!("an unused model starts nothing: {error}"));
     }
 }

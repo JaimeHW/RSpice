@@ -180,6 +180,12 @@ pub fn prepare_headless_run(
     processor = processor.with_resource_limits(limits);
     let expanded = processor.expand_content_with_abort(input.source, &origin, abort)?;
     let sealed_source_dependencies = processor.resolved_dependencies().to_vec();
+    // A `d_process` program starts from the root deck's directory, as the
+    // CLI starts it. A sealed bundle has no directory to start one from.
+    let expanded = crate::netlist_preparation::resolve_process_programs(
+        expanded,
+        if reads_files { origin.parent() } else { None },
+    );
     check_abort(abort)?;
     // Root admission happened before expansion. The captured closure is now
     // an executable deck governed by the expanded-source budget.

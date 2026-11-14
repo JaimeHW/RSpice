@@ -4,6 +4,7 @@
 //! that would read a file, a library or a co-simulation runtime at solve time.
 //! The judgment is lexical and owns no state.
 
+use super::process_programs;
 use crate::preparation::{PreparationError, PreparationStage};
 use crate::project_veriloga::preparation::project_veriloga_directive_matches_exact_identity;
 use rspice_core::netlist::{parse_include_directive, parse_lib_directive};
@@ -19,6 +20,12 @@ pub fn contains_external_include_directive(source: &str) -> bool {
 /// the engine's parameter resolution, defaults included; a source nothing
 /// seals them from, such as a corner's model cards, is refused for them.
 const CODE_MODEL_DATA_FILE: &str = "code-model data file";
+
+/// The reason a `d_process` program gives. Preparation writes a relative
+/// program path as the root deck's directory resolves it, as the CLI does,
+/// so a run starts a program it names by an absolute path; a host that
+/// cannot start programs refuses each instance by name.
+const PROCESS_PROGRAM: &str = "program a d_process instance starts";
 
 pub fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
     let line = executable_source_portion(line);
@@ -50,10 +57,9 @@ pub fn deferred_external_source_reason(line: &str) -> Option<&'static str> {
         .collect::<String>();
     // File/provider assignments belong to code-model declarations or instances;
     // identically named numeric parameters do not open external resources.
-    // `process_file` starts a program, which nothing seals.
     let code_model = directive == ".model" || directive.starts_with('a');
     if code_model && contains_parameter_assignment(&lower, "process_file") {
-        return Some("file-backed element or code-model parameter");
+        return Some(PROCESS_PROGRAM);
     }
     if code_model
         && ["file", "input_file", "state_file"]
@@ -126,7 +132,9 @@ fn contains_parameter_assignment(line: &str, parameter: &str) -> bool {
 
 /// Refuse a deck line that would open something outside the prepared run.
 /// The project's sealed Verilog-A and measurement tables pass; so do code-model
-/// data files, which the prepared snapshot seals and checks deck by deck.
+/// data files, which the prepared snapshot seals and checks deck by deck, and
+/// a `d_process` program named by an absolute path on a host that can start
+/// it.
 pub fn reject_deferred_external_sources_with_project_runtimes(
     netlist: &str,
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
@@ -140,18 +148,36 @@ pub fn reject_deferred_external_sources_with_project_runtimes(
                 format!("Executable netlist contains an unsealed external dependency: {error}"),
             )
         })?;
-    for (line_number, logical_line) in executable_logical_lines(netlist) {
+    reject_deferred_external_sources_on(
+        netlist,
+        project_runtimes,
+        process_programs::STARTS_PROGRAMS,
+    )
+}
+
+fn reject_deferred_external_sources_on(
+    netlist: &str,
+    project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+    starts_programs: bool,
+) -> Result<(), PreparationError> {
+    let records = executable_logical_lines(netlist);
+    for (line_number, logical_line) in &records {
+        let (line_number, logical_line) = (*line_number, logical_line.as_str());
         if project_runtimes.sources().any(|runtime| {
             project_veriloga_directive_matches_exact_identity(
-                &logical_line,
+                logical_line,
                 runtime.source_key(),
                 runtime.netlist_alias(),
             )
         }) {
             continue;
         }
-        if let Some(reason) = deferred_external_source_reason(&logical_line) {
+        if let Some(reason) = deferred_external_source_reason(logical_line) {
             if reason == "file-backed measurement reference" || reason == CODE_MODEL_DATA_FILE {
+                continue;
+            }
+            if reason == PROCESS_PROGRAM {
+                admit_process_programs(&records, line_number, logical_line, starts_programs)?;
                 continue;
             }
             return Err(PreparationError::new(
@@ -164,6 +190,54 @@ pub fn reject_deferred_external_sources_with_project_runtimes(
         }
     }
     Ok(())
+}
+
+/// Admit a record's `d_process` programs when this host starts each where
+/// the CLI starts it, by an absolute path; otherwise refuse, naming the
+/// instances when the host cannot start programs at all. A model no
+/// instance names starts nothing and passes.
+fn admit_process_programs(
+    records: &[(usize, String)],
+    line_number: usize,
+    record: &str,
+    starts_programs: bool,
+) -> Result<(), PreparationError> {
+    let instances = process_programs::process_instances(records, record);
+    if instances.is_empty() {
+        // A model no instance names starts nothing.
+        return Ok(());
+    }
+    let programs = process_programs::process_programs(record);
+    if !starts_programs {
+        let named = instances
+            .iter()
+            .map(|instance| format!("'{instance}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(PreparationError::new(
+            PreparationStage::SourceChecks,
+            format!(
+                "d_process instance {named} starts the program '{}' (line {line_number}: {record}), \
+                 and a run in the browser cannot start a program; run the deck in the desktop \
+                 application or the CLI",
+                programs.first().copied().unwrap_or_default()
+            ),
+        ));
+    }
+    match programs
+        .iter()
+        .find(|program| !process_programs::names_its_program_absolutely(program))
+    {
+        None => Ok(()),
+        Some(program) => Err(PreparationError::new(
+            PreparationStage::SourceChecks,
+            format!(
+                "Executable netlist contains an unsealed external dependency ({PROCESS_PROGRAM}) at \
+                 line {line_number}: {record}; the program '{program}' is named relative to no \
+                 deck directory, so name it by an absolute path"
+            ),
+        )),
+    }
 }
 
 /// Fold physical SPICE continuation records exactly as the core parser does
