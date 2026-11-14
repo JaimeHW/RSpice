@@ -30337,8 +30337,8 @@ impl Instance {
 		SSW=ABOH;
 		}
 		let ABSE=1f64* 1e-5f64;
-		let HLP=ddt(8, (1e-5f64* LD));
-		let ABSF=ddt_derivative(8,HLP,ABSE);
+		let HLP=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, (1e-5f64* LD), 0.0), None => ddt(8, (1e-5f64* LD)) };
+		let ABSF=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, ABSE, 0.0, 18u32), None => ddt_derivative(8,HLP,ABSE) };
 		let ACVM=ABSE* (ctx.checked_derivative_value(HLP, 1f64));
 		let HLQ=(ctx.checked_derivative_value(HLJ, HLO))+ (-HLP);
 		let ACVN=L7([0.0,0.0,0.0,0.0,0.0,0.0,(ACVM* SVH)]);
@@ -30582,8 +30582,8 @@ impl Instance {
 		STK=ABNY;
 		}
 		let ABRF=1f64* 1e-5f64;
-		let HNR=ddt(12, (1e-5f64* LH));
-		let ABRG=ddt_derivative(12,HNR,ABRF);
+		let HNR=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, (1e-5f64* LH), 0.0), None => ddt(12, (1e-5f64* LH)) };
+		let ABRG=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(1, ABRF, 0.0, 15u32), None => ddt_derivative(12,HNR,ABRF) };
 		let ACUZ=ABRF* (ctx.checked_derivative_value(HNR, 1f64));
 		let HNS=(ctx.checked_derivative_value(HNI, HNQ))+ (-HNR);
 		let ACVA=L7([0.0,0.0,0.0,0.0,0.0,(ACUZ* SVH),0.0]);
@@ -30599,8 +30599,8 @@ impl Instance {
 		STL=ABNZ;
 		}
 		let ABRI=1f64* 1e-5f64;
-		let HNV=ddt(13, (1e-5f64* LJ));
-		let ABRJ=ddt_derivative(13,HNV,ABRI);
+		let HNV=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(2, (1e-5f64* LJ), 0.0), None => ddt(13, (1e-5f64* LJ)) };
+		let ABRJ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(2, ABRI, 0.0, 16u32), None => ddt_derivative(13,HNV,ABRI) };
 		let ACVC=ABRI* (ctx.checked_derivative_value(HNV, 1f64));
 		let HNW=(ctx.checked_derivative_value(HNL, HNU))+ (-HNV);
 		let ACVD=L7([0.0,0.0,0.0,0.0,0.0,(ACVC* SVH),0.0]);

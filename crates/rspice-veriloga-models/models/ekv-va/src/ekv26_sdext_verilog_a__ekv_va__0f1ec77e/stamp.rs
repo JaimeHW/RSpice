@@ -1225,10 +1225,10 @@ impl Instance {
 		let TZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, B, Q));
 		let UA=SF* TZ;
 		let UB=K+ (TZ* SE);
-		let UC=ddt(0, TJ);
-		let UD=L4(std::array::from_fn(|i| ddt_derivative(0,UC,(TK)[i])));
-		let UE=ddt(1, TQ);
-		let UF=L4(std::array::from_fn(|i| ddt_derivative(1,UE,(TR)[i])));
+		let UC=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, TJ, 0.0), None => ddt(0, TJ) };
+		let UD=L4(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, (TK)[i], 0.0, [0u32, 1u32, 2u32, 3u32][i]), None => ddt_derivative(0,UC,(TK)[i]) }));
+		let UE=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, TQ, 0.0), None => ddt(1, TQ) };
+		let UF=L4(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(1, (TR)[i], 0.0, [0u32, 1u32, 2u32, 3u32][i]), None => ddt_derivative(1,UE,(TR)[i]) }));
 		let UG=Q== N;
 		let VM;
 		let VN;
@@ -1315,8 +1315,8 @@ impl Instance {
 		WE=VE;
 		WF=VI;
 		}
-		let WG=ddt(2, TX);
-		let WH=L4(std::array::from_fn(|i| ddt_derivative(2,WG,(TY)[i])));
+		let WG=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(2, TX, 0.0), None => ddt(2, TX) };
+		let WH=L4(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(2, (TY)[i], 0.0, [0u32, 1u32, 2u32, 3u32][i]), None => ddt_derivative(2,WG,(TY)[i]) }));
 		let WI=WH* B;
 		let WK=WJ* TX;
 		let WL=TY* WJ;
@@ -1467,8 +1467,8 @@ impl Instance {
 		let ABT=(ABN+ ABO)+ ABP;
 		let ABU=ABT* G;
 		let ABV=(((ABQ+ ABR)+ ABS)* G)+ (H* ABT);
-		let ABW=ddt(3, ABU);
-		let ABX=L2(std::array::from_fn(|i| ddt_derivative(3,ABW,(ABV)[i])));
+		let ABW=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(3, ABU, 0.0), None => ddt(3, ABU) };
+		let ABX=L2(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(3, (ABV)[i], 0.0, [0u32, 3u32][i]), None => ddt_derivative(3,ABW,(ABV)[i]) }));
 		let ABY=(ABX* B)* YK;
 		let ACA=(ABU* WJ)* ABZ;
 		let ACB=(ABV* WJ)* ABZ;
@@ -1525,8 +1525,8 @@ impl Instance {
 		let ADN=(ADH+ ADI)+ ADJ;
 		let ADO=ADN* E;
 		let ADP=(((ADK+ ADL)+ ADM)* E)+ (F* ADN);
-		let ADQ=ddt(4, ADO);
-		let ADR=L2(std::array::from_fn(|i| ddt_derivative(4,ADQ,(ADP)[i])));
+		let ADQ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(4, ADO, 0.0), None => ddt(4, ADO) };
+		let ADR=L2(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(4, (ADP)[i], 0.0, [2u32, 3u32][i]), None => ddt_derivative(4,ADQ,(ADP)[i]) }));
 		let ADS=(ADR* B)* YK;
 		let ADT=(ADO* WJ)* ABZ;
 		let ADU=(ADP* WJ)* ABZ;

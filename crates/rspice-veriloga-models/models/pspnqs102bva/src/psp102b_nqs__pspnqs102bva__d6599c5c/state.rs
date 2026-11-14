@@ -1046,9 +1046,9 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([90, 233, 76, 177, 22, 201, 37, 193, 244, 81, 86, 197, 51, 187, 180, 158, 65, 243, 4, 158, 228, 116, 143, 160, 67, 217, 89, 230, 197, 191, 90, 144]);
 	pub const EVENT_STATE_COUNT: usize = 18;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
-	pub const HB_ADMISSIBLE: bool = false;
-	pub const HB_REFUSAL: Option<&'static str> = Some("`QG_NQS`, `QS_NQS`, `QD_NQS`, `thesat2`, `idmult`, `vj`, `zinv`, `vjsrh`, `vav`, `vbi_minus_vjsrh`, `wsrh`, `wdep` and `asrh` are read before they are assigned, so they keep their values from the last accepted time point, which no harmonic-balance spectrum carries");
-	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[];
+	pub const HB_ADMISSIBLE: bool = true;
+	pub const HB_REFUSAL: Option<&'static str> = None;
+	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral, rspice_veriloga_runtime::GeneratedPeriodicKind::Integral];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "3092d9166e20d7377b3298fffe57d49fd6494b278a46f92f99c1722413deb602";

@@ -20770,8 +20770,8 @@ impl Instance {
 		let MCB;
 		let MCC;
 		if GVW{
-		let MCD=ddt(23, (GWF- staged[667]));
-		let MCE=L5(std::array::from_fn(|i| ddt_derivative(23,MCD,(GWG)[i])));
+		let MCD=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, (GWF- staged[667]), 0.0), None => ddt(23, (GWF- staged[667])) };
+		let MCE=L5(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, (GWG)[i], 0.0, [3u32, 4u32, 5u32, 6u32, 11u32][i]), None => ddt_derivative(23,MCD,(GWG)[i]) }));
 		let MCF=MCE* DH;
 		let MCG=(GWG* (ctx.checked_derivative_value(MCD, 1f64)))* DH;
 		let MCH=0f64+ (-MCD);
@@ -20803,8 +20803,8 @@ impl Instance {
 		MCT=LCD;
 		MCU=MCP;
 		}
-		let MCV=ddt(24, LBH);
-		let MCW=ddt_derivative(24,MCV,LBJ);
+		let MCV=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, LBH, 0.0), None => ddt(24, LBH) };
+		let MCW=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(1, LBJ, 0.0, 15u32), None => ddt_derivative(24,MCV,LBJ) };
 		let MCX=(ctx.checked_derivative_value(MCN, MCS))+ (-(KQA* MCV));
 		let MCY=MCT+ L6([0.0,0.0,0.0,0.0,0.0,((MCW* KQA)* DH)]);
 		let MCZ=MCU+ L6([0.0,0.0,0.0,0.0,0.0,(((LBJ* (ctx.checked_derivative_value(MCV, 1f64)))* KQA)* DH)]);

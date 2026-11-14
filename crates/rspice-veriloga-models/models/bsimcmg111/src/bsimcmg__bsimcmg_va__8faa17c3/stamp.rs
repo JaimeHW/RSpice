@@ -21246,8 +21246,8 @@ impl Instance {
 		let LRY;
 		let LRZ;
 		if HBM{
-		let LSA=ddt(12, (HBV- staged[649]));
-		let LSB=L5(std::array::from_fn(|i| ddt_derivative(12,LSA,(HBW)[i])));
+		let LSA=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, (HBV- staged[649]), 0.0), None => ddt(12, (HBV- staged[649])) };
+		let LSB=L5(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, (HBW)[i], 0.0, [3u32, 4u32, 5u32, 6u32, 10u32][i]), None => ddt_derivative(12,LSA,(HBW)[i]) }));
 		let LSC=LSB* DG;
 		let LSD=(HBW* (ctx.checked_derivative_value(LSA, 1f64)))* DG;
 		let LSE=0f64+ (-LSA);
@@ -21279,8 +21279,8 @@ impl Instance {
 		LSQ=KYT;
 		LSR=LSM;
 		}
-		let LSS=ddt(13, KXX);
-		let LST=ddt_derivative(13,LSS,KXZ);
+		let LSS=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, KXX, 0.0), None => ddt(13, KXX) };
+		let LST=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(1, KXZ, 0.0, 11u32), None => ddt_derivative(13,LSS,KXZ) };
 		let LSU=(ctx.checked_derivative_value(LSK, LSP))+ (-(KMO* LSS));
 		let LSV=LSQ+ L6([0.0,0.0,0.0,0.0,0.0,((LST* KMO)* DG)]);
 		let LSW=LSR+ L6([0.0,0.0,0.0,0.0,0.0,(((KXZ* (ctx.checked_derivative_value(LSS, 1f64)))* KMO)* DG)]);

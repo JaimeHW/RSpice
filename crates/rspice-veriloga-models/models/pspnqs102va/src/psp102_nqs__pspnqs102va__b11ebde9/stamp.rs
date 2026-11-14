@@ -30960,8 +30960,8 @@ impl Instance {
 		let MDB=HKI* AP;
 		let MDC=MDB* HKG;
 		let MDD=L13([MDC[0],MDC[1],MDC[2],MDC[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (HKJ* MDA);
-		let MDE=idt(0, (MDA* HKG), FFT);
-		let MDF=L13(std::array::from_fn(|i| idt_derivative(0,MDE,(MDD)[i],(L13([FGC[0],FGC[1],FGC[2],FGC[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let MDE=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, (MDA* HKG), FFT), None => idt(0, (MDA* HKG), FFT) };
+		let MDF=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, (MDD)[i], (L13([FGC[0],FGC[1],FGC[2],FGC[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [0u32, 2u32, 6u32, 7u32, 11u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32][i]), None => idt_derivative(0,MDE,(MDD)[i],(L13([FGC[0],FGC[1],FGC[2],FGC[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let MDG=MDF* MCW;
 		let MDH=MDD* MCW;
 		let MDI=BY+ (MCW* MDE);
@@ -30969,8 +30969,8 @@ impl Instance {
 		let MDK=BY+ ((MCW* branch_unknown_flows[2])* MCX);
 		let MDL=MDB* IAQ;
 		let MDM=L13([MDL[0],MDL[1],MDL[2],MDL[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (IAR* MDA);
-		let MDN=idt(1, (MDA* IAQ), FFU);
-		let MDO=L13(std::array::from_fn(|i| idt_derivative(1,MDN,(MDM)[i],(L13([FGD[0],FGD[1],FGD[2],FGD[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let MDN=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, (MDA* IAQ), FFU), None => idt(1, (MDA* IAQ), FFU) };
+		let MDO=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(1, (MDM)[i], (L13([FGD[0],FGD[1],FGD[2],FGD[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [0u32, 2u32, 6u32, 7u32, 11u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32][i]), None => idt_derivative(1,MDN,(MDM)[i],(L13([FGD[0],FGD[1],FGD[2],FGD[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let MDP=MDO* MCW;
 		let MDQ=MDM* MCW;
 		let MDR=BY+ (MCW* MDN);
@@ -30978,8 +30978,8 @@ impl Instance {
 		let MDT=BY+ ((MCW* branch_unknown_flows[4])* MCX);
 		let MDU=MDB* IPZ;
 		let MDV=L13([MDU[0],MDU[1],MDU[2],MDU[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (IQA* MDA);
-		let MDW=idt(2, (MDA* IPZ), FFV);
-		let MDX=L13(std::array::from_fn(|i| idt_derivative(2,MDW,(MDV)[i],(L13([FGE[0],FGE[1],FGE[2],FGE[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let MDW=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(2, (MDA* IPZ), FFV), None => idt(2, (MDA* IPZ), FFV) };
+		let MDX=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(2, (MDV)[i], (L13([FGE[0],FGE[1],FGE[2],FGE[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [0u32, 2u32, 6u32, 7u32, 11u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32][i]), None => idt_derivative(2,MDW,(MDV)[i],(L13([FGE[0],FGE[1],FGE[2],FGE[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let MDY=MDX* MCW;
 		let MDZ=MDV* MCW;
 		let MEA=BY+ (MCW* MDW);
@@ -30987,8 +30987,8 @@ impl Instance {
 		let MEC=BY+ ((MCW* branch_unknown_flows[6])* MCX);
 		let MED=MDB* JEH;
 		let MEE=L13([MED[0],MED[1],MED[2],MED[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (JEI* MDA);
-		let MEF=idt(3, (MDA* JEH), FFW);
-		let MEG=L13(std::array::from_fn(|i| idt_derivative(3,MEF,(MEE)[i],(L13([FGF[0],FGF[1],FGF[2],FGF[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let MEF=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(3, (MDA* JEH), FFW), None => idt(3, (MDA* JEH), FFW) };
+		let MEG=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(3, (MEE)[i], (L13([FGF[0],FGF[1],FGF[2],FGF[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [0u32, 2u32, 6u32, 7u32, 11u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32][i]), None => idt_derivative(3,MEF,(MEE)[i],(L13([FGF[0],FGF[1],FGF[2],FGF[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let MEH=MEG* MCW;
 		let MEI=MEE* MCW;
 		let MEJ=BY+ (MCW* MEF);
@@ -30996,8 +30996,8 @@ impl Instance {
 		let MEL=BY+ ((MCW* branch_unknown_flows[8])* MCX);
 		let MEM=MDB* JRX;
 		let MEN=L13([MEM[0],MEM[1],MEM[2],MEM[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (JRY* MDA);
-		let MEO=idt(4, (MDA* JRX), FFX);
-		let MEP=L13(std::array::from_fn(|i| idt_derivative(4,MEO,(MEN)[i],(L13([FGG[0],FGG[1],FGG[2],FGG[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let MEO=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(4, (MDA* JRX), FFX), None => idt(4, (MDA* JRX), FFX) };
+		let MEP=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(4, (MEN)[i], (L13([FGG[0],FGG[1],FGG[2],FGG[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [0u32, 2u32, 6u32, 7u32, 11u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32][i]), None => idt_derivative(4,MEO,(MEN)[i],(L13([FGG[0],FGG[1],FGG[2],FGG[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let MEQ=MEP* MCW;
 		let MER=MEN* MCW;
 		let MES=BY+ (MCW* MEO);
@@ -31005,8 +31005,8 @@ impl Instance {
 		let MEU=BY+ ((MCW* branch_unknown_flows[10])* MCX);
 		let MEV=MDB* KFF;
 		let MEW=L13([MEV[0],MEV[1],MEV[2],MEV[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (KFG* MDA);
-		let MEX=idt(5, (MDA* KFF), FFY);
-		let MEY=L13(std::array::from_fn(|i| idt_derivative(5,MEX,(MEW)[i],(L13([FGH[0],FGH[1],FGH[2],FGH[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let MEX=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(5, (MDA* KFF), FFY), None => idt(5, (MDA* KFF), FFY) };
+		let MEY=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(5, (MEW)[i], (L13([FGH[0],FGH[1],FGH[2],FGH[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [0u32, 2u32, 6u32, 7u32, 11u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32][i]), None => idt_derivative(5,MEX,(MEW)[i],(L13([FGH[0],FGH[1],FGH[2],FGH[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let MEZ=MEY* MCW;
 		let MFA=MEW* MCW;
 		let MFB=BY+ (MCW* MEX);
@@ -31014,8 +31014,8 @@ impl Instance {
 		let MFD=BY+ ((MCW* branch_unknown_flows[12])* MCX);
 		let MFE=MDB* KRM;
 		let MFF=L13([MFE[0],MFE[1],MFE[2],MFE[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (KRN* MDA);
-		let MFG=idt(6, (MDA* KRM), FFZ);
-		let MFH=L13(std::array::from_fn(|i| idt_derivative(6,MFG,(MFF)[i],(L13([FGI[0],FGI[1],FGI[2],FGI[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let MFG=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(6, (MDA* KRM), FFZ), None => idt(6, (MDA* KRM), FFZ) };
+		let MFH=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(6, (MFF)[i], (L13([FGI[0],FGI[1],FGI[2],FGI[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [0u32, 2u32, 6u32, 7u32, 11u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32][i]), None => idt_derivative(6,MFG,(MFF)[i],(L13([FGI[0],FGI[1],FGI[2],FGI[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let MFI=MFH* MCW;
 		let MFJ=MFF* MCW;
 		let MFK=BY+ (MCW* MFG);
@@ -31023,8 +31023,8 @@ impl Instance {
 		let MFM=BY+ ((MCW* branch_unknown_flows[14])* MCX);
 		let MFN=MDB* LDU;
 		let MFO=L13([MFN[0],MFN[1],MFN[2],MFN[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (LDV* MDA);
-		let MFP=idt(7, (MDA* LDU), FGA);
-		let MFQ=L13(std::array::from_fn(|i| idt_derivative(7,MFP,(MFO)[i],(L13([FGJ[0],FGJ[1],FGJ[2],FGJ[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let MFP=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(7, (MDA* LDU), FGA), None => idt(7, (MDA* LDU), FGA) };
+		let MFQ=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(7, (MFO)[i], (L13([FGJ[0],FGJ[1],FGJ[2],FGJ[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [0u32, 2u32, 6u32, 7u32, 11u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32][i]), None => idt_derivative(7,MFP,(MFO)[i],(L13([FGJ[0],FGJ[1],FGJ[2],FGJ[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let MFR=MFQ* MCW;
 		let MFS=MFO* MCW;
 		let MFT=BY+ (MCW* MFP);
@@ -31032,8 +31032,8 @@ impl Instance {
 		let MFV=BY+ ((MCW* branch_unknown_flows[16])* MCX);
 		let MFW=MDB* LQB;
 		let MFX=L13([MFW[0],MFW[1],MFW[2],MFW[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (LQC* MDA);
-		let MFY=idt(8, (MDA* LQB), FGB);
-		let MFZ=L13(std::array::from_fn(|i| idt_derivative(8,MFY,(MFX)[i],(L13([FGK[0],FGK[1],FGK[2],FGK[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let MFY=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(8, (MDA* LQB), FGB), None => idt(8, (MDA* LQB), FGB) };
+		let MFZ=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(8, (MFX)[i], (L13([FGK[0],FGK[1],FGK[2],FGK[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [0u32, 2u32, 6u32, 7u32, 11u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32][i]), None => idt_derivative(8,MFY,(MFX)[i],(L13([FGK[0],FGK[1],FGK[2],FGK[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let MGA=MFZ* MCW;
 		let MGB=MFX* MCW;
 		let MGC=BY+ (MCW* MFY);

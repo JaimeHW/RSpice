@@ -36555,8 +36555,8 @@ impl Instance {
 		let PON=KWC* DP;
 		let POO=PON* KWA;
 		let POP=L13([POO[0],POO[1],POO[2],POO[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (KWD* POM);
-		let POQ=idt(0, (POM* KWA), IPE);
-		let POR=L13(std::array::from_fn(|i| idt_derivative(0,POQ,(POP)[i],(L13([IPN[0],IPN[1],IPN[2],IPN[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let POQ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, (POM* KWA), IPE), None => idt(0, (POM* KWA), IPE) };
+		let POR=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, (POP)[i], (L13([IPN[0],IPN[1],IPN[2],IPN[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(0,POQ,(POP)[i],(L13([IPN[0],IPN[1],IPN[2],IPN[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let POS=POR* POJ;
 		let POT=POP* POJ;
 		let POU=AU+ (POJ* POQ);
@@ -36564,8 +36564,8 @@ impl Instance {
 		let POW=AU+ ((POJ* branch_unknown_flows[2])* GXH);
 		let POX=PON* LMJ;
 		let POY=L13([POX[0],POX[1],POX[2],POX[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (LMK* POM);
-		let POZ=idt(1, (POM* LMJ), IPF);
-		let PPA=L13(std::array::from_fn(|i| idt_derivative(1,POZ,(POY)[i],(L13([IPO[0],IPO[1],IPO[2],IPO[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let POZ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, (POM* LMJ), IPF), None => idt(1, (POM* LMJ), IPF) };
+		let PPA=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(1, (POY)[i], (L13([IPO[0],IPO[1],IPO[2],IPO[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(1,POZ,(POY)[i],(L13([IPO[0],IPO[1],IPO[2],IPO[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let PPB=PPA* POJ;
 		let PPC=POY* POJ;
 		let PPD=AU+ (POJ* POZ);
@@ -36573,8 +36573,8 @@ impl Instance {
 		let PPF=AU+ ((POJ* branch_unknown_flows[4])* GXH);
 		let PPG=PON* MBS;
 		let PPH=L13([PPG[0],PPG[1],PPG[2],PPG[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (MBT* POM);
-		let PPI=idt(2, (POM* MBS), IPG);
-		let PPJ=L13(std::array::from_fn(|i| idt_derivative(2,PPI,(PPH)[i],(L13([IPP[0],IPP[1],IPP[2],IPP[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let PPI=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(2, (POM* MBS), IPG), None => idt(2, (POM* MBS), IPG) };
+		let PPJ=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(2, (PPH)[i], (L13([IPP[0],IPP[1],IPP[2],IPP[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(2,PPI,(PPH)[i],(L13([IPP[0],IPP[1],IPP[2],IPP[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let PPK=PPJ* POJ;
 		let PPL=PPH* POJ;
 		let PPM=AU+ (POJ* PPI);
@@ -36582,8 +36582,8 @@ impl Instance {
 		let PPO=AU+ ((POJ* branch_unknown_flows[6])* GXH);
 		let PPP=PON* MQA;
 		let PPQ=L13([PPP[0],PPP[1],PPP[2],PPP[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (MQB* POM);
-		let PPR=idt(3, (POM* MQA), IPH);
-		let PPS=L13(std::array::from_fn(|i| idt_derivative(3,PPR,(PPQ)[i],(L13([IPQ[0],IPQ[1],IPQ[2],IPQ[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let PPR=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(3, (POM* MQA), IPH), None => idt(3, (POM* MQA), IPH) };
+		let PPS=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(3, (PPQ)[i], (L13([IPQ[0],IPQ[1],IPQ[2],IPQ[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(3,PPR,(PPQ)[i],(L13([IPQ[0],IPQ[1],IPQ[2],IPQ[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let PPT=PPS* POJ;
 		let PPU=PPQ* POJ;
 		let PPV=AU+ (POJ* PPR);
@@ -36591,8 +36591,8 @@ impl Instance {
 		let PPX=AU+ ((POJ* branch_unknown_flows[8])* GXH);
 		let PPY=PON* NDQ;
 		let PPZ=L13([PPY[0],PPY[1],PPY[2],PPY[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (NDR* POM);
-		let PQA=idt(4, (POM* NDQ), IPI);
-		let PQB=L13(std::array::from_fn(|i| idt_derivative(4,PQA,(PPZ)[i],(L13([IPR[0],IPR[1],IPR[2],IPR[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let PQA=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(4, (POM* NDQ), IPI), None => idt(4, (POM* NDQ), IPI) };
+		let PQB=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(4, (PPZ)[i], (L13([IPR[0],IPR[1],IPR[2],IPR[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(4,PQA,(PPZ)[i],(L13([IPR[0],IPR[1],IPR[2],IPR[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let PQC=PQB* POJ;
 		let PQD=PPZ* POJ;
 		let PQE=AU+ (POJ* PQA);
@@ -36600,8 +36600,8 @@ impl Instance {
 		let PQG=AU+ ((POJ* branch_unknown_flows[10])* GXH);
 		let PQH=PON* NQY;
 		let PQI=L13([PQH[0],PQH[1],PQH[2],PQH[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (NQZ* POM);
-		let PQJ=idt(5, (POM* NQY), IPJ);
-		let PQK=L13(std::array::from_fn(|i| idt_derivative(5,PQJ,(PQI)[i],(L13([IPS[0],IPS[1],IPS[2],IPS[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let PQJ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(5, (POM* NQY), IPJ), None => idt(5, (POM* NQY), IPJ) };
+		let PQK=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(5, (PQI)[i], (L13([IPS[0],IPS[1],IPS[2],IPS[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(5,PQJ,(PQI)[i],(L13([IPS[0],IPS[1],IPS[2],IPS[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let PQL=PQK* POJ;
 		let PQM=PQI* POJ;
 		let PQN=AU+ (POJ* PQJ);
@@ -36609,8 +36609,8 @@ impl Instance {
 		let PQP=AU+ ((POJ* branch_unknown_flows[12])* GXH);
 		let PQQ=PON* ODF;
 		let PQR=L13([PQQ[0],PQQ[1],PQQ[2],PQQ[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (ODG* POM);
-		let PQS=idt(6, (POM* ODF), IPK);
-		let PQT=L13(std::array::from_fn(|i| idt_derivative(6,PQS,(PQR)[i],(L13([IPT[0],IPT[1],IPT[2],IPT[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let PQS=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(6, (POM* ODF), IPK), None => idt(6, (POM* ODF), IPK) };
+		let PQT=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(6, (PQR)[i], (L13([IPT[0],IPT[1],IPT[2],IPT[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(6,PQS,(PQR)[i],(L13([IPT[0],IPT[1],IPT[2],IPT[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let PQU=PQT* POJ;
 		let PQV=PQR* POJ;
 		let PQW=AU+ (POJ* PQS);
@@ -36618,8 +36618,8 @@ impl Instance {
 		let PQY=AU+ ((POJ* branch_unknown_flows[14])* GXH);
 		let PQZ=PON* OPN;
 		let PRA=L13([PQZ[0],PQZ[1],PQZ[2],PQZ[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (OPO* POM);
-		let PRB=idt(7, (POM* OPN), IPL);
-		let PRC=L13(std::array::from_fn(|i| idt_derivative(7,PRB,(PRA)[i],(L13([IPU[0],IPU[1],IPU[2],IPU[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let PRB=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(7, (POM* OPN), IPL), None => idt(7, (POM* OPN), IPL) };
+		let PRC=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(7, (PRA)[i], (L13([IPU[0],IPU[1],IPU[2],IPU[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(7,PRB,(PRA)[i],(L13([IPU[0],IPU[1],IPU[2],IPU[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let PRD=PRC* POJ;
 		let PRE=PRA* POJ;
 		let PRF=AU+ (POJ* PRB);
@@ -36627,8 +36627,8 @@ impl Instance {
 		let PRH=AU+ ((POJ* branch_unknown_flows[16])* GXH);
 		let PRI=PON* PBU;
 		let PRJ=L13([PRI[0],PRI[1],PRI[2],PRI[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (PBV* POM);
-		let PRK=idt(8, (POM* PBU), IPM);
-		let PRL=L13(std::array::from_fn(|i| idt_derivative(8,PRK,(PRJ)[i],(L13([IPV[0],IPV[1],IPV[2],IPV[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let PRK=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(8, (POM* PBU), IPM), None => idt(8, (POM* PBU), IPM) };
+		let PRL=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(8, (PRJ)[i], (L13([IPV[0],IPV[1],IPV[2],IPV[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(8,PRK,(PRJ)[i],(L13([IPV[0],IPV[1],IPV[2],IPV[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let PRM=PRL* POJ;
 		let PRN=PRJ* POJ;
 		let PRO=AU+ (POJ* PRK);
