@@ -1901,7 +1901,7 @@ fn resolve_entry(
         .shortcut_command
         .map_or_else(String::new, |product_command| {
             state.model.preferences.shortcuts().resolved_label(
-                &crate::workbench::commands::vocabulary::CommandRegistry,
+                state.commands,
                 product_command,
                 crate::workbench::app_state::runtime_command_platform(ctx),
                 ctx.os(),

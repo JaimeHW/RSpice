@@ -11,6 +11,7 @@ use crate::workbench::app::{symbol_context_revision, sync_active_schematic};
 #[cfg(test)]
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::{Model, model_design_view};
+use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::{slots::DesignState, state::WorkbenchSession};
 
 use super::symbols::SymbolLibrary;
@@ -72,11 +73,11 @@ pub(crate) use self::interaction::{
 };
 pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
 pub(crate) use self::parts::{
-    CanvasFacts, CanvasFrame, CanvasParts, canvas_frame_in, canvas_parts, canvas_parts_in,
+    CanvasFacts, CanvasFrame, CanvasParts, canvas_frame_in, canvas_parts_in, canvas_parts_lent,
 };
 #[cfg(test)]
 pub(crate) use self::parts::{
-    canvas_application_modal_open, canvas_facts, canvas_facts_lent, canvas_frame, canvas_parts_lent,
+    canvas_application_modal_open, canvas_facts, canvas_facts_lent, canvas_frame, canvas_parts,
 };
 pub(crate) use self::requests::{DesignSurfaceRequest, SelectProbedTrace};
 pub(crate) use self::shelf_drag::{
@@ -124,7 +125,9 @@ fn refresh_symbol_context_after_interactions(
     refreshed
 }
 
-fn canvas_accessibility_view<'a>(state: &CanvasFacts<'a>) -> canvas::CanvasAccessibilityView<'a> {
+pub(crate) fn canvas_accessibility_view<'a>(
+    state: &CanvasFacts<'a>,
+) -> canvas::CanvasAccessibilityView<'a> {
     canvas::CanvasAccessibilityView {
         design: state.design_view(),
         editor: &state.model.schematic.session.editor,
@@ -137,20 +140,17 @@ fn canvas_accessibility_view<'a>(state: &CanvasFacts<'a>) -> canvas::CanvasAcces
     }
 }
 
-fn schematic_accessibility_shortcuts(
+pub(crate) fn schematic_accessibility_shortcuts(
     model: &Model,
+    commands: &Registry,
     platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> String {
-    use crate::workbench::{
-        commands::vocabulary::{CommandRegistry, command_registry},
-        design::commands::DesignCommand,
-        framework::command_registry::ids,
-    };
+    use crate::workbench::{design::commands::DesignCommand, framework::command_registry::ids};
     crate::workbench::app_state::accessibility_shortcut_summary(
         model.preferences.shortcuts(),
-        &CommandRegistry,
-        command_registry(),
+        commands,
+        commands,
         platform,
         operating_system,
         &[
@@ -524,8 +524,12 @@ pub fn render_schematic_view(
 
     let shortcut_platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
     let operating_system = ui.ctx().os();
-    let shortcuts =
-        schematic_accessibility_shortcuts(&*canvas.model, shortcut_platform, operating_system);
+    let shortcuts = schematic_accessibility_shortcuts(
+        &*canvas.model,
+        canvas.commands,
+        shortcut_platform,
+        operating_system,
+    );
     canvas::finish(
         ui,
         &response,
@@ -543,10 +547,10 @@ pub fn render_schematic_view(
 mod tests {
     use super::*;
     use crate::state::{
-        Cell, Component, ComponentType, Library, LibraryCellInstance, Point, PortDirection,
-        PortSpec, SchematicState, SymbolDocument, SymbolPin, View, ViewType,
+        Cell, ComponentType, Library, LibraryCellInstance, Point, PortDirection, PortSpec,
+        SchematicState, SymbolDocument, SymbolPin, View, ViewType,
     };
-    use crate::workbench::design::test_host::{DesignTestHost, canvas_facts};
+    use crate::workbench::design::test_host::DesignTestHost;
 
     fn port(name: &str, direction: PortDirection) -> PortSpec {
         PortSpec {
@@ -902,106 +906,5 @@ mod tests {
             .editor
             .add_component(ComponentType::Port, Point::origin());
         assert_ne!(symbol_context_revision(&state), library_changed);
-    }
-
-    #[test]
-    fn accessibility_description_summarizes_scene_and_tool_without_selection_churn() {
-        use crate::state::{Junction, NetLabel, Wire};
-
-        let mut state = DesignTestHost::default();
-        state
-            .model
-            .schematic
-            .document_mut_for_test()
-            .components
-            .push(Component::new(1, ComponentType::Resistor, Point::new(0, 0)));
-        state
-            .model
-            .schematic
-            .document_mut_for_test()
-            .wires
-            .push(Wire::new(2, vec![Point::new(0, 0), Point::new(10, 0)]));
-        state
-            .model
-            .schematic
-            .document_mut_for_test()
-            .junctions
-            .push(Junction::new(3, Point::new(10, 0)));
-        state
-            .model
-            .schematic
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(4, Point::new(10, 0), "OUT"));
-        state
-            .model
-            .schematic
-            .document_mut_for_test()
-            .design_notes
-            .push(
-                crate::state::DesignNote::new(
-                    5,
-                    Point::new(20, 10),
-                    crate::state::DesignNoteKind::PlainText,
-                    "Bias network",
-                )
-                .unwrap(),
-            );
-        state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_component(1);
-        state.model.schematic.session.editor.tool = crate::state::Tool::Wire;
-
-        let description = canvas::accessibility_description(
-            &canvas_accessibility_view(&canvas_facts(&state)),
-            &schematic_accessibility_shortcuts(
-                &state.model,
-                crate::state::command_catalog::CommandPlatform::Desktop,
-                egui::os::OperatingSystem::Windows,
-            ),
-        );
-
-        assert!(description.starts_with(
-            "1 component, 1 wire, 0 buses, 0 bus taps, 1 junction, 1 net label, 1 design note, 0 documentation shapes, 0 probe flags."
-        ));
-        assert!(description.contains("Active tool: Wire."));
-        assert!(!description.contains("Selected instance"));
-        assert!(!description.contains("item selected"));
-        assert!(description.contains(
-            "Arrow keys select the nearest eligible schematic object in each direction."
-        ));
-        assert!(description.contains("Escape: Cancel active command"));
-        assert!(description.contains("Shift+T: Place text or note"));
-        // Named as the Edit menu names it.
-        assert!(description.contains("S: Stretch"));
-        assert!(!description.contains("S: Stretch selection"));
-        assert_eq!(
-            canvas::selection_accessibility_status(&canvas_accessibility_view(&canvas_facts(
-                &state
-            ))),
-            "Selected instance unnamed, Resistor."
-        );
-        state.model.schematic.session.editor.selection.clear();
-        assert_eq!(
-            canvas::accessibility_description(
-                &canvas_accessibility_view(&canvas_facts(&state)),
-                &schematic_accessibility_shortcuts(
-                    &state.model,
-                    crate::state::command_catalog::CommandPlatform::Desktop,
-                    egui::os::OperatingSystem::Windows,
-                )
-            ),
-            description
-        );
-        assert_eq!(
-            canvas::selection_accessibility_status(&canvas_accessibility_view(&canvas_facts(
-                &state
-            ))),
-            "No schematic object selected."
-        );
     }
 }

@@ -3,9 +3,6 @@
 mod in_place;
 pub(crate) mod interaction;
 
-#[cfg(test)]
-mod tests;
-
 use egui::{Sense, Ui, WidgetInfo, WidgetType, vec2};
 
 use super::symbols::SymbolLibrary;
@@ -24,22 +21,18 @@ use rspice_schematic_editor::symbol_editor::surface::{
 };
 use rspice_schematic_editor::symbol_editor::{draw_canvas, update_viewport};
 
-fn symbol_canvas_accessibility_label(
+pub(crate) fn symbol_canvas_accessibility_label(
     document: &SymbolDocument,
     state: &CanvasFacts<'_>,
     read_only: bool,
     platform: crate::state::command_catalog::CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> String {
-    use crate::workbench::{
-        commands::vocabulary::{CommandRegistry, command_registry},
-        design::commands::DesignCommand,
-        framework::command_registry::ids,
-    };
+    use crate::workbench::{design::commands::DesignCommand, framework::command_registry::ids};
     let shortcuts = crate::workbench::app_state::accessibility_shortcut_summary(
         state.model.preferences.shortcuts(),
-        &CommandRegistry,
-        command_registry(),
+        state.commands,
+        state.commands,
         platform,
         operating_system,
         &[

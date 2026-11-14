@@ -9,7 +9,10 @@
 //! drawn. Whether a modal dialog was open is lent as it stood when the parts
 //! were taken. A dialog the surface asked for counts as open from the
 //! moment it asked, though the shell opens it only once the surface has
-//! drawn: [`canvas_application_modal_open`] is that one fact.
+//! drawn.
+//!
+//! The parts carry the application's commands, which the canvas's shortcut
+//! labels and accessibility summaries read.
 //!
 //! A page of the design surface draws over a [`CanvasFrame`]: the same
 //! parts for the whole pass, with the modal facts lent as it began, from
@@ -25,6 +28,8 @@ use crate::state::{
     BusDeclaration, BusParseError, CellViewRef, Point, PortSpec, SymbolDocument,
     SymbolEditorMetadata,
 };
+#[cfg(test)]
+use crate::workbench::app_state::AppState;
 use crate::workbench::{
     app::{
         SymbolInPlace, SymbolInPlaceRefusal, active_symbol_save_checks, deny_read_only_edit,
@@ -36,9 +41,9 @@ use crate::workbench::{
         store_symbol_canvas_frame, symbol_editor_request_source, sync_active_schematic,
         veriloga_master_of_component, veriloga_source_for_component,
     },
-    app_state::{AppState, DragType, Model, model_design_view},
+    app_state::{DragType, Model, model_design_view},
     design::{DesignFeature, own_modal_dialog_open},
-    framework::{feature::Cx, ports::ResultsPort},
+    framework::{command_registry::Registry, feature::Cx, ports::ResultsPort},
     slots::{DesignState, RunsState},
     state::WorkbenchSession,
 };
@@ -61,24 +66,17 @@ pub(crate) struct CanvasParts<'a> {
     pub(crate) workbench: &'a mut WorkbenchSession,
     pub(crate) runs: &'a mut RunsState,
     pub(crate) results: &'a dyn ResultsPort,
+    /// The application's commands, which shortcut labels read.
+    pub(crate) commands: &'static Registry,
     application_modal: bool,
     dialog_modal: bool,
 }
 
-/// The canvas's parts of the application's state, with its modal facts as
-/// they stand now.
+/// The canvas's parts of the application's state, as the shell's
+/// `AppState::canvas_parts` takes them, for the tests that name them here.
+#[cfg(test)]
 pub(crate) fn canvas_parts(state: &mut AppState) -> CanvasParts<'_> {
-    let application_modal = canvas_application_modal_open(state);
-    let dialog_modal = state.dialog_modal_open() || asked_dialog_waits(&state.workbench);
-    CanvasParts {
-        design: &mut state.design,
-        model: &mut state.model,
-        workbench: &mut state.workbench,
-        runs: &mut state.runs,
-        results: &*state.results,
-        application_modal,
-        dialog_modal,
-    }
+    state.canvas_parts()
 }
 
 /// The canvas's parts of the design feature's context, with its modal facts
@@ -92,6 +90,7 @@ pub(crate) fn canvas_parts_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasPa
         &mut *cx.wb,
         &mut *cx.runs,
         cx.peers.results(),
+        cx.commands,
         application_modal_open,
         dialog_modal_open,
     )
@@ -108,6 +107,7 @@ pub(crate) fn canvas_parts_lent<'a>(
     wb: &'a mut WorkbenchSession,
     runs: &'a mut RunsState,
     results: &'a dyn ResultsPort,
+    commands: &'static Registry,
     application_modal_open: bool,
     dialog_modal_open: bool,
 ) -> CanvasParts<'a> {
@@ -121,14 +121,16 @@ pub(crate) fn canvas_parts_lent<'a>(
         workbench: &mut *wb,
         runs: &mut *runs,
         results,
+        commands,
         application_modal,
         dialog_modal,
     }
 }
 
-/// [`canvas_application_modal_open`] in the design feature's context: the
-/// fact the shell lent it, a modal dialog of the feature's own that has
-/// opened since, or a dialog the surface asked for that waits.
+/// Whether the design surface reads a modal dialog as open, in the design
+/// feature's context: the fact the shell lent it, a modal dialog of the
+/// feature's own that has opened since, or a dialog the surface asked for
+/// that waits.
 pub(crate) fn canvas_application_modal_open_in(cx: &Cx<'_, DesignFeature>) -> bool {
     cx.application_modal_open()
         || own_modal_dialog_open(cx.state, false)
@@ -150,6 +152,8 @@ pub(crate) struct CanvasFrame<'a> {
     pub(crate) workbench: &'a mut WorkbenchSession,
     pub(crate) runs: &'a mut RunsState,
     pub(crate) results: &'a dyn ResultsPort,
+    /// The application's commands, which shortcut labels read.
+    pub(crate) commands: &'static Registry,
     application_modal: bool,
     dialog_modal: bool,
 }
@@ -166,6 +170,7 @@ pub(crate) fn canvas_frame(state: &mut AppState) -> CanvasFrame<'_> {
         workbench: &mut state.workbench,
         runs: &mut state.runs,
         results: &*state.results,
+        commands: crate::workbench::commands::vocabulary::command_registry(),
         application_modal,
         dialog_modal,
     }
@@ -182,6 +187,7 @@ pub(crate) fn canvas_frame_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasFr
         &mut *cx.wb,
         &mut *cx.runs,
         cx.peers.results(),
+        cx.commands,
         application_modal_open,
         dialog_modal_open,
     )
@@ -196,6 +202,7 @@ pub(crate) fn canvas_frame_lent<'a>(
     wb: &'a mut WorkbenchSession,
     runs: &'a mut RunsState,
     results: &'a dyn ResultsPort,
+    commands: &'static Registry,
     application_modal_open: bool,
     dialog_modal_open: bool,
 ) -> CanvasFrame<'a> {
@@ -207,6 +214,7 @@ pub(crate) fn canvas_frame_lent<'a>(
         workbench: &mut *wb,
         runs: &mut *runs,
         results,
+        commands,
         application_modal,
         dialog_modal,
     }
@@ -224,6 +232,7 @@ impl CanvasFrame<'_> {
             workbench: &mut *self.workbench,
             runs: &mut *self.runs,
             results: self.results,
+            commands: self.commands,
             application_modal,
             dialog_modal,
         }
@@ -236,6 +245,7 @@ impl CanvasFrame<'_> {
             model: &*self.model,
             runs: &*self.runs,
             results: self.results,
+            commands: self.commands,
             probed_trace: probed_trace(&*self.workbench),
         }
     }
@@ -265,6 +275,7 @@ impl CanvasFrame<'_> {
 /// Whether the design surface reads a modal dialog as open: one that is,
 /// or one it asked another workspace to open that waits for the shell.
 /// Every dialog the surface asks for counts for the dialog gate too.
+#[cfg(test)]
 pub(crate) fn canvas_application_modal_open(state: &AppState) -> bool {
     state.application_modal_open() || asked_dialog_waits(&state.workbench)
 }
@@ -294,6 +305,8 @@ pub(crate) struct CanvasFacts<'a> {
     pub(crate) model: &'a Model,
     pub(crate) runs: &'a RunsState,
     pub(crate) results: &'a dyn ResultsPort,
+    /// The application's commands, which shortcut labels read.
+    pub(crate) commands: &'static Registry,
     probed_trace: Option<&'a SelectedResultTrace>,
 }
 
@@ -305,13 +318,21 @@ pub(crate) fn canvas_facts(state: &AppState) -> CanvasFacts<'_> {
         model: &state.model,
         runs: &state.runs,
         results: &*state.results,
+        commands: crate::workbench::commands::vocabulary::command_registry(),
         probed_trace: probed_trace(&state.workbench),
     }
 }
 
 /// The canvas's facts from the design feature's context.
 pub(crate) fn canvas_facts_in<'a>(cx: &'a Cx<'_, DesignFeature>) -> CanvasFacts<'a> {
-    canvas_facts_lent(cx.state, cx.model, cx.wb, cx.runs, cx.peers.results())
+    canvas_facts_lent(
+        cx.state,
+        cx.model,
+        cx.wb,
+        cx.runs,
+        cx.peers.results(),
+        cx.commands,
+    )
 }
 
 /// The canvas's facts from the design slot, the model, the session, the
@@ -322,12 +343,14 @@ pub(crate) fn canvas_facts_lent<'a>(
     wb: &'a WorkbenchSession,
     runs: &'a RunsState,
     results: &'a dyn ResultsPort,
+    commands: &'static Registry,
 ) -> CanvasFacts<'a> {
     CanvasFacts {
         design: state,
         model,
         runs,
         results,
+        commands,
         probed_trace: probed_trace(wb),
     }
 }
@@ -432,6 +455,7 @@ impl CanvasParts<'_> {
             model: self.model,
             runs: self.runs,
             results: self.results,
+            commands: self.commands,
             probed_trace: probed_trace(self.workbench),
         }
     }

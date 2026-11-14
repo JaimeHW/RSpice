@@ -22,6 +22,7 @@ use crate::workbench::app::actions::workspace::{
 };
 use crate::workbench::app_state::diagnostic_store::{BatchStanding, DiagnosticBatch};
 use crate::workbench::app_state::{Model, SlotFacts, prompt_text};
+use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::framework::feature::harness::fresh_session_results;
 use crate::workbench::slots::{DesignState, RunsState};
 use crate::workbench::state::WorkbenchSession;
@@ -172,6 +173,7 @@ pub(crate) fn canvas_parts(host: &mut DesignTestHost) -> CanvasParts<'_> {
         &mut host.workbench,
         &mut host.runs,
         fresh_session_results(),
+        no_commands(),
         false,
         false,
     )
@@ -187,7 +189,17 @@ pub(crate) fn canvas_facts(host: &DesignTestHost) -> CanvasFacts<'_> {
         &host.workbench,
         &host.runs,
         fresh_session_results(),
+        no_commands(),
     )
+}
+
+/// The commands the host's parts carry: none. A shortcut label reads the
+/// application's registry, so a test that reads one runs through the whole
+/// application in feature_tests/design.
+fn no_commands() -> &'static Registry {
+    static NONE: std::sync::LazyLock<Registry> =
+        std::sync::LazyLock::new(|| Registry::new(&[], Vec::new(), &[]));
+    &NONE
 }
 
 /// The shared model, as `AppState` lends it.

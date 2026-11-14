@@ -315,7 +315,7 @@ pub(super) fn component_shelf(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         .id_salt("workbench.design.component_shelf")
         .auto_shrink([false, true])
         .show(ui, |ui| {
-            let pinned = pinned_band(ui, cx.model, &library_parts, &cells);
+            let pinned = pinned_band(ui, cx.model, cx.commands, &library_parts, &cells);
             band = recent_band(ui, cx.model, &library_parts, &cells).or(pinned);
             catalog = component_catalog(ui, cx.model);
             stimulus = stimulus_library_section(ui, cx.model);
@@ -868,6 +868,7 @@ fn resolve_shelf_entry(
 fn pinned_band(
     ui: &mut Ui,
     model: &mut Model,
+    commands: &crate::workbench::framework::command_registry::Registry,
     library_parts: &[LibraryPartRow],
     cells: &[CellCandidate],
 ) -> Option<ShelfArm> {
@@ -880,7 +881,7 @@ fn pinned_band(
         return None;
     }
     let shortcut = model.preferences.shortcuts().resolved_label(
-        &crate::workbench::commands::vocabulary::CommandRegistry,
+        commands,
         crate::workbench::design::commands::DesignCommand::PlaceInstance.key(),
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),

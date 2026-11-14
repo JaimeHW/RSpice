@@ -562,6 +562,26 @@ impl RSpiceApp {
     }
 }
 
+/// The design canvas's parts of the application's state: the design slot,
+/// the model, the session, the runs and the results workspace, with the
+/// application's commands and its modal facts as they stand now.
+impl AppState {
+    pub(crate) fn canvas_parts(&mut self) -> crate::schematic::view::CanvasParts<'_> {
+        let application_modal_open = self.application_modal_open();
+        let dialog_modal_open = self.dialog_modal_open();
+        crate::schematic::view::canvas_parts_lent(
+            &mut self.design,
+            &mut self.model,
+            &mut self.workbench,
+            &mut self.runs,
+            &*self.results,
+            command_registry(),
+            application_modal_open,
+            dialog_modal_open,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -10,6 +10,7 @@ mod bus_tap_placement_drawn;
 mod canvas;
 mod canvas_input;
 mod canvas_keyboard;
+mod canvas_shortcuts;
 mod cell_deletion_transactions;
 mod connectivity_manager_drawn;
 mod context_menu;
