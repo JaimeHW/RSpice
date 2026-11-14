@@ -107,7 +107,13 @@ const TSTEP: f64 = 100.0e-12;
 /// restarting the stepper: a gate's event that only other gates read is
 /// landed on without a restart, the run takes 1,449 points instead of 2,126,
 /// and the count read 7,776 after it.
-const MAX_INSTANCE_EVALUATIONS: u64 = 8_000;
+///
+/// Raised to 8,500 when that rule began reading every event of the instant
+/// rather than the first in the queue: an instant where a gate-only event
+/// sat ahead of one an analog output reads was landed without the restart
+/// the second needs. The deck's instants of both kinds now restart, and the
+/// count read 8,269 after it.
+const MAX_INSTANCE_EVALUATIONS: u64 = 8_500;
 
 /// Ceiling on deep copies of an instance cell over the whole run.
 ///
