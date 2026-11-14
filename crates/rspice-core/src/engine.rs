@@ -52,8 +52,8 @@ mod builder;
 mod built_topology;
 pub(crate) use builder::without_repeated_topology_reports;
 pub use builder::{
-    ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinCoverageGap,
-    ModelBinInspection, ModelBinInstanceInspection, ModelBinSelectionKind,
+    FlattenedDeck, ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection,
+    ModelBinCoverageGap, ModelBinInspection, ModelBinInstanceInspection, ModelBinSelectionKind,
     XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, build_native_xyce_memristor,
     data_dependencies::CodeModelDataFile, validate_native_xyce_ltra_model_contract,
 };

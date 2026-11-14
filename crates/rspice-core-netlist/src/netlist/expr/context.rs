@@ -946,7 +946,8 @@ impl ParamContext {
     }
 
     /// How many draws the stream has made.
-    pub(crate) fn statistical_draw_count(&self) -> u64 {
+    #[doc(hidden)]
+    pub fn statistical_draw_count(&self) -> u64 {
         self.random.counter.load(Ordering::Relaxed)
     }
 

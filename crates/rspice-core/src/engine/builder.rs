@@ -5869,6 +5869,91 @@ fn rebuilt<T>(mut device: Box<T>, step: impl FnOnce(T) -> T) -> Box<T> {
     device
 }
 
+/// A deck flattened as its build flattens it, for a caller that reads the
+/// flat elements before it builds the deck: `rspice check` runs its topology
+/// checks on them, and the build then takes them rather than flattening the
+/// deck a second time.
+pub struct FlattenedDeck<'a> {
+    netlist: &'a Netlist,
+    flattened: crate::netlist::FlattenedNetlist,
+    parameter_direction: Option<Box<crate::netlist::ParameterDirectionCapture>>,
+    /// The hierarchy depth and element limits it was flattened under.
+    limits: (usize, usize),
+    /// Whether flattening drew from the deck's statistical stream. A build
+    /// rewinds that stream before it flattens, so a deck whose flattening
+    /// draws is flattened again there.
+    drew: bool,
+}
+
+impl FlattenedDeck<'_> {
+    /// The deck's flat elements.
+    pub fn elements(&self) -> &[Element] {
+        &self.flattened.elements
+    }
+
+    /// This flattening, for a build of `netlist` under `limits`, when it is
+    /// the one that build would make: the same deck, untouched by the
+    /// rewrites a build makes first (`.VEC` inputs, a statistical sample,
+    /// startup validation each build from a copy), the same limits, and no
+    /// statistical draw.
+    fn reusable_for(
+        self,
+        netlist: &Netlist,
+        limits: &ResourceLimits,
+    ) -> Option<(
+        crate::netlist::FlattenedNetlist,
+        Option<Box<crate::netlist::ParameterDirectionCapture>>,
+    )> {
+        (std::ptr::eq(self.netlist, netlist)
+            && self.limits == (limits.max_hierarchy_depth, limits.max_flattened_elements)
+            && !self.drew)
+            .then_some((self.flattened, self.parameter_direction))
+    }
+}
+
+impl Engine {
+    /// Flatten `netlist` as [`Self::build_circuit_with_abort`] would, for
+    /// [`Self::build_flattened_circuit_with_abort`] to build. The elements and
+    /// any refusal are those of
+    /// [`flatten_netlist_with_models_config_with_abort`] under this engine's
+    /// hierarchy limits.
+    pub fn flatten_for_build_with_abort<'a>(
+        &self,
+        netlist: &'a Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<FlattenedDeck<'a>, ParseWithAbortError> {
+        let limits = &self.config.resource_limits;
+        let draws = netlist.params.statistical_draw_count();
+        let (flattened, parameter_direction) = flatten_netlist_with_parameter_direction(
+            netlist,
+            FlattenerConfig {
+                max_depth: limits.max_hierarchy_depth,
+                max_elements: limits.max_flattened_elements,
+                ..FlattenerConfig::default()
+            },
+            abort,
+        )?;
+        Ok(FlattenedDeck {
+            netlist,
+            flattened,
+            parameter_direction,
+            limits: (limits.max_hierarchy_depth, limits.max_flattened_elements),
+            drew: netlist.params.statistical_draw_count() != draws,
+        })
+    }
+
+    /// [`Self::build_circuit_with_abort`] of the deck `deck` flattened, taking
+    /// its flattening where it is the one the build would make.
+    pub fn build_flattened_circuit_with_abort(
+        &self,
+        deck: FlattenedDeck<'_>,
+        abort: &dyn AbortSignal,
+    ) -> Result<CircuitData, SimulationError> {
+        self.build_circuit_for_analysis(deck.netlist, &[], None, Some(deck), abort)
+            .map(|built| built.circuit)
+    }
+}
+
 impl Engine {
     /// Effective resistor parameters after parameter substitution.
     ///
@@ -6266,7 +6351,7 @@ impl Engine {
         tstop: Value,
         abort: &dyn AbortSignal,
     ) -> Result<CircuitData, SimulationError> {
-        self.build_circuit_for_analysis(netlist, &[], Some(tstop), abort)
+        self.build_circuit_for_analysis(netlist, &[], Some(tstop), None, abort)
             .map(|built| built.circuit)
     }
 
@@ -6295,7 +6380,7 @@ impl Engine {
         default_ports: &[crate::analysis::s_param::Port],
         abort: &dyn AbortSignal,
     ) -> Result<BuiltRfCircuit, SimulationError> {
-        self.build_circuit_for_analysis(netlist, default_ports, None, abort)
+        self.build_circuit_for_analysis(netlist, default_ports, None, None, abort)
     }
 
     /// Build the circuit a deck describes.
@@ -6314,6 +6399,7 @@ impl Engine {
         netlist: &Netlist,
         default_ports: &[crate::analysis::s_param::Port],
         transient_stop_time: Option<Value>,
+        flattened: Option<FlattenedDeck<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<BuiltRfCircuit, SimulationError> {
         // Expressions elaborated here are read in the deck's dialect.
@@ -6335,6 +6421,7 @@ impl Engine {
             transient_stop_time,
             None,
             false,
+            flattened,
             abort,
         )?;
         let built = match reference {
@@ -6347,6 +6434,7 @@ impl Engine {
                     transient_stop_time,
                     Some(&reference),
                     false,
+                    None,
                     abort,
                 )?
                 .0
@@ -6384,6 +6472,7 @@ impl Engine {
     ///
     /// A refusal of an instance the flattener left to the builder names the
     /// card that wrote that instance, unless its site knew a narrower place.
+    #[allow(clippy::too_many_arguments)]
     fn elaborate_circuit(
         &self,
         netlist: &Netlist,
@@ -6393,6 +6482,9 @@ impl Engine {
         // Whether `netlist` already carries the SPICE leaves of its HDL
         // designs as cards (`hdl_spice_leaves`).
         leaves_built: bool,
+        // The deck as a caller already flattened it, taken in place of
+        // flattening it again where it is the flattening this build makes.
+        flattened: Option<FlattenedDeck<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<(Box<BuiltRfCircuit>, Option<String>), SimulationError> {
         let mut instance_cards = HashMap::new();
@@ -6402,6 +6494,7 @@ impl Engine {
             transient_stop_time,
             reference,
             leaves_built,
+            flattened,
             &mut instance_cards,
             abort,
         )
@@ -6419,6 +6512,7 @@ impl Engine {
         transient_stop_time: Option<Value>,
         reference: Option<&str>,
         leaves_built: bool,
+        flattened: Option<FlattenedDeck<'_>>,
         instance_cards: &mut HashMap<String, crate::netlist::NetlistSourceLocation>,
         abort: &dyn AbortSignal,
     ) -> Result<(Box<BuiltRfCircuit>, Option<String>), SimulationError> {
@@ -6530,36 +6624,47 @@ impl Engine {
             1.0
         };
 
-        // Flatten subcircuit instances into top-level elements.
-        let flatten_started = self
-            .phase_timings()
-            .map(|_| crate::time_compat::Instant::now());
-        let (flattened, parameter_direction) = flatten_netlist_with_parameter_direction(
-            netlist,
-            FlattenerConfig {
-                max_depth: self.config.resource_limits.max_hierarchy_depth,
-                max_elements: self.config.resource_limits.max_flattened_elements,
-                ..FlattenerConfig::default()
-            },
-            abort,
-        )
-        .map_err(|error| {
-            let master = match &error {
-                ParseWithAbortError::Parse(ParseError::UndefinedSubcircuit(undefined)) => {
-                    Some(undefined.subcircuit_name.clone())
+        // Flatten subcircuit instances into top-level elements, unless the
+        // caller's flattening of this very deck is the one this would make.
+        let reused =
+            flattened.and_then(|deck| deck.reusable_for(netlist, &self.config.resource_limits));
+        let (flattened, parameter_direction) = match reused {
+            Some(reused) => reused,
+            None => {
+                let flatten_started = self
+                    .phase_timings()
+                    .map(|_| crate::time_compat::Instant::now());
+                let flattened = flatten_netlist_with_parameter_direction(
+                    netlist,
+                    FlattenerConfig {
+                        max_depth: self.config.resource_limits.max_hierarchy_depth,
+                        max_elements: self.config.resource_limits.max_flattened_elements,
+                        ..FlattenerConfig::default()
+                    },
+                    abort,
+                )
+                .map_err(|error| {
+                    let master = match &error {
+                        ParseWithAbortError::Parse(ParseError::UndefinedSubcircuit(undefined)) => {
+                            Some(undefined.subcircuit_name.clone())
+                        }
+                        _ => None,
+                    };
+                    let refusal = map_build_parse_error("subcircuit flattening", error);
+                    match master {
+                        Some(master) => {
+                            with_intended_master(refusal, &master, deck_master_names(netlist))
+                        }
+                        None => refusal,
+                    }
+                })?;
+                if let (Some(timings), Some(started)) = (self.phase_timings(), flatten_started) {
+                    let elapsed = started.elapsed();
+                    timings.record(|record| record.flatten += elapsed);
                 }
-                _ => None,
-            };
-            let refusal = map_build_parse_error("subcircuit flattening", error);
-            match master {
-                Some(master) => with_intended_master(refusal, &master, deck_master_names(netlist)),
-                None => refusal,
+                flattened
             }
-        })?;
-        if let (Some(timings), Some(started)) = (self.phase_timings(), flatten_started) {
-            let elapsed = started.elapsed();
-            timings.record(|record| record.flatten += elapsed);
-        }
+        };
         circuit.parameter_direction = parameter_direction;
         *instance_cards = flattened.external_instance_origins;
         let mut flat_elements = flattened.elements;
@@ -6930,6 +7035,7 @@ impl Engine {
                     transient_stop_time,
                     reference,
                     true,
+                    None,
                     abort,
                 );
             }

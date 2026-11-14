@@ -307,16 +307,10 @@ fn validate_netlist(
     })?;
     rspice_core::netlist::validate_output_symbols_with_abort(netlist, &crate::abort::ProcessAbort)
         .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
+    // Flattened once: the topology checks read the flat elements, and the
+    // build takes them.
     let flattened = crate::timings::time(timings, crate::timings::Phase::Flatten, || {
-        rspice_core::netlist::flatten_netlist_with_models_config_with_abort(
-            netlist,
-            rspice_core::netlist::FlattenerConfig {
-                max_depth: resource_limits.max_hierarchy_depth,
-                max_elements: resource_limits.max_flattened_elements,
-                ..Default::default()
-            },
-            &crate::abort::ProcessAbort,
-        )
+        engine.flatten_for_build_with_abort(netlist, &crate::abort::ProcessAbort)
     })
     .map_err(|error| crate::commands::input::map_error(error, &args.input, None))?;
     let mut result = ValidationResult::default();
@@ -344,15 +338,18 @@ fn validate_netlist(
         engine.config().spice_dialect != rspice_core::engine::SpiceDialect::BestAvailable;
     check_topology(
         netlist,
-        &flattened.elements,
+        flattened.elements(),
         windings_close_loops,
         &mut result,
     );
-    let built = check_circuit_build(netlist, &mut result, &engine)?;
+    // The connectivity checks read the flat elements after the build has
+    // taken them.
+    let connectivity_elements = args.connectivity.then(|| flattened.elements().to_vec());
+    let built = check_circuit_build(netlist, flattened, &mut result, &engine)?;
 
-    if args.connectivity {
-        let reference = build_reference(netlist, &flattened.elements, built.as_ref());
-        check_connectivity(netlist, &flattened.elements, reference, &mut result);
+    if let Some(elements) = &connectivity_elements {
+        let reference = build_reference(netlist, elements, built.as_ref());
+        check_connectivity(netlist, elements, reference, &mut result);
     }
 
     if args.models {
@@ -388,6 +385,7 @@ fn build_reference<'a>(
 /// an interrupt rather than reported as a defect in the customer's deck.
 fn check_circuit_build(
     netlist: &Netlist,
+    flattened: rspice_core::engine::FlattenedDeck<'_>,
     result: &mut ValidationResult,
     engine: &Engine,
 ) -> Result<Option<rspice_core::circuit::CircuitData>, CliError> {
@@ -397,7 +395,9 @@ fn check_circuit_build(
     // Use the same bounded discovery as `run` before accepting a cache hit.
     let build = engine
         .veriloga_source_dependencies_with_abort(netlist, &crate::abort::ProcessAbort)
-        .and_then(|_| engine.build_circuit_with_abort(netlist, &crate::abort::ProcessAbort));
+        .and_then(|_| {
+            engine.build_flattened_circuit_with_abort(flattened, &crate::abort::ProcessAbort)
+        });
     result
         .warnings
         .extend(
