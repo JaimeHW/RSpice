@@ -1025,3 +1025,73 @@ fn a_generated_model_output_is_read_at_every_accepted_time_point() {
         );
     }
 }
+
+/// Every compact model the catalog README documents has one of two outcomes
+/// on an X line that names it by its registry name: a build that compiles it
+/// in binds it, and any other build, the browser's without the catalog
+/// among them, refuses the instance by that name and names the feature that
+/// would supply it, never "Subcircuit ... has not been defined".
+#[test]
+fn every_shipped_model_binds_or_is_refused_by_its_name_and_feature() {
+    let readme = include_str!("../../../rspice-veriloga-models/README.md");
+    let shipped: Vec<(&str, &str)> = readme
+        .lines()
+        .filter_map(|line| {
+            let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+            let name = cells.get(1)?.strip_prefix('`')?.strip_suffix('`')?;
+            let feature = cells.get(3)?.strip_prefix('`')?.strip_suffix('`')?;
+            feature
+                .starts_with("veriloga-model-")
+                .then_some((name, feature))
+        })
+        .filter(|(_, feature)| *feature != "veriloga-model-<name>")
+        .collect();
+    assert_eq!(
+        shipped.len(),
+        60,
+        "the catalog README lists every shipped model"
+    );
+    let mut failures = Vec::new();
+    for (name, feature) in shipped {
+        let compiled = module_is_compiled(name);
+        #[cfg(feature = "veriloga-builtins-base")]
+        let terminals = if compiled {
+            rspice_core::device::veriloga_builtins::builtins::descriptor(name)
+                .map_or(2, |descriptor| descriptor.terminals.len())
+        } else {
+            2
+        };
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let terminals = 2;
+        let nodes = (0..terminals)
+            .map(|terminal| format!("n{terminal}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let netlist = Netlist::parse(&format!("* {name}\nV1 n0 0 1\nX1 {nodes} {name}\n.end\n"))
+            .expect("the deck parses");
+        let built = engine().build_circuit(&netlist).map(drop);
+        match (compiled, built) {
+            (true, Ok(())) => {}
+            (true, Err(error)) => failures.push(format!("{name} is compiled in: {error}")),
+            (false, Ok(())) => failures.push(format!("{name} bound though not compiled in")),
+            (false, Err(error)) => {
+                let typed = matches!(
+                    &error,
+                    rspice_core::SimulationError::Elaboration(refusal)
+                        if refusal.kind == rspice_core::ElaborationErrorKind::UnknownModule
+                            && refusal.instance.as_deref() == Some("X1")
+                );
+                let message = error.to_string();
+                if !typed
+                    || !message.contains(&format!(
+                        "{name} is a shipped compact model that this build does not include \
+                         (feature {feature})"
+                    ))
+                {
+                    failures.push(format!("{name}: {message}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

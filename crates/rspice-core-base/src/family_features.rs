@@ -14,6 +14,101 @@
 //! either, because each crate's own dev-dependencies enable it.
 //! `tools/ci/core_family.py` checks the same agreement in the manifests.
 
+/// The feature of each compact model the generated catalog ships, one model
+/// per feature, whether or not this build compiles it in. A build without a
+/// model still knows the model's name, so a deck that names it is refused by
+/// that name and told the feature instead of being told nothing defines it.
+#[doc(hidden)]
+pub const COMPACT_MODEL_FEATURES: &[&str] = &[
+    "veriloga-model-angelov",
+    "veriloga-model-angelov-gan",
+    "veriloga-model-asmesd",
+    "veriloga-model-asmesd-dio",
+    "veriloga-model-asmhemt",
+    "veriloga-model-bjt504tva",
+    "veriloga-model-bjt504va",
+    "veriloga-model-bjt505-va",
+    "veriloga-model-bjt505t-va",
+    "veriloga-model-bjtd504tva",
+    "veriloga-model-bjtd504va",
+    "veriloga-model-bjtd505-va",
+    "veriloga-model-bjtd505t-va",
+    "veriloga-model-bsimbulk",
+    "veriloga-model-bsimcmg-va",
+    "veriloga-model-bsimcmg107",
+    "veriloga-model-bsimcmg108",
+    "veriloga-model-bsimcmg110",
+    "veriloga-model-bsimcmg111",
+    "veriloga-model-bsimimg",
+    "veriloga-model-bsimsoi-18c250bc",
+    "veriloga-model-bsimsoi-e2aff994",
+    "veriloga-model-bsimsoi-va",
+    "veriloga-model-diode-cmc",
+    "veriloga-model-ekv-va",
+    "veriloga-model-ekv3-rf",
+    "veriloga-model-epfl-hemt-10a",
+    "veriloga-model-hicuml0va",
+    "veriloga-model-hicuml2va",
+    "veriloga-model-hisimhv-n4-va",
+    "veriloga-model-hisimhv-n5-va",
+    "veriloga-model-hisimhv-va",
+    "veriloga-model-hisimsoi-va-5be18005",
+    "veriloga-model-hisimsoi-va-242bc21d",
+    "veriloga-model-hisimsoi-va-38074d06",
+    "veriloga-model-hisimsotb-va",
+    "veriloga-model-juncap200",
+    "veriloga-model-l-utsoi-485e0ac9",
+    "veriloga-model-l-utsoi-832ce87d",
+    "veriloga-model-mosvar",
+    "veriloga-model-mvsg-cmc",
+    "veriloga-model-psp102bva",
+    "veriloga-model-psp102eva",
+    "veriloga-model-psp102va",
+    "veriloga-model-psp103tva",
+    "veriloga-model-psp103va",
+    "veriloga-model-psp104tva",
+    "veriloga-model-psp104va",
+    "veriloga-model-pspnqs102bva",
+    "veriloga-model-pspnqs102eva",
+    "veriloga-model-pspnqs102va",
+    "veriloga-model-pspnqs103va",
+    "veriloga-model-pspnqs104va",
+    "veriloga-model-r2-cmc",
+    "veriloga-model-r2-et-cmc",
+    "veriloga-model-r3-cmc",
+    "veriloga-model-vbic-4t-et-cf",
+    "veriloga-model-vbic13",
+    "veriloga-model-vbic13-3t-et",
+    "veriloga-model-vbic13-4t",
+];
+
+/// The feature that compiles in the shipped compact model `name` spells by
+/// its registry name (`JUNCAP200`, `bsimsoi__e2aff994`), or `None` when the
+/// catalog ships no such model. The catalog names a model's feature
+/// `veriloga-model-` and the registry name in lower case, each run of `_`
+/// spelled `-`; nothing is allocated.
+#[doc(hidden)]
+pub fn shipped_compact_model_feature(name: &str) -> Option<&'static str> {
+    fn spells(name: &str, package: &str) -> bool {
+        let mut name = name.bytes().peekable();
+        let mut package = package.bytes();
+        loop {
+            match (name.next(), package.next()) {
+                (None, None) => return true,
+                (Some(b'_'), Some(b'-')) => while name.next_if_eq(&b'_').is_some() {},
+                (Some(byte), Some(expected))
+                    if byte != b'-' && byte != b'_' && byte.to_ascii_lowercase() == expected => {}
+                _ => return false,
+            }
+        }
+    }
+    COMPACT_MODEL_FEATURES.iter().copied().find(|feature| {
+        feature
+            .strip_prefix("veriloga-model-")
+            .is_some_and(|package| spells(name, package))
+    })
+}
+
 /// Whether each feature of the family is on in the crate that stated it: one
 /// flag per feature of `rspice-core`'s manifest except `default` and
 /// `test-support`, named for the feature with `-` spelled `_`.
@@ -240,6 +335,39 @@ mod tests {
         features.remove("default");
         features.remove("test-support");
         features
+    }
+
+    #[test]
+    fn the_compact_model_features_are_the_familys_model_features() {
+        let listed: BTreeSet<_> = listed_flags()
+            .into_iter()
+            .map(|(_, feature)| feature)
+            .filter(|feature| feature.starts_with("veriloga-model-"))
+            .collect();
+        let shipped: BTreeSet<_> = super::COMPACT_MODEL_FEATURES.iter().copied().collect();
+        assert_eq!(shipped.len(), super::COMPACT_MODEL_FEATURES.len());
+        assert_eq!(shipped, listed);
+    }
+
+    #[test]
+    fn a_registry_name_spells_its_feature() {
+        use super::shipped_compact_model_feature as feature;
+        assert_eq!(feature("JUNCAP200"), Some("veriloga-model-juncap200"));
+        assert_eq!(
+            feature("bsimsoi__e2aff994"),
+            Some("veriloga-model-bsimsoi-e2aff994")
+        );
+        assert_eq!(feature("hicumL0va"), Some("veriloga-model-hicuml0va"));
+        assert_eq!(
+            feature("vbic_4T_et_cf"),
+            Some("veriloga-model-vbic-4t-et-cf")
+        );
+        // A module several models share, a hyphenated spelling and a
+        // stranger are not registry names.
+        assert_eq!(feature("bsimsoi"), None);
+        assert_eq!(feature("juncap-200"), None);
+        assert_eq!(feature("diode-cmc"), None);
+        assert_eq!(feature("RLOAD"), None);
     }
 
     #[test]

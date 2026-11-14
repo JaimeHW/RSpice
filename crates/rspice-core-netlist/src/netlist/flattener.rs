@@ -1331,8 +1331,12 @@ impl<'a> Flattener<'a> {
         names
     }
 
+    /// Whether `name` is a master hierarchy expansion leaves to the builder:
+    /// a Verilog-A module or card, a generated model this build compiles, or
+    /// a shipped compact model it does not, which the builder refuses by name.
     fn is_external_subckt(&self, name: &str) -> bool {
         self.external_subckts.contains(&name.to_ascii_uppercase())
+            || rspice_core_base::family_features::shipped_compact_model_feature(name).is_some()
     }
 
     fn find_subcircuit(&self, name: &str) -> Option<&'a SubcircuitDef> {

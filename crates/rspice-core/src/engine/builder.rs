@@ -10065,6 +10065,27 @@ impl Engine {
                     // refused with the same typed error rather than a
                     // build-internal one — a `.VERILOGA` include must not cost
                     // a deck its `UndefinedSubcircuit` diagnostic.
+                    //
+                    // A shipped compact model this build does not compile in
+                    // (its feature off, or a build without the catalog) is
+                    // no authoring mistake: it is refused by its name, with
+                    // the feature that would supply it.
+                    if let Some(feature) =
+                        rspice_core_base::family_features::shipped_compact_model_feature(
+                            subckt_name,
+                        )
+                    {
+                        return Err(crate::ElaborationError::new(
+                            crate::ElaborationErrorKind::UnknownModule,
+                            format!(
+                                "{subckt_name} is a shipped compact model that this build does \
+                                 not include (feature {feature})"
+                            ),
+                        )
+                        .instance(&element.name)
+                        .module(subckt_name)
+                        .into());
+                    }
                     let refusal = map_build_parse_error(
                         "subcircuit flattening",
                         ParseError::UndefinedSubcircuit(Box::new(
