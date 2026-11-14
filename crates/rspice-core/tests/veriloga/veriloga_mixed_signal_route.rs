@@ -1340,16 +1340,23 @@ endmodule
     }
 }
 
-/// A net that the divider and an `adc_bridge` output both drive and a
-/// resistor loads. Four-state resolution combines the two drivers on the
-/// event segment, but a converter reads one side's drive: the module port's
-/// design-level strengths or the code model's driver. So the build refuses
-/// it, naming the instance, the port, the node and the other driver, the
-/// same in either card order.
+/// A net that the divider and an `adc_bridge` both drive, a `d_inverter`
+/// reads and a 1k resistor loads. Verilog-AMS resolves the drivers on the
+/// digital segment first (IEEE 1364-2005 table 4-1: a strong 0 against a
+/// strong 1 is `x`), and the one D/A in front of the resistor converts the
+/// resolved value. The divider toggles `qdiv` at 5, 15, 25 and 35 ns from 0;
+/// the bridge reads a step that crosses its `in_high` at 18.6 ns. So the net
+/// is 0, x, 0, x, 1, x over those intervals: the inverter reads the same
+/// value (`x` reads as `x`), and the resistor sits at 0 V, the D/A's `vx`
+/// (midway, behind its strong resistance) and its high level. Card order
+/// changes none of it. The net's trace holds the resolved value too; the
+/// divider's `qdiv` is a `reg`, which keeps its own.
 #[test]
-fn a_net_a_module_and_a_code_model_both_drive_and_a_resistor_reads_is_refused() {
+fn a_net_a_module_and_a_code_model_both_drive_resolves_before_its_converter() {
+    use rspice_core::circuit::ConverterKind;
+
     let model = ModelFile::new("shared_event_net", CLOCK_DIVIDER);
-    let mut previous_error = None;
+    let mut previous: Option<Vec<f64>> = None;
     for mixed_first in [false, true] {
         let mixed = "x1 p 0 qdiv clock_divider";
         let adc = "a_adc [in] [qdiv] adc";
@@ -1360,10 +1367,12 @@ fn a_net_a_module_and_a_code_model_both_drive_and_a_resistor_reads_is_refused() 
         };
         let deck = format!(
             "* a module and a code model drive one loaded net\n\
-             vin in 0 dc 1\n\
+             vin in 0 pulse(0 1 18n 1n 1n 100n 200n)\n\
              r1 in 0 1k\n\
              {cards}\n\
+             a_inv qdiv qbar inv\n\
              .model adc adc_bridge (in_low=0.4 in_high=0.6)\n\
+             .model inv d_inverter (rise_delay=1n fall_delay=1n)\n\
              rp p 0 1meg\n\
              rqdiv qdiv 0 1k\n\
              .va \"{}\" clock_divider\n\
@@ -1371,34 +1380,66 @@ fn a_net_a_module_and_a_code_model_both_drive_and_a_resistor_reads_is_refused() 
             model.deck_path()
         );
         let netlist = Netlist::parse(&deck).unwrap();
-        let error = Engine::default()
+        let circuit = Engine::default()
             .build_circuit(&netlist)
-            .unwrap_err()
-            .to_string();
-        let lowered = error.to_lowercase();
-        for fragment in ["'x1'", "'qdiv'", "'a_adc'", "also drives"] {
-            assert!(
-                lowered.contains(fragment),
-                "the refusal names {fragment}: {error}"
+            .unwrap_or_else(|error| panic!("the net resolves before its converter: {error}"));
+        let insertions = circuit.converter_insertions();
+        assert_eq!(insertions.len(), 1, "one converter: {insertions:?}");
+        assert_eq!(insertions[0].kind, ConverterKind::D2a, "{insertions:?}");
+        let supply = insertions[0].supply.as_ref().expect("a supply").level;
+        let high = supply * 1000.0 / 1020.0;
+
+        let result = run(&deck, 40.0e-9, 0.1e-9);
+        let qbar = result
+            .digital_trace_named("qbar")
+            .expect("the inverter output has a trace");
+        let net_trace = result
+            .digital_trace_named("qdiv")
+            .expect("the shared net has a trace");
+        let mut volts = Vec::new();
+        for (at, net) in [
+            (3.0e-9, Logic::Zero),
+            (10.0e-9, Logic::Unknown),
+            (17.0e-9, Logic::Zero),
+            (22.0e-9, Logic::Unknown),
+            (30.0e-9, Logic::One),
+            (38.0e-9, Logic::Unknown),
+        ] {
+            let value = volts_at(&result, "qdiv", at);
+            println!(
+                "ATTRIBUTE mixed_first={mixed_first} at={at:e} qbar={:?} v(qdiv)={value:.9}",
+                state_at(qbar, at)
             );
-        }
-        // The refusal is located at the X card, whose line moves with the
-        // card order; everything after the location is the contract.
-        let (located, contract) = error
-            .split_once(": ")
-            .expect("an elaboration refusal has a location prefix");
-        assert!(
-            located.starts_with("Elaboration error at "),
-            "the refusal names the card that wrote x1: {error}"
-        );
-        let contract = contract.to_owned();
-        if let Some(previous) = previous_error {
             assert_eq!(
-                contract, previous,
-                "card order must not change the connection contract"
+                state_at(net_trace, at),
+                net,
+                "the net's trace holds its resolved value, not the divider's reg, at {at:e}"
             );
+            let inverted = match net {
+                Logic::Zero => Logic::One,
+                Logic::One => Logic::Zero,
+                _ => Logic::Unknown,
+            };
+            assert_eq!(
+                state_at(qbar, at),
+                inverted,
+                "the inverter reads the resolved net at {at:e}"
+            );
+            let level = match net {
+                Logic::Zero => 0.0,
+                Logic::One => high,
+                _ => high / 2.0,
+            };
+            assert!(
+                (value - level).abs() < 1.0e-6,
+                "the D/A converts the resolved {net:?} into {level} V at {at:e}, got {value}"
+            );
+            volts.push(value);
         }
-        previous_error = Some(contract);
+        if let Some(previous) = &previous {
+            assert_eq!(previous, &volts, "card order changes nothing");
+        }
+        previous = Some(volts);
     }
 }
 

@@ -418,11 +418,16 @@ pub(super) trait XspiceDigitalResolver {
         resolved: &mut Vec<(NodeId, crate::xspice::DigitalValue)>,
         resolved_real: &mut Vec<(NodeId, Value)>,
     ) -> crate::xspice::CmResult<()>;
-    /// What the design drives onto the shared node `node`, at its strength
-    /// levels, for a converter on an HDL port: the owner's answer while it
-    /// runs a trial, and nothing for a node it does not own.
+    /// What a converter on an HDL port converts on the shared node `node`,
+    /// at its strength levels: the design's drive with every XSPICE driver of
+    /// the net but the reading instance `reader`'s own. The owner's answer
+    /// while it runs a trial, and nothing for a node it does not own.
     #[cfg(feature = "veriloga")]
-    fn hdl_drive(&self, _node: NodeId) -> Option<crate::xspice::verilog::store::BitDrive> {
+    fn hdl_drive(
+        &self,
+        _node: NodeId,
+        _reader: usize,
+    ) -> Option<crate::xspice::verilog::store::BitDrive> {
         None
     }
 }
@@ -1756,6 +1761,8 @@ impl CircuitData {
         // The design an HDL port's converter reads its drive from.
         #[cfg(feature = "veriloga")]
         let hdl_owner = self.scheduler.mixed_digital_coordinator.as_ref();
+        #[cfg(feature = "veriloga")]
+        let hdl_bindings = self.scheduler.mixed_xspice_bindings.as_deref();
         // Shared handles, not mutable views of their contents: a pass that
         // drains nothing and schedules nothing must leave the event world
         // still shared with the rollback snapshot.
@@ -1870,9 +1877,11 @@ impl CircuitData {
             #[cfg(feature = "veriloga")]
             if instance.reads_hdl_drives() {
                 instance.refresh_hdl_drives(|node| {
-                    resolver
-                        .hdl_drive(node)
-                        .or_else(|| hdl_owner?.event_node_drive(node))
+                    resolver.hdl_drive(node, index).or_else(|| {
+                        let own =
+                            hdl_bindings.and_then(|bindings| bindings.own_driver(index, node));
+                        hdl_owner?.event_node_drive(node, own)
+                    })
                 });
             }
             instance.set_transient_companion_coefficients(companion_coefficients);

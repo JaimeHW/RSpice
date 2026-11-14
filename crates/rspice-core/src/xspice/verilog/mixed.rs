@@ -3353,6 +3353,19 @@ impl MixedSignalHost {
         });
     }
 
+    /// Each deck net a converted port bit was moved off, with the event
+    /// endpoint the bit sits on now.
+    pub(crate) fn traced_port_endpoints(&self, mut sink: impl FnMut(usize, usize)) {
+        for port in &self.event_ports {
+            if let (Some(deck), Some(_)) = (port.trace_node, port.bit)
+                && deck != port.node
+                && deck > 0
+            {
+                sink(deck, port.node);
+            }
+        }
+    }
+
     #[doc(hidden)]
     pub fn boundary_trace_bindings(
         &self,

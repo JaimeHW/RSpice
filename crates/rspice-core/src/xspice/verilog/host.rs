@@ -907,6 +907,16 @@ impl DigitalHost {
         self.store.boundary_drive(signal, bit)
     }
 
+    /// What a converter on the event net `net` converts; see
+    /// `DigitalSignalStore::connected_drive`.
+    pub(crate) fn connected_drive(
+        &self,
+        net: usize,
+        excluded: Option<super::store::ExternalBitDriverId>,
+    ) -> Option<super::store::BitDrive> {
+        self.store.connected_drive(net, excluded)
+    }
+
     pub(crate) fn plan(&self) -> &Arc<CanonicalDigitalPlan> {
         &self.plan
     }

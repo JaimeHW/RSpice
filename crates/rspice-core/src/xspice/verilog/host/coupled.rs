@@ -181,11 +181,16 @@ impl DigitalActiveExchange<'_> {
                 detail: format!("unknown shared digital net {net}"),
             })
     }
-    /// What the design drives onto the shared net `net`, at its strength
-    /// levels; see `DigitalSignalStore::connected_drive`.
+    /// What a converter on the shared net `net` converts, at its strength
+    /// levels: the design's drive with every XSPICE driver of the net but
+    /// `excluded`; see `DigitalSignalStore::connected_drive`.
     #[doc(hidden)]
-    pub fn read_net_drive(&self, net: usize) -> Option<crate::xspice::verilog::store::BitDrive> {
-        self.host.store.connected_drive(net)
+    pub fn read_net_drive(
+        &self,
+        net: usize,
+        excluded: Option<ExternalBitDriverId>,
+    ) -> Option<crate::xspice::verilog::store::BitDrive> {
+        self.host.store.connected_drive(net, excluded)
     }
     #[doc(hidden)]
     pub fn read_other_drivers(

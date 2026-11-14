@@ -1089,13 +1089,28 @@ impl MixedDigitalCoordinator {
         self.digital.boundary_drive(signal, bit)
     }
 
-    /// [`Self::boundary_drive`] of the event net the circuit's event node
-    /// `node` carries, or `None` for a node that is not the design's.
+    /// What a converter on the circuit's event node `node` converts: the
+    /// design's drive on the event net it carries, with every XSPICE driver
+    /// of the net but `excluded`, or `None` for a node that is not the
+    /// design's.
     #[doc(hidden)]
-    pub fn event_node_drive(&self, node: usize) -> Option<crate::xspice::verilog::store::BitDrive> {
+    pub fn event_node_drive(
+        &self,
+        node: usize,
+        excluded: Option<crate::xspice::verilog::store::ExternalBitDriverId>,
+    ) -> Option<crate::xspice::verilog::store::BitDrive> {
         let net = self.event_nodes.iter().position(|&event| event == node)?;
-        let bit = self.event_bits[net];
-        self.boundary_drive(bit.signal, bit.bit)
+        self.digital.connected_drive(net, excluded).or_else(|| {
+            let bit = self.event_bits[net];
+            self.boundary_drive(bit.signal, bit.bit)
+        })
+    }
+
+    /// The value the event net the circuit's event node `node` carries
+    /// resolved to, or `None` for a node that is not the design's.
+    pub(crate) fn event_value(&self, node: usize) -> Option<crate::xspice::DigitalValue> {
+        let net = self.event_nodes.iter().position(|&event| event == node)?;
+        self.digital.connected_value(net)
     }
 
     #[doc(hidden)]

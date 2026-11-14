@@ -5699,8 +5699,15 @@ fn add_connect_rule_converter(
 
     // A D/A reads the code models that drive its event node: every driver of
     // a legacy XSPICE boundary, and those a split net's segment holds when no
-    // module port drives it. An HDL port's own endpoint has none.
-    let drivers = if bridge.kind == XspiceAutoBridgeKind::Dac {
+    // module port drives it. An HDL port's own endpoint has none. A segment a
+    // module port drives too resolves its drivers first, as Verilog-AMS
+    // resolves a digital net before its connect module reads it, so its
+    // converter reads the resolved drive instead.
+    let module_drives = circuit
+        .mixed_signal_hosts
+        .iter()
+        .any(|host| host.driven_event_nodes().any(|node| node == event_node));
+    let drivers = if bridge.kind == XspiceAutoBridgeKind::Dac && !module_drives {
         connect_modules::event_node_drivers(circuit, event_node)
     } else {
         Vec::new()
@@ -5768,8 +5775,9 @@ fn add_connect_rule_converter(
         instance.tap_digital_drivers("in", drivers);
     }
     // An HDL port's converter reads the design's strength levels, which the
-    // XSPICE value on its event node carries only as a class, unless code
-    // models drive its segment instead.
+    // XSPICE value on its event node carries only as a class, resolved with
+    // the code models that drive its segment beside it, unless code models
+    // alone drive the segment.
     if bridge.event_node.is_some() && !taps_code_models {
         match bridge.kind {
             XspiceAutoBridgeKind::Adc => {}

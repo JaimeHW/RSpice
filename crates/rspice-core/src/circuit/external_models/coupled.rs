@@ -279,6 +279,24 @@ impl XspiceDigitalBindings {
     pub(crate) fn contains_node(&self, node: NodeId) -> bool {
         self.by_node.contains_key(&node)
     }
+    /// The driver the code model `owner` (its index among the circuit's
+    /// XSPICE instances) puts on the shared node `node` through an inout
+    /// port: a bidirectional converter's receiving half, which its own
+    /// driving half must not read back.
+    pub(crate) fn own_driver(&self, owner: usize, node: NodeId) -> Option<ExternalBitDriverId> {
+        self.inout_observers
+            .iter()
+            .find(|(_, (index, target))| *index == owner && target.node_id == node)
+            .and_then(|(_, (_, target))| self.drivers.get(target).copied())
+    }
+    /// Whether a code model drives the shared node `node` through an output
+    /// port: not a bidirectional converter's receiving half, which is the
+    /// design's own port read back.
+    pub(crate) fn code_model_drives(&self, node: NodeId) -> bool {
+        self.drivers.iter().any(|(target, driver)| {
+            target.node_id == node && !self.inout_observers.contains_key(&driver.index())
+        })
+    }
     pub(crate) fn contains_real_node(&self, node: NodeId) -> bool {
         self.real_by_node.contains_key(&node)
     }
@@ -826,9 +844,14 @@ impl XspiceDigitalResolver for SharedResolver<'_, '_> {
     fn owns(&self, node: NodeId) -> bool {
         self.bindings.by_node.contains_key(&node)
     }
-    fn hdl_drive(&self, node: NodeId) -> Option<crate::xspice::verilog::store::BitDrive> {
+    fn hdl_drive(
+        &self,
+        node: NodeId,
+        reader: usize,
+    ) -> Option<crate::xspice::verilog::store::BitDrive> {
         let &net = self.bindings.by_node.get(&node)?;
-        self.exchange.read_net_drive(net)
+        self.exchange
+            .read_net_drive(net, self.bindings.own_driver(reader, node))
     }
     fn owns_real(&self, node: NodeId) -> bool {
         self.bindings.real_by_node.contains_key(&node)

@@ -275,10 +275,12 @@ impl SplitSegment {
 /// holds no one value a converter could carry, and the deck declares no
 /// conversion between the two.
 ///
-/// So is a net a code model drives alongside a module's driver or an inout
-/// port. Its converter reads one side's drive: a module port's design-level
-/// strengths, or the code models' drivers. The two are resolved together only
-/// on the event net itself, so a converter here would carry half the net.
+/// A four-state segment a code model drives beside a module's driver or an
+/// inout port resolves every driver on it as one net (IEEE 1364-2005 section
+/// 7.10), and its one converter reads the resolved drive, as Verilog-AMS
+/// resolves a digital net before its connect module reads it. A real-valued
+/// one is refused: a real net carries one driver's value (LRM 2.4 section
+/// 6.5.3), and its converter would read one side's alone.
 fn split_segments(
     circuit: &CircuitData,
     physical: &BTreeSet<usize>,
@@ -347,7 +349,7 @@ fn split_segments(
     }
     for (node, model) in model_drivers {
         let segment = &segments[&node];
-        if !segment.module_drives && !segment.traffic.both {
+        if segment.logic || (!segment.module_drives && !segment.traffic.both) {
             continue;
         }
         let (host_index, port_index) = segment.members[0];
@@ -361,12 +363,11 @@ fn split_segments(
         return Err(crate::ElaborationError::new(
             crate::ElaborationErrorKind::PortDiscipline,
             format!(
-                "connects its port '{signal}' to node '{node_label}', which code model \
-                 '{model}' also drives and analog elements read. A net that a code model \
-                 drives alongside a module's driver or an inout port is resolved only on its \
-                 event segment, and the converter to its electrical node would read one \
-                 side's drive alone; such a net needs an explicit converter on the code \
-                 model's side"
+                "connects its real-valued port '{signal}' to node '{node_label}', which code \
+                 model '{model}' also drives and analog elements read. A real-valued net \
+                 carries one driver's value, so the converter to its electrical node would \
+                 read one side's drive alone; such a net needs an explicit converter on the \
+                 code model's side"
             ),
         )
         .instance(host.instance_name())

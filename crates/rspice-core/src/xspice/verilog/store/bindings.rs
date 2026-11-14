@@ -356,15 +356,36 @@ impl DigitalSignalStore {
             .copied()
     }
 
-    /// What the design drives onto the caller's event net `net`: the
-    /// [`Self::boundary_drive`] of every member bit of it.
-    pub(crate) fn connected_drive(&self, net: usize) -> Option<super::strength::BitDrive> {
+    /// What a converter on the caller's event net `net` converts: the
+    /// [`Self::boundary_drive`] of its member bits, resolved with every
+    /// XSPICE driver of the net but `excluded` (the converter's own receiving
+    /// half) as one net under IEEE 1364-2005 section 7.10. Verilog-AMS
+    /// resolves a digital segment's drivers before its connect module reads
+    /// it, so a code model driving the net beside the design is converted
+    /// with it, and a strong 0 against a strong 1 converts as `StX`. A forced
+    /// member decides the net, as [`Self::net_drive`] reads it.
+    pub(crate) fn connected_drive(
+        &self,
+        net: usize,
+        excluded: Option<ExternalBitDriverId>,
+    ) -> Option<super::strength::BitDrive> {
         let bits = self.connected.as_ref()?;
-        let net = bits
-            .topology
-            .nets
-            .get(*bits.topology.external_nets.get(net)?)?;
-        Some(self.net_drive(net))
+        let index = *bits.topology.external_nets.get(net)?;
+        let net = bits.topology.nets.get(index)?;
+        let excluded = excluded.map(|driver| driver.0);
+        let mut drivers = bits.topology.external_by_net[index]
+            .iter()
+            .filter(|&&slot| Some(slot) != excluded)
+            .map(|&slot| bits.external_values[slot])
+            .filter(|value| value.state != DigitalState::HighZ)
+            .peekable();
+        if drivers.peek().is_none() || self.forced_connected_value(net).is_some() {
+            return Some(self.net_drive(net));
+        }
+        let resolved = drivers.fold(self.connected_strength(net), |resolved, value| {
+            resolved.resolve(logic_map::hdl_strength(value))
+        });
+        Some(resolved.drive())
     }
 
     /// Validate the complete external topology before assigning any identity.

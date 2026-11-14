@@ -1605,6 +1605,21 @@ impl CircuitData {
                     .event_values()
                     .map(|(node, value)| (node, Claim::Resolved, value)),
             );
+            // A port's deck net that a code model drives beside the port
+            // carries the net's resolved value, not the port's own: a `reg`
+            // output keeps its value against a code model's contention while
+            // the net reads `x`.
+            if let Some(bindings) = &self.scheduler.mixed_xspice_bindings {
+                for host in &self.mixed_signal_hosts {
+                    host.traced_port_endpoints(|deck, endpoint| {
+                        if bindings.code_model_drives(endpoint)
+                            && let Some(value) = digital.event_value(endpoint)
+                        {
+                            claims.push((deck, Claim::Resolved, value));
+                        }
+                    });
+                }
+            }
         }
         for host in &self.mixed_signal_hosts {
             host.boundary_digital_values(|node, bit, source| {
