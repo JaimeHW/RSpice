@@ -2140,6 +2140,14 @@ impl Engine {
                             }
                         }
                     }
+                    // A node the operating point holds through GMIN whose
+                    // flows do not balance has no DC path for them, in every
+                    // analysis: harmonic balance refuses it by name too.
+                    Err(err @ SimulationError::Circuit(_))
+                        if err.to_string().contains(" has no DC path: ") =>
+                    {
+                        return Err(err);
+                    }
                     Err(err) => {
                         log::warn!(
                             "HB: DC operating point for the harmonic-0 seed failed ({err}); \

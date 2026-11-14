@@ -75,6 +75,8 @@ impl CircuitData {
             veriloga_potential_units: Vec::new(),
             compact_model_private_nodes: HashSet::new(),
             settled_compact_model_private_nodes: None,
+            floating_compact_model_islands: Vec::new(),
+            settled_compact_model_terminal_nets: Vec::new(),
             settled_node_gmin: 0.0,
             dc_initial_condition_ties: Vec::new(),
             compact_model_dc_driven_nodes: HashSet::new(),

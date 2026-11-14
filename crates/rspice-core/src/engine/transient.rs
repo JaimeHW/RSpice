@@ -5346,6 +5346,10 @@ impl Engine {
         if self.config.spice_dialect != SpiceDialect::Xyce {
             Self::hold_every_node_without_dc_path(&mut circuit);
         }
+        // A compact model's unconnected nodes take GMIN as the operating
+        // point settles them, whether this run solved that operating point
+        // or started without one.
+        self.settle_compact_model_nodes_from_state(&mut circuit, &mut matrix, &solution)?;
         let transient_baseline_diag_gmin = 0.0;
         if circuit.has_nonlinear_devices() {
             self.update_transient_nonlinear_devices(&mut circuit, &solution)?;

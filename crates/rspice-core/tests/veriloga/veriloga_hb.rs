@@ -1503,3 +1503,121 @@ fn periodic_noise_refuses_verilog_a_noise_it_cannot_fold_by_name() {
         );
     }
 }
+
+/// A module that reads a zero series resistance as an open branch, as
+/// `vbic_4T_et_cf.va` does: at `r = 0` its internal nodes `x` and `y` are
+/// joined by a junction to each other and to nothing else, and at `rth = 0`
+/// its terminal `t` carries no equation.
+const OPEN_ISLAND: &str = "`include \"disciplines.vams\"\n\
+     module va_hb_open_island(p, n, t);\n\
+     inout p, n, t;\n\
+     electrical p, n, t, x, y;\n\
+     parameter real r = 0.0;\n\
+     parameter real rth = 0.0;\n\
+     parameter real iloop = 0.0;\n\
+     analog begin\n\
+         if (r > 0.0) I(p, x) <+ V(p, x) / r; else I(p, x) <+ 0.0;\n\
+         I(x, y) <+ 1.0e-14 * (limexp(V(x, y) / $vt) - 1.0);\n\
+         I(y, x) <+ iloop;\n\
+         if (r > 0.0) I(y, n) <+ V(y, n) / r; else I(y, n) <+ 0.0;\n\
+         if (rth > 0.0) I(t) <+ V(t) / rth; else I(t) <+ 0.0;\n\
+         I(p, n) <+ V(p, n) / 1.0e3;\n\
+     end\n\
+     endmodule\n";
+
+fn open_island_deck(test: &str, parameters: &str) -> String {
+    let path = write_model(test, OPEN_ISLAND);
+    format!(
+        "* open series branches\n\
+         V1 in 0 DC 0.5 SIN(0.5 0.2 1meg)\n\
+         R1 in p 1k\n\
+         XVA p 0 t va_hb_open_island {parameters}\n\
+         .va \"{path}\" va_hb_open_island\n\
+         .end\n"
+    )
+}
+
+/// Spectre installs GMIN on a node with no DC path at setup ("Gmin installed
+/// to provide path"), so every analysis holds a compact model's floating
+/// sub-network and its unconnected terminal net the same way: the operating
+/// point, a transient from it, a transient from UIC and harmonic balance all
+/// give `p` the 1k-1k divider of the drive, and `t` reads 0 V. Before, the
+/// operating point and the transient failed on the singular system while
+/// harmonic balance answered.
+#[test]
+fn every_analysis_holds_a_floating_compact_model_sub_network_through_gmin() {
+    let deck = open_island_deck("island", "");
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let op = engine
+        .run_dc_op(&netlist)
+        .unwrap_or_else(|error| panic!("the operating point holds the sub-network: {error}"));
+    for (name, expected) in [("p", 0.25), ("t", 0.0)] {
+        let value = op.try_voltage_named(name).expect("node voltage");
+        assert!((value - expected).abs() <= 1e-9, "V({name}) = {value}");
+    }
+    let period = F0.recip();
+    for startup in [
+        TransientStartupMode::OperatingPoint,
+        TransientStartupMode::Uic,
+    ] {
+        let tran = engine
+            .run_tran_with_startup_mode_and_abort(
+                &netlist,
+                2.0 * period,
+                period / 256.0,
+                startup,
+                &rspice_core::NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("the {startup:?} transient runs: {error}"));
+        let time = &tran.time;
+        for (name, expected) in [
+            (
+                "p",
+                Box::new(|t: f64| 0.25 + 0.1 * (std::f64::consts::TAU * F0 * t).sin())
+                    as Box<dyn Fn(f64) -> f64>,
+            ),
+            ("t", Box::new(|_| 0.0)),
+        ] {
+            let waveform = tran.try_voltage_waveform_named(name).expect("waveform");
+            // UIC's first point is its authored state, not the drive's.
+            for (&t, &value) in time.iter().zip(waveform).skip(1) {
+                assert!(
+                    (value - expected(t)).abs() <= 1e-6,
+                    "{startup:?} V({name}) at {t:e}: {value}"
+                );
+            }
+        }
+    }
+    let hb = run_hb(&deck, 4);
+    let p = node(&hb, "p");
+    assert!(
+        (p[0].re - 0.25).abs() <= 1e-6 && (p[1].norm() - 0.1).abs() <= 1e-6,
+        "{p:?}"
+    );
+    assert!(node(&hb, "t")[0].norm() <= 1e-9);
+}
+
+/// A held sub-network whose own loop current sets a voltage across it has
+/// no canonical level: only GMIN would place it. The operating point
+/// refuses it by name, and harmonic balance gives the same refusal rather
+/// than an answer from a seed of zero.
+#[test]
+fn a_held_sub_network_only_gmin_would_place_is_refused_by_every_analysis() {
+    let deck = open_island_deck("island_loop", "iloop=1u");
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let op = engine
+        .run_dc_op(&netlist)
+        .expect_err("only GMIN would place the sub-network")
+        .to_string();
+    assert!(
+        op.contains(" has no DC path: it belongs to a sub-network"),
+        "{op}"
+    );
+    let hb = engine
+        .run_hb(&netlist, HbConfig::new(F0).with_harmonics(4))
+        .expect_err("harmonic balance refuses as the operating point does")
+        .to_string();
+    assert_eq!(hb, op);
+}

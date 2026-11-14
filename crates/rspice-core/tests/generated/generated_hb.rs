@@ -137,6 +137,50 @@ fn vbic_4t_et_gives_the_native_vbic_harmonics() {
     }
 }
 
+/// VBIC 4T et's default card gives one answer in every analysis.
+/// `vbic_4T_et_cf.va` reads its zero default series resistances as open
+/// branches, so `cx`, `ci`, `bx`, `bi`, `ei`, `bp` and `si` reach only one
+/// another, and the default `RTH = 0` leaves the net on `dt` without an
+/// equation. Spectre installs GMIN on such nodes at setup; the operating
+/// point, the transient and harmonic balance all hold them there, and the
+/// transistor conducts nothing: the collector sits at the supply and the
+/// base at the drive. Before, the operating point and the transient failed
+/// on the singular system while harmonic balance answered. Harmonic
+/// balance's own GMIN leaves `c` within 3e-9 V of the supply.
+#[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+#[test]
+fn vbic_4t_et_default_card_gives_one_answer_in_every_analysis() {
+    let deck = "* VBIC 4T et default card\nVCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\n\
+                RB in b 10k\nRC vcc c 1k\nQ1 c b 0 0 t qv\n.model qv VBIC_4T_ET_CF\n.end\n";
+    let netlist = Netlist::parse(deck).expect("parse");
+    let op = engine()
+        .run_dc_op(&netlist)
+        .unwrap_or_else(|error| panic!("the operating point holds the open card: {error}"));
+    for (name, expected) in [("c", 3.0), ("b", 0.8), ("t", 0.0)] {
+        let value = op.try_voltage_named(name).expect("node voltage");
+        assert!((value - expected).abs() <= 1e-9, "V({name}) = {value}");
+    }
+    let tran = engine()
+        .run_tran(&netlist, 2.0 / F0, 1.0 / (256.0 * F0))
+        .unwrap_or_else(|error| panic!("the transient holds the open card: {error}"));
+    let collector = tran.try_voltage_waveform_named("c").expect("V(c)");
+    assert!(collector.iter().all(|&value| (value - 3.0).abs() <= 1e-9));
+    let hb = engine()
+        .run_hb(
+            &netlist,
+            HbConfig::new(F0)
+                .with_harmonics(HARMONICS)
+                .with_tolerance(1e-9),
+        )
+        .unwrap_or_else(|error| panic!("HB must run: {error}"));
+    let c = spectrum(&hb, "c");
+    assert!((c[0].re - 3.0).abs() <= 1e-8, "{c:?}");
+    assert!(
+        c[1..].iter().all(|harmonic| harmonic.norm() <= 1e-9),
+        "{c:?}"
+    );
+}
+
 /// The one-sided Fourier coefficients of `waveform` over the period ending
 /// at `end`, sampled at `samples` uniform points by linear interpolation:
 /// `c_0` the mean and `c_k = (2/N) sum v(t_n) e^{-jk w t_n}`, the convention

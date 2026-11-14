@@ -673,6 +673,16 @@ pub struct CircuitData {
     /// stamps reach leaves it and rejoins the private set
     /// (`Engine::settle_compact_model_private_nodes`).
     pub(crate) settled_compact_model_private_nodes: Option<Vec<NodeId>>,
+    /// The sub-networks of compact-model private nodes among
+    /// [`Self::settled_compact_model_private_nodes`] that no DC equation
+    /// ties to the rest of the circuit or to ground, each held through GMIN
+    /// together until a stamp ties one of them out
+    /// (`Engine::settle_compact_model_private_nodes`).
+    pub(crate) floating_compact_model_islands: Vec<Vec<NodeId>>,
+    /// The deck nets among [`Self::settled_compact_model_private_nodes`]: a
+    /// compact model's terminal net no equation reaches, which leaves the
+    /// settled set for the deck's nodes, not the private ones.
+    pub(crate) settled_compact_model_terminal_nets: Vec<NodeId>,
     /// The GMIN an assembly that stamps no nodal floor installs on each of
     /// [`Self::settled_compact_model_private_nodes`]: the engine's floor
     /// value, `gmin_target` (`Engine::stamp_nodal_gmin`).

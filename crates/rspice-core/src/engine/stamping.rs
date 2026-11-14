@@ -314,6 +314,8 @@ impl Engine {
         if circuit.settled_compact_model_private_nodes.is_some() {
             return Self::release_restamped_private_nodes(circuit, matrix, rhs, floor);
         }
+        circuit.floating_compact_model_islands.clear();
+        circuit.settled_compact_model_terminal_nets.clear();
         let mut settled = Vec::new();
         let mut nodes: Vec<NodeId> = circuit
             .compact_model_private_nodes
@@ -351,8 +353,222 @@ impl Engine {
                 return Err(Self::private_node_without_dc_path(circuit, node, unread));
             }
         }
+        Self::settle_floating_compact_model_islands(circuit, matrix, floor, &mut settled);
+        Self::settle_unconnected_terminal_nets(circuit, matrix, rhs, floor, &mut settled);
         circuit.settled_compact_model_private_nodes = Some(settled);
         Ok(())
+    }
+
+    /// Settle each sub-network of a compact model's private nodes that no
+    /// DC equation ties to the rest of the circuit or to ground, holding
+    /// every node of it through GMIN.
+    ///
+    /// VBIC 4T et (`vbic_4T_et_cf.va`) reads a zero series resistance as an
+    /// open branch, so its default card leaves `cx`, `ci`, `bx`, `bi`, `ei`,
+    /// `bp` and `si` joined to one another through its junctions and to
+    /// nothing else. Each row of such a sub-network has entries, so no single
+    /// node settles, yet every current in it is a function of its own
+    /// branch voltages: its block of the system carries the common mode in
+    /// its null space, its rows sum to zero, and the operating point is
+    /// singular. Spectre installs GMIN on a node with no DC path ("Gmin
+    /// installed to provide path") at setup, so every analysis sees it; the
+    /// sub-network then reads the 0 V its balanced flows give it, and the
+    /// post-condition ([`Self::check_settled_compact_model_private_nodes`])
+    /// refuses one whose flows do not balance. Xyce warns for a netlist node
+    /// with no DC path and leaves a device's internal nodes to the device.
+    ///
+    /// A sub-network qualifies on this assembly's values: two or more private
+    /// nodes joined by nonzero entries, no nonzero entry between any of them
+    /// and a node outside, and every row summing to zero within rounding (a
+    /// ground conductance on any node leaves its row sum at that
+    /// conductance). A single private node is the caller's: it settles only
+    /// with an empty row or column. A stamp that later ties a sub-network out
+    /// releases it ([`Self::release_restamped_private_nodes`]).
+    fn settle_floating_compact_model_islands(
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        floor: Value,
+        settled: &mut Vec<NodeId>,
+    ) {
+        let size = circuit.num_nodes().min(circuit.matrix_size());
+        let mut members: Vec<usize> = circuit
+            .compact_model_private_nodes
+            .iter()
+            .map(|&node| node - 1)
+            .filter(|&index| index < size && circuit.receives_homotopy_gmin(index))
+            .collect();
+        if members.len() < 2 {
+            return;
+        }
+        members.sort_unstable();
+        let islands = Self::floating_islands_among(matrix, size, &members, |_| 0.0);
+        if islands.is_empty() {
+            return;
+        }
+        let diagonal = Self::settled_node_diagonal(circuit, floor);
+        let node_names = circuit.node_names_sorted();
+        for island in islands {
+            let names: Vec<&str> = island
+                .iter()
+                .map(|&index| node_names.get(index).map_or("?", String::as_str))
+                .collect();
+            log::info!(
+                "Nodes {} of a compact model have no DC path to the rest of the circuit; \
+                 holding each through GMIN = {:e} S.",
+                names.join(", "),
+                circuit.settled_node_gmin
+            );
+            let nodes: Vec<NodeId> = island.iter().map(|&index| index + 1).collect();
+            for &node in &nodes {
+                circuit.compact_model_private_nodes.remove(&node);
+                settled.push(node);
+                if diagonal != 0.0 {
+                    matrix.add(node - 1, node - 1, diagonal);
+                }
+            }
+            circuit.floating_compact_model_islands.push(nodes);
+        }
+    }
+
+    /// The sub-networks of `members` (sorted zero-based rows, all below
+    /// `size`) that this assembly's values leave without a DC path: joined
+    /// by nonzero entries, with no nonzero entry to a row or column outside
+    /// them, and each row summing to `diagonal(row)` within rounding, where
+    /// `diagonal` is what the caller itself installed on that row. Each has
+    /// two or more rows, sorted.
+    fn floating_islands_among(
+        matrix: &StaticMatrix,
+        size: usize,
+        members: &[usize],
+        diagonal: impl Fn(usize) -> Value,
+    ) -> Vec<Vec<usize>> {
+        fn root(parent: &mut [usize], mut slot: usize) -> usize {
+            while parent[slot] != slot {
+                parent[slot] = parent[parent[slot]];
+                slot = parent[slot];
+            }
+            slot
+        }
+        const OUTSIDE: usize = usize::MAX;
+        let mut slot_of = vec![OUTSIDE; size];
+        for (slot, &row) in members.iter().enumerate() {
+            slot_of[row] = slot;
+        }
+        let slot = |index: usize| slot_of.get(index).copied().unwrap_or(OUTSIDE);
+        let mut parent: Vec<usize> = (0..members.len()).collect();
+        let mut tied_out = vec![false; members.len()];
+        // NaN compares unequal to zero, so it ties as any other value does.
+        for (row, col, value) in matrix.stored_entries() {
+            if value == 0.0 {
+                continue;
+            }
+            match (slot(row), slot(col)) {
+                (OUTSIDE, OUTSIDE) => {}
+                (a, OUTSIDE) => tied_out[a] = true,
+                (OUTSIDE, b) => tied_out[b] = true,
+                (a, b) => {
+                    let (a, b) = (root(&mut parent, a), root(&mut parent, b));
+                    if a != b {
+                        parent[a] = b;
+                    }
+                }
+            }
+        }
+        let mut sum = vec![0.0; members.len()];
+        let mut magnitude = vec![0.0; members.len()];
+        for (row, col, value) in matrix.stored_entries() {
+            let (a, b) = (slot(row), slot(col));
+            if a != OUTSIDE && b != OUTSIDE {
+                sum[a] += value;
+                magnitude[a] += value.abs();
+            }
+        }
+        // A row whose entries cancel to the last bits of their magnitude
+        // sums to zero; one that carries a ground conductance sums to it.
+        let tolerance = Value::EPSILON.sqrt();
+        let mut groups: std::collections::BTreeMap<usize, (Vec<usize>, bool)> =
+            std::collections::BTreeMap::new();
+        for (slot, &row) in members.iter().enumerate() {
+            let group = groups
+                .entry(root(&mut parent, slot))
+                .or_insert_with(|| (Vec::new(), true));
+            group.0.push(row);
+            let balanced = (sum[slot] - diagonal(row)).abs()
+                <= tolerance * magnitude[slot].max(Value::MIN_POSITIVE);
+            group.1 &= !tied_out[slot] && balanced;
+        }
+        groups
+            .into_values()
+            .filter(|(rows, floating)| *floating && rows.len() >= 2)
+            .map(|(rows, _)| rows)
+            .collect()
+    }
+
+    /// Settle each compact model's terminal net that no equation reaches in
+    /// this assembly: an empty row, column and right-hand side, on a deck
+    /// node the DC ground-path walk has not already held
+    /// ([`Self::hold_nodes_without_dc_path`]).
+    ///
+    /// VBIC 4T et's thermal terminal `dt` carries `I(rth) <+ V(rth) / RTH`
+    /// only when `RTH > 0`; the default card's `RTH = 0` contributes zero,
+    /// and with no power in the device the net on that terminal has no
+    /// equation. The walk cannot see that, since a generated model's
+    /// terminals conduct for it. The net takes GMIN alone, as Spectre's
+    /// "Gmin installed to provide path" does, and the post-condition refuses
+    /// it if a current the model later drives into it finds no path. A stamp
+    /// that later reaches it releases it to the deck's nodes.
+    fn settle_unconnected_terminal_nets(
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &[Value],
+        floor: Value,
+        settled: &mut Vec<NodeId>,
+    ) {
+        #[allow(unused_mut)]
+        let mut nets: Vec<NodeId> = Vec::new();
+        #[cfg(feature = "veriloga-builtins-base")]
+        for instance in circuit.generated_veriloga_devices().iter() {
+            let terminals = instance.terminal_currents().len().min(instance.nodes.len());
+            nets.extend(&instance.nodes[..terminals]);
+        }
+        #[cfg(feature = "veriloga")]
+        for device in circuit.veriloga_devices().iter() {
+            nets.extend(
+                (0..device.num_terminals()).map(|terminal| device.node_for_terminal(terminal)),
+            );
+        }
+        if nets.is_empty() {
+            return;
+        }
+        nets.retain(|&node| {
+            let index = node.wrapping_sub(1);
+            node > 0
+                && index < circuit.num_nodes().min(circuit.matrix_size())
+                && circuit.receives_nodal_gmin(index)
+                && circuit.event_only_net_kind(node).is_none()
+                && circuit
+                    .dc_floating_component_for_matrix_row(index)
+                    .is_none()
+                && matrix.row_is_deficient(index)
+                && matrix.column_is_deficient(index)
+                && rhs.get(index).is_some_and(|&value| value == 0.0)
+        });
+        nets.sort_unstable();
+        nets.dedup();
+        let diagonal = Self::settled_node_diagonal(circuit, floor);
+        for node in nets {
+            log::info!(
+                "Node {} on a compact model's terminal has no DC path; holding it alone \
+                 through GMIN = {:e} S.",
+                Self::compact_model_node_name(circuit, node),
+                circuit.settled_node_gmin
+            );
+            settled.push(node);
+            circuit.settled_compact_model_terminal_nets.push(node);
+            if diagonal != 0.0 {
+                matrix.add(node - 1, node - 1, diagonal);
+            }
+        }
     }
 
     /// Every operating-point assembly after the one that settled them: a
@@ -378,16 +594,18 @@ impl Engine {
         floor: Value,
     ) -> Result<(), SimulationError> {
         let diagonal = Self::settled_node_diagonal(circuit, floor);
-        let Some(settled) = circuit.settled_compact_model_private_nodes.as_mut() else {
+        let Some(mut settled) = circuit.settled_compact_model_private_nodes.take() else {
             return Ok(());
         };
         if settled.is_empty() {
+            circuit.settled_compact_model_private_nodes = Some(settled);
             return Ok(());
         }
+        let island_nodes = Self::release_tied_islands(circuit, matrix, diagonal, &mut settled);
         let mut released = Vec::new();
         let mut refused = None;
         settled.retain(|&node| {
-            if refused.is_some() {
+            if refused.is_some() || island_nodes.contains(&node) {
                 return true;
             }
             // The node settled on an empty column and right-hand side; its
@@ -405,8 +623,21 @@ impl Engine {
             released.push(node);
             false
         });
+        circuit.settled_compact_model_private_nodes = Some(settled);
         for &node in &released {
-            circuit.compact_model_private_nodes.insert(node);
+            // A terminal net goes back to the deck's nodes, which take the
+            // floor; any other node is the model's own again.
+            if let Some(position) = circuit
+                .settled_compact_model_terminal_nets
+                .iter()
+                .position(|&net| net == node)
+            {
+                circuit
+                    .settled_compact_model_terminal_nets
+                    .swap_remove(position);
+            } else {
+                circuit.compact_model_private_nodes.insert(node);
+            }
             if diagonal != 0.0 {
                 matrix.add(node - 1, node - 1, -diagonal);
             }
@@ -418,6 +649,51 @@ impl Engine {
             ))),
             None => Ok(()),
         }
+    }
+
+    /// Release each held sub-network
+    /// ([`Self::settle_floating_compact_model_islands`]) that a stamp in this
+    /// assembly ties to a node outside it or to ground: its nodes are the
+    /// model's own again and give back the GMIN this assembly installed.
+    /// Returns the nodes of the sub-networks still held. A circuit with none
+    /// held pays nothing.
+    fn release_tied_islands(
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        diagonal: Value,
+        settled: &mut Vec<NodeId>,
+    ) -> std::collections::HashSet<NodeId> {
+        if circuit.floating_compact_model_islands.is_empty() {
+            return std::collections::HashSet::new();
+        }
+        let size = circuit.num_nodes().min(circuit.matrix_size());
+        let mut members: Vec<usize> = circuit
+            .floating_compact_model_islands
+            .iter()
+            .flatten()
+            .map(|&node| node - 1)
+            .collect();
+        members.sort_unstable();
+        let floating: std::collections::HashSet<NodeId> =
+            Self::floating_islands_among(matrix, size, &members, |_| diagonal)
+                .into_iter()
+                .flatten()
+                .map(|index| index + 1)
+                .collect();
+        let (held, tied): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut circuit.floating_compact_model_islands)
+                .into_iter()
+                .partition(|island| island.iter().all(|node| floating.contains(node)));
+        for node in tied.into_iter().flatten() {
+            settled.retain(|&settled_node| settled_node != node);
+            circuit.compact_model_private_nodes.insert(node);
+            if diagonal != 0.0 {
+                matrix.add(node - 1, node - 1, -diagonal);
+            }
+        }
+        let held_nodes = held.iter().flatten().copied().collect();
+        circuit.floating_compact_model_islands = held;
+        held_nodes
     }
 
     /// The post-condition of [`Self::settle_compact_model_private_nodes`]: a
@@ -438,6 +714,19 @@ impl Engine {
                 .get(node - 1)
                 .is_some_and(|value| !value.is_finite() || value.abs() > tolerance)
         }) {
+            Some(node)
+                if circuit
+                    .floating_compact_model_islands
+                    .iter()
+                    .any(|island| island.contains(&node)) =>
+            {
+                Err(SimulationError::Circuit(format!(
+                    "node {} has no DC path: it belongs to a sub-network of its compact model \
+                     that nothing ties to the rest of the circuit, and only GMIN would set its \
+                     voltages",
+                    Self::compact_model_node_name(circuit, node)
+                )))
+            }
             Some(node) => Err(Self::private_node_without_dc_path(circuit, node, true)),
             None => Ok(()),
         }

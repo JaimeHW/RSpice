@@ -1192,6 +1192,8 @@ impl Engine {
     ) -> Result<Option<T>, SimulationError> {
         let entry_private_nodes = circuit.compact_model_private_nodes.clone();
         let entry_settled_nodes = circuit.settled_compact_model_private_nodes.clone();
+        let entry_islands = circuit.floating_compact_model_islands.clone();
+        let entry_terminal_nets = circuit.settled_compact_model_terminal_nets.clone();
         loop {
             let entry_state = circuit.nonlinear_state_snapshot();
             circuit.zero_dc_nodal_floor = true;
@@ -1212,6 +1214,12 @@ impl Engine {
             circuit
                 .settled_compact_model_private_nodes
                 .clone_from(&entry_settled_nodes);
+            circuit
+                .floating_compact_model_islands
+                .clone_from(&entry_islands);
+            circuit
+                .settled_compact_model_terminal_nets
+                .clone_from(&entry_terminal_nets);
             if !self.hold_nodes_without_dc_path(circuit, matrix, &error) {
                 self.retain_dc_nodal_floor(circuit, matrix, &error);
                 return Ok(None);
@@ -1266,6 +1274,56 @@ impl Engine {
         }
         let floating = Self::nodes_proven_without_dc_path(circuit);
         Self::hold_alone_through_gmin(circuit, floating);
+    }
+
+    /// Settle a compact model's unconnected nodes
+    /// ([`Self::settle_compact_model_private_nodes`]) for a transient that
+    /// solved no operating point on this circuit, UIC or a resumed run, from
+    /// one DC assembly at the state it starts from: the same nodes then take
+    /// GMIN as when the run solves its operating point first. The assembly
+    /// leaves the devices' state as it found it. A circuit with no private
+    /// node, or one an operating point has settled, pays nothing.
+    pub(in crate::engine) fn settle_compact_model_nodes_from_state(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
+        if circuit.settled_compact_model_private_nodes.is_some()
+            || circuit.compact_model_private_nodes.is_empty()
+        {
+            return Ok(());
+        }
+        let entry_state = circuit.nonlinear_state_snapshot();
+        let mut rhs = vec![0.0; circuit.matrix_size()];
+        let mut correction_rhs = Vec::new();
+        matrix.clear_values();
+        Self::stamp_nodal_gmin(circuit, matrix, 0.0);
+        circuit.stamp_dc_direct(matrix, &mut rhs);
+        let stamped = self.try_stamp_operating_point_newton_system(
+            circuit,
+            matrix,
+            &mut rhs,
+            OperatingPointProbe {
+                solution,
+                time: 0.0,
+                analysis: crate::xspice::AnalysisType::DcOp,
+                junction_gmin: self
+                    .effective_device_junction_gmin(self.config.convergence_config.gmin_target),
+            },
+            false,
+            &mut correction_rhs,
+        );
+        circuit.restore_nonlinear_state(entry_state);
+        if let Err(error) = stamped {
+            // The run's own first step meets whatever this assembly met.
+            log::debug!("no DC assembly to settle compact-model nodes from: {error}");
+            matrix.clear_values();
+            return Ok(());
+        }
+        let settled = Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, 0.0);
+        matrix.clear_values();
+        settled
     }
 
     /// Rows of the nodes the DC ground-path walk proves floating
