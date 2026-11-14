@@ -448,3 +448,62 @@ fn vendor_admitted_decks_have_explicit_preparation_outcomes() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Validate on the netlist page, as the command carries it out: the deck the
+/// page shows is validated and its run prepared, and a deck with a relative
+/// include and no origin to seal it from is refused with why, leaving
+/// nothing validated.
+#[test]
+fn the_validate_command_validates_the_deck_the_netlist_page_shows() {
+    use crate::workbench::code::commands::CodeCommand;
+    use crate::workbench::state::Workspace;
+
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    assert!(app.state.apply_imported_netlist(
+        "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
+        None,
+        "standalone.cir"
+    ));
+    app.state.workbench.workspace = Workspace::Netlist;
+
+    app.execute_command_key(CodeCommand::ValidateCodeDocument.key());
+
+    let receipt = app
+        .state
+        .model
+        .netlist_artifacts
+        .validation
+        .as_ref()
+        .expect("the deck validates");
+    assert_eq!(receipt.task_count, 1);
+    assert_eq!(app.state.model.netlist_artifacts.validation_error, None);
+    assert_eq!(app.manual_deck_run_block_reason(), None);
+
+    assert!(app.state.apply_imported_netlist(
+        "standalone\n.include \"missing.inc\"\nV1 out 0 1\n.op\n.end\n".to_owned(),
+        None,
+        "missing.cir"
+    ));
+    app.state.workbench.workspace = Workspace::Netlist;
+
+    app.execute_command_key(CodeCommand::ValidateCodeDocument.key());
+
+    assert!(app.state.model.netlist_artifacts.validation.is_none());
+    assert_eq!(
+        app.state
+            .model
+            .netlist_artifacts
+            .validation_error
+            .as_deref(),
+        Some(
+            "Relative .include/.inc/.lib sources require an imported deck origin before they \
+             can be sealed"
+        )
+    );
+}
