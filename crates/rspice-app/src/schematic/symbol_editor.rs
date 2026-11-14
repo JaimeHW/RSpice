@@ -19,7 +19,6 @@ use crate::workbench::app::{
     load_active_symbol_editor_metadata, symbol_editor_copy_available, symbol_editor_lock_message,
     symbol_editor_request_source,
 };
-pub(crate) use rspice_schematic_editor::symbol_editor::draw_document_preview;
 use rspice_schematic_editor::symbol_editor::surface::{
     self, SymbolSurfaceAction, SymbolSurfaceRequest,
 };

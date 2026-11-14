@@ -10,7 +10,6 @@ use crate::state::{
     ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, SchematicState, SymbolDocument,
     SymbolPin, View, ViewType,
 };
-use crate::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::library_dialogs::new_view::{
@@ -18,6 +17,7 @@ use crate::workbench::project::library_dialogs::new_view::{
     seeded_symbol_view, view_type_label,
 };
 use crate::workbench::{ChoicePreference, RSpiceApp};
+use rspice_app_project::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
 
 use super::{in_front, published, shown, with_cx};
 

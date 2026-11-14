@@ -5342,6 +5342,7 @@ dependencies = [
  "rspice-design",
  "rspice-design-model",
  "rspice-project",
+ "rspice-schematic-editor",
  "rspice-simulation",
  "rspice-simulation-contract",
  "rspice-ui-kit",

@@ -152,11 +152,12 @@ ALLOWED: dict[str, set[str]] = {
     # tier whose run sets its configuration pages read, the workbench framework
     # it registers with, and the design, design-management, project,
     # simulation and painting crates its pages, Library browser and dialogs
-    # are built on.
+    # are built on, with the schematic editor whose symbol preview the
+    # Library and cellview manager draws.
     "rspice-app-project": {
         "rspice-app-state", "rspice-app-services", "rspice-app-runs", "rspice-app-workbench",
-        "rspice-design", "rspice-design-model", "rspice-project", "rspice-simulation",
-        "rspice-simulation-contract", "rspice-ui-kit",
+        "rspice-design", "rspice-design-model", "rspice-project", "rspice-schematic-editor",
+        "rspice-simulation", "rspice-simulation-contract", "rspice-ui-kit",
     },
     "rspice-worker": {"rspice-vocabulary", "rspice-design", "rspice-simulation", "rspice-hardcopy"},
 }

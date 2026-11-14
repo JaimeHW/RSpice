@@ -5,11 +5,11 @@
 use crate::state::{
     CellViewRef, ComponentType, Library, NetNamingPolicy, Point, SchematicGridPitch, SymbolDocument,
 };
-use crate::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::library_dialogs::new_cell::create_new_cell;
 use crate::workbench::{ChoicePreference, RSpiceApp};
+use rspice_app_project::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
 
 use super::{in_front, published, shown, with_cx};
 

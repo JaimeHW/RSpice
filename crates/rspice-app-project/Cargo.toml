@@ -23,6 +23,7 @@ rspice-ui-kit.workspace = true
 rspice-design.workspace = true
 rspice-design-model.workspace = true
 rspice-project.workspace = true
+rspice-schematic-editor.workspace = true
 rspice-simulation.workspace = true
 rspice-simulation-contract.workspace = true
 egui = { version = "0.35.0", default-features = false }

@@ -32,6 +32,7 @@
 use rspice_app_services::io;
 use rspice_app_state::{diagnostics, product, quantity, state, time_compat};
 use rspice_app_workbench::ui;
+use rspice_schematic_editor as schematic;
 
 mod services {
     pub(crate) use rspice_app_services::services::recent_files;
@@ -64,12 +65,7 @@ pub mod workbench {
             pub mod check_and_save;
             pub mod check_and_save_validation;
             pub mod design_management;
-            pub mod library {
-                mod shared;
-
-                pub use shared::LIBRARY_CATALOG_STALE_MESSAGE;
-                pub(in crate::workbench) use shared::validate_lcv_name;
-            }
+            pub mod library;
             pub mod project;
             pub mod project_revision_history;
         }
@@ -148,6 +144,7 @@ pub mod workbench {
     pub mod surfaces {
         pub use rspice_app_workbench::workbench::surfaces::*;
 
+        pub mod library_cellview_manager;
         pub mod project;
     }
     pub mod tools {

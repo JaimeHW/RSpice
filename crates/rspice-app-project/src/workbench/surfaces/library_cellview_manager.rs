@@ -367,7 +367,7 @@ fn symbol_projection(model: &Model) -> Option<SymbolProjection> {
     })
 }
 
-pub(crate) fn resolve_symbol_reference(model: &Model) -> Option<CellViewRef> {
+pub fn resolve_symbol_reference(model: &Model) -> Option<CellViewRef> {
     let manager = &model.library_manager;
     let selected = manager.current_library().and_then(|library| {
         let cell = manager.current_cell()?;
@@ -1121,17 +1121,19 @@ fn section_card(ui: &mut Ui, title: &str, description: &str, add_body: impl FnOn
     });
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
+    #[cfg(test)]
+    use crate::state::PortSpec;
     use crate::state::{
-        GeneratedSymbolViews, ParameterInheritance, PortSpec, SymbolElectricalType,
-        SymbolGraphicTemplate, SymbolIdentity, SymbolNetlistBinding, SymbolParameterConstraints,
-        SymbolParameterDefault, SymbolParameterField, SymbolParameterForm, SymbolParameterSection,
+        GeneratedSymbolViews, ParameterInheritance, SymbolElectricalType, SymbolGraphicTemplate,
+        SymbolIdentity, SymbolNetlistBinding, SymbolParameterConstraints, SymbolParameterDefault,
+        SymbolParameterField, SymbolParameterForm, SymbolParameterSection,
         SymbolParameterVisibility, SymbolPinDefinition, SymbolPinSide, SymbolSourceContract,
     };
 
-    pub(crate) fn typed_symbol() -> ModelBoundSymbolDefinition {
+    pub fn typed_symbol() -> ModelBoundSymbolDefinition {
         let pins = vec![
             SymbolPinDefinition::new(
                 "IN",
