@@ -56,6 +56,10 @@ enum Card {
 /// The block card `head` names. `.mach` and `.endmach` may be spelled out to
 /// any length up to `.machine` and `.endmachine`.
 fn card(head: &str) -> Option<Card> {
+    // Every block card is a dot card; an element card is none of them.
+    if !head.starts_with('.') {
+        return None;
+    }
     let lower = head.to_ascii_lowercase();
     let spells = |full: &str, shortest: usize| lower.len() >= shortest && full.starts_with(&lower);
     if spells(".machine", ".mach".len()) {
