@@ -470,14 +470,14 @@ impl WorkerOutcomeTransport {
     }
 }
 
+#[cfg(any(feature = "browser-worker", test))]
+pub(crate) use rspice_simulation_contract::worker_transport::checked_worker_request_numeric_total;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) use rspice_simulation_contract::worker_transport::validate_worker_request_transfer_buffer_lengths;
+#[cfg(any(feature = "browser-worker", feature = "test-support", test))]
+pub(crate) use rspice_simulation_contract::worker_transport::validate_worker_request_transfer_buffers;
 pub(crate) use rspice_simulation_contract::worker_transport::{
     MAX_WORKER_F64_VALUES, MAX_WORKER_TRANSFER_BUFFERS, WorkerF64Series,
-};
-#[cfg(any(feature = "browser-worker", test))]
-pub(crate) use rspice_simulation_contract::worker_transport::{
-    checked_worker_request_numeric_total, validate_worker_request_transfer_buffers,
 };
 
 impl WorkerOpPreviousStateTransport {

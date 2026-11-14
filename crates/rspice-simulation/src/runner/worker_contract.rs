@@ -6,7 +6,7 @@
 //! sides run in different threads natively and different contexts in the
 //! browser, so this is a serialized contract rather than a shared type.
 
-#[cfg(any(feature = "browser-worker", test))]
+#[cfg(any(feature = "browser-worker", feature = "test-support", test))]
 use crate::monte_carlo_checkpoint::validate_worker_request_checkpoint_lengths;
 
 mod analysis;
@@ -24,6 +24,8 @@ mod qpss;
 use qpac::validate_worker_qpac_result;
 use qpss::validate_worker_qpss_result;
 mod transport;
+#[cfg(all(feature = "test-support", not(target_arch = "wasm32")))]
+pub(crate) mod wire;
 
 pub(crate) use conversions::*;
 use rspice_simulation_contract::worker_recorded_fft::{self, WorkerRecordedFftSpectrum};
@@ -131,7 +133,7 @@ pub(crate) struct WorkerRequest {
 /// floating-point buffers. The embedded request deliberately carries empty
 /// dependencies; authenticated dependency metadata is encoded separately so
 /// its numerical payload never expands into per-sample JavaScript objects.
-#[cfg(any(feature = "browser-worker", test))]
+#[cfg(any(feature = "browser-worker", feature = "test-support", test))]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerRequestTransport {
     pub protocol: u8,
@@ -169,7 +171,7 @@ pub(crate) struct WorkerOpPreviousStateTransport {
 }
 
 /// Own the production transfer buffers for native transport round-trip tests.
-#[cfg(test)]
+#[cfg(any(feature = "test-support", test))]
 pub(crate) fn copy_dependency_transfer(
     dependencies: &crate::execution_artifact::ResolvedExecutionDependencies,
 ) -> Result<(String, Vec<Vec<f64>>), crate::prepared_dependency::ExecutionArtifactError> {
@@ -183,9 +185,9 @@ pub(crate) fn copy_dependency_transfer(
     ))
 }
 
-#[cfg(any(feature = "browser-worker", test))]
+#[cfg(any(feature = "browser-worker", feature = "test-support", test))]
 impl WorkerRequestTransport {
-    #[cfg(test)]
+    #[cfg(any(feature = "test-support", test))]
     pub(crate) fn from_request(mut request: WorkerRequest) -> Result<Self, String> {
         let dependencies = std::mem::take(&mut request.dependencies);
         let (dependency_metadata, mut buffers) =
@@ -217,6 +219,7 @@ impl WorkerRequestTransport {
         })
     }
 
+    #[cfg(any(feature = "browser-worker", test))]
     pub(crate) fn into_request(self) -> Result<WorkerRequest, String> {
         if self.protocol != WORKER_REQUEST_TRANSPORT_PROTOCOL {
             return Err(format!(
@@ -269,7 +272,7 @@ impl WorkerRequestTransport {
     }
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(target_arch = "wasm32", feature = "test-support", test))]
 fn worker_request_op_config_mut(
     request: &mut WorkerRequest,
 ) -> Option<&mut rspice_simulation_contract::config::OpConfig> {
@@ -314,7 +317,7 @@ fn worker_request_op_config(
     }
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(target_arch = "wasm32", feature = "test-support", test))]
 pub(crate) fn take_worker_request_op_previous_state(
     request: &mut WorkerRequest,
 ) -> Result<(Option<WorkerOpPreviousStateTransport>, Vec<Vec<f64>>), String> {

@@ -110,7 +110,7 @@ impl TransientCheckpointInput {
         }
         decode_bytes(&self.bytes, limits, abort)
     }
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(any(target_arch = "wasm32", feature = "test-support", test))]
     pub(crate) fn take_bytes(
         &mut self,
         limits: ResourceLimits,

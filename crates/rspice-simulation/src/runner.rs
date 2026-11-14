@@ -51,8 +51,23 @@ mod spec;
 pub(crate) use spec::spliced_run_temperature;
 #[cfg(any(target_arch = "wasm32", test))]
 mod wasm_worker;
-#[cfg(any(target_arch = "wasm32", test))]
+// Test tooling that drives the worker from outside a browser compiles the
+// contract natively for its byte transport alone, so most of it goes unused
+// there.
+#[cfg(any(target_arch = "wasm32", feature = "test-support", test))]
+#[cfg_attr(
+    not(any(target_arch = "wasm32", test)),
+    allow(dead_code, unused_imports)
+)]
 pub(crate) mod worker_contract;
+/// The browser worker's transport as bytes, for test tooling that drives the
+/// worker image from outside a browser.
+#[cfg(all(feature = "test-support", not(target_arch = "wasm32")))]
+pub mod worker_wire {
+    pub use super::worker_contract::wire::{
+        WorkerWireRequest, worker_wire_request, worker_wire_result,
+    };
+}
 
 pub(crate) mod study;
 
@@ -418,47 +433,8 @@ impl SimulationRunner {
         stream_transient_samples: bool,
     ) -> Result<(), SimulationError> {
         let transient_states = dispatch.transient_state_role();
-        let crate::execution::RunnerParts {
-            task,
-            executable_netlist,
-            project_veriloga_runtimes,
-            measurement_references,
-            data_files,
-            dependencies,
-            environment,
-            execution_limits,
-        } = dispatch.into_runner_parts();
-        // A configuration-only request has no checkpoint policy and no
-        // member. Preserve the sealed options even when this transient also
-        // has a basic config.
-        let request = match task.config {
-            Some(config)
-                if task.spec_options.tran_checkpoint.is_none()
-                    && task.spec_options.member.is_none()
-                    && task.spec_options.resume_at.is_none() =>
-            {
-                SimulationRequest::Config(Box::new(config))
-            }
-            _ => SimulationRequest::Spec {
-                spec: Box::new(task.spec),
-                options: Box::new(task.spec_options),
-            },
-        };
-        self.start_request(
-            request,
-            NetlistInput {
-                netlist: executable_netlist.to_string(),
-                source_path: None,
-                project_veriloga_runtimes,
-                measurement_references,
-                data_files,
-                dependencies,
-                environment,
-                stream_transient_samples,
-                execution_limits,
-            },
-            transient_states,
-        )
+        let (request, input) = prepared_request(dispatch, stream_transient_samples);
+        self.start_request(request, input, transient_states)
     }
 
     /// Start a simulation with the given configuration
@@ -576,6 +552,52 @@ impl SimulationRunner {
         }
         Ok(())
     }
+}
+
+/// The request and input a resolved task runs as, on this host's engine
+/// thread or in the browser's worker.
+pub(crate) fn prepared_request(
+    dispatch: ResolvedTaskDispatch,
+    stream_transient_samples: bool,
+) -> (SimulationRequest, NetlistInput) {
+    let crate::execution::RunnerParts {
+        task,
+        executable_netlist,
+        project_veriloga_runtimes,
+        measurement_references,
+        data_files,
+        dependencies,
+        environment,
+        execution_limits,
+    } = dispatch.into_runner_parts();
+    // A configuration-only request has no checkpoint policy and no
+    // member. Preserve the sealed options even when this transient also
+    // has a basic config.
+    let request = match task.config {
+        Some(config)
+            if task.spec_options.tran_checkpoint.is_none()
+                && task.spec_options.member.is_none()
+                && task.spec_options.resume_at.is_none() =>
+        {
+            SimulationRequest::Config(Box::new(config))
+        }
+        _ => SimulationRequest::Spec {
+            spec: Box::new(task.spec),
+            options: Box::new(task.spec_options),
+        },
+    };
+    let input = NetlistInput {
+        netlist: executable_netlist.to_string(),
+        source_path: None,
+        project_veriloga_runtimes,
+        measurement_references,
+        data_files,
+        dependencies,
+        environment,
+        stream_transient_samples,
+        execution_limits,
+    };
+    (request, input)
 }
 
 /// Whether this request asked the engine to trace its solve.

@@ -59,7 +59,12 @@ pub(super) fn restore_worker_request_checkpoint(
 }
 
 /// Check declared kind/count and the receiving run budget before copying buffers.
-#[cfg(any(feature = "browser-worker", test, target_arch = "wasm32"))]
+#[cfg(any(
+    feature = "browser-worker",
+    feature = "test-support",
+    test,
+    target_arch = "wasm32"
+))]
 pub(crate) fn validate_checkpoint_request_lengths(
     request: &WorkerRequest,
     numeric_values: usize,
