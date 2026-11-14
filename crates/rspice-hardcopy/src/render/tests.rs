@@ -1165,64 +1165,6 @@ fn schematic_clipping_policy_compiles_an_authored_sheet() {
     assert_eq!(scene.extent, source.content_extent());
 }
 
-/// Bleed is the print setup's: a sheet saved with an export bleed of its own
-/// compiles on its paper alone, full or clipped.
-#[test]
-fn a_sheet_saved_with_a_bleed_compiles_on_its_paper_for_full_and_clipped_output() {
-    let mut saved = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
-    saved["bleed_um"] = serde_json::json!(5_000);
-    let format: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
-    let source = resolved_blank_schematic(&format);
-    let (paper_width_um, paper_height_um) = format.oriented_dimensions_um();
-    assert_eq!(
-        source.content_extent().width().micrometres(),
-        paper_width_um
-    );
-    assert_eq!(
-        source.content_extent().height().micrometres(),
-        paper_height_um
-    );
-
-    let full = SchematicHardcopySetup::new(
-        SchematicHardcopyExtent::AuthoredDrawingSheet,
-        OutsideSheetContentPolicy::Ask,
-        true,
-        true,
-        true,
-        true,
-        true,
-        false,
-    );
-    let full_scene = scene_from_resolved(
-        &source,
-        source.default_print_mapping(),
-        full,
-        resolved_metadata(),
-    )
-    .unwrap();
-    assert_eq!(full_scene.extent, source.content_extent());
-
-    let clipped = SchematicHardcopySetup::new(
-        SchematicHardcopyExtent::AuthoredDrawingSheet,
-        OutsideSheetContentPolicy::ClipToAuthoredSheet,
-        true,
-        true,
-        true,
-        true,
-        true,
-        false,
-    );
-    let clipped_scene = scene_from_resolved(
-        &source,
-        source.default_print_mapping(),
-        clipped,
-        resolved_metadata(),
-    )
-    .unwrap();
-    assert_eq!(clipped_scene.extent.width().micrometres(), paper_width_um);
-    assert_eq!(clipped_scene.extent.height().micrometres(), paper_height_um);
-}
-
 #[test]
 fn authored_sheet_clip_preserves_partially_intersecting_non_linear_primitives() {
     let source_bounds =

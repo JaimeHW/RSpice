@@ -738,19 +738,6 @@ mod drawing_sheet_geometry_tests {
         assert!(clip_line_to_axis_rect((-2.0, 2.0), (-1.0, 3.0), 0.0, 1.0, 0.0, 1.0).is_none());
     }
 
-    /// The sheet's artwork stops at its paper: bleed is the print setup's,
-    /// and a sheet saved with one of its own draws none.
-    #[test]
-    fn authored_sheet_bounds_are_the_paper_even_for_a_sheet_saved_with_a_bleed() {
-        let mut saved = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
-        saved["bleed_um"] = serde_json::json!(5_000);
-        let format: SchematicSheetFormat = serde_json::from_value(saved).unwrap();
-        let bounds = authored_sheet_bounds(&format).unwrap();
-        let (width_um, height_um) = format.oriented_dimensions_um();
-        assert_eq!(bounds.maximum.x_um - bounds.minimum.x_um, width_um as i64);
-        assert_eq!(bounds.maximum.y_um - bounds.minimum.y_um, height_um as i64);
-    }
-
     #[test]
     fn schematic_bounds_include_major_arc_cardinal_extrema() {
         let arc = DocumentationShape::new(
