@@ -7124,13 +7124,14 @@ impl Engine {
         });
         // DampedNewton loads the residual and Jacobian once per candidate and
         // solves its next direction from that same load. Over a classic-MOS,
-        // diode or repeatable generated Verilog-A network of ordinary RC
-        // companions the assembly is a pure function of the candidate and the
-        // device state its load left, so the post-solve status assembly is
-        // that load.
+        // diode, promoted Gummel-Poon or repeatable generated Verilog-A
+        // network of ordinary RC companions the assembly is a pure function
+        // of the candidate and the device state its load left, so the
+        // post-solve status assembly is that load.
         let xyce_damped_status_load_is_newton_load = uses_xyce_damped_solver
             && (circuit.has_cacheable_classic_mos_transient_base()
                 || circuit.has_cacheable_diode_transient_base()
+                || circuit.has_repeatable_gummel_poon_transient_load()
                 || circuit.has_repeatable_generated_veriloga_transient_load());
         #[cfg(test)]
         let xyce_damped_status_load_is_newton_load = xyce_damped_status_load_is_newton_load

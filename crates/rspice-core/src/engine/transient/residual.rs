@@ -4226,8 +4226,8 @@ M1 d g 0 0 NM W=10u L=1u
         // DampedNewton refreshes the devices at each solved candidate and
         // assembles there for its status test. The next direction solve
         // takes that assembly instead of stamping the unchanged state again,
-        // which holds while restamping a classic-MOS or diode network is
-        // exactly idempotent.
+        // which holds while restamping a classic-MOS, diode or promoted
+        // Gummel-Poon network is exactly idempotent.
         const MOS_DECK: &str = "\
 Xyce damped status assembly, classic MOS
 VDD vdd 0 5
@@ -4247,12 +4247,29 @@ D1 d 0 DM
 .MODEL DM D IS=1e-14 CJO=1p
 .END
 ";
+        // RB above RBM gives the device a private base node, and the floating
+        // capacitor puts the transient in correction form.
+        const GUMMEL_POON_DECK: &str = "\
+Xyce damped status assembly, Gummel-Poon
+VCC vcc 0 5
+VIN in 0 DC 0 PULSE(0 1 1n 100p 100p 4n 10n)
+RS in b 1k
+RC vcc c 2k
+CF c b 1p
+Q1 c b 0 QN
+.MODEL QN NPN IS=1e-16 BF=100 RB=500 RBM=50 RE=2 RC=20 CJE=1p CJC=1p CJS=1p TF=1e-10 TR=1e-9
+.END
+";
         for (deck, perturbed) in [
-            (MOS_DECK, [("g", 1.4), ("d", 2.7)]),
-            (DIODE_DECK, [("a", 1.3), ("d", 0.62)]),
+            (MOS_DECK, &[("g", 1.4), ("d", 2.7)][..]),
+            (DIODE_DECK, &[("a", 1.3), ("d", 0.62)][..]),
+            (
+                GUMMEL_POON_DECK,
+                &[("b", 1.1), ("c", 0.2), ("q1.__bi.internal", 1.05)][..],
+            ),
         ] {
             for xyce_one_step_order2 in [false, true] {
-                check_status_assembly_reuse(deck, &perturbed, xyce_one_step_order2);
+                check_status_assembly_reuse(deck, perturbed, xyce_one_step_order2);
             }
         }
     }
@@ -4269,6 +4286,7 @@ D1 d 0 DM
         assert!(
             circuit.has_cacheable_classic_mos_transient_base()
                 || circuit.has_cacheable_diode_transient_base()
+                || circuit.has_repeatable_gummel_poon_transient_load()
         );
         let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
         circuit.link_indices(&matrix);
@@ -4337,6 +4355,9 @@ D1 d 0 DM
         }
         let mut rhs = vec![0.0; circuit.matrix_size()];
         let mut vbic_snapshot_cache = Vec::new();
+        // The transient forms the direct correction alongside the assembly
+        // where the circuit needs it; the next solve reads that too.
+        let correction_form = Engine::requires_transient_correction_form(&circuit);
         let bits = |values: &[Value]| {
             values
                 .iter()
@@ -4348,6 +4369,7 @@ D1 d 0 DM
                          rhs: &mut Vec<Value>,
                          refresh_nonlinear: bool,
                          core_evaluation: CoreEvaluation| {
+            let mut correction = Vec::new();
             engine
                 .stamp_transient_system(
                     circuit,
@@ -4361,10 +4383,10 @@ D1 d 0 DM
                     refresh_nonlinear,
                     core_evaluation,
                     0.0,
-                    None,
+                    correction_form.then_some(&mut correction),
                 )
                 .expect("assembly succeeds");
-            (bits(matrix.values_mut()), bits(rhs))
+            (bits(matrix.values_mut()), bits(rhs), bits(&correction))
         };
 
         let status = stamp(
