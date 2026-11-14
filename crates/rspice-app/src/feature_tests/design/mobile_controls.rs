@@ -1,12 +1,18 @@
 //! The canvas's touch controls driven through a whole application.
 
-use crate::schematic::view::mobile_controls::tests::strip_cx;
 use crate::schematic::view::mobile_controls::*;
-use crate::workbench::RSpiceApp;
+use crate::workbench::design::DesignFeature;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::state::Workspace;
+use crate::workbench::{RSpiceApp, features};
 use egui::Context;
 use rspice_schematic_editor::view::mobile_controls::{MobileCanvasAction, MobileCanvasRequest};
 use rspice_schematic_editor::view::navigation::ZoomRequest;
+
+/// The design feature's context, as the surface lends the strip it.
+pub(super) fn strip_cx(app: &mut RSpiceApp) -> Cx<'_, DesignFeature> {
+    features::surface_cx::<DesignFeature>(app, |_| true)
+}
 
 #[test]
 fn touch_requests_recheck_document_route_and_modal_state() {

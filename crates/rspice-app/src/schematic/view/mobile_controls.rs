@@ -134,4 +134,4 @@ pub(crate) fn execute_action(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) mod tests;
+mod tests;
