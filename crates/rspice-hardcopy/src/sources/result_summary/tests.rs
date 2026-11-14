@@ -157,6 +157,12 @@ fn typed_pstb_table_summary_preserves_complete_modes_and_global_evidence() {
             .iter()
             .any(|row| { row[0] == "Certificate problem order" && row[1] == "1" })
     );
+    assert!(
+        summary.tables[0]
+            .rows
+            .iter()
+            .any(|row| { row[0] == "Trivial multiplier index" && row[1] == "none" })
+    );
     assert_eq!(summary.tables[1].rows.len(), 1);
     assert_eq!(summary.tables[1].rows[0][1], exact_number(0.5));
     assert_eq!(summary.tables[1].rows[0][5], exact_number(0.25));

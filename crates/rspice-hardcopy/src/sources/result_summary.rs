@@ -795,7 +795,8 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
                 ),
                 periodic_metadata_row(
                     "Trivial multiplier index",
-                    optional_u64(*trivial_multiplier_index),
+                    trivial_multiplier_index
+                        .map_or_else(|| "none".to_owned(), |index| index.to_string()),
                     "zero-based",
                 ),
                 periodic_metadata_row(
@@ -891,7 +892,8 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
                 ),
                 periodic_metadata_row(
                     "Trivial multiplier index",
-                    optional_u64(*trivial_multiplier_index),
+                    trivial_multiplier_index
+                        .map_or_else(|| "none".to_owned(), |index| index.to_string()),
                     "zero-based",
                 ),
                 periodic_metadata_row(
@@ -906,7 +908,7 @@ fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<Semanti
                 ),
                 periodic_metadata_row(
                     "Minimum stability margin",
-                    optional_exact_number(*min_stability_margin_db),
+                    min_stability_margin_db.map_or_else(|| "not applicable".to_owned(), exact_number),
                     "dB",
                 ),
                 periodic_metadata_row(
@@ -1044,14 +1046,6 @@ fn append_floquet_certificate_rows(
             ),
         ]);
     }
-}
-
-fn optional_exact_number(value: Option<f64>) -> String {
-    value.map_or_else(|| "legacy unknown".to_owned(), exact_number)
-}
-
-fn optional_u64(value: Option<u64>) -> String {
-    value.map_or_else(|| "legacy unknown".to_owned(), |value| value.to_string())
 }
 
 const fn floquet_evidence_label(
