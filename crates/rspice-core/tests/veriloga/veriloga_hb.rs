@@ -1277,16 +1277,30 @@ struct SidebandNoise {
 }
 
 /// Periodic noise of `V(a)` at output sidebands -2..=2 and two offsets, on
-/// the deck's harmonic-balance carrier, with the contributions of the
-/// sources whose labels name `device`.
-fn pnoise_by_sideband(deck: &str, device: &str) -> Vec<SidebandNoise> {
+/// the deck's harmonic-balance carrier or its shooting (PSS) carrier, with
+/// the contributions of the sources whose labels name `device`.
+fn pnoise_by_sideband(deck: &str, device: &str, shooting: bool) -> Vec<SidebandNoise> {
     use rspice_core::NoAbort;
     use rspice_core::engine::{PeriodicNoiseRequest, PeriodicNoiseSidebands};
     let netlist = Netlist::parse(deck).expect("parse");
     let engine = Engine::new(SimulationConfig::default());
-    let hb = engine
-        .run_hb(&netlist, HbConfig::new(F0).with_harmonics(8))
-        .unwrap_or_else(|error| panic!("HB must run: {error}\n{deck}"));
+    let hb = (!shooting).then(|| {
+        engine
+            .run_hb(&netlist, HbConfig::new(F0).with_harmonics(8))
+            .unwrap_or_else(|error| panic!("HB must run: {error}\n{deck}"))
+    });
+    let pss = shooting.then(|| {
+        engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_harmonics(8)
+                    .with_points_per_period(256)
+                    .with_tolerance(1e-9),
+                &NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("shooting must run: {error}\n{deck}"))
+    });
     let offsets = [0.13 * F0, 0.37 * F0];
     let names = |label: &str| {
         let label = label.to_ascii_lowercase();
@@ -1296,22 +1310,27 @@ fn pnoise_by_sideband(deck: &str, device: &str) -> Vec<SidebandNoise> {
     };
     (-2..=2)
         .map(|output| {
-            let result = engine
-                .run_pnoise_from_hb_request_with_abort(
+            let request = PeriodicNoiseRequest {
+                sampling: None,
+                offsets: &offsets,
+                output_node: "a",
+                output_ref: None,
+                input_source: None,
+                max_sideband: 4,
+                sidebands: PeriodicNoiseSidebands { input: 0, output },
+            };
+            let result = match (&hb, &pss) {
+                (Some(hb), _) => engine.run_pnoise_from_hb_request_with_abort(
                     &netlist,
-                    &PeriodicNoiseRequest {
-                        sampling: None,
-                        offsets: &offsets,
-                        output_node: "a",
-                        output_ref: None,
-                        input_source: None,
-                        max_sideband: 4,
-                        sidebands: PeriodicNoiseSidebands { input: 0, output },
-                    },
+                    &request,
                     &hb.operating_point,
                     &NoAbort,
-                )
-                .unwrap_or_else(|error| panic!("pnoise must run: {error}\n{deck}"));
+                ),
+                (_, Some(point)) => engine
+                    .run_pnoise_from_pss_request_with_abort(&netlist, &request, point, &NoAbort),
+                (None, None) => unreachable!("one carrier is solved"),
+            }
+            .unwrap_or_else(|error| panic!("pnoise must run: {error}\n{deck}"));
             let mut device = vec![0.0; offsets.len()];
             for (_, values) in result.contributors.iter().filter(|(label, _)| names(label)) {
                 for (sum, value) in device.iter_mut().zip(values) {
@@ -1331,9 +1350,10 @@ fn pnoise_by_sideband(deck: &str, device: &str) -> Vec<SidebandNoise> {
 /// resistor's thermal noise, and its flicker noise modulated by the pumped
 /// current through it; and a diode's shot noise, which switches with its
 /// current. Reference: the native resistor (`AF=2` flicker) and diode on the
-/// same harmonic-balance carrier, at output sidebands -2..=2 and two
-/// offsets. Allowance: 1e-6 of the largest native total at that sideband, as
-/// for the periodic AC twins; the modules state the circuit's constants.
+/// same carrier, harmonic balance's and shooting's, at output sidebands
+/// -2..=2 and two offsets. Allowance: 1e-6 of the largest native total at
+/// that sideband, as for the periodic AC twins; the modules state the
+/// circuit's constants.
 #[test]
 fn veriloga_noise_folds_as_its_native_twins_on_a_pumped_carrier() {
     let (resistor_model, resistor_card) = two_terminal("pnoise_twin", NOISY_RESISTOR);
@@ -1352,9 +1372,11 @@ fn veriloga_noise_folds_as_its_native_twins_on_a_pumped_carrier() {
             "xd1",
         ),
     ];
-    for (native_deck, native_device, twin_deck, twin_device) in cases {
-        let native = pnoise_by_sideband(&native_deck, native_device);
-        let twin = pnoise_by_sideband(&twin_deck, twin_device);
+    for ((native_deck, native_device, twin_deck, twin_device), shooting) in
+        cases.iter().flat_map(|case| [(case, false), (case, true)])
+    {
+        let native = pnoise_by_sideband(native_deck, native_device, shooting);
+        let twin = pnoise_by_sideband(twin_deck, twin_device, shooting);
         for (sideband, (native, twin)) in (-2..=2).zip(native.iter().zip(&twin)) {
             let scale = native.total.iter().copied().fold(0.0, f64::max);
             for (index, (native_value, twin_value)) in native
@@ -1366,8 +1388,8 @@ fn veriloga_noise_folds_as_its_native_twins_on_a_pumped_carrier() {
             {
                 assert!(
                     (twin_value - native_value).abs() <= 1.0e-6 * scale,
-                    "{twin_device} sideband {sideband} value {index}: Verilog-A {twin_value:e} \
-                     against native {native_value:e}"
+                    "{twin_device} (shooting: {shooting}) sideband {sideband} value {index}: \
+                     Verilog-A {twin_value:e} against native {native_value:e}"
                 );
             }
             assert!(
