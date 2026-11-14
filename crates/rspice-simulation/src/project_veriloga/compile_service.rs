@@ -44,6 +44,7 @@ impl PipelineControl for CompileCancellation {
 /// `cells` as leaves and keeping the `delay_select` value of each
 /// min:typ:max expression: those of the netlist the project's run builds. A
 /// name neither the bundle nor `cells` defines is still an undefined module.
+#[cfg(any(test, feature = "test-support"))]
 pub fn compile_source(
     bundle: &ProjectSourceBundle,
     selected_module: Option<&str>,

@@ -137,8 +137,13 @@ fn task_in(
     dependencies: Vec<AnalysisInstanceId>,
 ) -> HeadlessTaskRequest {
     let deck = format!("{circuit}{card}\n.end\n");
-    let mut queue = rspice_simulation::manual_deck::build_manual_deck_queue(27.0, &deck)
-        .unwrap_or_else(|errors| panic!("{card} lowers: {errors:?}"));
+    let mut queue = rspice_simulation::manual_deck::build_manual_deck_queue_with_runtimes(
+        27.0,
+        &deck,
+        &rspice_simulation::veriloga::PreparedVerilogARuntimeSet::default(),
+    )
+    .map_err(rspice_simulation::manual_deck::ManualDeckError::into_messages)
+    .unwrap_or_else(|errors| panic!("{card} lowers: {errors:?}"));
     assert_eq!(queue.len(), 1, "{card}");
     let queued = queue.remove(0);
     HeadlessTaskRequest {

@@ -11,6 +11,9 @@ workspace = true
 
 [features]
 derivation-test-observation = []
+# Accessors only tests call, for dependent crates' tests. Enabled by
+# dev-dependencies; never in a shipping build.
+test-support = []
 
 [dependencies]
 rspice-vocabulary.workspace = true

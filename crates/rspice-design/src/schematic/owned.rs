@@ -154,6 +154,7 @@ impl Schematic {
     pub fn initialize_history(&mut self) {
         self.history.initialize();
     }
+    #[cfg(any(test, feature = "test-support"))]
     pub fn clear_history(&mut self) {
         self.history.clear();
     }

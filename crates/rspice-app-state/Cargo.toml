@@ -18,8 +18,12 @@ test-support = [
     "rspice-design/schematic-test-fixtures",
     "rspice-design/symbol-test-observation",
     "rspice-model-library/catalog-test-observation",
+    "rspice-model-library/test-support",
+    "rspice-project/test-support",
     "rspice-simulation/pdk-test-fixtures",
+    "rspice-simulation/test-support",
     "rspice-simulation-contract/derivation-test-observation",
+    "rspice-simulation-contract/test-support",
 ]
 
 [dependencies]
@@ -57,8 +61,8 @@ rspice-ui-kit = { workspace = true, features = ["test-support"] }
 rspice-formats = { workspace = true, features = ["result-validation-observation"] }
 rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }
 rspice-simulation-contract = { workspace = true, features = ["derivation-test-observation"] }
-rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }
-rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
+rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures", "test-support"] }
+rspice-model-library = { workspace = true, features = ["catalog-test-observation", "test-support"] }
 rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation", "test-support"] }
 base64 = "0.23"
 num-complex = "0.4"

@@ -514,6 +514,7 @@ impl ModelLibrary {
     }
 
     /// Set technology
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_technology(mut self, pdk: impl Into<String>, node: impl Into<String>) -> Self {
         self.pdk_name = pdk.into();
         self.technology_node = node.into();
@@ -622,6 +623,7 @@ impl ModelLibrary {
 
     /// Stable source revision for an editable, project-owned definition.
     #[must_use]
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn project_source_revision(&self) -> Option<ObjectRevision> {
         match self.source_authority {
             ModelSourceAuthority::ProjectOwned { revision, .. } => Some(revision),

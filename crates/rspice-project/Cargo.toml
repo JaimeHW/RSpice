@@ -13,6 +13,10 @@ workspace = true
 # Existing application fixtures may model invalid external catalog edits.
 library-test-fixtures = ["rspice-project-contract/library-test-fixtures"]
 document-fingerprint-observation = []
+# Constructors, accessors and workspace operations only tests call, for
+# dependent crates' tests. Enabled by dev-dependencies; never in a shipping
+# build.
+test-support = []
 
 [dependencies]
 rspice-formats = { workspace = true, features = ["project-results"] }

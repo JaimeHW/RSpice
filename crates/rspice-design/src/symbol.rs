@@ -874,6 +874,7 @@ impl SymbolDocument {
 
     /// Every authored text run in the body, with the point it hangs off, in
     /// body order.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn text_runs(&self) -> impl Iterator<Item = (&str, Point)> {
         self.body.iter().filter_map(|shape| match shape {
             SymbolShape::Text { anchor, text, .. } => Some((text.as_str(), *anchor)),
@@ -1062,6 +1063,7 @@ impl SymbolDocument {
     /// - Order is rewritten only when the two name sets agree exactly.
     ///   Sorting a mismatched list would interleave orphans into netlist
     ///   order, which is the one thing the order means.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn reconcile_ports(&mut self, ports: &[PortSpec]) {
         self.reconcile_typed_ports(ports, |_| None);
     }

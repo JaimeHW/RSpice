@@ -117,6 +117,7 @@ impl DeviceModel {
     }
 
     /// Set geometry limits
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_geometry(mut self, l_min: f64, l_max: f64, w_min: f64, w_max: f64) -> Self {
         self.l_min = Some(l_min);
         self.l_max = Some(l_max);
@@ -126,6 +127,7 @@ impl DeviceModel {
     }
 
     /// Add a parameter
+    #[cfg(any(test, feature = "test-support"))]
     pub fn add_parameter(&mut self, name: &str, value: f64) {
         self.parameters.insert(name.to_string(), value);
     }

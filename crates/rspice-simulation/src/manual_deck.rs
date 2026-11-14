@@ -55,6 +55,7 @@ impl From<Vec<String>> for ManualDeckError {
 }
 
 /// Parse authored analyses; returned tasks still require snapshot validation and authorization.
+#[cfg(any(test, feature = "test-support"))]
 pub fn build_manual_deck_queue(
     reference_temperature_celsius: f64,
     source: &str,
@@ -67,7 +68,7 @@ pub fn build_manual_deck_queue(
     .map_err(ManualDeckError::into_messages)
 }
 
-/// [`build_manual_deck_queue`] for a deck whose Verilog-A and HDL sources are
+/// Parse authored analyses for a deck whose Verilog-A and HDL sources are
 /// the run's sealed runtimes, with an engine refusal met while lowering kept
 /// as the structured refusal it is.
 ///

@@ -203,6 +203,7 @@ impl ProjectFile {
         }
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub fn new_with_simulation_results(
         workspace: ProjectWorkspace,
         libraries: ProjectLibraries,

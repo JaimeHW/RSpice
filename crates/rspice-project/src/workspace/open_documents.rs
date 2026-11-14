@@ -112,6 +112,7 @@ impl ProjectWorkspace {
 
     /// Display labels for the active occurrence: the root cell, then the
     /// instance descended through at each level.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn occurrence_labels(&self) -> Vec<String> {
         self.active_occurrence_or_root().labels()
     }

@@ -12,6 +12,9 @@ workspace = true
 [features]
 default = []
 pdk-test-fixtures = []
+# Conveniences only tests call, for this crate's and dependent crates' tests.
+# Enabled by dev-dependencies; never in a shipping build.
+test-support = []
 generated-veriloga-catalog = [
     "rspice-design/generated-veriloga-catalog",
     "rspice-core/veriloga-builtins",
@@ -50,4 +53,5 @@ web-sys = { workspace = true, features = ["Worker", "WorkerOptions", "WorkerType
 
 [dev-dependencies]
 rspice-design = { workspace = true, features = ["schematic-test-fixtures", "test-support"] }
+rspice-simulation-contract = { workspace = true, features = ["test-support"] }
 ron = { version = "0.12.2", features = ["integer128"] }

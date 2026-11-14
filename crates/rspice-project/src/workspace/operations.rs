@@ -1,5 +1,6 @@
 //! Project source, hardcopy and configuration transactions.
 
+#[cfg(any(test, feature = "test-support"))]
 use super::catalog::validate_hardcopy_source_set_catalog;
 use super::*;
 
@@ -143,6 +144,7 @@ impl ProjectWorkspace {
     /// Commit a validated page setup through the project dirty lifecycle.
     /// Re-saving byte-identical settings is a no-op and does not manufacture
     /// an unsaved project change.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn save_hardcopy_setup(
         &mut self,
         source: &rspice_hardcopy_contract::ActiveHardcopySource,
@@ -170,6 +172,7 @@ impl ProjectWorkspace {
 
     /// Persist a reusable project print-set mapping through the same project
     /// dirty lifecycle as document page setups.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn save_project_print_mapping(
         &mut self,
         table: rspice_hardcopy_contract::PrintMappingTable,
@@ -202,6 +205,7 @@ impl ProjectWorkspace {
 
     /// Insert or replace one exact source-set definition as a small,
     /// validated transaction. This never clones the rest of the project.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn save_hardcopy_source_set(
         &mut self,
         source_set: rspice_hardcopy_contract::sources::HardcopySourceSet,
@@ -236,6 +240,7 @@ impl ProjectWorkspace {
     }
 
     /// Remove one retained aggregate by its stable source identity.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn remove_hardcopy_source_set(&mut self, source_key: &str) -> bool {
         let before = self.hardcopy_source_sets.len();
         self.hardcopy_source_sets
@@ -319,6 +324,7 @@ impl ProjectWorkspace {
 
     /// Replace exact source bytes and enter the ordinary project dirty
     /// lifecycle. An unchanged write is a no-op and retains validation.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn replace_project_source(
         &mut self,
         language: ProjectSourceLanguage,
@@ -491,6 +497,7 @@ impl ProjectWorkspace {
         Ok(changed)
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub fn remove_project_source(
         &mut self,
         language: ProjectSourceLanguage,
@@ -505,6 +512,7 @@ impl ProjectWorkspace {
     /// Record successful validation for the document's exact current identity.
     /// This evidence is persisted and therefore marks the project dirty only
     /// when it changes.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn mark_project_source_validated(
         &mut self,
         language: ProjectSourceLanguage,
@@ -537,6 +545,7 @@ impl ProjectWorkspace {
         Ok(identity)
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub fn mark_project_sources_clean(&mut self) {
         self.project_sources_dirty = false;
     }
@@ -555,6 +564,7 @@ impl ProjectWorkspace {
     /// workspace "Make editable copy" action. Creating the source changes the
     /// persisted project, so it participates in the ordinary project dirty and
     /// save lifecycle on both native and browser targets.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn make_netlist_editable_copy(&mut self, generated: &str) -> bool {
         if self.netlist_source.is_some() {
             return false;

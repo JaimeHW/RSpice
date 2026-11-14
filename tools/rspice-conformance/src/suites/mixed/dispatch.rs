@@ -3,7 +3,7 @@
 //! # The headless path (default)
 //!
 //! The deck splits into its analysis card and its circuit. The card is lowered
-//! by `rspice_simulation::manual_deck::build_manual_deck_queue` (the reader the
+//! by `rspice_simulation::manual_deck::build_manual_deck_queue_with_runtimes` (the reader the
 //! application uses for an authored deck) and re-spelled as a study task's
 //! card (`analysis_spec_to_config(..).to_spice()`, the lowering `rspice study`
 //! applies), so the task graph is exactly what a study document of the same
@@ -1420,10 +1420,12 @@ mod tests {
 
     #[test]
     fn study_cards_match_the_study_document_lowering() {
-        let queue = rspice_simulation::manual_deck::build_manual_deck_queue(
+        let queue = rspice_simulation::manual_deck::build_manual_deck_queue_with_runtimes(
             27.0,
             "* t\n.tran 0.1u 2m\n.ac dec 10 1 10meg\n.tf v(out) vin\n.end\n",
+            &rspice_simulation::veriloga::PreparedVerilogARuntimeSet::default(),
         )
+        .map_err(rspice_simulation::manual_deck::ManualDeckError::into_messages)
         .unwrap();
         let cards: Vec<String> = queue
             .iter()

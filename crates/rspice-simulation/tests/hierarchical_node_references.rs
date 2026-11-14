@@ -53,8 +53,13 @@ fn origin() -> std::path::PathBuf {
 /// The deck's cards as the explicit task graph a study would carry.
 fn tasks() -> Vec<HeadlessTaskRequest> {
     let deck = format!("{CIRCUIT}{CARDS}.end\n");
-    let queue = rspice_simulation::manual_deck::build_manual_deck_queue(27.0, &deck)
-        .unwrap_or_else(|errors| panic!("cards lower: {errors:?}"));
+    let queue = rspice_simulation::manual_deck::build_manual_deck_queue_with_runtimes(
+        27.0,
+        &deck,
+        &rspice_simulation::veriloga::PreparedVerilogARuntimeSet::default(),
+    )
+    .map_err(rspice_simulation::manual_deck::ManualDeckError::into_messages)
+    .unwrap_or_else(|errors| panic!("cards lower: {errors:?}"));
     let mut tasks = queue
         .into_iter()
         .map(|mut queued| {

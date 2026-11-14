@@ -25,6 +25,7 @@ impl EditHistory {
         self.pending = None;
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) fn clear(&mut self) {
         self.committed.clear();
         self.pending = None;

@@ -29,3 +29,4 @@ uuid = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 ron = { version = "0.12.2", features = ["integer128"] }
+rspice-model-library = { workspace = true, features = ["test-support"] }

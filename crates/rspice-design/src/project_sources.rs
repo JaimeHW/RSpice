@@ -201,6 +201,7 @@ impl ProjectSourceLanguage {
         }
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub const fn required_extension(self) -> &'static str {
         match self {
             Self::VerilogA => ".va",
@@ -989,6 +990,7 @@ pub struct ProjectSourceRegistry {
 }
 
 impl ProjectSourceRegistry {
+    #[cfg(any(test, feature = "test-support"))]
     pub fn try_from_documents(
         documents: impl IntoIterator<Item = ProjectSourceDocument>,
     ) -> Result<Self, ProjectSourceError> {
