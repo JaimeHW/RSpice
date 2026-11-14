@@ -501,7 +501,7 @@ impl HbGeneratedDevice {
         let h = self.interval;
         let count = self.operators.len();
         let width = self.rows.len();
-        let name = self.static_probe.instance_name.clone();
+        let name = self.static_probe.instance_name.as_str();
         let refuse = |site: usize, kind: GeneratedPeriodicKind, reason: &str| {
             let operator = match kind {
                 GeneratedPeriodicKind::Derivative => "ddt",
