@@ -6,8 +6,10 @@
 //! been closed since; the design's top schematic is offered instead, and
 //! nothing at all when the design has none to offer.
 
-use crate::state::VerilogAPlacementHandoff;
-use crate::state::{CellViewRef, ViewType};
+use crate::state::{
+    CellViewRef, LibraryCellInstance, VerilogACompileReceipt, VerilogAPlacementHandoff, ViewType,
+    library_cell_placement_candidates,
+};
 use crate::workbench::app_state::Model;
 
 /// Where `handoff`'s device is offered for placement: the schematic the form
@@ -47,4 +49,44 @@ pub fn veriloga_placement_target(
         .clone()
         .filter(|remembered| open(remembered) && schematic(remembered))
         .or_else(|| schematic(&top).then_some(top))
+}
+
+/// The placement the open Verilog-A view's compile result offers: the
+/// device and where it would go.
+pub fn offered_veriloga_placement(
+    receipt: Option<&VerilogACompileReceipt>,
+    model: &Model,
+) -> Option<(VerilogAPlacementHandoff, CellViewRef)> {
+    let handoff = receipt?.placement.clone()?;
+    let target = veriloga_placement_target(model, &handoff)?;
+    Some((handoff, target))
+}
+
+/// Take the offered placement, withdrawing the offer: the schematic to
+/// switch to and the device to arm there, as the shelf arms a cell.
+pub fn take_offered_veriloga_placement(
+    receipt: &mut Option<VerilogACompileReceipt>,
+    model: &Model,
+) -> Result<(CellViewRef, LibraryCellInstance), String> {
+    let (handoff, target) = offered_veriloga_placement(receipt.as_ref(), model)
+        .ok_or_else(|| "No schematic is open to place the device in.".to_owned())?;
+    let candidate = library_cell_placement_candidates(&model.library_manager, &model.workspace)
+        .into_iter()
+        .find(|candidate| {
+            candidate.library == handoff.view.library
+                && candidate.cell == handoff.view.cell
+                && candidate.view == handoff.view.view
+        })
+        .ok_or_else(|| format!("{} is no longer a cell view.", handoff.view.display_path()))?;
+    if !candidate.ready {
+        return Err(format!(
+            "{} cannot be placed yet: {}.",
+            handoff.view.display_path(),
+            candidate.unavailable_reason
+        ));
+    }
+    if let Some(receipt) = receipt.as_mut() {
+        receipt.placement = None;
+    }
+    Ok((target, candidate.binding))
 }

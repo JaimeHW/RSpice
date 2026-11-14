@@ -8,6 +8,7 @@
 //! to remove, because removing one would disconnect whatever is wired to it.
 
 use crate::state::CellViewRef;
+use crate::workbench::WorkbenchSession;
 use crate::workbench::app_state::{Model, publish_symbol_definition_candidate};
 use crate::workbench::documents::code_workspace::{
     VerilogACellSymbol, reconciled_symbol, symbol_standing,
@@ -86,4 +87,28 @@ pub fn update_veriloga_symbol(
         )),
     }
     Ok(message)
+}
+
+/// Update the open Verilog-A view's symbol and say what happened. Once it
+/// is updated, returns the symbol to take its author to and the pins it
+/// gained, to be selected there, ready to be placed.
+pub fn update_active_veriloga_symbol_in(
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+) -> Option<(Option<CellViewRef>, Vec<String>)> {
+    let reference = model.workspace.content.active_view.clone();
+    let added = match symbol_standing(&model.library_manager, &reference) {
+        Some(VerilogACellSymbol::Drifted(drift)) => drift.missing,
+        _ => Vec::new(),
+    };
+    match update_veriloga_symbol(model, &reference) {
+        Ok(message) => {
+            wb.prompt(message);
+            Some((active_veriloga_symbol(model), added))
+        }
+        Err(message) => {
+            wb.prompt(message);
+            None
+        }
+    }
 }

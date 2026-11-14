@@ -8,7 +8,9 @@ use super::veriloga_interface::{compile_and_publish, press_strip_button};
 use crate::state::VerilogAPlacementHandoff;
 use crate::state::{Cell, CellViewRef, ComponentType, Library, Tool, View, ViewType};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::actions::veriloga_placement::veriloga_placement_target;
+use crate::workbench::app::actions::veriloga_placement::{
+    offered_veriloga_placement, veriloga_placement_target,
+};
 use crate::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
 use crate::workbench::app::veriloga_design_tests::{
     open_in_design, open_project_app, themed_context,
@@ -100,9 +102,11 @@ fn a_new_devices_first_compile_with_a_port_offers_to_place_it_where_it_came_from
         })
     );
     assert_eq!(
-        app.state
-            .offered_veriloga_placement()
-            .map(|(_, target)| target),
+        offered_veriloga_placement(
+            app.state.code.code_workspace.veriloga.receipt.as_ref(),
+            &app.state.model
+        )
+        .map(|(_, target)| target),
         Some(origin.clone())
     );
 

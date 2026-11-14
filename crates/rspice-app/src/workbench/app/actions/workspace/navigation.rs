@@ -12,12 +12,13 @@ use std::collections::BTreeMap;
 
 use crate::diagnostics::LogAnchor;
 use crate::schematic::view::violations::location_anchor;
-use crate::state::{CellViewRef, Point, RetainedSimulationState};
+use crate::state::{CellViewRef, LibraryCellInstance, Point, RetainedSimulationState};
 use crate::workbench::app::actions::hierarchy_net_highlight::NetCarry;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_design::drc::DrcSeverity;
+use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 
 use super::symbol_document::cycle_active_symbol_pin_finding;
 use super::{
@@ -76,6 +77,36 @@ impl NavigationParts<'_> {
         self.refresh_active_design_check_projection();
         self.wb
             .prompt(format!("Opened {}.", reference.display_path()));
+    }
+
+    /// Switch to the schematic `target` and arm `binding` there, as the
+    /// shelf arms a cell.
+    pub(crate) fn arm_cell_in_schematic(
+        &mut self,
+        target: CellViewRef,
+        binding: LibraryCellInstance,
+    ) {
+        self.open_workspace_view(target);
+        self.wb.activate(Workspace::Design);
+        rspice_app_state::workbench::app::schematic::placement::arm_cell_instance(
+            self.model, binding,
+        );
+    }
+
+    /// Open `symbol` in the symbol editor, where it is finished by hand,
+    /// with `pins` selected, ready to be placed.
+    pub(crate) fn open_symbol_with_pins_selected(
+        &mut self,
+        symbol: Option<CellViewRef>,
+        pins: Vec<String>,
+    ) {
+        if let Some(symbol) = symbol {
+            self.open_workspace_view(symbol);
+        }
+        self.restore.symbol.editor.set_selection(SymbolSelection {
+            pins: pins.into_iter().collect(),
+            ..SymbolSelection::default()
+        });
     }
 
     /// Descend into a hierarchical instance: open its master and record the
