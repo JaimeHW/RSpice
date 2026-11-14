@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use rspice_design::drc::DrcResult;
 
+use super::design_checks::CheckScope;
 #[cfg(test)]
 use super::design_checks::DesignCheckStatus;
 use super::diagnostic_store::listing::{ListingInputs, ListingSource};
@@ -18,7 +19,6 @@ use super::diagnostic_store::{BatchStanding, DiagnosticBatch};
 #[cfg(test)]
 use super::diagnostic_store::{DiagnosticInputs, DiagnosticRecord};
 use super::{AppState, Model, SlotFacts};
-#[cfg(test)]
 use crate::state::CellViewRef;
 use crate::time_compat::Instant;
 
@@ -184,6 +184,36 @@ impl AppState {
     pub(crate) fn clear_active_design_check(&mut self) {
         let facts = self.slot_facts();
         self.model.clear_active_design_check(facts);
+    }
+
+    /// [`Model::ensure_design_check`] with the slots' facts, stating what its
+    /// drawing sync had to say.
+    ///
+    /// [`Model::ensure_design_check`]: crate::workbench::app_state::Model::ensure_design_check
+    pub(in crate::workbench) fn ensure_design_check(
+        &mut self,
+        subject: CellViewRef,
+        scope: CheckScope,
+    ) -> Result<(), String> {
+        let facts = self.slot_facts();
+        let (outcome, prompt) = self.model.ensure_design_check(subject, scope, facts);
+        if let Some(prompt) = prompt {
+            self.prompt(prompt);
+        }
+        outcome
+    }
+
+    /// [`Model::run_active_design_checks`] with the slots' facts, stating
+    /// what its drawing sync had to say.
+    ///
+    /// [`Model::run_active_design_checks`]: crate::workbench::app_state::Model::run_active_design_checks
+    pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
+        let facts = self.slot_facts();
+        let (outcome, prompt) = self.model.run_active_design_checks(facts);
+        if let Some(prompt) = prompt {
+            self.prompt(prompt);
+        }
+        outcome
     }
 
     // Application half of a model operation; it becomes a request.

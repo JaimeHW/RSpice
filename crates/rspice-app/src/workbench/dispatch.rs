@@ -125,9 +125,12 @@ impl RSpiceApp {
         }
         if flags.contains(CommandFlags::EDITS_ACTIVE_DOCUMENT)
             && active_schematic_editor(self)
-            && self.state.schematic_edit_read_only()
+            && self.state.model.schematic_edit_read_only()
         {
-            self.state.deny_read_only_edit();
+            crate::workbench::app::deny_read_only_edit(
+                &self.state.model,
+                &mut self.state.workbench,
+            );
             return;
         }
         if flags.contains(CommandFlags::COMMITS_INSPECTOR_EDIT)
@@ -371,7 +374,10 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, MarkFailureSites(run_sequence)| {
-                if app.state.highlight_active_failure_sites() {
+                if crate::workbench::app::highlight_active_failure_sites(
+                    &mut app.state.model,
+                    &mut app.state.workbench,
+                ) {
                     app.state.results.results.marked_failure_run = run_sequence;
                 }
             },
@@ -610,9 +616,9 @@ impl Command {
         }
         if active_schematic_editor(app)
             && command_edits_schematic(self)
-            && app.state.schematic_edit_read_only()
+            && app.state.model.schematic_edit_read_only()
         {
-            app.state.deny_read_only_edit();
+            crate::workbench::app::deny_read_only_edit(&app.state.model, &mut app.state.workbench);
             return;
         }
         if self.commits_inspector_edit() && !app.state.commit_pending_inspector_edit() {

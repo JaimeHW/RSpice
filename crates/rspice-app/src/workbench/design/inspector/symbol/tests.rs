@@ -89,7 +89,7 @@ impl Editor {
                             &[],
                             &self.app.state.design.symbol.editor,
                             SymbolEditCapabilities {
-                                edit: !self.app.state.schematic_edit_read_only(),
+                                edit: !self.app.state.model.schematic_edit_read_only(),
                             },
                         ));
                     });

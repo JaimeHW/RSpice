@@ -236,17 +236,17 @@ fn a_symbol_that_fails_its_own_checks_is_refused_by_name() {
 #[test]
 fn safe_mode_locks_the_symbol_editor_and_the_banner_names_it() {
     let mut state = state_with_open_symbol(0);
-    assert!(!state.active_view_read_only());
+    assert!(!state.model.active_view_read_only());
     assert!(super::symbol_editor_copy_available(&state.model));
 
     state.model.safe_mode.active = true;
     state.model.safe_mode.applied.open_project_read_only = true;
 
     assert!(
-        state.active_view_read_only(),
+        state.model.active_view_read_only(),
         "safe mode opened the project read-only, so its symbol views are too"
     );
-    assert!(state.schematic_edit_read_only());
+    assert!(state.model.schematic_edit_read_only());
     let message = super::symbol_editor_lock_message(&state.model);
     assert!(
         message.contains("Safe mode"),

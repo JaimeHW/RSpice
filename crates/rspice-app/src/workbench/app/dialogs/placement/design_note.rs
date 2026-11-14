@@ -351,7 +351,7 @@ mod tests {
             let notes = state.model.schematic.document().design_notes.clone();
             assert!(validate_draft(&state).is_err(), "{change}");
             assert_eq!(state.design.design_note.source, Some(source));
-            if !state.schematic_edit_read_only() {
+            if !state.model.schematic_edit_read_only() {
                 state
                     .design
                     .design_note

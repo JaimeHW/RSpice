@@ -192,7 +192,9 @@ mod tests {
             SchematicNetHighlighting::SelectedNetAcrossHierarchy;
         assert!(state.light_net_named("in"), "top has a net named in");
 
-        state.descend_into_instance(Some(AMP_INSTANCES[0].to_owned()), amp.clone());
+        state
+            .navigation()
+            .descend_into_instance(Some(AMP_INSTANCES[0].to_owned()), amp.clone());
         assert_eq!(lit(&state).as_deref(), Some("IN"), "X1's port is lit");
         assert!(
             !state
@@ -206,10 +208,12 @@ mod tests {
             "the port net's wires are lit"
         );
 
-        state.ascend_workspace_level();
+        state.navigation().ascend_workspace_level();
         assert_eq!(lit(&state).as_deref(), Some("in"), "back up, in is lit");
 
-        state.descend_into_instance(Some(AMP_INSTANCES[1].to_owned()), amp);
+        state
+            .navigation()
+            .descend_into_instance(Some(AMP_INSTANCES[1].to_owned()), amp);
         assert_eq!(
             lit(&state),
             None,
@@ -225,7 +229,9 @@ mod tests {
         let mut state = reference.state;
         state.open_workspace_view(reference.top.clone());
         assert!(state.light_net_named("in"));
-        state.descend_into_instance(Some(AMP_INSTANCES[0].to_owned()), amp);
+        state
+            .navigation()
+            .descend_into_instance(Some(AMP_INSTANCES[0].to_owned()), amp);
         assert_eq!(lit(&state), None);
     }
 }

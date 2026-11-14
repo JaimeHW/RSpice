@@ -9,7 +9,7 @@ use rspice_design::drc::DrcResult;
 
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::design_checks::CheckScope;
-use crate::workbench::app_state::{AppState, Model, SlotFacts};
+use crate::workbench::app_state::{Model, SlotFacts};
 use crate::workbench::state::WorkbenchSession;
 
 /// Check Cellview, and say what it found.
@@ -84,55 +84,10 @@ fn report(
     }
 }
 
-impl AppState {
-    /// [`check_active_cellview`] for the session.
-    #[cfg(test)]
-    pub(crate) fn check_active_cellview(&mut self) -> Result<DrcResult, String> {
-        let facts = self.slot_facts();
-        check_active_cellview(&mut self.model, &mut self.workbench, facts)
-    }
-
-    /// Check Design: the configured design, walked from the simulation root,
-    /// with every schematic of the project's own libraries it never reaches.
-    #[cfg(test)]
-    pub(crate) fn check_design(&mut self) -> Result<DrcResult, String> {
-        rspice_app_runs::workbench::preflight::check_design(self)
-    }
-
-    /// [`Model::ensure_design_check`] with the slots' facts, stating what its
-    /// drawing sync had to say.
-    ///
-    /// [`Model::ensure_design_check`]: crate::workbench::app_state::Model::ensure_design_check
-    pub(in crate::workbench) fn ensure_design_check(
-        &mut self,
-        subject: CellViewRef,
-        scope: CheckScope,
-    ) -> Result<(), String> {
-        let facts = self.slot_facts();
-        let (outcome, prompt) = self.model.ensure_design_check(subject, scope, facts);
-        if let Some(prompt) = prompt {
-            self.prompt(prompt);
-        }
-        outcome
-    }
-
-    /// [`Model::run_active_design_checks`] with the slots' facts, stating
-    /// what its drawing sync had to say.
-    ///
-    /// [`Model::run_active_design_checks`]: crate::workbench::app_state::Model::run_active_design_checks
-    pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
-        let facts = self.slot_facts();
-        let (outcome, prompt) = self.model.run_active_design_checks(facts);
-        if let Some(prompt) = prompt {
-            self.prompt(prompt);
-        }
-        outcome
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
     use crate::diagnostics::LogSeverity;
     use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation, DrcViolationType};
 

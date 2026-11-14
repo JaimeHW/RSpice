@@ -172,8 +172,7 @@ fn an_unresolvable_anchor_renders_inert_and_says_why() {
         Some(anchor.clone()),
     );
 
-    let refusal = state
-        .log_anchor_refusal(&anchor)
+    let refusal = crate::workbench::app::log_anchor_refusal(&state.model, &anchor)
         .expect("a name this sheet does not draw cannot be jumped to");
     assert!(
         refusal.contains("DELETED"),
@@ -245,9 +244,7 @@ fn a_run_line_opens_its_log_and_refuses_once_the_run_is_gone() {
         .open(ConsoleChannel::Session);
     app.state.model.simulation.retained.runs.clear();
     let anchor = LogAnchor::ResultRun { run_sequence: 7 };
-    let refusal = app
-        .state
-        .log_anchor_refusal(&anchor)
+    let refusal = crate::workbench::app::log_anchor_refusal(&app.state.model, &anchor)
         .expect("a run this session dropped cannot be opened");
     assert!(refusal.contains("Run 7"), "{refusal}");
     let mut view = ConsoleView::default();

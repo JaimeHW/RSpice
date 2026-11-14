@@ -670,7 +670,9 @@ mod tests {
             .find(|crumb| crumb.label.starts_with("XAFE"))
             .and_then(|crumb| crumb.level)
             .expect("the descended level is a crumb");
-        app.state.focus_workspace_breadcrumb(intermediate);
+        app.state
+            .navigation()
+            .focus_workspace_breadcrumb(intermediate);
 
         assert_eq!(
             app.state
@@ -691,7 +693,7 @@ mod tests {
             .find(|crumb| crumb.label == "top")
             .and_then(|crumb| crumb.level)
             .expect("the design root is a crumb");
-        app.state.focus_workspace_breadcrumb(root);
+        app.state.navigation().focus_workspace_breadcrumb(root);
 
         assert!(
             app.state

@@ -745,7 +745,7 @@ fn a_read_only_sheet_states_its_properties_without_controls() {
         },
         String::new(),
     );
-    assert!(app.state.schematic_edit_read_only());
+    assert!(app.state.model.schematic_edit_read_only());
 
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(painted.starts_with("Sheet\nSize\nISO A4"), "{painted}");

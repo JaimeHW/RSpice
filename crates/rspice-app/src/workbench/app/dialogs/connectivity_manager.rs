@@ -1426,7 +1426,7 @@ impl RSpiceApp {
         connectivity_authority_error(&self.state.design.connectivity_manager, &self.state.model)
             .map_or(Ok(()), Err)?;
         if self.state.model.schematic.session.read_only
-            || self.state.active_view_read_only()
+            || self.state.model.active_view_read_only()
             || self.state.model.safe_mode.project_read_only()
         {
             return Err("The active schematic or project is read-only.".to_owned());

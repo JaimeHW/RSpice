@@ -2008,7 +2008,7 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
             &symbol_context,
         );
         assert_eq!(lit(&state).as_deref(), Some("IN"), "X1's port is lit");
-        state.ascend_workspace_level();
+        state.navigation().ascend_workspace_level();
         assert_eq!(lit(&state).as_deref(), Some("in"), "back up, in is lit");
         state.model.schematic.session.editor.selection.clear();
     }
@@ -2019,7 +2019,10 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
         .document()
         .components
         .iter()
-        .find(|component| state.hierarchy_master_for_component(component.id).is_none())
+        .find(|component| {
+            crate::workbench::app::hierarchy_master_for_component(&state.model, component.id)
+                .is_none()
+        })
         .map(|component| component.id)
         .expect("top places an ordinary part");
     click(&mut state, part);

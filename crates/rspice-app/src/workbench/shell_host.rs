@@ -846,7 +846,7 @@ impl ConsoleHost for AppState {
     }
 
     fn log_anchor_refusal(&self, anchor: &LogAnchor) -> Option<String> {
-        AppState::log_anchor_refusal(self, anchor)
+        crate::workbench::app::log_anchor_refusal(&self.model, anchor)
     }
 
     fn waive_finding(&mut self, target: &WaiverTarget, reason: &str) -> Result<(), String> {

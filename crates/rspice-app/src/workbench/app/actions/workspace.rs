@@ -14,9 +14,8 @@ mod waivers;
 
 use crate::diagnostics::LogAnchor;
 use crate::state::{CellViewRef, ComponentType, RetainedSimulationState, SchematicState, ViewType};
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::interaction_state::DragState;
-use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use symbol_document::{SymbolUiState, project_active_symbol_session};
@@ -133,222 +132,61 @@ pub(crate) fn capture_active_schematic_selection(
     ))
 }
 
-impl AppState {
-    /// [`new_schematic_document`] for the session.
-    pub(crate) fn new_schematic_document(&self) -> SchematicState {
-        new_schematic_document(
-            &self.model,
-            &self.design.schematic_snap,
-            self.design.schematic_routing_mode,
-        )
+/// Why a row carrying `anchor` cannot jump, or `None` if it can.
+///
+/// Asked while painting, so a row whose target no longer exists renders
+/// inert with the reason rather than offering a jump that refuses on
+/// click. The two answers are deliberately different surfaces: a refusal
+/// the reader can read before committing belongs in a tooltip, and only
+/// a refusal they could not have foreseen belongs in the console.
+///
+/// [`LogAnchor::Schematic`] and [`LogAnchor::Symbol`] carry geometry
+/// captured at the finding, so they always have somewhere to go — the
+/// staleness question is only asked of anchors that resolve by name.
+pub(crate) fn log_anchor_refusal(model: &Model, anchor: &LogAnchor) -> Option<String> {
+    match anchor {
+        LogAnchor::Schematic { .. } | LogAnchor::Symbol { .. } => None,
+        LogAnchor::Simulation { nets, devices } => {
+            let named = nets
+                .iter()
+                .chain(devices.iter())
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            match crate::schematic::view::drawn_failure_site_count(model, nets, devices) {
+                Err(error) => Some(error.message(&named)),
+                Ok(0) => Some(format!(
+                    "This sheet draws none of the objects that run named ({named})."
+                )),
+                Ok(_) => None,
+            }
+        }
+        LogAnchor::ResultRun { run_sequence } => model
+            .simulation
+            .retained
+            .runs
+            .iter()
+            .all(|run| run.id != *run_sequence)
+            .then(|| RetainedSimulationState::retired_run_message(*run_sequence)),
     }
 }
 
-impl AppState {
-    /// [`Model::active_view_read_only`](crate::workbench::app_state::Model::active_view_read_only)
-    /// for the session's model.
-    pub(crate) fn active_view_read_only(&self) -> bool {
-        self.model.active_view_read_only()
-    }
-
-    /// [`Model::schematic_edit_read_only`](crate::workbench::app_state::Model::schematic_edit_read_only)
-    /// for the session's model.
-    pub(crate) fn schematic_edit_read_only(&self) -> bool {
-        self.model.schematic_edit_read_only()
-    }
-
-    /// [`NavigationParts::navigate_to_log_anchor`] for the session.
-    pub(crate) fn jump_to_log_anchor(&mut self, anchor: LogAnchor) {
-        self.navigation().navigate_to_log_anchor(anchor);
-    }
-
-    /// Why a row carrying `anchor` cannot jump, or `None` if it can.
-    ///
-    /// Asked while painting, so a row whose target no longer exists renders
-    /// inert with the reason rather than offering a jump that refuses on
-    /// click. The two answers are deliberately different surfaces: a refusal
-    /// the reader can read before committing belongs in a tooltip, and only
-    /// a refusal they could not have foreseen belongs in the console.
-    ///
-    /// [`LogAnchor::Schematic`] and [`LogAnchor::Symbol`] carry geometry
-    /// captured at the finding, so they always have somewhere to go — the
-    /// staleness question is only asked of anchors that resolve by name.
-    pub(crate) fn log_anchor_refusal(&self, anchor: &LogAnchor) -> Option<String> {
-        match anchor {
-            LogAnchor::Schematic { .. } | LogAnchor::Symbol { .. } => None,
-            LogAnchor::Simulation { nets, devices } => {
-                let named = nets
-                    .iter()
-                    .chain(devices.iter())
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                match crate::schematic::view::drawn_failure_site_count(self, nets, devices) {
-                    Err(error) => Some(error.message(&named)),
-                    Ok(0) => Some(format!(
-                        "This sheet draws none of the objects that run named ({named})."
-                    )),
-                    Ok(_) => None,
-                }
-            }
-            LogAnchor::ResultRun { run_sequence } => self
-                .model
-                .simulation
-                .retained
-                .runs
-                .iter()
-                .all(|run| run.id != *run_sequence)
-                .then(|| RetainedSimulationState::retired_run_message(*run_sequence)),
-        }
-    }
-
-    /// Mark the objects the analysis on display was attributed to.
-    ///
-    /// The command form of [`highlight_failed_run_sites`], taking its
-    /// subject from the selected result so any surface can offer it without
-    /// re-deriving which run is being looked at.
-    pub(crate) fn highlight_active_failure_sites(&mut self) -> bool {
-        let Some(attribution) = self
-            .model
-            .simulation
-            .active_analysis()
-            .and_then(|analysis| analysis.failure_attribution.clone())
-        else {
-            return false;
-        };
-        let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
-        let devices: Vec<String> = attribution.devices().map(str::to_owned).collect();
-        highlight_failed_run_sites(&mut self.model, &mut self.workbench, &nets, &devices)
-    }
-
-    /// [`Model::sync_active_schematic_to_workspace`], stating what it has to
-    /// say on the status bar.
-    ///
-    /// [`Model::sync_active_schematic_to_workspace`]: crate::workbench::app_state::Model::sync_active_schematic_to_workspace
-    pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
-        sync_active_schematic(&mut self.model, &mut self.workbench);
-    }
-
-    /// [`restore_active_schematic_from_workspace`] for the session.
-    pub(crate) fn restore_active_schematic_from_workspace(&mut self) {
-        restore_active_schematic_from_workspace(
-            self.design.schematic_restore_parts(),
-            &mut self.model,
-            &self.workbench,
-            &self.runs,
-        );
-    }
-
-    /// [`NavigationParts::open_workspace_view`] for the session.
-    pub(crate) fn open_workspace_view(&mut self, reference: CellViewRef) {
-        self.navigation().open_workspace_view(reference);
-    }
-
-    /// [`NavigationParts::descend_into_instance`] for the session.
-    pub(crate) fn descend_into_instance(
-        &mut self,
-        instance: Option<String>,
-        reference: CellViewRef,
-    ) {
-        self.navigation().descend_into_instance(instance, reference);
-    }
-
-    /// What moving the canvas to another cell view or occurrence reads and
-    /// writes of the session.
-    pub(crate) fn navigation(&mut self) -> NavigationParts<'_> {
-        self.design
-            .navigation_parts(&mut self.model, &mut self.workbench, &self.runs)
-    }
-
-    /// [`deny_read_only_edit`] for the session's model, prompting on its
-    /// status bar.
-    pub(crate) fn deny_read_only_edit(&mut self) -> bool {
-        deny_read_only_edit(&self.model, &mut self.workbench)
-    }
-
-    /// [`NavigationParts::ascend_workspace_level`] for the session.
-    #[cfg(test)]
-    pub(crate) fn ascend_workspace_level(&mut self) {
-        self.navigation().ascend_workspace_level();
-    }
-
-    /// [`NavigationParts::focus_workspace_breadcrumb`] for the session.
-    #[cfg(test)]
-    pub(crate) fn focus_workspace_breadcrumb(&mut self, index: usize) {
-        self.navigation().focus_workspace_breadcrumb(index);
-    }
-
-    /// [`bump_active_schematic_epoch`] for the session.
-    pub(crate) fn bump_active_schematic_epoch(&mut self) {
-        bump_active_schematic_epoch(&mut self.design.symbol, &mut self.model, &self.workbench);
-    }
-
-    /// [`hierarchy_master_for_component`] for the session's model.
-    #[cfg(test)]
-    pub(crate) fn hierarchy_master_for_component(
-        &self,
-        component_id: u64,
-    ) -> Option<(String, CellViewRef)> {
-        hierarchy_master_for_component(&self.model, component_id)
-    }
-
-    /// [`NavigationParts::open_veriloga_source_for_component`] for the
-    /// session.
-    #[cfg(test)]
-    pub(crate) fn open_veriloga_source_for_component(&mut self, component_id: u64) -> bool {
-        self.navigation()
-            .open_veriloga_source_for_component(component_id)
-    }
-
-    /// [`NavigationParts::open_selected_instance_master`] for the session.
-    #[cfg(test)]
-    pub(crate) fn open_selected_instance_master(&mut self) {
-        self.navigation().open_selected_instance_master();
-    }
-
-    /// Why the selected instance cannot be shown in the generated deck, or
-    /// `None` when it can. Every surface that offers the jump asks this one
-    /// question, so a disabled row, a disabled palette entry and the refusal
-    /// the action itself would report cannot word the same block differently.
-    #[cfg(test)]
-    pub(crate) fn selected_instance_netlist_block(&self) -> Option<&'static str> {
-        self.model.selected_instance_generated_line().err()
-    }
-
-    /// Open the generated deck at the selected instance's card, the way
-    /// [`Self::open_selected_instance_master`] opens its schematic master.
-    ///
-    /// The Netlist workspace, the generated primary document and the caret
-    /// move as one transaction, and the status bar states where the instance
-    /// was found. The schematic selection is deliberately left alone: the netlist
-    /// navigator's reveal reads it to bring the round trip back.
-    pub(crate) fn show_selected_instance_in_netlist(&mut self) {
-        let Ok(location) = self.model.selected_instance_generated_line() else {
-            return;
-        };
-        crate::workbench::documents::netlist_document::open_generated_primary_in(
-            &mut self.model,
-            &mut self.code.netlist,
-        );
-        self.code.code_workspace.page =
-            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
-        self.workbench
-            .activate(crate::workbench::state::Workspace::Netlist);
-        self.code.netlist.cursor_line = location.line.saturating_sub(1);
-        self.code.netlist.requested_line = Some(location.line);
-        let announced = self.workbench.messages().format(
-            if location.stale {
-                crate::workbench::MessageId::NetlistShowInstanceStale
-            } else {
-                crate::workbench::MessageId::NetlistShowInstanceLocated
-            },
-            &[
-                ("instance", location.instance.as_str()),
-                ("line", &location.line.to_string()),
-            ],
-        );
-        self.prompt(announced);
-    }
+/// Mark the objects the analysis on display was attributed to.
+///
+/// The command form of [`highlight_failed_run_sites`], taking its
+/// subject from the selected result so any surface can offer it without
+/// re-deriving which run is being looked at.
+pub(crate) fn highlight_active_failure_sites(model: &mut Model, wb: &mut WorkbenchSession) -> bool {
+    let Some(attribution) = model
+        .simulation
+        .active_analysis()
+        .and_then(|analysis| analysis.failure_attribution.clone())
+    else {
+        return false;
+    };
+    let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
+    let devices: Vec<String> = attribution.devices().map(str::to_owned).collect();
+    highlight_failed_run_sites(model, wb, &nets, &devices)
 }
 
 /// Mark the design objects a failed run named, or say why it cannot.
@@ -686,16 +524,6 @@ pub(crate) fn bump_active_schematic_epoch(
 ) {
     model.active_schematic_epoch = model.active_schematic_epoch.wrapping_add(1);
     project_active_symbol_session(symbol, model, wb);
-}
-
-impl RSpiceApp {
-    pub(crate) fn restore_workspace_after_project_load(&mut self) {
-        self.state.restore_active_schematic_from_workspace();
-        self.state
-            .results
-            .analysis
-            .clear_transient_specialized_viewer_data();
-    }
 }
 
 #[cfg(test)]

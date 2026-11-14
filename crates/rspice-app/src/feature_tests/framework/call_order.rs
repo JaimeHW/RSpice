@@ -410,7 +410,13 @@ const ROUTE_OVERLAYS: &[(&str, &str)] = &[
 /// the same dispatch.
 const DISPATCH_FEATURE_COMMAND: &[Step] = &[
     ("1", &["held_back(flags, &self.state.platform).is_some()"]),
-    ("2", &["self.state.deny_read_only_edit()"]),
+    (
+        "2",
+        &["crate::workbench::app::deny_read_only_edit(\
+           &self.state.model,\
+           &mut self.state.workbench,\
+           )"],
+    ),
     ("3", &["self.state.commit_pending_inspector_edit()"]),
     ("4", &["features::execute(self, spec.key)"]),
     ("5", &["self.after_contribution()"]),
@@ -542,7 +548,10 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "12",
         &[
             "|app, MarkFailureSites(run_sequence)|",
-            "if app.state.highlight_active_failure_sites() {",
+            "if crate::workbench::app::highlight_active_failure_sites(\
+             &mut app.state.model,\
+             &mut app.state.workbench,\
+             ) {",
             "app.state.results.results.marked_failure_run = run_sequence;",
         ],
     ),

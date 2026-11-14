@@ -145,7 +145,7 @@ fn new_document_inherits_snap_targets_and_reconciles_the_preferred_pitch() {
 #[test]
 fn schematic_edit_authority_includes_late_safe_mode_project_read_only() {
     let mut state = AppState::default();
-    assert!(!state.schematic_edit_read_only());
+    assert!(!state.model.schematic_edit_read_only());
 
     state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
@@ -155,8 +155,11 @@ fn schematic_edit_authority_includes_late_safe_mode_project_read_only() {
         String::new(),
     );
 
-    assert!(state.schematic_edit_read_only());
-    assert!(state.deny_read_only_edit());
+    assert!(state.model.schematic_edit_read_only());
+    assert!(crate::workbench::app::deny_read_only_edit(
+        &state.model,
+        &mut state.workbench
+    ));
 }
 
 fn symbol_document(pins: &[(&str, PortDirection, Point)]) -> SymbolDocument {
@@ -1212,7 +1215,10 @@ fn read_only_symbol_edit_paths_use_consistent_refusal_text() {
         expected
     );
 
-    assert!(state.deny_read_only_edit());
+    assert!(crate::workbench::app::deny_read_only_edit(
+        &state.model,
+        &mut state.workbench
+    ));
     assert_eq!(state.prompt_text(), Some(expected));
 }
 
@@ -1779,7 +1785,9 @@ fn state_with_populated_user_library() -> AppState {
 fn renaming_a_cell_rewrites_the_masters_inside_every_occurrence() {
     let mut state = state_with_populated_user_library();
     let amp = CellViewRef::new("user", "amp", "schematic");
-    state.descend_into_instance(Some("XAMP".to_owned()), amp.clone());
+    state
+        .navigation()
+        .descend_into_instance(Some("XAMP".to_owned()), amp.clone());
     let path = state.model.workspace.content.occurrence_path();
     assert_eq!(path.to_string(), "/XAMP");
 
@@ -2251,7 +2259,10 @@ fn a_run_that_named_nothing_offers_no_highlight() {
         "with no failed analysis on display there is nothing to offer"
     );
     assert!(
-        !state.highlight_active_failure_sites(),
+        !crate::workbench::app::highlight_active_failure_sites(
+            &mut state.model,
+            &mut state.workbench
+        ),
         "and nothing to mark"
     );
     assert!(

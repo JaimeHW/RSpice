@@ -387,6 +387,7 @@ impl Fixture {
             .insert_schematic_editor(master.key(), child);
         self.app
             .state
+            .navigation()
             .descend_into_instance(Some("X1".into()), master.clone());
         master
     }
@@ -1048,10 +1049,11 @@ fn conductor_routes_validate_source_before_finishing() {
             match change {
                 "unchanged" => {}
                 "occurrence" => {
-                    fixture.app.state.focus_workspace_breadcrumb(0);
+                    fixture.app.state.navigation().focus_workspace_breadcrumb(0);
                     fixture
                         .app
                         .state
+                        .navigation()
                         .descend_into_instance(Some("X2".into()), master);
                 }
                 "sheet" => {

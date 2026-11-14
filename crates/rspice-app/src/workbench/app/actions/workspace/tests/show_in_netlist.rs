@@ -105,7 +105,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     let (mut state, source_id, load_id, unmapped_id) = located_instance_state();
 
     assert_eq!(
-        state.selected_instance_netlist_block(),
+        state.model.selected_instance_generated_line().err(),
         Some("select one instance")
     );
 
@@ -116,7 +116,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
         .editor
         .selection
         .select_only_component(source_id);
-    assert_eq!(state.selected_instance_netlist_block(), None);
+    assert_eq!(state.model.selected_instance_generated_line().err(), None);
 
     // The instance's own card is the first of its lines, never the
     // continuation the map also carries.
@@ -138,7 +138,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
         .selection
         .select_only_component(unmapped_id);
     assert_eq!(
-        state.selected_instance_netlist_block(),
+        state.model.selected_instance_generated_line().err(),
         Some("no netlist line for this instance")
     );
 
@@ -150,7 +150,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
         .selection
         .select_component(load_id);
     assert_eq!(
-        state.selected_instance_netlist_block(),
+        state.model.selected_instance_generated_line().err(),
         Some("select one instance")
     );
 
@@ -164,7 +164,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     state.model.netlist_artifacts.generated_document = None;
     state.model.netlist_artifacts.generated_source.clear();
     assert_eq!(
-        state.selected_instance_netlist_block(),
+        state.model.selected_instance_generated_line().err(),
         Some("no generated netlist yet — open the Netlist workspace to generate one")
     );
 }
@@ -217,7 +217,7 @@ fn showing_an_instance_from_a_stale_deck_says_so_without_blocking_the_jump() {
         .netlist_artifacts
         .current_generation_input_digest = Some(crate::state::content_digest("edited-schematic"));
 
-    assert_eq!(state.selected_instance_netlist_block(), None);
+    assert_eq!(state.model.selected_instance_generated_line().err(), None);
     state.show_selected_instance_in_netlist();
 
     assert_eq!(state.code.netlist.requested_line, Some(2));
@@ -285,5 +285,5 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
             .single_component(),
         Some(load_id)
     );
-    assert_eq!(state.selected_instance_netlist_block(), None);
+    assert_eq!(state.model.selected_instance_generated_line().err(), None);
 }

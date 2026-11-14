@@ -307,7 +307,7 @@ mod tests {
             }
             state.design.builtin_xspice_placement.close();
             assert!(state.design.builtin_xspice_placement.source.is_none());
-            if !state.schematic_edit_read_only() {
+            if !state.model.schematic_edit_read_only() {
                 state.design.builtin_xspice_placement.open(
                     descriptor.stable_id,
                     descriptor.display_name,

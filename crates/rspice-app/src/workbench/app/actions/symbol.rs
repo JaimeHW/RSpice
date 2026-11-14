@@ -25,7 +25,10 @@ impl RSpiceApp {
         let source = self.state.symbol_editor_request_source();
         bind_canvas_source(&mut self.state.design.symbol.editor, source);
         if self.state.design.symbol.editor.pending_polyline.len() < 2
-            || self.state.deny_read_only_edit()
+            || crate::workbench::app::deny_read_only_edit(
+                &self.state.model,
+                &mut self.state.workbench,
+            )
         {
             self.state.design.symbol.editor.pending_polyline.clear();
             return;

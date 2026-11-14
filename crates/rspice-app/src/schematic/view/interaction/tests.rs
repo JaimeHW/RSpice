@@ -363,7 +363,7 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
     // Start in another workspace, so landing in Design is the open's doing
     // rather than where the test began.
     state.workbench.activate(Workspace::Netlist);
-    assert!(state.open_veriloga_source_for_component(42));
+    assert!(state.navigation().open_veriloga_source_for_component(42));
     assert_eq!(
         state.model.workspace.content.active_view,
         veriloga_reference

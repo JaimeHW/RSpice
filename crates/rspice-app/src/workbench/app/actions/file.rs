@@ -417,6 +417,14 @@ impl RSpiceApp {
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
         crate::workbench::workflows::file_actions::action_file_save_with_io(state, io)
     }
+
+    pub(crate) fn restore_workspace_after_project_load(&mut self) {
+        self.state.restore_active_schematic_from_workspace();
+        self.state
+            .results
+            .analysis
+            .clear_transient_specialized_viewer_data();
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

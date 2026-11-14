@@ -235,7 +235,9 @@ pub(crate) fn answer_descend_hierarchy(state: &mut AppState, request: DescendHie
         } => {
             match edit_mode {
                 HierarchyDescendEditMode::EditInPlace => {
-                    state.descend_into_instance(Some(instance), reference);
+                    state
+                        .navigation()
+                        .descend_into_instance(Some(instance), reference);
                 }
                 HierarchyDescendEditMode::OpenIsolated => {
                     state.open_workspace_view(reference);
@@ -499,7 +501,7 @@ mod tests {
     #[test]
     fn direct_gesture_descends_in_place_without_opening_the_menu_dialog() {
         let (mut state, _, child) = hierarchy_state();
-        state.open_selected_instance_master();
+        state.navigation().open_selected_instance_master();
         assert_eq!(state.model.workspace.content.active_view, child);
         assert_eq!(
             state
@@ -522,7 +524,7 @@ mod tests {
             .preferences
             .set_toggle(TogglePreference::HierarchicalEditInPlace, false);
 
-        state.open_selected_instance_master();
+        state.navigation().open_selected_instance_master();
 
         assert_eq!(state.model.workspace.content.active_view, child);
         assert_eq!(state.model.workspace.content.hierarchy_stack, vec![child]);
@@ -613,7 +615,7 @@ mod tests {
 
         assert_eq!(state.model.workspace.content.active_view, child);
         assert!(state.model.workspace.content.active_read_only_reference());
-        assert!(state.active_view_read_only());
+        assert!(state.model.active_view_read_only());
         assert!(!state.model.schematic.session.read_only);
         assert!(
             !state
@@ -629,7 +631,7 @@ mod tests {
             !state.model.workspace.content.active_read_only_reference(),
             "the parent was never opened as a reference"
         );
-        assert!(!state.active_view_read_only());
+        assert!(!state.model.active_view_read_only());
 
         state.open_workspace_view(child);
         assert!(

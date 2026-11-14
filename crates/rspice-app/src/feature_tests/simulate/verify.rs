@@ -128,7 +128,7 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
         },
         String::new(),
     );
-    assert!(app.state.schematic_edit_read_only());
+    assert!(app.state.model.schematic_edit_read_only());
 
     let reason = tuning_commit_block_reason(
         &app.state.model,

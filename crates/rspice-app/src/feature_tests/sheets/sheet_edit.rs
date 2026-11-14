@@ -101,7 +101,7 @@ fn a_sheet_is_edited_only_on_a_writable_schematic() {
         String::new(),
     );
 
-    assert!(app.state.schematic_edit_read_only());
+    assert!(app.state.model.schematic_edit_read_only());
     assert!(!drawing_sheet_editable(
         &app.state.workbench,
         &app.state.model

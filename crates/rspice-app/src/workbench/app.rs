@@ -188,7 +188,8 @@ pub(crate) use actions::stimulus_placement::arm_placement_from_definition;
 
 pub(crate) use actions::workspace::{
     copy_active_schematic_selection, deny_read_only_edit, hierarchy_master_for_component,
-    selected_hierarchy_master, selected_instance_veriloga_source,
+    highlight_active_failure_sites, log_anchor_refusal, selected_hierarchy_master,
+    selected_instance_veriloga_source,
     symbol_document::{
         active_symbol_ports, active_symbol_save_checks, finish_symbol_parent_edit,
         generate_active_symbol_document, load_active_symbol_editor_metadata,
