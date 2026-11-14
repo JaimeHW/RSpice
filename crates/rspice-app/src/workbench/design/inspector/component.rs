@@ -263,7 +263,7 @@ pub(super) fn component_model_source_target(
         .map(|(library, model)| ComponentModelSourceTarget::Catalog { library, model })
 }
 
-pub(super) fn catalog_model_location(
+pub(crate) fn catalog_model_location(
     model: &Model,
     component: &Component,
 ) -> Option<(String, String)> {

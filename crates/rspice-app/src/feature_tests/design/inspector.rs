@@ -6,7 +6,6 @@ use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use crate::state::{
     CellViewRef, Component, ComponentType, LibraryCellInstance, Point, SchematicProbe, ViewType,
 };
-use crate::workbench::RSpiceApp;
 use crate::workbench::app::actions::workspace::inline_edit_authority;
 use crate::workbench::design::inspector::component::{
     TEMPERATURE_PARAM, apply_bound_model_choice, apply_bound_model_section, bound_model_choices,
@@ -18,12 +17,19 @@ use crate::workbench::design::inspector::inline_instance::{
 };
 use crate::workbench::design::inspector::model_evidence::component_model_evidence;
 use crate::workbench::design::inspector::tests::{
-    accesskit_nodes, app_with_model_bound_instance, painted_panel, state_with_two_components,
+    accesskit_nodes, app_with_model_bound_instance, painted_panel, seed_two_components,
 };
 use crate::workbench::design::inspector::*;
 use crate::workbench::framework::feature::SimulatePort as _;
 use crate::workbench::state::{InlineEditField, InlineEditSession, Workspace};
+use crate::workbench::{AppState, RSpiceApp};
 use std::collections::HashMap;
+
+fn state_with_two_components() -> AppState {
+    let mut state = AppState::default();
+    seed_two_components(&mut state.model);
+    state
+}
 
 #[test]
 fn each_editable_group_reserves_its_strip_only_for_its_own_fields() {

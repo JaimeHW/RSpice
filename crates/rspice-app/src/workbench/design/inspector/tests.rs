@@ -13,22 +13,26 @@ use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use crate::state::{
     Cell, Library, LibraryCellInstance, Point, PortDirection, SchematicProbe, View, ViewType,
 };
+use crate::workbench::RSpiceApp;
+use crate::workbench::design::test_host::DesignTestHost;
 use crate::workbench::docks::inspector::shared::{
     checks_status, sheet_floating_net_findings, sheet_open_pin_findings,
 };
-use crate::workbench::{AppState, RSpiceApp};
 use rspice_design::drc::DrcSeverity;
 
-pub(crate) fn state_with_two_components() -> AppState {
-    let mut state = AppState::default();
-    state
-        .model
+/// A resistor and a capacitor placed on the model's sheet.
+pub(crate) fn seed_two_components(model: &mut crate::workbench::app_state::Model) {
+    model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(0, 0));
-    state
-        .model
+    model
         .schematic
         .add_component(ComponentType::Capacitor, Point::new(40, 0));
+}
+
+pub(crate) fn state_with_two_components() -> DesignTestHost {
+    let mut state = DesignTestHost::default();
+    seed_two_components(&mut state.model);
     state
 }
 
@@ -169,99 +173,9 @@ pub(crate) fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
     text
 }
 
-/// One retained probe on a cell view whose sheet catalog holds `sheets`
-/// sheets. With two, the probe is assigned to the second one.
-#[cfg(not(target_arch = "wasm32"))]
-fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
-    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
-
-    const PROBE: u64 = 77;
-    let mut app = RSpiceApp::test_instance();
-    app.state
-        .model
-        .schematic
-        .document_mut_for_test()
-        .probes
-        .push(
-            SchematicProbe::new(
-                PROBE,
-                Point::new(10, 20),
-                "V(OUT)",
-                Some("V(OUT)".to_owned()),
-            )
-            .expect("the fixture probe is well formed"),
-        );
-    app.state.sync_active_schematic_to_workspace();
-
-    let key = app
-        .state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    let first = app
-        .state
-        .model
-        .workspace
-        .content
-        .design_management
-        .bootstrap_for_cell_view(&key, "Input stage", [PROBE])
-        .expect("the fixture cell view takes a sheet catalog");
-    if sheets > 1 {
-        let catalog = app
-            .state
-            .model
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog_mut(&key)
-            .expect("the catalog was just bootstrapped");
-        let second = catalog
-            .create_sheet(
-                SheetDefinition {
-                    name: "Output stage".to_owned(),
-                    template: SheetTemplate::AnalogSchematic,
-                    port_policy: SheetPortPolicy::TypedOffSheetPorts,
-                    explicit_page_number: Some(2),
-                },
-                Some(first),
-            )
-            .expect("a second sheet");
-        catalog
-            .assign_objects(catalog.revision(), second, [PROBE])
-            .expect("the probe takes its assignment");
-        catalog
-            .set_active(first)
-            .expect("the first sheet is active");
-    }
-    (app, PROBE)
-}
-
-/// An inspected object states which sheet holds it, by the catalog's own page
-/// number and name — and says nothing at all where there is one sheet, since
-/// naming it would only repeat the document.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn an_inspected_object_names_its_sheet_only_above_one_sheet() {
-    let (mut multi, probe) = app_with_probe_on_last_sheet(2);
-    let painted = painted_panel(|ui| probe_panel(ui, &mut multi.design_cx(), probe));
-    assert!(
-        painted.contains("Sheet 2 \u{00b7} Output stage"),
-        "the row names the ordinal and the name the catalog carries: {painted}"
-    );
-
-    let (mut single, probe) = app_with_probe_on_last_sheet(1);
-    let painted = painted_panel(|ui| probe_panel(ui, &mut single.design_cx(), probe));
-    assert!(
-        !painted.contains("Input stage"),
-        "a single-sheet cell view is its sheet, so the row is absent: {painted}"
-    );
-}
-
 #[test]
 fn an_empty_selection_inspects_the_sheet() {
-    let state = AppState::default();
+    let state = DesignTestHost::default();
     assert_eq!(subject(&state.model, &[]), DesignSubject::Sheet);
 }
 
@@ -298,7 +212,7 @@ fn one_instance_beats_the_set_and_several_fall_through_to_multi() {
 
 #[test]
 fn one_probe_has_its_own_inspector_and_mixed_selection_falls_back_to_multi() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().probes.push(
         SchematicProbe::new(73, Point::new(10, 20), "V(out)", Some("V(out)".to_owned())).unwrap(),
     );
@@ -324,7 +238,7 @@ fn one_probe_has_its_own_inspector_and_mixed_selection_falls_back_to_multi() {
 
 #[test]
 fn conductors_on_one_net_inspect_that_net_and_a_split_falls_back_to_multi() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let nets = vec![
         DesignNet {
             name: "vout".to_owned(),
@@ -375,7 +289,7 @@ fn conductors_on_one_net_inspect_that_net_and_a_split_falls_back_to_multi() {
 
 #[test]
 fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -423,7 +337,7 @@ fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
 
 #[test]
 fn explicit_junction_selection_resolves_its_live_net() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -458,7 +372,7 @@ fn explicit_junction_selection_resolves_its_live_net() {
 
 #[test]
 fn a_selected_interface_port_routes_to_the_shared_net_inspector() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let port =
         Component::new(77, ComponentType::Port, Point::origin()).with_name_value("P1", "VIN");
     state
@@ -491,7 +405,7 @@ fn a_selected_interface_port_routes_to_the_shared_net_inspector() {
 
 #[test]
 fn a_conductor_with_no_resolved_net_never_claims_one() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -506,7 +420,7 @@ fn a_conductor_with_no_resolved_net_never_claims_one() {
 
 #[test]
 fn isolated_instance_terminals_are_open_not_bound_to_synthetic_nodes() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -550,7 +464,7 @@ fn open_terminal_rows_are_disabled_while_bound_rows_remain_actionable() {
 /// names its node; the bare name is the top sheet's node of that name.
 #[test]
 fn a_net_below_the_root_is_read_under_its_instance_path() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     assert_eq!(net_engine_name(&state.model, "OUT").as_deref(), Some("out"));
     state.model.workspace.descend_into(
         "X1".to_owned(),
@@ -567,7 +481,7 @@ fn a_net_below_the_root_is_read_under_its_instance_path() {
 /// changes under one, and says nothing for a current, clean check.
 #[test]
 fn checks_header_speaks_only_when_the_check_is_not_current_and_clean() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     assert!(!checks_current(&state.model));
     assert_eq!(checks_status(&state.model).as_deref(), Some("not run"));
 
@@ -584,7 +498,7 @@ fn checks_header_speaks_only_when_the_check_is_not_current_and_clean() {
 
 #[test]
 fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let mut result = rspice_design::drc::DrcResult::new();
     result.add_violation(rspice_design::drc::DrcViolation::new(
         1,
@@ -711,7 +625,7 @@ fn a_component_does_not_claim_a_placed_cells_finding_of_the_same_name() {
 
 #[test]
 fn an_instance_rename_is_rejected_when_it_collides_or_is_empty() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -859,7 +773,7 @@ fn declared_parameters_are_typed_while_unknown_extensions_remain_lossless() {
 /// committed from the inspector while the editor beside it turned it away.
 #[test]
 fn an_inline_source_edit_is_refused_by_the_gate_the_editor_commits_through() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -914,7 +828,7 @@ fn an_inline_source_edit_is_refused_by_the_gate_the_editor_commits_through() {
 
 #[test]
 fn fresh_standard_instances_project_their_complete_typed_parameter_contract() {
-    let state = AppState::default();
+    let state = DesignTestHost::default();
     let component = Component::new(7, ComponentType::Resistor, Point::origin());
     let contract =
         inline_parameter_contract(&state.design, &state.model, &component, &HashMap::new());
@@ -937,7 +851,7 @@ fn fresh_standard_instances_project_their_complete_typed_parameter_contract() {
 
 #[test]
 fn component_identity_reports_occurrence_and_graphical_execution_views() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     assert_eq!(containing_occurrence_path(&state.model), "/");
 
     state.model.workspace.descend_into(
@@ -964,32 +878,8 @@ fn component_identity_reports_occurrence_and_graphical_execution_views() {
 }
 
 #[test]
-fn model_choices_stay_inside_the_bound_library_and_device_family() {
-    let (app, id) = app_with_model_bound_instance();
-    let component = app
-        .state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| component.id == id)
-        .expect("bound component");
-    let choices = bound_model_choices(&app.state.model, component, "OPA189_A");
-    let values = choices
-        .iter()
-        .map(|(value, _)| value.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(values, ["OPA189_A", "OPA189_B"]);
-    assert_eq!(
-        catalog_model_location(&app.state.model, component),
-        Some(("vendor_analog".to_owned(), "OPA189_A".to_owned()))
-    );
-}
-
-#[test]
 fn a_veriloga_cell_opens_its_exact_code_source_target() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let mut cell = Cell::new("sensor_bridge");
     cell.add_view(View::new("veriloga", ViewType::VerilogA));
     let mut library = Library::new("behavioral");
@@ -1093,7 +983,7 @@ fn a_mos_operating_point_shows_the_designer_set_in_engineering_units() {
 /// still the instance's own and keeps its row.
 #[test]
 fn a_level_1_mosfet_is_offered_only_the_parameters_its_card_reads() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     rspice_app_state::workbench::examples::load_example(
         "CMOS Inverter",
         &mut state.model.schematic,
@@ -1152,7 +1042,7 @@ fn a_level_1_mosfet_is_offered_only_the_parameters_its_card_reads() {
 /// another instance's operating point, or the top sheet's device of that name.
 #[test]
 fn a_device_below_the_root_is_read_under_its_instance_path() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let component =
         Component::new(7, ComponentType::Nmos, Point::origin()).with_name_value("MN", "nch");
     assert_eq!(
@@ -1294,7 +1184,7 @@ fn terminal_rows_start_at_the_panel_inset_with_no_empty_caret_column() {
 /// path names an instance the expanded hierarchy has not got. The design
 /// projection refuses such a configuration, so a surface that still shows
 /// connectivity afterwards is showing the editor buffer's.
-fn unresolve_configuration(state: &mut AppState) {
+fn unresolve_configuration(state: &mut DesignTestHost) {
     let root = state.model.workspace.content.active_view.clone();
     state
         .model
@@ -1320,7 +1210,7 @@ fn unresolve_configuration(state: &mut AppState) {
 
 #[test]
 fn the_inspector_states_an_unresolved_configuration_instead_of_buffer_connectivity() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -1363,7 +1253,7 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
     // namespaces the pages apart before anything electrical is read. The
     // inspector therefore reports one net or two depending entirely on which
     // document it read, which is what this pins.
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -1439,7 +1329,7 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
 /// provider's card even when another drawing's library defines the same name.
 #[test]
 fn a_model_the_plan_binds_reads_as_resolved_beside_another_drawings_copy() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.model_library_manager.clear();
     for name in ["alpha", "beta"] {
         let bytes = format!(".model shared_diode D(Is=1n) ; {name}\n");
@@ -1470,7 +1360,7 @@ fn a_model_the_plan_binds_reads_as_resolved_beside_another_drawings_copy() {
 fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
     use crate::state::model_library::ModelConsumerScope;
 
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.model_library_manager.clear();
     for name in ["alpha", "beta"] {
         let mut library = ModelLibrary::new(name);
@@ -1525,7 +1415,7 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
 /// reported missing.
 #[test]
 fn the_cmos_inverter_example_binds_models_the_library_resolves() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     rspice_app_state::workbench::examples::load_example(
         "CMOS Inverter",
         &mut state.model.schematic,

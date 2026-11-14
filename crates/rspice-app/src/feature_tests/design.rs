@@ -12,6 +12,7 @@ mod gestures;
 mod import_workflow;
 mod inline_instance;
 mod inspector;
+mod inspector_drawn;
 mod inspector_veriloga_modules;
 mod mobile_controls;
 mod navigator;
