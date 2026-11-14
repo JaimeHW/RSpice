@@ -3,7 +3,7 @@
 //! ```text
 //! rspice-mixed-corpus run [--design C1,C5] [--variant v] [--analysis a] [--record] [--extended]
 //!                         [--producer "<cmd>"] [--worker <web-dir>]
-//!                         [--expect-route interp|native|worker] [--jobs N]
+//!                         [--expect-route interp|native|worker] [--jobs N] [--cases <dir>]
 //! rspice-mixed-corpus case <design-dir> <variant> <analysis> <out.json> [--budget-s N] [--o5]
 //!                          [--worker <web-dir>]
 //! rspice-mixed-corpus capture --oracle O1|O4|O2|O5-O1|O5-O4|O8 [--design C1] [--update] [--jobs N]
@@ -17,7 +17,9 @@
 //! worker image's wasm-bindgen `pkg/`, as `crates/rspice-app/web` does once
 //! the browser build has generated it.
 //! `--jobs` is the most cells (or captures) running at once; the default is
-//! `runner::default_jobs()`.
+//! `runner::default_jobs()`. `--cases` keeps each cell's case result file in
+//! the directory it names, to compare two routes' values afterwards; by
+//! default they go to a temporary directory removed when the run ends.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -58,6 +60,8 @@ enum Commands {
         expect_route: Option<String>,
         #[arg(long, value_parser = job_count)]
         jobs: Option<usize>,
+        #[arg(long)]
+        cases: Option<PathBuf>,
     },
     /// Run one case in this process and write case-result.json.
     Case {
@@ -151,6 +155,7 @@ fn run() -> Result<ExitCode, String> {
             worker,
             expect_route,
             jobs,
+            cases,
         } => {
             let route = if worker.is_some() {
                 Route::Worker
@@ -158,17 +163,23 @@ fn run() -> Result<ExitCode, String> {
                 Route::compiled()
             };
             check_route(expect_route.as_deref(), route)?;
-            run_corpus(runner::RunOptions {
-                designs: design,
-                variant,
-                analysis,
-                record,
-                extended,
-                producer,
-                worker,
-                jobs: jobs.unwrap_or_default(),
-                ..options(route)?
-            })
+            let defaults = options(route)?;
+            let keep = cases.is_some();
+            run_corpus(
+                runner::RunOptions {
+                    designs: design,
+                    variant,
+                    analysis,
+                    record,
+                    extended,
+                    producer,
+                    worker,
+                    jobs: jobs.unwrap_or_default(),
+                    work: cases.unwrap_or_else(|| defaults.work.clone()),
+                    ..defaults
+                },
+                keep,
+            )
         }
         Commands::Probe {
             which,
@@ -182,13 +193,16 @@ fn run() -> Result<ExitCode, String> {
                 "d" => "P06d",
                 other => return Err(format!("unknown probe {other}; use a, b, c or d")),
             };
-            run_corpus(runner::RunOptions {
-                designs: vec![id.to_owned()],
-                record,
-                extended: true,
-                jobs: jobs.unwrap_or_default(),
-                ..options(Route::compiled())?
-            })
+            run_corpus(
+                runner::RunOptions {
+                    designs: vec![id.to_owned()],
+                    record,
+                    extended: true,
+                    jobs: jobs.unwrap_or_default(),
+                    ..options(Route::compiled())?
+                },
+                false,
+            )
         }
         Commands::Capture {
             oracle,
@@ -253,10 +267,13 @@ fn options(route: Route) -> Result<runner::RunOptions, String> {
     })
 }
 
-fn run_corpus(options: runner::RunOptions) -> Result<ExitCode, String> {
+/// Run `options`, then remove the case files unless the caller `keep`s them.
+fn run_corpus(options: runner::RunOptions, keep: bool) -> Result<ExitCode, String> {
     let started = std::time::Instant::now();
     let reports = runner::run(&options)?;
-    let _ = std::fs::remove_dir_all(&options.work);
+    if !keep {
+        let _ = std::fs::remove_dir_all(&options.work);
+    }
     // On stderr with the per-cell lines; stdout is the same for any --jobs.
     eprintln!(
         "mixed-corpus: {} cells, --jobs {}, {:.1} s",
