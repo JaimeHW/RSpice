@@ -806,6 +806,22 @@ fn deck_with_sealed_module(
     roots: &[&str],
     module: &str,
 ) -> (String, serde_json::Value) {
+    let (key, digest) = deck_key(files, roots, module);
+    let deck = format!("{title}\n.veriloga \"{key}\" {module}\nX1 q {module}\nR1 q 0 1k\n.end\n");
+    let netlist = rspice_core::Netlist::parse(&deck).expect("the deck parses");
+    let runtime = sealed_runtime(&netlist, key, digest, files, roots, module);
+    let set = rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+        .expect("one runtime is a set");
+    (deck, serde_json::to_value(&set).unwrap())
+}
+
+/// The key and digest the prepared manual-deck route seals `module` of
+/// `files` under.
+fn deck_key(
+    files: &[(&str, &str)],
+    roots: &[&str],
+    module: &str,
+) -> (String, rspice_vocabulary::product::ContentDigest) {
     let text: String = files
         .iter()
         .map(|(name, text)| format!("{name}\n{text}"))
@@ -814,9 +830,20 @@ fn deck_with_sealed_module(
     let file_name = roots[0].rsplit('/').next().unwrap();
     let key =
         rspice_simulation::netlist_preparation::deck_source_key(digest, module, module, file_name);
-    let deck = format!("{title}\n.veriloga \"{key}\" {module}\nX1 q {module}\nR1 q 0 1k\n.end\n");
-    let netlist = rspice_core::Netlist::parse(&deck).expect("the deck parses");
-    let cells = rspice_core::engine::hdl_external_cells(&netlist);
+    (key, digest)
+}
+
+/// `module` of `files` compiled with the unified runtime options against
+/// `netlist`'s cells and selection, and sealed under `key`.
+fn sealed_runtime(
+    netlist: &rspice_core::Netlist,
+    key: String,
+    digest: rspice_vocabulary::product::ContentDigest,
+    files: &[(&str, &str)],
+    roots: &[&str],
+    module: &str,
+) -> rspice_simulation::veriloga::PreparedVerilogARuntime {
+    let cells = rspice_core::engine::hdl_external_cells(netlist);
     let delay_select =
         rspice_core::engine::hdl_delay_select(&rspice_core::resolve_simulation_config(
             &rspice_core::SimulationConfig::default(),
@@ -833,7 +860,7 @@ fn deck_with_sealed_module(
     let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
         external_cells: Some(cells.clone()),
         delay_select,
-        wreal_resolution: rspice_core::engine::hdl_wreal_resolution(&netlist),
+        wreal_resolution: rspice_core::engine::hdl_wreal_resolution(netlist),
         ..rspice_simulation::compilation::unified_runtime_compiler_options()
     });
     let limits = rspice_simulation::project_veriloga::project_virtual_compile_limits();
@@ -846,19 +873,15 @@ fn deck_with_sealed_module(
         .expect("the sources prepare")
         .compile_runtime(module)
         .expect("the module compiles");
-    let runtime =
-        rspice_simulation::veriloga::PreparedVerilogARuntime::try_from_virtual_compilation_against(
-            key,
-            digest,
-            module.to_owned(),
-            &compilation,
-            Some(&cells),
-            delay_select,
-        )
-        .expect("the runtime seals");
-    let set = rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
-        .expect("one runtime is a set");
-    (deck, serde_json::to_value(&set).unwrap())
+    rspice_simulation::veriloga::PreparedVerilogARuntime::try_from_virtual_compilation_against(
+        key,
+        digest,
+        module.to_owned(),
+        &compilation,
+        Some(&cells),
+        delay_select,
+    )
+    .expect("the runtime seals")
 }
 
 const CLOCK: &str = "`timescale 1ns/1ps\nmodule clk(q);\n  output q;\n  reg q;\n  \
@@ -895,6 +918,42 @@ fn a_two_file_unit_with_a_local_header_runs_in_the_worker() {
         "top",
     );
     assert_sealed_clock_runs_in_the_worker(13, &deck, runtimes);
+}
+
+/// A project's own Verilog-A device runs in the worker beside an HDL
+/// process: the project's `vres`, a 1 kΩ resistor as `I(p, n) <+ V(p, n) / r`
+/// sealed under its project key, loads the clock's `q` where the other
+/// decks put a deck resistor, and `V(q)` steps between the same levels.
+#[wasm_bindgen_test]
+fn a_project_verilog_a_device_loads_an_hdl_process_in_the_worker() {
+    const VRES: &str = "`include \"disciplines.vams\"\nmodule vres(p, n);\n  inout p, n;\n  \
+                        electrical p, n;\n  parameter real r = 1000.0;\n  \
+                        analog I(p, n) <+ V(p, n) / r;\nendmodule\n";
+    let clock = [("clk.v", CLOCK)];
+    let (clock_key, clock_digest) = deck_key(&clock, &["clk.v"], "clk");
+    let device = [("vres.va", VRES)];
+    let device_key = "__rspice_project__/fixture/vres.va".to_owned();
+    let device_digest =
+        rspice_vocabulary::canonical::content_digest("rspice.test/project", VRES.as_bytes());
+    let deck = format!(
+        "Worker Verilog-A beside HDL\n.veriloga \"{clock_key}\" clk\n\
+         .veriloga \"{device_key}\" vres\nX1 q clk\nX2 q 0 vres\n.end\n"
+    );
+    let netlist = rspice_core::Netlist::parse(&deck).expect("the deck parses");
+    let runtimes = vec![
+        sealed_runtime(&netlist, clock_key, clock_digest, &clock, &["clk.v"], "clk"),
+        sealed_runtime(
+            &netlist,
+            device_key,
+            device_digest,
+            &device,
+            &["vres.va"],
+            "vres",
+        ),
+    ];
+    let set = rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(runtimes)
+        .expect("two runtimes are a set");
+    assert_sealed_clock_runs_in_the_worker(21, &deck, serde_json::to_value(&set).unwrap());
 }
 
 /// A file the HDL reads that the run did not seal is a located warning in
