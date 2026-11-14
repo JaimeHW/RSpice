@@ -450,8 +450,12 @@ jobs:
             os: ubuntu-24.04-arm
           - route: native
             os: ubuntu-24.04-arm
+    # No CARGO_BUILD_JOBS: the build takes every core of the runner. rustc's
+    # codegen units draw on cargo's job tokens, so one job compiled
+    # rspice-core's sixteen units one after another. Four jobs peak at 4.6 GB
+    # of rustc together (rspice-veriloga 2.2 GB, rspice-core 2.1 GB), well
+    # inside the runner's 16 GB.
     env:
-      CARGO_BUILD_JOBS: "1"
       # The route is the build; the test refuses a binary built as the other.
       # The worker route runs the interp build's cells in the browser worker
       # under Node, from the worker image generated into crates/rspice-app/web.
