@@ -321,39 +321,22 @@ pub fn set_shared_x_view(
     }
 }
 
+/// How a strip's height is shared out.
+///
+/// Its panes split what the shared X axis leaves equally, as ViVA's and
+/// EZwave's strips do: no pane's quantity is secondary to another's, and a
+/// pane weighted down was left too short to label its own axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct WaveStackGeometry {
-    /// Height of one weight unit, before a pane's own weight is applied.
-    pane_unit_height: f32,
-    total_weight: f32,
+    pane_height: f32,
     shared_x_height: f32,
     seam_height: f32,
-}
-
-/// The mockup's pane weights: the sheet's primary quantity takes three parts
-/// and every companion pane two, so a supply-current or phase pane reads as
-/// the secondary evidence it is instead of splitting the stack evenly.
-fn pane_weight(ordinal: usize, pane_count: usize) -> f32 {
-    if pane_count <= 1 {
-        1.0
-    } else if ordinal == 0 {
-        3.0
-    } else {
-        2.0
-    }
-}
-
-impl WaveStackGeometry {
-    fn pane_height(&self, ordinal: usize, pane_count: usize) -> f32 {
-        (self.pane_unit_height * pane_weight(ordinal, pane_count)).max(0.0)
-    }
 }
 
 fn wave_stack_geometry(available_height: f32, pane_count: usize) -> WaveStackGeometry {
     if pane_count == 0 || !available_height.is_finite() {
         return WaveStackGeometry {
-            pane_unit_height: 0.0,
-            total_weight: 1.0,
+            pane_height: 0.0,
             shared_x_height: 0.0,
             seam_height: 0.0,
         };
@@ -370,13 +353,9 @@ fn wave_stack_geometry(available_height: f32, pane_count: usize) -> WaveStackGeo
     // proportionally in constrained multi-pane/multi-strip arrangements.
     // The sum is exact: this function never asks the parent to grow.
     let shared_x_height = (content * RULER_SHARE).min(WAVE_SHARED_X_HEIGHT);
-    let total_weight: f32 = (0..pane_count)
-        .map(|ordinal| pane_weight(ordinal, pane_count))
-        .sum();
-    let pane_unit_height = ((content - shared_x_height) / total_weight).max(0.0);
+    let pane_height = ((content - shared_x_height) / pane_count as f32).max(0.0);
     WaveStackGeometry {
-        pane_unit_height,
-        total_weight,
+        pane_height,
         shared_x_height,
         seam_height,
     }
@@ -943,7 +922,6 @@ fn show_strip_plot(
         gutter,
     };
 
-    let mut expanded_ordinal = 0;
     for (ordinal, pane) in panes.iter().enumerate() {
         if ordinal > 0 {
             let (seam, _) = ui.allocate_exact_size(
@@ -958,8 +936,7 @@ fn show_strip_plot(
         let pane_height = if collapsed[ordinal] {
             WAVE_PANE_HEADER_HEIGHT.min(ui.available_height())
         } else {
-            expanded_ordinal += 1;
-            geometry.pane_height(expanded_ordinal - 1, expanded_count)
+            geometry.pane_height
         };
         let pane_exprs = std::mem::take(&mut pane_exprs[ordinal]);
         ui.allocate_ui_with_layout(
