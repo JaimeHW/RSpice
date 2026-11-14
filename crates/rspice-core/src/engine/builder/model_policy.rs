@@ -2307,15 +2307,16 @@ pub(super) fn collect_floating_nodes(
 
 /// What the code models' port types say about nodes the DC walk cannot see
 /// through: the walk leaves every XSPICE terminal undecided, so it reports a
-/// node a `dac_bridge` drives, and a digital net, as lacking a DC path.
+/// node a code model's voltage output drives, and a digital net, as lacking a
+/// DC path.
 ///
 /// Only the no-DC-path warning reads this. The engine's floating components
 /// are the walk's own.
 #[derive(Debug, Default)]
 pub(super) struct CodeModelNodes {
-    /// Nodes on a `dac_bridge`'s single-ended voltage output, which drives
-    /// them from ground.
-    bridge_driven: BTreeSet<String>,
+    /// Nodes on a single-ended voltage output (`dac_bridge`'s, `gain`'s, any
+    /// code model's `v` output), which drives them from ground.
+    voltage_driven: BTreeSet<String>,
     /// Nodes only event ports (digital or real) reach: event nets, which
     /// carry no voltage.
     event_only: BTreeSet<String>,
@@ -2350,7 +2351,6 @@ impl CodeModelNodes {
                 }
                 continue;
             };
-            let bridge = model_type.eq_ignore_ascii_case("dac_bridge");
             let mut specs = code_model.ports().iter();
             for port in ports {
                 let names = port.node_names();
@@ -2363,11 +2363,10 @@ impl CodeModelNodes {
                     .unwrap_or(spec.default_type);
                 if port_type.is_event_driven() {
                     event.extend(names);
-                } else if bridge
-                    && spec.name == "out"
+                } else if spec.direction == crate::xspice::PortDirection::Out
                     && port_type == crate::xspice::PortType::Voltage
                 {
-                    nodes.bridge_driven.extend(names.clone());
+                    nodes.voltage_driven.extend(names.clone());
                     analog.extend(names);
                 } else {
                     analog.extend(names);
@@ -2379,7 +2378,7 @@ impl CodeModelNodes {
     }
 
     /// The no-DC-path nodes the code models account for: event nets, and
-    /// every node of a floating component a bridge drives.
+    /// every node of a floating component a voltage output drives.
     fn accounted_floating_nodes(
         &self,
         diagnostics: &crate::netlist::DcGroundPathDiagnostics,
@@ -2393,7 +2392,7 @@ impl CodeModelNodes {
         for component in &diagnostics.floating_components {
             if component
                 .iter()
-                .any(|node| self.bridge_driven.contains(node))
+                .any(|node| self.voltage_driven.contains(node))
             {
                 accounted.extend(component.iter().cloned());
             }

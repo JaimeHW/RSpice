@@ -683,3 +683,45 @@ fn a_bridge_driven_node_and_a_digital_net_have_no_dc_path_warning() {
         "{stderr}"
     );
 }
+
+/// Every code model's single-ended voltage output drives its node from
+/// ground, not only `dac_bridge`'s: neither a `gain` output nor a `summer`
+/// output, nor the RC loads behind them, float. A capacitor midpoint still
+/// floats and is still warned.
+#[test]
+fn a_node_any_code_model_voltage_output_drives_has_no_dc_path_warning() {
+    let directory = common::test_dir("dc_path_voltage_output");
+    std::fs::write(
+        directory.join("outputs.cir"),
+        "* gain and summer outputs into RC loads beside a floating capacitor midpoint\n\
+         vin in 0 0.5\n\
+         again in g gain1\n\
+         .model gain1 gain(gain=2)\n\
+         r1 g gl 1k\n\
+         c1 gl 0 1p\n\
+         asum [in in] s sum1\n\
+         .model sum1 summer(in_gain=[1 1])\n\
+         r2 s sl 1k\n\
+         c2 sl 0 1p\n\
+         c3 in mid 1n\n\
+         c4 mid 0 1n\n\
+         .tran 1n 2u\n\
+         .end\n",
+    )
+    .unwrap();
+    let output = rspice_in(
+        &directory,
+        &["run", "outputs.cir", "-f", "csv", "-o", "out.csv"],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let warned: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("does not have a DC path to ground"))
+        .collect();
+    assert_eq!(warned.len(), 1, "{stderr}");
+    assert!(
+        warned[0].ends_with("Voltage Node (MID) does not have a DC path to ground"),
+        "{stderr}"
+    );
+}
