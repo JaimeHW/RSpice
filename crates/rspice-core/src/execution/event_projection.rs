@@ -206,25 +206,28 @@ pub enum EventProjectionError {
 
 /// The VCD bit a digital value shows as.
 ///
-/// The level survives and the strength does not, because VCD has four bit
-/// states and no drive strength:
+/// VCD has four bit states and no drive strength, so the value's twelve-state
+/// [`DigitalValue::event_code`] spells as ngspice's `eprvcd` spells it
+/// (`get_vcdval`, xspice/evt/evtprint.c:461): a strong, resistive or
+/// undetermined band keeps its level, and a high-impedance band is `z`
+/// whatever its level, which is what `z` means in an IEEE 1364 VCD.
 ///
-/// | [`DigitalState`] | VCD |
-/// |---|---|
-/// | `Zero`, `ZeroR`, `ZeroZ` | `0` |
-/// | `One`, `OneR`, `OneZ` | `1` |
-/// | `Unknown`, `UnknownR`, `UnknownZ` | `x` |
-/// | `HighZ` | `z` |
+/// | band | `0` level | `1` level | unknown level |
+/// |---|---|---|---|
+/// | strong, resistive, undetermined | `0` | `1` | `x` |
+/// | high impedance | `z` | `z` | `z` |
 ///
-/// So a resistive one and a strong one are both `1` in the dump, and
-/// [`DigitalValue::strength`] is dropped. A consumer that needs the band is
-/// looking for [`DigitalValue::event_code`], not for a VCD file.
+/// [`DigitalState::HighZ`] is `z` too. So a resistive one and a strong one
+/// are both `1` in the dump, and a code model's undriven `Uz` output is `z`.
+/// A consumer that needs the band is looking for
+/// [`DigitalValue::event_code`], not for a VCD file.
 pub fn digital_value_to_vcd_bit(value: DigitalValue) -> VcdBit {
-    match value.state {
-        DigitalState::Zero | DigitalState::ZeroR | DigitalState::ZeroZ => VcdBit::Zero,
-        DigitalState::One | DigitalState::OneR | DigitalState::OneZ => VcdBit::One,
-        DigitalState::Unknown | DigitalState::UnknownR | DigitalState::UnknownZ => VcdBit::Unknown,
-        DigitalState::HighZ => VcdBit::HighImpedance,
+    match value.event_code() {
+        0 | 3 | 9 => VcdBit::Zero,
+        1 | 4 | 10 => VcdBit::One,
+        2 | 5 | 11 => VcdBit::Unknown,
+        // 6, 7 and 8 (`0z`, `1z`, `Uz`) and 12 (`HighZ`), the only codes left.
+        _ => VcdBit::HighImpedance,
     }
 }
 
@@ -237,9 +240,9 @@ pub fn digital_value_to_vcd_bit(value: DigitalValue) -> VcdBit {
 ///
 /// - `None` — the member has no recorded point at or before the event, so the
 ///   run has not said what the bit is. VCD spells that `x`.
-/// - `Some(code)` — the level of [`DigitalValue::from_event_code`], through
-///   [`digital_value_to_vcd_bit`], so the strength drops exactly as it does
-///   for a scalar.
+/// - `Some(code)` — [`DigitalValue::from_event_code`] through
+///   [`digital_value_to_vcd_bit`], so the member spells exactly as a scalar
+///   does: its level, or `z` for a high-impedance band.
 ///
 /// The return is `None` only for a code that is not a digital event code at
 /// all. That cannot come from a history this crate recorded — every code is
@@ -1073,20 +1076,37 @@ mod tests {
     ];
 
     #[test]
-    fn every_strength_band_keeps_its_level() {
-        let levels = [
+    fn a_high_impedance_band_is_z_and_every_other_band_keeps_its_level() {
+        // A plain level takes its band from the strength it is carried at.
+        for (state, level) in [
             (DigitalState::Zero, VcdBit::Zero),
-            (DigitalState::ZeroR, VcdBit::Zero),
-            (DigitalState::ZeroZ, VcdBit::Zero),
             (DigitalState::One, VcdBit::One),
-            (DigitalState::OneR, VcdBit::One),
-            (DigitalState::OneZ, VcdBit::One),
             (DigitalState::Unknown, VcdBit::Unknown),
+        ] {
+            for strength in STRENGTHS {
+                let expected = if strength == DigitalStrength::HighZ {
+                    VcdBit::HighImpedance
+                } else {
+                    level
+                };
+                assert_eq!(
+                    digital_value_to_vcd_bit(DigitalValue::new(state, strength)),
+                    expected,
+                    "{state:?} at {strength:?}"
+                );
+            }
+        }
+        // A state that names its band keeps it, whatever it is carried at.
+        let banded = [
+            (DigitalState::ZeroR, VcdBit::Zero),
+            (DigitalState::OneR, VcdBit::One),
             (DigitalState::UnknownR, VcdBit::Unknown),
-            (DigitalState::UnknownZ, VcdBit::Unknown),
+            (DigitalState::ZeroZ, VcdBit::HighImpedance),
+            (DigitalState::OneZ, VcdBit::HighImpedance),
+            (DigitalState::UnknownZ, VcdBit::HighImpedance),
             (DigitalState::HighZ, VcdBit::HighImpedance),
         ];
-        for (state, expected) in levels {
+        for (state, expected) in banded {
             for strength in STRENGTHS {
                 assert_eq!(
                     digital_value_to_vcd_bit(DigitalValue::new(state, strength)),
@@ -1094,6 +1114,19 @@ mod tests {
                     "{state:?} at {strength:?}"
                 );
             }
+        }
+        // ngspice's own spelling of each code, in its table's order (0s 1s
+        // Us 0r 1r Ur 0z 1z Uz 0u 1u Uu), as eprvcd writes it.
+        let ngspice = "01x01xzzz01x";
+        for (code, letter) in ngspice.chars().enumerate() {
+            let value = DigitalValue::from_event_code(code as u8).expect("an event code");
+            let bit = match digital_value_to_vcd_bit(value) {
+                VcdBit::Zero => '0',
+                VcdBit::One => '1',
+                VcdBit::Unknown => 'x',
+                VcdBit::HighImpedance => 'z',
+            };
+            assert_eq!(bit, letter, "code {code} ({})", value.to_ngspice_token());
         }
     }
 
@@ -1135,8 +1168,8 @@ mod tests {
 
     #[test]
     fn a_member_code_spells_the_bit_the_dump_shows_and_an_absent_one_spells_unknown() {
-        // A held code spells its level, whatever the strength the level came
-        // from — the same table `digital_value_to_vcd_bit` applies to a scalar.
+        // A held code spells as the value it encodes — the same table
+        // `digital_value_to_vcd_bit` applies to a scalar.
         for state in [
             DigitalState::Zero,
             DigitalState::ZeroR,

@@ -1682,7 +1682,11 @@ fn transient_vcd_carries_every_event_node_at_its_own_time() {
                 change.tick,
                 point.time
             );
+            // A high-impedance band (codes 0z 1z Uz, and HighZ) is `z` whatever
+            // its level, as ngspice's eprvcd writes it; any other keeps its level.
+            let high_impedance = matches!(point.value.event_code(), 6..=8 | 12);
             let expected = match point.value.state {
+                _ if high_impedance => VcdBit::HighImpedance,
                 DigitalState::Zero | DigitalState::ZeroR | DigitalState::ZeroZ => VcdBit::Zero,
                 DigitalState::One | DigitalState::OneR | DigitalState::OneZ => VcdBit::One,
                 DigitalState::Unknown | DigitalState::UnknownR | DigitalState::UnknownZ => {
