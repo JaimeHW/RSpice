@@ -311,70 +311,43 @@ fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
-/// The application's persisted model. Its files keep the paths they had in
-/// this crate, so they are named here exactly as before.
-fn app_state_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-state/src")
+/// Every application crate's `src`: this crate's and each `rspice-app-*`
+/// crate's, read at run time rather than listed here.
+///
+/// A file that moved to another application crate keeps the path it had in
+/// this crate, so it is named in the guards exactly as before, and a new
+/// application crate is read without an edit here.
+fn app_src_dirs() -> Vec<PathBuf> {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let crates = manifest.parent().expect("the crates directory");
+    let mut dirs: Vec<PathBuf> = fs::read_dir(crates)
+        .unwrap_or_else(|error| panic!("read {}: {error}", crates.display()))
+        .map(|entry| entry.expect("directory entry").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "rspice-app" || name.starts_with("rspice-app-"))
+                && path.join("Cargo.toml").is_file()
+        })
+        .map(|path| path.join("src"))
+        .collect();
+    dirs.sort();
+    // A floor, not a tally: the application is this crate and the thirteen
+    // split out of it, and a discovery that finds fewer has lost its roots.
+    assert!(
+        dirs.len() >= 14 && dirs.contains(&src_dir()),
+        "the guards found only {} application crates under {}; a root list that stops \
+         resolving is a guard that has stopped guarding",
+        dirs.len(),
+        crates.display()
+    );
+    dirs
 }
 
-/// The application's platform services, named the same way.
-fn app_services_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-services/src")
-}
-
-/// The application's run tier, named the same way.
-fn app_runs_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-runs/src")
-}
-
-/// The application's workbench framework, named the same way.
+/// The workbench framework's `src`, where the framework's command ids are
+/// declared.
 fn app_workbench_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src")
-}
-
-/// The application's sheets feature, named the same way.
-fn app_sheets_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-sheets/src")
-}
-
-/// The application's settings feature, named the same way.
-fn app_settings_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-settings/src")
-}
-
-/// The application's results feature, named the same way.
-fn app_results_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-results/src")
-}
-
-/// The application's hardcopy feature, named the same way.
-fn app_hardcopy_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-hardcopy/src")
-}
-
-/// The application's cloud feature, named the same way.
-fn app_cloud_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-cloud/src")
-}
-
-/// The application's models feature, named the same way.
-fn app_models_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-models/src")
-}
-
-/// The application's simulate feature, named the same way.
-fn app_simulate_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-simulate/src")
-}
-
-/// The application's code feature, named the same way.
-fn app_code_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-code/src")
-}
-
-/// The application's project feature, named the same way.
-fn app_project_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-project/src")
 }
 
 fn design_model_src_dir() -> PathBuf {
@@ -531,24 +504,11 @@ fn path_grammar_is_owned_by_one_module() {
     );
 
     let mut measured: BTreeMap<String, usize> = BTreeMap::new();
-    for (prefix, root) in [
-        ("", src_dir()),
-        ("", app_state_src_dir()),
-        ("", app_services_src_dir()),
-        ("", app_runs_src_dir()),
-        ("", app_workbench_src_dir()),
-        ("", app_sheets_src_dir()),
-        ("", app_settings_src_dir()),
-        ("", app_results_src_dir()),
-        ("", app_hardcopy_src_dir()),
-        ("", app_cloud_src_dir()),
-        ("", app_models_src_dir()),
-        ("", app_simulate_src_dir()),
-        ("", app_code_src_dir()),
-        ("", app_project_src_dir()),
+    let roots = app_src_dirs().into_iter().map(|root| ("", root)).chain([
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),
-    ] {
+    ]);
+    for (prefix, root) in roots {
         for (path, file) in production_files(&root) {
             // Follow the extracted generator; other runtime modules also
             // handle filesystem paths, which have a different grammar.
@@ -646,22 +606,7 @@ fn interactive_surfaces_do_not_read_raw_workspace_buffers() {
     );
 
     let mut measured: BTreeMap<String, usize> = BTreeMap::new();
-    for root in [
-        src_dir(),
-        app_state_src_dir(),
-        app_services_src_dir(),
-        app_runs_src_dir(),
-        app_workbench_src_dir(),
-        app_sheets_src_dir(),
-        app_settings_src_dir(),
-        app_results_src_dir(),
-        app_hardcopy_src_dir(),
-        app_cloud_src_dir(),
-        app_models_src_dir(),
-        app_simulate_src_dir(),
-        app_code_src_dir(),
-        app_project_src_dir(),
-    ] {
+    for root in app_src_dirs() {
         for (path, file) in production_files(&root) {
             let code = Source::read(&file).code;
             let count: usize = RAW_BUFFER_CONSTRUCTORS
@@ -1059,33 +1004,30 @@ fn skip_payload(after: &str) -> &str {
 #[test]
 fn every_command_has_a_user_route() {
     let root = src_dir();
-    // The chrome's menus and toolbar and the framework's command ids compile
-    // in the workbench crate, at the same paths under its `src`.
+    // The framework's command ids compile in the workbench crate, at the same
+    // path under its `src`.
     let workbench_root = app_workbench_src_dir();
     let mut registry_code = None;
     let mut routing_code = None;
     let mut routes: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let app_roots = app_src_dirs();
     // A feature's commands compile in its own crate once it has one, at the
     // same path under that crate's `src`.
     let features = FEATURE_COMMAND_FILES
         .iter()
         .map(|file| {
-            let path = [
-                root.join(file),
-                app_sheets_src_dir().join(file),
-                app_settings_src_dir().join(file),
-                app_results_src_dir().join(file),
-                app_hardcopy_src_dir().join(file),
-                app_cloud_src_dir().join(file),
-                app_models_src_dir().join(file),
-                app_simulate_src_dir().join(file),
-                app_code_src_dir().join(file),
-                app_project_src_dir().join(file),
-            ]
-            .into_iter()
-            .find(|path| path.is_file())
-            .unwrap_or_else(|| root.join(file));
-            Source::read(&path).production
+            let homes: Vec<PathBuf> = app_roots
+                .iter()
+                .map(|root| root.join(file))
+                .filter(|path| path.is_file())
+                .collect();
+            let [path] = homes.as_slice() else {
+                panic!(
+                    "{file} is in {} application crates; its commands are read in exactly one",
+                    homes.len()
+                );
+            };
+            Source::read(path).production
         })
         .collect::<Vec<_>>();
     let ids = command_ids(
@@ -1094,10 +1036,9 @@ fn every_command_has_a_user_route() {
         &features,
     );
 
-    for (path, file) in production_files(&root)
-        .into_iter()
-        .chain(production_files(&workbench_root))
-    {
+    // A route is wherever it compiles: the chrome's menus and toolbar in the
+    // workbench crate, a feature's toolbar and in-place controls in its own.
+    for (path, file) in app_roots.iter().flat_map(|root| production_files(root)) {
         let code = Source::read(&file).code;
         if path == COMMAND_REGISTRY_FILE {
             registry_code = Some(code.clone());
@@ -1423,25 +1364,12 @@ fn persisted_policies_reach_a_projection() {
     // these persisted contracts.
     let mut declarations: BTreeMap<String, String> = BTreeMap::new();
     let mut projections: Vec<(String, String, String)> = Vec::new();
-    for (prefix, root) in [
-        ("", src_dir()),
-        ("", app_state_src_dir()),
-        ("", app_services_src_dir()),
-        ("", app_runs_src_dir()),
-        ("", app_workbench_src_dir()),
-        ("", app_sheets_src_dir()),
-        ("", app_settings_src_dir()),
-        ("", app_results_src_dir()),
-        ("", app_hardcopy_src_dir()),
-        ("", app_cloud_src_dir()),
-        ("", app_models_src_dir()),
-        ("", app_simulate_src_dir()),
-        ("", app_code_src_dir()),
-        ("", app_project_src_dir()),
+    let roots = app_src_dirs().into_iter().map(|root| ("", root)).chain([
         ("", design_model_src_dir()),
         ("design/", design_src_dir()),
         ("runtime/", simulation_src_dir()),
-    ] {
+    ]);
+    for (prefix, root) in roots {
         for (path, file) in production_files(&root) {
             let path = format!("{prefix}{path}");
             let declares = POLICY_RECORDS

@@ -922,28 +922,47 @@ fn workbench_dir() -> PathBuf {
     src_dir().join("workbench")
 }
 
-/// The workbench's framework modules compile as `rspice-app-workbench`, and the
-/// sheets, settings, results, hardcopy, cloud, models, simulate, code and
-/// project features as `rspice-app-sheets`, `rspice-app-settings`,
-/// `rspice-app-results`, `rspice-app-hardcopy`, `rspice-app-cloud`,
-/// `rspice-app-models`, `rspice-app-simulate`, `rspice-app-code` and
-/// `rspice-app-project`, at the paths they had here, and keep their rank in
-/// the same order: each crate's `src/workbench` is scanned beside this
-/// crate's.
-fn workbench_roots() -> [PathBuf; 11] {
-    [
-        workbench_dir(),
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src/workbench"),
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-sheets/src/workbench"),
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-settings/src/workbench"),
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-results/src/workbench"),
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-hardcopy/src/workbench"),
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-cloud/src/workbench"),
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-models/src/workbench"),
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-simulate/src/workbench"),
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-code/src/workbench"),
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-project/src/workbench"),
-    ]
+/// The `src/workbench` of every application crate from the workbench framework
+/// up: the framework's own crate and each crate that depends on it, this
+/// crate among them.
+///
+/// The framework's modules and the features' keep the paths they had here and
+/// their rank in the same order, so each such crate's `src/workbench` is
+/// scanned beside this crate's. The roots come from [`app_src_dirs`] and the
+/// manifests, so a new feature crate's interior is ranked without an edit
+/// here. The tiers below the framework — the model, the services and the run
+/// tier — mirror some of these paths too, but the crate graph orders them
+/// (`tools/ci/check_app_crate_dependencies.py`), not this table.
+fn workbench_roots() -> &'static [PathBuf] {
+    static ROOTS: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    ROOTS.get_or_init(|| {
+        let roots: Vec<PathBuf> = app_src_dirs()
+            .into_iter()
+            .filter(|src| crate_of(src) == "rspice-app-workbench" || depends_on_the_framework(src))
+            .map(|src| src.join("workbench"))
+            .collect();
+        // A floor, not a tally: this crate, the framework and the nine
+        // features that compile as crates of their own.
+        assert!(
+            roots.len() >= 11 && roots.contains(&workbench_dir()),
+            "the workbench scan found only {} roots: {roots:?}",
+            roots.len()
+        );
+        roots
+    })
+}
+
+/// Whether the crate whose `src` this is names the workbench framework among
+/// its dependencies.
+fn depends_on_the_framework(src: &Path) -> bool {
+    let manifest = src
+        .parent()
+        .expect("a source root sits in its crate's directory")
+        .join("Cargo.toml");
+    fs::read_to_string(&manifest)
+        .unwrap_or_else(|error| panic!("read {}: {error}", manifest.display()))
+        .lines()
+        .any(|line| line.trim_start().starts_with("rspice-app-workbench"))
 }
 
 /// A source's path under whichever workbench root holds it.
@@ -1590,23 +1609,9 @@ fn every_production_dialog_callsite_supplies_a_description() {
     );
 }
 
-/// The UI crates this file's accessibility scan covers, relative to the
-/// workspace's `crates/` directory.
+/// The UI crates this file's accessibility scan covers beside every
+/// application crate, relative to the workspace's `crates/` directory.
 const PAINTED_UI_CRATES: &[&str] = &[
-    "rspice-app/src",
-    "rspice-app-state/src",
-    "rspice-app-services/src",
-    "rspice-app-runs/src",
-    "rspice-app-workbench/src",
-    "rspice-app-sheets/src",
-    "rspice-app-settings/src",
-    "rspice-app-results/src",
-    "rspice-app-hardcopy/src",
-    "rspice-app-cloud/src",
-    "rspice-app-models/src",
-    "rspice-app-simulate/src",
-    "rspice-app-code/src",
-    "rspice-app-project/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",
@@ -1848,8 +1853,11 @@ fn paints_text(window: &str) -> bool {
 fn a_painted_row_reaches_the_accessibility_tree() {
     let crates_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let mut sources = Vec::new();
-    for crate_src in PAINTED_UI_CRATES {
-        sources.extend(rust_sources(&crates_root.join(crate_src)));
+    for crate_src in app_src_dirs()
+        .into_iter()
+        .chain(PAINTED_UI_CRATES.iter().map(|src| crates_root.join(src)))
+    {
+        sources.extend(rust_sources(&crate_src));
     }
 
     let mut scanned = 0_usize;
