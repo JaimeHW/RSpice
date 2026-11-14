@@ -1,34 +1,34 @@
 # variant	analysis	route	outcome	detail
 mx	op	interp	pass	op (O5-O4) [1] |a−e|=1.154e-4 allowed 6.607e-3 (a=1.202269e0, e=1.202384e0)
 mx	op	native	pass	op (O5-O4) [1] |a−e|=1.154e-4 allowed 6.607e-3 (a=1.202269e0, e=1.202384e0)
-mx	op	worker	fail	parse: parse: Parse error: subcircuit flattening error: Subcircuit JUNCAP200 has not been defined for instance XJESD
+mx	op	worker	wrong	malformed-refusal:analysis; unknown_module: Elaboration error: instance 'xjesd' (module 'JUNCAP200'): no Verilog-A module answers to that name: JUNCAP200 is a shipped compact model that this build does not include (feature veriloga-model-juncap200)
 mx	dc-line	interp	pass	line (O5-O4) [0] |a−e|=1.566e-5 allowed 6.430e-3 (a=1.143244e0, e=1.143259e0)
 mx	dc-line	native	pass	line (O5-O4) [0] |a−e|=1.566e-5 allowed 6.430e-3 (a=1.143244e0, e=1.143259e0)
-mx	dc-line	worker	fail	parse: parse: Parse error: subcircuit flattening error: Subcircuit JUNCAP200 has not been defined for instance XJESD
+mx	dc-line	worker	wrong	malformed-refusal:analysis; unknown_module: Elaboration error: instance 'xjesd' (module 'JUNCAP200'): no Verilog-A module answers to that name: JUNCAP200 is a shipped compact model that this build does not include (feature veriloga-model-juncap200)
 mx	dc-load	interp	pass	load (O5-O4) [40] |a−e|=3.179e-5 allowed 6.357e-3 (a=1.119019e0, e=1.119050e0)
 mx	dc-load	native	pass	load (O5-O4) [40] |a−e|=3.179e-5 allowed 6.357e-3 (a=1.119019e0, e=1.119050e0)
-mx	dc-load	worker	fail	parse: parse: Parse error: subcircuit flattening error: Subcircuit JUNCAP200 has not been defined for instance XJESD
+mx	dc-load	worker	wrong	malformed-refusal:analysis; unknown_module: Elaboration error: instance 'xjesd' (module 'JUNCAP200'): no Verilog-A module answers to that name: JUNCAP200 is a shipped compact model that this build does not include (feature veriloga-model-juncap200)
 mx	ac	interp	pass	psrr (O5-O4) [2] Δ=-4.463e-2 dB, -4.410e-1° allowed 2e-1 dB, 2e0°
 mx	ac	native	pass	psrr (O5-O4) [2] Δ=-4.463e-2 dB, -4.410e-1° allowed 2e-1 dB, 2e0°
-mx	ac	worker	fail	parse: parse: Parse error: subcircuit flattening error: Subcircuit JUNCAP200 has not been defined for instance XJESD
+mx	ac	worker	wrong	malformed-refusal:analysis; unknown_module: Elaboration error: instance 'xjesd' (module 'JUNCAP200'): no Verilog-A module answers to that name: JUNCAP200 is a shipped compact model that this build does not include (feature veriloga-model-juncap200)
 mx	ac@trim	interp	pass	psrr (O5) [0] Δ=4.104e-8 dB, -1.637e-12° allowed 8.7e-4 dB, 5.7e-3°
 mx	ac@trim	native	pass	psrr (O5) [0] Δ=4.104e-8 dB, -1.637e-12° allowed 8.7e-4 dB, 5.7e-3°
-mx	ac@trim	worker	fail	parse: parse: Parse error: subcircuit flattening error: Subcircuit JUNCAP200 has not been defined for instance XJESD
+mx	ac@trim	worker	wrong	malformed-refusal:analysis; unknown_module: Elaboration error: instance 'xjesd' (module 'JUNCAP200'): no Verilog-A module answers to that name: JUNCAP200 is a shipped compact model that this build does not include (feature veriloga-model-juncap200)
 mx	stb	interp	pass	margins.gm (O5-O1) [0] |a−e|=6.488e-7 allowed 5.000e-1 (a=8.475355e1, e=8.475355e1)
 mx	stb	native	pass	margins.gm (O5-O1) [0] |a−e|=6.488e-7 allowed 5.000e-1 (a=8.475355e1, e=8.475355e1)
-mx	stb	worker	fail	simulation: simulation: Invalid configuration: STB analysis error: Netlist error: subcircuit flattening error: Subcircuit JUNCAP200 has not been defined for instance XJESD
+mx	stb	worker	fail	simulation: simulation: Invalid configuration: STB analysis error: Elaboration error: instance 'xjesd' (module 'JUNCAP200'): no Verilog-A module answers to that name: JUNCAP200 is a shipped compact model that this build does not include (feature veriloga-model-jun
 mx	noise	interp	pass	vn (O5-O1) [0] |a−e|=1.859e-15 allowed 4.351e-14 (a=8.683464e-13, e=8.702050e-13)
 mx	noise	native	pass	vn (O5-O1) [0] |a−e|=1.859e-15 allowed 4.351e-14 (a=8.683464e-13, e=8.702050e-13)
-mx	noise	worker	fail	parse: parse: Parse error: subcircuit flattening error: Subcircuit JUNCAP200 has not been defined for instance XJESD
+mx	noise	worker	wrong	malformed-refusal:analysis; unknown_module: Elaboration error: instance 'xjesd' (module 'JUNCAP200'): no Verilog-A module answers to that name: JUNCAP200 is a shipped compact model that this build does not include (feature veriloga-model-juncap200)
 mx	tf	interp	pass	tf (O5) [1] |a−e|=1.478e-5 allowed 2.301e-1 (a=2.301378e4, e=2.301378e4)
 mx	tf	native	pass	tf (O5) [1] |a−e|=1.478e-5 allowed 2.301e-1 (a=2.301378e4, e=2.301378e4)
-mx	tf	worker	fail	simulation: simulation: Invalid configuration: DC transfer-function analysis error: Netlist error: subcircuit flattening error: Subcircuit JUNCAP200 has not been defined for instance XJESD
+mx	tf	worker	fail	simulation: simulation: Invalid configuration: DC transfer-function analysis error: Elaboration error: instance 'xjesd' (module 'JUNCAP200'): no Verilog-A module answers to that name: JUNCAP200 is a shipped compact model that this build does not include (feature v
 mx	sens	interp	pass	sens (O5-O1) [1] |a−e|=8.678e-12 allowed 8.582e-8 (a=-8.582326e-6, e=-8.582317e-6)
 mx	sens	native	pass	sens (O5-O1) [1] |a−e|=8.678e-12 allowed 8.582e-8 (a=-8.582326e-6, e=-8.582317e-6)
-mx	sens	worker	fail	parse: parse: Parse error: subcircuit flattening error: Subcircuit JUNCAP200 has not been defined for instance XJESD
+mx	sens	worker	wrong	malformed-refusal:analysis; unknown_module: Elaboration error: instance 'xjesd' (module 'JUNCAP200'): no Verilog-A module answers to that name: JUNCAP200 is a shipped compact model that this build does not include (feature veriloga-model-juncap200)
 mx	pz	interp	pass	pz (O5) pole |a−e|=0.000e0 allowed 2.478e2 at e=-247803169.5444901+0i; pending 1
 mx	pz	native	pass	pz (O5) pole |a−e|=0.000e0 allowed 2.478e2 at e=-247803169.5444901+0i; pending 1
-mx	pz	worker	fail	parse: parse: Parse error: subcircuit flattening error: Subcircuit JUNCAP200 has not been defined for instance XJESD
+mx	pz	worker	wrong	malformed-refusal:analysis; unknown_module: Elaboration error: instance 'xjesd' (module 'JUNCAP200'): no Verilog-A module answers to that name: JUNCAP200 is a shipped compact model that this build does not include (feature veriloga-model-juncap200)
 mx	tran	interp	pass	trim (O5-O1) [0] |a−e|=4.107e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)
 mx	tran	native	pass	trim (O5-O1) [0] |a−e|=4.107e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)
-mx	tran	worker	fail	parse: parse: Parse error: subcircuit flattening error: Subcircuit JUNCAP200 has not been defined for instance XJESD
+mx	tran	worker	wrong	malformed-refusal:analysis; unknown_module: Elaboration error: instance 'xjesd' (module 'JUNCAP200'): no Verilog-A module answers to that name: JUNCAP200 is a shipped compact model that this build does not include (feature veriloga-model-juncap200)
