@@ -24,6 +24,16 @@ impl SourceSimulator {
     pub const fn is_native(&self) -> bool {
         matches!(self, Self::Native)
     }
+
+    /// The simulator whose source defaults a drawing from this program asks
+    /// for; a native project names none.
+    pub const fn core_source(self) -> Option<rspice_core::netlist::SourceSimulator> {
+        match self {
+            Self::Native => None,
+            Self::Ltspice => Some(rspice_core::netlist::SourceSimulator::Ltspice),
+            Self::Qspice => Some(rspice_core::netlist::SourceSimulator::Qspice),
+        }
+    }
 }
 
 impl SimulationCompatibility {

@@ -3,10 +3,10 @@
 //! Everything here is a choice of *x-range* or a restatement of a number the
 //! engine resolved. Nothing evaluates a waveform: the trace comes from
 //! [`sample_trace`], which asks the transient's own evaluator, and every
-//! substituted field — a pulse width the card omitted, a sine frequency that
-//! defaults to `1 / TSTOP`, an exponential time constant that defaults to
-//! TSTEP — is read back out of `rspice_core`'s resolvers rather than worked
-//! out again up here. The breakpoints a trace is measured at come from those
+//! substituted field — a pulse width the card omitted, a sine frequency the
+//! ngspice dialect defaults to `1 / TSTOP`, an exponential time constant it
+//! defaults to TSTEP — is read back out of `rspice_core`'s resolvers rather
+//! than worked out again up here. The breakpoints a trace is measured at come from those
 //! same resolvers, which is why they are stated here beside the guides that
 //! label a handful of them.
 //!
@@ -26,8 +26,8 @@ use rspice_core::circuit::VoltageSources;
 use rspice_core::netlist::SourceSpec;
 
 use super::{
-    DETACHED_NETS, PREVIEW_DIALECT, PreviewTiming, PreviewWindow, WaveformReadouts, WaveformTrace,
-    preview_defect, sample_trace, source_spec, transient_part,
+    DETACHED_NETS, PreviewTiming, PreviewWindow, WaveformReadouts, WaveformTrace, preview_defect,
+    sample_trace, source_spec, transient_part,
 };
 use crate::state::Component;
 use crate::state::format_engineering_display;
@@ -374,16 +374,12 @@ pub fn names_design_variable(record: &StimulusDefinition) -> bool {
 fn fit_span(spec: &SourceSpec, timing: PreviewTiming) -> f64 {
     let stop = timing.tstop;
     match spec {
-        SourceSpec::Pulse {
-            width_defaults_to_zero,
-            pulse_count,
-            ..
-        } => {
-            let Some((delay, rise, fall, _, period)) = pulse_timing(spec, timing) else {
+        SourceSpec::Pulse { pulse_count, .. } => {
+            let Some((delay, rise, fall, width, period)) = pulse_timing(spec, timing) else {
                 return stop;
             };
             let lead = delay.max(0.0);
-            if *width_defaults_to_zero {
+            if is_one_triangle(width, period, timing) {
                 return lead + ((rise + fall) * 4.0).min(stop);
             }
             let cycles = if *pulse_count > 0.0 {
@@ -404,7 +400,13 @@ fn fit_span(spec: &SourceSpec, timing: PreviewTiming) -> f64 {
             ..
         } => {
             let (td1, tau1, td2, tau2) = exp_timing(*td1, *tau1, *td2, *tau2, timing);
-            (td2 + 6.0 * tau2).max(td1 + 6.0 * tau1)
+            let rise = td1 + 6.0 * tau1;
+            // A fall that never comes (an infinite TD2) frames the rise alone.
+            if td2.is_finite() {
+                (td2 + 6.0 * tau2).max(rise)
+            } else {
+                rise
+            }
         }
         SourceSpec::ExpTrain(train) => (train.td1 + 3.0 * train.period)
             .max(train.td2 + 6.0 * train.tau2)
@@ -814,7 +816,6 @@ fn readouts_of(
         SourceSpec::Pulse {
             v1,
             v2,
-            width_defaults_to_zero,
             pulse_count,
             ..
         } => {
@@ -826,7 +827,7 @@ fn readouts_of(
             rows.push(row("PER", seconds_free(period, "s")));
             rows.push(row(
                 "duty",
-                if *width_defaults_to_zero {
+                if is_one_triangle(width, period, timing) {
                     "one triangle".to_owned()
                 } else if period > 0.0 {
                     format!("{:.1} %", (width + (rise + fall) * 0.5) / period * 100.0)
@@ -993,6 +994,12 @@ fn readouts_of(
     rows
 }
 
+/// Whether a resolved `PULSE` is a single zero-width triangle: no width, and a
+/// period that never comes round within the run.
+fn is_one_triangle(width: f64, period: f64, timing: PreviewTiming) -> bool {
+    width <= 0.0 && period >= timing.tstop
+}
+
 /// The `PULSE` timing this transient resolves, in card order.
 fn pulse_timing(spec: &SourceSpec, timing: PreviewTiming) -> Option<(f64, f64, f64, f64, f64)> {
     let SourceSpec::Pulse {
@@ -1001,7 +1008,6 @@ fn pulse_timing(spec: &SourceSpec, timing: PreviewTiming) -> Option<(f64, f64, f
         fall,
         width,
         period,
-        width_defaults_to_zero,
         ..
     } = spec
     else {
@@ -1013,10 +1019,9 @@ fn pulse_timing(spec: &SourceSpec, timing: PreviewTiming) -> Option<(f64, f64, f
         *fall,
         *width,
         *period,
-        *width_defaults_to_zero,
         timing.tstep,
         timing.tstop,
-        PREVIEW_DIALECT,
+        timing.rules,
     ))
 }
 
@@ -1037,7 +1042,7 @@ fn exp_timing(
         td2,
         tau2,
         timing.tstep,
-        PREVIEW_DIALECT,
+        timing.rules,
     )
 }
 
@@ -1046,7 +1051,7 @@ fn sin_frequency(frequency: f64, timing: PreviewTiming) -> f64 {
         frequency,
         timing.tstep,
         timing.tstop,
-        PREVIEW_DIALECT,
+        timing.rules,
     )
 }
 
@@ -1062,7 +1067,7 @@ fn sffm_parameters(
         signal,
         timing.tstep,
         timing.tstop,
-        PREVIEW_DIALECT,
+        timing.rules,
     )
 }
 
@@ -1072,7 +1077,7 @@ fn am_frequencies(modulating: f64, carrier: f64, timing: PreviewTiming) -> (f64,
         carrier,
         timing.tstep,
         timing.tstop,
-        PREVIEW_DIALECT,
+        timing.rules,
     )
 }
 
@@ -1172,6 +1177,7 @@ mod tests {
             tstep: tstop / 1000.0,
             tstop,
             from_analysis: true,
+            ..PreviewTiming::default()
         }
     }
 
@@ -1192,13 +1198,13 @@ mod tests {
             .map(|guide| guide.time)
     }
 
-    /// The ngspice-46/47 pin, restated as a readout. `PULSE(V1 V2 TD TR TF)`
-    /// resolves to PW = 0 and PER = TSTOP, and the strip has to say so rather
-    /// than computing a duty cycle from the fields the card shows.
+    /// `PULSE(V1 V2 TD TR TF 0)` resolves to PER = TSTOP, one zero-width
+    /// triangle, and the strip has to say so rather than computing a duty
+    /// cycle from the fields the card shows.
     #[test]
-    fn an_edges_only_pulse_reads_zero_width_and_one_triangle() {
+    fn a_zero_width_pulse_reads_zero_width_and_one_triangle() {
         let spec = rspice_core::netlist::parse_source_spec_text(
-            "PULSE(0 5 0 1n 1n)",
+            "PULSE(0 5 0 1n 1n 0)",
             0,
             &rspice_core::netlist::ParamContext::new(),
         )
@@ -1228,18 +1234,27 @@ mod tests {
         assert_eq!(guide(&realization, "PER"), Some(1e-3));
     }
 
-    /// An omitted SIN frequency is `1 / TSTOP`, so the strip's `f` is a
-    /// property of the reading transient and not of the card.
+    fn ngspice_timing(tstop: f64) -> PreviewTiming {
+        PreviewTiming {
+            rules: rspice_core::config::SpiceDialect::Ngspice.into(),
+            ..timing(tstop)
+        }
+    }
+
+    /// An omitted SIN frequency is `1 / TSTOP` under the ngspice dialect, so
+    /// the strip's `f` is a property of the reading transient and not of the
+    /// card. RSpice's own rules run it at 0 Hz, as LTspice does.
     #[test]
-    fn an_omitted_sine_frequency_reads_one_over_the_stop_time() {
+    fn an_omitted_sine_frequency_reads_the_plans_rules() {
         let spec = rspice_core::netlist::parse_source_spec_text(
             "SIN(0 1)",
             0,
             &rspice_core::netlist::ParamContext::new(),
         )
         .expect("spec");
-        assert!((sin_frequency_of(&spec, timing(1e-3)) - 1e3).abs() < 1e-6);
-        assert!((sin_frequency_of(&spec, timing(1e-1)) - 10.0).abs() < 1e-9);
+        assert!((sin_frequency_of(&spec, ngspice_timing(1e-3)) - 1e3).abs() < 1e-6);
+        assert!((sin_frequency_of(&spec, ngspice_timing(1e-1)) - 10.0).abs() < 1e-9);
+        assert_eq!(sin_frequency_of(&spec, timing(1e-3)), 0.0);
     }
 
     fn sin_frequency_of(spec: &SourceSpec, timing: PreviewTiming) -> f64 {
@@ -1264,13 +1279,18 @@ mod tests {
         assert_eq!(readout(&realization, "FM"), "1 kHz");
     }
 
+    /// A zero time constant is TSTEP under the ngspice dialect and an ideal
+    /// step under RSpice's own rules; the strip states whichever ran.
     #[test]
     fn an_exponential_reads_the_time_constants_the_engine_substitutes() {
         let record = definition(ComponentType::VoltageSourceExp, "0", "v2=1 tau1=0 tau2=0");
-        let realization = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-3));
+        let ngspice = StimulusRealization::of(&record, SpanChoice::Fit, ngspice_timing(1e-3));
+        assert_eq!(readout(&ngspice, "τ rise"), "1 µs");
+        assert_eq!(readout(&ngspice, "τ fall"), "1 µs");
 
-        assert_eq!(readout(&realization, "τ rise"), "1 µs");
-        assert_eq!(readout(&realization, "τ fall"), "1 µs");
+        let own = StimulusRealization::of(&record, SpanChoice::Fit, timing(1e-3));
+        assert_eq!(readout(&own, "τ rise"), "0 s");
+        assert_eq!(readout(&own, "τ fall"), "0 s");
     }
 
     #[test]

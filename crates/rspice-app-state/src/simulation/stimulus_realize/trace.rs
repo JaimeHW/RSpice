@@ -356,6 +356,7 @@ mod tests {
             tstep: tstop / 1000.0,
             tstop,
             from_analysis: true,
+            ..PreviewTiming::default()
         }
     }
 

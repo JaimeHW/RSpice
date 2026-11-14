@@ -22,6 +22,7 @@ fn timing(tstop: f64) -> PreviewTiming {
         tstep: tstop / 1000.0,
         tstop,
         from_analysis: true,
+        ..PreviewTiming::default()
     }
 }
 
@@ -152,10 +153,9 @@ fn a_component_that_is_not_an_independent_source_is_not_realized() {
     assert!(is_independent_source(ComponentType::CurrentSourcePwlFile));
 }
 
-/// The ngspice-46/47 pin. `PULSE(V1 V2 TD TR TF)` with the width omitted and
-/// both edges authored resolves to PW = 0 and PER = TSTOP: one triangle of zero
-/// width, then V1 for the rest of the run. The old hand-rolled sampler read the
-/// same card as a 50 % square wave.
+/// `PULSE(V1 V2 TD TR TF 0)` with the period omitted resolves to PER = TSTOP:
+/// one triangle of zero width, then V1 for the rest of the run. The old
+/// hand-rolled sampler read the same card as a 50 % square wave.
 ///
 /// The triangle is two nanoseconds wide in a millisecond window, so no grid a
 /// plot can afford lands on it: sampled uniformly, this card drew a flat line
@@ -165,14 +165,17 @@ fn a_component_that_is_not_an_independent_source_is_not_realized() {
 /// The card is spelled here rather than emitted from a placed component,
 /// because the netlist generator cannot write this form: `format_source_value`
 /// substitutes its own `pw=1u per=2u` for an omitted width and period, so the
-/// only way an RSpice project holds an edges-only pulse is a deck someone
-/// wrote. The bridge reads such a deck's source exactly as the engine does,
-/// which is what this pins.
+/// only way an RSpice project holds such a pulse is a deck someone wrote. The
+/// bridge reads such a deck's source exactly as the engine does, which is what
+/// this pins.
 #[test]
-fn an_edges_only_pulse_previews_as_one_zero_width_pulse_then_v1() {
-    let spec =
-        rspice_core::netlist::parse_source_spec_text("PULSE(0 5 0 1n 1n)", 0, &ParamContext::new())
-            .expect("spec");
+fn a_zero_width_pulse_previews_as_one_triangle_then_v1() {
+    let spec = rspice_core::netlist::parse_source_spec_text(
+        "PULSE(0 5 0 1n 1n 0)",
+        0,
+        &ParamContext::new(),
+    )
+    .expect("spec");
     let timing = timing(1e-3);
     let peak = evaluate_at(&spec, 0.5e-9, timing);
     assert!(
@@ -197,6 +200,68 @@ fn an_edges_only_pulse_previews_as_one_zero_width_pulse_then_v1() {
     );
     let readouts = trace.readouts().expect("readouts");
     assert!((readouts.span() - 5.0).abs() < 1e-12, "{readouts:?}");
+}
+
+/// `PULSE(V1 V2 TD TR TF)` with the width omitted previews as the plan's run
+/// reads it. RSpice's own rules take QSPICE's default, the ngspice dialect the
+/// ngspice manual's (§4.1.1) and the Xyce dialect Xyce's, and all three hold V2
+/// to the stop (QSPICE and Xyce 7.10 measured). A project drawn in LTspice
+/// takes LTspice's default, which runs the card as one zero-width triangle
+/// (LTspice 26.1.1 measured).
+#[test]
+fn an_edges_only_pulse_previews_by_the_plans_rules() {
+    use rspice_core::config::SpiceDialect;
+    let spec =
+        rspice_core::netlist::parse_source_spec_text("PULSE(0 5 0 1n 1n)", 0, &ParamContext::new())
+            .expect("spec");
+    let best = timing(1e-3);
+    for rules in [
+        SpiceDialect::BestAvailable.into(),
+        SpiceDialect::Ngspice.into(),
+        SpiceDialect::Xyce.into(),
+    ] {
+        let timing = PreviewTiming { rules, ..best };
+        let held = evaluate_at(&spec, 0.5e-3, timing);
+        assert!((held - 5.0).abs() < 1e-12, "{rules:?}: {held}");
+    }
+    let ltspice = PreviewTiming {
+        rules: SourceRules::new(
+            SpiceDialect::BestAvailable,
+            Some(rspice_core::netlist::SourceSimulator::Ltspice),
+        ),
+        ..best
+    };
+    assert!((evaluate_at(&spec, 1e-9, ltspice) - 5.0).abs() < 1e-12);
+    assert!(evaluate_at(&spec, 0.5e-3, ltspice).abs() < 1e-12);
+}
+
+/// The preview fills an omitted field with the default of the simulator the
+/// plan follows, as the run does: an `SFFM` with no modulation index is a plain
+/// carrier under RSpice's own rules (QSPICE's MDI 0) and modulated under the
+/// ngspice dialect (the ngspice manual's MDI 90 and FS 5/TSTOP, here 5 kHz).
+#[test]
+fn the_preview_fills_omitted_fields_by_the_plans_rules() {
+    let spec =
+        rspice_core::netlist::parse_source_spec_text("SFFM(0 1 1meg)", 0, &ParamContext::new())
+            .expect("spec");
+    let best = timing(1e-3);
+    let ngspice = PreviewTiming {
+        rules: rspice_core::config::SpiceDialect::Ngspice.into(),
+        ..best
+    };
+    // A quarter of a carrier cycle past 250 whole ones: the plain carrier is
+    // at its crest.
+    let time = 2.5025e-4;
+    let plain = evaluate_at(&spec, time, best);
+    assert!((plain - 1.0).abs() < 1e-9, "{plain}");
+    let tau = std::f64::consts::TAU;
+    let expected = (tau * 1e6 * time + 90.0 * (tau * 5e3 * time).sin()).sin();
+    let modulated = evaluate_at(&spec, time, ngspice);
+    assert!(
+        (modulated - expected).abs() < 1e-9,
+        "{modulated} vs {expected}"
+    );
+    assert!((modulated - plain).abs() > 0.1, "{modulated} vs {plain}");
 }
 
 /// A pulse that authors its width is the square wave it looks like, so the
@@ -459,6 +524,7 @@ fn the_timing_caption_names_the_transient_and_whether_the_plan_holds_one() {
             tstep: 1e-8,
             tstop: 1e-3,
             from_analysis: true,
+            ..PreviewTiming::default()
         }
         .caption(),
         "TRAN 1ms · TSTEP 10ns"
@@ -468,6 +534,7 @@ fn the_timing_caption_names_the_transient_and_whether_the_plan_holds_one() {
             tstep: 1e-8,
             tstop: 1e-3,
             from_analysis: false,
+            ..PreviewTiming::default()
         }
         .caption()
         .ends_with("· plan default")

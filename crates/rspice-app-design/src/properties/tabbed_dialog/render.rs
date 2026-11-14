@@ -401,6 +401,7 @@ mod tests {
                     tstep: 1e-9,
                     tstop: 4e-6,
                     from_analysis: true,
+                    ..stimulus_realize::PreviewTiming::default()
                 },
             ),
         );

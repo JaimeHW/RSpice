@@ -732,7 +732,9 @@ pub fn open_property_editor_in(
 /// to name one. The plan's first enabled transient is that one; a plan without
 /// a transient yet gets the setup's own defaults, which is what a run would use
 /// if the user added one and changed nothing, and the card says the numbers came
-/// from there rather than from an analysis.
+/// from there rather than from an analysis. The plan's compatibility dialect
+/// and the program a drawing came from decide whose defaults fill the fields a
+/// card leaves out, as they do for the run.
 pub(in crate::workbench) fn stimulus_preview_timing(model: &Model) -> PreviewTiming {
     let authored = model.sim_setup.analysis_plan.as_ref().and_then(|plan| {
         plan.instances()
@@ -747,6 +749,7 @@ pub(in crate::workbench) fn stimulus_preview_timing(model: &Model) -> PreviewTim
     let setup = authored.unwrap_or_default();
     let seconds = |text: &str| crate::quantity::parse_engineering_value(text).ok();
     let default = PreviewTiming::default();
+    let options = &model.sim_setup.options;
     PreviewTiming {
         tstep: seconds(&setup.step)
             .filter(|step| step.is_finite() && *step > 0.0)
@@ -755,6 +758,10 @@ pub(in crate::workbench) fn stimulus_preview_timing(model: &Model) -> PreviewTim
             .filter(|stop| stop.is_finite() && *stop > 0.0)
             .unwrap_or(default.tstop),
         from_analysis,
+        rules: rspice_core::netlist::SourceRules::new(
+            options.compatibility.core_override().unwrap_or_default(),
+            options.source_simulator.core_source(),
+        ),
     }
 }
 
@@ -939,6 +946,28 @@ mod tests {
         let fallback = stimulus_preview_timing(&state.model);
         assert_eq!(fallback, PreviewTiming::default());
         assert!(!fallback.from_analysis);
+    }
+
+    /// The preview reads omitted source fields as the plan's run will: under
+    /// its compatibility dialect, with the defaults of the program a drawing
+    /// came from.
+    #[test]
+    fn the_preview_reads_sources_by_the_plans_compatibility_and_source_program() {
+        use rspice_simulation_contract::options::{SimulationCompatibility, SourceSimulator};
+        let mut state = AppState::default();
+        assert_eq!(
+            stimulus_preview_timing(&state.model).rules,
+            rspice_core::netlist::SourceRules::default()
+        );
+        state.model.sim_setup.options.compatibility = SimulationCompatibility::Ngspice;
+        state.model.sim_setup.options.source_simulator = SourceSimulator::Ltspice;
+        assert_eq!(
+            stimulus_preview_timing(&state.model).rules,
+            rspice_core::netlist::SourceRules::new(
+                rspice_core::config::SpiceDialect::Ngspice,
+                Some(rspice_core::netlist::SourceSimulator::Ltspice),
+            )
+        );
     }
 
     /// A built-in Verilog-A parameter's row carries the units and description

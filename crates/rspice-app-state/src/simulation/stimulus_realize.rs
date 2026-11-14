@@ -22,8 +22,7 @@
 //! x-range and of how the range is measured, never of value.
 
 use rspice_core::circuit::VoltageSources;
-use rspice_core::config::SpiceDialect;
-use rspice_core::netlist::{ParamContext, SourceSpec};
+use rspice_core::netlist::{ParamContext, SourceRules, SourceSpec};
 
 use crate::simulation::table_route::{self, TableSources};
 use crate::state::stimulus_library::definition::StimulusDefinition;
@@ -181,10 +180,10 @@ pub struct PreviewWindow {
 
 /// The transient the preview evaluates against.
 ///
-/// Every omitted waveform field resolves against a stop time — an omitted pulse
-/// period becomes TSTOP, an omitted SIN frequency becomes 1/TSTOP — so a
-/// preview cannot show a source without naming which transient it is showing it
-/// under, and the card states this in its title.
+/// Omitted waveform fields resolve against a stop time — an omitted pulse
+/// period becomes TSTOP, an omitted SIN frequency 1/TSTOP under the ngspice
+/// dialect — so a preview cannot show a source without naming which transient
+/// it is showing it under, and the card states this in its title.
 ///
 /// The engine's own fallbacks when it is handed neither
 /// (`evaluate_source_spec_at_time_with_dialect`: TSTEP 1e-12, TSTOP 1e99) are
@@ -201,6 +200,10 @@ pub struct PreviewTiming {
     pub tstop: f64,
     /// Whether these came from a transient analysis the plan actually holds.
     pub from_analysis: bool,
+    /// How the plan's run reads its sources: its compatibility dialect and
+    /// the simulator a drawing came from, whose defaults fill the fields a
+    /// card leaves out.
+    pub rules: SourceRules,
 }
 
 impl Default for PreviewTiming {
@@ -214,6 +217,7 @@ impl Default for PreviewTiming {
             tstep: 1e-8,
             tstop: 1e-3,
             from_analysis: false,
+            rules: SourceRules::default(),
         }
     }
 }
@@ -246,31 +250,25 @@ impl PreviewTiming {
     }
 }
 
-/// The dialect a project's sources are read under.
-///
-/// Every netlist flavour a project offers maps to `BestAvailable` or `Ngspice`
-/// and nothing selects `Xyce`, so a preview that asked the project which one to
-/// use would be offering a choice the project cannot make.
-pub(crate) const PREVIEW_DIALECT: SpiceDialect = SpiceDialect::BestAvailable;
-
 /// This spec's value at one instant, as the engine steps it.
 ///
 /// Evaluated by the transient's own evaluator — including every substitution it
-/// makes for an omitted field, so an edges-only `PULSE(0 5 0 1n 1n)` shows the
-/// single zero-width pulse the ngspice-46/47 rule produces rather than the
-/// square wave its labels suggest, and an `SFFM` authored with `FC=0` shows the
-/// engine's `1 / TSTOP` carrier.
+/// makes for an omitted field, so `PULSE(0 5 0 1n 1n 0)` shows the single
+/// zero-width pulse its TSTOP period produces rather than the square wave its
+/// labels suggest, and an `SFFM` authored with `FC=0` shows the engine's
+/// `1 / TSTOP` carrier.
 ///
-/// The transient the substitutions resolve against is the plan's, never the
-/// window's: a preview looking at one period of a pulse train is still looking
-/// at the train a run would produce over its whole stop time.
+/// The transient and the rules the substitutions resolve against are the
+/// plan's, never the window's: a preview looking at one period of a pulse train
+/// is still looking at the train a run would produce over its whole stop time,
+/// with the defaults of the simulator the plan follows.
 fn evaluate_at(spec: &SourceSpec, time: f64, timing: PreviewTiming) -> f64 {
     VoltageSources::evaluate_source_spec_at_time_with_dialect(
         spec,
         time,
         timing.tstep,
         timing.tstop,
-        PREVIEW_DIALECT,
+        timing.rules,
     )
 }
 
