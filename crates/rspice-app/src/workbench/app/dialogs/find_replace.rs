@@ -303,7 +303,7 @@ pub(in crate::workbench) fn render_find_replace_dialog(
 /// none, or why Replace all is refused. A form nobody has typed into has
 /// refused nothing, so it states what Replace all is waiting for, without the
 /// failure mark.
-fn find_replace_summary(
+pub(crate) fn find_replace_summary(
     find: &str,
     found: &Result<Vec<DocumentMatches>, String>,
     count: usize,
