@@ -31,6 +31,88 @@ const HEADER_METADATA_GAP: f32 = 8.0;
 const HEADER_LEGEND_GAP: f32 = 4.0;
 const HEADER_ICON_SIDE: f32 = 22.0;
 const HEADER_ACTION_ITEM_GAP: f32 = 1.0;
+/// The gap between a header's window controls and the scale chip beside
+/// them. It is the same in every header, so the strip's X toggle and each
+/// pane's Y toggle end on one rule.
+pub(crate) const WINDOW_CONTROL_GAP: f32 = 4.0;
+/// What the strip's X scale chip reads.
+pub(crate) const X_SCALE_LABEL: &str = "log X";
+
+/// Where the window control `slot` places from the right stands in a header
+/// row spanning `rect`: the rightmost, 0, ends on the rule every row of strip
+/// chrome ends on.
+pub(crate) fn window_control_rect(rect: Rect, slot: usize) -> Rect {
+    let right =
+        rect.right() - HEADER_PADDING_X - slot as f32 * (HEADER_ICON_SIDE + HEADER_ACTION_ITEM_GAP);
+    Rect::from_min_max(
+        egui::pos2(right - HEADER_ICON_SIDE, rect.top()),
+        egui::pos2(right, rect.bottom()),
+    )
+}
+
+/// The rule the scale chip ends on in a header row spanning `rect` that
+/// keeps `slots` window controls: the gap left of the leftmost of them.
+pub(crate) fn scale_chip_right(rect: Rect, slots: usize) -> f32 {
+    window_control_rect(rect, slots.max(1) - 1).left() - WINDOW_CONTROL_GAP
+}
+
+/// The width the scale chip reading `label` takes: the toggle chip's own.
+fn scale_chip_width(ui: &Ui, label: &str) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let text = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                label.to_owned(),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                t.color.text,
+            )
+            .size()
+            .x
+    });
+    let touch = if t.metrics.is_touch() {
+        t.metrics.touch_target()
+    } else {
+        0.0
+    };
+    (text + 18.0).max(touch)
+}
+
+/// The strip's X scale toggle in the place its header kept for it: the chip
+/// each pane's Y toggle is, reading "log X", lit while the axis is
+/// logarithmic, and refused, with the reason on hover, where the axis
+/// cannot be. True when the reader toggled it.
+pub(crate) fn x_scale_chip(
+    ui: &mut Ui,
+    id: egui::Id,
+    rect: Rect,
+    (logarithmic, refusal): (bool, Option<&str>),
+) -> bool {
+    let refused = !logarithmic && refusal.is_some();
+    let mut slot = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(id)
+            .max_rect(rect)
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+    );
+    let toggle = slot
+        .add_enabled_ui(!refused, |ui| {
+            rspice_ui_kit::widgets::chip(ui, X_SCALE_LABEL, logarithmic)
+        })
+        .inner
+        .on_hover_text("Toggle logarithmic X axis")
+        .on_disabled_hover_text(refusal.map_or_else(String::new, |reason| {
+            format!("A logarithmic X axis is not available: {reason}")
+        }));
+    toggle.widget_info(|| {
+        WidgetInfo::selected(
+            WidgetType::SelectableLabel,
+            !refused,
+            logarithmic,
+            "Logarithmic X axis",
+        )
+    });
+    toggle.clicked() && !refused
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct HorizontalSpan {
@@ -143,14 +225,20 @@ fn strip_content_layout(
 
 fn trailing_actions_width(
     icon_side: f32,
-    (maximizable, closable): (bool, bool),
+    slots: usize,
+    scale_chip_width: f32,
     zoomed: bool,
     fit_chip_width: f32,
 ) -> f32 {
-    let icon_count = usize::from(maximizable) + usize::from(closable);
-    let icons_width = icon_count as f32 * icon_side
-        + icon_count.saturating_sub(1) as f32 * HEADER_ACTION_ITEM_GAP;
+    let icons_width =
+        slots as f32 * icon_side + slots.saturating_sub(1) as f32 * HEADER_ACTION_ITEM_GAP;
+    let scale_width = if scale_chip_width > 0.0 {
+        WINDOW_CONTROL_GAP + scale_chip_width
+    } else {
+        0.0
+    };
     icons_width
+        + scale_width
         + if zoomed {
             2.0 * HEADER_ACTION_ITEM_GAP + 4.0 + fit_chip_width
         } else {
@@ -189,6 +277,9 @@ pub struct StripHeaderResponse {
     /// Where the header left room for the caller's own field, when it asked
     /// for one.
     pub field_rect: Option<Rect>,
+    /// Where the header left room for the strip's X scale chip, beside its
+    /// window controls, when it asked for one: see [`x_scale_chip`].
+    pub scale_rect: Option<Rect>,
 }
 
 /// What a legend chip's context menu adds, given the chip's index.
@@ -210,6 +301,8 @@ pub struct StripHeader<'a> {
     id_salt: egui::Id,
     maximizable: bool,
     field_width: f32,
+    x_scale: bool,
+    window_slots: usize,
 }
 
 impl<'a> StripHeader<'a> {
@@ -230,6 +323,8 @@ impl<'a> StripHeader<'a> {
             id_salt: egui::Id::new(kind),
             maximizable: true,
             field_width: 0.0,
+            x_scale: false,
+            window_slots: 0,
         }
     }
 
@@ -272,6 +367,22 @@ impl<'a> StripHeader<'a> {
     /// draws itself, in [`StripHeaderResponse::field_rect`].
     pub fn field(mut self, width: f32) -> Self {
         self.field_width = width.max(0.0);
+        self
+    }
+
+    /// Keep room beside the window controls for the strip's X scale chip,
+    /// which the caller draws in [`StripHeaderResponse::scale_rect`] with
+    /// [`x_scale_chip`].
+    pub(crate) fn x_scale(mut self, on: bool) -> Self {
+        self.x_scale = on;
+        self
+    }
+
+    /// Keep at least `slots` places for window controls, filled from the
+    /// right, so this header's scale chip ends on the rule of its
+    /// neighbours' that carry more controls.
+    pub(crate) fn window_slots(mut self, slots: usize) -> Self {
+        self.window_slots = slots;
         self
     }
 
@@ -348,10 +459,22 @@ impl<'a> StripHeader<'a> {
         } else {
             0.0
         };
+        let slots = if self.pane_actions {
+            self.window_slots
+                .max(usize::from(self.maximizable) + usize::from(self.closable))
+        } else {
+            0
+        };
+        let scale_width = if self.pane_actions && self.x_scale {
+            scale_chip_width(ui, X_SCALE_LABEL)
+        } else {
+            0.0
+        };
         let actions_width = if self.pane_actions {
             trailing_actions_width(
                 HEADER_ICON_SIDE,
-                (self.maximizable, self.closable),
+                slots,
+                scale_width,
                 self.zoomed,
                 fit_chip_width,
             )
@@ -532,51 +655,77 @@ impl<'a> StripHeader<'a> {
             });
 
         if self.pane_actions {
-            ui.scope_builder(
-                egui::UiBuilder::new()
-                    .max_rect(actions_rect)
-                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
-                |ui| {
-                    ui.set_clip_rect(actions_rect);
-                    ui.spacing_mut().item_spacing.x = HEADER_ACTION_ITEM_GAP;
-                    if self.closable
-                        && IconButton::new(Icon::Close)
-                            .side(HEADER_ICON_SIDE)
-                            .tooltip("Close strip")
-                            .show(ui)
-                            .clicked()
-                    {
-                        out.close_clicked = true;
-                    }
-                    let tip = if self.maximized {
-                        "Restore strips"
-                    } else {
-                        "Maximize strip"
-                    };
-                    if self.maximizable
-                        && IconButton::new(Icon::ZoomFit)
-                            .side(HEADER_ICON_SIDE)
-                            .on(self.maximized)
-                            .tooltip(tip)
-                            .show(ui)
-                            .clicked()
-                    {
-                        out.maximize_clicked = true;
-                    }
-                    if self.zoomed {
-                        ui.add_space(4.0);
-                        if action_chip(
-                            ui,
-                            "FIT",
-                            "Restore automatic view (double-click the plot does the same)",
-                        )
-                        .clicked()
-                        {
-                            out.fit_clicked = true;
-                        }
-                    }
-                },
+            // The window controls stand in their places from the right, the
+            // scale chip the same gap left of them in every header, and FIT
+            // left of that.
+            let control = |ui: &mut Ui, slot: usize, salt: &str| {
+                ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt((self.id_salt, salt))
+                        .max_rect(window_control_rect(rect, slot).intersect(actions_rect))
+                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                )
+            };
+            if self.closable
+                && IconButton::new(Icon::Close)
+                    .side(HEADER_ICON_SIDE)
+                    .tooltip("Close strip")
+                    .show(&mut control(ui, 0, "close"))
+                    .clicked()
+            {
+                out.close_clicked = true;
+            }
+            let tip = if self.maximized {
+                "Restore strips"
+            } else {
+                "Maximize strip"
+            };
+            if self.maximizable
+                && IconButton::new(Icon::ZoomFit)
+                    .side(HEADER_ICON_SIDE)
+                    .on(self.maximized)
+                    .tooltip(tip)
+                    .show(&mut control(ui, usize::from(self.closable), "maximize"))
+                    .clicked()
+            {
+                out.maximize_clicked = true;
+            }
+            let mut left = scale_chip_right(rect, slots) + WINDOW_CONTROL_GAP;
+            if scale_width > 0.0 {
+                let right = scale_chip_right(rect, slots);
+                let scale = Rect::from_min_max(
+                    egui::pos2((right - scale_width).max(actions_rect.left()), inner.top()),
+                    egui::pos2(right, inner.bottom()),
+                );
+                out.scale_rect = Some(scale);
+                left = scale.left();
+            }
+            // FIT's place is made whether or not the view is zoomed: a child
+            // made only now and then would renumber every widget after it,
+            // and a drag on the ruler below would lose its widget midway.
+            let fit = Rect::from_min_max(
+                egui::pos2(actions_rect.left(), inner.top()),
+                egui::pos2(
+                    (left - HEADER_ACTION_ITEM_GAP - 4.0).max(actions_rect.left()),
+                    inner.bottom(),
+                ),
             );
+            let mut fit_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .id_salt((self.id_salt, "fit"))
+                    .max_rect(fit)
+                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
+            );
+            if self.zoomed
+                && action_chip(
+                    &mut fit_ui,
+                    "FIT",
+                    "Restore automatic view (double-click the plot does the same)",
+                )
+                .clicked()
+            {
+                out.fit_clicked = true;
+            }
         }
 
         out
@@ -809,13 +958,15 @@ mod tests {
 
     #[test]
     fn trailing_actions_reserve_exact_rendered_controls_first() {
-        let base = trailing_actions_width(22.0, (true, false), false, 0.0);
-        let close = trailing_actions_width(22.0, (true, true), false, 0.0);
-        let zoomed = trailing_actions_width(22.0, (true, true), true, 31.0);
+        let base = trailing_actions_width(22.0, 1, 0.0, false, 0.0);
+        let close = trailing_actions_width(22.0, 2, 0.0, false, 0.0);
+        let zoomed = trailing_actions_width(22.0, 2, 0.0, true, 31.0);
+        let scale = trailing_actions_width(22.0, 1, 48.0, false, 0.0);
 
         assert_eq!(base, 22.0);
         assert_eq!(close, 45.0);
         assert_eq!(zoomed, 82.0);
+        assert_eq!(scale, 22.0 + WINDOW_CONTROL_GAP + 48.0);
     }
 
     /// Two strips drawn one above the other in one parent, as a pane's stack

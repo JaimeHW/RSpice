@@ -500,11 +500,16 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                         |ui| {
                             ui.set_min_height(strip_height);
                             let mut edits = ExpressionEdits::default();
+                            // An XY strip keeps a place for the maximize
+                            // control the strips drawn against time carry
+                            // beside their close one, so every scale chip
+                            // ends on one rule.
+                            let slots = 1 + usize::from(pane_chrome && !maximized && n > 1);
                             if show_xy_strip(
                                 ui,
                                 host,
                                 model,
-                                index,
+                                (index, slots),
                                 linked_cursor_domain.as_ref(),
                                 options,
                                 &mut edits,
@@ -572,7 +577,32 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                             .removable_from(0)
                             .chip_menu(&mut conversions)
                             .pane_actions(pane_chrome)
+                            .x_scale(true)
                             .show(ui);
+                        // The strip header owns the shared X axis, and with
+                        // it the axis' scale toggle.
+                        if let Some(rect) = header.scale_rect
+                            && crate::strip::x_scale_chip(
+                                ui,
+                                egui::Id::new(("rspice.results.x-scale", model.analysis_key)),
+                                rect,
+                                (
+                                    model.x_scale == XScale::Log10,
+                                    log_x_refusal(model).as_deref(),
+                                ),
+                            )
+                        {
+                            let scale = match model.x_scale {
+                                XScale::Log10 => XScale::Linear,
+                                XScale::Linear => XScale::Log10,
+                            };
+                            let pane_count = model.unit_panes().len();
+                            let session = host.session_mut();
+                            session.x_scales.insert(model.analysis_key, scale);
+                            // A range read on one scale is no viewport on the
+                            // other.
+                            set_shared_x_view(session, model.analysis_key, pane_count, None);
+                        }
                         if let Some(chip_index) = header.legend_clicked {
                             toggle_expr = Some((model.analysis_key, chip_index));
                         }
@@ -799,21 +829,9 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
         quantity_policy: options.quantity,
         significant_digits: usize::from(options.readout.displayed_significant_digits().get()),
         cursors: (cursor_owner || linked_cursor).then_some(host.session().cursors),
-        log_refusal: log_x_refusal(model),
     };
     let output = navigation::show_shared_x_axis(ui, &mut host.session_mut().derived, model, input);
     host.note_sample_reads(output.overview_samples_read, output.extrema_samples_read);
-    if output.scale_toggled {
-        let scale = match model.x_scale {
-            XScale::Log10 => XScale::Linear,
-            XScale::Linear => XScale::Log10,
-        };
-        let session = host.session_mut();
-        session.x_scales.insert(model.analysis_key, scale);
-        // A range read on one scale is no viewport on the other.
-        set_shared_x_view(session, model.analysis_key, pane_count, None);
-        return;
-    }
     if let Some(viewport) = output.viewport {
         let range = match viewport {
             navigation::SharedXViewChange::Fit => None,
@@ -1073,7 +1091,7 @@ fn route_expressions(
 
 /// One strip plotting a unit pane's curves against a signal or an
 /// expression: a header naming the abscissa, with the span of the sweep it
-/// draws and a close button; the pane's own header, whose legend and scale
+/// draws, its X scale chip and a close button; the pane's own header, whose legend and scale
 /// it shares; and the plot, whose one horizontal axis is the abscissa's
 /// ruler, without the overview track the sweep's has. True when the reader
 /// closed it.
@@ -1081,7 +1099,7 @@ fn show_xy_strip(
     ui: &mut Ui,
     host: &mut impl StackHost,
     model: &StripModel,
-    index: usize,
+    (index, slots): (usize, usize),
     linked_cursor_domain: Option<&CursorDomain>,
     options: StackOptions,
     edits: &mut ExpressionEdits,
@@ -1101,7 +1119,10 @@ fn show_xy_strip(
         .zoomed(strip.x_view.is_some() || strip.y_view.is_some())
         .field(field_width)
         .pane_actions(options.pane_chrome)
+        .x_scale(true)
+        .window_slots(slots)
         .show(ui);
+    let scale_rect = header.scale_rect;
     if ui
         .ctx()
         .data_mut(|data| data.get_temp::<u64>(xy_reveal_id()))
@@ -1241,6 +1262,7 @@ fn show_xy_strip(
                     frame,
                     strip: index,
                     log_y,
+                    scale_rect,
                 },
             );
         });

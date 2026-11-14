@@ -140,7 +140,18 @@ fn an_expression_on_a_pane_of_its_own_is_named_in_it() {
         "the staircase's entry is in its own pane, under the volts pane's row: \
          entry {entry:?}, volts row {volts:?}"
     );
-    let swatch = control(&output, "Toggle analog(D(code)) visibility");
+    // The strip header's chip has a swatch of the same name; the entry's is
+    // the one on its row.
+    let swatch = controls(&output)
+        .into_iter()
+        .filter(|(_, label, _)| label.as_deref() == Some("Toggle analog(D(code)) visibility"))
+        .filter_map(|(_, _, rect)| rect)
+        .min_by(|a, b| {
+            (a.center().y - entry.center().y)
+                .abs()
+                .total_cmp(&(b.center().y - entry.center().y).abs())
+        })
+        .expect("the entry has its swatch");
     assert!(
         (swatch.center().y - entry.center().y).abs() < 4.0 && swatch.right() <= entry.left(),
         "the entry's swatch leads it on its row: swatch {swatch:?}, entry {entry:?}"
@@ -356,8 +367,9 @@ fn a_logic_expression_chip_offers_analog() {
     );
 }
 
-/// Both axes' log toggles read alike, "log", lit while the axis is
-/// logarithmic; and the X axis's stands clear of cursor A's flag with A on
+/// Both axes' log toggles are one chip, lit while the axis is logarithmic:
+/// the pane's reads "log" in its header, the shared X axis's "log X" in the
+/// strip header, which owns that axis, clear of cursor A's flag with A on
 /// the plot's left edge, with lanes beside the panes and without.
 #[test]
 fn the_axes_log_toggles_read_alike_and_clear_cursor_a() {
@@ -370,15 +382,18 @@ fn the_axes_log_toggles_read_alike_and_clear_cursor_a() {
         super::lanes::place_cursors(&mut state, Some(0.0), None);
         let ctx = theme_context();
         let output = settled(&ctx, &mut state);
-        // The volts pane's Y toggle and the X toggle; the currents' pane
-        // draws nothing and offers no toggle.
-        assert_eq!(
+        // The volts pane's Y toggle and the strip's X toggle; the currents'
+        // pane draws nothing and offers no toggle.
+        let count = |word: &str| {
             texts(&output.shapes)
                 .iter()
-                .filter(|(text, _)| text == "log")
-                .count(),
-            2,
-            "the Y toggle and the X toggle read \"log\" (lanes: {lanes})"
+                .filter(|(text, _)| text == word)
+                .count()
+        };
+        assert_eq!(
+            (count("log"), count("log X")),
+            (1, 1),
+            "the Y toggle and the X toggle (lanes: {lanes})"
         );
         assert!(
             texts(&output.shapes)
@@ -394,7 +409,7 @@ fn the_axes_log_toggles_read_alike_and_clear_cursor_a() {
             .max_by(|a, b| a.top().total_cmp(&b.top()))
             .expect("cursor A's flag on the time axis");
         assert!(
-            toggle.right() + 4.0 <= flag.left() - 3.0,
+            toggle.bottom() < flag.top() && !toggle.expand(4.0).intersects(flag.expand(3.0)),
             "the X toggle clears cursor A's flag (lanes: {lanes}): toggle {toggle:?}, flag letter \
              {flag:?}"
         );

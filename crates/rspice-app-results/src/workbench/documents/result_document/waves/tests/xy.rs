@@ -256,9 +256,9 @@ fn a_strip_against_a_signal_draws_one_horizontal_axis_on_a_ruler_without_an_over
     let count = |texts: &[&(String, egui::Rect)], word: &str| {
         texts.iter().filter(|(text, _)| text == word).count()
     };
-    // The overview's word stands under the time strip alone; each ruler has
-    // its scale toggle, which reads "log" as the pane's Y toggle does and
-    // never states the linear default.
+    // The overview's word stands under the time strip alone. Each strip's
+    // header carries its X scale chip, "log X"; the ruler names no scale and
+    // no word states the linear default.
     let all: Vec<&(String, egui::Rect)> = painted.iter().collect();
     assert_eq!(count(&all, "FULL"), 1, "{painted:?}");
     assert_eq!(
@@ -266,10 +266,11 @@ fn a_strip_against_a_signal_draws_one_horizontal_axis_on_a_ruler_without_an_over
         0,
         "no overview under the strip: {below:?}"
     );
+    assert_eq!(count(&all, "log X"), 2, "{painted:?}");
     assert_eq!(
         count(&below, "log"),
-        2,
-        "the pane's Y toggle and the ruler's X toggle: {below:?}"
+        1,
+        "the pane's Y toggle alone under the strip's header: {below:?}"
     );
     assert_eq!(count(&all, "LIN") + count(&all, "LOG"), 0, "{painted:?}");
     assert!(!below.iter().any(|(text, _)| text.starts_with("TIME")));
@@ -380,17 +381,107 @@ fn both_strips_stand_on_one_ruler() {
     }
 }
 
-/// The centre of the X scale toggle of the strip whose header is at `top`:
-/// the lowest "log" under it, below the pane header's Y toggle.
+/// The centre of the X scale chip in the header of the strip whose subtitle
+/// stands at `top`: the "log X" on that row.
 fn x_toggle(painted: &[(String, egui::Rect)], top: f32) -> Option<egui::Pos2> {
     painted
         .iter()
-        .filter(|(text, rect)| text == "log" && rect.top() > top)
-        .max_by(|(_, a), (_, b)| a.top().total_cmp(&b.top()))
+        .filter(|(text, _)| text == "log X")
+        .min_by(|(_, a), (_, b)| (a.top() - top).abs().total_cmp(&(b.top() - top).abs()))
         .map(|(_, rect)| rect.center())
 }
 
-/// The ruler's scale toggle reads the abscissa over decades and back; a
+/// Where each control the frame publishes as `name` stands.
+fn controls_named(ctx: &egui::Context, state: &mut ResultsTestHost, name: &str) -> Vec<egui::Rect> {
+    ctx.enable_accesskit();
+    frame(ctx, state, Vec::new());
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            super::lanes::FRAME,
+        )),
+        ..Default::default()
+    };
+    let output = ctx.run_ui(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
+    });
+    output
+        .platform_output
+        .accesskit_update
+        .map(|update| {
+            update
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.label() == Some(name))
+                .filter_map(|(_, node)| node.bounds())
+                .map(|bounds| {
+                    egui::Rect::from_min_max(
+                        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Every axis' scale chip stands in one right-hand column, in the header of
+/// what owns the axis, the same gap left of that header's window control.
+/// The strip drawn against time and the strip drawn against a signal each
+/// carry "log X" on one right edge, beside their maximize and close icons,
+/// which share an x; each pane's "log Y" ends on the same edge.
+#[test]
+fn every_scale_chip_ends_on_one_rule_beside_its_window_control() {
+    let mut state = lissajous_host();
+    open_strip(&mut state, "V", signal("V(a)"));
+    let ctx = theme_context();
+    let chips = controls_named(&ctx, &mut state, "Logarithmic X axis");
+    let maximize = controls_named(&ctx, &mut state, "Maximize strip");
+    let close = controls_named(&ctx, &mut state, "Close strip");
+    assert_eq!(
+        chips.len(),
+        2,
+        "each strip header carries its X chip: {chips:?}"
+    );
+    assert_eq!(
+        (maximize.len(), close.len()),
+        (1, 1),
+        "{maximize:?} {close:?}"
+    );
+    assert!(
+        (maximize[0].center().x - close[0].center().x).abs() <= 0.5,
+        "the window icons share an x: {maximize:?} {close:?}"
+    );
+    let (time, xy) = if chips[0].top() < chips[1].top() {
+        (chips[0], chips[1])
+    } else {
+        (chips[1], chips[0])
+    };
+    assert!(
+        (time.right() - xy.right()).abs() <= 0.5,
+        "both X chips end on one rule: {time:?} {xy:?}"
+    );
+    assert!(
+        ((maximize[0].left() - time.right()) - (close[0].left() - xy.right())).abs() <= 0.5,
+        "each chip stands the same gap left of its window control"
+    );
+    assert!(time.bottom() <= maximize[0].bottom() + 0.5 && time.top() >= maximize[0].top() - 0.5);
+    // A pane's own scale chip, once it reads "log Y", ends on the same rule.
+    let painted = painted_texts(&ctx, &mut state);
+    let x_label = painted
+        .iter()
+        .find(|(text, _)| text == "log X")
+        .map(|(_, rect)| rect.right())
+        .expect("the strip header reads log X");
+    for (_, rect) in painted.iter().filter(|(text, _)| text == "log Y") {
+        assert!(
+            (rect.right() - x_label).abs() <= 0.5,
+            "{rect:?} against {x_label}"
+        );
+    }
+}
+
+/// The header's X scale chip reads the abscissa over decades and back; a
 /// signed abscissa refuses it. The strip keeps its choice.
 #[test]
 fn the_rulers_scale_toggle_reads_the_abscissa_over_decades() {
@@ -421,7 +512,7 @@ fn the_rulers_scale_toggle_reads_the_abscissa_over_decades() {
     let painted = painted_texts(&ctx, &mut state);
     let top = strip_top(&painted, "vs V(d)");
     let toggle = |painted: &[(String, egui::Rect)]| x_toggle(painted, top);
-    let off = toggle(&painted).expect("the strip's ruler has its log toggle");
+    let off = toggle(&painted).expect("the strip's header has its X scale chip");
     click(&ctx, &mut state, off, egui::PointerButton::Primary);
     assert!(
         strips(&state)[0].log_x,
@@ -429,7 +520,9 @@ fn the_rulers_scale_toggle_reads_the_abscissa_over_decades() {
     );
     let painted = painted_texts(&ctx, &mut state);
     assert!(
-        painted.iter().all(|(text, _)| text != "LIN" && text != "LOG"),
+        painted
+            .iter()
+            .all(|(text, _)| text != "LIN" && text != "LOG"),
         "{painted:?}"
     );
     assert!(
@@ -448,7 +541,7 @@ fn the_rulers_scale_toggle_reads_the_abscissa_over_decades() {
     open_strip(&mut state, "V", signal("V(a)"));
     let painted = painted_texts(&ctx, &mut state);
     let top = strip_top(&painted, "vs V(a)");
-    let off = x_toggle(&painted, top).expect("the strip's ruler has its log toggle");
+    let off = x_toggle(&painted, top).expect("the strip's header has its X scale chip");
     click(&ctx, &mut state, off, egui::PointerButton::Primary);
     assert!(
         !strips(&state)[0].log_x,

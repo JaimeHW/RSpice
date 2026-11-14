@@ -24,6 +24,9 @@ const SHARED_X_FLAG_TOP: f32 = 17.0;
 const SHARED_X_FLAG_HEIGHT: f32 = 13.0;
 const SHARED_X_LANE_TOP: f32 = 35.0;
 const SHARED_X_LANE_HEIGHT: f32 = 14.0;
+/// The gap between a ruler's gutter caption, or its overview's name, and the
+/// plot it stands under.
+const RULER_CAPTION_GAP: f32 = 8.0;
 
 /// The narrowest viewport an overview-handle drag can produce, as a fraction
 /// of the full retained sweep. It is the reciprocal of the zoom ceiling, so
@@ -35,8 +38,7 @@ const SHARED_X_MIN_WINDOW: f64 = 1.0 / 200.0;
 const SHARED_X_OVERVIEW_POINTS: usize = 160;
 pub const WAVE_SHARED_RIGHT_MARGIN: f32 = 14.0;
 /// The height of a ruler with no overview track: its row of ticks and its
-/// row of cursor boxes, with the caption and the scale toggle in the gutter
-/// beside them.
+/// row of cursor boxes, with the caption in the gutter beside them.
 pub const WAVE_RULER_HEIGHT_WITHOUT_OVERVIEW: f32 = SHARED_X_LANE_TOP;
 
 pub fn model_x_axis(
@@ -135,8 +137,6 @@ pub struct SharedXAxis {
     /// The reader's significant digits, which a cursor's value box reads in.
     pub significant_digits: usize,
     pub cursors: Option<CursorPair>,
-    /// Why the axis cannot be logarithmic, when it cannot.
-    pub log_refusal: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -159,8 +159,6 @@ pub struct SharedXAxisResponse {
     /// Retained sample visits charged to this draw, including cache construction.
     pub overview_samples_read: usize,
     pub extrema_samples_read: usize,
-    /// The reader switched the axis between linear and logarithmic.
-    pub scale_toggled: bool,
     /// Where the gutter caption stands, for a host that offers a choice on
     /// it.
     pub caption_rect: Option<egui::Rect>,
@@ -224,8 +222,9 @@ pub fn show_shared_x_axis(
 }
 
 /// Draw a ruler: the ticks of the range shown, the cursors' boxes, the
-/// caption and the scale toggle in the gutter and, when it has a record to
-/// scroll, the overview track under them. Resolves its pointer and keyboard
+/// caption in the gutter and, when it has a record to scroll, the overview
+/// track under them; the strip header carries its scale toggle. Resolves its
+/// pointer and keyboard
 /// gestures.
 pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> SharedXAxisResponse {
     let mut output = SharedXAxisResponse::default();
@@ -578,7 +577,7 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
     }
     let gutter_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
     output.caption_rect = Some(painter.text(
-        egui::pos2(plot_left - 8.0, label_top + font.size * 0.5),
+        egui::pos2(plot_left - RULER_CAPTION_GAP, label_top + font.size * 0.5),
         egui::Align2::RIGHT_CENTER,
         caption,
         gutter_font.clone(),
@@ -586,69 +585,12 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
     ));
     if has_overview {
         painter.text(
-            egui::pos2(plot_left - 8.0, track.center().y),
+            egui::pos2(plot_left - RULER_CAPTION_GAP, track.center().y),
             egui::Align2::RIGHT_CENTER,
             "FULL",
             gutter_font,
             c.text_faint,
         );
-    }
-    // The scale toggle reads as each pane's Y toggle does: "log", lit while
-    // the axis is logarithmic, in the chip's fills. It heads the gutter, in
-    // the column the panes' unit tags start in, where no cursor flag reaches:
-    // beside the plot's left edge it ran into cursor A's flag. A domain a
-    // logarithmic axis cannot show refuses it with the reason.
-    let logarithmic = scale == XScale::Log10;
-    let refused = !logarithmic && input.log_refusal.is_some();
-    let toggle_galley = painter.layout_no_wrap(
-        "log".to_owned(),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        c.text,
-    );
-    let toggle_rect = egui::Rect::from_min_size(
-        egui::pos2(rect.left() + 5.0, flag_top - 1.0),
-        egui::vec2(toggle_galley.size().x + 12.0, SHARED_X_FLAG_HEIGHT + 2.0),
-    );
-    if toggle_rect.right() + 4.0 <= plot_left {
-        let toggle = ui
-            .interact(toggle_rect, id.with("scale"), egui::Sense::click())
-            .on_hover_text(match &input.log_refusal {
-                Some(reason) if refused => {
-                    format!("A logarithmic X axis is not available: {reason}")
-                }
-                _ => "Toggle logarithmic X axis".to_owned(),
-            });
-        toggle.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::SelectableLabel,
-                !refused,
-                logarithmic,
-                "Logarithmic X axis",
-            )
-        });
-        let hovered = toggle.hovered() && !refused;
-        let (fill, border, ink) = if logarithmic {
-            (c.accent_dim, c.accent, c.text)
-        } else if refused {
-            (egui::Color32::TRANSPARENT, c.border, c.text_faint)
-        } else if hovered {
-            (egui::Color32::TRANSPARENT, c.border_strong, c.text)
-        } else {
-            (egui::Color32::TRANSPARENT, c.border, c.text_dim)
-        };
-        painter.rect(
-            toggle_rect,
-            t.radius,
-            fill,
-            egui::Stroke::new(1.0, border),
-            egui::StrokeKind::Inside,
-        );
-        painter.galley(
-            toggle_rect.center() - toggle_galley.size() * 0.5,
-            toggle_galley,
-            ink,
-        );
-        output.scale_toggled = toggle.clicked() && !refused;
     }
 
     // The same fills and ink as the plot's own cursor flags, so one cursor

@@ -717,6 +717,9 @@ pub(crate) struct XyInput<'a> {
     /// The strip, by its place among the session's strips.
     pub strip: usize,
     pub log_y: bool,
+    /// Where the strip's header keeps its X scale chip, which reads the
+    /// abscissa over decades.
+    pub scale_rect: Option<egui::Rect>,
 }
 
 /// Draw one strip's curves against its abscissa.
@@ -727,6 +730,7 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         frame,
         strip: strip_index,
         log_y,
+        scale_rect,
     } = input;
     let Some(strip) = host.session().xy_strips.get(strip_index).cloned() else {
         return;
@@ -895,6 +899,14 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     let linear_x = finite_bounds(curves.iter().flat_map(|curve| curve.x()), false, 0.0);
     let log_refusal = log_abscissa_refusal(abscissa_label(abscissa), &resolved.unit, linear_x);
     let log_x = strip.log_x && log_refusal.is_none();
+    let scale_toggled = scale_rect.is_some_and(|rect| {
+        crate::strip::x_scale_chip(
+            ui,
+            egui::Id::new(("rspice.results.xy-scale", strip_index)),
+            rect,
+            (log_x, log_refusal.as_deref()),
+        )
+    });
     let x_scale = if log_x { XScale::Log10 } else { XScale::Linear };
     let x_view = strip
         .x_view
@@ -1311,7 +1323,6 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
             quantity_policy: quantity,
             significant_digits,
             cursors: None,
-            log_refusal,
         },
     );
     let mut chosen = None;
@@ -1389,13 +1400,13 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         }
     }
     // The ruler's own gestures: its keys and double-click move the X range
-    // alone, and its scale toggle reads the abscissa over decades.
+    // alone; the header's scale chip reads the abscissa over decades.
     match ruler.viewport {
         Some(super::navigation::SharedXViewChange::Fit) => held.x_view = None,
         Some(super::navigation::SharedXViewChange::Range(range)) => held.x_view = Some(range),
         None => {}
     }
-    if ruler.scale_toggled {
+    if scale_toggled {
         held.log_x = !log_x;
         // A range read on one scale is no view on the other.
         held.x_view = None;
