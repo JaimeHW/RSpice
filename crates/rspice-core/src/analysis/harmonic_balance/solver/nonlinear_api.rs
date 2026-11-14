@@ -172,6 +172,11 @@ impl HbSolver {
             unknowns,
             simparams,
         )?;
+        let num_nodes = self.num_nodes;
+        self.generated_step_nodes
+            .extend(device.rows().iter().copied().filter(|&row| row < num_nodes));
+        self.generated_step_nodes.sort_unstable();
+        self.generated_step_nodes.dedup();
         self.generated_nonlinear_devices.push(device);
         Ok(())
     }

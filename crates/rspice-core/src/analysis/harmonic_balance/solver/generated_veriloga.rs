@@ -28,10 +28,6 @@ use rspice_veriloga_runtime::{
     GeneratedAnalysisKind, GeneratedDdtCoefficients, GeneratedSimulationParameters,
 };
 
-/// One stamp's residual `F` over the augmented unknowns, and its Jacobian
-/// entries `(row, column, dF/dx)`.
-type Probe = (Vec<Value>, Vec<(usize, usize, Value)>);
-
 pub(super) struct HbGeneratedDevice {
     /// HB-private copy with inactive `ddt` coefficients: `F` and `dF/dx`.
     static_probe: BuiltinVerilogAInstance,
@@ -45,8 +41,15 @@ pub(super) struct HbGeneratedDevice {
     interval: Value,
     num_nodes: usize,
     simparams: GeneratedSimulationParameters,
-    /// Zero-based augmented MNA rows the instance stamps.
+    /// Zero-based augmented MNA rows the instance stamps, sorted.
     rows: Vec<usize>,
+    /// The right-hand side a probe stamps into, over the whole periodic
+    /// state; only `rows` are ever written or read.
+    rhs: Vec<Value>,
+    /// Per row of `rows`: the static probe's residual `F`.
+    static_residual: Vec<Value>,
+    /// Per row of `rows`: the charge probe's residual `F + (Q - Q_ref)/h`.
+    charge_residual: Vec<Value>,
 }
 
 impl Clone for HbGeneratedDevice {
@@ -59,6 +62,9 @@ impl Clone for HbGeneratedDevice {
             num_nodes: self.num_nodes,
             simparams: self.simparams,
             rows: self.rows.clone(),
+            rhs: self.rhs.clone(),
+            static_residual: self.static_residual.clone(),
+            charge_residual: self.charge_residual.clone(),
         }
     }
 }
@@ -137,6 +143,9 @@ impl HbGeneratedDevice {
             interval,
             num_nodes,
             simparams,
+            rhs: vec![0.0; unknowns],
+            static_residual: vec![0.0; rows.len()],
+            charge_residual: vec![0.0; rows.len()],
             rows,
         };
         for (probe, coefficients) in [
@@ -156,13 +165,23 @@ impl HbGeneratedDevice {
         }
         let reference = vec![0.0; unknowns];
         for probe in [&mut sampler.static_probe, &mut sampler.charge_probe] {
-            Self::probe(probe, &mut sampler.matrix, &reference, num_nodes, simparams).and_then(
-                |_| {
-                    probe
-                        .advance_state()
-                        .map_err(|error| failure("reference charge", &error))
+            Self::probe(
+                probe,
+                &mut sampler.matrix,
+                ProbeBuffers {
+                    rhs: &mut sampler.rhs,
+                    residual: &mut sampler.static_residual,
+                    rows: &sampler.rows,
                 },
-            )?;
+                &reference,
+                num_nodes,
+                simparams,
+            )
+            .and_then(|()| {
+                probe
+                    .advance_state()
+                    .map_err(|error| failure("reference charge", &error))
+            })?;
         }
         Ok(sampler)
     }
@@ -176,42 +195,59 @@ impl HbGeneratedDevice {
         &self.rows
     }
 
-    /// One probe stamp of `device` at `solution`: `A·x - z`, which is the
-    /// residual `F` of the companion `A·x_new = z` the stamp linearizes, and
-    /// its Jacobian `A`.
+    /// One probe stamp of `device` at `solution`, left in `matrix` as its
+    /// Jacobian `A`, with `A·x - z` at each of the instance's rows in
+    /// `buffers.residual`: the residual `F` of the companion `A·x_new = z` the
+    /// stamp linearizes. Nothing is allocated: a sample runs once per
+    /// collocation point per Newton evaluation.
     fn probe(
         device: &mut BuiltinVerilogAInstance,
         matrix: &mut StaticMatrix,
+        buffers: ProbeBuffers<'_>,
         solution: &[Value],
         num_nodes: usize,
         simparams: GeneratedSimulationParameters,
-    ) -> Result<Probe, HbError> {
+    ) -> Result<(), HbError> {
+        let ProbeBuffers {
+            rhs,
+            residual,
+            rows,
+        } = buffers;
         matrix.clear_values();
-        let mut rhs = vec![0.0; solution.len()];
+        for &row in rows {
+            rhs[row] = 0.0;
+        }
         device
             .stamp_probe(
                 matrix,
-                &mut rhs,
+                rhs,
                 solution,
                 num_nodes,
                 GeneratedAnalysisKind::Tran,
                 simparams,
             )
             .map_err(|error| {
-                HbError::InvalidCircuit(format!(
+                let message = format!(
                     "generated Verilog-A device '{}' HB sample failed: {error}",
                     device.instance_name
-                ))
+                );
+                if crate::circuit::generated_evaluation_is_nonfinite(&error) {
+                    HbError::NonFiniteSample(message)
+                } else {
+                    HbError::InvalidCircuit(message)
+                }
             })?;
-        let jacobian: Vec<(usize, usize, Value)> = matrix
-            .stored_entries()
-            .filter(|&(_, _, value)| value != 0.0)
-            .collect();
-        let mut residual = rhs.iter().map(|value| -value).collect::<Vec<_>>();
-        for &(row, col, value) in &jacobian {
-            residual[row] += value * solution[col];
+        for (slot, &row) in residual.iter_mut().zip(rows) {
+            *slot = -rhs[row];
         }
-        Ok((residual, jacobian))
+        for (row, col, value) in matrix.stored_entries() {
+            if value != 0.0
+                && let Ok(slot) = rows.binary_search(&row)
+            {
+                residual[slot] += value * solution[col];
+            }
+        }
+        Ok(())
     }
 
     /// Stamp `F` and `Q - Q_ref` at one collocation sample, with their
@@ -222,33 +258,58 @@ impl HbGeneratedDevice {
         f: &mut NativeStamp,
         q: &mut NativeStamp,
     ) -> Result<(), HbError> {
-        let (static_residual, static_jacobian) = Self::probe(
+        let h = self.interval;
+        Self::probe(
             &mut self.static_probe,
             &mut self.matrix,
+            ProbeBuffers {
+                rhs: &mut self.rhs,
+                residual: &mut self.static_residual,
+                rows: &self.rows,
+            },
             solution,
             self.num_nodes,
             self.simparams,
         )?;
-        let (companion_residual, companion_jacobian) = Self::probe(
+        for (row, col, value) in self.matrix.stored_entries() {
+            if value != 0.0 {
+                f.stamp(row + 1, col + 1, value);
+                q.stamp(row + 1, col + 1, -h * value);
+            }
+        }
+        Self::probe(
             &mut self.charge_probe,
             &mut self.matrix,
+            ProbeBuffers {
+                rhs: &mut self.rhs,
+                residual: &mut self.charge_residual,
+                rows: &self.rows,
+            },
             solution,
             self.num_nodes,
             self.simparams,
         )?;
-        let h = self.interval;
-        for &row in &self.rows {
-            let charge = h * (companion_residual[row] - static_residual[row]);
-            f.stamp_rhs(row + 1, -static_residual[row]);
-            q.stamp_rhs(row + 1, -charge);
+        for (row, col, value) in self.matrix.stored_entries() {
+            if value != 0.0 {
+                q.stamp(row + 1, col + 1, h * value);
+            }
         }
-        for &(row, col, value) in &static_jacobian {
-            f.stamp(row + 1, col + 1, value);
-            q.stamp(row + 1, col + 1, -h * value);
-        }
-        for &(row, col, value) in &companion_jacobian {
-            q.stamp(row + 1, col + 1, h * value);
+        for ((&row, &static_residual), &charge_residual) in self
+            .rows
+            .iter()
+            .zip(&self.static_residual)
+            .zip(&self.charge_residual)
+        {
+            f.stamp_rhs(row + 1, -static_residual);
+            q.stamp_rhs(row + 1, -h * (charge_residual - static_residual));
         }
         Ok(())
     }
+}
+
+/// The scratch one probe stamp works in, owned by the sampler and sized once.
+struct ProbeBuffers<'a> {
+    rhs: &'a mut [Value],
+    residual: &'a mut [Value],
+    rows: &'a [usize],
 }

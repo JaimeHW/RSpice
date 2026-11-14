@@ -501,6 +501,8 @@ impl HbSolver {
             veriloga_nonlinear_devices: Vec::new(),
             #[cfg(feature = "veriloga-builtins-base")]
             generated_nonlinear_devices: Vec::new(),
+            #[cfg(feature = "veriloga-builtins-base")]
+            generated_step_nodes: Vec::new(),
         })
     }
 
@@ -545,6 +547,8 @@ impl HbSolver {
             veriloga_nonlinear_devices: Vec::new(),
             #[cfg(feature = "veriloga-builtins-base")]
             generated_nonlinear_devices: Vec::new(),
+            #[cfg(feature = "veriloga-builtins-base")]
+            generated_step_nodes: Vec::new(),
         }
     }
 

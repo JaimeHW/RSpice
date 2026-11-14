@@ -30,17 +30,13 @@ fn behavioral_stamp_error(error: crate::device::BehavioralEvaluationError) -> St
     }
 }
 
-/// Classify a generated/builtin Verilog-A device's evaluation failure.
-///
-/// The generated runtime raises typed non-finite refusals from its analog
-/// operators (`ddt`, `idt`, `idtmod`, event control) and from `ddx`; each of
-/// those is a property of the point the solver handed the device. A missing
-/// simulator parameter, an initialization slot, a loop ceiling or an unwrapped
-/// `idtmod` bound is not, and stays structural.
+/// Whether a generated evaluation failed because the module's arithmetic
+/// left the reals at the point the solver offered: a property of that point,
+/// which a Newton trial or a time step can step back from.
 #[cfg(feature = "veriloga-builtins-base")]
-fn generated_veriloga_stamp_error(
-    error: rspice_veriloga_runtime::GeneratedVerilogAEvaluationError,
-) -> StampError {
+pub(crate) fn generated_evaluation_is_nonfinite(
+    error: &rspice_veriloga_runtime::GeneratedEvaluationError,
+) -> bool {
     use rspice_veriloga_runtime::{
         GeneratedDdtCandidateError, GeneratedEvaluationError, GeneratedEventControlError,
         GeneratedIdtCandidateError, GeneratedIdtModCandidateError,
@@ -54,7 +50,7 @@ fn generated_veriloga_stamp_error(
         )
     }
 
-    let rejectable = match &error.source {
+    match error {
         // `checked_derivative_value` fails only for a non-finite operand or a
         // non-finite derivative.
         GeneratedEvaluationError::Derivative { .. } => true,
@@ -85,7 +81,21 @@ fn generated_veriloga_stamp_error(
         GeneratedEvaluationError::Integer { non_finite, .. }
         | GeneratedEvaluationError::ArrayIndex { non_finite, .. } => *non_finite,
         _ => false,
-    };
+    }
+}
+
+/// Classify a generated/builtin Verilog-A device's evaluation failure.
+///
+/// The generated runtime raises typed non-finite refusals from its analog
+/// operators (`ddt`, `idt`, `idtmod`, event control) and from `ddx`; each of
+/// those is a property of the point the solver handed the device. A missing
+/// simulator parameter, an initialization slot, a loop ceiling or an unwrapped
+/// `idtmod` bound is not, and stays structural.
+#[cfg(feature = "veriloga-builtins-base")]
+fn generated_veriloga_stamp_error(
+    error: rspice_veriloga_runtime::GeneratedVerilogAEvaluationError,
+) -> StampError {
+    let rejectable = generated_evaluation_is_nonfinite(&error.source);
     if rejectable {
         StampError::nonfinite_trial(
             error.instance_name.clone(),

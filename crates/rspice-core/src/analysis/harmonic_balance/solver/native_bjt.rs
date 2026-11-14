@@ -657,7 +657,7 @@ impl HbSolver {
             }
             device.stamp_periodic_fq(solution, f, q)?;
             if f.invalid || q.invalid {
-                return Err(HbError::InvalidCircuit(format!(
+                return Err(HbError::NonFiniteSample(format!(
                     "generated Verilog-A device '{}' produced invalid physical F/Q entries",
                     device.name()
                 )));

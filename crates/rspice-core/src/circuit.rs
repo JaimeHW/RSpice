@@ -86,6 +86,8 @@ mod xspice_dispatch;
 pub(crate) use net_kind::{NetKind, NetKinds};
 mod nonlinear;
 pub use crate::op_label::{OP_LABELS, OpLabel};
+#[cfg(feature = "veriloga-builtins-base")]
+pub(crate) use nonlinear::generated_evaluation_is_nonfinite;
 pub(crate) use nonlinear::{AcceptedNativeNonlinearCheckpointStates, NonlinearDeviceStateSnapshot};
 
 /// Resolve persisted text back to the interned label this build emits.

@@ -55,6 +55,14 @@ struct HbNewtonStep {
 /// Armijo sufficient-decrease constant of the HB residual line search.
 const HB_ARMIJO_C: Value = 1e-4;
 
+/// The largest change a Newton step may make to a generated compact model's
+/// node voltage at any instant of the period: the transient's own voltage
+/// step limit (`MAX_DELTA_VOLTAGE_LIMIT`), which it applies whenever no
+/// device limits its junctions itself. Harmonic balance samples those models
+/// without `$limit`, so it limits their nodes this way instead.
+#[cfg(feature = "veriloga-builtins-base")]
+pub(super) const GENERATED_STEP_LIMIT: Value = 0.5;
+
 /// Outcome of trying an undamped Newton step.
 enum FullNewtonStep {
     /// The state holds the full step and its residual.
@@ -565,6 +573,82 @@ impl ExactHbOperator<'_> {
         }
     }
 
+    /// The coordinates an exactly homogeneous right-hand side fixes at zero:
+    /// the one-entry rows now, and the equations that reach no excited
+    /// equation once a candidate fails its certificate.
+    fn homogeneous_rows(&self) -> ExactHomogeneousRows {
+        ExactHomogeneousRows {
+            one_entry_rows: self.one_entry_rows(),
+            dependents: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// For each realified unknown, the other equations that name it with a
+    /// nonzero coefficient.
+    fn row_dependents(&self) -> ExactRowDependents {
+        let size = self.entity_count() * self.real_width;
+        let mut offsets = vec![0; size + 1];
+        self.visit_entries(|row, column, value| {
+            if value != 0.0 && row != column {
+                offsets[column + 1] += 1;
+            }
+        });
+        for column in 0..size {
+            offsets[column + 1] += offsets[column];
+        }
+        let mut next = offsets[..size].to_vec();
+        let mut rows = vec![0; offsets[size]];
+        self.visit_entries(|row, column, value| {
+            if value != 0.0 && row != column {
+                rows[next[column]] = row;
+                next[column] += 1;
+            }
+        });
+        ExactRowDependents { offsets, rows }
+    }
+
+    /// Zero every unknown whose equation reaches no excited equation, and say
+    /// whether that changed the candidate. No equation of that closed set
+    /// names an unknown outside it, so with its right-hand side exactly zero
+    /// its exact solution is zero: the system is block triangular, and its
+    /// diagonal block is nonsingular when the system is. A gate network that
+    /// no model current loads, as on a HEMT whose gate draws nothing, is such
+    /// a set at every harmonic its source does not drive: the
+    /// transconductance names the gate from the drain's equation, but no gate
+    /// equation names the drain. Krylov roundoff there, carried in through
+    /// the preconditioner's pivoting, is a componentwise error of one however
+    /// small it is.
+    fn project_unexcited_rows(
+        dependents: &ExactRowDependents,
+        solution: &mut [Complex64],
+        rhs: &[Complex64],
+    ) -> bool {
+        let zero = Complex64::new(0.0, 0.0);
+        let mut reached = rhs.iter().map(|value| *value != zero).collect::<Vec<_>>();
+        let mut pending = (0..rhs.len())
+            .filter(|&row| reached[row])
+            .collect::<Vec<_>>();
+        while let Some(column) = pending.pop() {
+            for &row in &dependents.rows[dependents.offsets[column]..dependents.offsets[column + 1]]
+            {
+                if !reached[row] {
+                    reached[row] = true;
+                    pending.push(row);
+                }
+            }
+        }
+        let mut changed = false;
+        for (value, _) in solution
+            .iter_mut()
+            .zip(&reached)
+            .filter(|(_, reached)| !**reached)
+        {
+            changed |= *value != zero;
+            *value = zero;
+        }
+        changed
+    }
+
     /// Assemble only the independent per-harmonic diagonal blocks used by
     /// the block-Jacobi preconditioner.  This costs O(H*N^2), not
     /// O((H*N)^2), and includes the exact same-harmonic Hankel coupling.
@@ -814,14 +898,50 @@ impl super::krylov::KrylovPreconditioner for RowScaledExactHbPreconditioner<'_> 
     }
 }
 
+/// What [`ExactHbOperator::homogeneous_rows`] found: the coordinates an
+/// exactly zero right-hand side fixes at zero.
+struct ExactHomogeneousRows {
+    one_entry_rows: Vec<(usize, usize)>,
+    /// Built the first time a candidate fails its certificate, so a solve
+    /// that certifies never pays for it.
+    dependents: std::cell::OnceCell<ExactRowDependents>,
+}
+
+/// [`ExactHbOperator::row_dependents`]: the equations naming each unknown,
+/// in compressed columns.
+struct ExactRowDependents {
+    offsets: Vec<usize>,
+    rows: Vec<usize>,
+}
+
 fn exact_hb_candidate_report(
     operator: &ExactHbOperator<'_>,
-    one_entry_rows: &[(usize, usize)],
+    homogeneous: &ExactHomogeneousRows,
     solution: &mut [Complex64],
     rhs: &[Complex64],
 ) -> Result<(rspice_matrix::ComplexTransposeBackwardErrorReport, Value), rspice_matrix::SolverError>
 {
-    operator.project_homogeneous_one_entry_rows(one_entry_rows, solution, rhs);
+    operator.project_homogeneous_one_entry_rows(&homogeneous.one_entry_rows, solution, rhs);
+    let report = exact_hb_certificate(operator, solution, rhs)?;
+    if report.0.is_accepted() {
+        return Ok(report);
+    }
+    let dependents = homogeneous
+        .dependents
+        .get_or_init(|| operator.row_dependents());
+    if ExactHbOperator::project_unexcited_rows(dependents, solution, rhs) {
+        exact_hb_certificate(operator, solution, rhs)
+    } else {
+        Ok(report)
+    }
+}
+
+fn exact_hb_certificate(
+    operator: &ExactHbOperator<'_>,
+    solution: &[Complex64],
+    rhs: &[Complex64],
+) -> Result<(rspice_matrix::ComplexTransposeBackwardErrorReport, Value), rspice_matrix::SolverError>
+{
     let size = rhs.len();
     let report = rspice_matrix::analyze_complex_transpose_solution_by_entry_visitor(
         size,
@@ -1192,7 +1312,16 @@ impl HbSolver {
             // a seed that meets the row test only loosely, such as one
             // transient period, still gets its Newton step.
             if iter == 0 {
-                self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
+                match self.compute_full_residual_with_gmin(state, gmin, source_scale) {
+                    Ok(()) => {}
+                    // A starting state some device cannot evaluate leaves this
+                    // stage nothing to step from; the next one starts elsewhere.
+                    Err(error @ HbError::NonFiniteSample(_)) => {
+                        log::debug!("HB Newton cannot start from its state: {error}");
+                        return Ok(false);
+                    }
+                    Err(error) => return Err(error),
+                }
                 if abort.is_aborted() {
                     return Err(HbError::Aborted);
                 }
@@ -1215,7 +1344,7 @@ impl HbSolver {
             // and restores quadratic convergence; the Toeplitz-only complex
             // path remains selectable for A/B comparison and for the large-
             // system Krylov fast path.
-            let delta_x = match self.newton_correction(state, gmin, abort)? {
+            let mut delta_x = match self.newton_correction(state, gmin, abort)? {
                 Ok(dx) => dx,
                 Err(error) if error.is_convergence_failure() && seed_meets_rows => {
                     log::debug!(
@@ -1230,6 +1359,8 @@ impl HbSolver {
                 }
                 Err(error) => return Err(error),
             };
+
+            self.limit_generated_newton_step(&mut delta_x);
 
             // 5. Take the full step when it contracts the Newton correction,
             // otherwise apply the residual line search for robust convergence.
@@ -1558,7 +1689,15 @@ impl HbSolver {
             }
             self.set_newton_trial(state, &x_orig, &branch_orig, delta, alpha);
 
-            self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
+            match self.compute_full_residual_with_gmin(state, gmin, source_scale) {
+                Ok(()) => {}
+                // A trial some device cannot evaluate is a rejected trial.
+                Err(HbError::NonFiniteSample(_)) => {
+                    alpha *= 0.5;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
             let merit =
                 state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
 
@@ -1572,6 +1711,18 @@ impl HbSolver {
             }
 
             alpha *= 0.5;
+        }
+
+        if !best_merit.is_finite() {
+            // Every trial left the reals: stay at the iterate, whose residual
+            // was finite, and let continuation decide.
+            state.x = x_orig;
+            state.mna_branch_currents = branch_orig;
+            self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
+            return Err(HbError::NonFiniteSample(
+                "every damped trial of the Newton step reached a state a device cannot evaluate"
+                    .to_string(),
+            ));
         }
 
         // Use best step found with voltage limiting
@@ -1629,7 +1780,17 @@ impl HbSolver {
         let x_orig = state.x.clone();
         let branch_orig = state.mna_branch_currents.clone();
         self.set_newton_trial(state, &x_orig, &branch_orig, delta, 1.0);
-        self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
+        match self.compute_full_residual_with_gmin(state, gmin, source_scale) {
+            Ok(()) => {}
+            // A full step some device cannot evaluate goes to the line search.
+            Err(HbError::NonFiniteSample(_)) => {
+                state.x = x_orig;
+                state.mna_branch_currents = branch_orig;
+                self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
+                return Ok(FullNewtonStep::Rejected);
+            }
+            Err(error) => return Err(error),
+        }
         let merit = state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
         if merit < initial_merit * (1.0 - HB_ARMIJO_C) {
             return Ok(FullNewtonStep::Accepted);
@@ -1672,6 +1833,49 @@ impl HbSolver {
         }
         self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
         Ok(FullNewtonStep::Rejected)
+    }
+
+    /// Limit a Newton step on the generated compact models' nodes as the
+    /// transient limits it: when the step would move one of their electrical
+    /// node voltages by more than [`GENERATED_STEP_LIMIT`] at some instant,
+    /// the whole step is scaled so that none moves further. The bound on a
+    /// node's swing is `|dV_0| + sum_k |dV_k|`, which no instant exceeds. The
+    /// direction, and so the exact Jacobian's Newton direction, is kept; a
+    /// step inside the limit, as every step near the solution is, is taken
+    /// as it is.
+    fn limit_generated_newton_step(&self, delta: &mut HbNewtonStep) {
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            let mut largest: Value = 0.0;
+            for &node in &self.generated_step_nodes {
+                if !self.electrical_node(node) {
+                    continue;
+                }
+                let Some((dc, harmonics)) = delta
+                    .node_voltages
+                    .get(node)
+                    .and_then(|row| row.split_first())
+                else {
+                    continue;
+                };
+                let swing = dc.re.abs() + harmonics.iter().map(|value| value.norm()).sum::<Value>();
+                largest = largest.max(swing);
+            }
+            if largest > GENERATED_STEP_LIMIT {
+                let scale = GENERATED_STEP_LIMIT / largest;
+                for row in delta
+                    .node_voltages
+                    .iter_mut()
+                    .chain(delta.branch_currents.iter_mut())
+                {
+                    for value in row {
+                        *value *= scale;
+                    }
+                }
+            }
+        }
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let _ = delta;
     }
 
     /// Solve J * dX = -R at `state`. The outer error is a Jacobian assembly
@@ -2164,7 +2368,7 @@ impl HbSolver {
                 periodic_networks: &self.exact_periodic_networks,
             };
             operator.validate()?;
-            let one_entry_rows = operator.one_entry_rows();
+            let homogeneous = operator.homogeneous_rows();
             let couplings = CollocationCouplings::sample(
                 &operator,
                 HbFft::try_with_size(self.fft.num_harmonics(), self.fft.size())?,
@@ -2203,7 +2407,7 @@ impl HbSolver {
             } else {
                 match exact_hb_candidate_report(
                     &operator,
-                    &one_entry_rows,
+                    &homogeneous,
                     &mut outcome.solution,
                     &rhs_complex,
                 ) {
@@ -2347,7 +2551,7 @@ impl HbSolver {
 
                     let (refined_report, relative_residual) = match exact_hb_candidate_report(
                         &operator,
-                        &one_entry_rows,
+                        &homogeneous,
                         &mut outcome.solution,
                         &rhs_complex,
                     ) {
@@ -3479,14 +3683,81 @@ mod exact_matrix_free_tests {
         let mut candidate = exact;
         candidate[operator.re_idx(0, 1)] = Complex64::new(1.0e-30, -1.0e-30);
 
-        let (report, relative_residual) =
-            exact_hb_candidate_report(&operator, &operator.one_entry_rows(), &mut candidate, &rhs)
-                .expect("canonical candidate has a finite full certificate");
+        let (report, relative_residual) = exact_hb_candidate_report(
+            &operator,
+            &operator.homogeneous_rows(),
+            &mut candidate,
+            &rhs,
+        )
+        .expect("canonical candidate has a finite full certificate");
 
         assert!(report.is_accepted());
         assert_eq!(relative_residual.to_bits(), 0);
         assert_eq!(candidate[operator.re_idx(0, 1)].re.to_bits(), 0);
         assert_eq!(candidate[operator.re_idx(0, 1)].im.to_bits(), 0);
+    }
+
+    #[test]
+    fn candidate_report_zeroes_equations_that_reach_no_excited_equation() {
+        // Nodes 0 and 2 form a network whose equations name only each other;
+        // node 1's equation names node 0 (a transconductance), and node 3's
+        // names node 1. With no drive on 0 and 2 their exact solution is
+        // zero, and roundoff there is a componentwise error that no Krylov
+        // refinement removes. Node 3 has no drive either, but its equation
+        // reaches node 1's, so its value must stand.
+        let g = vec![
+            (0, 0, 1.0),
+            (0, 2, -0.5),
+            (2, 2, 1.0),
+            (2, 0, -0.5),
+            (1, 1, 2.0),
+            (1, 0, 0.5),
+            (3, 3, 1.0),
+            (3, 1, -1.0),
+        ];
+        let operator = ExactHbOperator {
+            gmin: 0.0,
+            num_nodes: 4,
+            ..fixture(&g, &[], &[], &[])
+        };
+        let size = operator.entity_count() * operator.real_width;
+        let mut exact = vec![Complex64::new(0.0, 0.0); size];
+        for harmonic in 0..operator.num_components {
+            for node in [1, 3] {
+                exact[operator.re_idx(node, harmonic)] =
+                    Complex64::new(1.0 + harmonic as Value, 0.0);
+                if harmonic > 0 {
+                    exact[operator.im_idx(node, harmonic)] =
+                        Complex64::new(-1.0 - harmonic as Value, 0.0);
+                }
+            }
+        }
+        let rhs = operator.apply(&exact);
+        for harmonic in 0..operator.num_components {
+            assert_eq!(rhs[operator.re_idx(3, harmonic)], Complex64::new(0.0, 0.0));
+        }
+        let mut candidate = exact.clone();
+        for harmonic in 0..operator.num_components {
+            candidate[operator.re_idx(0, harmonic)] = Complex64::new(1.0e-30, 0.0);
+            candidate[operator.re_idx(2, harmonic)] = Complex64::new(3.0e-30, 0.0);
+        }
+        let homogeneous = operator.homogeneous_rows();
+        let unprojected = exact_hb_certificate(&operator, &candidate, &rhs)
+            .expect("finite certificate")
+            .0;
+        assert!(!unprojected.is_accepted());
+
+        let (report, _) = exact_hb_candidate_report(&operator, &homogeneous, &mut candidate, &rhs)
+            .expect("the projected candidate has a finite certificate");
+
+        assert!(report.is_accepted());
+        for (index, (value, expected)) in candidate.iter().zip(&exact).enumerate() {
+            assert_eq!(
+                (value.re.to_bits(), value.im.to_bits()),
+                (expected.re.to_bits(), expected.im.to_bits()),
+                "coordinate {index}"
+            );
+        }
     }
 
     #[test]
@@ -3525,15 +3796,18 @@ mod exact_matrix_free_tests {
         let mut candidate = exact;
         candidate[dc_row] = Complex64::new(-8.3e-39, 0.0);
 
-        let (unprojected, _) =
-            exact_hb_candidate_report(&operator, &[], &mut candidate.clone(), &rhs)
-                .expect("the roundoff candidate has a finite full certificate");
+        let (unprojected, _) = exact_hb_certificate(&operator, &candidate, &rhs)
+            .expect("the roundoff candidate has a finite full certificate");
         assert!(!unprojected.is_accepted());
         assert!((unprojected.componentwise_error() - 1.0).abs() < 1.0e-12);
 
-        let (report, _) =
-            exact_hb_candidate_report(&operator, &operator.one_entry_rows(), &mut candidate, &rhs)
-                .expect("the projected candidate has a finite full certificate");
+        let (report, _) = exact_hb_candidate_report(
+            &operator,
+            &operator.homogeneous_rows(),
+            &mut candidate,
+            &rhs,
+        )
+        .expect("the projected candidate has a finite full certificate");
         assert!(
             report.is_accepted(),
             "componentwise error {:e}",

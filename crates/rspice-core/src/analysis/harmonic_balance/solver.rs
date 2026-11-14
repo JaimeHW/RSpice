@@ -150,6 +150,11 @@ pub enum HbError {
     LinearSolveFailed(String),
     /// Invalid circuit configuration
     InvalidCircuit(String),
+    /// A device evaluated to a non-finite value at a sample of a state the
+    /// solver proposed. A Newton trial that meets one is a rejected trial,
+    /// as a transient step whose evaluation overflows is a rejected step;
+    /// only a solve that has no other state to try reports it.
+    NonFiniteSample(String),
     /// Invalid numerical solver configuration.
     InvalidConfig(HbConfigError),
 }
@@ -172,6 +177,7 @@ impl std::fmt::Display for HbError {
             Self::LinearConvergenceFailed(msg) => write!(f, "Linear convergence failed: {msg}"),
             Self::LinearSolveFailed(msg) => write!(f, "Linear solve failed: {msg}"),
             Self::InvalidCircuit(msg) => write!(f, "Invalid circuit: {}", msg),
+            Self::NonFiniteSample(msg) => write!(f, "Non-finite device sample: {msg}"),
             Self::InvalidConfig(error) => write!(f, "Invalid HB config: {error}"),
         }
     }
@@ -185,6 +191,7 @@ impl HbError {
             Self::ConvergenceFailed { .. }
                 | Self::SingularMatrix
                 | Self::LinearConvergenceFailed(_)
+                | Self::NonFiniteSample(_)
         )
     }
 }
@@ -1094,6 +1101,10 @@ pub struct HbSolver {
     /// charge probe.
     #[cfg(feature = "veriloga-builtins-base")]
     generated_nonlinear_devices: Vec<HbGeneratedDevice>,
+    /// Zero-based nodes of the generated compact models, sorted: the nodes a
+    /// Newton step is limited on, as the transient limits them.
+    #[cfg(feature = "veriloga-builtins-base")]
+    generated_step_nodes: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

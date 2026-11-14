@@ -323,7 +323,14 @@ impl HbSolver {
             }
             state.begin_newton_iteration(iteration)?;
             if iteration == 0 {
-                self.compute_dc_residual(state, gmin, source_scale)?;
+                match self.compute_dc_residual(state, gmin, source_scale) {
+                    Ok(()) => {}
+                    Err(error @ HbError::NonFiniteSample(_)) => {
+                        log::debug!("HB DC Newton cannot start from its state: {error}");
+                        return Ok(false);
+                    }
+                    Err(error) => return Err(error),
+                }
                 if abort.is_aborted() {
                     return Err(HbError::Aborted);
                 }
@@ -352,7 +359,7 @@ impl HbSolver {
             neg_residual.extend(state.residual.iter().map(|row| -row[0].re));
             neg_residual.extend(state.mna_branch_residual.iter().map(|row| -row[0].re));
 
-            let delta_x = match self.solve_real_linear_system(&jacobian, &neg_residual) {
+            let mut delta_x = match self.solve_real_linear_system(&jacobian, &neg_residual) {
                 Ok(d) => d,
                 Err(error) if error.is_convergence_failure() => {
                     log::debug!("HB DC Newton correction rejected: {error}");
@@ -361,8 +368,10 @@ impl HbSolver {
                 Err(error) => return Err(error),
             };
 
+            self.limit_generated_dc_step(&mut delta_x);
+
             // Line search with DC voltage limiting
-            self.apply_dc_line_search(
+            match self.apply_dc_line_search(
                 state,
                 &delta_x,
                 HbDcLineSearchLimits {
@@ -372,7 +381,14 @@ impl HbSolver {
                     voltage_abstol: self.voltage_abstol,
                     source_scale,
                 },
-            )?;
+            ) {
+                Ok(()) => {}
+                Err(error @ HbError::NonFiniteSample(_)) => {
+                    log::debug!("HB DC Newton step rejected: {error}");
+                    return Ok(false);
+                }
+                Err(error) => return Err(error),
+            }
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
             }
@@ -709,8 +725,16 @@ impl HbSolver {
                 continue;
             }
 
-            // Compute new residual
-            self.compute_dc_residual(state, gmin, source_scale)?;
+            // Compute new residual; a trial some device cannot evaluate is a
+            // rejected trial.
+            match self.compute_dc_residual(state, gmin, source_scale) {
+                Ok(()) => {}
+                Err(HbError::NonFiniteSample(_)) => {
+                    alpha *= 0.5;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
             let trial_merit =
                 state.certificate_merit(reltol, current_abstol, voltage_abstol, true)?;
 
@@ -734,12 +758,36 @@ impl HbSolver {
             || !self.apply_dc_trial_update(state, &checkpoint, delta_x, best_alpha)
         {
             self.restore_dc_checkpoint(state, &checkpoint)?;
-            return Err(HbError::InvalidCircuit(
+            self.compute_dc_residual(state, gmin, source_scale)?;
+            return Err(HbError::NonFiniteSample(
                 "HB DC line search found no finite branch-inclusive trial state".to_string(),
             ));
         }
         self.compute_dc_residual(state, gmin, source_scale)?;
         Ok(())
+    }
+
+    /// The DC seed's Newton step, limited on the generated compact models'
+    /// electrical nodes as the harmonic step is: scaled so that none of
+    /// their node voltages moves by more than the transient's step limit.
+    fn limit_generated_dc_step(&self, delta_x: &mut [Value]) {
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            let largest = self
+                .generated_step_nodes
+                .iter()
+                .filter(|&&node| self.electrical_node(node))
+                .filter_map(|&node| delta_x.get(node))
+                .fold(0.0, |largest: Value, step| largest.max(step.abs()));
+            if largest > super::newton::GENERATED_STEP_LIMIT {
+                let scale = super::newton::GENERATED_STEP_LIMIT / largest;
+                for value in delta_x.iter_mut() {
+                    *value *= scale;
+                }
+            }
+        }
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let _ = delta_x;
     }
 
     fn validate_dc_exact_mna_registry(&self) -> Result<usize, HbError> {
