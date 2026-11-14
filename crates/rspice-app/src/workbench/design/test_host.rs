@@ -23,7 +23,7 @@ use crate::workbench::app::actions::workspace::{
 use crate::workbench::app_state::diagnostic_store::{BatchStanding, DiagnosticBatch};
 use crate::workbench::app_state::{Model, SlotFacts, prompt_text};
 use crate::workbench::framework::command_registry::Registry;
-use crate::workbench::framework::feature::harness::fresh_session_results;
+use crate::workbench::framework::feature::harness::{fresh_session_code, fresh_session_results};
 use crate::workbench::slots::{DesignState, RunsState};
 use crate::workbench::state::WorkbenchSession;
 
@@ -165,7 +165,7 @@ impl DesignTestHost {
 /// whole application. The host holds no other feature's slot, so no foreign
 /// dialog is open: both modal facts are lent as closed, and a dialog of the
 /// design feature's own or one the surface asked for still counts. The
-/// results workspace answers as a fresh session's does.
+/// results workspace and the code feature answer as a fresh session's do.
 pub(crate) fn canvas_parts(host: &mut DesignTestHost) -> CanvasParts<'_> {
     canvas_parts_lent(
         &mut host.design,
@@ -173,6 +173,7 @@ pub(crate) fn canvas_parts(host: &mut DesignTestHost) -> CanvasParts<'_> {
         &mut host.workbench,
         &mut host.runs,
         fresh_session_results(),
+        fresh_session_code(),
         no_commands(),
         false,
         false,
@@ -180,8 +181,8 @@ pub(crate) fn canvas_parts(host: &mut DesignTestHost) -> CanvasParts<'_> {
 }
 
 /// The canvas's facts from the host, as `canvas_facts` reads them from the
-/// whole application, with the results workspace answering as a fresh
-/// session's does.
+/// whole application, with the results workspace and the code feature
+/// answering as a fresh session's do.
 pub(crate) fn canvas_facts(host: &DesignTestHost) -> CanvasFacts<'_> {
     canvas_facts_lent(
         &host.design,
@@ -189,6 +190,7 @@ pub(crate) fn canvas_facts(host: &DesignTestHost) -> CanvasFacts<'_> {
         &host.workbench,
         &host.runs,
         fresh_session_results(),
+        fresh_session_code(),
         no_commands(),
     )
 }

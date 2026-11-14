@@ -19,10 +19,9 @@ use crate::workbench::state::Workspace;
 use crate::workbench::{
     app::{
         StimulusLinkMode, copy_active_schematic_selection, cut_schematic_selection,
-        delete_schematic_selection, duplicate_schematic_selection_at,
-        new_veriloga_device_available_in, open_replace_instance_dialog, open_stimulus_link,
-        paste_schematic_clipboard_at, replace_instance_available, schematic_grid_step,
-        show_stimulus_definition,
+        delete_schematic_selection, duplicate_schematic_selection_at, open_replace_instance_dialog,
+        open_stimulus_link, paste_schematic_clipboard_at, replace_instance_available,
+        schematic_grid_step, show_stimulus_definition,
     },
     design::commands::DesignCommand,
     framework::command_registry::ids,
@@ -1470,7 +1469,7 @@ pub(crate) fn action_availability(
             Err(refusal) => (false, refusal.sentence()),
         },
         ContextAction::NewVerilogADevice => (
-            new_veriloga_device_available_in(state.model),
+            state.code.new_veriloga_device_available(state.model),
             "Make a writable design library available",
         ),
         ContextAction::UpdateInstanceInterface => (

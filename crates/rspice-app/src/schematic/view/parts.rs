@@ -6,10 +6,11 @@
 //! (a probe's trace, the operating-point hop, a requirement link, and the
 //! menu's Verilog-A device form, model-bound symbol and netlist card) waits
 //! in the session's outbox until the shell answers it, once the surface has
-//! drawn. Whether a modal dialog was open is lent as it stood when the parts
-//! were taken. A dialog the surface asked for counts as open from the
-//! moment it asked, though the shell opens it only once the surface has
-//! drawn.
+//! drawn. What the code feature shows, such as whether New Verilog-A device
+//! can make anything, the canvas reads through code's port. Whether a modal
+//! dialog was open is lent as it stood when the parts were taken. A dialog
+//! the surface asked for counts as open from the moment it asked, though the
+//! shell opens it only once the surface has drawn.
 //!
 //! The parts carry the application's commands, which the canvas's shortcut
 //! labels and accessibility summaries read.
@@ -43,7 +44,11 @@ use crate::workbench::{
     },
     app_state::{DragType, Model, model_design_view},
     design::{DesignFeature, own_modal_dialog_open},
-    framework::{command_registry::Registry, feature::Cx, ports::ResultsPort},
+    framework::{
+        command_registry::Registry,
+        feature::{CodePort, Cx},
+        ports::ResultsPort,
+    },
     slots::{DesignState, RunsState},
     state::WorkbenchSession,
 };
@@ -66,6 +71,9 @@ pub(crate) struct CanvasParts<'a> {
     pub(crate) workbench: &'a mut WorkbenchSession,
     pub(crate) runs: &'a mut RunsState,
     pub(crate) results: &'a dyn ResultsPort,
+    /// What the code feature shows, which the menu's Verilog-A device row
+    /// reads.
+    pub(crate) code: &'a dyn CodePort,
     /// The application's commands, which shortcut labels read.
     pub(crate) commands: &'static Registry,
     application_modal: bool,
@@ -90,6 +98,7 @@ pub(crate) fn canvas_parts_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasPa
         &mut *cx.wb,
         &mut *cx.runs,
         cx.peers.results(),
+        cx.peers.code(),
         cx.commands,
         application_modal_open,
         dialog_modal_open,
@@ -107,6 +116,7 @@ pub(crate) fn canvas_parts_lent<'a>(
     wb: &'a mut WorkbenchSession,
     runs: &'a mut RunsState,
     results: &'a dyn ResultsPort,
+    code: &'a dyn CodePort,
     commands: &'static Registry,
     application_modal_open: bool,
     dialog_modal_open: bool,
@@ -121,6 +131,7 @@ pub(crate) fn canvas_parts_lent<'a>(
         workbench: &mut *wb,
         runs: &mut *runs,
         results,
+        code,
         commands,
         application_modal,
         dialog_modal,
@@ -152,6 +163,9 @@ pub(crate) struct CanvasFrame<'a> {
     pub(crate) workbench: &'a mut WorkbenchSession,
     pub(crate) runs: &'a mut RunsState,
     pub(crate) results: &'a dyn ResultsPort,
+    /// What the code feature shows, which the menu's Verilog-A device row
+    /// reads.
+    pub(crate) code: &'a dyn CodePort,
     /// The application's commands, which shortcut labels read.
     pub(crate) commands: &'static Registry,
     application_modal: bool,
@@ -170,6 +184,7 @@ pub(crate) fn canvas_frame(state: &mut AppState) -> CanvasFrame<'_> {
         workbench: &mut state.workbench,
         runs: &mut state.runs,
         results: &*state.results,
+        code: &*state.code,
         commands: crate::workbench::commands::vocabulary::command_registry(),
         application_modal,
         dialog_modal,
@@ -187,6 +202,7 @@ pub(crate) fn canvas_frame_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasFr
         &mut *cx.wb,
         &mut *cx.runs,
         cx.peers.results(),
+        cx.peers.code(),
         cx.commands,
         application_modal_open,
         dialog_modal_open,
@@ -202,6 +218,7 @@ pub(crate) fn canvas_frame_lent<'a>(
     wb: &'a mut WorkbenchSession,
     runs: &'a mut RunsState,
     results: &'a dyn ResultsPort,
+    code: &'a dyn CodePort,
     commands: &'static Registry,
     application_modal_open: bool,
     dialog_modal_open: bool,
@@ -214,6 +231,7 @@ pub(crate) fn canvas_frame_lent<'a>(
         workbench: &mut *wb,
         runs: &mut *runs,
         results,
+        code,
         commands,
         application_modal,
         dialog_modal,
@@ -232,6 +250,7 @@ impl CanvasFrame<'_> {
             workbench: &mut *self.workbench,
             runs: &mut *self.runs,
             results: self.results,
+            code: self.code,
             commands: self.commands,
             application_modal,
             dialog_modal,
@@ -245,6 +264,7 @@ impl CanvasFrame<'_> {
             model: &*self.model,
             runs: &*self.runs,
             results: self.results,
+            code: self.code,
             commands: self.commands,
             probed_trace: probed_trace(&*self.workbench),
         }
@@ -305,6 +325,9 @@ pub(crate) struct CanvasFacts<'a> {
     pub(crate) model: &'a Model,
     pub(crate) runs: &'a RunsState,
     pub(crate) results: &'a dyn ResultsPort,
+    /// What the code feature shows, which the menu's Verilog-A device row
+    /// reads.
+    pub(crate) code: &'a dyn CodePort,
     /// The application's commands, which shortcut labels read.
     pub(crate) commands: &'static Registry,
     probed_trace: Option<&'a SelectedResultTrace>,
@@ -318,6 +341,7 @@ pub(crate) fn canvas_facts(state: &AppState) -> CanvasFacts<'_> {
         model: &state.model,
         runs: &state.runs,
         results: &*state.results,
+        code: &*state.code,
         commands: crate::workbench::commands::vocabulary::command_registry(),
         probed_trace: probed_trace(&state.workbench),
     }
@@ -331,6 +355,7 @@ pub(crate) fn canvas_facts_in<'a>(cx: &'a Cx<'_, DesignFeature>) -> CanvasFacts<
         cx.wb,
         cx.runs,
         cx.peers.results(),
+        cx.peers.code(),
         cx.commands,
     )
 }
@@ -343,6 +368,7 @@ pub(crate) fn canvas_facts_lent<'a>(
     wb: &'a WorkbenchSession,
     runs: &'a RunsState,
     results: &'a dyn ResultsPort,
+    code: &'a dyn CodePort,
     commands: &'static Registry,
 ) -> CanvasFacts<'a> {
     CanvasFacts {
@@ -350,6 +376,7 @@ pub(crate) fn canvas_facts_lent<'a>(
         model,
         runs,
         results,
+        code,
         commands,
         probed_trace: probed_trace(wb),
     }
@@ -455,6 +482,7 @@ impl CanvasParts<'_> {
             model: self.model,
             runs: self.runs,
             results: self.results,
+            code: self.code,
             commands: self.commands,
             probed_trace: probed_trace(self.workbench),
         }
