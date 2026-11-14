@@ -3,7 +3,7 @@
 //! The generator decides per model whether harmonic balance can sample its
 //! residual as `F(x) + dQ(x)/dt`; an admitted model's harmonics must be those
 //! of its native twin where one exists, and those of RSpice's own settled
-//! transient everywhere.
+//! transient everywhere one settles, or of shooting's orbit where none does.
 
 use num_complex::Complex64;
 use rspice_core::analysis::PssConfig;
@@ -740,6 +740,97 @@ fn compare_with_settled_transient(
     );
 }
 
+/// Each admitted family whose transient cannot settle within a fixture's
+/// run, with shooting as its oracle. BSIM-SOI e2aff994's floating body
+/// charges only as 1/t: after 384 periods its fundamental still moves by
+/// 1.4e-4 of itself each period, so no settled transient exists to compare
+/// with. Shooting solves the period map's fixed point directly and needs
+/// none. The gate swings about 1 V so that the device conducts; about the
+/// 0.6 V of the other MOSFET fixtures it is nearly off, and its drain moves
+/// by 6 µV.
+///
+/// Allowance, fixed before the first comparison: the standing one, each of
+/// the DC term and first three harmonics of the harmonic-balance spectrum
+/// within 1e-3 of the fundamental's amplitude of shooting's.
+fn shooting_oracle_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
+    vec![
+        #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
+        (
+            "SOI MOSFET (BSIM-SOI e2aff994)",
+            "VDD vdd 0 1\nV1 in 0 SIN(1.0 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 0 t bsimsoi__e2aff994\n",
+            "d",
+        ),
+    ]
+}
+
+#[test]
+fn generated_models_whose_transient_cannot_settle_reach_shootings_orbit() {
+    let mut failures = Vec::new();
+    for (family, circuit, node) in shooting_oracle_fixtures() {
+        check_against_shooting(family, circuit, node, &mut failures);
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Run one shooting-oracle fixture through harmonic balance and shooting and
+/// compare their spectra under the allowance [`shooting_oracle_fixtures`]
+/// states.
+fn check_against_shooting(family: &str, circuit: &str, node: &str, failures: &mut Vec<String>) {
+    let deck = format!("* {family} periodic steady state\n{circuit}.end\n");
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let hb = match engine().run_hb(
+        &netlist,
+        HbConfig::new(F0)
+            .with_harmonics(HARMONICS)
+            .with_tolerance(1e-9),
+    ) {
+        Ok(result) => spectrum(&result, node),
+        Err(error) => {
+            failures.push(format!("{family}: harmonic balance must run: {error}"));
+            return;
+        }
+    };
+    let pss = match engine().run_pss(
+        &netlist,
+        PssConfig::new(F0)
+            .with_points_per_period(512)
+            .with_tolerance(1e-9),
+    ) {
+        Ok(result) => result.result,
+        Err(error) => {
+            failures.push(format!("{family}: shooting must run: {error}"));
+            return;
+        }
+    };
+    let output = pss
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("{family}: V({node}) present"));
+    let end = *pss.time.last().expect("a periodic waveform");
+    let orbit = period_spectrum(&pss.time, &pss.waveforms[output].values, end, 512);
+    let fundamental = orbit[1].norm();
+    for k in 0..=3 {
+        if (hb[k] - orbit[k]).norm() > 1e-3 * fundamental {
+            failures.push(format!(
+                "{family}: V({node}) harmonic {k}: harmonic balance {} against shooting {} \
+                 (fundamental {fundamental})",
+                hb[k], orbit[k]
+            ));
+        }
+    }
+    let worst = (0..=3)
+        .map(|k| (hb[k] - orbit[k]).norm() / fundamental)
+        .fold(0.0, f64::max);
+    eprintln!(
+        "{family}: V({node}) harmonic balance worst {worst:.3e} of shooting's fundamental; \
+         harmonic balance {:?} shooting {:?}",
+        &hb[..4],
+        &orbit[..4]
+    );
+}
+
 /// Why shooting refuses a generated model whose source branch stores flux.
 #[cfg(feature = "veriloga-model-angelov")]
 const FLUX: &str = "a voltage contribution takes the time derivative of its branch current (an \
@@ -802,9 +893,9 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// A generated model whose harmonics no settled transient has confirmed is
-/// refused before solving, by instance and module, with what is missing
-/// (BSIM-SOI 4.6.1 and e2aff994), as is one a settled transient contradicts,
+/// A generated model whose harmonics neither a settled transient nor shooting
+/// has confirmed is refused before solving, by instance and module, with
+/// what is missing (BSIM-SOI 4.6.1), as is one a settled transient contradicts,
 /// with by how much (PSP NQS 103), and one whose generator could not prove
 /// its residual `F(x) + dQ(x)/dt`, with the generator's reason; the
 /// generator proves every shipped model's.
@@ -824,19 +915,13 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
 /// ends with.
 fn refused_models() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
     vec![
-        #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
-        (
-            "XM d d 0 0 0 t bsimsoi__e2aff994",
-            "XM",
-            "bsimsoi__e2aff994",
-            "harmonic balance and a quasi-static sweep disagree on the fundamental by 12%",
-        ),
         #[cfg(feature = "veriloga-model-bsimsoi-va")]
         (
             "XM d d 0 0 bsimsoi_va",
             "XM",
             "bsimsoi_va",
-            "harmonic balance and the transient disagree on the fundamental by a factor of 9",
+            "shooting, which needs no settled transient, refuses it for the `ddt` site harmonic \
+             balance carries",
         ),
         // The fixture a PSP NQS 103 admission would need: harmonic balance's
         // fundamental is 3.2e-5 + 0.016318i against the settled transient's
@@ -895,7 +980,8 @@ fn check_refusal(card: &str, instance: &str, module: &str, reason: &str) -> Opti
 }
 
 /// Every shipped model this build compiles, walked by name: an admitted one
-/// must reach its fixture's settled transient, a refused one must give its
+/// must reach its fixture's settled transient, or shooting's orbit where no
+/// transient settles, a refused one must give its
 /// named reason, and one with neither a fixture nor a named refusal fails,
 /// so a model the generator newly admits cannot go unchecked. A fixture or
 /// refusal names its model as a word of its deck. It needs every model
@@ -909,6 +995,7 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
             .any(|word| word.eq_ignore_ascii_case(name))
     };
     let fixtures = settled_fixtures();
+    let oracle_fixtures = shooting_oracle_fixtures();
     let refused = refused_models();
     let mut failures = Vec::new();
     for &name in builtins::builtin_names() {
@@ -921,6 +1008,11 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
             .find(|(_, circuit, _)| names_model(circuit, name))
         {
             check_fixture(family, circuit, node, &mut failures);
+        } else if let Some(&(family, circuit, node)) = oracle_fixtures
+            .iter()
+            .find(|(_, circuit, _)| names_model(circuit, name))
+        {
+            check_against_shooting(family, circuit, node, &mut failures);
         } else {
             failures.push(format!(
                 "{name}: harmonic balance admits it, but it has no settled-transient fixture"

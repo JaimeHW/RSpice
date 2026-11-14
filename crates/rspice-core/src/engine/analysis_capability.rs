@@ -1116,18 +1116,12 @@ fn carrier_refusal(
 #[cfg(feature = "veriloga-builtins-base")]
 const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[
     (
-        "bsimsoi__e2aff994",
-        "its harmonics have not been checked against a settled transient: on a common-source \
-         stage its floating body's charging slows only as 1/t, so after 384 periods its \
-         fundamental still moves by 1.4e-4 of itself each period, and harmonic balance and a \
-         quasi-static sweep disagree on the fundamental by 12%",
-    ),
-    (
         "bsimsoi_va",
         "its harmonics have not been checked against a settled transient: on a common-source \
          stage its floating body's charging slows only as 1/t, so after 384 periods its \
          fundamental still moves by 1.7e-4 of itself each period, and harmonic balance and the \
-         transient disagree on the fundamental by a factor of 9",
+         transient disagree on the fundamental by a factor of 9; shooting, which needs no \
+         settled transient, refuses it for the `ddt` site harmonic balance carries",
     ),
     (
         "pspnqs103va",
