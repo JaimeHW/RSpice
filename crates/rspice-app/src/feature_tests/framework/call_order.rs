@@ -971,16 +971,23 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
 /// share, and the page has its own answered as it returns; the inspector has
 /// what it raised answered once it has drawn, before the next point draws.
 /// The navigator and the toolbars raise nothing, so they answer nothing
-/// where they draw. The Library and cellview manager's route has what it
-/// raised, a symbol dialog to open, answered as it returns, so the dialog
-/// draws in the frame that asked for it.
+/// where they draw. The Library and cellview manager draws in the feature's
+/// context too, and has what it raised, the symbol editor or a symbol
+/// dialog to open, answered as it returns, so a dialog draws in the frame
+/// that asked for it; on its Libraries page the Library page's dialogs
+/// follow, each with what it raised answered.
 const PROJECT_CONTRIBUTIONS: &[Step] = &[
     (
         "library and cellview manager route",
         &["== super::SurfaceId::LibraryCellviewManager\
            {\
-           library_cellview_manager::show(ui, app);\
+           let ctx = ui.ctx().clone();\
+           let page = library_cellview_manager::show(ui, &mut features::cx(app));\
            app.after_contribution();\
+           if page == LibraryCellviewPage::Libraries {\
+           self::project::library::dialogs(&ctx, app);\
+           app.after_contribution();\
+           }\
            return;\
            }"],
     ),
@@ -2227,36 +2234,38 @@ const LIBRARY_PAGE: &[Step] = &[
 
 /// The Library surface as the shell composes it: the page in the project
 /// feature's context, then what it raised (a view to open, a cell to create)
-/// answered as it returns, before the publication dialogs draw.
+/// answered as it returns, before its dialogs draw.
 const LIBRARY_COMPOSITION: &[Step] = &[
     ("page", &["page(ui, &mut features::cx(app));"]),
     ("what the page raised", &["app.after_contribution();"]),
-    (
-        "publication",
-        &["super::library_publication::show(&ctx, app);"],
-    ),
+    ("its dialogs", &["dialogs(&ctx, app);"]),
 ];
 
-/// The library and view membership dialogs the Library surface draws, in
-/// today's order, each through the feature registry, in the project
-/// feature's context, which answers what each raised as it returns. New
-/// Library raises nothing, so the answer after it finds nothing to carry out.
+/// The dialogs of a page that draws the Library browser: the publication
+/// dialogs, then the library and view membership dialogs, in today's order,
+/// each through the feature registry, in the project feature's context,
+/// which answers what each raised as it returns. New Library raises
+/// nothing, so the answer after it finds nothing to carry out.
 const LIBRARY_DIALOGS: &[Step] = &[
     (
+        "publication",
+        &["super::library_publication::show(ctx, app);"],
+    ),
+    (
         "New Library",
-        &["render_dialog(app, &ctx, DialogKey(\"project.new_library\"));"],
+        &["render_dialog(app, ctx, DialogKey(\"project.new_library\"));"],
     ),
     (
         "Rename Library",
-        &["render_dialog(app, &ctx, DialogKey(\"project.rename_library\"));"],
+        &["render_dialog(app, ctx, DialogKey(\"project.rename_library\"));"],
     ),
     (
         "Delete Library",
-        &["render_dialog(app, &ctx, DialogKey(\"project.delete_library\"));"],
+        &["render_dialog(app, ctx, DialogKey(\"project.delete_library\"));"],
     ),
     (
         "Rename View",
-        &["render_dialog(app, &ctx, DialogKey(\"project.rename_view\"));"],
+        &["render_dialog(app, ctx, DialogKey(\"project.rename_view\"));"],
     ),
 ];
 
@@ -2286,13 +2295,23 @@ fn the_library_dialogs_draw_in_the_project_context_and_a_change_is_answered_as_i
     assert_runs_in_order(
         "shell_host::project::library",
         &library,
-        &[LIBRARY_COMPOSITION, LIBRARY_DIALOGS].concat(),
+        LIBRARY_COMPOSITION,
     );
     assert!(
-        without_whitespace(&library).ends_with(&without_whitespace(
-            "render_dialog(app, &ctx, DialogKey(\"project.rename_view\"));"
+        without_whitespace(&library).ends_with(&without_whitespace("dialogs(&ctx, app);")),
+        "the Library surface draws nothing after its dialogs"
+    );
+    let dialogs = body(LIBRARY_HOST, "pub(in crate::workbench) fn dialogs(");
+    assert_runs_in_order(
+        "shell_host::project::library::dialogs",
+        &dialogs,
+        LIBRARY_DIALOGS,
+    );
+    assert!(
+        without_whitespace(&dialogs).ends_with(&without_whitespace(
+            "render_dialog(app, ctx, DialogKey(\"project.rename_view\"));"
         )),
-        "the Library surface draws nothing after its last dialog has what it raised answered"
+        "the Library page's dialogs draw nothing after the last has what it raised answered"
     );
     assert_project_registers(
         "project.new_library",

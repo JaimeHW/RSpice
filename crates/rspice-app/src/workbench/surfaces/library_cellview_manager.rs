@@ -20,14 +20,14 @@ use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
-use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{Problem, paint_problem_mark, problem_line};
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::requests::OpenSymbolAuthoring;
+use crate::workbench::project::ProjectFeature;
+use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::workspace_state::LibraryCellviewPage;
-use crate::workbench::state::Workspace;
-
-use crate::workbench::shell_host::project;
+use crate::workbench::surfaces::project::library;
 
 const COMPACT_BREAKPOINT: f32 = 820.0;
 const SPLIT_BREAKPOINT: f32 = 960.0;
@@ -59,27 +59,35 @@ enum SymbolAction {
     Import,
 }
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+/// The manager in the project feature's context: its identity, its page
+/// tabs, then the page in front, which is the page it returns. The
+/// Libraries page is the project's own Library browser; the shell draws
+/// that page's dialogs once what the manager raised has been answered.
+pub fn show(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> LibraryCellviewPage {
     let tokens = Tokens::get(ui.ctx());
-    Frame::new().fill(tokens.color.bg_app).show(ui, |ui| {
-        surface_header(ui, app);
-        page_tabs(ui, app);
+    Frame::new()
+        .fill(tokens.color.bg_app)
+        .show(ui, |ui| {
+            surface_header(ui, cx);
+            page_tabs(ui, cx);
 
-        let page = app.state.project.library_cellview_page;
-        let panel = ui.scope(|ui| match page {
-            LibraryCellviewPage::Libraries => project::show_library_browser(ui, app),
-            LibraryCellviewPage::SymbolForm => symbol_form_page(ui, app),
-        });
-        ui.ctx().accesskit_node_builder(panel.response.id, |node| {
-            node.set_role(egui::accesskit::Role::TabPanel);
-            node.set_label(format!("Library Cellview Manager {}", page.label()));
-        });
-    });
+            let page = cx.state.library_cellview_page;
+            let panel = ui.scope(|ui| match page {
+                LibraryCellviewPage::Libraries => library::page(ui, cx),
+                LibraryCellviewPage::SymbolForm => symbol_form_page(ui, cx),
+            });
+            ui.ctx().accesskit_node_builder(panel.response.id, |node| {
+                node.set_role(egui::accesskit::Role::TabPanel);
+                node.set_label(format!("Library Cellview Manager {}", page.label()));
+            });
+            page
+        })
+        .inner
 }
 
-fn surface_header(ui: &mut Ui, app: &RSpiceApp) {
+fn surface_header(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) {
     let tokens = Tokens::get(ui.ctx());
-    let snapshot = catalog_snapshot(app);
+    let snapshot = catalog_snapshot(cx.model);
     let compact = ui.available_width() <= COMPACT_BREAKPOINT;
     let shown = Frame::new()
         .fill(tokens.color.bg_panel)
@@ -92,12 +100,12 @@ fn surface_header(ui: &mut Ui, app: &RSpiceApp) {
                 ScrollArea::horizontal()
                     .id_salt("library-cellview-header-context")
                     .auto_shrink([false, true])
-                    .show(ui, |ui| header_context(ui, app, snapshot, &tokens));
+                    .show(ui, |ui| header_context(ui, cx, snapshot, &tokens));
             } else {
                 ui.horizontal(|ui| {
                     identity_block(ui, &tokens);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        header_context(ui, app, snapshot, &tokens);
+                        header_context(ui, cx, snapshot, &tokens);
                     });
                 });
             }
@@ -138,8 +146,8 @@ struct CatalogSnapshot {
     views: usize,
 }
 
-fn catalog_snapshot(app: &RSpiceApp) -> CatalogSnapshot {
-    let libraries = app.state.model.library_manager.libraries_sorted();
+fn catalog_snapshot(model: &Model) -> CatalogSnapshot {
+    let libraries = model.library_manager.libraries_sorted();
     CatalogSnapshot {
         libraries: libraries.len(),
         cells: libraries.iter().map(|library| library.cell_count()).sum(),
@@ -150,22 +158,24 @@ fn catalog_snapshot(app: &RSpiceApp) -> CatalogSnapshot {
     }
 }
 
-fn header_context(ui: &mut Ui, app: &RSpiceApp, snapshot: CatalogSnapshot, tokens: &Tokens) {
+fn header_context(
+    ui: &mut Ui,
+    cx: &Cx<'_, ProjectFeature>,
+    snapshot: CatalogSnapshot,
+    tokens: &Tokens,
+) {
     ui.spacing_mut().item_spacing.x = 8.0;
     header_chip(
         ui,
         "Project",
-        &format!(
-            "r{}",
-            app.state.model.workspace.content.project.revision().get()
-        ),
+        &format!("r{}", cx.model.workspace.content.project.revision().get()),
         None,
         tokens,
     );
     header_chip(
         ui,
         "Catalog",
-        &format!("r{}", app.state.model.library_manager.revision()),
+        &format!("r{}", cx.model.library_manager.revision()),
         None,
         tokens,
     );
@@ -181,9 +191,9 @@ fn header_context(ui: &mut Ui, app: &RSpiceApp, snapshot: CatalogSnapshot, token
     );
     // An open, writable project is the ordinary case and the chip has nothing
     // to add to it. The other two say what the reader cannot do here.
-    let access = if !app.state.platform.project_lifecycle.is_open() {
+    let access = if !cx.platform.project_lifecycle.is_open() {
         Some(("closed", None))
-    } else if app.state.model.safe_mode.project_read_only() {
+    } else if cx.model.safe_mode.project_read_only() {
         Some(("safe-mode read only", Some(Problem::Warning)))
     } else {
         None
@@ -222,7 +232,7 @@ fn header_chip(ui: &mut Ui, label: &str, value: &str, problem: Option<Problem>, 
         });
 }
 
-fn page_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
+fn page_tabs(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let tokens = Tokens::get(ui.ctx());
     let font = theme::sans(tokens::FS_0, FontWeight::Medium);
     let tab_ids =
@@ -247,7 +257,7 @@ fn page_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                         + 24.0;
                     let (_, rect) = ui.allocate_space(vec2(width, TAB_HEIGHT));
                     let response = ui.interact(rect, tab_ids[index], Sense::click());
-                    let selected = app.state.project.library_cellview_page == page;
+                    let selected = cx.state.library_cellview_page == page;
                     response.widget_info(|| {
                         WidgetInfo::selected(
                             WidgetType::SelectableLabel,
@@ -287,7 +297,7 @@ fn page_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                     theme::paint_focus_ring(ui, &response, rect);
                     if response.clicked() {
-                        app.state.project.library_cellview_page = page;
+                        cx.state.library_cellview_page = page;
                     }
                     if response.has_focus() {
                         let target = ui.input_mut(|input| {
@@ -307,8 +317,7 @@ fn page_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                             }
                         });
                         if let Some(target) = target {
-                            app.state.project.library_cellview_page =
-                                LibraryCellviewPage::ALL[target];
+                            cx.state.library_cellview_page = LibraryCellviewPage::ALL[target];
                             ui.memory_mut(|memory| memory.request_focus(tab_ids[target]));
                         }
                     }
@@ -326,30 +335,26 @@ fn page_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
     });
 }
 
-fn symbol_form_page(ui: &mut Ui, app: &mut RSpiceApp) {
-    let projection = symbol_projection(app);
+fn symbol_form_page(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+    let projection = symbol_projection(cx.model);
     ScrollArea::vertical()
         .id_salt("library-cellview-symbol-form")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            symbol_context(ui, app, projection.as_ref());
+            symbol_context(ui, cx, projection.as_ref());
             ui.add_space(10.0);
             match projection {
-                None => no_symbol_state(ui, app),
-                Some(projection) => selected_symbol_surface(ui, app, &projection),
+                None => no_symbol_state(ui, cx),
+                Some(projection) => selected_symbol_surface(ui, cx, &projection),
             }
             ui.add_space(16.0);
         });
 }
 
-fn symbol_projection(app: &RSpiceApp) -> Option<SymbolProjection> {
-    let reference = resolve_symbol_reference(app)?;
-    let library = app
-        .state
-        .model
-        .library_manager
-        .get_library(&reference.library)?;
+fn symbol_projection(model: &Model) -> Option<SymbolProjection> {
+    let reference = resolve_symbol_reference(model)?;
+    let library = model.library_manager.get_library(&reference.library)?;
     let view = library
         .get_cell(&reference.cell)?
         .get_view(&reference.view)?;
@@ -362,8 +367,8 @@ fn symbol_projection(app: &RSpiceApp) -> Option<SymbolProjection> {
     })
 }
 
-pub(crate) fn resolve_symbol_reference(app: &RSpiceApp) -> Option<CellViewRef> {
-    let manager = &app.state.model.library_manager;
+pub(crate) fn resolve_symbol_reference(model: &Model) -> Option<CellViewRef> {
+    let manager = &model.library_manager;
     let selected = manager.current_library().and_then(|library| {
         let cell = manager.current_cell()?;
         let view = manager.current_view()?;
@@ -374,7 +379,7 @@ pub(crate) fn resolve_symbol_reference(app: &RSpiceApp) -> Option<CellViewRef> {
         return selected;
     }
 
-    let active = &app.state.model.workspace.content.active_view;
+    let active = &model.workspace.content.active_view;
     let active_is_symbol = manager
         .get_library(&active.library)
         .and_then(|library| library.get_cell(&active.cell))
@@ -384,12 +389,11 @@ pub(crate) fn resolve_symbol_reference(app: &RSpiceApp) -> Option<CellViewRef> {
         return Some(active.clone());
     }
 
-    first_symbol_reference(app, true).or_else(|| first_symbol_reference(app, false))
+    first_symbol_reference(model, true).or_else(|| first_symbol_reference(model, false))
 }
 
-fn first_symbol_reference(app: &RSpiceApp, typed_only: bool) -> Option<CellViewRef> {
-    app.state
-        .model
+fn first_symbol_reference(model: &Model, typed_only: bool) -> Option<CellViewRef> {
+    model
         .library_manager
         .libraries_sorted()
         .into_iter()
@@ -411,7 +415,7 @@ fn first_symbol_reference(app: &RSpiceApp, typed_only: bool) -> Option<CellViewR
         .next()
 }
 
-fn symbol_context(ui: &mut Ui, app: &RSpiceApp, projection: Option<&SymbolProjection>) {
+fn symbol_context(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>, projection: Option<&SymbolProjection>) {
     let tokens = Tokens::get(ui.ctx());
     let selection = projection
         .map(|projection| projection.reference.display_path())
@@ -443,10 +447,7 @@ fn symbol_context(ui: &mut Ui, app: &RSpiceApp, projection: Option<&SymbolProjec
                         context_value(
                             ui,
                             "Project",
-                            &format!(
-                                "r{}",
-                                app.state.model.workspace.content.project.revision().get()
-                            ),
+                            &format!("r{}", cx.model.workspace.content.project.revision().get()),
                             None,
                             &tokens,
                         );
@@ -454,7 +455,7 @@ fn symbol_context(ui: &mut Ui, app: &RSpiceApp, projection: Option<&SymbolProjec
                         context_value(
                             ui,
                             "Catalog",
-                            &format!("r{}", app.state.model.library_manager.revision()),
+                            &format!("r{}", cx.model.library_manager.revision()),
                             None,
                             &tokens,
                         );
@@ -481,14 +482,14 @@ fn context_value(ui: &mut Ui, label: &str, value: &str, problem: Option<Problem>
     );
 }
 
-fn no_symbol_state(ui: &mut Ui, app: &mut RSpiceApp) {
+fn no_symbol_state(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let tokens = Tokens::get(ui.ctx());
     section_card(
         ui,
         "No symbol view is available",
         "Create or import a model-bound symbol to establish an explicit terminal, source, component-form, and netlist contract.",
         |ui| {
-            let block = project_write_block_reason(app);
+            let block = project_write_block_reason(cx);
             let create = Button::new("Create model-bound symbol\u{2026}")
                 .accent()
                 .enabled(block.is_none())
@@ -497,10 +498,7 @@ fn no_symbol_state(ui: &mut Ui, app: &mut RSpiceApp) {
                 create.clone().on_disabled_hover_text(reason);
             }
             if create.clicked() {
-                app.state
-                    .workbench
-                    .outbox
-                    .push(OpenSymbolAuthoring::ModelBound);
+                cx.wb.outbox.push(OpenSymbolAuthoring::ModelBound);
             }
             let import = Button::new("Import symbol\u{2026}")
                 .enabled(block.is_none())
@@ -509,10 +507,7 @@ fn no_symbol_state(ui: &mut Ui, app: &mut RSpiceApp) {
                 import.clone().on_disabled_hover_text(reason);
             }
             if import.clicked() {
-                app.state
-                    .workbench
-                    .outbox
-                    .push(OpenSymbolAuthoring::Import(None));
+                cx.wb.outbox.push(OpenSymbolAuthoring::Import(None));
             }
         },
     );
@@ -523,8 +518,12 @@ fn no_symbol_state(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-fn selected_symbol_surface(ui: &mut Ui, app: &mut RSpiceApp, projection: &SymbolProjection) {
-    symbol_actions(ui, app, projection);
+fn selected_symbol_surface(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ProjectFeature>,
+    projection: &SymbolProjection,
+) {
+    symbol_actions(ui, cx, projection);
     ui.add_space(10.0);
 
     match &projection.definition {
@@ -534,11 +533,11 @@ fn selected_symbol_surface(ui: &mut Ui, app: &mut RSpiceApp, projection: &Symbol
     }
 }
 
-fn symbol_actions(ui: &mut Ui, app: &mut RSpiceApp, projection: &SymbolProjection) {
+fn symbol_actions(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, projection: &SymbolProjection) {
     let tokens = Tokens::get(ui.ctx());
     let typed = projection.definition.as_ref().is_ok_and(Option::is_some);
-    let write_block = symbol_write_block_reason(app, projection);
-    let project_block = project_write_block_reason(app);
+    let write_block = symbol_write_block_reason(cx, projection);
+    let project_block = project_write_block_reason(cx);
     let compact = ui.available_width() <= COMPACT_BREAKPOINT;
     let mut action = None;
 
@@ -563,12 +562,15 @@ fn symbol_actions(ui: &mut Ui, app: &mut RSpiceApp, projection: &SymbolProjectio
         node.set_label("Symbol and component form actions");
     });
 
-    // The symbol dialogs are raised for the shell, which opens them as the
-    // manager returns; the form and the importer name the symbol shown.
+    // The symbol editor and the symbol dialogs are raised for the shell,
+    // which opens them as the manager returns: the editor on the symbol
+    // shown, in Design, and the form and the importer naming it.
     let raised = match action {
         Some(SymbolAction::OpenEditor) => {
-            app.state.open_workspace_view(projection.reference.clone());
-            Command::OpenWorkspace(Workspace::Design).execute(app);
+            cx.wb.outbox.push(ProjectRequest::OpenView(
+                projection.reference.clone(),
+                ViewType::Symbol,
+            ));
             None
         }
         Some(SymbolAction::EditForm) => Some(OpenSymbolAuthoring::ParameterForm(Some(
@@ -581,7 +583,7 @@ fn symbol_actions(ui: &mut Ui, app: &mut RSpiceApp, projection: &SymbolProjectio
         None => None,
     };
     if let Some(request) = raised {
-        app.state.workbench.outbox.push(request);
+        cx.wb.outbox.push(request);
     }
 }
 
@@ -646,13 +648,12 @@ fn action_buttons(
     action
 }
 
-fn project_write_block_reason(app: &RSpiceApp) -> Option<&'static str> {
-    if !app.state.platform.project_lifecycle.is_open() {
+fn project_write_block_reason(cx: &Cx<'_, ProjectFeature>) -> Option<&'static str> {
+    if !cx.platform.project_lifecycle.is_open() {
         Some("Open a project before authoring symbols.")
-    } else if app.state.model.safe_mode.project_read_only() {
+    } else if cx.model.safe_mode.project_read_only() {
         Some("The project is read-only in local safe mode.")
-    } else if !app
-        .state
+    } else if !cx
         .model
         .library_manager
         .libraries_sorted()
@@ -666,10 +667,10 @@ fn project_write_block_reason(app: &RSpiceApp) -> Option<&'static str> {
 }
 
 fn symbol_write_block_reason(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ProjectFeature>,
     projection: &SymbolProjection,
 ) -> Option<&'static str> {
-    project_write_block_reason(app).or_else(|| {
+    project_write_block_reason(cx).or_else(|| {
         projection
             .library_read_only
             .then_some("The selected symbol belongs to a read-only library.")

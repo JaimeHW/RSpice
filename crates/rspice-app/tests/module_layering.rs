@@ -794,11 +794,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // lend the feature its context and carry out what it returns, so they
     // rank above its surfaces, its launcher and the transactions they run.
     "shell_host/project",
-    // The Library and cellview manager: a shell surface only the host
-    // draws, whose Libraries page draws the project's Library browser
-    // through the host's composition. The row retires when the manager
-    // becomes a feature surface drawn over the feature's context.
-    "surfaces/library_cellview_manager",
     // The shell's host: which owner draws at each contribution point the
     // docks and surfaces leave to one. It names every owner it resolves to,
     // so it ranks above all of them; the containers reach it only through

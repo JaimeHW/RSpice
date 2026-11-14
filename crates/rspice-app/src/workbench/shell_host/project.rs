@@ -61,9 +61,3 @@ pub(in crate::workbench) fn page(ui: &mut Ui, app: &mut RSpiceApp) {
         node.set_label(format!("Project {}", page.label()));
     });
 }
-
-/// Reuse the exact project-owned Library/Cell/View browser from a specialist
-/// route without introducing a second selection or mutation owner.
-pub(crate) fn show_library_browser(ui: &mut Ui, app: &mut RSpiceApp) {
-    library::library(ui, app);
-}

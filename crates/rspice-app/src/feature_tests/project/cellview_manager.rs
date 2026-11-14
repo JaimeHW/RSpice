@@ -5,6 +5,7 @@
 use egui::{Modifiers, Rect, vec2};
 
 use crate::state::{Cell, CellViewRef, Library, View, ViewType};
+use crate::workbench::features;
 use crate::workbench::framework::requests::OpenSymbolAuthoring;
 use crate::workbench::project::workspace_state::LibraryCellviewPage;
 use crate::workbench::state::Workspace;
@@ -40,7 +41,7 @@ fn render(app: &mut RSpiceApp, size: egui::Vec2) -> egui::FullOutput {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, app));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(app)));
         },
     )
 }
@@ -108,7 +109,7 @@ fn exact_selected_symbol_wins_over_an_unrelated_active_document() {
         CellViewRef::new("authoring", "amp", "symbol")
     );
     assert_eq!(
-        resolve_symbol_reference(&app),
+        resolve_symbol_reference(&app.state.model),
         Some(CellViewRef::new("authoring", "amp", "symbol"))
     );
 }

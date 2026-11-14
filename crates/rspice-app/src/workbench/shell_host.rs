@@ -83,6 +83,7 @@ impl Host for RSpiceApp {
             Point::Surface(workspace) => {
                 use crate::workbench::design::surface as design;
                 use crate::workbench::documents::code_workspace::sync_automation_debugger;
+                use crate::workbench::project::workspace_state::LibraryCellviewPage;
                 use crate::workbench::surfaces::{
                     automation, code_adapters, library_cellview_manager, netlist, project,
                     simulate, stimulus, verify,
@@ -109,11 +110,19 @@ impl Host for RSpiceApp {
                 if app.state.workbench.current_route().surface_id()
                     == super::SurfaceId::LibraryCellviewManager
                 {
-                    // What the manager raised, a symbol dialog to open, is
-                    // answered as it returns, so the dialog draws in the
-                    // frame that asked for it.
-                    library_cellview_manager::show(ui, app);
+                    // The manager draws in the project feature's context.
+                    // What it raised, the symbol editor or a symbol dialog
+                    // to open, is answered as it returns, so a dialog draws
+                    // in the frame that asked for it. On its Libraries page
+                    // the Library page's dialogs follow, as they follow the
+                    // Library page itself.
+                    let ctx = ui.ctx().clone();
+                    let page = library_cellview_manager::show(ui, &mut features::cx(app));
                     app.after_contribution();
+                    if page == LibraryCellviewPage::Libraries {
+                        self::project::library::dialogs(&ctx, app);
+                        app.after_contribution();
+                    }
                     return;
                 }
                 match workspace {
