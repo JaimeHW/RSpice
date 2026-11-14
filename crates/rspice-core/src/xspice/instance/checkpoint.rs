@@ -222,7 +222,8 @@ impl XspiceInstance {
         Ok(())
     }
 
-    pub(crate) fn runtime_checkpoint(
+    #[doc(hidden)]
+    pub fn runtime_checkpoint(
         &self,
         accepted: f64,
         matrix_size: usize,
@@ -263,7 +264,8 @@ impl XspiceInstance {
     /// Rebuild MNA binding caches on a temporary initialized instance. The
     /// receiver must already carry its circuit's resolved parameters and loads.
     /// Validate all circuit input observations before installing this result.
-    pub(crate) fn restored_runtime_checkpoint(
+    #[doc(hidden)]
+    pub fn restored_runtime_checkpoint(
         &self,
         image: &InstanceRuntimeCheckpoint,
         accepted: f64,
@@ -323,7 +325,8 @@ impl XspiceInstance {
     /// Check cached event observations against the restored circuit without
     /// invoking a model or changing its dispatch signature. Shared other-driver
     /// values are returned in circuit polarity; None selects local resolution.
-    pub(crate) fn validate_runtime_event_observations(
+    #[doc(hidden)]
+    pub fn validate_runtime_event_observations(
         &self,
         events: XspiceEventInputs<'_>,
         drivers: &super::super::event::XspiceDigitalDrivers,

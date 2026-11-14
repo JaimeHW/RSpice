@@ -631,7 +631,8 @@ impl Instant {
     /// idempotent: a tick image is its own nearest tick at distance zero. See
     /// "one instant, one key" on this type.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn canonical(self, lattice: EventLattice, scheduled_from: Instant) -> Self {
+    #[doc(hidden)]
+    pub fn canonical(self, lattice: EventLattice, scheduled_from: Instant) -> Self {
         let seconds = self.seconds();
         let Some(image) = lattice
             .resolution

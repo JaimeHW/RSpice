@@ -848,7 +848,8 @@ impl CmContext {
     /// Whether `at` is still ahead of the current instant, so a breakpoint
     /// there is one the stepper can land on: the complement of
     /// [`Self::is_due`] for every instant that is a number.
-    pub(crate) fn is_ahead(&self, at: Value) -> bool {
+    #[doc(hidden)]
+    pub fn is_ahead(&self, at: Value) -> bool {
         at > self.time + self.coincidence
     }
 
@@ -863,7 +864,8 @@ impl CmContext {
     }
 
     /// Apply the owning engine's resource policy to this model context.
-    pub(crate) fn set_resource_limits(&mut self, resource_limits: crate::resource::ResourceLimits) {
+    #[doc(hidden)]
+    pub fn set_resource_limits(&mut self, resource_limits: crate::resource::ResourceLimits) {
         self.resource_limits = resource_limits;
     }
 
@@ -2713,7 +2715,8 @@ impl CmContext {
     /// `transactional_resource` so circuit acceptance can capture its undo image.
     /// Register each independently mutable resource once; aliases must share the
     /// registration rather than independently journal the same external state.
-    pub(crate) fn set_transactional_resource<T>(&mut self, key: impl Into<String>, resource: Arc<T>)
+    #[doc(hidden)]
+    pub fn set_transactional_resource<T>(&mut self, key: impl Into<String>, resource: Arc<T>)
     where
         T: TransactionalContextResource,
     {
@@ -2728,7 +2731,8 @@ impl CmContext {
     /// in an acceptance transaction. Failed restoration permanently invalidates
     /// the registration, including registrations in cloned contexts.
     /// Unregistered resources retain their existing access behavior.
-    pub(crate) fn transactional_resource<T>(&self, key: &str) -> CmResult<Option<Arc<T>>>
+    #[doc(hidden)]
+    pub fn transactional_resource<T>(&self, key: &str) -> CmResult<Option<Arc<T>>>
     where
         T: Any + Send + Sync + 'static,
     {
@@ -3248,7 +3252,8 @@ impl CmContext {
     /// analysis, or the operating point a transient solves before its first
     /// step, which evaluates with the transient's analysis type. A UIC
     /// transient solves no operating point, so its time-zero load is not one.
-    pub(crate) fn is_dc_operating_point(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_dc_operating_point(&self) -> bool {
         self.is_dc() || self.operating_point_load
     }
 

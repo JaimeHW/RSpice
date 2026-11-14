@@ -590,7 +590,8 @@ pub enum AnalogInputConnection {
 
 impl AnalogInputConnection {
     /// Terminals whose difference supplies a voltage control sample.
-    pub(crate) fn voltage_control_nodes(&self) -> Option<(usize, usize)> {
+    #[doc(hidden)]
+    pub fn voltage_control_nodes(&self) -> Option<(usize, usize)> {
         match self {
             Self::Node(node) => Some((*node, 0)),
             Self::Differential(pos, neg) | Self::VoltageOutput { pos, neg } => Some((*pos, *neg)),
@@ -599,7 +600,8 @@ impl AnalogInputConnection {
     }
 
     /// Terminals of an analog output; branch-current inputs have no output terminals.
-    pub(crate) fn output_nodes(&self) -> Option<(usize, usize)> {
+    #[doc(hidden)]
+    pub fn output_nodes(&self) -> Option<(usize, usize)> {
         match self {
             Self::CurrentOutput { pos, neg } | Self::Hybrid { pos, neg, .. } => Some((*pos, *neg)),
             _ => self.voltage_control_nodes(),
@@ -607,7 +609,8 @@ impl AnalogInputConnection {
     }
 
     /// Resolve explicit output selections without changing the model's defaults.
-    pub(crate) fn output_type(&self, default: PortType) -> PortType {
+    #[doc(hidden)]
+    pub fn output_type(&self, default: PortType) -> PortType {
         match self {
             Self::VoltageOutput { .. } => PortType::Voltage,
             Self::CurrentOutput { .. } => PortType::Current,
@@ -692,7 +695,8 @@ impl AnalogInputConnection {
         }
     }
 
-    pub(crate) fn branch_ordinal(&self) -> Option<usize> {
+    #[doc(hidden)]
+    pub fn branch_ordinal(&self) -> Option<usize> {
         match self {
             AnalogInputConnection::CurrentProbe { branch_ordinal, .. }
             | AnalogInputConnection::BranchCurrent { branch_ordinal }
@@ -811,7 +815,8 @@ pub enum PortConnection {
 
 impl PortConnection {
     /// Terminals of an analog output; branch-current inputs have no output terminals.
-    pub(crate) fn output_nodes(&self) -> Option<(usize, usize)> {
+    #[doc(hidden)]
+    pub fn output_nodes(&self) -> Option<(usize, usize)> {
         match self {
             Self::Analog(node) => Some((*node, 0)),
             Self::Differential(pos, neg)
@@ -823,7 +828,8 @@ impl PortConnection {
     }
 
     /// Resolve explicit output selections without changing the model's defaults.
-    pub(crate) fn output_type(&self, default: PortType) -> PortType {
+    #[doc(hidden)]
+    pub fn output_type(&self, default: PortType) -> PortType {
         match self {
             Self::VoltageOutput { .. } => PortType::Voltage,
             Self::CurrentOutput { .. } => PortType::Current,
@@ -865,7 +871,8 @@ impl PortConnection {
 
     /// Whether this connection carries event values or nothing: it reaches no
     /// analog node, branch or source.
-    pub(crate) fn is_event_or_null_connection(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_event_or_null_connection(&self) -> bool {
         matches!(
             self,
             PortConnection::Digital(_)
@@ -990,7 +997,8 @@ pub struct SharedXspiceInstance(Arc<XspiceInstance>);
 
 impl SharedXspiceInstance {
     /// Register an instance the circuit has just built.
-    pub(crate) fn new(instance: XspiceInstance) -> Self {
+    #[doc(hidden)]
+    pub fn new(instance: XspiceInstance) -> Self {
         Self(Arc::new(instance))
     }
 
@@ -1005,7 +1013,8 @@ impl SharedXspiceInstance {
     /// `engine::xspice_settle_ratchet` can fail a change that puts the deep
     /// copies back.
     #[inline]
-    pub(crate) fn make_mut(&mut self) -> &mut XspiceInstance {
+    #[doc(hidden)]
+    pub fn make_mut(&mut self) -> &mut XspiceInstance {
         let (instance, copied) = crate::xspice::settle_cost::make_mut_reporting_copy(&mut self.0);
         if copied {
             crate::xspice::settle_cost::note_instance_deep_copy();
@@ -1087,7 +1096,8 @@ impl XspiceInstance {
     }
 
     /// Create a new XSPICE instance with all supported parameter channels.
-    pub(crate) fn new_with_string_vectors(
+    #[doc(hidden)]
+    pub fn new_with_string_vectors(
         name: impl Into<String>,
         model: Arc<dyn CodeModel>,
         connections: Vec<PortConnection>,
@@ -1436,23 +1446,27 @@ impl XspiceInstance {
 
     /// The model's converter output conductances at this instance's present
     /// state; see [`super::CodeModel::converter_noise_conductances`].
-    pub(crate) fn converter_noise_conductances(&self) -> Vec<(usize, Value)> {
+    #[doc(hidden)]
+    pub fn converter_noise_conductances(&self) -> Vec<(usize, Value)> {
         self.model.converter_noise_conductances(&self.context)
     }
 
     /// See [`super::CodeModel::port_noise_currents`].
-    pub(crate) fn port_noise_currents(&self) -> Vec<super::PortNoiseCurrent> {
+    #[doc(hidden)]
+    pub fn port_noise_currents(&self) -> Vec<super::PortNoiseCurrent> {
         self.model.port_noise_currents(&self.context)
     }
 
     /// See [`super::CodeModel::receives_real_output`].
     #[cfg(feature = "veriloga")]
-    pub(crate) fn receives_real_output(&self, port: &str) -> bool {
+    #[doc(hidden)]
+    pub fn receives_real_output(&self, port: &str) -> bool {
         self.model.receives_real_output(port)
     }
 
     #[cfg(feature = "veriloga")]
-    pub(crate) fn analog_input_thresholds(&self) -> CmResult<Vec<super::AnalogInputThreshold>> {
+    #[doc(hidden)]
+    pub fn analog_input_thresholds(&self) -> CmResult<Vec<super::AnalogInputThreshold>> {
         let thresholds = self.model.analog_input_thresholds(&self.context)?;
         for threshold in &thresholds {
             let port_index = self.port_indices.get(&threshold.port).copied();
@@ -1500,11 +1514,8 @@ impl XspiceInstance {
     /// reads the tapped driver through [`CmContext::other_digital_drivers`],
     /// the same per-element driver view an inout port receives.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn tap_digital_drivers(
-        &mut self,
-        port: &str,
-        drivers: Vec<super::event::XspiceDriverId>,
-    ) {
+    #[doc(hidden)]
+    pub fn tap_digital_drivers(&mut self, port: &str, drivers: Vec<super::event::XspiceDriverId>) {
         self.driver_taps = Some(Arc::new(DigitalDriverTaps {
             port: port.to_string(),
             drivers,
@@ -1519,19 +1530,22 @@ impl XspiceInstance {
     /// [`CmContext::input_hdl_drive`]; the circuit refreshes it before every
     /// evaluation ([`Self::refresh_hdl_drives`]), so no image carries it.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn read_hdl_drives(&mut self, port: &str) {
+    #[doc(hidden)]
+    pub fn read_hdl_drives(&mut self, port: &str) {
         self.hdl_drive_port = Some(Arc::from(port));
     }
 
     #[cfg(feature = "veriloga")]
-    pub(crate) fn reads_hdl_drives(&self) -> bool {
+    #[doc(hidden)]
+    pub fn reads_hdl_drives(&self) -> bool {
         self.hdl_drive_port.is_some()
     }
 
     /// Set the drive each element of the [`Self::read_hdl_drives`] port reads
     /// to `drive` of the element's event node.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn refresh_hdl_drives(
+    #[doc(hidden)]
+    pub fn refresh_hdl_drives(
         &mut self,
         drive: impl Fn(usize) -> Option<super::verilog::store::BitDrive>,
     ) {
@@ -1552,11 +1566,13 @@ impl XspiceInstance {
     }
 
     #[cfg(feature = "veriloga")]
-    pub(crate) fn bind_mixed_input_thresholds(&mut self) {
+    #[doc(hidden)]
+    pub fn bind_mixed_input_thresholds(&mut self) {
         self.mixed_input_thresholds_bound = true;
     }
 
-    pub(crate) fn has_mixed_input_thresholds(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_mixed_input_thresholds(&self) -> bool {
         self.mixed_input_thresholds_bound
     }
 
@@ -1564,7 +1580,8 @@ impl XspiceInstance {
     /// `port[element]`, at the connected input's present value; see
     /// [`super::CodeModel::analog_threshold_input_at`].
     #[cfg(feature = "veriloga")]
-    pub(crate) fn analog_threshold_sample(
+    #[doc(hidden)]
+    pub fn analog_threshold_sample(
         &self,
         port: &str,
         element: usize,
@@ -1582,7 +1599,8 @@ impl XspiceInstance {
     /// [`super::LocatedCrossing`]. Whether it changes anything is asked first,
     /// so a candidate that carries none does not copy a shared instance.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn located_crossing_differs(
+    #[doc(hidden)]
+    pub fn located_crossing_differs(
         &self,
         port: &str,
         element: usize,
@@ -1595,13 +1613,15 @@ impl XspiceInstance {
     /// Whether this model decides its declared thresholds by a crossing the
     /// root located on them; see [`super::CodeModel::decides_by_located_crossing`].
     #[cfg(feature = "veriloga")]
-    pub(crate) fn decides_by_located_crossing(&self) -> bool {
+    #[doc(hidden)]
+    pub fn decides_by_located_crossing(&self) -> bool {
         self.model.decides_by_located_crossing()
     }
 
     /// See [`Self::located_crossing_differs`].
     #[cfg(feature = "veriloga")]
-    pub(crate) fn set_located_crossing(
+    #[doc(hidden)]
+    pub fn set_located_crossing(
         &mut self,
         port: &str,
         element: usize,
@@ -1615,7 +1635,8 @@ impl XspiceInstance {
     /// The present value of the connected input `port[element]` itself, in
     /// volts, before any crossing function is applied to it.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn analog_threshold_input(&self, port: &str, element: usize) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn analog_threshold_input(&self, port: &str, element: usize) -> Option<Value> {
         let spec = self
             .port_indices
             .get(port)
@@ -1659,7 +1680,8 @@ impl XspiceInstance {
     }
 
     /// Human-readable checkpoint resume blocker, when this instance is unsafe.
-    pub(crate) fn checkpoint_resume_blocker(&self) -> Option<String> {
+    #[doc(hidden)]
+    pub fn checkpoint_resume_blocker(&self) -> Option<String> {
         match self.checkpoint_support() {
             XspiceCheckpointSupport::Stateless | XspiceCheckpointSupport::Serializable => None,
             XspiceCheckpointSupport::Unsupported { reason } => {
@@ -1670,7 +1692,8 @@ impl XspiceInstance {
     }
 
     /// Serializable state to store in transient checkpoint files.
-    pub(crate) fn checkpoint_state(&self) -> XspiceInstanceCheckpoint {
+    #[doc(hidden)]
+    pub fn checkpoint_state(&self) -> XspiceInstanceCheckpoint {
         XspiceInstanceCheckpoint {
             name: self.name.clone(),
             model: self.model_name().to_string(),
@@ -1679,7 +1702,8 @@ impl XspiceInstance {
     }
 
     /// Restore serializable state from a transient checkpoint.
-    pub(crate) fn validate_checkpoint_state(
+    #[doc(hidden)]
+    pub fn validate_checkpoint_state(
         &self,
         checkpoint: &XspiceInstanceCheckpoint,
     ) -> Result<(), String> {
@@ -1699,7 +1723,8 @@ impl XspiceInstance {
     }
 
     /// Restore serializable state from a transient checkpoint.
-    pub(crate) fn restore_checkpoint_state(
+    #[doc(hidden)]
+    pub fn restore_checkpoint_state(
         &mut self,
         checkpoint: &XspiceInstanceCheckpoint,
     ) -> Result<(), String> {
@@ -1819,7 +1844,8 @@ impl XspiceInstance {
 
     /// Visit event-node load contributions declared by ngspice-style LOAD(port)
     /// model parameters.
-    pub(crate) fn for_each_event_load_contribution(&self, mut visit: impl FnMut(usize, Value)) {
+    #[doc(hidden)]
+    pub fn for_each_event_load_contribution(&self, mut visit: impl FnMut(usize, Value)) {
         for (port, connection) in self.ports.iter().zip(self.connections.iter()) {
             if !port_declares_event_type(port) {
                 continue;
@@ -1834,12 +1860,14 @@ impl XspiceInstance {
     }
 
     /// Set transient run context for code models with ngspice run-context defaults.
-    pub(crate) fn set_transient_run_context(&mut self, tstep: Option<Value>, tstop: Option<Value>) {
+    #[doc(hidden)]
+    pub fn set_transient_run_context(&mut self, tstep: Option<Value>, tstop: Option<Value>) {
         self.context.set_transient_run_context(tstep, tstop);
     }
 
     /// Set the transient companion coefficients supplied by the owning engine.
-    pub(crate) fn set_transient_companion_coefficients(
+    #[doc(hidden)]
+    pub fn set_transient_companion_coefficients(
         &mut self,
         coefficients: crate::numerics::integration::CompanionCoefficients,
     ) {
@@ -1847,24 +1875,28 @@ impl XspiceInstance {
             .set_transient_companion_coefficients(coefficients);
     }
 
-    pub(crate) fn set_xyce_one_step_order2(&mut self, enabled: bool) {
+    #[doc(hidden)]
+    pub fn set_xyce_one_step_order2(&mut self, enabled: bool) {
         self.context.set_xyce_one_step_order2(enabled);
     }
 
     /// Set the window the model counts as the current instant
     /// ([`super::CmContext::is_due`]) for the evaluations that follow.
-    pub(crate) fn set_code_model_coincidence(&mut self, window: Value) {
+    #[doc(hidden)]
+    pub fn set_code_model_coincidence(&mut self, window: Value) {
         self.context.coincidence = window;
     }
 
     /// Mark the evaluations that follow as Newton loads of an operating-point
     /// solve ([`super::CmContext::is_dc_operating_point`]), or as not.
-    pub(crate) fn set_operating_point_load(&mut self, operating_point_load: bool) {
+    #[doc(hidden)]
+    pub fn set_operating_point_load(&mut self, operating_point_load: bool) {
         self.context.set_operating_point_load(operating_point_load);
     }
 
     /// Apply the owning engine's resource policy before model initialization.
-    pub(crate) fn set_resource_limits(&mut self, resource_limits: crate::resource::ResourceLimits) {
+    #[doc(hidden)]
+    pub fn set_resource_limits(&mut self, resource_limits: crate::resource::ResourceLimits) {
         self.context.set_resource_limits(resource_limits);
     }
 
@@ -1936,7 +1968,8 @@ impl XspiceInstance {
 
     /// Sample each inout port's executed driver, without substituting the
     /// node's resolved value or this model's future output target.
-    pub(crate) fn update_committed_digital_outputs(
+    #[doc(hidden)]
+    pub fn update_committed_digital_outputs(
         &mut self,
         drivers: &super::event::XspiceDigitalDrivers,
         time: Value,
@@ -2016,7 +2049,8 @@ impl XspiceInstance {
     }
 
     #[cfg(any(feature = "veriloga", test))]
-    pub(crate) fn observe_other_digital_drivers(
+    #[doc(hidden)]
+    pub fn observe_other_digital_drivers(
         &mut self,
         port_name: &str,
         index: usize,
@@ -2046,7 +2080,8 @@ impl XspiceInstance {
 
     /// Update inputs and attach finite-output analog transition metadata from
     /// upstream XSPICE instances.
-    pub(crate) fn update_inputs_with_analog_transitions(
+    #[doc(hidden)]
+    pub fn update_inputs_with_analog_transitions(
         &mut self,
         solution: &[Value],
         num_nodes: usize,
@@ -2260,7 +2295,8 @@ impl XspiceInstance {
 
     /// Attach the circuit journal only for this call, including error recovery.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn evaluate_with_resource_transaction(
+    #[doc(hidden)]
+    pub fn evaluate_with_resource_transaction(
         &mut self,
         time: Value,
         timestep: Value,
@@ -2406,13 +2442,15 @@ impl XspiceInstance {
     /// Whether this instance's transient probes run on the live instance; see
     /// [`Self::runs_probe_on_live_instance`].
     #[inline]
-    pub(crate) fn probes_on_live_instance(&self) -> bool {
+    #[doc(hidden)]
+    pub fn probes_on_live_instance(&self) -> bool {
         self.probe_writes_only_outputs
     }
 
     /// [`super::CodeModel::candidate_event_time`] for the transient candidate
     /// at `candidate`, when this instance's last probe was of it.
-    pub(crate) fn candidate_event_time(&self, candidate: Value) -> Option<Value> {
+    #[doc(hidden)]
+    pub fn candidate_event_time(&self, candidate: Value) -> Option<Value> {
         (self.probe_writes_only_outputs && self.context.time == candidate)
             .then(|| self.model.candidate_event_time(&self.context))
             .flatten()
@@ -2468,7 +2506,8 @@ impl XspiceInstance {
     /// Condition 2 is redundant for every model that opts into condition 1
     /// today — none of them declare an analog port — and it is kept so that a
     /// future opt-in cannot silently make the skip unsound.
-    pub(crate) fn supports_event_dirty_dispatch(&self) -> bool {
+    #[doc(hidden)]
+    pub fn supports_event_dirty_dispatch(&self) -> bool {
         self.model.can_skip_unchanged_event_inputs() && self.has_only_event_connections()
     }
 
@@ -2476,7 +2515,8 @@ impl XspiceInstance {
     /// some driven port is not a digital or real event port. An event port's
     /// output entry is created with its event kind and no setter changes the
     /// kind of an existing entry, so it always reads as zero there.
-    pub(crate) fn drives_continuous_outputs(&self) -> bool {
+    #[doc(hidden)]
+    pub fn drives_continuous_outputs(&self) -> bool {
         self.ports.iter().any(|port| {
             matches!(
                 port.direction,
@@ -2491,7 +2531,8 @@ impl XspiceInstance {
     /// output contribution and no terminal to stamp. Ports and connections
     /// are fixed at construction, which is where this is decided.
     #[inline]
-    pub(crate) fn has_analog_stamp_surface(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_analog_stamp_surface(&self) -> bool {
         self.analog_stamp_surface
     }
 
@@ -2504,7 +2545,8 @@ impl XspiceInstance {
 
     /// Event-only models can execute inside an interpolated analog interval.
     /// Models with a physical connection require a solved analog boundary.
-    pub(crate) fn has_only_event_connections(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_only_event_connections(&self) -> bool {
         self.connections
             .iter()
             .all(PortConnection::is_event_or_null_connection)
@@ -2519,7 +2561,8 @@ impl XspiceInstance {
     /// because a digital drain and a real drain report separate touched-node
     /// lists: collapsing them into one index would wake an instance on a net
     /// number it reads a different kind of value from.
-    pub(crate) fn for_each_event_input_net(&self, mut visit: impl FnMut(EventInputKind, usize)) {
+    #[doc(hidden)]
+    pub fn for_each_event_input_net(&self, mut visit: impl FnMut(EventInputKind, usize)) {
         for (port, connection) in self.ports.iter().zip(self.connections.iter()) {
             if port.direction != super::PortDirection::In
                 && port.direction != super::PortDirection::InOut
@@ -2560,7 +2603,8 @@ impl XspiceInstance {
     /// because the one writer that asks, the accepted step's voltage
     /// projection, writes node rows and nothing else.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn for_each_analog_input_net(&self, mut visit: impl FnMut(usize)) {
+    #[doc(hidden)]
+    pub fn for_each_analog_input_net(&self, mut visit: impl FnMut(usize)) {
         fn typed_element(element: &AnalogInputConnection, visit: &mut impl FnMut(usize)) {
             match element {
                 AnalogInputConnection::Node(node) => visit(*node),
@@ -2599,7 +2643,8 @@ impl XspiceInstance {
     /// indices and inverted connections. Inversion belongs to schedule_events;
     /// an observer or an input alias is never an additional driver.
     #[cfg(any(feature = "veriloga", test))]
-    pub(crate) fn for_each_digital_output_driver(
+    #[doc(hidden)]
+    pub fn for_each_digital_output_driver(
         &self,
         visit: impl FnMut(super::event_scheduler::EventTarget),
     ) {
@@ -2607,7 +2652,8 @@ impl XspiceInstance {
     }
 
     #[cfg(feature = "veriloga")]
-    pub(crate) fn for_each_real_output_driver(
+    #[doc(hidden)]
+    pub fn for_each_real_output_driver(
         &self,
         visit: impl FnMut(super::event_scheduler::EventTarget),
     ) {
@@ -2654,13 +2700,15 @@ impl XspiceInstance {
     /// Whether an event has reached an input net since the recorded
     /// event-input signature was last confirmed.
     #[inline]
-    pub(crate) fn event_inputs_dirty(&self) -> bool {
+    #[doc(hidden)]
+    pub fn event_inputs_dirty(&self) -> bool {
         self.event_inputs_dirty
     }
 
     /// Record that an event reached one of this instance's input nets.
     #[inline]
-    pub(crate) fn mark_event_inputs_dirty(&mut self) {
+    #[doc(hidden)]
+    pub fn mark_event_inputs_dirty(&mut self) {
         self.event_inputs_dirty = true;
     }
 
@@ -2674,7 +2722,8 @@ impl XspiceInstance {
     /// debug builds every deck in the suite exercises it.
     #[cfg(debug_assertions)]
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn debug_assert_event_inputs_quiet(
+    #[doc(hidden)]
+    pub fn debug_assert_event_inputs_quiet(
         &self,
         solution: &[Value],
         num_nodes: usize,
@@ -3036,7 +3085,8 @@ impl XspiceInstance {
     }
 
     /// Absolute transient breakpoints contributed by this code model.
-    pub(crate) fn transient_breakpoints(&self) -> CmResult<Vec<Value>> {
+    #[doc(hidden)]
+    pub fn transient_breakpoints(&self) -> CmResult<Vec<Value>> {
         self.model.transient_breakpoints(&self.context)
     }
 
@@ -3280,23 +3330,27 @@ impl XspiceInstance {
     /// it asks this before taking the mutable view that would copy a shared
     /// instance to drain an empty queue.
     #[inline]
-    pub(crate) fn has_requested_breakpoints(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_requested_breakpoints(&self) -> bool {
         self.context.has_requested_breakpoints()
     }
 
     /// Drain transient breakpoint requests while preserving context storage.
-    pub(crate) fn drain_requested_breakpoints(&mut self) -> impl Iterator<Item = Value> + '_ {
+    #[doc(hidden)]
+    pub fn drain_requested_breakpoints(&mut self) -> impl Iterator<Item = Value> + '_ {
         self.context.drain_requested_breakpoints()
     }
 
     /// Drain which of the breakpoint requests complete a zero-duration edge.
-    pub(crate) fn drain_requested_edge_completions(&mut self) -> impl Iterator<Item = Value> + '_ {
+    #[doc(hidden)]
+    pub fn drain_requested_edge_completions(&mut self) -> impl Iterator<Item = Value> + '_ {
         self.context.drain_requested_edge_completions()
     }
 
     /// Drain the temporary breakpoint requests, the instants to land on
     /// without restarting.
-    pub(crate) fn drain_requested_landings(&mut self) -> impl Iterator<Item = Value> + '_ {
+    #[doc(hidden)]
+    pub fn drain_requested_landings(&mut self) -> impl Iterator<Item = Value> + '_ {
         self.context.drain_requested_landings()
     }
 
@@ -3308,16 +3362,14 @@ impl XspiceInstance {
     /// output — which is most of them once a gate network is settling —
     /// contributes nothing to schedule.
     #[inline]
-    pub(crate) fn has_pending_events(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_pending_events(&self) -> bool {
         self.context.has_pending_events()
     }
 
     /// Process digital events scheduled by this instance
-    pub(crate) fn schedule_events(
-        &mut self,
-        event_queue: &mut XspiceEventScheduler,
-        current_time: Value,
-    ) {
+    #[doc(hidden)]
+    pub fn schedule_events(&mut self, event_queue: &mut XspiceEventScheduler, current_time: Value) {
         let mut moved_keys = Vec::new();
         for PendingDigitalEvent {
             port_name,
@@ -3490,7 +3542,8 @@ impl XspiceInstance {
     /// differential node pair.  The circuit evaluator uses this ephemeral
     /// map to make upstream legacy Y-device transitions visible to downstream
     /// analog code models during the same nonlinear evaluation.
-    pub(crate) fn analog_output_transitions(&self) -> Vec<((usize, usize), AnalogTransition)> {
+    #[doc(hidden)]
+    pub fn analog_output_transitions(&self) -> Vec<((usize, usize), AnalogTransition)> {
         let mut transitions = Vec::new();
         for (index, port) in self.ports.iter().enumerate() {
             if port.direction != super::PortDirection::Out
@@ -3629,7 +3682,8 @@ impl XspiceInstance {
     }
 
     #[cfg(feature = "veriloga")]
-    pub(crate) fn rebind_event_node(&mut self, from: usize, to: usize) {
+    #[doc(hidden)]
+    pub fn rebind_event_node(&mut self, from: usize, to: usize) {
         let rebind = |node: &mut usize| {
             if *node == from {
                 *node = to;
@@ -3664,10 +3718,8 @@ impl XspiceInstance {
         }
     }
 
-    pub(crate) fn for_each_analog_output(
-        &self,
-        mut visit: impl FnMut(&PortSpec, PortType, usize, usize),
-    ) {
+    #[doc(hidden)]
+    pub fn for_each_analog_output(&self, mut visit: impl FnMut(&PortSpec, PortType, usize, usize)) {
         for (port, connection) in self.ports.iter().zip(&self.connections) {
             if port.direction != super::PortDirection::Out {
                 continue;
@@ -3917,13 +3969,15 @@ impl XspiceInstance {
     /// matrix load; asking first keeps an instance that queued nothing out of
     /// the copy-on-write path.
     #[inline]
-    pub(crate) fn has_deferred_contributions(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_deferred_contributions(&self) -> bool {
         self.context.has_deferred_contributions()
     }
 
     /// The same question for the static-only stamps retained for Xyce OneStep.
     #[inline]
-    pub(crate) fn has_static_deferred_contributions(&self) -> bool {
+    #[doc(hidden)]
+    pub fn has_static_deferred_contributions(&self) -> bool {
         self.context.has_static_deferred_contributions()
     }
 
@@ -3938,12 +3992,14 @@ impl XspiceInstance {
     }
 
     /// Drain static-only matrix stamps queued by the code model.
-    pub(crate) fn take_static_deferred_stamps(&mut self) -> Vec<(usize, usize, Value)> {
+    #[doc(hidden)]
+    pub fn take_static_deferred_stamps(&mut self) -> Vec<(usize, usize, Value)> {
         self.context.drain_static_stamps().collect()
     }
 
     /// Drain static-only RHS contributions queued by the code model.
-    pub(crate) fn take_static_deferred_rhs(&mut self) -> Vec<(usize, Value)> {
+    #[doc(hidden)]
+    pub fn take_static_deferred_rhs(&mut self) -> Vec<(usize, Value)> {
         self.context.drain_static_rhs().collect()
     }
 
@@ -3955,7 +4011,8 @@ impl XspiceInstance {
     /// evaluation already equalised them — so for every gate quiet since, this
     /// answers yes and the per-step accept sweep leaves it shared.
     #[inline]
-    pub(crate) fn accept_timestep_is_noop(&self) -> bool {
+    #[doc(hidden)]
+    pub fn accept_timestep_is_noop(&self) -> bool {
         self.context.advance_state_is_noop()
     }
 
@@ -3978,7 +4035,8 @@ impl XspiceInstance {
     /// The caller keeps the recorded vector outside the transient rollback
     /// image; see `circuit::external_models::XspiceOutputIterates` for why the
     /// instance cannot hold it itself.
-    pub(crate) fn collect_output_iterate(&self, out: &mut Vec<Value>) {
+    #[doc(hidden)]
+    pub fn collect_output_iterate(&self, out: &mut Vec<Value>) {
         for port in self.ports.iter().filter(|port| {
             port.direction == super::PortDirection::Out
                 || port.direction == super::PortDirection::InOut

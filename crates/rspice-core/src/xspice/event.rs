@@ -346,7 +346,8 @@ impl XspiceEventScheduler {
     }
 
     /// The circuit net the earliest pending event writes.
-    pub(crate) fn next_event_node(&self) -> Option<usize> {
+    #[doc(hidden)]
+    pub fn next_event_node(&self) -> Option<usize> {
         self.inner
             .next_instant_target()
             .map(|(_, target)| self.inner.target(target).node_id)
