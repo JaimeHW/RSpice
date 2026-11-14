@@ -47,7 +47,7 @@ use crate::workbench::state::{ConsolePage, Workspace};
 mod find_matches;
 mod hierarchy_tree;
 mod shelf;
-pub(in crate::workbench) mod stimulus;
+pub(crate) mod stimulus;
 pub(in crate::workbench) mod symbol;
 
 #[cfg(test)]

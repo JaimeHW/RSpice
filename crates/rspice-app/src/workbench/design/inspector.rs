@@ -11,7 +11,7 @@ mod model_evidence;
 /// Visible to the workbench so the library browser's own gate can render this
 /// pane beside it: the two panels state the same counts about the same design,
 /// and a review that only ever opened one of them would not see them disagree.
-pub(in crate::workbench) mod stimulus;
+pub(crate) mod stimulus;
 pub(in crate::workbench) mod symbol;
 
 pub(crate) use component::bind_component_model_from_catalog;

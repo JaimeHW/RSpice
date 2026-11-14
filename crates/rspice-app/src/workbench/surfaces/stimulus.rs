@@ -24,12 +24,12 @@
 
 mod footer;
 mod identity;
-mod program;
+pub(crate) mod program;
 mod proof;
 mod pwl;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use egui::{Rect, Sense, Ui, UiBuilder, Vec2};
 
@@ -108,7 +108,7 @@ pub(super) enum StageAction {
 /// strip that restated it somewhere else would be a second place to keep in
 /// step with the first.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct Finding {
+pub(crate) struct Finding {
     /// The sheet field this is about, which is where it is shown.
     ///
     /// `None` for the generator's own refusals, which are about the whole
@@ -122,7 +122,7 @@ pub(super) struct Finding {
 }
 
 /// Everything the five bands read, resolved once per frame.
-pub(super) struct Stage {
+pub(crate) struct Stage {
     /// The definition as the library holds it.
     pub saved: StimulusDefinition,
     /// The definition as it is being edited, including the field in progress.
@@ -196,13 +196,13 @@ impl Stage {
 /// grow a line per finding, which it took out of the plot: typing a value the
 /// engine objects to shrank the waveform that was there to show you what the
 /// value did.
-const IDENTITY_HEIGHT: f32 = 36.0;
+pub(crate) const IDENTITY_HEIGHT: f32 = 36.0;
 /// Below this the plot is a line rather than a waveform, so the program band
 /// yields — and scrolls — instead: a squashed curve proves nothing.
 const PROOF_MINIMUM_HEIGHT: f32 = 120.0;
 const SEAM: f32 = 1.0;
 
-pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     if cx.model.workspace.content.stimulus_library.is_empty() {
         show_empty(ui, cx);
         return;
@@ -287,7 +287,7 @@ fn show_empty(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
 /// an empty definition, and the caller falls back to the empty stage — which
 /// cannot happen after [`select_first_if_unresolved`] except in the single
 /// frame a delete lands on.
-fn resolve(cx: &mut Cx<'_, DesignFeature>) -> Option<Stage> {
+pub(crate) fn resolve(cx: &mut Cx<'_, DesignFeature>) -> Option<Stage> {
     let name = cx.state.selected_stimulus_definition.clone()?;
     let saved = cx
         .model

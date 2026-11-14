@@ -127,7 +127,7 @@ pub(crate) mod docks {
         #[cfg(test)]
         pub(crate) use rspice_app_simulate::workbench::docks::navigator::simulate;
         pub(in crate::workbench) mod source_bundle;
-        pub(in crate::workbench) mod stimulus_browser_state;
+        pub(crate) mod stimulus_browser_state;
         pub(in crate::workbench) use rspice_app_simulate::workbench::docks::navigator::verify;
         pub(in crate::workbench) mod veriloga;
     }
@@ -216,7 +216,7 @@ pub(crate) mod surfaces {
     pub(crate) mod netlist;
     pub(crate) mod project;
     pub(crate) use rspice_app_simulate::workbench::surfaces::simulate;
-    pub(super) mod stimulus;
+    pub(crate) mod stimulus;
     pub(crate) use rspice_app_simulate::workbench::surfaces::verify;
     pub(super) mod veriloga;
 }

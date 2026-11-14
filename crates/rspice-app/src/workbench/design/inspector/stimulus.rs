@@ -76,7 +76,7 @@ enum Verb {
     CommitPurpose(String),
 }
 
-pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let library = &cx.model.workspace.content.stimulus_library;
     let Some(definition) = cx
         .state

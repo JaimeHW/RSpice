@@ -2,6 +2,9 @@
 //! draws, opened as its command opens it and drawn by the real frame through
 //! the feature's own context.
 
+mod stimulus_browser;
+mod stimulus_surface;
+
 use egui::accesskit::{Node, Role};
 use egui::{Context, Rect, pos2, vec2};
 

@@ -21,7 +21,7 @@
 mod row;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::collections::HashMap;
 
@@ -82,7 +82,7 @@ struct Row<'a> {
     curve: &'a Result<WaveformTrace, String>,
 }
 
-pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     if cx.model.workspace.content.stimulus_library.is_empty() {
         show_empty(ui, cx);
         return;
@@ -524,7 +524,7 @@ fn no_match(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, scope: &mut StimulusSco
 /// of fourteen definitions under twelve closed headings is a browser that shows
 /// the reader nothing, and the tree state stores exactly the nodes a reader has
 /// acted on.
-fn folded_node(family: StimulusFamily) -> NavigatorTreeNode {
+pub(crate) fn folded_node(family: StimulusFamily) -> NavigatorTreeNode {
     NavigatorTreeNode::Master(format!("stimulus/folded/{}", family.label()))
 }
 

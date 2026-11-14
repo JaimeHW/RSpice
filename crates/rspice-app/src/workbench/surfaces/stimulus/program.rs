@@ -477,7 +477,7 @@ fn shape_column(
 /// import transform and `TRNOISE`'s random-telegraph triple — and those are
 /// named, because nothing in the sheet says they belong to the card above
 /// them.
-pub(super) fn shape_fields<'a>(
+pub(crate) fn shape_fields<'a>(
     sheet: &'a PropertySheet,
     stage: &Stage,
 ) -> Vec<&'a PropertyDefinition> {

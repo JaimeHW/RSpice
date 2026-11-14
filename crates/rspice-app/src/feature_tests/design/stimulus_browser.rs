@@ -1,0 +1,521 @@
+//! The stimulus browser and its inspector drawn through the design context a
+//! whole application lends: the rows, the scope strip, the footer and the
+//! adopter cards.
+
+use crate::state::stimulus_library::definition::StimulusFamily;
+use crate::state::stimulus_library::draft::DefinitionDraft;
+use crate::state::stimulus_library::fixtures;
+use crate::state::{Component, Point};
+use crate::workbench::design::inspector::stimulus as inspector_dock;
+use crate::workbench::design::navigator::stimulus::tests::{NAVIGATOR, library};
+use crate::workbench::design::navigator::stimulus::*;
+use crate::workbench::docks::navigator::stimulus_browser_state::StimulusScope;
+use crate::workbench::state::Workspace;
+use crate::workbench::{AppState, RSpiceApp};
+
+/// The inspector's own width at the same fit.
+const INSPECTOR: egui::Vec2 = egui::vec2(300.0, 640.0);
+
+/// Lay one dock out and read back everything it announced.
+fn announced(size: egui::Vec2, mut pass: impl FnMut(&mut egui::Ui)) -> Vec<String> {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    // Two passes: the first builds the font set and the caches the rows read,
+    // the second lays out against both.
+    let input = || egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+        ..Default::default()
+    };
+    let _ = ctx.run_ui(input(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| pass(ui));
+    });
+    let output = ctx.run_ui(input(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| pass(ui));
+    });
+    output
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit tree")
+        .nodes
+        .into_iter()
+        .flat_map(|(_, node)| {
+            [
+                node.label().map(str::to_owned),
+                node.value().map(str::to_owned),
+            ]
+        })
+        .flatten()
+        .collect()
+}
+
+/// Everything the browser announces for this state.
+fn browser(app: &mut RSpiceApp) -> Vec<String> {
+    announced(NAVIGATOR, |ui| show(ui, &mut app.design_cx()))
+}
+
+/// Everything the inspector announces for this state.
+fn inspector(app: &mut RSpiceApp) -> Vec<String> {
+    announced(INSPECTOR, |ui| {
+        inspector_dock::show(ui, &mut app.design_cx())
+    })
+}
+
+/// One placed source carrying `definition`, wired across two nets.
+fn adopt(state: &mut AppState, id: u64, reference: &str, definition: &str) {
+    let held = state
+        .model
+        .workspace
+        .content
+        .stimulus_library
+        .get(definition)
+        .cloned()
+        .expect("the fixture library holds it");
+    let mut component = Component::new(id, held.component_type(), Point::new(4 + id as i32, 4));
+    component.name = reference.to_owned();
+    held.adopt_onto(&mut component).expect("adopt");
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(component);
+}
+
+/// Every definition is under the heading of the family it realizes, and a
+/// family the library does not use gets no heading at all.
+#[test]
+fn definitions_are_grouped_under_the_family_they_realize() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    let published = browser(&mut app);
+
+    for family in ["SIN", "PULSE", "PWL", "EXP", "AM", "SFFM", "PAT", "TRNOISE"] {
+        assert!(
+            published.iter().any(|run| run.starts_with(family)),
+            "{family} has no heading: {published:?}"
+        );
+    }
+    // The fixtures author no AC definition, so nothing claims the heading.
+    assert!(
+        !published.iter().any(|run| run.starts_with("AC \u{b7}")),
+        "an unused family was headed anyway: {published:?}"
+    );
+    for name in fixtures::names() {
+        assert!(
+            published.iter().any(|run| run.starts_with(name)),
+            "{name} has no row: {published:?}"
+        );
+    }
+}
+
+/// A row announces its name and its meta column together: the key figure and
+/// how many placed sources use the definition are the whole of what tells two
+/// definitions of one family apart, and a reader working by ear is owed them.
+///
+/// In words. "→1" needed the tooltip to decode, and the revision counter was
+/// "r1" down every row of a list whose selected row the inspector describes.
+#[test]
+fn a_row_announces_its_meta_beside_its_name() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    adopt(&mut app.state, 1, "V1", "bridge_cal_step");
+    let published = browser(&mut app);
+
+    assert!(
+        published
+            .iter()
+            .any(|run| run == "bridge_cal_step, PER 1 ms \u{b7} 1 use"),
+        "the meta column never reached AccessKit: {published:?}"
+    );
+    assert!(
+        !published.iter().any(|run| run.contains(", r1")),
+        "the revision counter is off the rows: {published:?}"
+    );
+    // A current source says so in front of its figure; a voltage source does
+    // not, because it is the ordinary case.
+    assert!(
+        published
+            .iter()
+            .any(|run| run.starts_with("load_step_50u, I \u{b7} PER 5 ms")),
+        "a current definition did not state its quantity: {published:?}"
+    );
+}
+
+/// The dirty dot follows the editor, and reads error rather than warning when
+/// the draft says something the deck would refuse.
+#[test]
+fn the_row_states_an_unapplied_draft_and_whether_it_is_refused() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    assert!(
+        !browser(&mut app).iter().any(|run| run.contains("draft")),
+        "a clean library announced a draft"
+    );
+
+    let saved = app
+        .state
+        .model
+        .workspace
+        .content
+        .stimulus_library
+        .get("sensor_diff_1k")
+        .cloned()
+        .expect("held");
+    app.state
+        .design
+        .stimulus_editor
+        .draft_for(&saved)
+        .edit(|working| working.params = "va=4m freq=2k".to_owned());
+    assert!(
+        browser(&mut app)
+            .iter()
+            .any(|run| run.contains("sensor_diff_1k") && run.contains("draft not applied")),
+        "an unapplied draft was not announced"
+    );
+
+    // A negative PWL delay is one of the few things the netlist parser refuses
+    // outright, so it is a draft the deck would not take.
+    let ramp = app
+        .state
+        .model
+        .workspace
+        .content
+        .stimulus_library
+        .get("vdd_ramp_1ms")
+        .cloned()
+        .expect("held");
+    app.state
+        .design
+        .stimulus_editor
+        .draft_for(&ramp)
+        .edit(|working| working.params = "td=-1n".to_owned());
+    assert!(
+        browser(&mut app)
+            .iter()
+            .any(|run| run.contains("vdd_ramp_1ms") && run.contains("draft refused")),
+        "a refused draft read the same as an ordinary one"
+    );
+}
+
+/// The scope strip counts the library rather than the listing, and narrowing
+/// to Unadopted leaves exactly the definitions nothing carries.
+#[test]
+fn the_scope_strip_counts_the_library_and_narrows_the_tree() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    adopt(&mut app.state, 1, "V1", "bridge_cal_step");
+    adopt(&mut app.state, 2, "V2", "vdd_operate");
+
+    let published = browser(&mut app);
+    for option in ["All 14", "In use 2", "Unused 12"] {
+        assert!(
+            published.iter().any(|run| run == option),
+            "{option} is not on the scope strip: {published:?}"
+        );
+    }
+
+    app.state.design.stimulus_browser.scope = StimulusScope::Adopted;
+    let published = browser(&mut app);
+    assert!(
+        published
+            .iter()
+            .any(|run| run.starts_with("bridge_cal_step"))
+    );
+    assert!(
+        !published.iter().any(|run| run.starts_with("emi_am_150k")),
+        "an unadopted definition survived the Adopted scope: {published:?}"
+    );
+    // The counts are the library's either way, so the strip still says how
+    // much of it the reader is not looking at.
+    assert!(published.iter().any(|run| run == "Unused 12"));
+}
+
+/// A filter opens every group it leaves standing: a reader who typed a name
+/// and was shown a closed heading would read it as no match at all.
+#[test]
+fn a_filter_shows_its_matches_expanded_even_where_the_group_was_folded() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    app.state
+        .workbench
+        .navigator_trees
+        .for_workspace(Workspace::Stimulus)
+        .toggle(folded_node(StimulusFamily::Am));
+    assert!(
+        !browser(&mut app)
+            .iter()
+            .any(|run| run.starts_with("emi_am_150k")),
+        "a folded group still listed its definitions"
+    );
+
+    app.state.workbench.set_navigator_filter("emi");
+    let published = browser(&mut app);
+    assert!(
+        published.iter().any(|run| run.starts_with("emi_am_150k")),
+        "the filter's match stayed folded: {published:?}"
+    );
+}
+
+/// An empty library and a filter that matched nothing are different facts, and
+/// each offers the press that resolves it.
+#[test]
+fn an_unauthored_library_and_a_filter_that_matched_nothing_read_differently() {
+    let mut empty = RSpiceApp::test_instance();
+    let published = browser(&mut empty);
+    assert!(published.contains(&"This project has no stimulus definitions".to_owned()));
+    assert!(published.contains(&"New definition".to_owned()));
+
+    let mut filtered = RSpiceApp::test_instance();
+    library(&mut filtered.state);
+    filtered
+        .state
+        .workbench
+        .set_navigator_filter("nothing_matches_this");
+    let published = browser(&mut filtered);
+    assert!(published.contains(&"No definition matches this filter".to_owned()));
+    assert!(published.contains(&"Clear filters".to_owned()));
+    assert!(!published.contains(&"This project has no stimulus definitions".to_owned()));
+}
+
+/// The footer band states what the reader has to act on: a placed source
+/// behind the definition it carries, and what the audit found.
+///
+/// It used to be permanent, and in a new or healthy project carried only "no
+/// adopters · 0 E · 0 W": thirty pixels reporting the absence of a problem,
+/// in compiler shorthand, under a count of placed sources nobody acts on.
+#[test]
+fn the_footer_states_only_what_the_library_needs_acting_on() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    adopt(&mut app.state, 1, "V1", "bridge_cal_step");
+    adopt(&mut app.state, 2, "V2", "bridge_cal_step");
+
+    let published = browser(&mut app);
+    assert!(
+        published.iter().any(|run| run == "In use 1"),
+        "the scope strip counts definitions: {published:?}"
+    );
+    // Every placed source is in step, so the band carries the audit alone,
+    // in words rather than in "0 E · 4 W".
+    assert!(
+        published
+            .iter()
+            .any(|run| run.ends_with(" warnings") && !run.contains("revision")),
+        "the footer did not state the library's findings: {published:?}"
+    );
+    for absent in ["adopter", " E \u{b7} "] {
+        assert!(
+            !published.iter().any(|run| run.contains(absent)),
+            "the footer counts no adopters and talks no shorthand, \
+             and said {absent:?}: {published:?}"
+        );
+    }
+
+    let mut draft = DefinitionDraft::new(
+        app.state
+            .model
+            .workspace
+            .content
+            .stimulus_library
+            .get("bridge_cal_step")
+            .cloned()
+            .expect("held"),
+    );
+    draft.edit(|working| working.params = "v2=20m per=1m".to_owned());
+    app.state
+        .model
+        .workspace
+        .content
+        .stimulus_library
+        .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
+    let published = browser(&mut app);
+    assert!(
+        published
+            .iter()
+            .any(|run| run.starts_with("2 placed sources use an older revision \u{b7} ")),
+        "the footer did not state what the publish left behind: {published:?}"
+    );
+}
+
+/// The engine is asked for a definition's waveform once, not once per frame.
+///
+/// A fourteen row library evaluated per frame is fourteen engine parses and
+/// nearly nine hundred sample steps for every pointer move, and nothing about
+/// the drawing would show it.
+#[test]
+fn the_minis_are_evaluated_once_across_two_frames() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    let _ = browser(&mut app);
+    let after_first = app.state.design.stimulus_browser.evaluations();
+    assert_eq!(
+        after_first, 14,
+        "every fixture definition should have been evaluated exactly once"
+    );
+
+    let _ = browser(&mut app);
+    let _ = browser(&mut app);
+    assert_eq!(
+        app.state.design.stimulus_browser.evaluations(),
+        after_first,
+        "a frame that changed nothing asked the engine again"
+    );
+
+    // Publishing moves the revision, which is half the cache key, so the row
+    // redraws rather than showing the picture it had.
+    let mut draft = DefinitionDraft::new(
+        app.state
+            .model
+            .workspace
+            .content
+            .stimulus_library
+            .get("sensor_diff_1k")
+            .cloned()
+            .expect("held"),
+    );
+    draft.edit(|working| working.params = "va=9m freq=1k".to_owned());
+    app.state
+        .model
+        .workspace
+        .content
+        .stimulus_library
+        .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
+    let _ = browser(&mut app);
+    assert_eq!(
+        app.state.design.stimulus_browser.evaluations(),
+        after_first + 1,
+        "a published revision did not re-evaluate its mini"
+    );
+}
+
+/// A definition the engine can step through holds a curve; one it cannot holds
+/// the refusal, which is what the row paints a mark for instead of a line.
+#[test]
+fn a_family_with_no_waveform_at_this_boundary_holds_its_refusal_rather_than_a_curve() {
+    use crate::simulation::stimulus_realize::WaveformTrace;
+
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    let _ = browser(&mut app);
+    let browser_state = &app.state.design.stimulus_browser;
+
+    let sine = browser_state
+        .mini("sensor_diff_1k", 1)
+        .expect("the sine was evaluated");
+    assert!(
+        matches!(sine, Ok(WaveformTrace::Curve(samples)) if samples.len() > 8),
+        "the sine has no curve to draw"
+    );
+    let noise = browser_state
+        .mini("supply_trnoise", 1)
+        .expect("the noise train was evaluated");
+    assert!(
+        noise.is_err(),
+        "a noise train claimed a waveform it has no way to produce"
+    );
+}
+
+/// The inspector lists every adopter in the design, states where the run
+/// reaches it, and offers the verbs its occurrence can carry.
+#[test]
+fn the_inspector_cards_every_adopter_in_the_design() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    app.state.design.selected_stimulus_definition = Some("bridge_cal_step".to_owned());
+    adopt(&mut app.state, 1, "V1", "bridge_cal_step");
+    adopt(&mut app.state, 2, "V2", "bridge_cal_step");
+    let published = inspector(&mut app);
+
+    assert!(
+        published.contains(&"Adopters, 2".to_owned()),
+        "{published:?}"
+    );
+    // At the design root a card is its instance and nothing else: "/" is not
+    // a place to be told about, and an adopter in step with the library has
+    // no decision on it to chip.
+    for reference in ["V1", "V2"] {
+        assert!(
+            published.iter().any(|run| run == reference),
+            "{reference} has no card: {published:?}"
+        );
+    }
+    assert!(published.contains(&"Show in schematic".to_owned()));
+    assert!(published.contains(&"Properties\u{2026}".to_owned()));
+    assert!(
+        !published.iter().any(|run| run.contains("adopted \u{b7} r")),
+        "an in-step adopter chipped its normal state: {published:?}"
+    );
+}
+
+/// A definition nothing has adopted states that, rather than heading an empty
+/// list or explaining how adoption works.
+#[test]
+fn the_inspector_says_the_definition_is_unused_when_nothing_has_adopted_it() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    let published = inspector(&mut app);
+
+    assert!(
+        published.contains(&"Adopters, 0".to_owned()),
+        "{published:?}"
+    );
+    assert!(
+        published.contains(&"Not used in this design".to_owned()),
+        "{published:?}"
+    );
+    // With no adopter there is no reader, so the consumers section is absent
+    // rather than headed over nothing.
+    assert!(
+        !published
+            .iter()
+            .any(|run| run.starts_with("Analysis consumers")),
+        "{published:?}"
+    );
+}
+
+/// The inspector is the definition's world, not a reference card.
+///
+/// It used to carry an "Engine contract · PULSE" section describing an empty
+/// specimen of the family — a card this project does not hold — over "Edit
+/// impact", whose four rows restated the Adopters count, the two button
+/// tooltips and a constant about frozen manifests.
+#[test]
+fn the_inspector_drops_the_family_reference_and_the_edit_impact_block() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    app.state.design.selected_stimulus_definition = Some("bridge_cal_step".to_owned());
+    let published = inspector(&mut app);
+
+    for absent in [
+        "Engine contract",
+        "Edit impact",
+        "Read by",
+        "On apply",
+        "Frozen manifests",
+        "Owner",
+        "Stored",
+    ] {
+        assert!(
+            !published.iter().any(|run| run.starts_with(absent)),
+            "{absent:?} is still on the panel: {published:?}"
+        );
+    }
+    // What is left is the definition's own bookkeeping.
+    for present in ["Adopters, 0", "Definition"] {
+        assert!(
+            published.iter().any(|run| run.starts_with(present)),
+            "{present:?} left with it: {published:?}"
+        );
+    }
+}
+
+/// Nothing selected is not a subject: the dock used to head a section to say
+/// so, over a count the browser's own band prints.
+#[test]
+fn the_inspector_paints_nothing_with_no_definition_selected() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    app.state.design.selected_stimulus_definition = None;
+    assert!(inspector(&mut app).is_empty());
+}
