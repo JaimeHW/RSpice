@@ -17,7 +17,7 @@ use std::collections::HashSet;
 
 /// Carry out a lifecycle choice on the netlist page's deck or include that
 /// the dialog raised, then close the dialog when the same frame closed it.
-pub(in crate::workbench) fn apply_netlist_lifecycle_action(
+pub fn apply_netlist_lifecycle_action(
     code: &mut CodeWorkspaceRuntimeState,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
@@ -139,7 +139,7 @@ pub(in crate::workbench) fn apply_netlist_lifecycle_action(
 /// Create the top deck the creation form drafted, which the form raised,
 /// and close the dialog once it is made; a refusal stays in the form's
 /// footer.
-pub(in crate::workbench) fn commit_new_top_deck(
+pub fn commit_new_top_deck(
     code: &mut CodeWorkspaceRuntimeState,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,

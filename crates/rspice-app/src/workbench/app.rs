@@ -82,7 +82,7 @@ pub(crate) mod actions;
 #[cfg(target_arch = "wasm32")]
 mod browser_history;
 pub(crate) mod code_adapters;
-pub(crate) mod netlist_lifecycle;
+pub(crate) use rspice_app_code::workbench::app::netlist_lifecycle;
 pub(crate) mod project_transactions;
 pub(crate) use rspice_app_workbench::workbench::app::command_palette;
 pub(crate) mod dialogs;

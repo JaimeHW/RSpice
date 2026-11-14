@@ -11,7 +11,7 @@ use crate::workbench::app_state::Model;
 use crate::workbench::state::Workspace;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 
-pub(crate) fn action_export_netlist_with_io(
+pub fn action_export_netlist_with_io(
     model: &mut Model,
     wb: &mut WorkbenchSession,
     format: crate::io::NetlistFormat,
@@ -131,7 +131,7 @@ pub(crate) fn action_export_netlist_with_io(
     }
 }
 
-pub(crate) fn action_view_netlist(model: &mut Model, wb: &mut WorkbenchSession) {
+pub fn action_view_netlist(model: &mut Model, wb: &mut WorkbenchSession) {
     if model.schematic.document().components.is_empty() {
         wb.prompt("No circuit to netlist. Add components first.");
         return;

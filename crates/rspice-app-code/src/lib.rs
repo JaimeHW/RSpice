@@ -78,6 +78,7 @@ pub mod workbench {
             pub mod source_language_tools;
             pub mod veriloga_build_settings;
         }
+        pub mod netlist_lifecycle;
 
         pub(crate) use dialogs::source_document::{
             begin_new_top_deck_in, open_source_document_dialog_in,
@@ -149,6 +150,7 @@ pub mod workbench {
         pub mod virtual_text_editor;
     }
     pub mod menu_bar {
+        pub mod netlist_actions;
         pub mod netlist_compat;
         pub mod netlist_export;
 

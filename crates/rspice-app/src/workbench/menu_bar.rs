@@ -7,17 +7,15 @@
 //! into the functions re-exported here.
 
 mod bom_export;
-mod code_adapters;
 mod file_menu;
-use rspice_app_code::workbench::menu_bar::netlist_compat;
-use rspice_app_code::workbench::menu_bar::netlist_export;
+use rspice_app_code::workbench::menu_bar::netlist_actions;
 use rspice_app_results::workbench::menu_bar::waveform_export;
 
 pub(crate) use bom_export::action_export_bill_of_materials_with_io;
-pub(crate) use code_adapters::{action_export_netlist_with_io, action_view_netlist};
 pub(crate) use file_menu::{FileMenuAction, dispatch_file_menu_action};
+pub(crate) use netlist_actions::{action_export_netlist_with_io, action_view_netlist};
 #[cfg(test)]
-pub(crate) use netlist_export::build_menu_netlist_in;
+pub(crate) use rspice_app_code::workbench::menu_bar::netlist_export::build_menu_netlist_in;
 pub(crate) use waveform_export::action_export_result_selection_with_io;
 #[cfg(test)]
 pub(crate) use waveform_export::{
