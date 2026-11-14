@@ -839,6 +839,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     // moved into the code feature's tests, or with the dialogs re-homed
     // under it.
     ("app", "code"),
+    ("app", "design"), // the design feature's test host; retires at the design flip
     // `AppState` is the session aggregate, so it inherits two problems from
     // the root it was split out of.
     //

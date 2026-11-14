@@ -521,20 +521,20 @@ fn radial_documentation_center(model: &Model) -> Option<Point> {
 mod tests {
     use super::*;
     use crate::state::{Component, ComponentType, DesignNote, DesignNoteKind};
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// The draft's validation, over what the form reads.
-    fn validate_draft(state: &AppState) -> DraftValidation {
+    fn validate_draft(state: &DesignTestHost) -> DraftValidation {
         super::validate_draft(&state.design.array_selection, &state.model)
     }
 
     /// The names the count derives, over what the form reads.
-    fn derive_naming_from_count(state: &mut AppState) {
+    fn derive_naming_from_count(state: &mut DesignTestHost) {
         super::derive_naming_from_count(&mut state.design.array_selection, &state.model);
     }
 
     /// The radial array's centre, over the model it reads.
-    fn radial_documentation_center(state: &AppState) -> Option<Point> {
+    fn radial_documentation_center(state: &DesignTestHost) -> Option<Point> {
         super::radial_documentation_center(&state.model)
     }
 
@@ -560,7 +560,7 @@ mod tests {
     /// a new run of names, and the line under Count reads them off.
     #[test]
     fn the_names_follow_the_count() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -603,7 +603,7 @@ mod tests {
 
     #[test]
     fn open_uses_exact_default_count_and_collision_free_naming() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -657,7 +657,7 @@ mod tests {
 
     #[test]
     fn radial_documentation_accepts_notes_and_starts_at_the_selection_center() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -698,7 +698,7 @@ mod tests {
 
     #[test]
     fn rectangular_array_highlights_only_the_incompatible_count_field() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -733,7 +733,7 @@ mod tests {
 
     #[test]
     fn malformed_naming_highlights_only_the_naming_field() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -772,7 +772,7 @@ mod tests {
 
     #[test]
     fn stale_operation_is_not_misrepresented_as_a_field_error() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic

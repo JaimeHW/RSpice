@@ -8,6 +8,8 @@ pub(crate) mod inspector;
 pub(crate) mod navigator;
 mod routed;
 pub(crate) mod surface;
+#[cfg(test)]
+pub(crate) mod test_host;
 pub(crate) mod toolbar;
 
 use egui::Context;

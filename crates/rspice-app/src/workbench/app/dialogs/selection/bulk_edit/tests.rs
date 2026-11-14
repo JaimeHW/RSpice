@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::state::{LibraryCellInstance, Point};
-use crate::workbench::app_state::AppState;
+use crate::workbench::design::test_host::DesignTestHost;
 
 pub(crate) fn component(id: u64, name: &str, section: Option<&str>) -> Component {
     let mut component = Component::new(id, ComponentType::CellInstance, Point::new(id as i32, 0))
@@ -36,7 +36,7 @@ fn the_result_columns_fit_inside_their_pane() {
 
 #[test]
 fn the_scope_line_names_the_occurrence_below_the_implicit_root() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     assert_eq!(active_hierarchy_path(&state.model), "/");
 
     state.model.workspace.descend_into(
@@ -70,7 +70,7 @@ fn wildcard_filter_is_case_insensitive_and_anchored_when_requested() {
 
 #[test]
 fn free_text_query_searches_hidden_instance_parameters_and_binding_fields() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let mut instance = component(1, "U1", Some("tt"));
     instance.params = "gain=100".to_owned();
     state.model.schematic.document_mut_for_test().components = vec![instance];
@@ -93,7 +93,7 @@ fn free_text_query_searches_hidden_instance_parameters_and_binding_fields() {
 
 #[test]
 fn exact_mockup_default_section_filter_matches_an_inherited_binding() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().components = vec![component(1, "U1", None)];
     let filter = SelectionBulkFilter {
         model_cell: "OPA189*".to_owned(),
@@ -111,7 +111,7 @@ fn exact_mockup_default_section_filter_matches_an_inherited_binding() {
 /// what it is waiting for.
 #[test]
 fn bulk_edit_opens_with_no_value_and_apply_waits_for_one() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
 
     open_selection_bulk_edit_dialog(
@@ -130,7 +130,7 @@ fn bulk_edit_opens_with_no_value_and_apply_waits_for_one() {
 /// and a library that defines none says so.
 #[test]
 fn bulk_edit_offers_the_bound_librarys_sections() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
 
     open_selection_bulk_edit_dialog(
@@ -353,7 +353,7 @@ fn bom_and_distribution_bulk_edits_reach_the_parts_they_apply_to() {
             .all(|part| part.params == "tol_dist=uniform")
     );
 
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
     let rows = build_rows(
         &state.model,
@@ -414,7 +414,7 @@ fn invalid_numeric_value_leaves_document_and_undo_history_unchanged() {
 
 #[test]
 fn impact_preview_is_exact_without_cloning_an_undo_transaction() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().components = vec![
         component(1, "X1", Some("tt")),
         component(2, "X2", Some("tt")),
@@ -458,7 +458,7 @@ fn impact_preview_is_exact_without_cloning_an_undo_transaction() {
 
 #[test]
 fn authority_rejects_active_selection_and_external_buffer_drift() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", Some("tt"))];
     state
         .model
@@ -497,7 +497,7 @@ fn authority_rejects_active_selection_and_external_buffer_drift() {
 
 #[test]
 fn complete_project_rows_are_visible_but_other_owners_are_locked() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", Some("tt"))];
     let mut external = SchematicState::default();
     external.document_mut_for_test().components = vec![component(2, "X2", Some("ff"))];
@@ -521,7 +521,7 @@ fn complete_project_rows_are_visible_but_other_owners_are_locked() {
 
 #[test]
 fn port_rows_only_accept_the_display_property() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().components =
         vec![Component::new(1, ComponentType::Port, Point::new(0, 0)).with_name_value("VIN", "")];
     let filter = SelectionBulkFilter {

@@ -160,10 +160,12 @@ fn validate_draft(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// The draft's validation, over what the form reads.
-    fn validate_draft(state: &AppState) -> Result<PendingDocumentationShapePlacement, String> {
+    fn validate_draft(
+        state: &DesignTestHost,
+    ) -> Result<PendingDocumentationShapePlacement, String> {
         super::validate_draft(&state.design.documentation_shape, &state.model)
     }
 
@@ -172,7 +174,7 @@ mod tests {
     #[test]
     fn each_shape_arms_its_tool_without_a_dialog() {
         for kind in DocumentationShapeKind::ALL {
-            let mut state = AppState::default();
+            let mut state = DesignTestHost::default();
             assert_eq!(arm_documentation_shape(&mut state.model, kind), Ok(()));
             assert!(!state.design.documentation_shape.open);
             assert_eq!(
@@ -205,7 +207,7 @@ mod tests {
 
     #[test]
     fn arming_preserves_the_dialog_source_and_rejects_a_different_occurrence() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         assert!(validate_draft(&state).is_err());
         let master = crate::state::CellViewRef::new("work", "shape_child", "schematic");
         state.model.workspace.descend_into(
