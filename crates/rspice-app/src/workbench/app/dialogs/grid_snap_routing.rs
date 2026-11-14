@@ -342,10 +342,12 @@ pub(crate) mod tests {
     use crate::state::write_policy::LocalSafeModeOptions;
     use crate::state::{SchematicGridPitch, SchematicWireRoutingStyle, Tool};
     use crate::workbench::app::RSpiceApp;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// Apply, over the slot, the model and the session.
-    fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingCommitError> {
+    fn commit_grid_snap_routing(
+        state: &mut DesignTestHost,
+    ) -> Result<(), GridSnapRoutingCommitError> {
         state
             .design
             .commit_grid_snap_routing(&mut state.model, &mut state.workbench)
@@ -361,7 +363,7 @@ pub(crate) mod tests {
 
     #[test]
     fn open_captures_an_isolated_exact_draft_and_models_free_without_fake_pitch() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.design.set_grid_style(GridStyle::Lines);
         state.model.schematic.session.editor.snap_engine.enabled = false;
         state.model.schematic.session.editor.snap_engine.snap_radius = 7;
@@ -403,7 +405,7 @@ pub(crate) mod tests {
 
     #[test]
     fn apply_publishes_every_owner_and_records_only_the_document_pitch() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         // 45° routing is offered only under the any-angle junction policy.
         state
             .model
@@ -528,7 +530,7 @@ pub(crate) mod tests {
     #[test]
     fn angled_routing_needs_the_any_angle_junction_policy() {
         for mode in [WireRoutingMode::FortyFiveDegree, WireRoutingMode::Diagonal] {
-            let mut state = AppState::default();
+            let mut state = DesignTestHost::default();
             assert!(open_grid_snap_routing_dialog(
                 &mut state.design.grid_snap_routing,
                 state.design.grid,
@@ -551,7 +553,7 @@ pub(crate) mod tests {
                 WireRoutingMode::HorizontalFirst
             );
 
-            let mut state = AppState::default();
+            let mut state = DesignTestHost::default();
             state
                 .model
                 .schematic
@@ -581,7 +583,7 @@ pub(crate) mod tests {
 
     #[test]
     fn free_snap_and_session_only_choices_do_not_dirty_document_history() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         // Free routing is offered only under the any-angle junction policy.
         state
             .model
@@ -630,7 +632,7 @@ pub(crate) mod tests {
 
     #[test]
     fn read_only_pitch_change_rejects_the_whole_transaction_without_partial_apply() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.schematic.session.read_only = true;
         let original_snap = state.model.schematic.session.editor.snap_engine.clone();
         assert!(open_grid_snap_routing_dialog(
@@ -670,7 +672,7 @@ pub(crate) mod tests {
 
     #[test]
     fn late_safe_mode_activation_rejects_pitch_change_without_partial_apply() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let original_snap = state.model.schematic.session.editor.snap_engine.clone();
         assert!(open_grid_snap_routing_dialog(
             &mut state.design.grid_snap_routing,
@@ -710,7 +712,7 @@ pub(crate) mod tests {
 
     #[test]
     fn stale_authority_rejects_every_candidate_before_any_owner_changes() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         assert!(open_grid_snap_routing_dialog(
             &mut state.design.grid_snap_routing,
             state.design.grid,
@@ -744,7 +746,7 @@ pub(crate) mod tests {
 
     #[test]
     fn wire_gesture_started_after_open_rejects_every_candidate_without_cancelling_it() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let original_snap = state.model.schematic.session.editor.snap_engine.clone();
         assert!(open_grid_snap_routing_dialog(
             &mut state.design.grid_snap_routing,
@@ -784,7 +786,7 @@ pub(crate) mod tests {
             (GridSnapSpacingChoice::Mil25, 5, Point::new(5, 5)),
             (GridSnapSpacingChoice::Metric, 4, Point::new(8, 8)),
         ] {
-            let mut state = AppState::default();
+            let mut state = DesignTestHost::default();
             assert!(open_grid_snap_routing_dialog(
                 &mut state.design.grid_snap_routing,
                 state.design.grid,
@@ -821,7 +823,7 @@ pub(crate) mod tests {
 
     #[test]
     fn enabled_spacing_requires_at_least_one_actionable_snap_target() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let original_snap = state.model.schematic.session.editor.snap_engine.clone();
         assert!(open_grid_snap_routing_dialog(
             &mut state.design.grid_snap_routing,
