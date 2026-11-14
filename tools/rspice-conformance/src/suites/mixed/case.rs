@@ -296,9 +296,19 @@ impl Observation {
 /// Canonical spelling of an output name: lower case; a bare node is `v(node)`;
 /// a SPICE-style branch (`vdd#branch`, ngspice's `v.xlf.vdd#branch`) is
 /// `i(name)` with the device-letter prefix ngspice adds inside subcircuits
-/// removed.
+/// removed. A periodic small-signal trace's sideband suffix (`V(out)[sb=-1]`)
+/// follows the canonical name with an explicit sign, and sideband zero is the
+/// plain name.
 pub fn canonical_signal(name: &str) -> String {
     let lower = name.trim().to_ascii_lowercase();
+    if let Some((base, sideband)) = sideband_suffix(&lower) {
+        let base = canonical_signal(base);
+        return if sideband == 0 {
+            base
+        } else {
+            format!("{base}[sb={sideband:+}]")
+        };
+    }
     if let Some(branch) = lower.strip_suffix("#branch") {
         let branch = branch
             .strip_prefix("v.")
@@ -318,6 +328,12 @@ pub fn canonical_signal(name: &str) -> String {
         return format!("v({inner})");
     }
     format!("v({lower})")
+}
+
+/// A trailing `[sb=k]` sideband selector: the name before it and `k`.
+fn sideband_suffix(name: &str) -> Option<(&str, i64)> {
+    let (base, selector) = name.strip_suffix(']')?.rsplit_once("[sb=")?;
+    Some((base, selector.trim().parse().ok()?))
 }
 
 /// The repository revision the producer was built from, best effort.
@@ -350,6 +366,10 @@ mod tests {
         assert_eq!(canonical_signal("v.xlf.vdd#branch"), "i(xlf.vdd)");
         assert_eq!(canonical_signal("I(XLF.VDD)"), "i(xlf.vdd)");
         assert_eq!(canonical_signal("i(v.xlf.vdd)"), "i(xlf.vdd)");
+        assert_eq!(canonical_signal("V(out)[sb=-1]"), "v(out)[sb=-1]");
+        assert_eq!(canonical_signal("v(out)[sb=1]"), "v(out)[sb=+1]");
+        assert_eq!(canonical_signal("V(out)[sb=+0]"), "v(out)");
+        assert_eq!(canonical_signal("I(V1)[sb=+2]"), "i(v1)[sb=+2]");
     }
 
     #[test]

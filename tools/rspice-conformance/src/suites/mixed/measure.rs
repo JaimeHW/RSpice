@@ -489,11 +489,11 @@ pub fn parse_expression(expression: &str) -> Vec<(f64, String)> {
     let mut current = String::new();
     for character in expression.chars() {
         match character {
-            '(' => {
+            '(' | '[' => {
                 depth += 1;
                 current.push(character);
             }
-            ')' => {
+            ')' | ']' => {
                 depth = depth.saturating_sub(1);
                 current.push(character);
             }
@@ -1246,6 +1246,10 @@ mod tests {
                 (1.0, "v(xmod.outintp)".into()),
                 (-1.0, "v(xmod.outintn)".into())
             ]
+        );
+        assert_eq!(
+            parse_expression("v(out)[sb=-1]"),
+            vec![(1.0, "v(out)[sb=-1]".into())]
         );
     }
 
