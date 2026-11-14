@@ -4,9 +4,18 @@
 
 use crate::state::stimulus_library::fixtures;
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::stimulus::tests::{seeded, stage_size};
+use crate::workbench::surfaces::stimulus::tests::stage_size;
 use crate::workbench::surfaces::stimulus::*;
 use egui::{Pos2, Rect, vec2};
+
+/// An application whose project holds the fixture library.
+pub(super) fn seeded(selection: &str) -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.model.workspace.content.stimulus_library = fixtures::library();
+    app.state.workbench.workspace = crate::workbench::state::Workspace::Stimulus;
+    app.state.design.selected_stimulus_definition = Some(selection.to_owned());
+    app
+}
 
 /// The two viewports the instrument is held to: the workspace's smallest
 /// supported window, and the ordinary laptop one.

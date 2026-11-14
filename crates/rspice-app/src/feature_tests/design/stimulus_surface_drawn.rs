@@ -1,8 +1,9 @@
 //! The stimulus surface drawn through a whole application.
 
+use super::stimulus_surface::seeded;
 use crate::state::ComponentType;
 use crate::state::stimulus_library::definition::StimulusFamily;
-use crate::workbench::surfaces::stimulus::tests::{adopter, seeded};
+use crate::workbench::surfaces::stimulus::tests::adopter;
 
 #[test]
 fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
@@ -59,7 +60,7 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
 #[test]
 fn applying_a_rename_repoints_every_adopter() {
     let mut app = seeded("bridge_cal_step");
-    let id = adopter(&mut app.state, "bridge_cal_step", "V1");
+    let id = adopter(&mut app.state.model, "bridge_cal_step", "V1");
     crate::workbench::app::actions::stimulus::edit_name(
         app.state.design.selected_stimulus_definition.as_deref(),
         &mut app.state.design.stimulus_editor,

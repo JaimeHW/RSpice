@@ -2,9 +2,8 @@
 
 use egui::vec2;
 
-use crate::state::stimulus_library::fixtures;
 use crate::state::{Component, Point};
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::app_state::Model;
 
 /// The centre column the shell leaves this stage at one viewport.
 ///
@@ -50,19 +49,9 @@ pub(crate) fn stage_size(width: f32, height: f32) -> egui::Vec2 {
     vec2(columns.max(320.0), rows.max(240.0))
 }
 
-/// An application whose project holds the fixture library.
-pub(crate) fn seeded(selection: &str) -> RSpiceApp {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.workspace.content.stimulus_library = fixtures::library();
-    app.state.workbench.workspace = crate::workbench::state::Workspace::Stimulus;
-    app.state.design.selected_stimulus_definition = Some(selection.to_owned());
-    app
-}
-
 /// One placed source that has adopted a fixture definition.
-pub(crate) fn adopter(state: &mut AppState, name: &str, instance: &str) -> u64 {
-    let definition = state
-        .model
+pub(crate) fn adopter(model: &mut Model, name: &str, instance: &str) -> u64 {
+    let definition = model
         .workspace
         .content
         .stimulus_library
@@ -73,8 +62,7 @@ pub(crate) fn adopter(state: &mut AppState, name: &str, instance: &str) -> u64 {
     let mut component = Component::new(id, definition.component_type(), Point::new(4, 4));
     component.name = instance.to_owned();
     definition.adopt_onto(&mut component).expect("adopt");
-    state
-        .model
+    model
         .schematic
         .document_mut_for_test()
         .components
