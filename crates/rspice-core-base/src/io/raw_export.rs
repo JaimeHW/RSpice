@@ -750,6 +750,22 @@ mod export_tests {
         bytes
     }
 
+    /// The bytes with every `Date:` header line emptied: each write stamps the
+    /// wall clock, so two writes a second apart differ only there.
+    fn without_dates(bytes: &[u8]) -> Vec<u8> {
+        bytes
+            .split(|&byte| byte == b'\n')
+            .map(|line| {
+                if line.starts_with(b"Date: ") {
+                    &b"Date:"[..]
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(&b'\n')
+    }
+
     fn event_timelines() -> Vec<RawEventTimeline> {
         vec![
             RawEventTimeline {
@@ -819,7 +835,11 @@ mod export_tests {
             // separator, no trailing marker, nothing that reaches backwards.
             let mut expected = alone.clone();
             expected.extend_from_slice(&events);
-            assert_eq!(combined, expected, "{format:?}");
+            assert_eq!(
+                without_dates(&combined),
+                without_dates(&expected),
+                "{format:?}"
+            );
 
             // And the reader every existing caller uses still sees the
             // analysis plot, unchanged.
