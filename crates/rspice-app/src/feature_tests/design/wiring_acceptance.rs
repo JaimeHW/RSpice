@@ -7,10 +7,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{
-    RSpiceApp, copy_active_schematic_selection, delete_schematic_selection,
-    paste_schematic_clipboard_at,
-};
 use crate::schematic::view::gesture_commits;
 use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::selection_transform::{
@@ -21,6 +17,10 @@ use crate::state::{
     BusDeclaration, BusSlice, BusTapOrientation, Cell, CellViewRef, ComponentType, Library,
     MoveSelectionMode, Point, Rotation, Selection, SheetDefinition, SheetId, SheetPortPolicy,
     SheetTemplate, View, ViewType,
+};
+use crate::workbench::app::{
+    RSpiceApp, copy_active_schematic_selection, delete_schematic_selection,
+    paste_schematic_clipboard_at,
 };
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
@@ -196,7 +196,7 @@ impl Bench {
     pub(super) fn move_selection(&mut self, delta: Point, mode: MoveSelectionMode) {
         let state = &mut self.app.state;
         state.design.move_selection.mode = mode;
-        super::arm_move_selection_in(
+        crate::workbench::app::arm_move_selection_in(
             &mut state.design.move_selection,
             &mut state.design.stretch_selection,
             &mut state.design.array_selection,
@@ -213,7 +213,7 @@ impl Bench {
     /// preview there and press Enter.
     pub(super) fn stretch_selection(&mut self, delta: Point) {
         let state = &mut self.app.state;
-        super::arm_stretch_selection_in(
+        crate::workbench::app::arm_stretch_selection_in(
             &mut state.design.stretch_selection,
             &mut state.design.move_selection,
             &mut state.design.array_selection,
@@ -375,7 +375,7 @@ impl Bench {
             ),
             Ok(true)
         ) {
-            super::place_floating_paste(
+            crate::workbench::app::place_floating_paste(
                 &mut state.design.floating_paste,
                 &mut state.model,
                 &mut state.workbench,
@@ -394,7 +394,7 @@ impl Bench {
     /// Make sheet `index` the one being edited, as its tab does.
     pub(super) fn activate_sheet(&mut self, index: usize) {
         let state = &mut self.app.state;
-        let _ = super::sheets::activate_sheet(
+        let _ = crate::workbench::app::sheets::activate_sheet(
             &mut state.model,
             &mut state.workbench,
             &mut *state.design,
@@ -404,7 +404,7 @@ impl Bench {
     }
 
     pub(super) fn active_sheet(&self) -> usize {
-        let active = super::sheets::active_sheet_id(&self.app.state);
+        let active = crate::workbench::app::sheets::active_sheet_id(&self.app.state);
         self.sheets
             .iter()
             .position(|sheet| Some(*sheet) == active)

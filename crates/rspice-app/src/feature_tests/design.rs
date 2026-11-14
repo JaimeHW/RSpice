@@ -90,6 +90,7 @@ mod touch_flow;
 mod transient_annotations;
 mod visibility_options_drawn;
 mod wiring;
+mod wiring_acceptance;
 
 use egui::accesskit::{Node, Role};
 use egui::{Context, Rect, pos2, vec2};
