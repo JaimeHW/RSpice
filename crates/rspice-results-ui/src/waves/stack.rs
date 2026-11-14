@@ -11,7 +11,7 @@ use super::{
     trace_key,
 };
 use crate::{
-    derived::DerivedSeries,
+    derived::{DerivedSeries, Extremes},
     presentation::well_hint,
     session::{ExprEditor, ResultViewerState, XyStrip},
     strip::{LegendChip, StripHeader},
@@ -204,41 +204,125 @@ const WAVE_MIN_PLOT_HEIGHT: f32 = 24.0;
 const STRIP_GAP: f32 = 8.0;
 const STRIP_DIVIDER: f32 = 1.0;
 
-/// Y range of one pane's traces, padded 8 %. Per-trace extremes are cached
-/// on the data version — never rescanned per frame.
+/// The extremes a pane's traces draw: in the X `window`, or over the whole
+/// record when there is none. Each trace's block extremes are built once per
+/// data version, and a window reads them in time logarithmic in its length,
+/// so a pan or a zoom never rescans the samples.
 ///
 /// The fit is per pane because each pane carries its own unit: fitting
 /// volts and amps to one range would flatten whichever is smaller.
-pub fn pane_y_range(
+pub fn pane_trace_extremes(
     derived: &mut DerivedSeries,
     model: &StripModel,
     indices: &[usize],
+    window: Option<(f64, f64)>,
     mut note_samples: impl FnMut(usize),
-) -> Option<(f64, f64)> {
-    let mut min = f64::INFINITY;
-    let mut max = f64::NEG_INFINITY;
+) -> Extremes {
+    let mut extremes = Extremes::default();
     for trace in indices.iter().filter_map(|index| model.traces.get(*index)) {
-        let extremes = derived.range_or(trace_key(model, trace), || {
-            note_samples(trace.y.len());
-            rspice_results::measurements::finite_extremes(&trace.y)
+        let index = derived.extrema_or(trace_key(model, trace), &trace.y, &mut note_samples);
+        extremes.absorb(match window {
+            Some(window) => index.window(&trace.x, &trace.y, &trace.shape, window),
+            None => index.whole(),
         });
-        if let Some((lo, hi)) = extremes {
-            min = min.min(lo);
-            max = max.max(hi);
-        }
     }
-    if !min.is_finite() {
-        return None;
+    extremes
+}
+
+/// The extremes an expression draws in the X `window`, or over its whole
+/// series when there is none.
+fn expression_extremes(
+    derived: &mut DerivedSeries,
+    expression: &ResolvedExpr,
+    window: Option<(f64, f64)>,
+) -> Extremes {
+    let index = derived.extrema_or(expression.cache_key, &expression.y, |_| {});
+    match window {
+        Some(window) => index.window(&expression.x, &expression.y, &expression.shape, window),
+        None => index.whole(),
     }
+}
+
+/// The whole-series extremes of the expressions a pane draws.
+fn expressions_range(exprs: &[ResolvedExpr]) -> Option<(f64, f64)> {
+    exprs
+        .iter()
+        .filter_map(|expression| expression.y_extremes)
+        .reduce(|(lo, hi), (a, b)| (lo.min(a), hi.max(b)))
+}
+
+/// A linear fit's span, padded 8 % so no curve runs along the frame.
+fn padded((min, max): (f64, f64)) -> (f64, f64) {
     let pad = (max - min) * 0.08;
     // A span that cannot survive its own padding is flat as far as any axis
     // can draw it: exactly constant, or constant to within a few ulps. Both
     // widen the same way, because a range finer than the tick ladder can
     // subdivide leaves the pane with no labels at all.
     if pad <= 0.0 {
-        return Some((min - 1.0, max + 1.0));
+        return (min - 1.0, max + 1.0);
     }
-    Some((min - pad, max + pad))
+    (min - pad, max + pad)
+}
+
+/// Y range of one pane's traces over the whole record, padded 8 %.
+pub fn pane_y_range(
+    derived: &mut DerivedSeries,
+    model: &StripModel,
+    indices: &[usize],
+    note_samples: impl FnMut(usize),
+) -> Option<(f64, f64)> {
+    pane_trace_extremes(derived, model, indices, None, note_samples)
+        .range()
+        .map(padded)
+}
+
+/// What one pane's automatic Y fit is taken over.
+pub struct PaneFit<'a> {
+    /// The pane's traces, as indices into the strip model's.
+    pub traces: &'a [usize],
+    /// The expressions the pane draws.
+    pub expressions: &'a [ResolvedExpr],
+    /// The specification limits the pane draws, which must stay on it.
+    pub limits: &'a [plot::LimitLine],
+    /// The X window the pane shows.
+    pub window: (f64, f64),
+    /// Whether the axis is logarithmic, which fits the positive values.
+    pub log: bool,
+}
+
+/// The Y interval a pane shows when the reader has not pinned one: what its
+/// curves draw in the X window it shows, as ViVA and EZwave refit a strip on
+/// an X zoom, padded by the same rule a whole-record fit is.
+///
+/// A window that holds none of the pane's values, past the end of its data,
+/// fits the whole record instead, so panning there leaves the pane its axis.
+pub fn pane_fit(
+    derived: &mut DerivedSeries,
+    model: &StripModel,
+    fit: &PaneFit<'_>,
+    mut note_samples: impl FnMut(usize),
+) -> Option<(f64, f64)> {
+    let mut measure = |window: Option<(f64, f64)>| {
+        let traces = pane_trace_extremes(derived, model, fit.traces, window, &mut note_samples);
+        let mut expressions = Extremes::default();
+        for expression in fit.expressions {
+            expressions.absorb(expression_extremes(derived, expression, window));
+        }
+        (traces, expressions)
+    };
+    let (mut traces, mut expressions) = measure(Some(fit.window));
+    let mut all = traces;
+    all.absorb(expressions);
+    if all.range().is_none() {
+        (traces, expressions) = measure(None);
+        all = traces;
+        all.absorb(expressions);
+    }
+    if fit.log {
+        pane_view::pane_auto_log_y(all.positive_range(), fit.limits)
+    } else {
+        pane_auto_y(traces.range().map(padded), expressions.range(), fit.limits)
+    }
 }
 
 pub fn model_is_visible(
@@ -897,7 +981,7 @@ fn show_strip_plot(
                 &pane.traces,
                 |count| extrema_samples += count,
             );
-            pane_auto_y(range, exprs, &[]).is_none()
+            pane_auto_y(range, expressions_range(exprs), &[]).is_none()
         })
         .collect();
     host.note_sample_reads(0, extrema_samples);
@@ -1180,7 +1264,7 @@ fn show_xy_strip(
     // The pane's header: its legend, its unit and its scale, which the strip
     // shares with the pane it plots.
     let pane_range = pane_y_range(&mut host.session_mut().derived, model, &pane.traces, |_| {});
-    let auto_y = pane_auto_y(pane_range, &exprs, &[]);
+    let auto_y = pane_auto_y(pane_range, expressions_range(&exprs), &[]);
     let log_y_available = auto_y.is_some_and(|(minimum, maximum)| minimum > 0.0 && maximum > 0.0);
     let mut log_y = pane_log_y(host.session(), model, pane) && log_y_available;
     let cursor_a = (host.session().cursor_readout_active()
@@ -1386,28 +1470,37 @@ fn show_unit_pane(
     let presentation = options.readout;
     let quantity_policy = options.quantity;
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    let (x0, x1) = x_domain;
     // The pane's own top edge, kept so the active rail can span header and
     // canvas together once the pane's full height is known.
     let pane_top = ui.available_rect_before_wrap().top();
 
+    // Over the whole record: whether the pane draws anything at all, and
+    // whether anything it draws could stand on a logarithmic axis.
     let mut extrema_samples = 0;
-    let pane_range = pane_y_range(
+    let mut whole = pane_trace_extremes(
         &mut host.session_mut().derived,
         model,
         &pane.traces,
+        None,
         |count| extrema_samples += count,
     );
-    host.note_sample_reads(0, extrema_samples);
+    for expression in exprs {
+        whole.absorb(expression_extremes(
+            &mut host.session_mut().derived,
+            expression,
+            None,
+        ));
+    }
     let specification_limits = if host.session().show_spec_limits {
         host.specification_limits(model, pane, &t)
     } else {
         Vec::new()
     };
-    let auto_y = pane_auto_y(pane_range, exprs, &specification_limits);
     // A pane with nothing to draw has no Y axis for its header to act on.
-    let plotted = pane_auto_y(pane_range, exprs, &[]).is_some();
-    let log_y_available = auto_y.is_some_and(|(minimum, maximum)| minimum > 0.0 && maximum > 0.0);
+    let plotted = whole.range().is_some();
+    // A logarithmic axis draws a pane's positive values; one with none has
+    // nothing to draw on it.
+    let log_y_available = whole.positive_range().is_some();
     let mut log_y = pane_log_y(host.session(), model, pane) && log_y_available;
     if !log_y_available && log_y {
         set_pane_log_y(host.session_mut(), model, pane, false);
@@ -1456,6 +1549,22 @@ fn show_unit_pane(
         set_pane_log_y(host.session_mut(), model, pane, log_y);
     }
 
+    // The automatic fit follows the X window: a zoom in time refits Y to
+    // what the window shows, until the reader pins a Y range of their own.
+    let window = shared_x_view(host.session(), model.analysis_key, pane_count).unwrap_or(x_domain);
+    let auto_y = pane_fit(
+        &mut host.session_mut().derived,
+        model,
+        &PaneFit {
+            traces: &pane.traces,
+            expressions: exprs,
+            limits: &specification_limits,
+            window,
+            log: log_y,
+        },
+        |count| extrema_samples += count,
+    );
+    host.note_sample_reads(0, extrema_samples);
     let Some((auto_y0, auto_y1)) = auto_y else {
         // A pane with nothing plotted is its header alone; the hint is for a
         // pane whose plotted traces hold no finite value to fit.
@@ -1472,8 +1581,7 @@ fn show_unit_pane(
     let pane_view =
         host.session()
             .analysis_plot_view_pane(ResultViewer::Waves, model.analysis_key, ordinal);
-    let (x0, x1) =
-        shared_x_view(host.session(), model.analysis_key, pane_count).unwrap_or((x0, x1));
+    let (x0, x1) = window;
     let family_envelopes = host
         .session()
         .show_family_envelope

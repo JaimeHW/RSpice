@@ -401,7 +401,7 @@ fn the_hidden_control_shows_whole_on_a_crowded_row() {
                     .nodes
                     .iter()
                     .filter(|(_, node)| {
-                        matches!(node.label(), Some("log" | "Autoscale Y to visible traces"))
+                        matches!(node.label(), Some("log" | "Fit Y to the traces in view"))
                     })
                     .filter_map(|(_, node)| node.bounds())
                     .map(|bounds| {

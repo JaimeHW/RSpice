@@ -294,14 +294,14 @@ pub fn show_header(
                     .on_hover_text(if log_y_available {
                         "Toggle logarithmic Y axis"
                     } else {
-                        "Logarithmic Y requires strictly positive visible values"
+                        "Logarithmic Y needs a positive value to draw"
                     });
                 if log.clicked() {
                     output.toggle_log_y = true;
                 }
                 if IconButton::new(Icon::ZoomFit)
                     .side(19.0)
-                    .tooltip("Autoscale Y to visible traces")
+                    .tooltip("Fit Y to the traces in view")
                     .show(ui)
                     .clicked()
                 {

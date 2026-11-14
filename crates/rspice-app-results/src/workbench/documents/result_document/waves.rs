@@ -17,7 +17,6 @@ use rspice_results_ui::session::{ExprEditor, MarkerView};
 use rspice_results_ui::waves::cursor_interpolation;
 use rspice_results_ui::waves::header as pane_header;
 use rspice_results_ui::waves::navigation::shared_axis_viewport_fraction;
-use rspice_results_ui::waves::pane::pane_auto_y;
 #[cfg(test)]
 use rspice_results_ui::waves::pane::{apply_family_trace_style, nearest_drawn_trace};
 use rspice_results_ui::waves::readout::append_copied_cursor;
@@ -83,7 +82,7 @@ use super::{
 #[cfg(test)]
 use rspice_results_ui::waves::stack::set_pane_log_y;
 use rspice_results_ui::waves::stack::{
-    active_pane, model_is_visible, pane_log_y, set_shared_x_view, shared_x_view,
+    PaneFit, active_pane, model_is_visible, pane_fit, pane_log_y, set_shared_x_view, shared_x_view,
 };
 mod stack_host;
 
@@ -768,8 +767,9 @@ fn active_pane_x_unit(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Option<S
 ///
 /// The inspector's extents, the axis-limit editor and the zoom control all
 /// read this rather than the traces' own extremes: an expression or a
-/// specification limit widens the drawn axis, and reporting the narrower
-/// interval meant the typed limits opened on numbers that were not on screen.
+/// specification limit widens the drawn axis, the X window narrows it, and
+/// reporting any other interval meant the typed limits opened on numbers
+/// that were not on screen.
 pub(super) fn displayed_pane_auto_y(
     state: &mut ResultsParts<'_>,
     model: &StripModel,
@@ -777,7 +777,15 @@ pub(super) fn displayed_pane_auto_y(
     ordinal: usize,
     t: &Tokens,
 ) -> Option<(f64, f64)> {
-    let pane_range = pane_y_range(&mut state.results.session.derived, model, &pane.traces);
+    let window = model.x_range.map(|full| {
+        shared_x_view(
+            &state.results.session,
+            model.analysis_key,
+            model.unit_panes().len(),
+        )
+        .unwrap_or(full)
+    })?;
+    let log = pane_log_y(&state.results.session, model, pane);
     let limits = if state.results.session.show_spec_limits {
         matching_spec_limits(state.results_reads(), model, pane, t)
     } else {
@@ -790,12 +798,29 @@ pub(super) fn displayed_pane_auto_y(
     } else {
         Vec::new()
     };
-    pane_auto_y(pane_range, &exprs, &limits)
+    let mut fit = PaneFit {
+        traces: &pane.traces,
+        expressions: &exprs,
+        limits: &limits,
+        window,
+        log,
+    };
+    let note = |count| frame_work::note_samples(FrameSampleRead::TraceExtremes, count);
+    let fitted = pane_fit(&mut state.results.session.derived, model, &fit, note);
+    if fitted.is_none() && log {
+        // The pane draws a logarithmic axis only over positive values; with
+        // none it falls back to the linear one, and so does this.
+        fit.log = false;
+        return pane_fit(&mut state.results.session.derived, model, &fit, note);
+    }
+    fitted
 }
 
 #[cfg(test)]
 mod tests;
 
+/// A pane's traces' range over the whole record, padded as its fit is.
+#[cfg(test)]
 fn pane_y_range(
     derived: &mut DerivedSeries,
     model: &StripModel,

@@ -3,6 +3,10 @@
 
 use rspice_results::waveform::SharedWaveformValues;
 
+mod extrema;
+
+pub use extrema::{ExtremaIndex, Extremes};
+
 /// Source key, interval endpoint bits and branch ordinal.
 pub type WindowStatsKey = (u64, u64, u64, usize);
 /// Exact interval measurement or its retained diagnostic.
@@ -21,6 +25,9 @@ pub struct DerivedSeries {
     /// Cached finite (min, max) per series key — axis autoranges must not
     /// rescan millions of samples per frame.
     ranges: std::collections::HashMap<u64, Option<(f64, f64)>>,
+    /// Block extremes per series key, so a pane fits the X window it shows
+    /// without reading every sample in it on every frame.
+    extrema: std::collections::HashMap<u64, std::sync::Arc<ExtremaIndex>>,
     /// Gap-aware overview knots, bounded by the caller's drawing budget.
     overview_indices: std::collections::HashMap<u64, std::sync::Arc<Vec<usize>>>,
     /// Cached windowed (min, max, rms) measurements, keyed by
@@ -60,6 +67,7 @@ impl DerivedSeries {
         if self.version != version {
             self.map.clear();
             self.ranges.clear();
+            self.extrema.clear();
             self.overview_indices.clear();
             self.stats.clear();
             self.shapes.clear();
@@ -141,6 +149,27 @@ impl DerivedSeries {
         build: impl FnOnce() -> Option<(f64, f64)>,
     ) -> Option<(f64, f64)> {
         *self.ranges.entry(key).or_insert_with(build)
+    }
+
+    /// Fetch or build the block extremes of `values` under `key`. A key
+    /// whose summary was built from other values is rebuilt, so a reused key
+    /// can never answer for a different series. `note_samples` hears how
+    /// many samples a build read.
+    pub fn extrema_or(
+        &mut self,
+        key: u64,
+        values: &[f64],
+        note_samples: impl FnOnce(usize),
+    ) -> std::sync::Arc<ExtremaIndex> {
+        if let Some(hit) = self.extrema.get(&key)
+            && hit.describes(values)
+        {
+            return std::sync::Arc::clone(hit);
+        }
+        note_samples(values.len());
+        let index = std::sync::Arc::new(ExtremaIndex::build(values));
+        self.extrema.insert(key, std::sync::Arc::clone(&index));
+        index
     }
 
     /// Keep one interval per source/branch. Cursor dragging must not retain a

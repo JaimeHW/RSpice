@@ -135,20 +135,14 @@ const FLAT_FIT_RELATIVE_SPAN: f64 = 1.0e-9;
 /// the axis is a bound the reader cannot check against.
 pub fn pane_auto_y(
     pane_range: Option<(f64, f64)>,
-    exprs: &[ResolvedExpr],
+    expressions: Option<(f64, f64)>,
     limits: &[plot::LimitLine],
 ) -> Option<(f64, f64)> {
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
-    if let Some((a, b)) = pane_range {
-        lo = a;
-        hi = b;
-    }
-    for expr in exprs {
-        if let Some((a, b)) = expr.y_extremes {
-            lo = lo.min(a);
-            hi = hi.max(b);
-        }
+    for (a, b) in pane_range.into_iter().chain(expressions) {
+        lo = lo.min(a);
+        hi = hi.max(b);
     }
     for limit in limits {
         lo = lo.min(limit.y);
@@ -163,6 +157,36 @@ pub fn pane_auto_y(
     } else {
         Some((lo - 1.0, hi + 1.0))
     }
+}
+
+/// The Y interval a logarithmic pane fits itself to: the positive values its
+/// curves draw, and its positive specification limits, padded by the same
+/// share of the axis a linear fit is, in decades. A value at or below zero
+/// has no place on the axis and leaves the fit alone.
+pub fn pane_auto_log_y(
+    positive: Option<(f64, f64)>,
+    limits: &[plot::LimitLine],
+) -> Option<(f64, f64)> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for value in positive
+        .into_iter()
+        .flat_map(|(a, b)| [a, b])
+        .chain(limits.iter().map(|limit| limit.y))
+        .filter(|value| value.is_finite() && *value > 0.0)
+    {
+        lo = lo.min(value);
+        hi = hi.max(value);
+    }
+    if lo > hi {
+        return None;
+    }
+    let pad = (hi / lo).log10() * 0.08;
+    if !(pad > 0.0 && pad.is_finite()) || hi - lo <= FLAT_FIT_RELATIVE_SPAN * hi {
+        return Some((lo / 1.1, hi * 1.1));
+    }
+    let factor = 10f64.powf(pad);
+    Some((lo / factor, hi * factor))
 }
 
 /// The active-run trace whose drawn curve passes closest to the pointer.

@@ -491,7 +491,7 @@ fn a_pane_with_nothing_plotted_offers_no_axis_controls() {
             })
             .count()
     };
-    for name in ["log", "Autoscale Y to visible traces"] {
+    for name in ["log", "Fit Y to the traces in view"] {
         assert_eq!(on_row(volts, name), 1, "the volts pane offers {name:?}");
         assert_eq!(
             on_row(currents, name),
