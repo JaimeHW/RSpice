@@ -1214,7 +1214,6 @@ impl Bjt {
         self.mna_limited_from
             .set(apply_limiting.then_some(candidate));
         self.remember_mna_iteration();
-        self.mna_rbi_current = rbi_current;
 
         let [mut vc, mut vb, mut ve, mut vs] =
             [candidate[0], candidate[1], candidate[2], candidate[3]];
@@ -1294,6 +1293,25 @@ impl Bjt {
             raw
         };
         self.impose_intrinsic_node_constraints(&mut state, vc, vb, ve, vs);
+        let excess_phase = [
+            candidate[EXTERNAL_DIM + IDX_VXF1],
+            candidate[EXTERNAL_DIM + IDX_VXF2],
+        ];
+        if self.mna_dissipation_drops.is_none()
+            && self.mna_eval_holds([vc, vb, ve, vs], &state, excess_phase, rbi_current)
+        {
+            // The bias this load settled on, limited or not, is the one the
+            // held evaluation was taken at, so evaluating it again would
+            // reproduce that evaluation and its charge branches bit for bit.
+            // A stamp consumes the exact-repeat key above; this is what lets
+            // an accepted step's refresh of the converged candidate, whose
+            // last load already left its junctions unlimited, skip a second
+            // evaluation of every device.
+            self.reduced_linearization_cache_valid.set(false);
+            self.charge_snapshot_cache_valid.set(false);
+            return;
+        }
+        self.mna_rbi_current = rbi_current;
         self.eval_anchor = [vc, vb, ve, vs];
 
         let voltages = BjtNodeVoltages {
@@ -1339,8 +1357,7 @@ impl Bjt {
         self.vbp = state[IDX_VBP];
         self.vsi = state[IDX_VSI];
         self.vrth = state[IDX_VRTH];
-        self.vxf1 = candidate[EXTERNAL_DIM + IDX_VXF1];
-        self.vxf2 = candidate[EXTERNAL_DIM + IDX_VXF2];
+        [self.vxf1, self.vxf2] = excess_phase;
         self.vbe = self.vbi - self.vei;
         self.vbc = self.vbi - self.vci;
         self.ic = terminal_currents[EXT_C].current;
@@ -1367,23 +1384,42 @@ impl Bjt {
         candidate: &[Value; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM],
         rbi_current: Value,
     ) -> bool {
-        if !self.mna_eval_at_state || self.mna_eval.is_none() || !self.mna_charge_cache_valid.get()
-        {
-            return false;
-        }
         let [vc, vb, ve, vs] = [candidate[0], candidate[1], candidate[2], candidate[3]];
         let mut state = [0.0; INTERNAL_DIM];
         state.copy_from_slice(&candidate[EXTERNAL_DIM..EXTERNAL_DIM + INTERNAL_DIM]);
         self.impose_intrinsic_node_constraints(&mut state, vc, vb, ve, vs);
+        self.mna_eval_holds(
+            [vc, vb, ve, vs],
+            &state,
+            [
+                candidate[EXTERNAL_DIM + IDX_VXF1],
+                candidate[EXTERNAL_DIM + IDX_VXF2],
+            ],
+            rbi_current,
+        )
+    }
+
+    /// Whether the cached evaluation, and the charge branches refreshed with
+    /// it, were taken at terminal anchor `anchor`, internal state `state`,
+    /// excess-phase voltages `excess_phase` and RBI branch current
+    /// `rbi_current`, each bit for bit.
+    fn mna_eval_holds(
+        &self,
+        anchor: [Value; EXTERNAL_DIM],
+        state: &[Value; INTERNAL_DIM],
+        excess_phase: [Value; 2],
+        rbi_current: Value,
+    ) -> bool {
+        if !self.mna_eval_at_state || self.mna_eval.is_none() || !self.mna_charge_cache_valid.get()
+        {
+            return false;
+        }
         let held = [
             self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
         ];
-        same_bits(&self.eval_anchor, &[vc, vb, ve, vs])
-            && same_bits(&held, &state)
-            && same_bits(
-                &[self.vxf1, self.vxf2],
-                &candidate[EXTERNAL_DIM + IDX_VXF1..=EXTERNAL_DIM + IDX_VXF2],
-            )
+        same_bits(&self.eval_anchor, &anchor)
+            && same_bits(&held, state)
+            && same_bits(&[self.vxf1, self.vxf2], &excess_phase)
             && self.mna_rbi_current.to_bits() == rbi_current.to_bits()
     }
 
@@ -3494,6 +3530,40 @@ mod tests {
             assert!(!bjt.mna_eval_is_unlimited_at(&bjt.mna_solution_bias(&moved), rbi));
             bjt.set_junction_gmin(1e-9);
             assert!(!bjt.mna_eval_is_unlimited_at(&candidate, rbi));
+        }
+    }
+
+    /// A Newton load of the bias the held evaluation was taken at, as an
+    /// accepted step's refresh of its converged candidate is once the stamp
+    /// has consumed the exact-repeat key, keeps that evaluation, and leaves
+    /// the device exactly as evaluating the bias again does. Another bias
+    /// evaluates again.
+    #[test]
+    fn a_newton_load_of_the_held_bias_keeps_its_evaluation() {
+        for card in GUMMEL_POON_CARDS {
+            let (mut bjt, bias) = settled_gummel_poon(card, FORWARD_ACTIVE);
+            bjt.stamp_mna(&mut DenseStamper::new(bias.len()));
+            assert_eq!(bjt.mna_limited_from.get(), None);
+            let mut evaluated = bjt.clone();
+            evaluated.mna_eval_at_state = false;
+            // Only an evaluation sums the terminal rows, so rows taken away
+            // beforehand show which load evaluated.
+            let rows = bjt.mna_terminal_rows.0.take();
+            bjt.update(&bias);
+            evaluated.update(&bias);
+            assert!(
+                bjt.mna_terminal_rows.0.is_none(),
+                "the held bias was evaluated again"
+            );
+            bjt.mna_terminal_rows.0 = rows;
+            assert_eq!(format!("{bjt:?}"), format!("{evaluated:?}"));
+
+            let mut moved = bias.clone();
+            moved[bjt.node_base - 1] += 1e-3;
+            bjt.stamp_mna(&mut DenseStamper::new(bias.len()));
+            bjt.mna_terminal_rows.0 = None;
+            bjt.update(&moved);
+            assert!(bjt.mna_terminal_rows.0.is_some());
         }
     }
 
