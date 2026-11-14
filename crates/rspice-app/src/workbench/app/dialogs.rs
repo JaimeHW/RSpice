@@ -16,7 +16,7 @@ pub(crate) mod create_model_bound_symbol;
 pub(crate) use rspice_app_project::workbench::app::dialogs::design_management;
 #[cfg(test)]
 pub(crate) use rspice_app_sheets::workbench::app::dialogs::delete_sheet;
-pub(in crate::workbench) mod design_request;
+pub(crate) mod design_request;
 pub(crate) mod design_review_comments;
 #[cfg(test)]
 pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_defaults;
@@ -45,7 +45,7 @@ pub(crate) use rspice_app_project::workbench::app::dialogs::project;
 pub(crate) use rspice_app_settings::workbench::app::dialogs::preferences;
 #[cfg(test)]
 pub(in crate::workbench) use rspice_app_simulate::workbench::app::dialogs::plan_removal;
-pub(in crate::workbench) mod property_dialog;
+pub(crate) mod property_dialog;
 #[cfg(test)]
 pub(crate) use rspice_app_cloud::workbench::app::dialogs::publish_web;
 pub(crate) mod replace_instance;
