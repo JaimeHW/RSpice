@@ -12,14 +12,14 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design::commands::DesignCommand;
-use crate::workbench::design::inspector::sheet::*;
 use crate::workbench::design::inspector::tests::{accesskit_nodes, painted_panel};
+use rspice_app_sheets::workbench::docks::inspector::design::sheet::*;
 
 /// The sheet's section over `state`'s parts, as the sheets feature hands
 /// them to it.
 fn sheet_panel(ui: &mut egui::Ui, state: &mut AppState) {
     let review_markers = state.design.schematic_visibility.review_markers;
-    crate::workbench::design::inspector::sheet::sheet_panel(
+    rspice_app_sheets::workbench::docks::inspector::design::sheet::sheet_panel(
         ui,
         SheetInspector {
             model: &mut state.model,
