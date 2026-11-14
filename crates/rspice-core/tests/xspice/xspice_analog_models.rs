@@ -6,29 +6,16 @@ use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{
     AnalogInputConnection, AnalysisType, CmContext, CodeModel, CodeModelRegistry, PortConnection,
-    PortType, XspiceInstance, clear_registered_data_files, register_data_file,
+    PortType, XspiceInstance, register_data_file, unregister_data_file,
 };
-use std::sync::{Mutex, MutexGuard};
 
-static DATA_FILE_REGISTRY_LOCK: Mutex<()> = Mutex::new(());
+/// Unregisters one virtual data file when the test ends. Every XSPICE test shares this
+/// executable's registry, so a test removes only the file it registered.
+struct RegisteredDataFile(&'static str);
 
-struct DataFileRegistryGuard {
-    _lock: MutexGuard<'static, ()>,
-}
-
-impl DataFileRegistryGuard {
-    fn new() -> Self {
-        let lock = DATA_FILE_REGISTRY_LOCK
-            .lock()
-            .expect("lock XSPICE data-file registry test guard");
-        clear_registered_data_files().expect("clear XSPICE data-file registry");
-        Self { _lock: lock }
-    }
-}
-
-impl Drop for DataFileRegistryGuard {
+impl Drop for RegisteredDataFile {
     fn drop(&mut self) {
-        let _ = clear_registered_data_files();
+        let _ = unregister_data_file(self.0);
     }
 }
 
@@ -2312,7 +2299,6 @@ rload out 0 1meg
 
 #[test]
 fn xspice_xfer_reads_registered_virtual_touchstone_file() {
-    let _guard = DataFileRegistryGuard::new();
     register_data_file(
         "virtual://xfer/ri.s1p",
         "\
@@ -2322,6 +2308,7 @@ fn xspice_xfer_reads_registered_virtual_touchstone_file() {
 ",
     )
     .expect("register virtual Touchstone data");
+    let _file = RegisteredDataFile("virtual://xfer/ri.s1p");
     let deck = "\
 * XSPICE xfer virtual Touchstone file
 vin in 0 dc 0 ac 1
