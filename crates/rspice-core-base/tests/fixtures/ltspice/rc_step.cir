@@ -1,0 +1,8 @@
+* rc stepped transient
+V1 in 0 PULSE(0 1 0 1p 1p 1 2)
+R1 in out {r}
+C1 out 0 1n
+.param r=1k
+.step param r list 1k 2k 4k
+.tran 0 5u 0 50n
+.end

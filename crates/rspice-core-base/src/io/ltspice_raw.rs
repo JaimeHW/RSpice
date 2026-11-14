@@ -7,15 +7,22 @@
 //! ## Format Overview
 //!
 //! .raw files contain:
-//! 1. ASCII header with metadata (title, date, simulation type, variables)
+//! 1. A text header with metadata (title, date, simulation type, variables):
+//!    ASCII from ngspice, Xyce and RSpice, UTF-16LE from LTspice
 //! 2. Binary or ASCII data section with simulation values
 //!
-//! The header uses key-value pairs terminated by "Values:" or "Binary:"
+//! The header uses key-value pairs terminated by "Values:" or "Binary:".
+//! LTspice's binary layouts all read: single-precision signals beside a
+//! double scale, `double`, complex AC, `fastaccess` (column by column) and
+//! `stepped` (every `.step` run in one plot, the scale restarting per run).
 
-use std::io::{BufRead, BufReader, Cursor, Read};
+use std::io::{Cursor, Read};
 use std::path::Path;
 use thiserror::Error;
 
+mod header_text;
+#[cfg(test)]
+mod ltspice_files_tests;
 mod metadata_options;
 mod table_metadata;
 pub use {
@@ -365,24 +372,36 @@ fn parse_plot(
     bytes: &[u8],
     resource_limits: ResourceLimits,
 ) -> Result<(RawWaveformData, usize), RawParseError> {
-    let mut reader = BufReader::new(Cursor::new(bytes));
-    // Parse ASCII header
-    let (mut header, mut variables, data_offset) = parse_header(&mut reader, resource_limits)?;
-    let data_offset = usize::try_from(data_offset).map_err(|_| {
-        RawParseError::DataError("raw data offset exceeds this platform".to_string())
-    })?;
+    let header_text = header_text::decode_header(bytes)?;
+    let (mut header, mut variables) = parse_header(&header_text.text, resource_limits)?;
+    let data_offset = header_text.data_offset;
     let data_bytes = bytes.get(data_offset..).ok_or_else(|| {
         RawParseError::DataError("raw data offset exceeds the input length".to_string())
     })?;
 
-    // Parse data
     let (mut waveforms, actual_points, data_length) = if header.is_binary {
         parse_binary_data(data_bytes, &header, &variables, resource_limits)?
+    } else if header_text.encoding == header_text::TextEncoding::Utf16Le {
+        // Every character of an ASCII section is one UTF-16 unit, two bytes.
+        let text = header_text::utf16le_ascii(data_bytes, usize::MAX);
+        let (waveforms, points, length) =
+            parse_ascii_data(&text, &header, &variables, resource_limits)?;
+        (waveforms, points, length.saturating_mul(2))
     } else {
         parse_ascii_data(data_bytes, &header, &variables, resource_limits)?
     };
     if header.no_points == 0 {
         header.no_points = actual_points;
+    }
+    if time_carries_compression_marks(&header, &variables)
+        && let Some(time) = waveforms.first_mut()
+    {
+        // LTspice marks the points its waveform compression kept by setting
+        // the sign bit of their time; the time itself is the magnitude.
+        time.y.iter_mut().for_each(|value| *value = value.abs());
+        for waveform in &mut waveforms {
+            waveform.x.iter_mut().for_each(|value| *value = value.abs());
+        }
     }
     table_metadata::restore_table_metadata(&mut header, &mut variables, &mut waveforms)?;
 
@@ -394,6 +413,23 @@ fn parse_plot(
         },
         data_offset.saturating_add(data_length),
     ))
+}
+
+/// Whether the plot's time scale can carry LTspice's compression marks: a
+/// real transient whose scale is time. Time never runs negative in a
+/// transient, so a set sign bit there is a mark, never a value. A table
+/// RSpice wrote with its own layout metadata keeps its scale as written.
+fn time_carries_compression_marks(header: &RawFileHeader, variables: &[RawVariable]) -> bool {
+    !header.is_complex
+        && header
+            .plotname
+            .trim()
+            .eq_ignore_ascii_case("Transient Analysis")
+        && variables
+            .first()
+            .is_some_and(|scale| scale.var_type.eq_ignore_ascii_case("time"))
+        // Malformed metadata is refused when the table is restored.
+        && !raw_table_has_coordinate(header).unwrap_or(true)
 }
 
 /// Header keys that can open a plot block.
@@ -413,12 +449,23 @@ const PLOT_HEADER_KEYS: [&str; 9] = [
     "variables:",
 ];
 
+/// Whether `bytes` are blank space, in either text encoding.
 fn is_blank(bytes: &[u8]) -> bool {
-    bytes.iter().all(u8::is_ascii_whitespace)
+    bytes.iter().all(u8::is_ascii_whitespace) || header_text::is_utf16le_blank(bytes)
 }
 
-/// Whether `bytes` open another plot, ignoring leading blank space.
+/// Whether `bytes` open another plot, ignoring leading blank space, in
+/// either text encoding.
 fn starts_plot_header(bytes: &[u8]) -> bool {
+    starts_ascii_plot_header(bytes)
+        || header_text::looks_utf16le(bytes) && {
+            let bytes = bytes.strip_prefix(&[0xFF, 0xFE]).unwrap_or(bytes);
+            starts_ascii_plot_header(&header_text::utf16le_ascii(bytes, 256))
+        }
+}
+
+/// The plot header test on ASCII text.
+fn starts_ascii_plot_header(bytes: &[u8]) -> bool {
     let Some(start) = bytes.iter().position(|byte| !byte.is_ascii_whitespace()) else {
         return false;
     };
@@ -463,29 +510,27 @@ fn in_plot(plot_number: usize, error: RawParseError) -> RawParseError {
     }
 }
 
-/// Parse the ASCII header section
-fn parse_header<R: BufRead>(
-    reader: &mut R,
+/// Flags that change how a plot's values are laid out and that this reader
+/// does not read. ngspice's `unpadded` leaves a short vector's missing points
+/// out of the data instead of padding them. Any other flag it does not know
+/// is informational and ignored, as ngspice ignores it.
+const UNREAD_LAYOUT_FLAGS: [&str; 1] = ["unpadded"];
+
+/// Parse a header decoded by [`header_text::decode_header`]: its lines end
+/// with the `Binary:` or `Values:` line.
+fn parse_header(
+    text: &str,
     resource_limits: ResourceLimits,
-) -> Result<(RawFileHeader, Vec<RawVariable>, u64), RawParseError> {
+) -> Result<(RawFileHeader, Vec<RawVariable>), RawParseError> {
     let mut header = RawFileHeader::default();
     let mut variables = Vec::new();
     let mut in_variables = false;
-    let mut bytes_read: u64 = 0;
     let mut saw_no_variables = false;
     let mut saw_no_points = false;
     let mut metadata_options = metadata_options::MetadataOptions::default();
 
-    loop {
-        let mut line = String::new();
-        let n = reader.read_line(&mut line)?;
-        if n == 0 {
-            return Err(RawParseError::InvalidHeader(
-                "Unexpected end of file".to_string(),
-            ));
-        }
-        bytes_read += n as u64;
-
+    for (line_index, line) in text.lines().enumerate() {
+        let line_number = line_index + 1;
         let line = line.trim();
 
         // Check for data section start
@@ -502,14 +547,13 @@ fn parse_header<R: BufRead>(
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() < 3 {
                 return Err(RawParseError::InvalidHeader(format!(
-                    "Malformed variable definition: {}",
-                    line
+                    "line {line_number}: Malformed variable definition: {line}"
                 )));
             }
             let index = parts[0].parse::<usize>().map_err(|_| {
                 RawParseError::InvalidHeader(format!(
-                    "Invalid variable index '{}' in '{}'",
-                    parts[0], line
+                    "line {line_number}: Invalid variable index '{}' in '{line}'",
+                    parts[0]
                 ))
             })?;
             ResourceLimitError::ensure(
@@ -543,6 +587,16 @@ fn parse_header<R: BufRead>(
                 "option" => metadata_options.read(value)?,
                 "flags" => {
                     header.flags = value.split_whitespace().map(|s| s.to_string()).collect();
+                    if let Some(flag) = header.flags.iter().find(|flag| {
+                        UNREAD_LAYOUT_FLAGS
+                            .iter()
+                            .any(|unread| flag.eq_ignore_ascii_case(unread))
+                    }) {
+                        return Err(RawParseError::UnsupportedFormat(format!(
+                            "line {line_number}: the flag '{flag}' changes how the values are \
+                             laid out, and this reader does not read that layout"
+                        )));
+                    }
                     header.is_complex = header
                         .flags
                         .iter()
@@ -555,7 +609,9 @@ fn parse_header<R: BufRead>(
                 "no. variables" => {
                     saw_no_variables = true;
                     header.no_variables = value.parse().map_err(|_| {
-                        RawParseError::InvalidHeader(format!("Invalid no. variables: {}", value))
+                        RawParseError::InvalidHeader(format!(
+                            "line {line_number}: Invalid no. variables: {value}"
+                        ))
                     })?;
                     ResourceLimitError::ensure(
                         ResourceKind::ExternalDataValues,
@@ -566,7 +622,9 @@ fn parse_header<R: BufRead>(
                 "no. points" => {
                     saw_no_points = true;
                     header.no_points = value.parse().map_err(|_| {
-                        RawParseError::InvalidHeader(format!("Invalid no. points: {}", value))
+                        RawParseError::InvalidHeader(format!(
+                            "line {line_number}: Invalid no. points: {value}"
+                        ))
                     })?;
                     if header.no_points > 0 {
                         ensure_waveform_dimensions(&header, header.no_points, resource_limits)?;
@@ -603,7 +661,7 @@ fn parse_header<R: BufRead>(
     }
 
     metadata_options.finish(&mut header)?;
-    Ok((header, variables, bytes_read))
+    Ok((header, variables))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -716,10 +774,25 @@ fn detect_binary_encoding(
         .into_iter()
         .max_by_key(|(encoding, _, _, fit)| (*fit, encoding.is_all_f64() == header.is_double))
         .ok_or_else(|| {
-            RawParseError::DataError(format!(
-                "Binary payload length {} does not match any supported encoding for {} variable(s) and {} point(s)",
-                payload_len, num_vars, header.no_points
-            ))
+            let flagged = candidates
+                .into_iter()
+                .find(|encoding| encoding.is_all_f64() == header.is_double)
+                .and_then(|encoding| encoding.row_size_bytes(num_vars))
+                .and_then(|row| row.checked_mul(header.no_points));
+            match flagged {
+                Some(needed) if header.no_points > 0 && payload_len < needed => {
+                    RawParseError::DataError(format!(
+                        "the binary data holds {payload_len} byte(s), but {num_vars} \
+                         variable(s) x {} point(s) laid out as the Flags line says need \
+                         {needed}; the file is truncated",
+                        header.no_points
+                    ))
+                }
+                _ => RawParseError::DataError(format!(
+                    "Binary payload length {} does not match any supported encoding for {} variable(s) and {} point(s)",
+                    payload_len, num_vars, header.no_points
+                )),
+            }
         })?;
 
     Ok((chosen.0, chosen.1, chosen.2))
@@ -854,42 +927,39 @@ fn parse_binary_data(
         .then(|| data_columns(num_vars, num_points))
         .transpose()?;
 
-    // Read all data points
-    for _ in 0..num_points {
-        for var_idx in 0..num_vars {
-            let real_value = match encoding {
-                BinaryEncoding::RealAllF64 | BinaryEncoding::ComplexAllF64 => {
-                    read_f64_le(&mut cursor)?
-                }
-                BinaryEncoding::RealMixedAxisF64RestF32
-                | BinaryEncoding::ComplexMixedAxisF64RestF32 => {
-                    if var_idx == 0 {
-                        read_f64_le(&mut cursor)?
-                    } else {
-                        read_f32_le(&mut cursor)? as f64
-                    }
-                }
+    let mut read_value = |var_idx: usize| -> Result<(), RawParseError> {
+        let single = !encoding.is_all_f64() && var_idx > 0;
+        let mut read = || -> Result<f64, RawParseError> {
+            let value = if single {
+                f64::from(read_f32_le(&mut cursor)?)
+            } else {
+                read_f64_le(&mut cursor)?
             };
-            ensure_finite_binary_value(real_value)?;
-
-            data[var_idx].push(real_value);
-
-            if let Some(imag) = data_imag.as_mut() {
-                let imag_value = match encoding {
-                    BinaryEncoding::ComplexAllF64 => read_f64_le(&mut cursor)?,
-                    BinaryEncoding::ComplexMixedAxisF64RestF32 => {
-                        if var_idx == 0 {
-                            read_f64_le(&mut cursor)?
-                        } else {
-                            read_f32_le(&mut cursor)? as f64
-                        }
-                    }
-                    BinaryEncoding::RealAllF64 | BinaryEncoding::RealMixedAxisF64RestF32 => {
-                        unreachable!("imaginary storage requested for real binary encoding")
-                    }
-                };
-                ensure_finite_binary_value(imag_value)?;
-                imag[var_idx].push(imag_value);
+            ensure_finite_binary_value(value)?;
+            Ok(value)
+        };
+        data[var_idx].push(read()?);
+        if let Some(imag) = data_imag.as_mut() {
+            imag[var_idx].push(read()?);
+        }
+        Ok(())
+    };
+    if header
+        .flags
+        .iter()
+        .any(|flag| flag.eq_ignore_ascii_case("fastaccess"))
+    {
+        // LTspice's fast-access layout stores the data column by column:
+        // every point of the scale, then every point of each signal.
+        for var_idx in 0..num_vars {
+            for _ in 0..num_points {
+                read_value(var_idx)?;
+            }
+        }
+    } else {
+        for _ in 0..num_points {
+            for var_idx in 0..num_vars {
+                read_value(var_idx)?;
             }
         }
     }

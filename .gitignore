@@ -44,6 +44,10 @@ Thumbs.db
 # corpus wholesale rather than one directory at a time.
 !tests/xyce/**/*.raw
 *.log
+# LTspice's own rawfiles and the log that names a stepped file's runs are the
+# reader's fixtures, not output.
+!crates/rspice-core-base/tests/fixtures/ltspice/*.raw
+!crates/rspice-core-base/tests/fixtures/ltspice/*.log
 *.pyc
 __pycache__/
 /*.out
