@@ -82,7 +82,6 @@ fn a_runtime_compiled_module_names_the_runtime_of_this_build() {
         model.path()
     ));
     assert_eq!(ran.analog, [RUNTIME]);
-    assert_eq!(ran.verilog_a_runtime(), Some(RUNTIME));
     assert!(ran.digital.is_empty(), "{ran}");
     assert_eq!(
         ran.to_string(),
@@ -115,7 +114,7 @@ fn a_mixed_design_names_the_verilog_host() {
         design.path()
     ));
     assert_eq!(ran.digital, [DigitalBackend::VerilogHost], "{ran}");
-    assert_eq!(ran.verilog_a_runtime(), None, "{ran}");
+    assert!(ran.analog.is_empty(), "{ran}");
 }
 
 /// An authored event-driven code model is XSPICE's digital engine; the
@@ -142,7 +141,6 @@ fn an_xspice_digital_model_names_xspice() {
 fn a_generated_compact_model_is_named_by_its_module() {
     let ran = ran("* diode\nv1 in 0 0.6\nr1 in a 1k\nxd a 0 diode_cmc\n.op\n.end\n");
     assert_eq!(ran.analog, [AnalogBackend::GeneratedModel], "{ran}");
-    assert_eq!(ran.verilog_a_runtime(), None, "{ran}");
     assert!(
         ran.generated_models
             .iter()

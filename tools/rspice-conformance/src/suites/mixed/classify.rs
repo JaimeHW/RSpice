@@ -15,16 +15,51 @@
 //! carries the refusal's instance and analysis kind as typed fields, so a
 //! prose-only identity is malformed.
 
-use super::Outcome;
 use super::case::{CaseResult, ErrorRecord};
 use super::compare::Verdict;
+use super::{Outcome, Route};
+use rspice_core::backends::AnalogBackend;
 
 /// On since every runner carries a refusal's identity as typed fields.
 pub const REQUIRE_STRUCTURED_REFUSAL: bool = true;
 
-/// The error category of a case its route's harness could not hand to what
-/// the route tests; its display is the reason the `gap` row keeps.
-pub const HARNESS_GAP: &str = "harness-gap";
+/// The Verilog-A runtime a route runs runtime-compiled modules on: the one
+/// its build compiles in. The app is an external producer that may run
+/// either desktop runtime, so it names none.
+const fn route_runtime(route: Route) -> Option<AnalogBackend> {
+    match route {
+        Route::Interp => Some(AnalogBackend::Interpreter),
+        Route::Native => Some(AnalogBackend::NativeJit),
+        Route::Worker => Some(AnalogBackend::WasmJit),
+        Route::App => None,
+    }
+}
+
+/// The failure of a cell whose result contradicts the route it ran on: the
+/// result names another Verilog-A runtime than the route's, or it completed
+/// without naming what ran it. A cell that ran on the wrong engine has not
+/// tested its route, however its numbers compare.
+pub fn route_failure(route: Route, result: &CaseResult) -> Option<Classification> {
+    route_mismatch(route, result).map(|why| Classification::new(Outcome::Fail, why))
+}
+
+fn route_mismatch(route: Route, result: &CaseResult) -> Option<String> {
+    let expected = route_runtime(route)?;
+    let Some(backends) = &result.backends else {
+        return (result.outcome == "completed")
+            .then(|| format!("route mismatch: run on {route}, the result names no backend"));
+    };
+    backends
+        .analog
+        .iter()
+        .find(|ran| **ran != AnalogBackend::GeneratedModel && **ran != expected)
+        .map(|ran| {
+            format!(
+                "route mismatch: run on {route}, result says {}",
+                ran.label()
+            )
+        })
+}
 
 /// The fixed analysis labels a refusal may use, per card kind.
 pub fn analysis_labels(kind: &str) -> &'static [&'static str] {
@@ -212,12 +247,6 @@ pub fn classify(
 }
 
 fn classify_error(error: &ErrorRecord, kind: &str, instances: &[String]) -> Classification {
-    if error.category == HARNESS_GAP {
-        return Classification::new(
-            Outcome::Gap,
-            format!("harness gap: {}", first_line(&error.display)),
-        );
-    }
     let refusal_category = matches!(error.category.as_str(), "capability" | "elaboration")
         || (error.category == "parse" && error.token.is_some());
     if !refusal_category {
@@ -393,20 +422,67 @@ mod tests {
         CaseEnd::Completed(Box::new(result))
     }
 
+    /// A cell is checked against the runtime its route compiles in: a native
+    /// cell whose result says the interpreter ran it, or a completed cell
+    /// that names nothing, did not test its route.
     #[test]
-    fn a_harness_gap_is_a_gap_with_its_reason() {
-        let result = CaseResult::new("worker", "simulation").failed(ErrorRecord {
-            category: HARNESS_GAP.into(),
-            detail: "module 'sk' holds an index the worker cannot read".into(),
-            display: "module 'sk' holds an index the worker cannot read".into(),
-            stage: Some("preparation".into()),
+    fn a_result_from_another_runtime_than_its_route_is_a_route_mismatch() {
+        use rspice_core::backends::ExecutionBackends;
+        let ran_on = |analog: &[AnalogBackend]| {
+            let mut result = CaseResult::new("native", "simulation");
+            result.backends = Some(ExecutionBackends {
+                analog: analog.to_vec(),
+                ..ExecutionBackends::default()
+            });
+            result
+        };
+        assert_eq!(
+            route_mismatch(Route::Native, &ran_on(&[AnalogBackend::Interpreter])).as_deref(),
+            Some("route mismatch: run on native, result says interpreter")
+        );
+        assert_eq!(
+            route_mismatch(Route::Worker, &ran_on(&[AnalogBackend::NativeJit])).as_deref(),
+            Some("route mismatch: run on worker, result says native JIT")
+        );
+        // One module on the route's runtime does not excuse another off it.
+        assert_eq!(
+            route_mismatch(
+                Route::Native,
+                &ran_on(&[AnalogBackend::NativeJit, AnalogBackend::Interpreter])
+            )
+            .as_deref(),
+            Some("route mismatch: run on native, result says interpreter")
+        );
+        for (route, runtime) in [
+            (Route::Interp, AnalogBackend::Interpreter),
+            (Route::Native, AnalogBackend::NativeJit),
+            (Route::Worker, AnalogBackend::WasmJit),
+        ] {
+            let result = ran_on(&[runtime, AnalogBackend::GeneratedModel]);
+            assert_eq!(route_mismatch(route, &result), None, "{route}");
+        }
+        // Only built-in devices or generated models ran: no runtime to check.
+        assert_eq!(
+            route_mismatch(Route::Native, &ran_on(&[AnalogBackend::GeneratedModel])),
+            None
+        );
+        assert_eq!(route_mismatch(Route::Native, &ran_on(&[])), None);
+        // A completed cell that names nothing did not report its route.
+        let unreported = CaseResult::new("native", "simulation");
+        assert_eq!(
+            route_mismatch(Route::Native, &unreported).as_deref(),
+            Some("route mismatch: run on native, the result names no backend")
+        );
+        // A refusal before anything was built names nothing, rightly.
+        let refused = unreported.failed(ErrorRecord {
+            category: "capability".into(),
             ..Default::default()
         });
-        let class = classify(&CaseEnd::Completed(Box::new(result)), "tran", &[], &[]);
-        assert_eq!(class.outcome, Outcome::Gap);
+        assert_eq!(route_mismatch(Route::Native, &refused), None);
+        // The app may run either desktop runtime.
         assert_eq!(
-            class.detail,
-            "harness gap: module 'sk' holds an index the worker cannot read"
+            route_mismatch(Route::App, &ran_on(&[AnalogBackend::Interpreter])),
+            None
         );
     }
 

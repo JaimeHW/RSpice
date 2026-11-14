@@ -121,15 +121,6 @@ impl ExecutionBackends {
         union(&mut self.generated_models, &other.generated_models);
         union(&mut self.substitutions, &other.substitutions);
     }
-
-    /// The Verilog-A runtime that ran the result's runtime-compiled modules,
-    /// if any ran.
-    pub fn verilog_a_runtime(&self) -> Option<AnalogBackend> {
-        self.analog
-            .iter()
-            .copied()
-            .find(|backend| *backend != AnalogBackend::GeneratedModel)
-    }
 }
 
 /// `analog: native JIT, generated model (JUNCAP200); digital: Verilog host`,

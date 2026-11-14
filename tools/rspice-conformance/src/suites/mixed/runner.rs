@@ -601,6 +601,11 @@ fn evaluate_cell(
         ),
         _ => ("none".to_owned(), options.route()),
     };
+    if let CaseEnd::Completed(result) = end
+        && let Some(failure) = super::classify::route_failure(route, result)
+    {
+        return (failure, dispatch, route);
+    }
     let mut verdicts = Vec::new();
     if let CaseEnd::Completed(result) = end
         && result.outcome == "completed"
@@ -1382,7 +1387,6 @@ pub fn ledger_counts(rows: &[Row]) -> String {
                 (Outcome::Fail, 'F'),
                 (Outcome::Wrong, 'W'),
                 (Outcome::Unverified, 'U'),
-                (Outcome::Gap, 'G'),
             ] {
                 if let Some(count) = counts.get(&outcome) {
                     text.push_str(&format!(" {count}{letter}"));
