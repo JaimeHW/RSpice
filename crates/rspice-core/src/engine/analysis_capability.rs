@@ -1067,13 +1067,15 @@ fn pss_veriloga_refusal(
 
 /// The first Verilog-A instance of `family` harmonic balance cannot sample,
 /// refused by `analysis` with harmonic balance's reason.
-fn hb_admission_refusal(
+fn hb_admission_refusal<const PROBE_DEVICES: bool>(
     circuit: &CircuitData,
     family: CapabilityFamily,
     analysis: CapabilityAnalysis,
 ) -> Option<UnsupportedCapabilityError> {
     match family {
-        CapabilityFamily::VerilogAGenerated => hb_generated_refusal(circuit, analysis),
+        CapabilityFamily::VerilogAGenerated => {
+            hb_generated_refusal::<PROBE_DEVICES>(circuit, analysis)
+        }
         _ => hb_veriloga_operator_refusal(circuit, analysis),
     }
 }
@@ -1148,7 +1150,11 @@ const PSS_GENERATED_CARRIED_SITE: &str = "its residual is not F(x) + dQ(x)/dt: h
 /// Harmonic balance refuses a generated compact model whose generator could
 /// not prove its residual `F(x) + dQ(x)/dt`, with the generator's reason, or
 /// one whose harmonics have not been checked, with what is missing.
-fn hb_generated_refusal(
+///
+/// Shooting also refuses one whose source branch stores flux at its
+/// parameters, which only an evaluation of the model can tell; without
+/// `PROBE_DEVICES` that check is left out, along with the model code it runs.
+fn hb_generated_refusal<const PROBE_DEVICES: bool>(
     circuit: &CircuitData,
     analysis: CapabilityAnalysis,
 ) -> Option<UnsupportedCapabilityError> {
@@ -1168,7 +1174,8 @@ fn hb_generated_refusal(
                 .then_some(PSS_GENERATED_CARRIED_SITE)
             })
             .or_else(|| {
-                (matches!(analysis, CapabilityAnalysis::Pss)
+                (PROBE_DEVICES
+                    && matches!(analysis, CapabilityAnalysis::Pss)
                     && device
                         .stores_flux(circuit.num_nodes(), circuit.generated_simulation_parameters))
                 .then_some(PSS_GENERATED_FLUX)
@@ -1346,7 +1353,23 @@ impl Engine {
         circuit: &CircuitData,
         analysis: CapabilityAnalysis,
     ) -> Result<(), SimulationError> {
-        Self::ensure_capability_on_carrier(circuit, analysis, None)
+        Self::ensure_capability_on_carrier::<true>(circuit, analysis, None)
+    }
+
+    /// [`Self::ensure_analysis_capability`] without the checks that evaluate a
+    /// device, for a query that reads only the circuit's structure.
+    ///
+    /// The one such check probes whether a generated model's source branch
+    /// stores flux, by running the model's stamp. A structural query is asked
+    /// where no model is evaluated, in the browser's UI thread among others,
+    /// and asking the full gate there links every compiled model's stamp into
+    /// that image for a check it never needs: the analysis asks the full gate
+    /// again before it solves, and refuses such a model there.
+    pub(in crate::engine) fn ensure_structural_analysis_capability(
+        circuit: &CircuitData,
+        analysis: CapabilityAnalysis,
+    ) -> Result<(), SimulationError> {
+        Self::ensure_capability_on_carrier::<false>(circuit, analysis, None)
     }
 
     /// [`Self::ensure_analysis_capability`] for a periodic small-signal
@@ -1356,12 +1379,13 @@ impl Engine {
         analysis: CapabilityAnalysis,
         carrier: PeriodicCarrier,
     ) -> Result<(), SimulationError> {
-        Self::ensure_capability_on_carrier(circuit, analysis, Some(carrier))
+        Self::ensure_capability_on_carrier::<true>(circuit, analysis, Some(carrier))
     }
 
     /// The gate itself. Without a carrier, a cell that depends on one admits
-    /// nothing it restricts.
-    fn ensure_capability_on_carrier(
+    /// nothing it restricts. `PROBE_DEVICES` keeps the checks that evaluate a
+    /// device; see [`Self::ensure_structural_analysis_capability`].
+    fn ensure_capability_on_carrier<const PROBE_DEVICES: bool>(
         circuit: &CircuitData,
         analysis: CapabilityAnalysis,
         carrier: Option<PeriodicCarrier>,
@@ -1387,7 +1411,9 @@ impl Engine {
                         }
                     }
                     InstanceGate::HbAdmissibleVerilogA => {
-                        if let Some(refusal) = hb_admission_refusal(circuit, family, analysis) {
+                        if let Some(refusal) =
+                            hb_admission_refusal::<PROBE_DEVICES>(circuit, family, analysis)
+                        {
                             return Err(refusal.into());
                         }
                     }
@@ -1399,7 +1425,7 @@ impl Engine {
                     InstanceGate::CarrierAdmitsVerilogA => {
                         let refusal = match carrier {
                             Some(PeriodicCarrier::HarmonicBalance) => {
-                                hb_admission_refusal(circuit, family, analysis)
+                                hb_admission_refusal::<PROBE_DEVICES>(circuit, family, analysis)
                             }
                             // A shooting orbit carries the generated models
                             // shooting takes, which are those harmonic
@@ -1407,14 +1433,15 @@ impl Engine {
                             Some(PeriodicCarrier::Shooting)
                                 if family == CapabilityFamily::VerilogAGenerated =>
                             {
-                                hb_admission_refusal(circuit, family, analysis)
+                                hb_admission_refusal::<PROBE_DEVICES>(circuit, family, analysis)
                             }
                             // A runtime module rides a shooting orbit when
                             // the period map carried its state and harmonic
                             // balance's samples linearize it.
                             Some(PeriodicCarrier::Shooting) => {
-                                pss_veriloga_refusal(circuit, analysis)
-                                    .or_else(|| hb_admission_refusal(circuit, family, analysis))
+                                pss_veriloga_refusal(circuit, analysis).or_else(|| {
+                                    hb_admission_refusal::<PROBE_DEVICES>(circuit, family, analysis)
+                                })
                             }
                             None => carrier_refusal(circuit, family, analysis),
                         };
