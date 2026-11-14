@@ -3362,12 +3362,22 @@ impl Engine {
     /// same switching circuit, past the 5 mV the corpus allows. A code model
     /// dates no crossing: it samples the analog solution at accepted points,
     /// as in ngspice. A mixed module without code models is untouched.
+    ///
+    /// A module that dates no crossing is left to the device truncation as
+    /// well: one whose every port is an event net a code model shares reads
+    /// no node voltage at all. A `d_process` toggling a `dac_bridge` beside
+    /// a Verilog observer of its output took 232,985 points over 2 ms where
+    /// the same deck without the observer took 84,009.
     pub(super) fn mixed_crossings_hold_node_voltage_estimator(
         circuit: &crate::circuit::CircuitData,
     ) -> bool {
         #[cfg(feature = "veriloga")]
         {
-            circuit.has_xspice_devices() && circuit.has_mixed_signal_hosts()
+            circuit.has_xspice_devices()
+                && circuit
+                    .mixed_signal_hosts
+                    .iter()
+                    .any(crate::xspice::verilog::MixedSignalHost::dates_analog_crossings)
         }
         #[cfg(not(feature = "veriloga"))]
         {

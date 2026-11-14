@@ -71,3 +71,53 @@ fn d_process_beside_a_verilog_module_replays_rolled_back_trials_from_its_journal
         }
     });
 }
+
+/// A Verilog observer of `d` reads no node voltage, so the coupled deck is
+/// stepped as the deck without it is, but for the landings of its coupled
+/// events.
+///
+/// Any mixed module used to keep a deck with code models on the generic
+/// node-voltage estimator, which only a module that dates a crossing of a
+/// node voltage needs. Over 20 us the deck took 2,166 points with the
+/// observer and 593 without it; over 2 ms, 217,986 and 58,013, where
+/// ngspice-46 takes 46,642 with the module as an XSPICE inverter. The
+/// observer now leaves it 738.
+#[test]
+fn a_verilog_observer_of_an_event_net_leaves_the_d_process_deck_its_steps() {
+    let dir = unique_temp_dir("rspice-d-process-observer");
+    fs::create_dir_all(&dir).expect("create the module's directory");
+    let module = dir.join("obs.v");
+    fs::write(
+        &module,
+        "`timescale 1ns/1ps\n\
+         module obs(d, q);\n  input d; output q; reg q;\n  always @(d) q = d;\nendmodule\n",
+    )
+    .expect("write the module");
+    let observed = Netlist::parse(&format!(
+        "d_process with a Verilog observer\n.hdl \"{}\"\nxobs d q obs\n{TOGGLE_PEER_DECK}.end\n",
+        module.display().to_string().replace('\\', "/")
+    ))
+    .expect("observed d_process deck parses");
+    let alone = Netlist::parse(&format!("d_process alone\n{TOGGLE_PEER_DECK}.end\n"))
+        .expect("d_process deck parses");
+
+    let engine = Engine::default();
+    let mut points = Vec::new();
+    for netlist in [&alone, &observed] {
+        let exchanges = ProcessExchangeLog::default();
+        let _factory = ProcessFactoryGuard::toggle_peer(&exchanges);
+        let result = engine
+            .run_tran(netlist, 20.0e-6, 400.0e-9)
+            .expect("the d_process transient runs to its stop time");
+        // The process reads the clock, high at every edge it is asked at.
+        assert_toggle_peer_matches_ngspice(&result, &exchanges, |_| vec![1]);
+        points.push(result.time.len());
+    }
+    let _ = fs::remove_dir_all(dir);
+    assert!(
+        points[1] as f64 <= 1.5 * points[0] as f64,
+        "the observed deck took {} points, the deck alone {}",
+        points[1],
+        points[0]
+    );
+}

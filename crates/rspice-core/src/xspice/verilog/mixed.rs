@@ -3050,6 +3050,14 @@ impl MixedSignalHost {
             .any(|bridge| bridge.positive == 0 || bridge.negative == 0)
     }
 
+    /// Whether this module dates a crossing of a node voltage: an A/D bridge
+    /// of its own, or the input root of a converter that feeds it
+    /// ([`Self::add_converter_input_root`]), each found by a root chase on the
+    /// voltage it reads.
+    pub(crate) fn dates_analog_crossings(&self) -> bool {
+        !self.state.bridges.adc.is_empty()
+    }
+
     /// One endpoint per discrete port, excluding ground. Root-only detectors
     /// are observations of a physical node, not additional event endpoints.
     /// Count the linked port once, independently of its conversion machinery.
