@@ -580,6 +580,48 @@ fn nmos_output_family() -> ResultsTestHost {
     state
 }
 
+/// The names a frame's pane legends give, each with the pane, counted from
+/// the top, whose header row it stands in.
+fn legend_names(ctx: &egui::Context, output: &egui::FullOutput) -> Vec<(String, usize)> {
+    let areas = plot_areas(ctx, output);
+    output
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| &update.nodes)
+        .filter_map(|(_, node)| {
+            let name = node
+                .label()?
+                .strip_prefix("Toggle ")?
+                .strip_suffix(" visibility")?;
+            let bounds = node.bounds()?;
+            let y = ((bounds.y0 + bounds.y1) * 0.5) as f32;
+            let pane = areas.iter().position(|area| y < area.top())?;
+            (pane == 0 || y > areas[pane - 1].bottom()).then(|| (name.to_owned(), pane))
+        })
+        .collect()
+}
+
+/// A pane's header names exactly what the pane draws: in a Bode strip the
+/// magnitudes in the top pane's row and the phases in the phase pane's,
+/// each once, and no pane that draws traces has an empty legend.
+#[test]
+fn a_bode_strip_names_each_trace_in_the_pane_that_draws_it() {
+    for theme in [crate::ui::Theme::default(), light()] {
+        let ctx = context(theme);
+        let mut state = bode_family();
+        let output = settled(&ctx, &mut state, FRAME);
+        assert_eq!(plot_areas(&ctx, &output).len(), 2, "magnitude over phase");
+        let mut names = legend_names(&ctx, &output);
+        names.sort();
+        let expected: Vec<(String, usize)> = (0..3)
+            .map(|ordinal| (format!("phase(V(o{ordinal}))"), 1))
+            .chain((0..3).map(|ordinal| (format!("|V(o{ordinal})|"), 0)))
+            .collect();
+        assert_eq!(names, expected, "each name once, in the pane that draws it");
+    }
+}
+
 /// Every Y grid line carries its label, and the unit caption overlaps none
 /// of them, from a tall strip down to four panes in a short one.
 #[test]

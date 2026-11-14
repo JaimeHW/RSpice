@@ -61,7 +61,6 @@ pub trait StackHost {
         ui: &mut Ui,
         model: &StripModel,
         pane: &UnitPane,
-        ordinal: usize,
         input: pane_header::PaneHeader,
     ) -> pane_header::UnitPaneHeaderResponse;
     fn family_envelopes(&mut self, model: &StripModel, pane: &UnitPane) -> Arc<FamilyEnvelopePlan>;
@@ -1290,7 +1289,7 @@ fn show_xy_strip(
     };
     let header = ui
         .push_id(("xy-strip-pane", identity), |ui| {
-            host.pane_header(ui, model, pane, ordinal, input)
+            host.pane_header(ui, model, pane, input)
         })
         .inner;
     edits.toggle = edits.toggle.or(header.toggle_expression);
@@ -1530,7 +1529,7 @@ fn show_unit_pane(
             .pane_chrome
             .then(|| abscissa_menu(host.session(), model, pane, None)),
     };
-    let header = host.pane_header(ui, model, pane, ordinal, input);
+    let header = host.pane_header(ui, model, pane, input);
     edits.toggle = edits.toggle.or(header.toggle_expression);
     edits.remove = edits.remove.or(header.remove_expression);
     if let Some(abscissa) = header.abscissa {

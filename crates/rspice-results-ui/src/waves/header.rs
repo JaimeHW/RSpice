@@ -50,8 +50,8 @@ pub struct PaneExpression {
     pub color: egui::Color32,
     /// Its dash and marker, as the pane draws its curve.
     pub swatch: SwatchStyle,
-    /// Whether it is drawn. A hidden one waits behind the pane's hidden
-    /// control, as a hidden signal does.
+    /// Whether it is drawn. A hidden one waits in the pane's trace list,
+    /// as a hidden signal does.
     pub visible: bool,
     /// What it reads at cursor A, in the pane's unit, when A is placed.
     pub at_cursor: Option<String>,
@@ -157,26 +157,6 @@ pub(crate) fn abscissa_choices(
 
 pub use rspice_ui_kit::panels::elide_chars as elide;
 
-fn trace_belongs_to_pane(
-    model: &StripModel,
-    pane: &UnitPane,
-    ordinal: usize,
-    trace: &StripTrace,
-) -> bool {
-    if !trace.kind.is_phase() {
-        return model.trace_unit(trace) == pane.unit;
-    }
-    let has_magnitude = model
-        .traces
-        .iter()
-        .any(|candidate| !candidate.kind.is_phase() && model.trace_unit(candidate) == "dB");
-    if has_magnitude {
-        pane.unit == "dB"
-    } else {
-        ordinal == 0
-    }
-}
-
 #[derive(Default)]
 pub struct UnitPaneHeaderResponse {
     pub autoscale_y: bool,
@@ -227,7 +207,6 @@ pub fn show_header(
     ui: &mut Ui,
     model: &StripModel,
     pane: &UnitPane,
-    ordinal: usize,
     input: PaneHeader,
     display_name: impl for<'a> Fn(&'a str) -> Cow<'a, str>,
     host: &mut impl PaneHeaderHost,
@@ -334,20 +313,30 @@ pub fn show_header(
         ..
     } = header_regions(rect, action_width);
 
-    let mut traces: Vec<&StripTrace> = model
+    // The row names exactly what the pane draws, the same traces its fit
+    // and its curves read, and offers the hidden signals of its unit. A
+    // magnitude's phase is drawn in the phase pane, so it is named there,
+    // and the signal a pane is drawn against is its X, not a curve.
+    let curve = |trace: &&StripTrace| {
+        !drawn_against
+            .is_some_and(|name| super::xy::is_own_abscissa(&trace.source_waveform_name, name))
+    };
+    let mut plotted_traces: Vec<&StripTrace> = pane
+        .traces
+        .iter()
+        .filter(|index| **index < model.signal_trace_count)
+        .filter_map(|index| model.traces.get(*index))
+        .filter(curve)
+        .collect();
+    let mut hidden: Vec<&StripTrace> = model
         .traces
         .iter()
         .take(model.signal_trace_count)
-        .filter(|trace| trace_belongs_to_pane(model, pane, ordinal, trace))
-        // The signal a pane is drawn against is its X, not a curve.
-        .filter(|trace| {
-            !drawn_against
-                .is_some_and(|name| super::xy::is_own_abscissa(&trace.source_waveform_name, name))
-        })
+        .filter(|trace| !trace.visible && !pane.unlabeled && model.trace_unit(trace) == pane.unit)
+        .filter(curve)
         .collect();
-    sweep_members_in_value_order(&mut traces, |trace| &trace.source_waveform_name);
-    let (plotted_traces, hidden): (Vec<&StripTrace>, Vec<&StripTrace>) =
-        traces.into_iter().partition(|trace| trace.visible);
+    sweep_members_in_value_order(&mut plotted_traces, |trace| &trace.source_waveform_name);
+    sweep_members_in_value_order(&mut hidden, |trace| &trace.source_waveform_name);
     let (drawn_expressions, hidden_expressions): (Vec<_>, Vec<_>) = expressions
         .iter()
         .partition(|expression| expression.visible);

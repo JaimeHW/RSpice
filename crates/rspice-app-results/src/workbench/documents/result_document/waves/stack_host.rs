@@ -57,10 +57,9 @@ impl StackHost for WaveStackHost<'_, '_> {
         ui: &mut Ui,
         model: &StripModel,
         pane: &UnitPane,
-        ordinal: usize,
         input: pane_header::PaneHeader,
     ) -> pane_header::UnitPaneHeaderResponse {
-        show_unit_pane_header(ui, self.0, model, pane, ordinal, input)
+        show_unit_pane_header(ui, self.0, model, pane, input)
     }
     fn family_envelopes(&mut self, model: &StripModel, pane: &UnitPane) -> Arc<FamilyEnvelopePlan> {
         let generation = self.0.results.models.generation();
@@ -119,7 +118,6 @@ fn show_unit_pane_header(
     state: &mut ResultsParts<'_>,
     model: &StripModel,
     pane: &UnitPane,
-    ordinal: usize,
     input: pane_header::PaneHeader,
 ) -> pane_header::UnitPaneHeaderResponse {
     // Design notation changes labels only; retained source names remain identities.
@@ -175,7 +173,6 @@ fn show_unit_pane_header(
         ui,
         model,
         pane,
-        ordinal,
         input,
         |name| notations.display(name),
         &mut HeaderHost {
