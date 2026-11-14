@@ -16,7 +16,6 @@ use crate::schematic::{
 use crate::state::model_hub::{ModelHubPartRow, PartPlacement, PartProvenance, PartState};
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
 use crate::state::{ComponentType, engine_only_xspice_devices};
-use crate::workbench::RSpiceApp;
 use rspice_app_state::veriloga_library::BUILTIN_VERILOGA_MODELS;
 
 /// The shelf's built-in Verilog-A rows read and stand as the Library page
@@ -496,84 +495,10 @@ fn shelf_rows_of_different_families_paint_distinct_glyph_slots() {
 
 // -------------------------------------------------- shelf pinning and recents
 
-/// The Component shelf under test: the application it paints from and the
-/// context it paints into, held together so that one frame is one call.
-///
-/// The pair is owned rather than passed because a helper taking `&mut
-/// RSpiceApp` hands a test the whole application, and `tests/module_layering`
-/// counts every signature that does.
+/// The whole Component shelf, through the entry point the dock calls.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) struct ShelfHarness {
-    pub(crate) ctx: egui::Context,
-    pub(crate) app: RSpiceApp,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl ShelfHarness {
-    /// A themed shelf that has painted nothing yet.
-    pub(crate) fn opened() -> Self {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        Self {
-            ctx,
-            app: RSpiceApp::test_instance(),
-        }
-    }
-
-    /// The shelf held open across frames, driven to a settled layout.
-    ///
-    /// Two frames: the first builds the font set, the second lays out against
-    /// it, and only then are the painted rects worth clicking.
-    pub(crate) fn settled(mut self) -> Self {
-        let _ = self.output(Vec::new());
-        let _ = self.output(Vec::new());
-        self
-    }
-
-    /// Publishing an accessibility tree, so a frame reports what the keyboard
-    /// is on. Switched on before the shelf settles, because a context starts
-    /// reporting from the frame after it is told to.
-    pub(crate) fn reporting_accessibility(self) -> Self {
-        self.ctx.enable_accesskit();
-        self
-    }
-
-    /// One frame of the whole Component shelf, through the same entry point
-    /// the dock calls — so the placement watch, the bands, and the catalog all
-    /// see one frame, as they do in the product.
-    pub(crate) fn output(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
-        let Self { ctx, app } = self;
-        ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(260.0, 2400.0),
-                )),
-                events,
-                ..egui::RawInput::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| {
-                        ui.set_width(260.0);
-                        component_shelf(ui, &mut app.design_cx());
-                    });
-            },
-        )
-    }
-
-    /// What one such frame painted: the joined text and the runs it came from.
-    ///
-    /// Both, because a gesture has to land on a row, and only the runs carry
-    /// where the rows are.
-    pub(crate) fn frame(
-        &mut self,
-        events: Vec<egui::Event>,
-    ) -> (String, Vec<(String, egui::Rect, egui::Color32)>) {
-        let output = self.output(events);
-        (painted_text(&output), painted_runs(&output))
-    }
+pub(crate) fn draw_component_shelf(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+    component_shelf(ui, cx);
 }
 
 /// Every shelf-entry key survives the round trip through the durable form,

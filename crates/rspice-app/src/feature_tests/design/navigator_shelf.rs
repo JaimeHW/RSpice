@@ -13,10 +13,92 @@ use crate::state::{
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design::navigator::shelf::*;
-use crate::workbench::design::navigator::tests::shelf::{ShelfHarness, retained_model_library};
+use crate::workbench::design::navigator::tests::shelf::{
+    draw_component_shelf, retained_model_library,
+};
 use crate::workbench::design::navigator::tests::*;
 use crate::workbench::framework::requests::FocusPlacementSearch;
 use std::collections::HashSet;
+
+/// The Component shelf under test: the application it paints from and the
+/// context it paints into, held together so that one frame is one call.
+///
+/// The pair is owned rather than passed because a helper taking `&mut
+/// RSpiceApp` hands a test the whole application, and `tests/module_layering`
+/// counts every signature that does.
+#[cfg(not(target_arch = "wasm32"))]
+struct ShelfHarness {
+    ctx: egui::Context,
+    app: RSpiceApp,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ShelfHarness {
+    /// A themed shelf that has painted nothing yet.
+    fn opened() -> Self {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        Self {
+            ctx,
+            app: RSpiceApp::test_instance(),
+        }
+    }
+
+    /// The shelf held open across frames, driven to a settled layout.
+    ///
+    /// Two frames: the first builds the font set, the second lays out against
+    /// it, and only then are the painted rects worth clicking.
+    fn settled(mut self) -> Self {
+        let _ = self.output(Vec::new());
+        let _ = self.output(Vec::new());
+        self
+    }
+
+    /// Publishing an accessibility tree, so a frame reports what the keyboard
+    /// is on. Switched on before the shelf settles, because a context starts
+    /// reporting from the frame after it is told to.
+    fn reporting_accessibility(self) -> Self {
+        self.ctx.enable_accesskit();
+        self
+    }
+
+    /// One frame of the whole Component shelf, through the same entry point
+    /// the dock calls — so the placement watch, the bands, and the catalog all
+    /// see one frame, as they do in the product.
+    fn output(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+        let Self { ctx, app } = self;
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(260.0, 2400.0),
+                )),
+                events,
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        ui.set_width(260.0);
+                        draw_component_shelf(ui, &mut app.design_cx());
+                    });
+            },
+        )
+    }
+
+    /// What one such frame painted: the joined text and the runs it came from.
+    ///
+    /// Both, because a gesture has to land on a row, and only the runs carry
+    /// where the rows are.
+    fn frame(
+        &mut self,
+        events: Vec<egui::Event>,
+    ) -> (String, Vec<(String, egui::Rect, egui::Color32)>) {
+        let output = self.output(events);
+        (painted_text(&output), painted_runs(&output))
+    }
+}
 
 /// The canvas-side shelf can place what the project already holds: a retained
 /// part arms the cursor directly instead of re-raising the pack confirmation.
