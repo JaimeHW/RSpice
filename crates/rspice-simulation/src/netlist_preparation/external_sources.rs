@@ -2,7 +2,9 @@
 //!
 //! A prepared run executes sealed sources only, so preparation refuses a line
 //! that would read a file, a library or a co-simulation runtime at solve time.
-//! The judgment is lexical and owns no state.
+//! The judgment is lexical and owns no state, except that a line the parser
+//! never reads, such as one in a false `.if` branch, opens nothing and is
+//! skipped as the run skips it ([`UnreadLines`]).
 
 use super::process_programs;
 use crate::preparation::{PreparationError, PreparationStage};
@@ -187,6 +189,7 @@ fn reject_deferred_external_sources_on(
     search_path: Option<&std::ffi::OsStr>,
 ) -> Result<(), PreparationError> {
     let records = executable_logical_lines(netlist);
+    let unread = UnreadLines::new(netlist);
     for (line_number, logical_line) in &records {
         let (line_number, logical_line) = (*line_number, logical_line.as_str());
         if project_runtimes.sources().any(|runtime| {
@@ -203,13 +206,18 @@ fn reject_deferred_external_sources_on(
                 continue;
             }
             if reason == PROCESS_PROGRAM {
-                admit_process_programs(
+                match admit_process_programs(
                     &records,
                     line_number,
                     logical_line,
                     starts_programs,
                     search_path,
-                )?;
+                ) {
+                    Err(refusal) if !unread.contains(line_number) => return Err(refusal),
+                    _ => continue,
+                }
+            }
+            if unread.contains(line_number) {
                 continue;
             }
             return Err(PreparationError::new(
@@ -284,6 +292,48 @@ fn admit_process_programs(
                  deck directory, so name it by an absolute path"
             ),
         )),
+    }
+}
+
+/// The lines of a deck the parser skips without reading them: an untaken
+/// `.if`/`.elseif`/`.else` branch, an inline `.lib` section no `.lib` card
+/// selects. A run never reads such a line, so a check skips it as ngspice
+/// skips every line of a false branch: it comments them out once the deck
+/// and its includes are read (`inp.c` `dotifeval`).
+///
+/// The deck is parsed on the first question only, so a deck no check would
+/// refuse a line of costs nothing. A deck that does not parse has no line the
+/// parser skips, and every line is checked.
+pub(crate) struct UnreadLines<'a> {
+    deck: &'a str,
+    regions: std::cell::OnceCell<Vec<std::ops::RangeInclusive<usize>>>,
+}
+
+impl<'a> UnreadLines<'a> {
+    pub(crate) fn new(deck: &'a str) -> Self {
+        Self {
+            deck,
+            regions: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// Whether one-based physical line `line` of the deck is one the parser
+    /// skips.
+    pub(crate) fn contains(&self, line: usize) -> bool {
+        self.regions
+            .get_or_init(|| {
+                rspice_core::Netlist::parse(self.deck).map_or_else(
+                    |_| Vec::new(),
+                    |parsed| {
+                        parsed
+                            .unread_root_source()
+                            .map(|region| region.lines.clone())
+                            .collect()
+                    },
+                )
+            })
+            .iter()
+            .any(|lines| lines.contains(&line))
     }
 }
 

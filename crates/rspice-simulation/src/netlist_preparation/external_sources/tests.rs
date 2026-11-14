@@ -47,6 +47,37 @@ fn every_runtime_external_input_category_fails_closed() {
     }
 }
 
+/// A line the parser skips opens nothing: every runtime input in a false
+/// `.if` branch or in a later branch of a chain an earlier one took passes,
+/// and the same line in the branch taken is still refused.
+#[test]
+fn a_runtime_input_on_a_line_the_parser_skips_passes() {
+    for line in [
+        ".hdl compact_model.va",
+        ".VERILOGA \"compact_model.va\" amp",
+        "Vstim in 0 PWL FILE \"wave.csv\"",
+        ".model cosim d_cosim (simulation = \"payload.dll\")\nAco [in] [out] null cosim",
+        ".model process d_process (process_file = 'workers/absent')\nAproc [in] [out] null process",
+    ] {
+        for skipped in [
+            format!("deck\n.param mode=0\n.if (mode == 1)\n{line}\n.endif\nR1 a 0 1k\n.end\n"),
+            format!("deck\n.if 1\nR1 a 0 1k\n.elseif 1\n{line}\n.else\n{line}\n.endif\n.end\n"),
+        ] {
+            reject_deferred_external_sources(&skipped)
+                .unwrap_or_else(|error| panic!("a skipped line was refused: {skipped}: {error}"));
+        }
+        let taken = format!("deck\n.if 0\nR1 a 0 1k\n.else\n{line}\n.endif\n.end\n");
+        let error = reject_deferred_external_sources(&taken)
+            .err()
+            .unwrap_or_else(|| panic!("a line in the branch taken is read: {taken}"));
+        assert!(
+            error.message().contains("unsealed external dependency")
+                || error.message().contains("PATH"),
+            "{taken}: {error}"
+        );
+    }
+}
+
 #[test]
 fn project_veriloga_path_is_exact_while_spice_identifiers_ignore_case() {
     let source_key = "__rspice_project__/project/digest/Model.va";

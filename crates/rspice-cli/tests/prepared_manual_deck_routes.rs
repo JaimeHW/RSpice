@@ -473,6 +473,33 @@ fn source_lines_of_an_included_file_give_the_clis_numbers() {
     ));
 }
 
+/// A source line in a false `.if` branch is skipped as every other line
+/// there is, in the deck and in a file it includes, on every route: its file
+/// does not exist and nothing reads it.
+#[test]
+fn a_source_line_in_a_false_branch_is_skipped_on_every_route() {
+    let dir = test_dir("prepared-false-branch");
+    write(&dir, "rtl/top.v", TOP);
+    write(&dir, "lib/leaf.v", LEAF);
+    write(
+        &dir,
+        "models/clock.inc",
+        ".if (gate_level == 1)\n.hdl \"../netlist/top_gates.v\"\n.else\n\
+         .hdl \"../rtl/top.v\"\n.endif\n.hdl \"../lib/leaf.v\"\n",
+    );
+    write(
+        &dir,
+        "deck.cir",
+        &format!(
+            "false branches\n.param gate_level=0\n.if 0\n.hdl \"absent.va\"\n.endif\n\
+             .include \"models/clock.inc\"\n{CIRCUIT}"
+        ),
+    );
+    let deck = dir.join("deck.cir");
+    assert_clock(&assert_same_transient(&deck, "q"));
+    assert_clock(&assert_same_transient_on(&deck, "q", headless_run));
+}
+
 /// A two-terminal resistor; an instance with three nodes is refused when
 /// the circuit elaborates, at the line that wrote the instance.
 const VRES: &str = "`include \"disciplines.vams\"\nmodule vres(p, n);\n  inout p, n;\n  \

@@ -375,20 +375,23 @@ fn deck_hdl_sites(source: &str) -> Vec<(usize, VerilogAInclude)> {
 ///
 /// Every line the run reads is sealed where it stands, so a source line
 /// left in the expanded deck `expanded` from one of the included files
-/// `includes` is one the seal did not read, such as a line in a false `.if`
-/// branch. Preparation refuses it either way; counted in the expanded text
-/// its line number points nowhere the author can look, so this finds the
-/// file and line that hold it. `None` when no such line is left, or when no
+/// `includes`, on a line the parser reads, is one the seal was not given.
+/// Preparation refuses it either way; counted in the expanded text its line
+/// number points nowhere the author can look, so this finds the file and
+/// line that hold it. A line the parser skips, such as one in a false `.if`
+/// branch, is skipped here too. `None` when no such line is left, or when no
 /// included file holds it as written.
 pub(crate) fn included_hdl_source_refusal(
     expanded: &str,
     includes: &[ResolvedIncludeDependency],
 ) -> Option<PreparationError> {
+    let unread = super::external_sources::UnreadLines::new(expanded);
     super::executable_logical_lines(expanded)
         .into_iter()
-        .filter_map(|(_, line)| {
+        .filter_map(|(number, line)| {
             let directive = rspice_core::netlist::parse_veriloga_source_directive(&line)?;
-            (!names_sealed_runtime(&directive.file_path)).then_some((line, directive))
+            (!names_sealed_runtime(&directive.file_path) && !unread.contains(number))
+                .then_some((line, directive))
         })
         .find_map(|(line, directive)| {
             includes.iter().find_map(|include| {
@@ -401,8 +404,7 @@ pub(crate) fn included_hdl_source_refusal(
                     PreparationStage::SourceChecks,
                     format!(
                         "line {number} of '{}': the Verilog-A source '{}' is named on a line \
-                         the run's seal did not read, such as one in a false .if branch, and a \
-                         run executes sealed sources only",
+                         the run's seal was not given, and a run executes sealed sources only",
                         include.resolved_path().display(),
                         directive.file_path.display()
                     ),
