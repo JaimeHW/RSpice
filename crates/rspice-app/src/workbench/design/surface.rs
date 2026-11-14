@@ -1,6 +1,6 @@
 //! Hierarchical design document surface.
 
-mod layout_editor;
+pub(crate) mod layout_editor;
 pub(crate) mod netlist_first;
 mod tool_options;
 
@@ -170,9 +170,9 @@ const CANVAS_BREADCRUMB_ELISION: &str = "\u{2026}";
 /// elision that stands for crumbs there was no room for — carries none and is
 /// not a place you can go.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct BreadcrumbCrumb {
-    label: String,
-    level: Option<usize>,
+pub(crate) struct BreadcrumbCrumb {
+    pub(crate) label: String,
+    pub(crate) level: Option<usize>,
 }
 
 impl BreadcrumbCrumb {
@@ -185,7 +185,7 @@ impl BreadcrumbCrumb {
     }
 }
 
-fn breadcrumb(ctx: &Context, canvas: &mut CanvasFrame<'_>, content_rect: Rect) {
+pub(crate) fn breadcrumb(ctx: &Context, canvas: &mut CanvasFrame<'_>, content_rect: Rect) {
     let t = Tokens::get(ctx);
     let in_place = symbol_in_place_breadcrumb_segments(&canvas.facts());
     let leaves_in_place = in_place.is_some();
@@ -393,7 +393,7 @@ fn crumb_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
 
 /// The whole occurrence path, library first; a row too narrow for it elides
 /// the middle rather than any choice dropping levels.
-fn hierarchy_breadcrumb_segments(model: &Model) -> Vec<BreadcrumbCrumb> {
+pub(crate) fn hierarchy_breadcrumb_segments(model: &Model) -> Vec<BreadcrumbCrumb> {
     let active = &model.workspace.content.active_view;
     let occurrence = model
         .workspace
@@ -447,7 +447,7 @@ fn with_alpha(color: egui::Color32, alpha: u8) -> egui::Color32 {
 /// rather than after it — and names every occurrence it will reach on hover.
 ///
 /// [`master_occurrence_paths`] is the one derivation of that scope.
-fn occurrence_scope_banner(ui: &mut Ui, model: &Model) {
+pub(crate) fn occurrence_scope_banner(ui: &mut Ui, model: &Model) {
     let occurrences = master_occurrence_paths(model);
     if occurrences.len() < 2 {
         return;
@@ -479,7 +479,7 @@ fn occurrence_scope_banner(ui: &mut Ui, model: &Model) {
 ///
 /// The document's occurrence ends at its own reference by construction, so
 /// the master asked about is `active_view`.
-fn master_occurrence_paths(model: &Model) -> Vec<String> {
+pub(crate) fn master_occurrence_paths(model: &Model) -> Vec<String> {
     let Ok(projection) = model.workspace.design_projection(
         &model.library_manager,
         &model.workspace.content.active_view,
@@ -589,13 +589,9 @@ fn unsupported_document(ui: &mut Ui, model: &Model, view_type: ViewType) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use crate::workbench::{AppState, RSpiceApp};
-
-    /// The canvas every render in this module uses. Wide enough that the crumb
-    /// row is measured rather than elided.
-    const RASTER_VIEWPORT: Vec2 = egui::vec2(720.0, 60.0);
+    use crate::workbench::AppState;
 
     fn crumb_labels(state: &AppState) -> Vec<String> {
         hierarchy_breadcrumb_segments(&state.model)
@@ -604,7 +600,7 @@ mod tests {
             .collect()
     }
 
-    fn descended(state: &mut AppState, instance: &str, cell: &str) {
+    pub(crate) fn descended(state: &mut AppState, instance: &str, cell: &str) {
         state.model.workspace.descend_into(
             instance.to_owned(),
             crate::state::CellViewRef::new("user", cell, "schematic"),
@@ -646,210 +642,6 @@ mod tests {
                 "XBIAS \u{b7} bias".to_owned(),
                 "schematic".to_owned(),
             ]
-        );
-    }
-
-    /// Every level is a place you can go, and going there opens exactly that
-    /// occurrence rather than the deepest one that shares its master.
-    #[test]
-    fn a_breadcrumb_level_opens_the_occurrence_it_names() {
-        let mut app = RSpiceApp::test_instance();
-        descended(&mut app.state, "XAFE", "afe_core");
-        descended(&mut app.state, "XBIAS", "bias");
-
-        let crumbs = hierarchy_breadcrumb_segments(&app.state.model);
-        let levels: Vec<Option<usize>> = crumbs.iter().map(|crumb| crumb.level).collect();
-        assert_eq!(
-            levels,
-            vec![None, Some(0), Some(1), Some(2), None],
-            "the library and the view name no level; every occurrence level does"
-        );
-
-        let intermediate = crumbs
-            .iter()
-            .find(|crumb| crumb.label.starts_with("XAFE"))
-            .and_then(|crumb| crumb.level)
-            .expect("the descended level is a crumb");
-        app.state
-            .navigation()
-            .focus_workspace_breadcrumb(intermediate);
-
-        assert_eq!(
-            app.state
-                .model
-                .workspace
-                .content
-                .occurrence_path()
-                .to_string(),
-            "/XAFE"
-        );
-        assert_eq!(
-            app.state.model.workspace.content.active_view.cell,
-            "afe_core"
-        );
-
-        let root = hierarchy_breadcrumb_segments(&app.state.model)
-            .into_iter()
-            .find(|crumb| crumb.label == "top")
-            .and_then(|crumb| crumb.level)
-            .expect("the design root is a crumb");
-        app.state.navigation().focus_workspace_breadcrumb(root);
-
-        assert!(
-            app.state
-                .model
-                .workspace
-                .content
-                .occurrence_path()
-                .is_root()
-        );
-        assert_eq!(app.state.model.workspace.content.active_view.cell, "top");
-    }
-
-    /// A crumb states the instance *and* its master. Two occurrences of one
-    /// master must not paint the same crumb, and one instance name under two
-    /// masters must not either — which is what a crumb truncated to either half
-    /// would do.
-    #[test]
-    fn breadcrumb_segments_render_instance_and_master() {
-        fn render(instance: &str, master: &str) -> crate::ui::raster::Canvas {
-            let mut app = RSpiceApp::test_instance();
-            descended(&mut app.state, instance, master);
-            crate::ui::raster::render(RASTER_VIEWPORT, |ui, _| {
-                breadcrumb(
-                    ui.ctx(),
-                    &mut crate::schematic::view::canvas_frame(&mut app.state),
-                    Rect::from_min_size(egui::Pos2::ZERO, RASTER_VIEWPORT),
-                );
-            })
-        }
-
-        let band = Rect::from_min_size(egui::Pos2::ZERO, RASTER_VIEWPORT);
-        let ink = |canvas: &crate::ui::raster::Canvas| -> Vec<egui::Color32> {
-            canvas.pixels_in(band).collect()
-        };
-
-        let first = render("X1", "amp");
-        let second = render("X2", "amp");
-        let elsewhere = render("X1", "bias");
-
-        assert!(
-            ink(&first).iter().any(|pixel| *pixel != first.background()),
-            "the breadcrumb painted nothing at all"
-        );
-        assert_ne!(
-            ink(&first),
-            ink(&second),
-            "a crumb that dropped the instance would paint X1 and X2 identically"
-        );
-        assert_ne!(
-            ink(&first),
-            ink(&elsewhere),
-            "a crumb that dropped the master would paint amp and bias identically"
-        );
-    }
-
-    /// A project whose root sheet instantiates one cell twice, with the design
-    /// root open. Descending into the shared cell is what puts a document with
-    /// two occurrences in front.
-    fn app_with_a_twice_instantiated_cell() -> (RSpiceApp, crate::state::CellViewRef) {
-        use crate::state::{
-            CellViewRef, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
-        };
-
-        let mut app = RSpiceApp::test_instance();
-        let root = app.state.model.workspace.content.active_view.clone();
-        let shared = CellViewRef::new("user", "pad", "schematic");
-
-        if app
-            .state
-            .model
-            .library_manager
-            .get_library(&shared.library)
-            .is_none()
-        {
-            app.state
-                .model
-                .library_manager
-                .add_library(Library::new(&shared.library));
-        }
-        let cell = app
-            .state
-            .model
-            .library_manager
-            .get_library_mut(&shared.library)
-            .expect("the project library")
-            .get_or_create_cell(&shared.cell);
-        if cell.get_view(&shared.view).is_none() {
-            cell.add_view(View::new(&shared.view, ViewType::Schematic));
-        }
-
-        let mut master = SchematicState::default();
-        master.add_component(ComponentType::Resistor, Point::new(30, 0));
-        app.state
-            .model
-            .workspace
-            .insert_schematic_editor(shared.key(), master);
-
-        let mut binding = LibraryCellInstance::new(&shared.library, &shared.cell, &shared.view);
-        binding.bind_interface(&[]);
-        let mut root_sheet = SchematicState::default();
-        root_sheet.add_library_cell_component(Point::new(400, 400), binding.clone());
-        root_sheet.add_library_cell_component(Point::new(600, 400), binding);
-        app.state.model.schematic = root_sheet.clone();
-        app.state
-            .model
-            .workspace
-            .insert_schematic_editor(root.key(), root_sheet);
-        (app, shared)
-    }
-
-    /// The strip states a scope, so it appears exactly where the scope is wider
-    /// than the sheet in front of the reader: never at a design root, never on a
-    /// master placed once, always on one placed more than once.
-    #[test]
-    fn occurrence_watermark_appears_only_above_one_instance() {
-        fn render(app: &RSpiceApp) -> crate::ui::raster::Canvas {
-            crate::ui::raster::render(RASTER_VIEWPORT, |ui, background| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE.fill(background))
-                    .show(ui, |ui| occurrence_scope_banner(ui, &app.state.model));
-            })
-        }
-
-        let (mut app, shared) = app_with_a_twice_instantiated_cell();
-        assert_eq!(
-            master_occurrence_paths(&app.state.model).len(),
-            1,
-            "the design root is instantiated once"
-        );
-        assert_eq!(
-            render(&app).content_height(),
-            0,
-            "a design root must carry no occurrence marking"
-        );
-
-        let master = app
-            .state
-            .model
-            .workspace
-            .clone_schematic_editor(&shared.key())
-            .expect("the shared master buffer");
-        app.state.model.workspace.descend_into(
-            "X1".to_owned(),
-            shared.clone(),
-            ViewType::Schematic,
-        );
-        app.state.model.schematic = master;
-
-        assert_eq!(
-            master_occurrence_paths(&app.state.model).len(),
-            2,
-            "the shared master is instantiated twice"
-        );
-        assert!(
-            render(&app).content_height() > 0,
-            "a master placed twice must say so before the edit"
         );
     }
 }
