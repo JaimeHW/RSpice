@@ -1077,6 +1077,8 @@ pub(crate) fn producer_name(producer: &str) -> Cow<'_, str> {
         "rspice.engine.timestep" => "Time step",
         "rspice.engine.measure" => "Measurements",
         "rspice.engine.boundary" => "Simulator",
+        "rspice.engine.hdl" => "HDL",
+        "rspice.engine.assert" => "Assertions",
         "rspice.automation.workspace"
         | "rspice.automation.runtime"
         | "rspice.automation.permissions"
@@ -1159,6 +1161,8 @@ mod producer_name_tests {
             ("rspice.netlist.parser", "Netlist"),
             ("rspice.design.rules", "Design rules"),
             ("rspice.simulation.run", "Simulation"),
+            ("rspice.engine.hdl", "HDL"),
+            ("rspice.engine.assert", "Assertions"),
         ] {
             assert_eq!(producer_name(producer), name, "{producer}");
         }
