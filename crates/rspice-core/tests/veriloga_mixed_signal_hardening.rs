@@ -681,10 +681,19 @@ fn mixed_fixture_hashes_are_identical_across_processes() {
 /// on the SIN deck, every step held to 24.7 ps). The behavioral clock steps as
 /// the SIN one did before: the same 56 points, the approach step
 /// `[0.3274, 0.4024]` ns the test describes.
+///
+/// Re-measured when a connect converter began dating its event at the
+/// crossing its root located (56 -> 55). `clk`'s 2/3 ns fall read a rounding
+/// short of the threshold on the point past the root, so the converter held,
+/// the root chased the same crossing one solver floor later, and the fall
+/// came on a point of its own 8.6e-21 s past 2/3 ns. It is now dated at the
+/// located crossing, 1.4e-21 s before 2/3 ns, that point is gone, and every
+/// later point moved by at most 1.0e-18 s. Every rise, and every `ca`, `qa`
+/// and `qb` event, is bit-identical.
 const TWO_CROSSINGS_PIN: (&str, &str, usize) = (
     "two_unfed_crossings_keep_their_own_instants_when_a_trial_lands_on_the_later_one",
     "hardening_two_crossings",
-    56,
+    55,
 );
 
 /// Print `result`'s fingerprint under `key`, and assert its point count
