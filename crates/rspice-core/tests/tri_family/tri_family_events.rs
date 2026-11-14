@@ -997,6 +997,187 @@ fn a_converter_read_by_a_module_lands_alike_under_a_one_ulp_nudge() {
     }
 }
 
+/// The follower, with a copy of the clock it reads on an output of its own,
+/// so a converter the build inserted on its input can be traced.
+const COPYING_FOLLOWER: &str = "`timescale 1ns/1ps\n\
+module follower(clk, q, ck); input clk; wire clk; output q; reg q; output ck; wire ck;\n\
+assign ck = clk;\n\
+initial q = 1'b0;\n\
+always @(posedge clk) q <= #2 ~q;\n\
+endmodule\n";
+
+/// Connect rules that read the clock as the sigma-delta modulator's
+/// `adc_bridge` does: one threshold at 0.5 V, 1 ns each way.
+const SINGLE_THRESHOLD_RULES: &str = "connectrules deck;\n\
+connect a2d #(.vsup(1.0), .vthi(0.5), .vtlo(0.5), .tdrise(1n), .tdfall(1n));\n\
+connect d2a #(.vsup(1.0), .trise(100p), .tfall(100p));\n\
+endconnectrules\n";
+
+/// The shipped 1 V rules' A/D: a band from 0.3 V to 0.7 V that times out
+/// to X after 1 ns, and no delay.
+const BAND_RULES: &str = "connectrules deck;\n\
+connect a2d #(.vsup(1.0), .ftlo(0.3), .fthi(0.7), .txdel(1n));\n\
+connect d2a #(.vsup(1.0), .trise(100p), .tfall(100p));\n\
+endconnectrules\n";
+
+/// The sigma-delta modulator's clock path with the module reading the analog
+/// clock itself, through the connect converter `rules` select.
+fn run_clock_through_a_connect_converter(
+    rules: &str,
+    amplitude: f64,
+    periods: usize,
+) -> TransientResult {
+    let mut source = String::from(COPYING_FOLLOWER);
+    for (_, module) in rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES {
+        source.push_str(module);
+    }
+    source.push_str(rules);
+    let design = ModelFile::new(&source);
+    run(
+        &format!(
+            "* connect converter edges dated at their crossings\n\
+             vclk aclk 0 dc 0 pulse(0 {amplitude:?} 0.1u 2n 2n 98n 200n)\n\
+             .hdl \"{}\" module=follower\n\
+             .options connectrules=deck\n\
+             Xf aclk q ck follower\n\
+             .end\n",
+            design.path()
+        ),
+        0.1e-6 + periods as f64 * 200e-9,
+        0.1e-6,
+    )
+}
+
+/// The edges of the clock copy `ck`, after time zero.
+fn clock_copy_edges(result: &TransientResult) -> Vec<(f64, DigitalState)> {
+    let mut previous = None;
+    let mut edges = Vec::new();
+    for (time, state) in trace_points(result, "ck") {
+        if time > 0.0 && previous.is_some_and(|previous| previous != state) {
+            edges.push((time, state));
+        }
+        previous = Some(state);
+    }
+    edges
+}
+
+/// The same clock path through the connect converter the build inserts on
+/// the module's own input. The root lands one representable instant past
+/// each crossing, where the input can read a rounding short of the
+/// threshold, so the converter decides by the crossing there, as
+/// `adc_bridge` does: every edge is its crossing plus 1 ns, landed in one
+/// point, and the module's `#2` after each rising edge falls on the tick
+/// image. Decided by the landed sample, 7 of these 200 edges came a solver
+/// floor (1.0e-18 s) late, and on the modulator's own deck 1,345 of 19,999.
+#[test]
+fn a_connect_converter_on_a_module_input_dates_every_edge_at_its_crossing() {
+    let periods = 100;
+    let result = run_clock_through_a_connect_converter(SINGLE_THRESHOLD_RULES, 1.0, periods);
+    let ns = 1e-9;
+    let edges = clock_copy_edges(&result);
+    assert_eq!(edges.len(), 2 * periods, "{edges:?}");
+    let mut late = Vec::new();
+    for (index, &(time, state)) in edges.iter().enumerate() {
+        let period = (index / 2) as f64 * 200.0;
+        let exact = match state {
+            DigitalState::One => (100.0 + period + 2.0) * ns,
+            _ => (100.0 + period + 102.0) * ns,
+        };
+        if (time - exact).abs() > 64.0 * f64::EPSILON * exact {
+            late.push((time, time - exact));
+        }
+        assert!(
+            result.time.binary_search_by(|t| t.total_cmp(&time)).is_ok(),
+            "the edge at {time:.17e} s is an accepted point"
+        );
+    }
+    assert!(
+        late.is_empty(),
+        "{} of {} converter edges are not at their crossing plus 1 ns: {late:?}",
+        late.len(),
+        edges.len()
+    );
+    for time in rising_edges(&result, "q") {
+        let picoseconds = (time * 1e12).round();
+        assert_eq!(
+            time,
+            picoseconds / 1e12,
+            "the register moves on a tick image, 2 ns after a rising clock edge"
+        );
+        assert_eq!(
+            (picoseconds as u64 - 104_000) % 400_000,
+            0,
+            "the register rises 2 ns after every other rising clock edge: {time:.17e} s"
+        );
+    }
+}
+
+/// The connect converter's landings do not hinge on the last bits of its
+/// input either: a clock one ulp taller or shorter lands the same edges on
+/// the same steps.
+#[test]
+fn a_connect_converter_on_a_module_input_lands_alike_under_a_one_ulp_nudge() {
+    let periods = 100;
+    let base = run_clock_through_a_connect_converter(SINGLE_THRESHOLD_RULES, 1.0, periods);
+    for (what, amplitude) in [
+        ("clock amplitude up", 1.0f64.next_up()),
+        ("clock amplitude down", 1.0f64.next_down()),
+    ] {
+        let nudged =
+            run_clock_through_a_connect_converter(SINGLE_THRESHOLD_RULES, amplitude, periods);
+        assert_grid_survives_a_nudge(
+            &format!("the connect converter's clock path, {what}"),
+            &base.time,
+            &nudged.time,
+        );
+        let (base_edges, nudged_edges) = (clock_copy_edges(&base), clock_copy_edges(&nudged));
+        assert_eq!(
+            nudged_edges.len(),
+            base_edges.len(),
+            "{what}: the converter published a different number of edges"
+        );
+        for (&(time, state), &(at, expected)) in nudged_edges.iter().zip(&base_edges) {
+            assert!(
+                state == expected && (time - at).abs() <= 64.0 * f64::EPSILON * at,
+                "{what}: an edge moved from {at:.17e} s ({expected:?}) to {time:.17e} s ({state:?})"
+            );
+        }
+    }
+}
+
+/// A connect converter with a timed band: the clock passes 0.3 V to 0.7 V
+/// in 0.8 ns, inside the 1 ns timeout, so it publishes no X, and each level
+/// at the crossing that leaves the band, with no delay: 1.4 ns into the
+/// rising ramp at 0.7 V and 1.4 ns into the falling one at 0.3 V.
+#[test]
+fn a_connect_converter_with_a_timed_band_dates_each_level_at_the_band_exit() {
+    let periods = 20;
+    let result = run_clock_through_a_connect_converter(BAND_RULES, 1.0, periods);
+    let ns = 1e-9;
+    let edges = clock_copy_edges(&result);
+    let expected: Vec<(f64, DigitalState)> = (0..periods)
+        .flat_map(|period| {
+            let start = 100.0 + 200.0 * period as f64;
+            [
+                (start + 1.4, DigitalState::One),
+                (start + 101.4, DigitalState::Zero),
+            ]
+        })
+        .collect();
+    assert_eq!(
+        edges.iter().map(|edge| edge.1).collect::<Vec<_>>(),
+        expected.iter().map(|edge| edge.1).collect::<Vec<_>>(),
+        "the clock never times out in the band: {edges:?}"
+    );
+    for (&(time, _), &(at, _)) in edges.iter().zip(&expected) {
+        let exact = at * ns;
+        assert!(
+            (time - exact).abs() <= 64.0 * f64::EPSILON * exact,
+            "a converter edge at {time:.17e} s is not at its band exit, {exact:.17e} s"
+        );
+    }
+}
+
 /// The same clock through a converter with an unknown band, 0.4 V to 0.6 V,
 /// on steps long enough to cross both edges at once. The root locates the
 /// first edge crossed and the converter takes the state just past it there,
