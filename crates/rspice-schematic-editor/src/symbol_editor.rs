@@ -370,12 +370,13 @@ fn draw_grid(
     color: Color32,
     spacing: SymbolGridSpacing,
 ) {
-    let step = spacing.model_step() * viewport.zoom;
+    let model_step = spacing.model_step() as f32;
+    let step = model_step * viewport.zoom;
     if step < 8.0 {
         return;
     }
     if !viewport.placement.is_identity() {
-        draw_placed_grid(painter, viewport, color, spacing.model_step());
+        draw_placed_grid(painter, viewport, color, model_step);
         return;
     }
     let min = viewport.rect.min;
@@ -945,8 +946,8 @@ fn distance_to_screen_segment(point: Pos2, start: Pos2, end: Pos2) -> f32 {
 }
 
 pub fn snap_point(point: Point, spacing: SymbolGridSpacing) -> Point {
-    let grid = spacing.model_step();
-    let snap = |v: i32| ((v as f32 / grid).round() * grid).round() as i32;
+    let grid = spacing.model_step() as f32;
+    let snap = |v: i32| ((v as f32 / grid).round() * grid) as i32;
     Point::new(snap(point.x), snap(point.y))
 }
 

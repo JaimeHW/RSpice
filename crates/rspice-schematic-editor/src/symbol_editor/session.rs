@@ -98,33 +98,37 @@ pub struct SymbolTextDraft {
 /// finer display grid can never produce a pin a parent schematic cannot
 /// wire to. The default is the terminal pitch itself, so the lattice a new
 /// author draws against is the one their pins will snap to.
+///
+/// Symbol coordinates are whole units, so every pitch offered is a whole
+/// number of them: a point snapped to it lands on the lattice drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SymbolGridSpacing {
     #[default]
     Ten,
     Five,
-    TwoPointFive,
+    Two,
+    One,
 }
 
 impl SymbolGridSpacing {
-    pub const ALL: [Self; 3] = [Self::Ten, Self::Five, Self::TwoPointFive];
+    pub const ALL: [Self; 4] = [Self::Ten, Self::Five, Self::Two, Self::One];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Ten => "grid 10",
             Self::Five => "grid 5",
-            Self::TwoPointFive => "grid 2.5 \u{00b7} fine",
+            Self::Two => "grid 2",
+            Self::One => "grid 1",
         }
     }
 
-    /// The persistent symbol model uses integer quarter-grid coordinates.
-    /// The fine 2.5 display grid therefore maps to one two-unit/two-and-a-half
-    /// authored pitch with deterministic nearest-integer placement.
-    pub const fn model_step(self) -> f32 {
+    /// The pitch in symbol units.
+    pub const fn model_step(self) -> i32 {
         match self {
-            Self::Ten => 10.0,
-            Self::Five => 5.0,
-            Self::TwoPointFive => 2.5,
+            Self::Ten => 10,
+            Self::Five => 5,
+            Self::Two => 2,
+            Self::One => 1,
         }
     }
 }

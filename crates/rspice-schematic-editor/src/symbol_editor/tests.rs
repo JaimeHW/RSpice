@@ -98,13 +98,13 @@ fn preview_tile_uses_larger_size_when_canvas_allows() {
     assert!(canvas.contains(tile.max));
 }
 /// The display lattice is body artwork's business. A terminal that landed on
-/// a 2.5 grid point is a terminal a parent schematic cannot wire to, so the
+/// a fine grid point is a terminal a parent schematic cannot wire to, so the
 /// pin snap is deliberately not the one the toolbar shows.
 #[test]
 fn terminal_snap_holds_at_the_terminal_pitch_on_a_fine_display_grid() {
     assert_eq!(
-        snap_point(Point::new(12, -13), SymbolGridSpacing::TwoPointFive),
-        Point::new(13, -13),
+        snap_point(Point::new(12, -13), SymbolGridSpacing::Two),
+        Point::new(12, -14),
         "body geometry follows the display lattice the author selected"
     );
     assert_eq!(
@@ -126,7 +126,32 @@ fn symbol_grid_defaults_to_the_terminal_pitch() {
 
     assert_eq!(state.grid_spacing, SymbolGridSpacing::Ten);
     assert_eq!(
-        SymbolGridSpacing::TwoPointFive.label(),
-        "grid 2.5 \u{00b7} fine"
+        SymbolGridSpacing::ALL.map(SymbolGridSpacing::label),
+        ["grid 10", "grid 5", "grid 2", "grid 1"]
     );
+}
+
+/// Coordinates are whole units, so a pitch is offered only if every point
+/// snapped to it lands on its lattice: a 2.5 grid put points on 0, 3, 5, 8.
+#[test]
+fn every_grid_pitch_lands_points_on_its_own_lattice() {
+    for spacing in SymbolGridSpacing::ALL {
+        let step = spacing.model_step();
+        for value in -25..=25 {
+            let snapped = snap_point(Point::new(value, -value), spacing);
+            assert_eq!(
+                snapped.x % step,
+                0,
+                "{spacing:?} took {value} to {}",
+                snapped.x
+            );
+            assert_eq!(
+                snapped.y % step,
+                0,
+                "{spacing:?} took {value} to {}",
+                snapped.y
+            );
+            assert!((snapped.x - value).abs() * 2 <= step, "{spacing:?} {value}");
+        }
+    }
 }
