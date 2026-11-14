@@ -354,6 +354,39 @@ jobs:
           cargo test --locked --release -p rspice-core --features veriloga,veriloga-builtins
           --test generated every_shipped_model_reaches_its_fixture_or_names_its_refusal -- --ignored
 
+  browser-jit-shipped-sources:
+    name: Every shipped model through the browser JIT (Node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Every shipped Verilog-A model brought into a project as its own
+    # Verilog-A: compiled by the worker's compile request, emitted by the
+    # browser JIT, then compiled and instantiated by Node's WebAssembly
+    # engine, against the outcome the test pins for each source.
+    env:
+      CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+      WASM_BINDGEN_TEST_TIMEOUT: "3000"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          key: browser-jit-shipped-sources
+          cache-on-failure: true
+      - name: Install pinned wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+      - name: Build the walk over every shipped source
+        id: build
+        run: >-
+          cargo test --locked --release -p rspice-worker
+          --target wasm32-unknown-unknown --test shipped_source_jit --no-run
+      - name: Every shipped source through the browser JIT
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: >-
+          node --version &&
+          cargo test --locked --release -p rspice-worker
+          --target wasm32-unknown-unknown --test shipped_source_jit
+
   mixed-determinism:
     name: Mixed-deck determinism (serial vs parallel)
     runs-on: ubuntu-latest
