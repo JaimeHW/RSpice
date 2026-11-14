@@ -273,12 +273,12 @@ impl BranchLinearization {
     /// of a large series conductance and absolute terminal voltages.
     fn source(&self, internal: &[Value; INTERNAL_DIM], external: &[Value; EXTERNAL_DIM]) -> Value {
         let mut sum = CompensatedSource::new(self.current);
-        for (&derivative, &voltage) in self
-            .d_internal
-            .iter()
-            .zip(internal)
-            .chain(self.d_external.iter().zip(external))
-        {
+        for (&derivative, &voltage) in self.d_internal.iter().zip(internal) {
+            if derivative != 0.0 {
+                sum.add(derivative, voltage);
+            }
+        }
+        for (&derivative, &voltage) in self.d_external.iter().zip(external) {
             if derivative != 0.0 {
                 sum.add(derivative, voltage);
             }
@@ -295,18 +295,16 @@ impl BranchLinearization {
         external: [&[Value; EXTERNAL_DIM]; 2],
     ) -> [Value; 2] {
         let mut sums = [CompensatedSource::new(self.current); 2];
-        let first = internal[0].iter().chain(external[0]);
-        let second = internal[1].iter().chain(external[1]);
-        for ((&derivative, &v0), &v1) in self
-            .d_internal
-            .iter()
-            .chain(&self.d_external)
-            .zip(first)
-            .zip(second)
-        {
+        for (index, &derivative) in self.d_internal.iter().enumerate() {
             if derivative != 0.0 {
-                sums[0].add(derivative, v0);
-                sums[1].add(derivative, v1);
+                sums[0].add(derivative, internal[0][index]);
+                sums[1].add(derivative, internal[1][index]);
+            }
+        }
+        for (index, &derivative) in self.d_external.iter().enumerate() {
+            if derivative != 0.0 {
+                sums[0].add(derivative, external[0][index]);
+                sums[1].add(derivative, external[1][index]);
             }
         }
         sums.map(CompensatedSource::value)
