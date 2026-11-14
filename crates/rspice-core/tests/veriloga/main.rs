@@ -37,6 +37,8 @@ mod connect_rule_parameters;
 mod d_process_coupled;
 mod device_engine_roundtrip;
 mod diode_native;
+#[cfg(feature = "veriloga")]
+mod execution_backends;
 mod expression_stack_safety;
 #[cfg(feature = "veriloga")]
 mod hdl_external_paths;

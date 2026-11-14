@@ -1661,6 +1661,54 @@ impl CircuitData {
         inventory
     }
 
+    /// Which code runs this circuit: the Verilog-A runtime where a
+    /// runtime-compiled module has analog equations, the generated compact
+    /// models it instantiates, the Verilog host where a module runs discrete
+    /// processes, and what the build recorded itself.
+    pub(crate) fn execution_backends(&self) -> crate::backends::ExecutionBackends {
+        #[allow(unused_mut)]
+        let mut ran = self.build_backends.clone();
+        #[cfg(feature = "veriloga")]
+        {
+            use crate::backends::{AnalogBackend, DigitalBackend, ExecutionBackends};
+            use rspice_veriloga::device::{RuntimeBackend, VerilogADevice};
+            let runtime = !self.veriloga_devices.is_empty()
+                || self
+                    .mixed_signal_hosts
+                    .iter()
+                    .any(|host| host.analog_device().has_analog_equations());
+            let analog = runtime.then_some(match VerilogADevice::RUNTIME_BACKEND {
+                RuntimeBackend::NativeJit => AnalogBackend::NativeJit,
+                RuntimeBackend::WasmJit => AnalogBackend::WasmJit,
+                RuntimeBackend::Interpreter => AnalogBackend::Interpreter,
+            });
+            ran.merge(&ExecutionBackends {
+                analog: analog.into_iter().collect(),
+                digital: (!self.mixed_signal_hosts.is_empty())
+                    .then_some(DigitalBackend::VerilogHost)
+                    .into_iter()
+                    .collect(),
+                ..ExecutionBackends::default()
+            });
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if !self.generated_veriloga_devices.is_empty() {
+            let mut models: Vec<String> = self
+                .generated_veriloga_devices
+                .iter()
+                .map(|device| device.model_name.to_owned())
+                .collect();
+            models.sort_unstable();
+            models.dedup();
+            ran.merge(&crate::backends::ExecutionBackends {
+                analog: vec![crate::backends::AnalogBackend::GeneratedModel],
+                generated_models: models,
+                ..crate::backends::ExecutionBackends::default()
+            });
+        }
+        ran
+    }
+
     /// What a run elaborated, in one line: `Circuit: 142 nodes, 318 devices
     /// (120 resistor, 64 bsim4, 40 capacitor, 2 vsource)`.
     ///

@@ -187,6 +187,9 @@ fn finalize(
         builder = builder.parent_analysis(state.transient).scalar(state_time);
         output = state.dataset();
     }
+    if let Some(backends) = rspice_core::backends::recorded() {
+        builder = builder.backends(backends);
+    }
     builder
         .namespaces(ResultNamespaces {
             output,

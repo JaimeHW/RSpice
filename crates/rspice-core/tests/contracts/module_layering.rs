@@ -173,6 +173,10 @@ const LAYERS: &[(&str, u32)] = &[
     // re-exports it. It shares rank 1 with `io` and `numerics` because none
     // references another.
     ("capability", 1),
+    // Which code ran a result. The circuit build records what it built and
+    // the result document carries it; it reads only `log_scope`, whose scope
+    // carries its recorder as an opaque value, as `notice` does.
+    ("backends", 1),
     // What a run raised and went on to complete with: the parameters the
     // device models clamp, the convergence aids that solved, the timestep
     // floor the transient stepper was held at. The device models record into

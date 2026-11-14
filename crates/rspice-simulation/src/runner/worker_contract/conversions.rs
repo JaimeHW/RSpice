@@ -480,6 +480,7 @@ fn run_decoded_worker_request(
     let verbose = super::super::request_asked_for_verbose(&request);
     let progress = Arc::new(Mutex::new(SimulationProgress::default()));
     let abort_flag = Arc::new(AtomicBool::new(false));
+    let backends = rspice_core::backends::BackendRecorder::new();
     let response = WorkerResponse::from_result_for_transfer(
         id,
         super::super::run_simulation_thread_with_progress_observer(
@@ -498,12 +499,13 @@ fn run_decoded_worker_request(
                         .observing_notices(emit_worker_engine_notices)
                         .sealed_by(emit_worker_engine_log_seal),
                 ),
+                backends: Some(backends.clone()),
                 ..Default::default()
             },
         ),
     );
     ACTIVE_WORKER_PROGRESS_ID.with(|active| active.set(None));
-    worker_response_transport_value(response)
+    worker_response_transport_value(response, backends.snapshot())
 }
 
 /// A decoded request waiting for its dispatch, with every sealed Verilog-A
@@ -674,10 +676,10 @@ pub fn run_prepared_wasm_jit_request_value(
         )
     }));
     match refusal {
-        Some(refusal) => worker_response_transport_value(WorkerResponse::from_result_for_transfer(
-            pending.request.id,
-            Err(refusal),
-        )),
+        Some(refusal) => worker_response_transport_value(
+            WorkerResponse::from_result_for_transfer(pending.request.id, Err(refusal)),
+            Default::default(),
+        ),
         None => rspice_veriloga::wasm_jit::with_browser_run_models(pending.installed, || {
             run_decoded_worker_request(pending.request)
         }),
@@ -869,6 +871,7 @@ pub(super) fn worker_request_js_error(error: wasm_bindgen::JsValue) -> wasm_bind
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) fn worker_response_transport_value(
     response: WorkerResponse,
+    backends: Option<rspice_core::backends::ExecutionBackends>,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     use wasm_bindgen::JsValue;
 
@@ -876,7 +879,7 @@ pub(crate) fn worker_response_transport_value(
         protocol,
         response,
         buffers,
-    } = WorkerResponseTransport::from_response(response)
+    } = WorkerResponseTransport::from_response_with_backends(response, backends)
         .map_err(|error| JsValue::from_str(&error))?;
     // Each buffer leaves this module's memory as its own Float64Array, which
     // postMessage then transfers without copying. The JavaScript heap holds
@@ -913,6 +916,7 @@ pub(crate) fn worker_response_transport_value(
                 outcome: WorkerOutcomeTransport::Failure(WorkerSimulationError::ResourceFailure(
                     failure,
                 )),
+                backends: response.backends,
             },
             js_sys::Array::new(),
         ),
@@ -966,7 +970,13 @@ fn new_float64_array(len: usize) -> Result<js_sys::Float64Array, String> {
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn worker_response_from_value(
     value: wasm_bindgen::JsValue,
-) -> Result<WorkerResponse, SimulationError> {
+) -> Result<
+    (
+        WorkerResponse,
+        Option<rspice_core::backends::ExecutionBackends>,
+    ),
+    SimulationError,
+> {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::JsValue;
 
@@ -980,7 +990,7 @@ pub(crate) fn worker_response_from_value(
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         super::transport::validate_worker_response_before_transport(&response)
             .map_err(SimulationError::InvalidConfig)?;
-        return Ok(response);
+        return Ok((response, Default::default()));
     }
 
     let response =
@@ -1023,7 +1033,7 @@ pub(crate) fn worker_response_from_value(
         response,
         buffers: decoded_buffers,
     }
-    .into_response()
+    .into_response_and_backends()
     .map_err(SimulationError::InvalidConfig)
 }
 

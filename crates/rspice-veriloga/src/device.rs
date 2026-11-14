@@ -264,6 +264,18 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
     CompiledModelLayoutIdentity(hasher.finalize())
 }
 
+/// The machine that runs a runtime-compiled Verilog-A device. See
+/// [`VerilogADevice::RUNTIME_BACKEND`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeBackend {
+    /// Host machine code (x86-64 or AArch64).
+    NativeJit,
+    /// WebAssembly compiled in the browser worker.
+    WasmJit,
+    /// The portable bytecode interpreter.
+    Interpreter,
+}
+
 #[cfg(feature = "native")]
 use crate::native::{NativeModel, NativeRequiredStorage, NativeStampKernelIo};
 #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
@@ -3261,6 +3273,28 @@ impl VerilogADevice {
     #[cfg(not(feature = "native"))]
     pub fn is_using_native(&self) -> bool {
         false
+    }
+
+    /// The machine that runs every device of this build. Chosen when the
+    /// crate is compiled, by the same gates that choose what a device holds:
+    /// the native JIT where the `native` feature is on, the WebAssembly JIT in
+    /// a browser build, and the bytecode interpreter otherwise. A device that
+    /// cannot run on its build's backend refuses at construction; none falls
+    /// back to another.
+    pub const RUNTIME_BACKEND: RuntimeBackend = if cfg!(feature = "native") {
+        RuntimeBackend::NativeJit
+    } else if cfg!(all(feature = "wasm-jit", target_arch = "wasm32")) {
+        RuntimeBackend::WasmJit
+    } else {
+        RuntimeBackend::Interpreter
+    };
+
+    /// Whether the module has analog equations for the runtime to evaluate:
+    /// a contribution or a branch of its own. A module whose analog half is
+    /// empty, such as a purely digital one hosted for its discrete
+    /// processes, has none.
+    pub fn has_analog_equations(&self) -> bool {
+        !self.model.stamp_programs.is_empty() || !self.model.branch_sources.is_empty()
     }
 
     /// Get the number of terminals

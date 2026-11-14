@@ -309,6 +309,10 @@ fn run_implicit_step_op_table(
     contracts: &[StepCoordinateContract],
     run_label: Option<&str>,
 ) -> Result<DeckOutcome, CliError> {
+    // Every coordinate's documents, and the run's report, name the code
+    // that ran it.
+    let recorder = rspice_core::backends::BackendRecorder::new();
+    let _recording = recorder.install();
     let first_coordinate =
         materializer
             .coordinates()
@@ -650,8 +654,11 @@ fn run_implicit_step_op_table(
         Some(label) => format!("{base_name} [{label}]"),
         None => base_name,
     };
+    let backends = recorder.snapshot();
+    super::print_backends(backends.as_ref(), quiet)?;
     Ok(DeckOutcome {
         reports: vec![SimulationReport {
+            backends,
             name: report_name,
             netlist: args.input.display().to_string(),
             passed: measurements.iter().all(|measurement| measurement.passed),

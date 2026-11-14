@@ -96,6 +96,9 @@ pub mod device {
     #[cfg(feature = "veriloga")]
     pub mod veriloga;
 }
+/// Which code ran a result: the analog backends and digital engines a run's
+/// circuit builds record into its log scope.
+pub use rspice_core_base::backends;
 pub use rspice_core_base::diagnostics;
 pub mod engine;
 /// The names an event-only net is refused and published under.

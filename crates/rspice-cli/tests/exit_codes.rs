@@ -1166,7 +1166,7 @@ fn summary_json_carries_the_verdict() {
     );
     assert_eq!(json["tool"]["name"], "rspice");
     assert_eq!(json["tool"]["commit"], env!("RSPICE_BUILD_COMMIT"));
-    assert_eq!(json["schema_version"], 2);
+    assert_eq!(json["schema_version"], 3);
     assert_eq!(json["status"], "failed");
     assert_eq!(json["counts"]["runs"], 1);
     assert_eq!(json["counts"]["failed_measurements"], 1);

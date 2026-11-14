@@ -198,6 +198,45 @@ fn current_impulse_document_preserves_charge_availability() {
     assert!(malformed.to_json().is_err());
 }
 
+/// A document names the code that ran it, and reads back with it; one
+/// written before the run recorded anything carries no record.
+#[test]
+fn a_document_round_trips_the_code_that_ran_it() {
+    use crate::backends::{AnalogBackend, DigitalBackend, ExecutionBackends, ModelSubstitution};
+    let builder = || {
+        AnalysisResultDocument::from_transient(
+            instance(AnalysisKind::Tran),
+            &transient_result(),
+            None,
+            Vec::new(),
+        )
+        .unwrap()
+    };
+    let unrecorded = builder().build().unwrap();
+    assert_eq!(unrecorded.backends(), None);
+    assert!(!unrecorded.to_json().unwrap().contains("backends"));
+    let backends = ExecutionBackends {
+        analog: vec![AnalogBackend::Interpreter, AnalogBackend::GeneratedModel],
+        digital: vec![DigitalBackend::VerilogHost],
+        generated_models: vec!["juncap200".into()],
+        substitutions: vec![ModelSubstitution {
+            instance: "M1".into(),
+            model: "nch".into(),
+            requested: "ekv_va".into(),
+            feature: "veriloga-model-ekv-va".into(),
+            ran: "EKV 2.6".into(),
+        }],
+    };
+    let recorded = builder().backends(backends.clone()).build().unwrap();
+    assert_eq!(recorded.backends(), Some(&backends));
+    let json = recorded.to_json().unwrap();
+    assert!(json.contains("\"generatedModels\""), "{json}");
+    assert!(json.contains("\"verilog-host\""), "{json}");
+    let restored = AnalysisResultDocument::from_json(&json).unwrap();
+    assert_eq!(restored, recorded);
+    assert_eq!(restored.backends(), Some(&backends));
+}
+
 #[test]
 fn current_impulse_document_round_trips_device_lead_owners() {
     let mut result = transient_result();

@@ -64,6 +64,9 @@ pub struct LogScope {
     /// read only by the notice module's `LogScope::collecting` and
     /// `LogScope::notices`.
     pub(crate) notices: Option<Arc<dyn Any + Send + Sync>>,
+    /// Where the run records which code ran it, shared the same way. Set and
+    /// read only by the backends module's `LogScope::recording_backends`.
+    pub(crate) backends: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl LogScope {
@@ -73,6 +76,7 @@ impl LogScope {
             point: None,
             said_once: Arc::default(),
             notices: None,
+            backends: None,
         }
     }
 

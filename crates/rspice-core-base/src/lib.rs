@@ -13,6 +13,9 @@
 
 /// Abort signal for cancelling long-running simulations
 pub mod abort_signal;
+/// Which code ran a result: the analog backends and digital engines a run's
+/// circuit builds record into its log scope.
+pub mod backends;
 /// Starter model cards embedded in the binary; a leaf with no dependencies so
 /// that library, netlist and engine can all share one copy.
 #[doc(hidden)]

@@ -411,6 +411,9 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
                 continue;
             };
             let mut done = active.swap_remove(index);
+            if let Some(backends) = done.runner.backends() {
+                result.backends.get_or_insert_default().merge(&backends);
+            }
             if let TaskRun::Worker(task) = &mut done.runner {
                 for line in task.take_log() {
                     if result.warnings.len() < 64 {
@@ -501,6 +504,14 @@ impl TaskRun {
         match self {
             Self::Native(runner) => runner.take_task_transient_checkpoints(),
             Self::Worker(task) => task.take_checkpoints(),
+        }
+    }
+
+    /// Which code the finished task ran, as its result reports it.
+    fn backends(&self) -> Option<rspice_core::backends::ExecutionBackends> {
+        match self {
+            Self::Native(runner) => runner.execution_backends(),
+            Self::Worker(task) => task.backends(),
         }
     }
 }

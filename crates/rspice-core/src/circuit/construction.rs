@@ -111,6 +111,7 @@ impl CircuitData {
             // XSPICE instances
             xspice_instances: Vec::new(),
             xspice_has_event_driven_devices: false,
+            build_backends: Default::default(),
             xspice_event_loads: Default::default(),
             xspice_touched_digital_nodes: Vec::new(),
             xspice_touched_real_nodes: Vec::new(),

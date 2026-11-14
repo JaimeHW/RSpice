@@ -773,6 +773,12 @@ pub struct CircuitData {
     pub(crate) xspice_instances: Vec<SharedXspiceInstance>,
     /// Cached presence of event-driven XSPICE ports.
     pub(crate) xspice_has_event_driven_devices: bool,
+    /// What the build decided about which code runs this circuit and no
+    /// collection records: the deck's own event-driven code models (the
+    /// connect-rule converters a build inserts are XSPICE instances too), and
+    /// each card that ran a native port in place of a generated model this
+    /// build lacks. [`Self::execution_backends`] adds the rest.
+    pub(crate) build_backends: crate::backends::ExecutionBackends,
     /// ngspice-style total LOAD() contribution per event node.
     pub(crate) xspice_event_loads: crate::xspice::EventLoads,
     /// Scratch nodes touched while applying a batch of XSPICE digital events.

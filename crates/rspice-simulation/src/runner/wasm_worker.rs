@@ -94,6 +94,8 @@ mod browser {
             crate::transient_checkpoint::CheckpointLog,
             rspice_core::ResourceLimits,
         )>,
+        /// Where the running request's answer says which code ran it.
+        active_backends: Option<rspice_core::backends::BackendRecorder>,
         pending_result: Option<Result<SimulationResult, SimulationError>>,
     }
 
@@ -337,6 +339,7 @@ mod browser {
         pub(crate) checkpoint: CheckpointQueue,
         pub(crate) transient_checkpoint: CheckpointQueue,
         pub(crate) transient_checkpoint_log: crate::transient_checkpoint::CheckpointLog,
+        pub(crate) backends: rspice_core::backends::BackendRecorder,
     }
 
     pub(crate) fn start_worker_request(
@@ -353,6 +356,7 @@ mod browser {
             checkpoint,
             transient_checkpoint,
             transient_checkpoint_log,
+            backends,
         } = channels;
         if handle.is_running() || handle.has_unpolled_result() {
             return Err(SimulationError::AlreadyRunning);
@@ -376,6 +380,7 @@ mod browser {
                 transient_checkpoint_log,
                 input.execution_limits,
             ));
+            state.active_backends = Some(backends);
             state.pending_result = None;
         }
 
@@ -539,8 +544,13 @@ mod browser {
             .or_else(|_| Reflect::get(data, &JsValue::from_str("result")));
 
         let result = match response {
-            Ok(value) => worker_response_from_value(value).and_then(|response| {
+            Ok(value) => worker_response_from_value(value).and_then(|(response, backends)| {
                 validate_worker_response_id(id, &response)?;
+                if let (Some(recorder), Some(backends)) =
+                    (state.borrow_mut().active_backends.take(), backends)
+                {
+                    recorder.add(&backends);
+                }
                 response.into_result()
             }),
             Err(error) => Err(SimulationError::InvalidConfig(js_error_message(error))),

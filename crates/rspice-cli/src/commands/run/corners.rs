@@ -182,6 +182,7 @@ pub(super) fn run(
             Ok(outcome) => outcome,
             Err(error) => DeckOutcome {
                 reports: vec![SimulationReport {
+                    backends: None,
                     name: run_label.unwrap_or("base").to_string(),
                     netlist: args.input.display().to_string(),
                     passed: false,

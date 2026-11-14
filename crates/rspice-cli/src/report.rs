@@ -36,6 +36,8 @@ pub struct SimulationReport {
     pub error_details: Option<crate::cli::ErrorDetails>,
     /// Measurements (name, value, passed)
     pub measurements: Vec<MeasurementReport>,
+    /// Which code ran the run's analyses; `None` when it built no circuit.
+    pub backends: Option<rspice_core::backends::ExecutionBackends>,
 }
 
 /// Format like C's `%e` (ngspice's style): six fractional digits and a
@@ -607,6 +609,7 @@ mod tests {
 
     pub(super) fn report_with_measurement(value: Option<f64>) -> SimulationReport {
         SimulationReport {
+            backends: None,
             name: "rc".into(),
             netlist: "rc.sp".into(),
             passed: true,
@@ -1093,6 +1096,7 @@ mod tests {
     #[test]
     fn cancellation_run_status_is_failed_in_measurement_json_and_csv() {
         let reports = [SimulationReport {
+            backends: None,
             name: "deck [timed-out]".into(),
             netlist: "deck.cir".into(),
             passed: false,

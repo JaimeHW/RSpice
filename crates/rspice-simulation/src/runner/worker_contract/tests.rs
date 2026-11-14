@@ -286,6 +286,67 @@ fn a_transient_sends_its_time_axis_once_and_every_waveform_reads_it_back() {
     assert_eq!(transport.into_response().expect("decodes"), response);
 }
 
+/// The worker's answer names the code that ran its request, and the host
+/// reads it back with the result; an answer that built no circuit names none.
+#[test]
+fn a_worker_answer_carries_the_code_that_ran_its_request() {
+    use rspice_core::backends::{AnalogBackend, ExecutionBackends};
+    let time = vec![0.0, 1.0e-9];
+    let result = WorkerSimulationResult::Transient {
+        spectra: Vec::new(),
+        testbench_errors: Vec::new(),
+        checks: Default::default(),
+        convergence: None,
+        time: time.clone(),
+        waveforms: vec![WorkerWaveform {
+            name: "V(out)".to_string(),
+            x_values: time.clone(),
+            y_values: vec![0.5, 0.25],
+            y_unit: "V".to_string(),
+            is_complex: false,
+            y_imag: None,
+        }],
+        measurements: Vec::new(),
+        events: WorkerEventHistory::default(),
+    };
+    let response = WorkerResponse::from_result_for_transfer(9, Ok(SimulationResult::from(result)));
+    let backends = ExecutionBackends {
+        analog: vec![AnalogBackend::WasmJit, AnalogBackend::GeneratedModel],
+        generated_models: vec!["juncap200".into()],
+        ..ExecutionBackends::default()
+    };
+    let answer = |backends: Option<ExecutionBackends>| {
+        let transport =
+            WorkerResponseTransport::from_response_with_backends(response.clone(), backends)
+                .expect("encodes");
+        let metadata = serde_json::to_string(&transport.response).expect("metadata");
+        (metadata, transport.buffers)
+    };
+
+    // The host reads the metadata back from its JSON, as the browser hands it over.
+    let read = |(metadata, buffers): (String, Vec<Vec<f64>>)| {
+        WorkerResponseTransport {
+            protocol: WORKER_RESPONSE_TRANSPORT_PROTOCOL,
+            response: serde_json::from_str(&metadata).expect("metadata reads"),
+            buffers,
+        }
+        .into_response_and_backends()
+        .expect("the answer decodes")
+    };
+
+    let sent = answer(Some(backends.clone()));
+    assert!(sent.0.contains("\"wasm-jit\""), "{}", sent.0);
+    let (decoded, carried) = read(sent);
+    assert_eq!(carried, Some(backends));
+    assert_eq!(decoded, response);
+
+    let sent = answer(None);
+    assert!(!sent.0.contains("backends"), "{}", sent.0);
+    let (decoded, carried) = read(sent);
+    assert_eq!(carried, None);
+    assert_eq!(decoded, response);
+}
+
 #[test]
 fn waveforms_on_their_own_axes_each_send_one_and_share_it() {
     let sweep =
@@ -2398,6 +2459,7 @@ fn worker_transport_validates_complex_waveform_shape() {
                 measurements: Vec::new(),
                 events: WorkerEventHistory::default(),
             }),
+            backends: Default::default(),
         },
         buffers: vec![vec![0.0, 1.0], vec![0.0, 1.0], vec![0.2, 0.4], vec![0.1]],
     };
@@ -2427,6 +2489,7 @@ fn worker_transport_validates_complex_waveform_shape() {
                 measurements: Vec::new(),
                 events: WorkerEventHistory::default(),
             }),
+            backends: Default::default(),
         },
         buffers: vec![
             vec![0.0, 1.0],

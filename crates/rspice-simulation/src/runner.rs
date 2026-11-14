@@ -126,6 +126,8 @@ pub struct SimulationRunner {
     transient_checkpoint: crate::transient_checkpoint::CheckpointQueue,
     /// Every checkpoint image the current task published, in order.
     transient_checkpoint_log: crate::transient_checkpoint::CheckpointLog,
+    /// Which code the current task ran, recorded by every circuit it built.
+    backends: rspice_core::backends::BackendRecorder,
 
     /// States a transient task captured for the state cards bound to it,
     /// which their tasks take when this runner starts them. Kept across
@@ -165,6 +167,7 @@ impl SimulationRunner {
             monte_carlo_checkpoint: Arc::new(Mutex::new(None)),
             transient_checkpoint: Arc::new(Mutex::new(None)),
             transient_checkpoint_log: Arc::new(Mutex::new(Vec::new())),
+            backends: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             transient_states: Arc::default(),
             thread_handle: None,
@@ -309,6 +312,14 @@ impl SimulationRunner {
         )
     }
 
+    /// Which code the last task ran: the analog backends and digital engines
+    /// of every circuit it built, here or in the browser worker. Read it with
+    /// the task's result; the next task starts a new record. `None` until the
+    /// task builds a circuit.
+    pub fn execution_backends(&self) -> Option<rspice_core::backends::ExecutionBackends> {
+        self.backends.snapshot()
+    }
+
     /// Most recent complete transient state, retained even when a run is cancelled.
     pub fn take_transient_checkpoint(&self) -> Option<Arc<[u8]>> {
         self.transient_checkpoint
@@ -332,6 +343,7 @@ impl SimulationRunner {
         self.engine_log = Arc::new(Mutex::new(EngineLogQueue::default()));
         self.monte_carlo_checkpoint = Arc::new(Mutex::new(None));
         self.transient_checkpoint = Arc::new(Mutex::new(None));
+        self.backends = rspice_core::backends::BackendRecorder::new();
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -493,6 +505,7 @@ impl SimulationRunner {
         self.take_monte_carlo_checkpoint();
         self.take_transient_checkpoint();
         self.take_task_transient_checkpoints();
+        self.backends = rspice_core::backends::BackendRecorder::new();
         self.abort_flag.store(false, Ordering::SeqCst);
         match self.transient_samples.lock() {
             Ok(mut samples) => samples.clear(),
@@ -529,6 +542,7 @@ impl SimulationRunner {
                     Arc::clone(&self.transient_states),
                     transient_states,
                 )),
+                backends: Some(self.backends.clone()),
                 ..RunStreams::default()
             };
             let handle = std::thread::spawn(move || {
@@ -556,6 +570,7 @@ impl SimulationRunner {
                     checkpoint: Arc::clone(&self.monte_carlo_checkpoint),
                     transient_checkpoint: Arc::clone(&self.transient_checkpoint),
                     transient_checkpoint_log: Arc::clone(&self.transient_checkpoint_log),
+                    backends: self.backends.clone(),
                 },
             )?;
         }
@@ -663,6 +678,8 @@ pub(in crate::runner) struct RunStreams {
     pub(in crate::runner) transient_checkpoint_observer:
         Option<crate::transient_checkpoint::CheckpointObserver>,
     pub(in crate::runner) transient_states: Option<crate::engine_services::TransientStateHandoff>,
+    /// Where the run records which code ran it.
+    pub(in crate::runner) backends: Option<rspice_core::backends::BackendRecorder>,
 }
 
 fn lock_progress<'a>(
@@ -1024,6 +1041,7 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         transient_checkpoint_log,
         transient_checkpoint_observer,
         transient_states,
+        backends,
     } = streams;
 
     // Whatever the engine logs from here on belongs to this run, and only to
@@ -1033,6 +1051,11 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
     // The states this run captures for its state cards, or the one it reads.
     let _transient_states =
         transient_states.map(crate::engine_services::install_transient_state_handoff);
+    // Every circuit the run builds, on any thread it hands work to, records
+    // which code runs it here.
+    let _backends = backends
+        .as_ref()
+        .map(rspice_core::backends::BackendRecorder::install);
 
     // Update status: parsing
     {

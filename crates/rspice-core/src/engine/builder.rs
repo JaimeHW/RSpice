@@ -6316,6 +6316,9 @@ impl Engine {
                 log::info!("{inventory}");
             }
         }
+        if crate::backends::is_recording() {
+            crate::backends::record(&built.circuit.execution_backends());
+        }
         let mut built = built;
         built.circuit.analog_task_output = self.config.hdl.output.clone();
         // Of everything a transient stop time changes, only a BJT's internal
@@ -11157,6 +11160,18 @@ impl Engine {
                         ))
                     })?;
 
+                    if instance
+                        .ports()
+                        .iter()
+                        .any(|port| port.default_type.is_event_driven())
+                    {
+                        circuit
+                            .build_backends
+                            .merge(&crate::backends::ExecutionBackends {
+                                digital: vec![crate::backends::DigitalBackend::Xspice],
+                                ..Default::default()
+                            });
+                    }
                     circuit.add_xspice_instance(instance);
                     log::debug!(
                         "Created XSPICE instance {}: model={}, ports={}",

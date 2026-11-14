@@ -390,6 +390,7 @@ pub(super) fn run(
     let name = run_label.map_or_else(|| base.to_string(), |label| format!("{base} [{label}]"));
     Ok(ConcreteDeckOutcome {
         report: SimulationReport {
+            backends: None,
             name,
             netlist: args.input.display().to_string(),
             passed: error.is_none() && measurements.iter().all(|measurement| measurement.passed),

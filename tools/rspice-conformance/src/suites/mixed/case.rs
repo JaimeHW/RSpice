@@ -33,6 +33,10 @@ pub struct CaseResult {
     pub results: Vec<Observation>,
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// Which code ran the case's tasks, as their results report it; absent
+    /// when no task finished, or from a producer that does not say.
+    #[serde(default)]
+    pub backends: Option<rspice_core::backends::ExecutionBackends>,
     pub elapsed_s: f64,
 }
 
@@ -47,6 +51,7 @@ impl CaseResult {
             error: None,
             results: Vec::new(),
             warnings: Vec::new(),
+            backends: None,
             elapsed_s: 0.0,
         }
     }

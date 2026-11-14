@@ -70,26 +70,45 @@ pub fn worker_wire_request(
 }
 
 /// The result the browser host reads from the worker's answer to request
-/// `id`: its transport revision, its metadata (`response`) as JSON and its
-/// numeric buffers. A failure the worker answered with is this result's
-/// error, as the host reports it.
+/// `id`, with which code ran it: its transport revision, its metadata
+/// (`response`) as JSON and its numeric buffers. A failure the worker
+/// answered with is this result's error, as the host reports it; an answer
+/// the host cannot read names no code.
 pub fn worker_wire_result(
     id: u64,
     protocol: u8,
     metadata: &str,
     buffers: Vec<Vec<f64>>,
-) -> Result<SimulationResult, SimulationError> {
-    let response: WorkerResponseTransportMetadata =
-        serde_json::from_str(metadata).map_err(|error| {
-            SimulationError::InvalidConfig(format!("worker response metadata: {error}"))
-        })?;
-    let response = WorkerResponseTransport {
+) -> (
+    Option<rspice_core::backends::ExecutionBackends>,
+    Result<SimulationResult, SimulationError>,
+) {
+    let response: WorkerResponseTransportMetadata = match serde_json::from_str(metadata) {
+        Ok(response) => response,
+        Err(error) => {
+            return (
+                Default::default(),
+                Err(SimulationError::InvalidConfig(format!(
+                    "worker response metadata: {error}"
+                ))),
+            );
+        }
+    };
+    let decoded = WorkerResponseTransport {
         protocol,
         response,
         buffers,
     }
-    .into_response()
-    .map_err(SimulationError::InvalidConfig)?;
-    validate_worker_response_id(id, &response)?;
-    response.into_result()
+    .into_response_and_backends();
+    let (response, backends) = match decoded {
+        Ok(decoded) => decoded,
+        Err(error) => {
+            return (
+                Default::default(),
+                Err(SimulationError::InvalidConfig(error)),
+            );
+        }
+    };
+    let result = validate_worker_response_id(id, &response).and_then(|()| response.into_result());
+    (backends, result)
 }

@@ -225,6 +225,7 @@ pub use payload::{
 };
 
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::backends::ExecutionBackends;
 use crate::execution::bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 use crate::execution::capability::{AnalysisResultKind, analysis_result_kind};
 use crate::execution::plan::{
@@ -244,7 +245,9 @@ pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 /// refuses every version but its own before decoding any field. A new result
 /// *family* costs no version, since a reader refuses the unknown `resultKind`
 /// tag outright.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 22;
+///
+/// Version 23 added `backends`: which code ran the analysis.
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 23;
 
 /// How often long validation and serialization loops poll the abort source.
 const ABORT_POLL_STRIDE: usize = 256;
@@ -276,6 +279,10 @@ pub struct AnalysisResultDocument {
     device_states: Vec<DeviceStateSeries>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     frequency_table: Option<FrequencyTableMetadata>,
+    /// Which code ran the analysis: absent where no RSpice run produced the
+    /// values, as in a document converted from another simulator's output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    backends: Option<ExecutionBackends>,
     payload: ResultPayload,
 }
 
@@ -356,6 +363,7 @@ impl AnalysisResultDocument {
             scalars: Vec::new(),
             device_states: Vec::new(),
             frequency_table: None,
+            backends: None,
         }
     }
 
@@ -367,6 +375,12 @@ impl AnalysisResultDocument {
     /// Schema version this document declares.
     pub const fn schema_version(&self) -> u32 {
         self.schema_version
+    }
+
+    /// Which code ran the analysis that produced this result, where an
+    /// RSpice run produced it.
+    pub const fn backends(&self) -> Option<&ExecutionBackends> {
+        self.backends.as_ref()
     }
 
     /// Result family this document represents.
@@ -944,9 +958,17 @@ pub struct AnalysisResultDocumentBuilder {
     scalars: Vec<ResultScalar>,
     device_states: Vec<DeviceStateSeries>,
     frequency_table: Option<FrequencyTableMetadata>,
+    backends: Option<ExecutionBackends>,
 }
 
 impl AnalysisResultDocumentBuilder {
+    /// Name the code that ran the analysis.
+    #[must_use]
+    pub fn backends(mut self, backends: ExecutionBackends) -> Self {
+        self.backends = Some(backends);
+        self
+    }
+
     /// Name the analysis this result was post-processed from.
     #[must_use]
     pub fn parent_analysis(mut self, parent: AnalysisInstanceId) -> Self {
@@ -1067,6 +1089,7 @@ impl AnalysisResultDocumentBuilder {
             scalars: self.scalars,
             device_states: self.device_states,
             frequency_table: self.frequency_table,
+            backends: self.backends,
             payload: self.payload,
         };
         document.validate_with_limits_and_abort(limits, abort)?;

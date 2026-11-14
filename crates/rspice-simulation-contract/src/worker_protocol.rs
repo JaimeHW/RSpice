@@ -59,4 +59,5 @@ pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 48;
 /// 37: transient results and live suffixes retain singular voltage histories.
 /// 38: operating-point, DC and transient results carry the HDL severity
 ///     records and `.ASSERT` reports of their run.
-pub const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 38;
+/// 39: every response names the code that ran its request (`backends`).
+pub const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 39;

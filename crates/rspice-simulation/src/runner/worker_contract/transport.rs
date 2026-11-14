@@ -242,6 +242,11 @@ fn validate_worker_measurements(result: &WorkerSimulationResult) -> Result<(), S
 pub(crate) struct WorkerResponseTransportMetadata {
     pub id: u64,
     pub outcome: WorkerOutcomeTransport,
+    /// Which code ran the request: the worker's Verilog-A runtime is the
+    /// WebAssembly JIT, and the record says whether any module needed it.
+    /// Absent when the request was refused before it built a circuit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backends: Option<rspice_core::backends::ExecutionBackends>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1713,6 +1718,7 @@ mod pstb_floquet_contract_tests {
                 outcome: WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Inline(
                     worker,
                 )),
+                backends: Default::default(),
             },
             buffers: Vec::new(),
         };

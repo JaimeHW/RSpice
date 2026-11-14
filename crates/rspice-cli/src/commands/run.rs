@@ -628,6 +628,7 @@ fn ensure_cancellation_report(
         crate::abort::AbortReason::Timeout => "timed-out",
     };
     reports.push(SimulationReport {
+        backends: None,
         name: format!("{base_name} [{label}]"),
         netlist: input.display().to_string(),
         passed: false,
@@ -642,8 +643,8 @@ fn ensure_cancellation_report(
 }
 
 /// The JSON run summary's schema. Version 2 added `assertions` and
-/// `hdl_diagnostics`.
-const RUN_SUMMARY_SCHEMA_VERSION: u32 = 2;
+/// `hdl_diagnostics`; version 3 added each run's `backends`.
+const RUN_SUMMARY_SCHEMA_VERSION: u32 = 3;
 
 /// Write the one-artifact JSON contract for automation: tool identity,
 /// per-run status with every measurement, the deck's checks (`.ASSERT`
@@ -727,6 +728,7 @@ fn write_run_summary(
                 "error_details": report.error_details,
                 "duration_secs": report.duration_secs,
                 "measurements": report.measurements,
+                "backends": report.backends,
             })
         }).collect::<Vec<_>>(),
         "assertions": assertions.iter().map(crate::checks::assertion_json).collect::<Vec<_>>(),
@@ -802,7 +804,42 @@ struct ConcreteDeckOutcome {
 /// Multi-run failures don't abort the remaining runs — HSPICE semantics —
 /// so errors land in the report instead of bubbling, except for setup
 /// and output errors (bad arguments or unpublished result artifacts).
+///
+/// The run records which code ran it, on every thread it builds a circuit
+/// on; each result document it writes names that code, and so do its report
+/// and a line of its console output.
 fn run_concrete_deck(
+    netlist: &Netlist,
+    args: &RunArgs,
+    config: &Config,
+    verbose: bool,
+    quiet: bool,
+    run_label: Option<&str>,
+    identity: RunIdentity<'_>,
+) -> Result<ConcreteDeckOutcome, CliError> {
+    let recorder = rspice_core::backends::BackendRecorder::new();
+    let mut outcome = {
+        let _recording = recorder.install();
+        run_recorded_deck(netlist, args, config, verbose, quiet, run_label, identity)?
+    };
+    outcome.report.backends = recorder.snapshot();
+    print_backends(outcome.report.backends.as_ref(), quiet)?;
+    Ok(outcome)
+}
+
+/// `Backends: analog: native JIT; digital: none`, once per run that built a
+/// circuit.
+fn print_backends(
+    backends: Option<&rspice_core::backends::ExecutionBackends>,
+    quiet: bool,
+) -> Result<(), CliError> {
+    match backends {
+        Some(backends) if !quiet => crate::console::line(format_args!("Backends: {backends}")),
+        _ => Ok(()),
+    }
+}
+
+fn run_recorded_deck(
     netlist: &Netlist,
     args: &RunArgs,
     config: &Config,
@@ -921,6 +958,7 @@ fn run_concrete_deck(
 
     Ok(ConcreteDeckOutcome {
         report: SimulationReport {
+            backends: None,
             name,
             netlist: args.input.display().to_string(),
             passed,
@@ -1092,6 +1130,7 @@ mod step_cancellation_report_tests {
 
     fn passing_report() -> SimulationReport {
         SimulationReport {
+            backends: None,
             name: "deck [step-000001]".to_string(),
             netlist: "deck.cir".to_string(),
             passed: true,
@@ -1179,6 +1218,7 @@ mod step_cancellation_report_tests {
     fn existing_typed_cancellation_report_is_not_duplicated() {
         let interrupted = CliError::Interrupted;
         let mut reports = vec![SimulationReport {
+            backends: None,
             name: "deck [step-000002]".to_string(),
             netlist: "deck.cir".to_string(),
             passed: false,

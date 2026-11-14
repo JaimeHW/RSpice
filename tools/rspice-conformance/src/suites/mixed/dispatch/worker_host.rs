@@ -22,6 +22,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use rspice_core::abort_signal::AbortSignal;
+use rspice_core::backends::ExecutionBackends;
 use rspice_simulation::error::SimulationError;
 use rspice_simulation::execution::ResolvedTaskDispatch;
 use rspice_simulation::results::SimulationResult;
@@ -52,10 +53,11 @@ impl Frame {
     }
 }
 
-/// What one task's run in the worker gave: its result, the transient states
-/// it streamed, and its engine log lines.
+/// What one task's run in the worker gave: its result, which code ran it,
+/// the transient states it streamed, and its engine log lines.
 struct WorkerRun {
     outcome: Result<SimulationResult, SimulationError>,
+    backends: Option<ExecutionBackends>,
     checkpoints: Vec<Arc<[u8]>>,
     log: Vec<String>,
 }
@@ -120,6 +122,11 @@ impl WorkerTask {
             .as_mut()
             .map(|run| std::mem::take(&mut run.checkpoints))
             .unwrap_or_default()
+    }
+
+    /// Which code the finished task ran, as its worker's answer says.
+    pub(super) fn backends(&self) -> Option<ExecutionBackends> {
+        self.run.as_ref().and_then(|run| run.backends.clone())
     }
 
     /// The finished task's engine log lines.
@@ -238,6 +245,7 @@ impl WorkerHost {
         let id = self.next_id;
         let mut run = WorkerRun {
             outcome: Err(SimulationError::Aborted),
+            backends: None,
             checkpoints: Vec::new(),
             log: Vec::new(),
         };
@@ -332,8 +340,10 @@ impl WorkerHost {
                 "result" => {
                     run.outcome = match answer(&frame) {
                         Ok((protocol, metadata, buffers)) => {
-                            worker_wire_result(id, protocol, metadata, buffers)
-                                .map_err(|error| locator.locate(error))
+                            let (backends, result) =
+                                worker_wire_result(id, protocol, metadata, buffers);
+                            run.backends = backends;
+                            result.map_err(|error| locator.locate(error))
                         }
                         Err(message) => Err(SimulationError::InvalidConfig(message)),
                     };
