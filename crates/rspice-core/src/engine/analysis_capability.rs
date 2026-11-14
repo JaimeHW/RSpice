@@ -447,16 +447,41 @@ const PSS_VERILOGA_EVIDENCE: &[&str] = &[
     "tests/veriloga/veriloga_hb.rs::shooting_refuses_each_operator_with_state_by_name",
 ];
 
-/// Shooting takes a runtime Verilog-A module whose state is the charges it
-/// contributes: the period map integrates them from the node voltages the
-/// period starts at, as it does a generated model's.
+/// Native shooting takes a runtime Verilog-A module whose state is the
+/// charges it contributes: the period map integrates them from the node
+/// voltages the period starts at, as it does a generated model's. A driven
+/// orbit whose modules keep other state goes to event shooting, which reads
+/// that state from the transient's own image; the gate here is native
+/// shooting's, and event shooting answers its own admission.
 const fn pss_admissible_veriloga() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::PssAdmissibleVerilogA,
         token: PSS_VERILOGA_OPERATOR,
-        condition: "every Verilog-A module whose analog body is memoryless equations and `ddt` of the charges it contributes, with no voltage contribution, no `ddt` it does not contribute as a charge, no idt, laplace_*, absdelay, idtmod or zi_*, no transition, slew, cross, above, timer or last_crossing, no $abstime and no variable kept between time points; its charges are integrated over the period from the node voltages the period starts at",
+        condition: "by native shooting, every Verilog-A module whose analog body is memoryless equations and `ddt` of the charges it contributes, with no voltage contribution, no `ddt` it does not contribute as a charge, no idt, laplace_*, absdelay, idtmod or zi_*, no transition, slew, cross, above, timer or last_crossing, no $abstime and no variable kept between time points, its charges integrated over the period from the node voltages the period starts at; on a driven orbit, by event shooting, every other module without laplace_*, absdelay, idtmod or zi_* whose events and the values they write come back every period",
         evidence: PSS_VERILOGA_EVIDENCE,
     }
+}
+
+/// The native and XSPICE analog devices PSS and the small-signal analyses
+/// on its orbit take: what their declared periodic contracts admit, and on a
+/// driven orbit the voltage- and current-controlled switches native shooting
+/// does not carry, which event shooting solves and PAC, PXF and PNOISE
+/// linearize in the time domain.
+const fn event_carrier_contracts(analysis: CapabilityAnalysis) -> CellSupport {
+    periodic_contracts(
+        "analysis.periodic.device",
+        match analysis {
+            CapabilityAnalysis::Pss => {
+                "every instance whose declared periodic contracts admit it, and on a driven orbit voltage- and current-controlled switches, by event shooting"
+            }
+            CapabilityAnalysis::Pnoise => {
+                "every instance whose declared periodic contracts admit it, and on an event shooting orbit voltage- and current-controlled switches whose controls carry no noise where they change, for driven noise from white sources, output-referred or sampled at a phase"
+            }
+            _ => {
+                "every instance whose declared periodic contracts admit it, and on an event shooting orbit voltage- and current-controlled switches whose controls carry no small signal where they change"
+            }
+        },
+    )
 }
 
 /// The periodic steady state a periodic small-signal analysis linearizes
@@ -619,6 +644,11 @@ pub const fn capability_cell(
             ),
         },
         A::Pss | A::Hb | A::Pac | A::Pnoise | A::Pxf | A::Pstb => match family {
+            F::SpiceNative | F::XspiceAnalog
+                if matches!(analysis, A::Pss | A::Pac | A::Pxf | A::Pnoise) =>
+            {
+                event_carrier_contracts(analysis)
+            }
             F::SpiceNative | F::XspiceAnalog => periodic_contracts(
                 "analysis.periodic.device",
                 "every instance whose declared periodic contracts admit it",
