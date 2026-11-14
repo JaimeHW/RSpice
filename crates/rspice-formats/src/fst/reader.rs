@@ -265,10 +265,11 @@ mod tests {
     };
 
     fn fst_bytes(last_bit: &[u8]) -> Vec<u8> {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
+        // The clock alone is not unique: macOS reports whole microseconds, so
+        // two tests on parallel threads could share a file and delete it
+        // under each other.
+        static FIXTURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let nonce = FIXTURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
             "rspice-formats-fst-{}-{nonce}.fst",
             std::process::id()
