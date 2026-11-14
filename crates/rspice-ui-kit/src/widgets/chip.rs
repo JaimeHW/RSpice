@@ -6,6 +6,31 @@ use egui::{Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 use crate::theme::{self, FontWeight, mix};
 use crate::tokens::{self, Tokens};
 
+/// The width [`chip`] takes for `label`, so a row can make room for one
+/// before it draws it.
+pub fn chip_width(ui: &Ui, label: &str) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let text = ui
+        .painter()
+        .layout_no_wrap(
+            label.to_owned(),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text,
+        )
+        .size()
+        .x;
+    padded_width(&t, text)
+}
+
+fn padded_width(t: &Tokens, text: f32) -> f32 {
+    let floor = if t.metrics.is_touch() {
+        t.metrics.touch_target()
+    } else {
+        0.0
+    };
+    (text + 18.0).max(floor)
+}
+
 /// A 22 px toggle chip with a mono label. Returns the response; the caller
 /// owns the toggle state (`on`).
 pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
@@ -19,11 +44,13 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
             c.text,
         )
     });
-    let touch = t.metrics.is_touch();
-    let side = t.metrics.touch_target();
     let size = vec2(
-        (galley.size().x + 18.0).max(if touch { side } else { 0.0 }),
-        if touch { side } else { 22.0 },
+        padded_width(&t, galley.size().x),
+        if t.metrics.is_touch() {
+            t.metrics.touch_target()
+        } else {
+            22.0
+        },
     );
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| {

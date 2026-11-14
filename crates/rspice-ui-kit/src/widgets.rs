@@ -47,7 +47,7 @@ mod view_switch;
 
 pub use button::{Button, IconButton};
 pub use canvas_entry::{CanvasEntry, CanvasEntryChoice, CanvasEntryRows};
-pub use chip::chip;
+pub use chip::{chip, chip_width};
 pub use combo::Combo;
 pub(crate) use command_form::middle_elided;
 pub use command_form::{CommandForm, FieldLine, FormRows, ListEdit, ListWords, TableColumn};
