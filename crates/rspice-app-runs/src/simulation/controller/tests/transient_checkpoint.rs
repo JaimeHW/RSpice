@@ -129,12 +129,13 @@ fn transient_checkpoint_authored_plan_prepares_captures_and_resumes_native_run()
 
 fn images() -> Vec<Arc<[u8]>> {
     let (_, images) = Engine::default()
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &rspice_core::Netlist::parse(DECK).unwrap(),
             20e-9,
             1e-9,
             TransientStartupMode::OperatingPoint,
             &[7e-9, 14e-9],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     images
@@ -287,10 +288,10 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
         let netlist = rspice_core::Netlist::parse(DECK).unwrap();
         let engine = Engine::default();
         let (expected, _) = engine
-            .run_tran_resume(&netlist, &original, 20e-9, 1e-9)
+            .run_tran_resume_with_abort(&netlist, &original, 20e-9, 1e-9, &rspice_core::NoAbort)
             .unwrap();
         let (actual, _) = engine
-            .run_tran_resume(&netlist, &checkpoint, 20e-9, 1e-9)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 20e-9, 1e-9, &rspice_core::NoAbort)
             .unwrap();
         assert_eq!(actual.time, expected.time);
         assert_eq!(actual.voltages, expected.voltages);

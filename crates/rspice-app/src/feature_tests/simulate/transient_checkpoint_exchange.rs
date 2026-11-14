@@ -19,12 +19,13 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
     )
     .unwrap();
     let (_, images) = rspice_core::Engine::default()
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &deck,
             20e-9,
             1e-9,
             TransientStartupMode::OperatingPoint,
             &[7e-9],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let checkpoint = TransientCheckpointEvidence::from_bytes(

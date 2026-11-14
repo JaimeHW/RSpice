@@ -305,11 +305,12 @@ fn classic_jfet_pss_prescribed_and_tied_charge_have_no_spurious_state() {
         .unwrap();
     assert!(point.shooting_state().is_empty());
     engine
-        .run_pss_with_continuation_state(
+        .run_pss_with_continuation_state_abort(
             &netlist,
             PssConfig::new(F0)
                 .with_points_per_period(64)
                 .with_tstab_periods(0),
+            &rspice_core::NoAbort,
         )
         .expect("the complete accepted JFET state supports continuation");
     for (&time, &voltage) in point
@@ -1429,10 +1430,16 @@ fn check_nonlinear_time_features(kinds: std::ops::RangeInclusive<usize>) {
         if kind == 0 {
             let engine = Engine::default();
             let (_, state) = engine
-                .run_pss_with_continuation_state(&netlist, config)
+                .run_pss_with_continuation_state_abort(&netlist, config, &rspice_core::NoAbort)
                 .unwrap();
             let (continued, _) = engine
-                .run_tran_from_pss_state(&netlist, &state, source_period, source_period / 4.0)
+                .run_tran_from_pss_state_with_abort(
+                    &netlist,
+                    &state,
+                    source_period,
+                    source_period / 4.0,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             let output = continued
                 .node_names
@@ -1658,10 +1665,19 @@ fn pss_refines_source_clocks_beyond_the_requested_grid_nyquist_limit() {
                     .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
                     .map(|point| point.analysis().clone()),
                 engine
-                    .run_pss_with_continuation_state(&netlist, config.clone())
+                    .run_pss_with_continuation_state_abort(
+                        &netlist,
+                        config.clone(),
+                        &rspice_core::NoAbort,
+                    )
                     .map(|(analysis, _)| analysis),
                 engine
-                    .run_pss_with_frozen_source_continuation_state(&netlist, config.clone(), &[])
+                    .run_pss_with_frozen_source_continuation_state_abort(
+                        &netlist,
+                        config.clone(),
+                        &[],
+                        &rspice_core::NoAbort,
+                    )
                     .map(|(analysis, _)| analysis),
                 engine
                     .run_pss_operating_point_with_dc_seed_and_abort(
@@ -1862,10 +1878,19 @@ fn every_pss_entry_point_rejects_nonperiodic_forcing_even_when_endpoints_alias()
                 )
                 .unwrap_err(),
             engine
-                .run_pss_with_continuation_state(&netlist, config.clone())
+                .run_pss_with_continuation_state_abort(
+                    &netlist,
+                    config.clone(),
+                    &rspice_core::NoAbort,
+                )
                 .unwrap_err(),
             engine
-                .run_pss_with_frozen_source_continuation_state(&netlist, config, &[])
+                .run_pss_with_frozen_source_continuation_state_abort(
+                    &netlist,
+                    config,
+                    &[],
+                    &rspice_core::NoAbort,
+                )
                 .unwrap_err(),
         ];
         for error in errors {
@@ -2432,10 +2457,20 @@ fn prescribed_current_drives_mutual_flux_without_adding_a_shooting_coordinate() 
                     assert!(multiplier.im.abs() < 1e-10);
                     assert!((multiplier.re / (-1.0_f64).exp() - 1.0).abs() < 0.001);
                     let (_, state) = engine
-                        .run_pss_with_continuation_state(&netlist, config)
+                        .run_pss_with_continuation_state_abort(
+                            &netlist,
+                            config,
+                            &rspice_core::NoAbort,
+                        )
                         .unwrap();
                     let (continued, _) = engine
-                        .run_tran_from_pss_state(&netlist, &state, 1e-6, 1e-6 / 1024.0)
+                        .run_tran_from_pss_state_with_abort(
+                            &netlist,
+                            &state,
+                            1e-6,
+                            1e-6 / 1024.0,
+                            &rspice_core::NoAbort,
+                        )
                         .unwrap();
                     for (name, phasor, dc) in voltages {
                         let node = continued
@@ -2492,7 +2527,7 @@ fn coupled_winding_history_preserves_the_transformer_orbit_and_continuation() {
                 .with_points_per_period(points)
                 .with_tolerance(1e-11);
             let (analysis, state) = engine
-                .run_pss_with_continuation_state(&netlist, config)
+                .run_pss_with_continuation_state_abort(&netlist, config, &rspice_core::NoAbort)
                 .unwrap();
             let mut error: f64 = 0.0;
             for (name, transfer) in transfers {
@@ -2539,7 +2574,13 @@ fn coupled_winding_history_preserves_the_transformer_orbit_and_continuation() {
                     "the coupled orbit must match its exact impedance matrix"
                 );
                 let (continued, _) = engine
-                    .run_tran_from_pss_state(&netlist, &state, 2e-6, 1e-6 / 1024.0)
+                    .run_tran_from_pss_state_with_abort(
+                        &netlist,
+                        &state,
+                        2e-6,
+                        1e-6 / 1024.0,
+                        &rspice_core::NoAbort,
+                    )
                     .unwrap();
                 for (name, transfer) in transfers {
                     let node = continued
@@ -2711,10 +2752,20 @@ fn series_inductors_share_one_current_state_and_preserve_the_voltage_division() 
             .unwrap_err();
         assert!(error.to_string().contains("semantic circuit identity"));
         let (_, state) = Engine::default()
-            .run_pss_with_continuation_state(&netlist, point.config().clone())
+            .run_pss_with_continuation_state_abort(
+                &netlist,
+                point.config().clone(),
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         let (continued, _) = Engine::default()
-            .run_tran_from_pss_state(&netlist, &state, 2e-6, 1e-6 / 1024.0)
+            .run_tran_from_pss_state_with_abort(
+                &netlist,
+                &state,
+                2e-6,
+                1e-6 / 1024.0,
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         for (index, &time) in continued.time.iter().enumerate() {
             let expected =
@@ -3662,10 +3713,16 @@ fn coupled_series_windings_preserve_flux_and_internal_resistive_voltage_drops() 
                 }
             }
             let (_, state) = engine
-                .run_pss_with_continuation_state(&netlist, config)
+                .run_pss_with_continuation_state_abort(&netlist, config, &rspice_core::NoAbort)
                 .unwrap();
             let (continued, _) = engine
-                .run_tran_from_pss_state(&netlist, &state, 1e-6, 1e-6 / 1024.0)
+                .run_tran_from_pss_state_with_abort(
+                    &netlist,
+                    &state,
+                    1e-6,
+                    1e-6 / 1024.0,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             for (name, transfer) in transfers {
                 let node = continued

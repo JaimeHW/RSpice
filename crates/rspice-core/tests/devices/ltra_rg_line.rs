@@ -489,13 +489,14 @@ fn periodic_analyses_admit_an_rg_line() {
          .end\n"
     );
     engine()
-        .run_pss_with_continuation_state(
+        .run_pss_with_continuation_state_abort(
             &Netlist::parse(&pss_deck).expect("PSS RG deck parses"),
             PssConfig::new(f0)
                 .with_harmonics(2)
                 .with_points_per_period(64)
                 .with_tstab_periods(0)
                 .with_tolerance(1.0e-6),
+            &rspice_core::NoAbort,
         )
         .expect("an RG line carries no period-map state and must be admitted");
 
@@ -566,13 +567,14 @@ RL out 0 75
 ";
     let netlist = Netlist::parse(deck).expect("zero-length deck parses");
     engine()
-        .run_pss_with_continuation_state(
+        .run_pss_with_continuation_state_abort(
             &netlist,
             PssConfig::new(1.0e6)
                 .with_harmonics(2)
                 .with_points_per_period(64)
                 .with_tstab_periods(0)
                 .with_tolerance(1.0e-6),
+            &rspice_core::NoAbort,
         )
         .expect("an ideal through connection carries no period-map state");
 

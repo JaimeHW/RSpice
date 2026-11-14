@@ -451,7 +451,7 @@ fn a_device_no_checkpoint_carries_refuses_the_checkpoint_capture() {
     let netlist = parse(B3SOI_GAIN_STAGE);
     let (stop, max_step) = transient_window(&netlist);
     let error = Engine::default()
-        .run_tran_checkpointed(&netlist, stop, max_step)
+        .run_tran_checkpointed_with_abort(&netlist, stop, max_step, &rspice_core::NoAbort)
         .expect_err("B3SOI's accepted state has no checkpoint image");
     let rspice_core::SimulationError::UnsupportedCapability(refusal) = &error else {
         panic!("a checkpoint blocker is a capability refusal: {error}");
@@ -562,7 +562,7 @@ fn a_checkpoint_file_linearizes_like_the_live_state_it_holds() {
     let writer = parse(&DIODE_RC.replace(".ac dec 4 1k 100meg actimes=20u\n", ""));
     let (stop, max_step) = transient_window(&writer);
     let (_, checkpoint) = engine
-        .run_tran_checkpointed(&writer, stop, max_step)
+        .run_tran_checkpointed_with_abort(&writer, stop, max_step, &rspice_core::NoAbort)
         .expect("the diode-RC transient checkpoints");
     let checkpoint = through_a_file(&checkpoint.into_checkpoint().unwrap(), "diode_rc");
 
@@ -654,7 +654,7 @@ fn an_ac_sensitivity_at_a_state_follows_the_state_through_the_perturbation() {
     let writer = parse(&deck(1.0e4, ""));
     let (stop, max_step) = transient_window(&writer);
     let (_, checkpoint) = engine
-        .run_tran_checkpointed(&writer, stop, max_step)
+        .run_tran_checkpointed_with_abort(&writer, stop, max_step, &rspice_core::NoAbort)
         .expect("the diode-RC transient checkpoints");
     let checkpoint = checkpoint.into_checkpoint().unwrap();
     let at_checkpoint = parse(&deck(
@@ -871,12 +871,13 @@ mod trim {
         // stop time: both are the deck's own 550u.
         let (stop, max_step) = transient_window(&writer);
         let (_, scheduled) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &writer,
                 stop,
                 max_step,
                 rspice_core::engine::TransientStartupMode::OperatingPoint,
                 &[stop],
+                &rspice_core::NoAbort,
             )
             .expect("the trim deck writes its restart checkpoint");
         let [saved] = scheduled.as_slice() else {
@@ -1033,7 +1034,7 @@ mod edge_tick {
         let writer = parse(&deck(&module, ""));
         let (stop, max_step) = transient_window(&writer);
         let (_, checkpoint) = engine
-            .run_tran_checkpointed(&writer, stop, max_step)
+            .run_tran_checkpointed_with_abort(&writer, stop, max_step, &rspice_core::NoAbort)
             .expect("the clocked deck checkpoints on the clock's edge");
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let checkpoint = through_a_file(&checkpoint, "edge");

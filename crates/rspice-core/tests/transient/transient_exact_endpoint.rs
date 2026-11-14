@@ -102,12 +102,13 @@ fn final_time_is_canonical_across_run_checkpoint_schedule_and_resume() {
     );
 
     let (scheduled_result, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             STOP_TIME,
             max_step,
             TransientStartupMode::OperatingPoint,
             &[PREVIOUS_TIME, STOP_TIME],
+            &rspice_core::NoAbort,
         )
         .expect("scheduled checkpoint transient completes");
     assert_exact_terminal_sample(&scheduled_result, "scheduled checkpoint run");
@@ -128,7 +129,7 @@ fn final_time_is_canonical_across_run_checkpoint_schedule_and_resume() {
     }
 
     let (first_segment, seam_checkpoint) = engine
-        .run_tran_checkpointed(&netlist, PREVIOUS_TIME, max_step)
+        .run_tran_checkpointed_with_abort(&netlist, PREVIOUS_TIME, max_step, &rspice_core::NoAbort)
         .expect("first checkpointed segment completes");
     let seam_checkpoint = seam_checkpoint.into_checkpoint().unwrap();
     assert_eq!(
@@ -150,7 +151,13 @@ fn final_time_is_canonical_across_run_checkpoint_schedule_and_resume() {
         .expect("the exact seam checkpoint survives serialization");
 
     let (resumed, final_checkpoint) = engine
-        .run_tran_resume(&netlist, &serialized_seam, STOP_TIME, max_step)
+        .run_tran_resume_with_abort(
+            &netlist,
+            &serialized_seam,
+            STOP_TIME,
+            max_step,
+            &rspice_core::NoAbort,
+        )
         .expect("checkpoint continuation completes");
     let final_checkpoint = final_checkpoint.into_checkpoint().unwrap();
     assert_eq!(

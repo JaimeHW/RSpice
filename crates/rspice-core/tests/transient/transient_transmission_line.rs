@@ -31,12 +31,13 @@ fn finite_behavioral_current_controls_drive_the_analytic_delayed_rl_wave() {
         for control in ["L1", "R1"] {
             let source = Netlist::parse(&format!("finite-current line drive\nVD drive 0 DC 0 SIN(0 1m 1G)\nR1 drive coil 1k\nL1 coil 0 1u\nB1 0 near I={{I({control})^1}}\nT1 near 0 far 0 Z0=50 TD=1n\nRL far 0 50\n.options device zeroresistancetol=1k\n.options GMIN=0 RELTOL=1e-7 VNTOL=1e-10 ABSTOL=1e-16\n.save v(far) i(b1)\n.end\n")).unwrap();
             let (full, checkpoints) = engine
-                .run_tran_checkpoint_schedule_with_startup_mode(
+                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                     &source,
                     2.5e-9,
                     max_step,
                     TransientStartupMode::OperatingPoint,
                     &[1.2e-9],
+                    &rspice_core::NoAbort,
                 )
                 .unwrap();
             let voltage = full.try_voltage_waveform_named("far").unwrap();
@@ -60,7 +61,13 @@ fn finite_behavioral_current_controls_drive_the_analytic_delayed_rl_wave() {
             )
             .unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&source, &checkpoint, 2.5e-9, max_step)
+                .run_tran_resume_with_abort(
+                    &source,
+                    &checkpoint,
+                    2.5e-9,
+                    max_step,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             let seam = full
                 .time
@@ -110,11 +117,17 @@ fn controlled_current_drive_preserves_line_waves_and_current_observations_on_res
             let engine = Engine::new(config);
             let full = engine.run_tran(&source, 2.5e-9, 2e-12).unwrap();
             let (_, checkpoint) = engine
-                .run_tran_checkpointed(&source, 1.2e-9, 2e-12)
+                .run_tran_checkpointed_with_abort(&source, 1.2e-9, 2e-12, &rspice_core::NoAbort)
                 .unwrap();
             let checkpoint = checkpoint.into_checkpoint().unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&source, &checkpoint, 2.5e-9, 2e-12)
+                .run_tran_resume_with_abort(
+                    &source,
+                    &checkpoint,
+                    2.5e-9,
+                    2e-12,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             for result in [&full, &resumed] {
                 let voltage = result.try_voltage_waveform_named("far").unwrap();
@@ -167,10 +180,12 @@ fn smooth_behavioral_drive_preserves_matched_line_delay_and_continuation() {
     ] {
         let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
         let result = engine.run_tran(&deck, 2.5e-9, 2e-12).unwrap();
-        let (_, checkpoint) = engine.run_tran_checkpointed(&deck, 1.2e-9, 2e-12).unwrap();
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed_with_abort(&deck, 1.2e-9, 2e-12, &rspice_core::NoAbort)
+            .unwrap();
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&deck, &checkpoint, 2.5e-9, 2e-12)
+            .run_tran_resume_with_abort(&deck, &checkpoint, 2.5e-9, 2e-12, &rspice_core::NoAbort)
             .unwrap();
         for result in [&result, &resumed] {
             for (&time, &voltage) in result
@@ -244,12 +259,18 @@ fn loaded_lossless_line_preserves_dc_bias_through_startup_and_resume() {
                 );
             }
             let (first, checkpoint) = engine
-                .run_tran_checkpointed(&deck, 0.75e-6, 0.125e-6)
+                .run_tran_checkpointed_with_abort(&deck, 0.75e-6, 0.125e-6, &rspice_core::NoAbort)
                 .unwrap();
             let checkpoint = checkpoint.into_checkpoint().unwrap();
             let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&deck, &checkpoint, 3.25e-6, 0.125e-6)
+                .run_tran_resume_with_abort(
+                    &deck,
+                    &checkpoint,
+                    3.25e-6,
+                    0.125e-6,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             for result in [&first, &resumed] {
                 for (node, reference) in [("near", near_reference), ("far", far_reference)] {
@@ -282,12 +303,13 @@ fn native_diode_storage_has_finite_current_at_line_arrival_and_packed_restart() 
     ] {
         let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
         let (result, checkpoints) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &deck,
                 1.51e-9,
                 1e-12,
                 rspice_core::engine::TransientStartupMode::OperatingPoint,
                 &[arrival],
+                &rspice_core::NoAbort,
             )
             .unwrap();
         let index = result
@@ -321,7 +343,7 @@ fn native_diode_storage_has_finite_current_at_line_arrival_and_packed_restart() 
             .unwrap();
         let checkpoint = TransientCheckpoint::from_bytes(&packed).unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&deck, &checkpoint, 1.51e-9, 1e-12)
+            .run_tran_resume_with_abort(&deck, &checkpoint, 1.51e-9, 1e-12, &rspice_core::NoAbort)
             .unwrap();
         assert_eq!(
             resumed.try_branch_current_waveform_named("d1").unwrap()[0].to_bits(),
@@ -404,7 +426,13 @@ fn capacitor_ic_current_tracks_a_matched_line_arrival() {
             )
             .unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&deck, &checkpoint, 3.2e-9, 0.5e-12)
+                .run_tran_resume_with_abort(
+                    &deck,
+                    &checkpoint,
+                    3.2e-9,
+                    0.5e-12,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             let offset = full
                 .time
@@ -478,7 +506,7 @@ fn prescribed_capacitor_load_preserves_the_analytic_line_arrival() {
             .unwrap();
         let checkpoint = TransientCheckpoint::from_bytes(&bytes).unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&deck, &checkpoint, 2.4e-9, 0.25e-12)
+            .run_tran_resume_with_abort(&deck, &checkpoint, 2.4e-9, 0.25e-12, &rspice_core::NoAbort)
             .unwrap();
         let offset = result
             .time

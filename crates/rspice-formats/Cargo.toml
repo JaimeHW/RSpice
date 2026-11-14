@@ -17,6 +17,8 @@ project-results = [
 ]
 result-validation-observation = ["project-results"]
 table-schema = []
+# Hidden helpers that only the dependents' tests call.
+test-support = []
 # Reuse canonical retained results without enabling the engine in default codecs.
 result-csv = ["dep:rspice-vocabulary", "dep:rspice-core", "dep:rspice-results"]
 result-digital = ["dep:rspice-core", "dep:rspice-results"]

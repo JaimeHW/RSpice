@@ -137,7 +137,13 @@ fn gp_capacitor_ic_charge_fanout_survives_packed_restart() {
                 )
                 .unwrap();
                 let (resumed, _) = engine
-                    .run_tran_resume(&deck, &checkpoint, 4e-9, 0.5e-12)
+                    .run_tran_resume_with_abort(
+                        &deck,
+                        &checkpoint,
+                        4e-9,
+                        0.5e-12,
+                        &rspice_core::NoAbort,
+                    )
                     .unwrap();
                 let offset = result
                     .time
@@ -341,7 +347,13 @@ fn gp_prescribed_capacitor_events_keep_product_charge_current_and_restart() {
                     )
                     .unwrap();
                     let (resumed, _) = engine
-                        .run_tran_resume(&deck, &checkpoint, 2.4e-9, 5e-12)
+                        .run_tran_resume_with_abort(
+                            &deck,
+                            &checkpoint,
+                            2.4e-9,
+                            5e-12,
+                            &rspice_core::NoAbort,
+                        )
                         .unwrap();
                     let offset = result
                         .time

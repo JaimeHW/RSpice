@@ -134,7 +134,13 @@ fn envelope_bjt_restores_transport_depletion_and_substrate_currents() {
         .unwrap();
         for checkpoint in [checkpoint, packed] {
             let (resumed, _) = engine
-                .run_tran_resume(&deck, &checkpoint, 0.36e-3, 0.25e-6)
+                .run_tran_resume_with_abort(
+                    &deck,
+                    &checkpoint,
+                    0.36e-3,
+                    0.25e-6,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             assert_eq!(resumed.time.first(), transient.time.last());
             assert_eq!(resumed.time.last(), Some(&0.36e-3));

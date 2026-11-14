@@ -161,7 +161,7 @@ mod tests {
             // The independently captured checkpoint is the accepted VM state,
             // not a waveform reconstruction or output-derived approximation.
             let (_, checkpoint) = engine
-                .run_tran_checkpointed(&netlist, period, period / 64.0)
+                .run_tran_checkpointed_with_abort(&netlist, period, period / 64.0, &crate::NoAbort)
                 .unwrap();
             let checkpoint = checkpoint.into_checkpoint().unwrap();
             let mut circuit = engine.build_circuit(&netlist).unwrap();

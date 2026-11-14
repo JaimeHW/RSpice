@@ -21,7 +21,7 @@ fn checkpoint_fixture() -> (Engine, Netlist, TransientCheckpoint) {
     .expect("checkpoint fixture parses");
     let engine = Engine::new(SimulationConfig::default());
     let (_, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, 6.0e-6, 50.0e-9)
+        .run_tran_checkpointed_with_abort(&netlist, 6.0e-6, 50.0e-9, &rspice_core::NoAbort)
         .expect("checkpoint fixture first segment solves");
     let checkpoint = checkpoint.into_checkpoint().unwrap();
     (engine, netlist, checkpoint)
@@ -268,10 +268,10 @@ fn packed_and_unpacked_restores_produce_identical_state_and_trajectory() {
     assert_eq!(unpacked, packed);
 
     let (unpacked_result, unpacked_final) = engine
-        .run_tran_resume(&netlist, &unpacked, 12.0e-6, 50.0e-9)
+        .run_tran_resume_with_abort(&netlist, &unpacked, 12.0e-6, 50.0e-9, &rspice_core::NoAbort)
         .expect("unpacked checkpoint resumes");
     let (packed_result, packed_final) = engine
-        .run_tran_resume(&netlist, &packed, 12.0e-6, 50.0e-9)
+        .run_tran_resume_with_abort(&netlist, &packed, 12.0e-6, 50.0e-9, &rspice_core::NoAbort)
         .expect("packed checkpoint resumes");
     assert_eq!(unpacked_final, packed_final);
     assert_eq!(unpacked_result.time, packed_result.time);

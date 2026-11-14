@@ -1353,12 +1353,13 @@ fn transient_checkpoint_import_answers_without_a_dialog() {
     )
     .expect("the checkpoint deck parses");
     let (_, images) = rspice_core::Engine::default()
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &deck,
             20e-9,
             1e-9,
             TransientStartupMode::OperatingPoint,
             &[7e-9],
+            &rspice_core::NoAbort,
         )
         .expect("the checkpoint deck solves");
     let bytes = images[0]

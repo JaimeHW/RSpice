@@ -641,7 +641,13 @@ fn expression_capacitor_control_copy_preserves_the_manufactured_waveform() {
                         )
                         .unwrap();
                         let (resumed, _) = engine
-                            .run_tran_resume(&deck, &checkpoint, 1e-6, 0.125e-9)
+                            .run_tran_resume_with_abort(
+                                &deck,
+                                &checkpoint,
+                                1e-6,
+                                0.125e-9,
+                                &rspice_core::NoAbort,
+                            )
                             .unwrap();
                         let offset = result
                             .time
@@ -771,7 +777,13 @@ fn expression_capacitor_current_retains_small_increments_after_capacitance_chang
                     )
                     .unwrap();
                     let (resumed, _) = engine
-                        .run_tran_resume(&deck, &checkpoint, 2e-9, 1e-12)
+                        .run_tran_resume_with_abort(
+                            &deck,
+                            &checkpoint,
+                            2e-9,
+                            1e-12,
+                            &rspice_core::NoAbort,
+                        )
                         .unwrap();
                     let offset = result
                         .time
@@ -903,7 +915,13 @@ fn prescribed_capacitance_differentiates_product_charge_and_resumes() {
                             )
                             .unwrap();
                             let (resumed, _) = engine
-                                .run_tran_resume(&deck, &checkpoint, 1e-6, 1e-9)
+                                .run_tran_resume_with_abort(
+                                    &deck,
+                                    &checkpoint,
+                                    1e-6,
+                                    1e-9,
+                                    &rspice_core::NoAbort,
+                                )
                                 .unwrap();
                             let offset = result
                                 .time

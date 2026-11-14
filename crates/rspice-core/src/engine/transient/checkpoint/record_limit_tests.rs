@@ -10,11 +10,11 @@ fn public_resume_preserves_record_limit_identity_and_the_input_checkpoint() {
     let netlist = Netlist::parse("record ceiling\nVC c 0 2\nVB b 0 .7\nQ1 c b 0 qm\nX1 c b cell\n.model qm NPN IS=1e-16 BF=100 TF=1n PTF=90\n.subckt cell c b\nQ2 c b 0 qm\n.ends\n.end\n").unwrap();
     let engine = Engine::default();
     let (_, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, 1e-10, 1e-12)
+        .run_tran_checkpointed_with_abort(&netlist, 1e-10, 1e-12, &crate::NoAbort)
         .unwrap();
     let checkpoint = checkpoint.into_checkpoint().unwrap();
     let (baseline, _) = engine
-        .run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12)
+        .run_tran_resume_with_abort(&netlist, &checkpoint, 2e-10, 1e-12, &crate::NoAbort)
         .unwrap();
     let mut full = checkpoint.clone();
     let junction = &mut full.accepted_junction_history;
@@ -34,7 +34,7 @@ fn public_resume_preserves_record_limit_identity_and_the_input_checkpoint() {
     junction.bjt_history.phase[1] = Some(DelayBuffer::from_checkpoint(phase).unwrap());
     let before = full.clone();
     let error = engine
-        .run_tran_resume(&netlist, &full, 2e-10, 1e-12)
+        .run_tran_resume_with_abort(&netlist, &full, 2e-10, 1e-12, &crate::NoAbort)
         .unwrap_err();
     let descriptor = error.descriptor();
     assert_eq!(descriptor.code, SimulationErrorCode::ResourceLimit);
@@ -53,7 +53,7 @@ fn public_resume_preserves_record_limit_identity_and_the_input_checkpoint() {
     assert!(std::error::Error::source(&error).is_some());
     assert_eq!(full, before);
     let (rerun, _) = engine
-        .run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12)
+        .run_tran_resume_with_abort(&netlist, &checkpoint, 2e-10, 1e-12, &crate::NoAbort)
         .unwrap();
     assert_eq!(rerun.time, baseline.time);
     assert_eq!(rerun.voltages, baseline.voltages);

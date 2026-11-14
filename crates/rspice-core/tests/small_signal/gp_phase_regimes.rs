@@ -449,7 +449,7 @@ fn exact_restart(
     )
     .unwrap();
     let (resumed, _) = engine
-        .run_tran_resume(deck, &checkpoint, stop, step)
+        .run_tran_resume_with_abort(deck, &checkpoint, stop, step, &rspice_core::NoAbort)
         .unwrap();
     let seam = original
         .time

@@ -185,11 +185,11 @@ fn a_resumed_run_continues_the_esave_traces_exactly() {
         .run_tran(&netlist, stop, step)
         .expect("the whole run");
     let (_, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, seam, step)
+        .run_tran_checkpointed_with_abort(&netlist, seam, step, &rspice_core::NoAbort)
         .expect("the first part checkpoints");
     let checkpoint = checkpoint.into_checkpoint().unwrap();
     let (resumed, _) = engine
-        .run_tran_resume(&netlist, &checkpoint, stop, step)
+        .run_tran_resume_with_abort(&netlist, &checkpoint, stop, step, &rspice_core::NoAbort)
         .expect("the rest resumes");
     let _ = std::fs::remove_dir_all(&directory);
     let start = resumed.time[0];

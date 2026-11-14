@@ -34,7 +34,7 @@ fn terminal_current_probes_preserve_hierarchy_replay_and_checkpoint_identity() {
     ];
     let engine = Engine::new(SimulationConfig::default());
     let (result, checkpoint) = engine
-        .run_tran_checkpointed(&replayed, 6e-9, 0.1e-9)
+        .run_tran_checkpointed_with_abort(&replayed, 6e-9, 0.1e-9, &rspice_core::NoAbort)
         .unwrap();
     let checkpoint = checkpoint.into_checkpoint().unwrap();
     let current = result.try_branch_current_waveform_named("VMETER").unwrap();
@@ -46,7 +46,7 @@ fn terminal_current_probes_preserve_hierarchy_replay_and_checkpoint_identity() {
         assert!((current[index] - expected).abs() < 1e-10);
     }
     engine
-        .run_tran_resume(&replayed, &checkpoint, 7e-9, 0.1e-9)
+        .run_tran_resume_with_abort(&replayed, &checkpoint, 7e-9, 0.1e-9, &rspice_core::NoAbort)
         .unwrap();
     let (mut other, _) =
         Engine::create_perturbed_netlist_multi(&original, &[("RR".into(), 2000.0)]).unwrap();
@@ -54,7 +54,7 @@ fn terminal_current_probes_preserve_hierarchy_replay_and_checkpoint_identity() {
     other.saves = replayed.saves.clone();
     other.add_terminal_current_probe(probe(target, 1));
     let error = engine
-        .run_tran_resume(&other, &checkpoint, 7e-9, 0.1e-9)
+        .run_tran_resume_with_abort(&other, &checkpoint, 7e-9, 0.1e-9, &rspice_core::NoAbort)
         .unwrap_err();
     assert!(error.to_string().contains("different netlist"), "{error}");
 }

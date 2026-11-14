@@ -90,12 +90,13 @@ fn vbic_self_heated_delay_pss_matches_ngspice_and_retains_all_states() {
         config.convergence_config.junction_gmin_target = 0.0;
         let engine = Engine::new(config);
         let (analysis, state) = engine
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &netlist,
                 PssConfig::new(F0)
                     .with_points_per_period(512)
                     .with_tstab_periods(0)
                     .with_tolerance(1e-9),
+                &rspice_core::NoAbort,
             )
             .unwrap_or_else(|error| panic!("{kind}: {error}"));
         let names = ["th", "Q1.__xf1.internal", "Q1.__xf2.internal"];
@@ -117,7 +118,7 @@ fn vbic_self_heated_delay_pss_matches_ngspice_and_retains_all_states() {
             }
         }
         let (continued, checkpoint) = engine
-            .run_tran_from_pss_state(&netlist, &state, 1e-6, 1e-9)
+            .run_tran_from_pss_state_with_abort(&netlist, &state, 1e-6, 1e-9, &rspice_core::NoAbort)
             .unwrap();
         let traces = [
             continued.try_voltage_waveform_named(names[0]).unwrap(),
@@ -147,7 +148,7 @@ fn vbic_self_heated_delay_pss_matches_ngspice_and_retains_all_states() {
             }
         }
         let (direct, _) = engine
-            .run_tran_resume(&netlist, &checkpoint, 1.2e-6, 1e-9)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 1.2e-6, 1e-9, &rspice_core::NoAbort)
             .unwrap();
         for encoding in [
             TransientCheckpointEncoding::Unpacked,
@@ -156,7 +157,13 @@ fn vbic_self_heated_delay_pss_matches_ngspice_and_retains_all_states() {
             let restored =
                 TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&netlist, &restored, 1.2e-6, 1e-9)
+                .run_tran_resume_with_abort(
+                    &netlist,
+                    &restored,
+                    1.2e-6,
+                    1e-9,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             assert_eq!(resumed.time, direct.time);
             assert_eq!(resumed.voltages, direct.voltages);
@@ -226,12 +233,13 @@ fn gummel_poon_nonlinear_pss_matches_ngspice_and_retains_its_orbit() {
         config.convergence_config.junction_gmin_target = 0.0;
         let engine = Engine::new(config);
         let (analysis, state) = engine
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &netlist,
                 PssConfig::new(F0)
                     .with_points_per_period(512)
                     .with_tstab_periods(0)
                     .with_tolerance(1e-10),
+                &rspice_core::NoAbort,
             )
             .unwrap_or_else(|error| panic!("{kind} periodic solve: {error}"));
         let node = analysis
@@ -249,7 +257,7 @@ fn gummel_poon_nonlinear_pss_matches_ngspice_and_retains_its_orbit() {
             );
         }
         let (continued, checkpoint) = engine
-            .run_tran_from_pss_state(&netlist, &state, 1e-6, 1e-9)
+            .run_tran_from_pss_state_with_abort(&netlist, &state, 1e-6, 1e-9, &rspice_core::NoAbort)
             .unwrap();
         let traces = [
             continued
@@ -278,7 +286,7 @@ fn gummel_poon_nonlinear_pss_matches_ngspice_and_retains_its_orbit() {
             }
         }
         let (direct, _) = engine
-            .run_tran_resume(&netlist, &checkpoint, 1.2e-6, 1e-9)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 1.2e-6, 1e-9, &rspice_core::NoAbort)
             .unwrap();
         for encoding in [
             TransientCheckpointEncoding::Unpacked,
@@ -287,7 +295,13 @@ fn gummel_poon_nonlinear_pss_matches_ngspice_and_retains_its_orbit() {
             let restored =
                 TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&netlist, &restored, 1.2e-6, 1e-9)
+                .run_tran_resume_with_abort(
+                    &netlist,
+                    &restored,
+                    1.2e-6,
+                    1e-9,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             assert_eq!(resumed.time, direct.time);
             assert_eq!(resumed.voltages, direct.voltages);
@@ -301,16 +315,17 @@ fn nonlinear_descriptor_preserves_physical_transient_continuation() {
     let deck=Netlist::parse("Implicit nonlinear continuation\nV1 src 0 SIN(0.6 0.1 1)\nR1 src in 100\nR2 in 0 200\nD1 in 0 DM\n.model DM D(IS=1e-12)\nE1 out 0 in 0 2\nCout out 0 1u\n.end\n").unwrap();
     let engine = Engine::default();
     let (analysis, state) = engine
-        .run_pss_with_continuation_state(
+        .run_pss_with_continuation_state_abort(
             &deck,
             PssConfig::new(1.0)
                 .with_points_per_period(128)
                 .with_tstab_periods(0),
+            &rspice_core::NoAbort,
         )
         .unwrap();
     assert!(analysis.monodromy.is_empty());
     let (continued, _) = engine
-        .run_tran_from_pss_state(&deck, &state, 0.1, 0.001)
+        .run_tran_from_pss_state_with_abort(&deck, &state, 0.1, 0.001, &rspice_core::NoAbort)
         .unwrap();
     let node = |name: &str| {
         continued
@@ -366,16 +381,17 @@ fn coupled_descriptor_winding_state_survives_transient_continuation() {
         let deck = Netlist::parse(&format!("Coupled flux continuation\n{source}\nL1 in mid 0.1\nR1 mid 0 1\nH1 out 0 L1 2\nCout out 0 0.2\n.end\n")).unwrap();
         let engine = Engine::default();
         let (analysis, state) = engine
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &deck,
                 PssConfig::new(1.0)
                     .with_points_per_period(1024)
                     .with_tstab_periods(0),
+                &rspice_core::NoAbort,
             )
             .unwrap();
         assert_eq!(analysis.monodromy.len(), 1);
         let (continued, _) = engine
-            .run_tran_from_pss_state(&deck, &state, 0.1, 0.001)
+            .run_tran_from_pss_state_with_abort(&deck, &state, 0.1, 0.001, &rspice_core::NoAbort)
             .unwrap();
         let output = continued
             .node_names
@@ -419,16 +435,17 @@ fn vcvs_dependent_charge_survives_transient_continuation() {
         let deck = Netlist::parse(&format!("Controlled charge continuation\nI1 0 in SIN(0 {amplitude} 1)\nR1 in 0 1\nC1 in 0 0.1\nE1 out 0 in 0 2\nC2 out 0 0.2\n.end\n")).unwrap();
         let engine = Engine::default();
         let (analysis, state) = engine
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &deck,
                 PssConfig::new(1.0)
                     .with_points_per_period(1024)
                     .with_tstab_periods(0),
+                &rspice_core::NoAbort,
             )
             .unwrap();
         assert_eq!(analysis.monodromy.len(), 1);
         let (continued, _) = engine
-            .run_tran_from_pss_state(&deck, &state, 0.1, 0.001)
+            .run_tran_from_pss_state_with_abort(&deck, &state, 0.1, 0.001, &rspice_core::NoAbort)
             .unwrap();
         let node = |name: &str| {
             continued
@@ -478,16 +495,17 @@ fn classic_jfet_pss_continues_the_analytic_orbit_and_persists_its_history() {
         )).unwrap();
         let engine = Engine::default();
         let (_, state) = engine
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &netlist,
                 PssConfig::new(F0)
                     .with_points_per_period(256)
                     .with_tstab_periods(0)
                     .with_tolerance(1e-10),
+                &rspice_core::NoAbort,
             )
             .unwrap();
         let (continued, checkpoint) = engine
-            .run_tran_from_pss_state(&netlist, &state, 1e-6, 2e-9)
+            .run_tran_from_pss_state_with_abort(&netlist, &state, 1e-6, 2e-9, &rspice_core::NoAbort)
             .unwrap();
         let output = continued.try_voltage_waveform_named("out").unwrap();
         let wc = std::f64::consts::TAU * F0 * 1e3 * 900e-12;
@@ -501,7 +519,7 @@ fn classic_jfet_pss_continues_the_analytic_orbit_and_persists_its_history() {
             );
         }
         let (direct, _) = engine
-            .run_tran_resume(&netlist, &checkpoint, 1.2e-6, 2e-9)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 1.2e-6, 2e-9, &rspice_core::NoAbort)
             .unwrap();
         for encoding in [
             TransientCheckpointEncoding::Unpacked,
@@ -510,7 +528,13 @@ fn classic_jfet_pss_continues_the_analytic_orbit_and_persists_its_history() {
             let restored =
                 TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&netlist, &restored, 1.2e-6, 2e-9)
+                .run_tran_resume_with_abort(
+                    &netlist,
+                    &restored,
+                    1.2e-6,
+                    2e-9,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             assert_eq!(resumed.time, direct.time);
             assert_eq!(resumed.voltages, direct.voltages);
@@ -526,11 +550,12 @@ fn vbic_periodic_charge_and_continuation_match_analytic_rc() {
         let netlist = Netlist::parse(&format!("VBIC periodic charge\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\nQ1 0 out 0 0 vm\n.model vm {polarity}(LEVEL={level} IS=1e-40 IBEI=1e-40 IBCI=1e-40 CJE=100p CJC=20p MJE=0 MJC=0 TF=0 TR=0 CBEO=30p CBCO=9p RCX=0 RCI=0 RBX=0 RBI=0 RE=0 RBP=0 RS=0 CJEP=0 CJCP=0 CCSO=0 QCO=0 GAMM=0 ISP=0)\n.end\n")).unwrap();
         let engine = Engine::default();
         let (analysis, state) = engine
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &netlist,
                 PssConfig::new(F0)
                     .with_points_per_period(64)
                     .with_tstab_periods(0),
+                &rspice_core::NoAbort,
             )
             .unwrap_or_else(|error| panic!("{polarity}: {error}"));
         let node = |names: &[String]| {
@@ -600,7 +625,7 @@ fn vbic_periodic_charge_and_continuation_match_analytic_rc() {
             );
         }
         let (continued, checkpoint) = engine
-            .run_tran_from_pss_state(&netlist, &state, 1e-6, 2e-9)
+            .run_tran_from_pss_state_with_abort(&netlist, &state, 1e-6, 2e-9, &rspice_core::NoAbort)
             .unwrap();
         for (&time, &value) in continued
             .time
@@ -614,7 +639,7 @@ fn vbic_periodic_charge_and_continuation_match_analytic_rc() {
             );
         }
         let (direct, _) = engine
-            .run_tran_resume(&netlist, &checkpoint, 1.2e-6, 2e-9)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 1.2e-6, 2e-9, &rspice_core::NoAbort)
             .unwrap();
         for encoding in [
             TransientCheckpointEncoding::Unpacked,
@@ -623,7 +648,13 @@ fn vbic_periodic_charge_and_continuation_match_analytic_rc() {
             let restored =
                 TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&netlist, &restored, 1.2e-6, 2e-9)
+                .run_tran_resume_with_abort(
+                    &netlist,
+                    &restored,
+                    1.2e-6,
+                    2e-9,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             assert_eq!(direct.time, resumed.time);
             assert_eq!(direct.voltages, resumed.voltages);
@@ -641,7 +672,7 @@ fn refined_pss_preserves_default_pulse_edges_through_checkpoint_resume() {
         .with_points_per_period(32)
         .with_tstab_periods(0);
     let (analysis, state) = engine
-        .run_pss_with_continuation_state(&netlist, config)
+        .run_pss_with_continuation_state_abort(&netlist, config, &rspice_core::NoAbort)
         .unwrap();
     assert!(analysis.result.time.len() > 513);
     let expected = |time: f64| {
@@ -675,10 +706,10 @@ fn refined_pss_preserves_default_pulse_edges_through_checkpoint_resume() {
         );
     }
     let (_, checkpoint) = engine
-        .run_tran_from_pss_state(&netlist, &state, 1.2e-6, 2e-10)
+        .run_tran_from_pss_state_with_abort(&netlist, &state, 1.2e-6, 2e-10, &rspice_core::NoAbort)
         .unwrap();
     let (direct, _) = engine
-        .run_tran_resume(&netlist, &checkpoint, 2.1e-6, 2e-10)
+        .run_tran_resume_with_abort(&netlist, &checkpoint, 2.1e-6, 2e-10, &rspice_core::NoAbort)
         .unwrap();
     for encoding in [
         TransientCheckpointEncoding::Unpacked,
@@ -687,7 +718,7 @@ fn refined_pss_preserves_default_pulse_edges_through_checkpoint_resume() {
         let restored =
             TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &restored, 2.1e-6, 2e-10)
+            .run_tran_resume_with_abort(&netlist, &restored, 2.1e-6, 2e-10, &rspice_core::NoAbort)
             .unwrap();
         assert_eq!(resumed.time, direct.time);
         assert_eq!(resumed.voltages, direct.voltages);
@@ -712,13 +743,14 @@ fn autonomous_startup_kick_remains_quiet_on_the_orbit_and_reactivates_after_save
     let netlist = Netlist::parse("oscillator startup continuation\nL1 osc 0 1u\nC1 osc 0 1u\nB1 osc 0 I=-0.05*v(osc)+0.025*v(osc)*v(osc)*v(osc)\nI1 0 kick PULSE(0 1 10u 10n 10n 1u 1)\nRkick kick osc 1\n.end\n").unwrap();
     let engine = Engine::default();
     let (analysis, state) = engine
-        .run_pss_with_continuation_state(
+        .run_pss_with_continuation_state_abort(
             &netlist,
             PssConfig::autonomous()
                 .with_period_guess(6.3e-6)
                 .with_tstab_periods(30)
                 .with_tolerance(1e-6)
                 .with_max_iterations(60),
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let node = |names: &[String], name: &str| {
@@ -740,10 +772,10 @@ fn autonomous_startup_kick_remains_quiet_on_the_orbit_and_reactivates_after_save
         );
     }
     let (_, checkpoint) = engine
-        .run_tran_from_pss_state(&netlist, &state, 8e-6, 1e-8)
+        .run_tran_from_pss_state_with_abort(&netlist, &state, 8e-6, 1e-8, &rspice_core::NoAbort)
         .unwrap();
     let (direct, _) = engine
-        .run_tran_resume(&netlist, &checkpoint, 12e-6, 1e-8)
+        .run_tran_resume_with_abort(&netlist, &checkpoint, 12e-6, 1e-8, &rspice_core::NoAbort)
         .unwrap();
     for encoding in [
         TransientCheckpointEncoding::Unpacked,
@@ -752,7 +784,7 @@ fn autonomous_startup_kick_remains_quiet_on_the_orbit_and_reactivates_after_save
         let restored =
             TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &restored, 12e-6, 1e-8)
+            .run_tran_resume_with_abort(&netlist, &restored, 12e-6, 1e-8, &rspice_core::NoAbort)
             .unwrap();
         assert_eq!(resumed.time, direct.time);
         assert_eq!(resumed.voltages, direct.voltages);
@@ -807,15 +839,22 @@ fn source_defaults_survive_pss_continuation_and_persisted_transient_segments() {
                 ..Default::default()
             });
             let (_, state) = engine
-                .run_pss_with_continuation_state(
+                .run_pss_with_continuation_state_abort(
                     &netlist,
                     PssConfig::new(F0)
                         .with_points_per_period(128)
                         .with_tstab_periods(0),
+                    &rspice_core::NoAbort,
                 )
                 .unwrap();
             let (continued, checkpoint) = engine
-                .run_tran_from_pss_state(&netlist, &state, 1.31e-6, 3e-9)
+                .run_tran_from_pss_state_with_abort(
+                    &netlist,
+                    &state,
+                    1.31e-6,
+                    3e-9,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             for encoding in [
                 TransientCheckpointEncoding::Unpacked,
@@ -825,10 +864,22 @@ fn source_defaults_survive_pss_continuation_and_persisted_transient_segments() {
                     TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap())
                         .unwrap();
                 let (resumed, _) = engine
-                    .run_tran_resume(&netlist, &restored, 2.57e-6, 2e-9)
+                    .run_tran_resume_with_abort(
+                        &netlist,
+                        &restored,
+                        2.57e-6,
+                        2e-9,
+                        &rspice_core::NoAbort,
+                    )
                     .unwrap();
                 let (direct, _) = engine
-                    .run_tran_resume(&netlist, &checkpoint, 2.57e-6, 2e-9)
+                    .run_tran_resume_with_abort(
+                        &netlist,
+                        &checkpoint,
+                        2.57e-6,
+                        2e-9,
+                        &rspice_core::NoAbort,
+                    )
                     .unwrap();
                 assert_eq!(resumed.time, direct.time);
                 assert_eq!(resumed.voltages, direct.voltages);
@@ -909,10 +960,11 @@ fn frozen_modulation_source_is_authenticated_and_reactivated_at_time_zero() {
     let netlist = envelope_startup_deck();
     let engine = Engine::new(SimulationConfig::default());
     let (pss, state) = engine
-        .run_pss_with_frozen_source_continuation_state(
+        .run_pss_with_frozen_source_continuation_state_abort(
             &netlist,
             compact_pss_config(),
             &["vMoD".to_string()],
+            &rspice_core::NoAbort,
         )
         .expect("frozen-source PSS produces a continuation state");
 
@@ -935,7 +987,13 @@ fn frozen_modulation_source_is_authenticated_and_reactivated_at_time_zero() {
     );
 
     let (transient, _) = engine
-        .run_tran_from_pss_state(&netlist, &state, 600.0e-9, 10.0e-9)
+        .run_tran_from_pss_state_with_abort(
+            &netlist,
+            &state,
+            600.0e-9,
+            10.0e-9,
+            &rspice_core::NoAbort,
+        )
         .expect("original modulation waveform reactivates from the authenticated state");
     assert_eq!(transient.time.first().copied(), Some(0.0));
     let mod_index = transient
@@ -963,12 +1021,22 @@ fn linear_rl_continuation_retains_the_exact_supported_inductor_path() {
     .expect("linear RL deck parses");
     let engine = Engine::new(SimulationConfig::default());
     let (pss, state) = engine
-        .run_pss_with_continuation_state(&netlist, compact_pss_config())
+        .run_pss_with_continuation_state_abort(
+            &netlist,
+            compact_pss_config(),
+            &rspice_core::NoAbort,
+        )
         .expect("ordinary R/L and independent sources have an exact continuation contract");
 
     assert_eq!(pss.result.time.last().copied(), Some(state.period()));
     let (transient, _) = engine
-        .run_tran_from_pss_state(&netlist, &state, 100.0e-9, 10.0e-9)
+        .run_tran_from_pss_state_with_abort(
+            &netlist,
+            &state,
+            100.0e-9,
+            10.0e-9,
+            &rspice_core::NoAbort,
+        )
         .expect("the retained inductor history resumes in transient");
     assert_eq!(transient.time.first().copied(), Some(0.0));
     assert_eq!(transient.time.last().copied(), Some(100.0e-9));
@@ -979,10 +1047,11 @@ fn continuation_artifact_rejects_different_netlist_or_engine_configuration() {
     let netlist = envelope_startup_deck();
     let engine = Engine::new(SimulationConfig::default());
     let (_, state) = engine
-        .run_pss_with_frozen_source_continuation_state(
+        .run_pss_with_frozen_source_continuation_state_abort(
             &netlist,
             compact_pss_config(),
             &["Vmod".to_string()],
+            &rspice_core::NoAbort,
         )
         .expect("continuation state");
 
@@ -997,7 +1066,13 @@ fn continuation_artifact_rejects_different_netlist_or_engine_configuration() {
     )
     .expect("changed deck parses");
     let deck_error = engine
-        .run_tran_from_pss_state(&changed_deck, &state, 100.0e-9, 10.0e-9)
+        .run_tran_from_pss_state_with_abort(
+            &changed_deck,
+            &state,
+            100.0e-9,
+            10.0e-9,
+            &rspice_core::NoAbort,
+        )
         .expect_err("artifact must not cross semantic netlist identity");
     assert!(
         deck_error.to_string().contains("different netlist"),
@@ -1008,7 +1083,13 @@ fn continuation_artifact_rejects_different_netlist_or_engine_configuration() {
     changed_config.temperature += 10.0;
     let changed_engine = Engine::new(changed_config);
     let config_error = changed_engine
-        .run_tran_from_pss_state(&netlist, &state, 100.0e-9, 10.0e-9)
+        .run_tran_from_pss_state_with_abort(
+            &netlist,
+            &state,
+            100.0e-9,
+            10.0e-9,
+            &rspice_core::NoAbort,
+        )
         .expect_err("artifact must not cross resolved simulation configuration identity");
     assert!(
         config_error
@@ -1034,16 +1115,23 @@ fn continuation_artifact_authenticates_external_waveform_bytes() {
     .expect("PWL FILE deck parses");
     let engine = Engine::new(SimulationConfig::default());
     let (_, state) = engine
-        .run_pss_with_frozen_source_continuation_state(
+        .run_pss_with_frozen_source_continuation_state_abort(
             &netlist,
             compact_pss_config(),
             &["Vmod".to_string()],
+            &rspice_core::NoAbort,
         )
         .expect("the original external waveform snapshot is authenticated");
 
     waveform.replace("0,0\n0.000001,2\n");
     let error = engine
-        .run_tran_from_pss_state(&netlist, &state, 100.0e-9, 10.0e-9)
+        .run_tran_from_pss_state_with_abort(
+            &netlist,
+            &state,
+            100.0e-9,
+            10.0e-9,
+            &rspice_core::NoAbort,
+        )
         .expect_err("changed external waveform bytes must invalidate the artifact");
     assert!(
         error.to_string().contains("different netlist"),
@@ -1060,10 +1148,14 @@ fn memoryless_diode_supports_periodic_transient_continuation() {
     .unwrap();
     let engine = Engine::default();
     let (_, state) = engine
-        .run_pss_with_continuation_state(&netlist, compact_pss_config())
+        .run_pss_with_continuation_state_abort(
+            &netlist,
+            compact_pss_config(),
+            &rspice_core::NoAbort,
+        )
         .unwrap();
     let (transient, _) = engine
-        .run_tran_from_pss_state(&netlist, &state, 1e-6, 1e-8)
+        .run_tran_from_pss_state_with_abort(&netlist, &state, 1e-6, 1e-8, &rspice_core::NoAbort)
         .unwrap();
     assert!(
         transient
@@ -1083,15 +1175,22 @@ fn charged_diode_continuation_preserves_the_periodic_orbit_from_time_zero() {
     .unwrap();
     let engine = Engine::default();
     let (_, state) = engine
-        .run_pss_with_continuation_state(
+        .run_pss_with_continuation_state_abort(
             &netlist,
             compact_pss_config()
                 .with_points_per_period(512)
                 .with_tolerance(1e-10),
+            &rspice_core::NoAbort,
         )
         .expect("PSS captures the charged diode's accepted state");
     let (transient, _) = engine
-        .run_tran_from_pss_state(&netlist, &state, 2e-6, 1e-6 / 1024.0)
+        .run_tran_from_pss_state_with_abort(
+            &netlist,
+            &state,
+            2e-6,
+            1e-6 / 1024.0,
+            &rspice_core::NoAbort,
+        )
         .expect("charged periodic history resumes through the ordinary transient engine");
     let ratio = std::f64::consts::TAU;
     let amplitude = 0.01 / (1.0 + ratio * ratio).sqrt();
@@ -1124,7 +1223,11 @@ fn continuation_retains_supported_behavioral_state_and_refuses_unadvanced_famili
     )
     .expect("coupled-inductor deck parses");
     let coupled_error = engine
-        .run_pss_with_continuation_state(&coupled, compact_pss_config())
+        .run_pss_with_continuation_state_abort(
+            &coupled,
+            compact_pss_config(),
+            &rspice_core::NoAbort,
+        )
         .expect_err("singular magnetic flux must fail before the periodic solve");
     assert!(
         coupled_error
@@ -1143,14 +1246,24 @@ fn continuation_retains_supported_behavioral_state_and_refuses_unadvanced_famili
     )
     .expect("behavioral deck parses");
     let (behavioral_pss, behavioral_state) = engine
-        .run_pss_with_continuation_state(&behavioral, compact_pss_config())
+        .run_pss_with_continuation_state_abort(
+            &behavioral,
+            compact_pss_config(),
+            &rspice_core::NoAbort,
+        )
         .expect("behavioral integral state is represented in the PSS continuation");
     assert_eq!(
         behavioral_pss.result.time.last().copied(),
         Some(behavioral_state.period())
     );
     engine
-        .run_tran_from_pss_state(&behavioral, &behavioral_state, 100e-9, 10e-9)
+        .run_tran_from_pss_state_with_abort(
+            &behavioral,
+            &behavioral_state,
+            100e-9,
+            10e-9,
+            &rspice_core::NoAbort,
+        )
         .expect("the retained behavioral state resumes transient integration");
 
     let thermal_resistor = Netlist::parse(
@@ -1164,7 +1277,11 @@ fn continuation_retains_supported_behavioral_state_and_refuses_unadvanced_famili
     .expect("thermal resistor deck parses");
     let thermal_error =
         Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
-            .run_pss_with_continuation_state(&thermal_resistor, compact_pss_config())
+            .run_pss_with_continuation_state_abort(
+                &thermal_resistor,
+                compact_pss_config(),
+                &rspice_core::NoAbort,
+            )
             .expect_err("thermal accepted temperature must fail before solving");
     assert!(
         thermal_error
@@ -1186,12 +1303,22 @@ fn stateless_behavioral_source_has_an_exact_pss_continuation_path() {
     .expect("stateless behavioral deck parses");
     let engine = Engine::new(SimulationConfig::default());
     let (pss, state) = engine
-        .run_pss_with_continuation_state(&netlist, compact_pss_config())
+        .run_pss_with_continuation_state_abort(
+            &netlist,
+            compact_pss_config(),
+            &rspice_core::NoAbort,
+        )
         .expect("stateless behavioral source produces an exact continuation state");
 
     assert_eq!(pss.result.time.last().copied(), Some(state.period()));
     let (transient, _) = engine
-        .run_tran_from_pss_state(&netlist, &state, 100.0e-9, 10.0e-9)
+        .run_tran_from_pss_state_with_abort(
+            &netlist,
+            &state,
+            100.0e-9,
+            10.0e-9,
+            &rspice_core::NoAbort,
+        )
         .expect("stateless behavioral source resumes from the PSS state");
     assert_eq!(transient.time.first().copied(), Some(0.0));
     assert_eq!(transient.time.last().copied(), Some(100.0e-9));
@@ -1214,17 +1341,39 @@ fn pss_continuation_checkpoint_has_bit_exact_split_run_parity() {
     };
     let engine = Engine::new(simulation);
     let (_, state) = engine
-        .run_pss_with_continuation_state(&netlist, compact_pss_config())
+        .run_pss_with_continuation_state_abort(
+            &netlist,
+            compact_pss_config(),
+            &rspice_core::NoAbort,
+        )
         .expect("PSS continuation state");
 
     let (uninterrupted, _) = engine
-        .run_tran_from_pss_state(&netlist, &state, 200.0e-9, 100.0e-9)
+        .run_tran_from_pss_state_with_abort(
+            &netlist,
+            &state,
+            200.0e-9,
+            100.0e-9,
+            &rspice_core::NoAbort,
+        )
         .expect("uninterrupted PSS continuation");
     let (_, seam_checkpoint) = engine
-        .run_tran_from_pss_state(&netlist, &state, 100.0e-9, 100.0e-9)
+        .run_tran_from_pss_state_with_abort(
+            &netlist,
+            &state,
+            100.0e-9,
+            100.0e-9,
+            &rspice_core::NoAbort,
+        )
         .expect("first split segment");
     let (resumed, _) = engine
-        .run_tran_resume(&netlist, &seam_checkpoint, 200.0e-9, 100.0e-9)
+        .run_tran_resume_with_abort(
+            &netlist,
+            &seam_checkpoint,
+            200.0e-9,
+            100.0e-9,
+            &rspice_core::NoAbort,
+        )
         .expect("second split segment resumes");
 
     let seam = uninterrupted
@@ -1252,19 +1401,21 @@ fn frozen_source_contract_rejects_ambiguous_or_unknown_names() {
     let engine = Engine::new(SimulationConfig::default());
 
     let duplicate = engine
-        .run_pss_with_frozen_source_continuation_state(
+        .run_pss_with_frozen_source_continuation_state_abort(
             &netlist,
             compact_pss_config(),
             &["Vmod".to_string(), "vMOD".to_string()],
+            &rspice_core::NoAbort,
         )
         .expect_err("case-insensitive duplicates must fail before solving");
     assert!(duplicate.to_string().contains("duplicate source 'vmod'"));
 
     let unknown = engine
-        .run_pss_with_frozen_source_continuation_state(
+        .run_pss_with_frozen_source_continuation_state_abort(
             &netlist,
             compact_pss_config(),
             &["Vmissing".to_string()],
+            &rspice_core::NoAbort,
         )
         .expect_err("unknown sources must fail closed");
     assert!(
@@ -1279,16 +1430,17 @@ fn zero_ohm_charge_constraints_survive_transient_continuation() {
     let deck = Netlist::parse("Shorted charge continuation\nI1 0 out SIN(0.5 1 1 0 0 37)\nR1 out 0 0 AC=2\nC1 out 0 1u\nD1 out 0 DM\n.model DM D(IS=0 CJO=1n M=0)\n.end\n").unwrap();
     let engine = Engine::default();
     let (analysis, state) = engine
-        .run_pss_with_continuation_state(
+        .run_pss_with_continuation_state_abort(
             &deck,
             PssConfig::new(1.0)
                 .with_points_per_period(128)
                 .with_tstab_periods(0),
+            &rspice_core::NoAbort,
         )
         .unwrap();
     assert!(analysis.monodromy.is_empty());
     let (continued, _) = engine
-        .run_tran_from_pss_state(&deck, &state, 0.1, 0.01)
+        .run_tran_from_pss_state_with_abort(&deck, &state, 0.1, 0.01, &rspice_core::NoAbort)
         .unwrap();
     assert!(continued.voltages[0].iter().all(|voltage| *voltage == 0.0));
     let branch = |name: &str| {

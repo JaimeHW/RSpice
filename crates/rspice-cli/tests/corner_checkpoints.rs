@@ -63,8 +63,10 @@ fn checkpoint_resume_names_do_not_depend_on_waveform_output() {
                 "{mode}, output={save_output}: {resumed:?}"
             );
             for path in paths {
-                let state = rspice_core::engine::TransientCheckpoint::load_with_abort(
+                let state = rspice_core::engine::TransientCheckpoint::load_with_limit_and_abort(
                     &path,
+                    rspice_core::engine::DEFAULT_MAX_CHECKPOINT_BYTES,
+                    rspice_core::engine::DEFAULT_MAX_CHECKPOINT_BYTES,
                     &rspice_core::NoAbort,
                 )
                 .unwrap();

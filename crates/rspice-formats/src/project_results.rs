@@ -260,6 +260,7 @@ impl ProjectSimulationResultsData {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 pub fn seal_project_result_digests(run: &mut ProjectSimulationRun) -> Result<(), String> {
     for analysis in &mut run.analyses {
         let digest = analysis

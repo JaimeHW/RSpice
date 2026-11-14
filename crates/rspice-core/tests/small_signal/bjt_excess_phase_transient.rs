@@ -93,17 +93,18 @@ fn gp_phase_support_covers_preflight_checkpoint_compression_and_continuation() {
         let engine = Engine::new(config);
         assert!(
             engine
-                .preflight_transient_checkpoint(&source)
+                .preflight_transient_checkpoint_with_abort(&source, &rspice_core::NoAbort)
                 .unwrap()
                 .is_resumable()
         );
         let (full, scheduled) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &source,
                 2e-9,
                 4e-12,
                 TransientStartupMode::OperatingPoint,
                 &[1e-9],
+                &rspice_core::NoAbort,
             )
             .unwrap();
         assert_eq!(scheduled.len(), 1);
@@ -115,7 +116,7 @@ fn gp_phase_support_covers_preflight_checkpoint_compression_and_continuation() {
             let restored =
                 TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&source, &restored, 2e-9, 4e-12)
+                .run_tran_resume_with_abort(&source, &restored, 2e-9, 4e-12, &rspice_core::NoAbort)
                 .unwrap();
             let seam = full
                 .time
@@ -132,10 +133,12 @@ fn gp_phase_support_covers_preflight_checkpoint_compression_and_continuation() {
                 assert_eq!(actual, &expected[seam..]);
             }
         }
-        let (first, checkpoint) = engine.run_tran_checkpointed(&source, 1e-9, 4e-12).unwrap();
+        let (first, checkpoint) = engine
+            .run_tran_checkpointed_with_abort(&source, 1e-9, 4e-12, &rspice_core::NoAbort)
+            .unwrap();
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let (continued, final_checkpoint) = engine
-            .run_tran_resume(&source, &checkpoint, 2e-9, 4e-12)
+            .run_tran_resume_with_abort(&source, &checkpoint, 2e-9, 4e-12, &rspice_core::NoAbort)
             .unwrap();
         let final_checkpoint = final_checkpoint.into_checkpoint().unwrap();
         assert_eq!(continued.time.first(), first.time.last());
@@ -168,12 +171,14 @@ fn gp_noncausal_phase_refuses_before_startup_and_checkpoint_publication() {
             ..SimulationConfig::default()
         });
         assert_noncausal(
-            engine.preflight_transient_checkpoint(&source).unwrap_err(),
+            engine
+                .preflight_transient_checkpoint_with_abort(&source, &rspice_core::NoAbort)
+                .unwrap_err(),
             "Q1",
         );
         assert_noncausal(
             engine
-                .run_tran_checkpointed(&source, 2e-9, 4e-12)
+                .run_tran_checkpointed_with_abort(&source, 2e-9, 4e-12, &rspice_core::NoAbort)
                 .unwrap_err(),
             "Q1",
         );
@@ -201,12 +206,14 @@ fn gp_zero_phase_preserves_transient_and_checkpoint_behavior() {
             let b = deck(&format!("{disabled} {private}"));
             assert!(
                 engine
-                    .preflight_transient_checkpoint(&b)
+                    .preflight_transient_checkpoint_with_abort(&b, &rspice_core::NoAbort)
                     .unwrap()
                     .is_resumable()
             );
             let a = engine.run_tran(&a, 2e-9, 4e-12).unwrap();
-            let (b, checkpoint) = engine.run_tran_checkpointed(&b, 2e-9, 4e-12).unwrap();
+            let (b, checkpoint) = engine
+                .run_tran_checkpointed_with_abort(&b, 2e-9, 4e-12, &rspice_core::NoAbort)
+                .unwrap();
             let checkpoint = checkpoint.into_checkpoint().unwrap();
             assert_eq!(a.time, b.time);
             assert_eq!(a.voltages, b.voltages);
@@ -226,7 +233,7 @@ fn gp_unused_phase_model_does_not_block_an_unaffected_circuit() {
     let engine = Engine::default();
     assert!(
         engine
-            .preflight_transient_checkpoint(&source)
+            .preflight_transient_checkpoint_with_abort(&source, &rspice_core::NoAbort)
             .unwrap()
             .is_resumable()
     );

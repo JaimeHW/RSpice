@@ -88,12 +88,13 @@ fn jfet_terminal_reports_preserve_displacement_and_checkpoint_seams() {
                         ..Default::default()
                     });
                     let (full, checkpoints) = engine
-                        .run_tran_checkpoint_schedule_with_startup_mode(
+                        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                             &netlist,
                             2e-6,
                             0.5e-6,
                             TransientStartupMode::OperatingPoint,
                             &[0.5e-6, 1e-6],
+                            &rspice_core::NoAbort,
                         )
                         .unwrap();
                     for (parameter, source) in [("ID", "VD"), ("IG", "VG"), ("IS", "VS")] {
@@ -122,7 +123,13 @@ fn jfet_terminal_reports_preserve_displacement_and_checkpoint_seams() {
                         )
                         .unwrap();
                         let (resumed, _) = engine
-                            .run_tran_resume(&netlist, &checkpoint, 2e-6, 0.5e-6)
+                            .run_tran_resume_with_abort(
+                                &netlist,
+                                &checkpoint,
+                                2e-6,
+                                0.5e-6,
+                                &rspice_core::NoAbort,
+                            )
                             .unwrap();
                         let offset = full
                             .time

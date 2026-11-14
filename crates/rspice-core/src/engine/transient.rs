@@ -3573,14 +3573,8 @@ impl Engine {
 
     /// Elaborate a transient deck and return its typed checkpoint capability
     /// without running the solver.
-    pub fn preflight_transient_checkpoint(
-        &self,
-        netlist: &Netlist,
-    ) -> Result<TransientCheckpointCapability, SimulationError> {
-        self.preflight_transient_checkpoint_with_abort(netlist, &NoAbort)
-    }
-
-    /// Cancellable form of [`Engine::preflight_transient_checkpoint`].
+    ///
+    /// Honors `abort` cooperatively.
     pub fn preflight_transient_checkpoint_with_abort(
         &self,
         netlist: &Netlist,
@@ -3606,16 +3600,8 @@ impl Engine {
     /// nothing, and a run that reported that only at `tstop` would have spent
     /// the whole run to say so. [`Engine::preflight_transient_checkpoint`]
     /// answers the same question without running.
-    pub fn run_tran_checkpointed(
-        &self,
-        netlist: &Netlist,
-        tstop: Value,
-        max_step: Value,
-    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
-        self.run_tran_checkpointed_with_abort(netlist, tstop, max_step, &NoAbort)
-    }
-
-    /// Run a checkpointed transient with cooperative cancellation.
+    ///
+    /// Honors `abort` cooperatively.
     pub fn run_tran_checkpointed_with_abort(
         &self,
         netlist: &Netlist,
@@ -3635,23 +3621,8 @@ impl Engine {
 
     /// Run a checkpointed transient using the startup mode of one explicitly
     /// selected `.TRAN` card.
-    pub fn run_tran_checkpointed_with_startup_mode(
-        &self,
-        netlist: &Netlist,
-        tstop: Value,
-        max_step: Value,
-        startup_mode: TransientStartupMode,
-    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
-        self.run_tran_checkpointed_with_startup_mode_and_abort(
-            netlist,
-            tstop,
-            max_step,
-            startup_mode,
-            &NoAbort,
-        )
-    }
-
-    /// Cancellable checkpointed transient with an explicit startup contract.
+    ///
+    /// Honors `abort` cooperatively.
     pub fn run_tran_checkpointed_with_startup_mode_and_abort(
         &self,
         netlist: &Netlist,
@@ -3717,28 +3688,10 @@ impl Engine {
     ///
     /// A non-empty schedule is refused before any solver work when an owner of
     /// this deck's accepted state is not checkpointable, naming every such
-    /// owner; [`Engine::preflight_transient_checkpoint`] reports the same
+    /// owner; [`Engine::preflight_transient_checkpoint_with_abort`] reports the same
     /// inventory without running.
-    pub fn run_tran_checkpoint_schedule_with_startup_mode(
-        &self,
-        netlist: &Netlist,
-        tstop: Value,
-        max_step: Value,
-        startup_mode: TransientStartupMode,
-        checkpoint_times: &[Value],
-    ) -> Result<(TransientResult, Vec<ScheduledTransientCheckpoint>), SimulationError> {
-        self.run_tran_checkpoint_schedule_with_startup_mode_and_abort(
-            netlist,
-            tstop,
-            max_step,
-            startup_mode,
-            checkpoint_times,
-            &NoAbort,
-        )
-    }
-
-    /// Cancellable form of
-    /// [`Engine::run_tran_checkpoint_schedule_with_startup_mode`].
+    ///
+    /// Honors `abort` cooperatively.
     pub fn run_tran_checkpoint_schedule_with_startup_mode_and_abort(
         &self,
         netlist: &Netlist,
@@ -3802,17 +3755,8 @@ impl Engine {
     /// A checkpoint taken before a model's `$finish`, `$stop` or `$fatal`
     /// resumes to that finish, and the resumed run ends
     /// [`TransientEnd::Finished`].
-    pub fn run_tran_resume(
-        &self,
-        netlist: &Netlist,
-        checkpoint: &TransientCheckpoint,
-        tstop: Value,
-        max_step: Value,
-    ) -> Result<(TransientResult, TransientEnd), SimulationError> {
-        self.run_tran_resume_with_abort(netlist, checkpoint, tstop, max_step, &NoAbort)
-    }
-
-    /// Resume a checkpointed transient with cooperative cancellation.
+    ///
+    /// Honors `abort` cooperatively.
     pub fn run_tran_resume_with_abort(
         &self,
         netlist: &Netlist,
@@ -3833,7 +3777,7 @@ impl Engine {
 
     /// Continue an authored Xyce-style restart deck from a checkpoint.
     ///
-    /// This API is intentionally separate from [`Engine::run_tran_resume`].
+    /// This API is intentionally separate from [`Engine::run_tran_resume_with_abort`].
     /// It permits only the differences inherent to a restart workflow: the
     /// `.TRAN` stop horizon and `.OPTIONS RESTART` file-management metadata.
     /// A collision-resistant semantic identity still binds circuit topology,
@@ -15149,12 +15093,13 @@ D1 D 0 DMOD
             Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
 
         let (_, scheduled) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &netlist,
                 1.0e-9,
                 1.0e-9,
                 TransientStartupMode::OperatingPoint,
                 &[0.0],
+                &crate::NoAbort,
             )
             .expect("t=0 scheduled junction checkpoint captures");
         let origin = scheduled[0]
@@ -15178,7 +15123,7 @@ D1 D 0 DMOD
         }
 
         let (first, final_checkpoint) = engine
-            .run_tran_checkpointed(&netlist, 1.0e-9, 1.0e-9)
+            .run_tran_checkpointed_with_abort(&netlist, 1.0e-9, 1.0e-9, &crate::NoAbort)
             .expect("first v20 junction segment solves");
         let final_checkpoint = final_checkpoint.into_checkpoint().unwrap();
         let final_history = final_checkpoint.accepted_junction_transient_history();
@@ -15216,7 +15161,7 @@ D1 D 0 DMOD
         let serialized = TransientCheckpoint::from_text(&final_checkpoint.to_text())
             .expect("v20 junction checkpoint round-trips");
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &serialized, 2.0e-9, 1.0e-9)
+            .run_tran_resume_with_abort(&netlist, &serialized, 2.0e-9, 1.0e-9, &crate::NoAbort)
             .expect("v20 junction checkpoint resumes");
         for (device, parameter) in [("Q1", "IC"), ("Q1", "IB"), ("D1", "ID")] {
             let uninterrupted = first
@@ -15263,12 +15208,13 @@ D1 D 0 DMOD
             Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
 
         let (uninterrupted, scheduled) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &netlist,
                 1.0e-9,
                 0.25e-9,
                 TransientStartupMode::OperatingPoint,
                 &[0.25e-9],
+                &crate::NoAbort,
             )
             .expect("non-breakpoint checkpoint trajectory solves");
         assert_eq!(scheduled.len(), 1);
@@ -15307,7 +15253,7 @@ D1 D 0 DMOD
                 .is_none()
         );
         let (resumed, resumed_final) = engine
-            .run_tran_resume(&netlist, &serialized, 1.0e-9, 0.25e-9)
+            .run_tran_resume_with_abort(&netlist, &serialized, 1.0e-9, 0.25e-9, &crate::NoAbort)
             .expect("promoted BJT checkpoint resumes");
         let resumed_final = resumed_final.into_checkpoint().unwrap();
         match resumed_final.accepted_integration_runtime() {
@@ -15394,12 +15340,13 @@ D1 D 0 DMOD
         let engine =
             Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
         let (uninterrupted, scheduled) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &netlist,
                 2.0e-9,
                 0.05e-9,
                 TransientStartupMode::OperatingPoint,
                 &[0.625e-9],
+                &crate::NoAbort,
             )
             .expect("native diode checkpoint trajectory solves");
         assert_eq!(scheduled.len(), 1);
@@ -15416,7 +15363,7 @@ D1 D 0 DMOD
         let serialized = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect("native diode checkpoint round-trips");
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &serialized, 2.0e-9, 0.05e-9)
+            .run_tran_resume_with_abort(&netlist, &serialized, 2.0e-9, 0.05e-9, &crate::NoAbort)
             .expect("native diode checkpoint resumes");
         let seam_index = uninterrupted
             .time
@@ -15531,12 +15478,13 @@ D1 D 0 DMOD
         .expect("UIC phase fixture parses");
         let engine = Engine::default();
         let (_, scheduled) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &netlist,
                 0.2e-9,
                 0.1e-9,
                 TransientStartupMode::Uic,
                 &[0.0],
+                &crate::NoAbort,
             )
             .expect("UIC t=0 checkpoint trajectory solves");
         assert_eq!(scheduled.len(), 1);
@@ -15772,18 +15720,19 @@ D1 D 0 DMOD
             Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
         let deck = xyce_team_resistance_noise_deck(71, true);
         let (uninterrupted, scheduled) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &deck,
                 8.0e-9,
                 0.25e-9,
                 TransientStartupMode::OperatingPoint,
                 &[3.0e-9],
+                &crate::NoAbort,
             )
             .expect("TEAM RTN checkpoint trajectory solves");
         let checkpoint = TransientCheckpoint::from_text(&scheduled[0].checkpoint.to_text())
             .expect("TEAM RTN checkpoint round-trips");
         let (resumed, _) = engine
-            .run_tran_resume(&deck, &checkpoint, 8.0e-9, 0.25e-9)
+            .run_tran_resume_with_abort(&deck, &checkpoint, 8.0e-9, 0.25e-9, &crate::NoAbort)
             .expect("TEAM RTN checkpoint resumes");
         let seam = uninterrupted
             .time
@@ -15808,7 +15757,7 @@ D1 D 0 DMOD
         assert!(matches!(error, SimulationError::Aborted));
 
         let (_, checkpoint) = engine
-            .run_tran_checkpointed(&deck, 1.0e-9, 0.25e-9)
+            .run_tran_checkpointed_with_abort(&deck, 1.0e-9, 0.25e-9, &crate::NoAbort)
             .expect("bounded TEAM RTN checkpoint captures");
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let hostile = checkpoint.to_text().replacen(
@@ -16547,11 +16496,11 @@ D1 D 0 DMOD
         let engine =
             Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
         let (first, checkpoint) = engine
-            .run_tran_checkpointed(&netlist, 0.05, 1.0e-3)
+            .run_tran_checkpointed_with_abort(&netlist, 0.05, 1.0e-3, &crate::NoAbort)
             .expect("first segment solves");
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &checkpoint, 0.1, 1.0e-3)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 0.1, 1.0e-3, &crate::NoAbort)
             .expect("resumed segment solves");
         let before = *first
             .try_branch_current_waveform_named("C1")
@@ -16595,12 +16544,12 @@ D1 D 0 DMOD
         .expect("restart-reader deck parses");
         let engine = Engine::new(SimulationConfig::default());
         let (_, checkpoint) = engine
-            .run_tran_checkpointed(&first, 20.0e-6, 1.0e-6)
+            .run_tran_checkpointed_with_abort(&first, 20.0e-6, 1.0e-6, &crate::NoAbort)
             .expect("checkpoint-writer segment solves");
         let checkpoint = checkpoint.into_checkpoint().unwrap();
 
         let exact_error = engine
-            .run_tran_resume(&restarted, &checkpoint, 50.0e-6, 1.0e-6)
+            .run_tran_resume_with_abort(&restarted, &checkpoint, 50.0e-6, 1.0e-6, &crate::NoAbort)
             .expect_err("ordinary resume must remain exact-source strict");
         assert!(
             exact_error.to_string().contains("different netlist"),
@@ -16649,12 +16598,13 @@ D1 D 0 DMOD
             .expect("uninterrupted BUG_1284 baseline solves");
         let schedule = [0.0, 5.0e-9, 10.0e-9, 15.0e-9, 20.0e-9];
         let (_, checkpoints) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &first,
                 20.0e-9,
                 0.25e-9,
                 TransientStartupMode::OperatingPoint,
                 &schedule,
+                &crate::NoAbort,
             )
             .expect("one continuous first run captures the restart schedule");
         assert_eq!(checkpoints.len(), schedule.len());
@@ -16748,12 +16698,13 @@ D1 D 0 DMOD
         let engine =
             Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
         let (_, scheduled) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &netlist,
                 12.0e-9,
                 0.25e-9,
                 TransientStartupMode::OperatingPoint,
                 &[2.0e-9],
+                &crate::NoAbort,
             )
             .expect("dynamic-arrival checkpoint run solves");
         let checkpoint = &scheduled[0].checkpoint;
@@ -16769,7 +16720,7 @@ D1 D 0 DMOD
         );
 
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &serialized, 12.0e-9, 0.25e-9)
+            .run_tran_resume_with_abort(&netlist, &serialized, 12.0e-9, 0.25e-9, &crate::NoAbort)
             .expect("dynamic-arrival checkpoint resumes");
         for &arrival in serialized
             .pending_tline_arrivals()
@@ -16803,12 +16754,13 @@ D1 D 0 DMOD
             .map(|index| index as Value * 1.0e-9)
             .collect::<Vec<_>>();
         let error = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &netlist,
                 50.0e-9,
                 1.0e-9,
                 TransientStartupMode::OperatingPoint,
                 &schedule,
+                &crate::NoAbort,
             )
             .expect_err("aggregate checkpoint retention must obey the result-value budget");
         assert!(
@@ -17700,7 +17652,7 @@ D1 D 0 DMOD
         };
 
         let (first_full, first_checkpoint) = engine
-            .run_tran_checkpointed(&netlist, 500.0e-6, 2.0e-6)
+            .run_tran_checkpointed_with_abort(&netlist, 500.0e-6, 2.0e-6, &crate::NoAbort)
             .expect("ordinary first segment solves");
         let (first_compressed, compressed_checkpoint) = engine
             .run_tran_checkpointed_compressed_with_startup_mode_and_abort(
@@ -17727,7 +17679,13 @@ D1 D 0 DMOD
         }
 
         let (resumed_full, final_checkpoint) = engine
-            .run_tran_resume(&netlist, &first_checkpoint, 1.0e-3, 2.0e-6)
+            .run_tran_resume_with_abort(
+                &netlist,
+                &first_checkpoint,
+                1.0e-3,
+                2.0e-6,
+                &crate::NoAbort,
+            )
             .expect("ordinary resumed segment solves");
         let (resumed_compressed, compressed_final_checkpoint) = engine
             .run_tran_resume_compressed_with_abort(
@@ -18995,12 +18953,12 @@ D1 D 0 DMOD
             ..Default::default()
         });
         let (_, checkpoint) = engine
-            .run_tran_checkpointed(&netlist, 0.4, 1.0)
+            .run_tran_checkpointed_with_abort(&netlist, 0.4, 1.0, &crate::NoAbort)
             .expect("checkpoint seam lands on the explicit breakpoint");
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         assert!((checkpoint.time - 0.4).abs() <= 1.0e-12);
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &checkpoint, 1.0, 1.0)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 1.0, 1.0, &crate::NoAbort)
             .expect("active span ceiling no longer refuses checkpoint resume");
         assert_eq!(resumed.time.first().copied(), Some(checkpoint.time));
         let worst_post_seam_dt = resumed
@@ -19397,19 +19355,20 @@ D1 D 0 DMOD
         let engine =
             Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
         let (uninterrupted, scheduled) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &netlist,
                 4.0e-9,
                 0.25e-9,
                 TransientStartupMode::OperatingPoint,
                 &[2.0e-9],
+                &crate::NoAbort,
             )
             .expect("checkpointed trajectory solves");
         assert_eq!(scheduled.len(), 1);
         let checkpoint = TransientCheckpoint::from_text(&scheduled[0].checkpoint.to_text())
             .expect("solution-dependent capacitor checkpoint round-trips");
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &checkpoint, 4.0e-9, 0.25e-9)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 4.0e-9, 0.25e-9, &crate::NoAbort)
             .expect("solution-dependent capacitor checkpoint resumes");
         let seam = uninterrupted
             .time

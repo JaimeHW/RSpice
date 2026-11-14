@@ -903,11 +903,11 @@ fn a_checkpoint_across_a_converter_resumes_or_refuses_by_name() {
         .expect("the uninterrupted run");
     for stop in [60e-9, 100e-9] {
         let (_, checkpoint) = engine
-            .run_tran_checkpointed(&netlist, stop, 1e-9)
+            .run_tran_checkpointed_with_abort(&netlist, stop, 1e-9, &rspice_core::NoAbort)
             .expect("checkpoints");
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &checkpoint, 400e-9, 1e-9)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 400e-9, 1e-9, &rspice_core::NoAbort)
             .expect("resumes");
         for time in [80e-9, 120e-9, 169e-9, 200e-9, 280e-9, 350e-9]
             .into_iter()
@@ -947,7 +947,13 @@ fn a_checkpoint_across_a_converter_resumes_or_refuses_by_name() {
         let older = format!("{}{other}{}", &text[..at], &text[at + digits..]);
         let refusal = match TransientCheckpoint::from_bytes(older.as_bytes()) {
             Err(error) => error,
-            Ok(image) => match engine.run_tran_resume(&netlist, &image, 400e-9, 1e-9) {
+            Ok(image) => match engine.run_tran_resume_with_abort(
+                &netlist,
+                &image,
+                400e-9,
+                1e-9,
+                &rspice_core::NoAbort,
+            ) {
                 Ok(_) => panic!("an image with another converter model is refused"),
                 Err(error) => error.to_string(),
             },
@@ -1111,11 +1117,11 @@ fn a_checkpoint_inside_a_pending_deadline_resumes_onto_the_uninterrupted_run() {
     let start = x + 50e-9;
     for stop in [1.0e-6, x + 25e-9, start + 50e-9] {
         let (_, checkpoint) = engine
-            .run_tran_checkpointed(&netlist, stop, 10e-9)
+            .run_tran_checkpointed_with_abort(&netlist, stop, 10e-9, &rspice_core::NoAbort)
             .expect("checkpoints");
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &checkpoint, 4e-6, 10e-9)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 4e-6, 10e-9, &rspice_core::NoAbort)
             .expect("resumes");
         assert_resumes_onto(&whole, &resumed, stop);
     }
@@ -1162,11 +1168,17 @@ fn a_checkpoint_just_before_a_deadline_resumes_onto_the_uninterrupted_run() {
         };
         for (what, stop) in stops {
             let (_, checkpoint) = engine
-                .run_tran_checkpointed(&netlist, stop, 10e-9)
+                .run_tran_checkpointed_with_abort(&netlist, stop, 10e-9, &rspice_core::NoAbort)
                 .expect("checkpoints");
             let checkpoint = checkpoint.into_checkpoint().unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&netlist, &checkpoint, 4e-6, 10e-9)
+                .run_tran_resume_with_abort(
+                    &netlist,
+                    &checkpoint,
+                    4e-6,
+                    10e-9,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap_or_else(|error| panic!("resumes from {stop:e} (stock {stock}): {error}"));
             if let Err(difference) = resumes_onto(&whole, &resumed, stop) {
                 failures.push(format!("{what}: {difference}"));
@@ -1411,7 +1423,7 @@ fn r2e_ramps_each_edge_and_resumes_inside_a_ramp() {
             continue;
         }
         let (_, checkpoint) = engine
-            .run_tran_checkpointed(&netlist, 150e-9, 1e-9)
+            .run_tran_checkpointed_with_abort(&netlist, 150e-9, 1e-9, &rspice_core::NoAbort)
             .expect("checkpoints inside the rise");
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let text = String::from_utf8(
@@ -1425,7 +1437,7 @@ fn r2e_ramps_each_edge_and_resumes_inside_a_ramp() {
             "the image names its model"
         );
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &checkpoint, 600e-9, 1e-9)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 600e-9, 1e-9, &rspice_core::NoAbort)
             .expect("resumes");
         assert_resumes_onto(&whole, &resumed, 150e-9);
     }

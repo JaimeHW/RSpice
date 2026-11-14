@@ -558,13 +558,14 @@ Q1 cx bx 0 0 qmod
         );
 
         let pss = engine()
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &netlist,
                 PssConfig::new(1.0e6)
                     .with_harmonics(2)
                     .with_points_per_period(16)
                     .with_tstab_periods(0)
                     .with_tolerance(1.0e-6),
+                &rspice_core::NoAbort,
             )
             .expect_err("a generated compact model's integration state is not captured")
             .to_string();

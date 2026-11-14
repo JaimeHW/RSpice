@@ -36,12 +36,13 @@ fn gp_nodal_voltage_preserves_transport_charge_startup_and_packed_restart() {
                 TransientStartupMode::Uic,
             ] {
                 let (result, checkpoints) = engine
-                    .run_tran_checkpoint_schedule_with_startup_mode(
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                         &deck,
                         2.5e-9,
                         4e-12,
                         startup,
                         &[1.2e-9],
+                        &rspice_core::NoAbort,
                     )
                     .unwrap_or_else(|error| panic!("{dialect:?}/{polarity}/{startup:?}: {error}"));
                 let base = result.try_voltage_waveform_named("b").unwrap();
@@ -142,12 +143,13 @@ fn gp_nodal_voltage_feedback_preserves_nonlinear_charge_jump_and_current_fanout(
                 "nonlinear voltage feedback step\nVX x 0 PWL(0 0 .5n 0 .5n 1 2n 1)\nBV out 0 V={.19+.1*v(x)^2+.25*v(out)^2}\nCY out 0 2p\nQD 0 out 0 qload\n.model qload NPN(IS=1e-16 BF=100 BR=1 CJE=1p VJE=1 MJE=.5 FC=.5 CJC=0 TF=0 TR=0)\nF1 w 0 BV 2\nCW w 0 3p\nRW w 0 1k\nVC c 0 2\nVB b 0 .6\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF=.2n PTF=57.29577951308232)\n.options GMIN=0 RELTOL=1e-7 VNTOL=1e-10 ABSTOL=1e-16 CHGTOL=1e-26\n.save v(out) v(w) i(bv) i(f1)\n.end\n"
             ).unwrap();
             let (result, checkpoints) = engine
-                .run_tran_checkpoint_schedule_with_startup_mode(
+                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                     &deck,
                     2e-9,
                     1e-12,
                     TransientStartupMode::OperatingPoint,
                     &[0.5e-9, 1.1e-9],
+                    &rspice_core::NoAbort,
                 )
                 .unwrap_or_else(|error| panic!("{dialect:?}/{method:?}: {error}"));
             let out = result.try_voltage_waveform_named("out").unwrap();

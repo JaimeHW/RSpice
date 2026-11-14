@@ -1282,7 +1282,7 @@ fn a_checkpoint_beside_a_coincident_edge_resumes_bit_identical() {
     let engine = Engine::default();
     assert!(
         engine
-            .preflight_transient_checkpoint(&deck)
+            .preflight_transient_checkpoint_with_abort(&deck, &rspice_core::NoAbort)
             .unwrap()
             .is_resumable()
     );
@@ -1296,12 +1296,13 @@ fn a_checkpoint_beside_a_coincident_edge_resumes_bit_identical() {
     let before = plain.time[on_edge - 1];
 
     let (full, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &deck,
             tstop,
             max_step,
             TransientStartupMode::OperatingPoint,
             &[before, edge],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     assert_eq!(full.time, plain.time, "checkpointing moves no point");
@@ -1315,7 +1316,7 @@ fn a_checkpoint_beside_a_coincident_edge_resumes_bit_identical() {
             .unwrap();
         let restored = TransientCheckpoint::from_bytes(&bytes).unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&deck, &restored, tstop, max_step)
+            .run_tran_resume_with_abort(&deck, &restored, tstop, max_step, &rspice_core::NoAbort)
             .unwrap();
         let at = full.time.iter().position(|time| *time == seam).unwrap();
         let bits = |times: &[f64]| times.iter().map(|time| time.to_bits()).collect::<Vec<_>>();

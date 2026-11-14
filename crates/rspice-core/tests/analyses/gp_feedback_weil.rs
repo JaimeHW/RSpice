@@ -182,12 +182,13 @@ fn adaptive_feedback_checkpoints_preserve_the_accepted_trajectory() {
                 // An off-grid checkpoint splits an adaptive interval. Resume
                 // must retain the controller, nonlinear storage and phase state.
                 let (full, checkpoints) = engine
-                    .run_tran_checkpoint_schedule_with_startup_mode(
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                         &netlist,
                         4.8e-9,
                         8e-12,
                         case.startup,
                         &[1.911e-9],
+                        &rspice_core::NoAbort,
                     )
                     .unwrap_or_else(|e| panic!("{}/{polarity}/{model:?}: {e}", case.name));
                 let checkpoint = TransientCheckpoint::from_bytes(
@@ -198,7 +199,13 @@ fn adaptive_feedback_checkpoints_preserve_the_accepted_trajectory() {
                 )
                 .unwrap();
                 let (resumed, _) = engine
-                    .run_tran_resume(&netlist, &checkpoint, 4.8e-9, 8e-12)
+                    .run_tran_resume_with_abort(
+                        &netlist,
+                        &checkpoint,
+                        4.8e-9,
+                        8e-12,
+                        &rspice_core::NoAbort,
+                    )
                     .unwrap_or_else(|e| panic!("resume {}/{polarity}/{model:?}: {e}", case.name));
                 let offset = full
                     .time

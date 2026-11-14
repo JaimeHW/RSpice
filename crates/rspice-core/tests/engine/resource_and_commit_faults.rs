@@ -183,7 +183,7 @@ impl Drop for TestDirectory {
 fn checkpoint() -> TransientCheckpoint {
     let netlist = Netlist::parse(CHECKPOINT_DECK).expect("the checkpoint fixture parses");
     let (_, checkpoint) = Engine::new(SimulationConfig::default())
-        .run_tran_checkpointed(&netlist, 2.0e-6, 50.0e-9)
+        .run_tran_checkpointed_with_abort(&netlist, 2.0e-6, 50.0e-9, &rspice_core::NoAbort)
         .expect("the first segment solves");
     checkpoint.into_checkpoint().unwrap()
 }
@@ -259,7 +259,11 @@ fn a_failed_first_checkpoint_save_publishes_no_destination_at_all() {
 
         let armed = ArmedFaults::arm(ArtifactFault::io(*point));
         let error = checkpoint
-            .save_with_abort(&path, &NoAbort)
+            .save_with_encoding_and_abort(
+                &path,
+                rspice_core::engine::TransientCheckpointEncoding::Unpacked,
+                &NoAbort,
+            )
             .expect_err("the injected failure must fail the save");
         assert_eq!(armed.fired(), 1, "{point:?} never fired");
         drop(armed);
@@ -287,7 +291,11 @@ fn an_unarmed_checkpoint_save_publishes_normally() {
     let directory = TestDirectory::new("unarmed");
     let path = directory.path().join("segment.ckpt");
     checkpoint
-        .save_with_abort(&path, &NoAbort)
+        .save_with_encoding_and_abort(
+            &path,
+            rspice_core::engine::TransientCheckpointEncoding::Unpacked,
+            &NoAbort,
+        )
         .expect("an unarmed save publishes");
     assert_eq!(
         TransientCheckpoint::load(&path).expect("the published checkpoint loads"),

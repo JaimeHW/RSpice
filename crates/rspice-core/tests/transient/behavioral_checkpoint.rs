@@ -20,12 +20,12 @@ fn capacitor_fixture() -> (Engine, Netlist, TransientCheckpoint) {
     let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
     assert!(
         engine
-            .preflight_transient_checkpoint(&netlist)
+            .preflight_transient_checkpoint_with_abort(&netlist, &rspice_core::NoAbort)
             .unwrap()
             .is_resumable()
     );
     let (_, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, 400e-6, 2e-6)
+        .run_tran_checkpointed_with_abort(&netlist, 400e-6, 2e-6, &rspice_core::NoAbort)
         .unwrap();
     let checkpoint = checkpoint.into_checkpoint().unwrap();
     assert!(checkpoint.capability().is_resumable());
@@ -36,7 +36,7 @@ fn capacitor_fixture() -> (Engine, Netlist, TransientCheckpoint) {
 fn capacitor_checkpoint_restores_integrals_and_physical_charge_together() {
     let (engine, netlist, checkpoint) = capacitor_fixture();
     let (reference, reference_final) = engine
-        .run_tran_resume(&netlist, &checkpoint, 1e-3, 2e-6)
+        .run_tran_resume_with_abort(&netlist, &checkpoint, 1e-3, 2e-6, &rspice_core::NoAbort)
         .unwrap();
     for encoding in [
         TransientCheckpointEncoding::Unpacked,
@@ -46,7 +46,7 @@ fn capacitor_checkpoint_restores_integrals_and_physical_charge_together() {
             TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
         assert_eq!(loaded, checkpoint);
         let (resumed, final_state) = engine
-            .run_tran_resume(&netlist, &loaded, 1e-3, 2e-6)
+            .run_tran_resume_with_abort(&netlist, &loaded, 1e-3, 2e-6, &rspice_core::NoAbort)
             .unwrap();
         assert_eq!(final_state, reference_final);
         assert_eq!(resumed.time, reference.time);
@@ -108,7 +108,7 @@ fn capacitor_checkpoint_rejects_malformed_and_mismatched_integrals() {
     ))
     .unwrap();
     let error = engine
-        .run_tran_resume(&netlist, &wrong, 1e-3, 2e-6)
+        .run_tran_resume_with_abort(&netlist, &wrong, 1e-3, 2e-6, &rspice_core::NoAbort)
         .unwrap_err()
         .to_string();
     assert!(
@@ -137,12 +137,12 @@ fn fixture() -> (Engine, Netlist, TransientCheckpoint) {
     let engine = Engine::default();
     assert!(
         engine
-            .preflight_transient_checkpoint(&netlist)
+            .preflight_transient_checkpoint_with_abort(&netlist, &rspice_core::NoAbort)
             .unwrap()
             .is_resumable()
     );
     let (_, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, 400e-6, 10e-6)
+        .run_tran_checkpointed_with_abort(&netlist, 400e-6, 10e-6, &rspice_core::NoAbort)
         .unwrap();
     let checkpoint = checkpoint.into_checkpoint().unwrap();
     assert!(checkpoint.capability().is_resumable());
@@ -153,7 +153,7 @@ fn fixture() -> (Engine, Netlist, TransientCheckpoint) {
 fn behavioral_checkpoint_restores_nested_and_independent_integrals() {
     let (engine, netlist, checkpoint) = fixture();
     let (reference, reference_final) = engine
-        .run_tran_resume(&netlist, &checkpoint, 1e-3, 10e-6)
+        .run_tran_resume_with_abort(&netlist, &checkpoint, 1e-3, 10e-6, &rspice_core::NoAbort)
         .unwrap();
     for encoding in [
         TransientCheckpointEncoding::Unpacked,
@@ -163,7 +163,7 @@ fn behavioral_checkpoint_restores_nested_and_independent_integrals() {
             TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
         assert_eq!(loaded, checkpoint);
         let (result, final_state) = engine
-            .run_tran_resume(&netlist, &loaded, 1e-3, 10e-6)
+            .run_tran_resume_with_abort(&netlist, &loaded, 1e-3, 10e-6, &rspice_core::NoAbort)
             .unwrap();
         assert_eq!(final_state, reference_final);
         assert_eq!(result.time, reference.time);
@@ -212,7 +212,7 @@ fn behavioral_checkpoint_rejects_corrupt_or_mismatched_operator_history() {
     );
     let wrong = TransientCheckpoint::from_text(&mismatched).unwrap();
     let error = engine
-        .run_tran_resume(&netlist, &wrong, 1e-3, 10e-6)
+        .run_tran_resume_with_abort(&netlist, &wrong, 1e-3, 10e-6, &rspice_core::NoAbort)
         .unwrap_err()
         .to_string();
     assert!(

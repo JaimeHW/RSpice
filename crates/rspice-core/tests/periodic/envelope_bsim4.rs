@@ -68,7 +68,7 @@ fn bsim4_continuation_preserves_the_carrier_orbit_and_portable_checkpoint() {
             TransientCheckpoint::from_text(&result.final_checkpoint().to_text()).unwrap();
         assert!(checkpoint.capability().is_resumable());
         engine
-            .run_tran_resume(&deck, &checkpoint, 0.26e-9, 0.5e-12)
+            .run_tran_resume_with_abort(&deck, &checkpoint, 0.26e-9, 0.5e-12, &rspice_core::NoAbort)
             .unwrap();
         let tag = EnvelopeGuaranteeTag::from(result.guarantee());
         let encoded = serde_json::to_string(&tag).unwrap();

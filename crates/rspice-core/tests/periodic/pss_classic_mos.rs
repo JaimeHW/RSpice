@@ -108,7 +108,7 @@ M1 {terminals} mm L=1u W=10u AD=4p AS=5p PD=20u PS=22u M=2 OFF
         config.integration_method = Some(method);
         let label = format!("{dialect:?} level {level} {kind} {method:?}");
         let (analysis, state) = engine
-            .run_pss_with_continuation_state(&netlist, config)
+            .run_pss_with_continuation_state_abort(&netlist, config, &rspice_core::NoAbort)
             .unwrap_or_else(|error| panic!("{label}: {error}"));
         let reference = engine.run_tran(&netlist, 200e-9, 10e-9 / 512.0).unwrap();
         let result = &analysis.result;
@@ -123,7 +123,13 @@ M1 {terminals} mm L=1u W=10u AD=4p AS=5p PD=20u PS=22u M=2 OFF
             }
         }
         let (continued, checkpoint) = engine
-            .run_tran_from_pss_state(&netlist, &state, 10e-9, 10e-9 / 512.0)
+            .run_tran_from_pss_state_with_abort(
+                &netlist,
+                &state,
+                10e-9,
+                10e-9 / 512.0,
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         for name in ["gate", "out"] {
             let actual = continued.try_voltage_waveform_named(name).unwrap();
@@ -138,7 +144,13 @@ M1 {terminals} mm L=1u W=10u AD=4p AS=5p PD=20u PS=22u M=2 OFF
         }
         let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
         engine
-            .run_tran_resume(&netlist, &checkpoint, 10.1e-9, 10e-9 / 512.0)
+            .run_tran_resume_with_abort(
+                &netlist,
+                &checkpoint,
+                10.1e-9,
+                10e-9 / 512.0,
+                &rspice_core::NoAbort,
+            )
             .unwrap();
     }
 }

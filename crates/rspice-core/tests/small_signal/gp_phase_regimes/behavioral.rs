@@ -130,11 +130,17 @@ fn gp_behavioral_prescribed_forcing_has_physical_event_equations() {
                     false,
                 );
                 let (_, checkpoint) = engine
-                    .run_tran_checkpointed(&source, 1.2e-9, 4e-12)
+                    .run_tran_checkpointed_with_abort(&source, 1.2e-9, 4e-12, &rspice_core::NoAbort)
                     .unwrap();
                 let checkpoint = checkpoint.into_checkpoint().unwrap();
                 let (resumed, _) = engine
-                    .run_tran_resume(&source, &checkpoint, 2.5e-9, 4e-12)
+                    .run_tran_resume_with_abort(
+                        &source,
+                        &checkpoint,
+                        2.5e-9,
+                        4e-12,
+                        &rspice_core::NoAbort,
+                    )
                     .unwrap();
                 check(
                     &resumed,
@@ -231,12 +237,13 @@ fn gp_nodal_behavioral_current_preserves_nonlinear_decay_and_packed_restart() {
                 config.convergence_config.gmin_target = 0.0;
                 let engine = Engine::new(config);
                 let (result, checkpoints) = engine
-                    .run_tran_checkpoint_schedule_with_startup_mode(
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                         &deck,
                         2e-9,
                         1e-12,
                         TransientStartupMode::OperatingPoint,
                         &[0.5e-9, 1.1e-9],
+                        &rspice_core::NoAbort,
                     )
                     .unwrap_or_else(|error| panic!("{dialect:?}/{method:?}/{polarity}: {error}"));
                 let voltage = result.try_voltage_waveform_named("out").unwrap();
@@ -278,7 +285,13 @@ fn gp_nodal_behavioral_current_preserves_nonlinear_decay_and_packed_restart() {
                     )
                     .unwrap();
                     let (resumed, _) = engine
-                        .run_tran_resume(&deck, &checkpoint, 2e-9, 1e-12)
+                        .run_tran_resume_with_abort(
+                            &deck,
+                            &checkpoint,
+                            2e-9,
+                            1e-12,
+                            &rspice_core::NoAbort,
+                        )
                         .unwrap();
                     let seam = result
                         .time

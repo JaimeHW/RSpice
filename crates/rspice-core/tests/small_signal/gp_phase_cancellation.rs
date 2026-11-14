@@ -116,11 +116,13 @@ fn gp_cancelled_continuation_preserves_checkpoint_and_future_continuation() {
             gp_transient_phase_model: model,
             ..SimulationConfig::default()
         });
-        let (_, checkpoint) = engine.run_tran_checkpointed(&source, 1e-9, 4e-12).unwrap();
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed_with_abort(&source, 1e-9, 4e-12, &rspice_core::NoAbort)
+            .unwrap();
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let encoded = checkpoint.to_text();
         let (baseline, final_checkpoint) = engine
-            .run_tran_resume(&source, &checkpoint, 2e-9, 4e-12)
+            .run_tran_resume_with_abort(&source, &checkpoint, 2e-9, 4e-12, &rspice_core::NoAbort)
             .unwrap();
         let abort = CancelAfterSamples::new(32);
         assert!(matches!(
@@ -130,7 +132,7 @@ fn gp_cancelled_continuation_preserves_checkpoint_and_future_continuation() {
         abort.assert_stopped();
         assert_eq!(checkpoint.to_text(), encoded);
         let (reused, reused_checkpoint) = engine
-            .run_tran_resume(&source, &checkpoint, 2e-9, 4e-12)
+            .run_tran_resume_with_abort(&source, &checkpoint, 2e-9, 4e-12, &rspice_core::NoAbort)
             .unwrap();
         assert_eq!(baseline.time, reused.time);
         assert_eq!(baseline.step_sizes, reused.step_sizes);

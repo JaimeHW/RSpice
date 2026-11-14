@@ -44,7 +44,7 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 [dev-dependencies]
 rspice-app-state = { workspace = true, features = ["test-support"] }
 rspice-ui-kit = { workspace = true, features = ["test-support"] }
-rspice-formats = { workspace = true, features = ["result-validation-observation"] }
+rspice-formats = { workspace = true, features = ["result-validation-observation", "test-support"] }
 rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }
 rspice-simulation-contract = { workspace = true, features = ["derivation-test-observation"] }
 rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }

@@ -4553,12 +4553,13 @@ fn legacy_external_bc_charge_matches_capacitor_terminals_and_checkpoint_history(
                         && rc == 100.0;
                     let (a, scheduled) = if check_resume {
                         engine
-                            .run_tran_checkpoint_schedule_with_startup_mode(
+                            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                                 &actual,
                                 100e-9,
                                 5e-9,
                                 TransientStartupMode::OperatingPoint,
                                 &[50e-9],
+                                &rspice_core::NoAbort,
                             )
                             .unwrap()
                     } else {
@@ -4591,7 +4592,13 @@ fn legacy_external_bc_charge_matches_capacitor_terminals_and_checkpoint_history(
                         )
                         .unwrap();
                         let (resumed, _) = engine
-                            .run_tran_resume(&actual, &checkpoint, 100e-9, 5e-9)
+                            .run_tran_resume_with_abort(
+                                &actual,
+                                &checkpoint,
+                                100e-9,
+                                5e-9,
+                                &rspice_core::NoAbort,
+                            )
                             .unwrap();
                         let seam = a.time.iter().position(|t| *t == resumed.time[0]).unwrap();
                         assert_eq!(resumed.time, a.time[seam..]);
@@ -4604,8 +4611,14 @@ fn legacy_external_bc_charge_matches_capacitor_terminals_and_checkpoint_history(
                         }
                         // Terminal checkpoints deliberately reset integration order,
                         // but must preserve the accepted current at the seam exactly.
-                        let (prefix, checkpoint) =
-                            engine.run_tran_checkpointed(&actual, 50e-9, 5e-9).unwrap();
+                        let (prefix, checkpoint) = engine
+                            .run_tran_checkpointed_with_abort(
+                                &actual,
+                                50e-9,
+                                5e-9,
+                                &rspice_core::NoAbort,
+                            )
+                            .unwrap();
                         let checkpoint = TransientCheckpoint::from_bytes(
                             &checkpoint
                                 .into_checkpoint()
@@ -4615,7 +4628,13 @@ fn legacy_external_bc_charge_matches_capacitor_terminals_and_checkpoint_history(
                         )
                         .unwrap();
                         let (resumed, _) = engine
-                            .run_tran_resume(&actual, &checkpoint, 100e-9, 5e-9)
+                            .run_tran_resume_with_abort(
+                                &actual,
+                                &checkpoint,
+                                100e-9,
+                                5e-9,
+                                &rspice_core::NoAbort,
+                            )
                             .unwrap();
                         for parameter in ["IB", "IC"] {
                             assert_eq!(
@@ -5975,12 +5994,13 @@ fn legacy_private_collector_preserves_external_bc_storage_and_checkpoint() {
                         && base == "RBX=50 RBI=70";
                     let (tran, checkpoints) = if check_resume {
                         engine
-                            .run_tran_checkpoint_schedule_with_startup_mode(
+                            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                                 &deck,
                                 100e-9,
                                 5e-9,
                                 TransientStartupMode::OperatingPoint,
                                 &[50e-9],
+                                &rspice_core::NoAbort,
                             )
                             .unwrap()
                     } else {
@@ -6014,7 +6034,13 @@ fn legacy_private_collector_preserves_external_bc_storage_and_checkpoint() {
                         )
                         .unwrap();
                         let (resumed, _) = engine
-                            .run_tran_resume(&deck, &checkpoint, 100e-9, 5e-9)
+                            .run_tran_resume_with_abort(
+                                &deck,
+                                &checkpoint,
+                                100e-9,
+                                5e-9,
+                                &rspice_core::NoAbort,
+                            )
                             .unwrap();
                         let seam = tran
                             .time

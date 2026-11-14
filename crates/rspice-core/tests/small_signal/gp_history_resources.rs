@@ -165,35 +165,37 @@ fn check_checkpoint_capture(startup_event: bool) {
     assert_eq!(
         assert_limit(
             engine
-                .run_tran_checkpointed(&netlist, 1e-9, 1e-12)
+                .run_tran_checkpointed_with_abort(&netlist, 1e-9, 1e-12, &rspice_core::NoAbort)
                 .unwrap_err(),
             live
         ),
         live + copy
     );
     Engine::new(config(live + copy))
-        .run_tran_checkpointed(&netlist, 1e-9, 1e-12)
+        .run_tran_checkpointed_with_abort(&netlist, 1e-9, 1e-12, &rspice_core::NoAbort)
         .unwrap();
     let limited = Engine::new(config(live + copy));
     assert_limit(
         limited
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &netlist,
                 1e-9,
                 1e-12,
                 TransientStartupMode::OperatingPoint,
                 &[2.5e-10, 5e-10, 7.5e-10],
+                &rspice_core::NoAbort,
             )
             .unwrap_err(),
         live + copy,
     );
     let (waveform, checkpoints) = Engine::new(config(4 * (live + copy)))
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             1e-9,
             1e-12,
             TransientStartupMode::OperatingPoint,
             &[2.5e-10, 5e-10, 7.5e-10],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     assert_eq!(checkpoints.len(), 3);
@@ -206,23 +208,25 @@ fn restoration_obeys_the_new_budget_without_mutating_the_input_checkpoint() {
     let netlist = deck(1, 90.0);
     let config = SimulationConfig::default();
     let engine = Engine::new(config.clone());
-    let (_, checkpoint) = engine.run_tran_checkpointed(&netlist, 1e-9, 1e-12).unwrap();
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed_with_abort(&netlist, 1e-9, 1e-12, &rspice_core::NoAbort)
+        .unwrap();
     let checkpoint = checkpoint.into_checkpoint().unwrap();
     let encoded = checkpoint.to_text();
     let (baseline, _) = engine
-        .run_tran_resume(&netlist, &checkpoint, 2e-9, 1e-12)
+        .run_tran_resume_with_abort(&netlist, &checkpoint, 2e-9, 1e-12, &rspice_core::NoAbort)
         .unwrap();
     let mut limited = config;
     limited.resource_limits.max_transport_history_bytes = 0;
     assert_limit(
         Engine::new(limited)
-            .run_tran_resume(&netlist, &checkpoint, 2e-9, 1e-12)
+            .run_tran_resume_with_abort(&netlist, &checkpoint, 2e-9, 1e-12, &rspice_core::NoAbort)
             .unwrap_err(),
         0,
     );
     assert_eq!(checkpoint.to_text(), encoded);
     let (rerun, _) = engine
-        .run_tran_resume(&netlist, &checkpoint, 2e-9, 1e-12)
+        .run_tran_resume_with_abort(&netlist, &checkpoint, 2e-9, 1e-12, &rspice_core::NoAbort)
         .unwrap();
     assert_eq!(rerun.time, baseline.time);
     assert_eq!(rerun.voltages, baseline.voltages);

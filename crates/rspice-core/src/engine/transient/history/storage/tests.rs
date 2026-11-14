@@ -42,7 +42,7 @@ fn public_capture_and_restore_preserve_allocation_failures_and_accepted_state() 
         )
     });
     let (_, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, 1e-10, 1e-12)
+        .run_tran_checkpointed_with_abort(&netlist, 1e-10, 1e-12, &crate::NoAbort)
         .unwrap();
     let checkpoint = checkpoint.into_checkpoint().unwrap();
     let encoded = checkpoint.to_text();
@@ -50,7 +50,13 @@ fn public_capture_and_restore_preserve_allocation_failures_and_accepted_state() 
     limited_config.resource_limits.max_transport_history_bytes = 0;
     let limited = Engine::new(limited_config);
     let policy_error = fail_reservation_after(0, || {
-        let result = limited.run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12);
+        let result = limited.run_tran_resume_with_abort(
+            &netlist,
+            &checkpoint,
+            2e-10,
+            1e-12,
+            &crate::NoAbort,
+        );
         assert_eq!(HISTORY_RESERVATIONS_BEFORE_FAILURE.get(), Some(0));
         result.unwrap_err()
     });
@@ -58,15 +64,15 @@ fn public_capture_and_restore_preserve_allocation_failures_and_accepted_state() 
         if error.resource == crate::ResourceKind::TransportHistoryBytes));
 
     let (continued, _) = engine
-        .run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12)
+        .run_tran_resume_with_abort(&netlist, &checkpoint, 2e-10, 1e-12, &crate::NoAbort)
         .unwrap();
     for count in [0, 1, 5, 12] {
         let failed_capture = fail_reservation_after(startup_reservations + count, || {
-            engine.run_tran_checkpointed(&netlist, 1e-10, 1e-12)
+            engine.run_tran_checkpointed_with_abort(&netlist, 1e-10, 1e-12, &crate::NoAbort)
         });
         assert_allocation(&failed_capture.unwrap_err());
         let failed_restore = fail_reservation_after(count, || {
-            engine.run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12)
+            engine.run_tran_resume_with_abort(&netlist, &checkpoint, 2e-10, 1e-12, &crate::NoAbort)
         });
         assert_allocation(&failed_restore.unwrap_err());
         assert_eq!(checkpoint.to_text(), encoded);
@@ -76,7 +82,7 @@ fn public_capture_and_restore_preserve_allocation_failures_and_accepted_state() 
     assert_eq!(rerun.voltages, baseline.voltages);
     assert_eq!(rerun.branch_currents, baseline.branch_currents);
     let (resumed, _) = engine
-        .run_tran_resume(&netlist, &checkpoint, 2e-10, 1e-12)
+        .run_tran_resume_with_abort(&netlist, &checkpoint, 2e-10, 1e-12, &crate::NoAbort)
         .unwrap();
     assert_eq!(resumed.time, continued.time);
     assert_eq!(resumed.voltages, continued.voltages);

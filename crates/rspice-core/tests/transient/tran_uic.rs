@@ -811,12 +811,13 @@ fn coupled_winding_initial_currents_survive_packed_continuation() {
             TransientStartupMode::Uic,
         ] {
             let (full, scheduled) = engine
-                .run_tran_checkpoint_schedule_with_startup_mode(
+                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                     &deck,
                     0.4e-9,
                     1e-12,
                     startup,
                     &[0.2e-9],
+                    &rspice_core::NoAbort,
                 )
                 .unwrap();
             for (name, authored) in [("l1", -0.0002), ("l2", 0.0003)] {
@@ -841,7 +842,13 @@ fn coupled_winding_initial_currents_survive_packed_continuation() {
             )
             .unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&deck, &checkpoint, 0.4e-9, 1e-12)
+                .run_tran_resume_with_abort(
+                    &deck,
+                    &checkpoint,
+                    0.4e-9,
+                    1e-12,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             let offset = full
                 .time

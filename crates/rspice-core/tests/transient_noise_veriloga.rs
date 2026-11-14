@@ -78,7 +78,7 @@ fn checkpointing_a_transient_noise_run_is_a_typed_capability_refusal() {
     assert_checkpoint_refusal(&validator, "streamed checkpoint validator");
 
     let run = engine()
-        .run_tran_checkpointed(&netlist, 100.0e-9, 1.0e-9)
+        .run_tran_checkpointed_with_abort(&netlist, 100.0e-9, 1.0e-9, &rspice_core::NoAbort)
         .expect_err("a retained final checkpoint of a transient-noise run must be refused");
     assert_checkpoint_refusal(&run, "checkpointed transient run");
 }
@@ -867,7 +867,7 @@ endmodule
             .expect_err("a scheduled checkpoint of a shaped-noise run must be refused");
         assert_checkpoint_refusal(&validator, "streamed checkpoint validator");
         let run = engine()
-            .run_tran_checkpointed(&netlist, 100.0e-9, 1.0e-9)
+            .run_tran_checkpointed_with_abort(&netlist, 100.0e-9, 1.0e-9, &rspice_core::NoAbort)
             .expect_err("a retained checkpoint of a shaped-noise run must be refused");
         assert_checkpoint_refusal(&run, "checkpointed transient run");
     }

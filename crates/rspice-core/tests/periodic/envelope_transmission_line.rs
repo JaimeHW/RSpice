@@ -88,11 +88,12 @@ fn envelope_line_history_crosses_origin_and_round_trips_for_short_and_long_delay
             TransientCheckpoint::from_text(&result.final_checkpoint().to_text()).unwrap();
         assert!(checkpoint.capability().is_resumable());
         let (resumed, _) = engine
-            .run_tran_resume(
+            .run_tran_resume_with_abort(
                 &deck,
                 &checkpoint,
                 2.0 * delay + 0.4 / FREQ,
                 1.0 / FREQ / 1024.0,
+                &rspice_core::NoAbort,
             )
             .unwrap();
         compare_carrier(result.carrier(), &resumed);

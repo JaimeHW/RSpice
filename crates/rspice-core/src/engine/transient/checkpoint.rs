@@ -8770,15 +8770,6 @@ impl TransientCheckpoint {
         self.save_with_encoding(path, TransientCheckpointEncoding::Unpacked)
     }
 
-    /// Atomically write canonical unpacked text with cooperative cancellation.
-    pub fn save_with_abort(
-        &self,
-        path: &std::path::Path,
-        abort: &dyn AbortSignal,
-    ) -> Result<(), SimulationError> {
-        self.save_with_encoding_and_abort(path, TransientCheckpointEncoding::Unpacked, abort)
-    }
-
     /// Atomically write the checkpoint in the selected representation.
     pub fn save_with_encoding(
         &self,
@@ -8809,20 +8800,6 @@ impl TransientCheckpoint {
             path,
             DEFAULT_MAX_CHECKPOINT_BYTES,
             DEFAULT_MAX_CHECKPOINT_BYTES,
-        )
-    }
-
-    /// Read and auto-detect a checkpoint with the production resource policy
-    /// and cooperative cancellation.
-    pub fn load_with_abort(
-        path: &std::path::Path,
-        abort: &dyn AbortSignal,
-    ) -> Result<Self, SimulationError> {
-        Self::load_with_limit_and_abort(
-            path,
-            DEFAULT_MAX_CHECKPOINT_BYTES,
-            DEFAULT_MAX_CHECKPOINT_BYTES,
-            abort,
         )
     }
 
@@ -11942,7 +11919,9 @@ mod tests {
             ..SimulationConfig::default()
         };
         let engine = Engine::new(config.clone());
-        let (baseline, checkpoint) = engine.run_tran_checkpointed(&deck, 1e-9, 1e-12).unwrap();
+        let (baseline, checkpoint) = engine
+            .run_tran_checkpointed_with_abort(&deck, 1e-9, 1e-12, &crate::NoAbort)
+            .unwrap();
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let phase = checkpoint.accepted_junction_history.bjt_history.phase[0]
             .as_ref()
@@ -11962,7 +11941,7 @@ mod tests {
         let limit = limited.resource_limits.max_result_values;
         let limited = Engine::new(limited);
         let error = limited
-            .run_tran_checkpointed(&deck, 1e-9, 1e-12)
+            .run_tran_checkpointed_with_abort(&deck, 1e-9, 1e-12, &crate::NoAbort)
             .unwrap_err();
         let SimulationError::ResourceLimit(error) = error else {
             panic!("expected a typed result budget refusal, got {error}");
@@ -12247,7 +12226,7 @@ mod tests {
         }
         let netlist = Netlist::parse("VBIC restart preflight\nV1 c 0 1\nV2 b 0 0.7\nQ1 c b 0 vm\n.model vm NPN LEVEL=4\n.end\n").unwrap();
         let (_, captured) = Engine::default()
-            .run_tran_checkpointed(&netlist, 1e-9, 1e-11)
+            .run_tran_checkpointed_with_abort(&netlist, 1e-9, 1e-11, &crate::NoAbort)
             .expect("promoted VBIC has complete device, history and solver state");
         let captured = captured.into_checkpoint().unwrap();
         captured.capability().require_resumable().unwrap();
@@ -13209,7 +13188,9 @@ mod tests {
             min_timestep: 1e-15,
             ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce)
         });
-        let (_, checkpoint) = engine.run_tran_checkpointed(&deck, 2e-9, 1e-12).unwrap();
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed_with_abort(&deck, 2e-9, 1e-12, &crate::NoAbort)
+            .unwrap();
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let state = checkpoint.solution_dependent_capacitor_states[0]
             .as_ref()
@@ -14616,7 +14597,11 @@ mod tests {
 
         let save_abort = crate::abort_signal::CountingAbort::new(2);
         let save_error = sample()
-            .save_with_abort(&path, &save_abort)
+            .save_with_encoding_and_abort(
+                &path,
+                crate::engine::TransientCheckpointEncoding::Unpacked,
+                &save_abort,
+            )
             .expect_err("cancelled save must fail");
         assert!(matches!(save_error, SimulationError::Aborted));
         assert_eq!(
@@ -14630,8 +14615,13 @@ mod tests {
         );
 
         let load_abort = crate::abort_signal::CountingAbort::new(1);
-        let load_error = TransientCheckpoint::load_with_abort(&path, &load_abort)
-            .expect_err("cancelled load must fail before parsing invalid sentinel data");
+        let load_error = TransientCheckpoint::load_with_limit_and_abort(
+            &path,
+            crate::engine::DEFAULT_MAX_CHECKPOINT_BYTES,
+            crate::engine::DEFAULT_MAX_CHECKPOINT_BYTES,
+            &load_abort,
+        )
+        .expect_err("cancelled load must fail before parsing invalid sentinel data");
         assert!(matches!(load_error, SimulationError::Aborted));
         assert!(load_abort.count() <= 3);
 

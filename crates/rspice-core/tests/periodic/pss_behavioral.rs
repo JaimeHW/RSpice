@@ -54,7 +54,7 @@ fn xyce_pss_frequency_context_matches_transient_and_retains_integral_history() {
     .unwrap();
     let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
     let (analysis, state) = engine
-        .run_pss_with_continuation_state(&netlist, config())
+        .run_pss_with_continuation_state_abort(&netlist, config(), &rspice_core::NoAbort)
         .unwrap();
     for (name, gain) in [("out", 1.0), ("current", 2.0)] {
         let row = analysis
@@ -78,7 +78,7 @@ fn xyce_pss_frequency_context_matches_transient_and_retains_integral_history() {
     assert_eq!(analysis.monodromy.len(), 1);
     assert!((analysis.monodromy[0][0] - (-RATE / F0).exp()).abs() < 2e-4);
     let (continued, _) = engine
-        .run_tran_from_pss_state(&netlist, &state, 2e-4, 2e-6)
+        .run_tran_from_pss_state_with_abort(&netlist, &state, 2e-4, 2e-6, &rspice_core::NoAbort)
         .unwrap();
     for (name, gain) in [("out", 1.0), ("current", 2.0)] {
         let wave = continued.try_voltage_waveform_named(name).unwrap();
@@ -144,10 +144,10 @@ fn pss_behavioral_integrals_continue_through_transient_checkpoint() {
     let engine = Engine::default();
     let netlist = circuit();
     let (_, state) = engine
-        .run_pss_with_continuation_state(&netlist, config())
+        .run_pss_with_continuation_state_abort(&netlist, config(), &rspice_core::NoAbort)
         .unwrap();
     let (continued, checkpoint) = engine
-        .run_tran_from_pss_state(&netlist, &state, 1e-3, 2e-6)
+        .run_tran_from_pss_state_with_abort(&netlist, &state, 1e-3, 2e-6, &rspice_core::NoAbort)
         .unwrap();
     for name in ["out", "nested", "current"] {
         let wave = continued.try_voltage_waveform_named(name).unwrap();
@@ -168,7 +168,7 @@ fn pss_behavioral_integrals_continue_through_transient_checkpoint() {
     assert_eq!(loaded, checkpoint);
     let stop = checkpoint.time + 1e-4;
     let (resumed, _) = engine
-        .run_tran_resume(&netlist, &loaded, stop, 2e-6)
+        .run_tran_resume_with_abort(&netlist, &loaded, stop, 2e-6, &rspice_core::NoAbort)
         .unwrap();
     let wave = resumed.try_voltage_waveform_named("out").unwrap();
     for (&time, &actual) in resumed.time.iter().zip(wave) {

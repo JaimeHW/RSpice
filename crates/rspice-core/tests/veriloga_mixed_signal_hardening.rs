@@ -794,17 +794,18 @@ fn assert_mixed_persisted_restart_at(deck: &str, signal: &str, at: f64) {
     let engine = Engine::new(SimulationConfig::default());
     assert!(
         engine
-            .preflight_transient_checkpoint(&netlist)
+            .preflight_transient_checkpoint_with_abort(&netlist, &rspice_core::NoAbort)
             .unwrap()
             .is_resumable()
     );
     let (baseline, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             200e-9,
             1e-9,
             TransientStartupMode::OperatingPoint,
             &[at],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let saved = &scheduled[0].checkpoint;
@@ -829,7 +830,7 @@ fn assert_mixed_persisted_restart_at(deck: &str, signal: &str, at: f64) {
     let restored = loaded.unwrap();
     assert_eq!(restored, TransientCheckpoint::from_bytes(&text).unwrap());
     let (resumed, _) = engine
-        .run_tran_resume(&netlist, &restored, 200e-9, 1e-9)
+        .run_tran_resume_with_abort(&netlist, &restored, 200e-9, 1e-9, &rspice_core::NoAbort)
         .unwrap();
     assert_eq!(resumed.node_names, baseline.node_names);
     for (actual, expected) in std::iter::once((&resumed.time, &baseline.time))
@@ -951,12 +952,13 @@ fn a_mixed_checkpoint_stream_survives_cancellation_and_resumes_pending_work() {
     let engine = Engine::new(SimulationConfig::default());
     let times = [50e-9, 100e-9, 150e-9];
     let (baseline, retained) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             200e-9,
             1e-9,
             TransientStartupMode::OperatingPoint,
             &times,
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let abort = rspice_core::abort_signal::AtomicAbort::new();
@@ -1189,15 +1191,18 @@ fn an_automatic_real_to_voltage_converter_resumes_bit_for_bit() {
     );
     let netlist = Netlist::parse(&deck).unwrap();
     let engine = Engine::new(SimulationConfig::default());
-    let capability = engine.preflight_transient_checkpoint(&netlist).unwrap();
+    let capability = engine
+        .preflight_transient_checkpoint_with_abort(&netlist, &rspice_core::NoAbort)
+        .unwrap();
     assert!(capability.is_resumable(), "{:?}", capability.blockers());
     let (baseline, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             200e-9,
             1e-9,
             TransientStartupMode::OperatingPoint,
             &[90e-9, 100e-9],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let s = baseline.node_index_named("s").unwrap();
@@ -1214,7 +1219,7 @@ fn an_automatic_real_to_voltage_converter_resumes_bit_for_bit() {
         assert!(image_names(&point.checkpoint, "__rspice_auto_real_to_v_"));
         let saved = through_disk(&point.checkpoint);
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &saved, 200e-9, 1e-9)
+            .run_tran_resume_with_abort(&netlist, &saved, 200e-9, 1e-9, &rspice_core::NoAbort)
             .unwrap();
         let events = assert_resumes_bit_for_bit(&baseline, &resumed, saved.time);
         assert!(events >= 4, "the real steps on after the seam");
@@ -1256,19 +1261,20 @@ fn a_resumed_real_to_voltage_converter_continues_its_saved_ramp() {
     let netlist = Netlist::parse(&deck).unwrap();
     let engine = Engine::new(SimulationConfig::default());
     let (baseline, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             200e-9,
             1e-9,
             TransientStartupMode::OperatingPoint,
             &[100e-9],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let checkpoint = &scheduled[0].checkpoint;
     assert!(image_names(checkpoint, "real_to_v"));
     let saved = through_disk(checkpoint);
     let (resumed, _) = engine
-        .run_tran_resume(&netlist, &saved, 200e-9, 1e-9)
+        .run_tran_resume_with_abort(&netlist, &saved, 200e-9, 1e-9, &rspice_core::NoAbort)
         .unwrap();
     assert_resumes_bit_for_bit(&baseline, &resumed, saved.time);
     let out = resumed.node_index_named("out").unwrap();
@@ -1329,15 +1335,18 @@ fn every_real_valued_event_model_resumes_bit_for_bit() {
     );
     let netlist = Netlist::parse(&deck).unwrap();
     let engine = Engine::new(SimulationConfig::default());
-    let capability = engine.preflight_transient_checkpoint(&netlist).unwrap();
+    let capability = engine
+        .preflight_transient_checkpoint_with_abort(&netlist, &rspice_core::NoAbort)
+        .unwrap();
     assert!(capability.is_resumable(), "{:?}", capability.blockers());
     let (baseline, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             200e-9,
             1e-9,
             TransientStartupMode::OperatingPoint,
             &[47e-9, 100e-9],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     for net in ["dr", "rg", "rd", "obs"] {
@@ -1347,7 +1356,7 @@ fn every_real_valued_event_model_resumes_bit_for_bit() {
     for point in &scheduled {
         let saved = through_disk(&point.checkpoint);
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &saved, 200e-9, 1e-9)
+            .run_tran_resume_with_abort(&netlist, &saved, 200e-9, 1e-9, &rspice_core::NoAbort)
             .unwrap();
         let events = assert_resumes_bit_for_bit(&baseline, &resumed, saved.time);
         assert!(events >= 40, "every model publishes after the seam");
@@ -1391,15 +1400,18 @@ fn every_xspice_flip_flop_latch_and_divider_resumes_bit_for_bit() {
     );
     let netlist = Netlist::parse(&deck).unwrap();
     let engine = Engine::new(SimulationConfig::default());
-    let capability = engine.preflight_transient_checkpoint(&netlist).unwrap();
+    let capability = engine
+        .preflight_transient_checkpoint_with_abort(&netlist, &rspice_core::NoAbort)
+        .unwrap();
     assert!(capability.is_resumable(), "{:?}", capability.blockers());
     let (baseline, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             300e-9,
             1e-9,
             TransientStartupMode::OperatingPoint,
             &[115e-9, 150e-9],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     for net in ["q1", "q2", "q3", "q4", "q5", "q6", "q7"] {
@@ -1409,7 +1421,7 @@ fn every_xspice_flip_flop_latch_and_divider_resumes_bit_for_bit() {
     for point in &scheduled {
         let saved = through_disk(&point.checkpoint);
         let (resumed, _) = engine
-            .run_tran_resume(&netlist, &saved, 300e-9, 1e-9)
+            .run_tran_resume_with_abort(&netlist, &saved, 300e-9, 1e-9, &rspice_core::NoAbort)
             .unwrap();
         let events = assert_resumes_bit_for_bit(&baseline, &resumed, saved.time);
         assert!(events >= 40, "every model publishes after the seam");
@@ -1528,7 +1540,7 @@ fn corpus_transient(deck: &str) -> (Netlist, f64, f64, TransientStartupMode) {
 fn the_ldo_testbench_resumes_bit_for_bit_from_inside_its_trim_sequence() {
     let (netlist, stop, max_step, startup) = ldo_testbench();
     let capability = Engine::default()
-        .preflight_transient_checkpoint(&netlist)
+        .preflight_transient_checkpoint_with_abort(&netlist, &rspice_core::NoAbort)
         .unwrap();
     assert!(capability.is_resumable(), "{:?}", capability.blockers());
     // Code 8 latches at 800 us and is read 92.5 us later.
@@ -1812,18 +1824,19 @@ endmodule
     let engine = Engine::new(SimulationConfig::default());
     assert!(
         engine
-            .preflight_transient_checkpoint(&netlist)
+            .preflight_transient_checkpoint_with_abort(&netlist, &rspice_core::NoAbort)
             .expect("the capability preflight elaborates this deck")
             .is_resumable(),
         "an analog-only Verilog-A deck must have a resumable checkpoint"
     );
     let (baseline, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             200.0e-9,
             1.0e-9,
             TransientStartupMode::OperatingPoint,
             &[100.0e-9],
+            &rspice_core::NoAbort,
         )
         .expect("the scheduled baseline run completes");
     let checkpoint = &scheduled[0].checkpoint;
@@ -1835,7 +1848,13 @@ endmodule
         "the checkpoint must be an accepted baseline point"
     );
     let (resumed, _) = engine
-        .run_tran_resume(&netlist, checkpoint, 200.0e-9, 1.0e-9)
+        .run_tran_resume_with_abort(
+            &netlist,
+            checkpoint,
+            200.0e-9,
+            1.0e-9,
+            &rspice_core::NoAbort,
+        )
         .expect(
             "an analog-only Verilog-A deck must still resume; the mixed refusal is about a \
              module's digital half, not about the `.VERILOGA` route",

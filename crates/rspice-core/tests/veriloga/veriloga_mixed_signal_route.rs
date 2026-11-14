@@ -7292,12 +7292,13 @@ fn a_mixed_checkpoint_resumes_with_the_forces_in_effect() {
     let netlist = Netlist::parse(&deck).unwrap();
     let engine = Engine::new(SimulationConfig::default());
     let (baseline, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             120e-9,
             0.2e-9,
             TransientStartupMode::OperatingPoint,
             &[40e-9],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let saved = &scheduled[0].checkpoint;
@@ -7306,7 +7307,7 @@ fn a_mixed_checkpoint_resumes_with_the_forces_in_effect() {
         .unwrap();
     let restored = TransientCheckpoint::from_bytes(&text).unwrap();
     let (resumed, _) = engine
-        .run_tran_resume(&netlist, &restored, 120e-9, 0.2e-9)
+        .run_tran_resume_with_abort(&netlist, &restored, 120e-9, 0.2e-9, &rspice_core::NoAbort)
         .unwrap();
     let after = |points: Vec<(f64, String)>| {
         points
@@ -7360,12 +7361,13 @@ fn a_mixed_checkpoint_round_trips_an_assign_fed_by_an_a_d_input() {
     let netlist = Netlist::parse(&deck).unwrap();
     let engine = Engine::new(SimulationConfig::default());
     let (baseline, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &netlist,
             120e-9,
             0.2e-9,
             TransientStartupMode::OperatingPoint,
             &[40e-9],
+            &rspice_core::NoAbort,
         )
         .unwrap();
     let saved = &scheduled[0].checkpoint;
@@ -7374,7 +7376,7 @@ fn a_mixed_checkpoint_round_trips_an_assign_fed_by_an_a_d_input() {
         .unwrap();
     let restored = TransientCheckpoint::from_bytes(&text).unwrap();
     let (resumed, _) = engine
-        .run_tran_resume(&netlist, &restored, 120e-9, 0.2e-9)
+        .run_tran_resume_with_abort(&netlist, &restored, 120e-9, 0.2e-9, &rspice_core::NoAbort)
         .unwrap();
     let after = |points: Vec<(f64, String)>| {
         points

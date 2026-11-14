@@ -49,7 +49,7 @@ fn expression_capacitor_pss_matches_charge_law_and_continues() {
             ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce)
         });
         let (analysis, state) = engine
-            .run_pss_with_continuation_state(&deck, config())
+            .run_pss_with_continuation_state_abort(&deck, config(), &rspice_core::NoAbort)
             .unwrap();
         let index = analysis
             .result
@@ -70,7 +70,7 @@ fn expression_capacitor_pss_matches_charge_law_and_continues() {
             );
         }
         let (continued, _) = engine
-            .run_tran_from_pss_state(&deck, &state, 2e-4, 2e-6)
+            .run_tran_from_pss_state_with_abort(&deck, &state, 2e-4, 2e-6, &rspice_core::NoAbort)
             .unwrap();
         for (&time, &value) in continued
             .time
@@ -122,10 +122,10 @@ fn expression_capacitor_pss_owns_integral_coordinates_and_rebases_history() {
     assert_eq!(point.analysis().monodromy.len(), 1);
     assert!((point.analysis().monodromy[0][0] - 1.).abs() < 1e-5);
     let (_, state) = engine
-        .run_pss_with_continuation_state(&deck, config())
+        .run_pss_with_continuation_state_abort(&deck, config(), &rspice_core::NoAbort)
         .unwrap();
     let (continued, _) = engine
-        .run_tran_from_pss_state(&deck, &state, 2e-4, 1e-6)
+        .run_tran_from_pss_state_with_abort(&deck, &state, 2e-4, 1e-6, &rspice_core::NoAbort)
         .unwrap();
     let current = continued
         .try_branch_current_waveform_named("Vdrive")
@@ -162,7 +162,11 @@ fn prescribed_capacitance_pss_preserves_product_charge_through_continuation() {
                 ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce)
             });
             let (analysis, state) = engine
-                .run_pss_with_continuation_state(&deck, config().with_points_per_period(1024))
+                .run_pss_with_continuation_state_abort(
+                    &deck,
+                    config().with_points_per_period(1024),
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             let out = analysis
                 .result
@@ -177,7 +181,13 @@ fn prescribed_capacitance_pss_preserves_product_charge_through_continuation() {
                 );
             }
             let (continued, _) = engine
-                .run_tran_from_pss_state(&deck, &state, 0.4e-3, 0.5e-6)
+                .run_tran_from_pss_state_with_abort(
+                    &deck,
+                    &state,
+                    0.4e-3,
+                    0.5e-6,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             let voltage = continued.try_voltage_waveform_named("out").unwrap();
             let current = continued.try_branch_current_waveform_named("C1").unwrap();

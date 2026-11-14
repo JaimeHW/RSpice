@@ -2162,16 +2162,22 @@ fn envelope_runner_composes_the_two_authenticated_halves() {
         )
         .expect("envelope run completes");
     let (carrier, state) = engine
-        .run_hb_envelope_continuation_state(&netlist, config.clone(), &["Vmod".to_owned()])
+        .run_hb_envelope_continuation_state_with_abort(
+            &netlist,
+            config.clone(),
+            &["Vmod".to_owned()],
+            &crate::NoAbort,
+        )
         .expect("carrier solve");
     let (transient, _) = engine
-        .run_tran_from_hb_envelope_state(
+        .run_tran_from_hb_envelope_state_with_abort(
             &netlist,
             &config,
             &["Vmod".to_owned()],
             &state,
             600.0e-9,
             10.0e-9,
+            &crate::NoAbort,
         )
         .expect("continuation");
     assert_eq!(

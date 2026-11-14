@@ -68,15 +68,30 @@ fn every_pss_entry_point_preserves_the_audited_diode_charge() {
                 &rspice_core::abort_signal::NoAbort,
             )
             .map(|point| point.analysis().clone()),
-        engine.run_pss_with_dc_seed(&netlist, config.clone(), &seed),
+        engine.run_pss_with_dc_seed_and_abort(
+            &netlist,
+            config.clone(),
+            &seed,
+            &rspice_core::NoAbort,
+        ),
         engine
-            .run_pss_operating_point_with_dc_seed(&netlist, config.clone(), &seed)
+            .run_pss_operating_point_with_dc_seed_and_abort(
+                &netlist,
+                config.clone(),
+                &seed,
+                &rspice_core::NoAbort,
+            )
             .map(|point| point.analysis().clone()),
         engine
-            .run_pss_with_continuation_state(&netlist, config.clone())
+            .run_pss_with_continuation_state_abort(&netlist, config.clone(), &rspice_core::NoAbort)
             .map(|(analysis, _)| analysis),
         engine
-            .run_pss_with_frozen_source_continuation_state(&netlist, config.clone(), &[])
+            .run_pss_with_frozen_source_continuation_state_abort(
+                &netlist,
+                config.clone(),
+                &[],
+                &rspice_core::NoAbort,
+            )
             .map(|(analysis, _)| analysis),
     ];
     for result in routes {
@@ -110,7 +125,12 @@ fn seeded_pss_consumes_exact_dc_state() {
     let probe_config = compact_config().with_tolerance(10.0);
 
     let seeded = engine
-        .run_pss_with_dc_seed(&netlist, probe_config.clone(), &periodic_seed)
+        .run_pss_with_dc_seed_and_abort(
+            &netlist,
+            probe_config.clone(),
+            &periodic_seed,
+            &rspice_core::NoAbort,
+        )
         .expect("seeded PSS converges");
     let automatic = engine
         .run_pss(&netlist, probe_config)
@@ -141,7 +161,12 @@ fn seeded_pss_rejects_stale_or_tampered_basis() {
     )
     .expect("payload is internally shaped but belongs to a different basis");
     let err = engine
-        .run_pss_with_dc_seed(&netlist, compact_config(), &wrong_order)
+        .run_pss_with_dc_seed_and_abort(
+            &netlist,
+            compact_config(),
+            &wrong_order,
+            &rspice_core::NoAbort,
+        )
         .expect_err("reordered node basis must be rejected");
     assert!(
         matches!(err, SimulationError::Circuit(message) if message.contains("node basis does not match"))
@@ -154,7 +179,12 @@ fn seeded_pss_rejects_stale_or_tampered_basis() {
     )
     .expect("payload is internally shaped but belongs to a different branch basis");
     let err = engine
-        .run_pss_with_dc_seed(&netlist, compact_config(), &wrong_branch)
+        .run_pss_with_dc_seed_and_abort(
+            &netlist,
+            compact_config(),
+            &wrong_branch,
+            &rspice_core::NoAbort,
+        )
         .expect_err("stale branch basis must be rejected");
     assert!(
         matches!(err, SimulationError::Circuit(message) if message.contains("branch basis does not match"))
@@ -187,7 +217,7 @@ fn unseeded_pss_behavior_is_unchanged() {
         .run_pss(&netlist, compact_config())
         .expect("ordinary PSS converges");
     let explicit_same_dc = engine
-        .run_pss_with_dc_seed(&netlist, compact_config(), &seed)
+        .run_pss_with_dc_seed_and_abort(&netlist, compact_config(), &seed, &rspice_core::NoAbort)
         .expect("equivalent seeded PSS converges");
 
     assert_eq!(automatic, explicit_same_dc);

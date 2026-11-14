@@ -161,7 +161,7 @@ R2 mid 0 220
 fn checkpoint_fixture() -> TransientCheckpoint {
     let netlist = Netlist::parse(CHECKPOINT_DECK).expect("the checkpoint fixture parses");
     let (_, checkpoint) = Engine::new(SimulationConfig::default())
-        .run_tran_checkpointed(&netlist, 1.0e-6, 50.0e-9)
+        .run_tran_checkpointed_with_abort(&netlist, 1.0e-6, 50.0e-9, &rspice_core::NoAbort)
         .expect("the checkpoint fixture solves its first segment");
     checkpoint.into_checkpoint().unwrap()
 }

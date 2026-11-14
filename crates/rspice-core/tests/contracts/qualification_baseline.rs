@@ -670,8 +670,10 @@ fn gates() -> Vec<Gate> {
     });
 
     // --- Checkpoint and output throughput -----------------------------------
-    let (_, checkpoint) = serialized(|| engine.run_tran_checkpointed(&netlist, 1.0e-5, 2.0e-8))
-        .expect("the checkpoint fixture solves its first segment");
+    let (_, checkpoint) = serialized(|| {
+        engine.run_tran_checkpointed_with_abort(&netlist, 1.0e-5, 2.0e-8, &rspice_core::NoAbort)
+    })
+    .expect("the checkpoint fixture solves its first segment");
     let checkpoint = checkpoint.into_checkpoint().unwrap();
     let unpacked = checkpoint
         .to_bytes(TransientCheckpointEncoding::Unpacked)

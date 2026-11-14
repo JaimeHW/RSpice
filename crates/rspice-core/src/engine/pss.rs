@@ -1728,16 +1728,8 @@ impl Engine {
     /// The seed must match the fully elaborated circuit's canonical node and
     /// branch ordering exactly. A valid seed replaces the internal DC solve;
     /// it is used directly to initialize reactive state and stabilization.
-    pub fn run_pss_with_dc_seed(
-        &self,
-        netlist: &Netlist,
-        config: PssConfig,
-        dc_seed: &PssDcOperatingPointSeed,
-    ) -> Result<PssAnalysisResult, SimulationError> {
-        self.run_pss_with_dc_seed_and_abort(netlist, config, dc_seed, &NoAbort)
-    }
-
-    /// Cancellable form of [`Self::run_pss_with_dc_seed`].
+    ///
+    /// Honors `abort` cooperatively.
     pub fn run_pss_with_dc_seed_and_abort(
         &self,
         netlist: &Netlist,
@@ -1798,16 +1790,8 @@ impl Engine {
 
     /// Solve PSS from an exact DC seed and retain the converged numerical
     /// state required by dependent periodic analyses.
-    pub fn run_pss_operating_point_with_dc_seed(
-        &self,
-        netlist: &Netlist,
-        config: PssConfig,
-        dc_seed: &PssDcOperatingPointSeed,
-    ) -> Result<PssOperatingPoint, SimulationError> {
-        self.run_pss_operating_point_with_dc_seed_and_abort(netlist, config, dc_seed, &NoAbort)
-    }
-
-    /// Cancellable form of [`Self::run_pss_operating_point_with_dc_seed`].
+    ///
+    /// Honors `abort` cooperatively.
     pub fn run_pss_operating_point_with_dc_seed_and_abort(
         &self,
         netlist: &Netlist,
@@ -1860,15 +1844,8 @@ impl Engine {
     /// that shooting PSS does not yet advance with the transient integrator's
     /// accepted-step lifecycle; returning a checkpoint for those circuits
     /// would misrepresent stale internal state as periodic.
-    pub fn run_pss_with_continuation_state(
-        &self,
-        netlist: &Netlist,
-        config: PssConfig,
-    ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
-        self.run_pss_with_continuation_state_abort(netlist, config, &NoAbort)
-    }
-
-    /// Cancellable form of [`Self::run_pss_with_continuation_state`].
+    ///
+    /// Honors `abort` cooperatively.
     pub fn run_pss_with_continuation_state_abort(
         &self,
         netlist: &Netlist,
@@ -1887,22 +1864,8 @@ impl Engine {
     /// envelope/modulation sources would otherwise make the authored deck
     /// non-periodic. Source names are matched case-insensitively after circuit
     /// elaboration; unknown, empty, or duplicate names are rejected.
-    pub fn run_pss_with_frozen_source_continuation_state(
-        &self,
-        netlist: &Netlist,
-        config: PssConfig,
-        frozen_source_names: &[String],
-    ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
-        self.run_pss_with_frozen_source_continuation_state_abort(
-            netlist,
-            config,
-            frozen_source_names,
-            &NoAbort,
-        )
-    }
-
-    /// Cancellable form of
-    /// [`Self::run_pss_with_frozen_source_continuation_state`].
+    ///
+    /// Honors `abort` cooperatively.
     pub fn run_pss_with_frozen_source_continuation_state_abort(
         &self,
         netlist: &Netlist,
@@ -2085,17 +2048,8 @@ impl Engine {
     /// Continue transient integration for `duration` seconds from a converged
     /// PSS state. Returned sample times remain absolute and start at
     /// `state.time_origin()`.
-    pub fn run_tran_from_pss_state(
-        &self,
-        netlist: &Netlist,
-        state: &PssContinuationState,
-        duration: Value,
-        max_step: Value,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
-        self.run_tran_from_pss_state_with_abort(netlist, state, duration, max_step, &NoAbort)
-    }
-
-    /// Cancellable form of [`Self::run_tran_from_pss_state`].
+    ///
+    /// Honors `abort` cooperatively.
     pub fn run_tran_from_pss_state_with_abort(
         &self,
         netlist: &Netlist,

@@ -114,7 +114,13 @@ fn classic_mos_envelope_reconstructs_native_history_and_portable_continuation() 
             TransientCheckpoint::from_text(&result.final_checkpoint().to_text()).unwrap();
         assert!(checkpoint.capability().is_resumable());
         engine
-            .run_tran_resume(&deck, &checkpoint, 10.1e-9, 10e-9 / 1024.0)
+            .run_tran_resume_with_abort(
+                &deck,
+                &checkpoint,
+                10.1e-9,
+                10e-9 / 1024.0,
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         let encoded =
             serde_json::to_string(&EnvelopeGuaranteeTag::from(result.guarantee())).unwrap();

@@ -47,12 +47,13 @@ fn bjt_auxiliary_lte_domain_survives_checkpoint_encoding_and_rejects_mismatch() 
         .unwrap();
         let engine = xyce_engine();
         let (full, scheduled) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &netlist,
                 8e-6,
                 2e-7,
                 TransientStartupMode::OperatingPoint,
                 &[2.37e-6],
+                &rspice_core::NoAbort,
             )
             .unwrap();
         let source = &scheduled[0].checkpoint;
@@ -68,7 +69,13 @@ fn bjt_auxiliary_lte_domain_survives_checkpoint_encoding_and_rejects_mismatch() 
             let checkpoint =
                 TransientCheckpoint::from_bytes(&source.to_bytes(encoding).unwrap()).unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&netlist, &checkpoint, 8e-6, 2e-7)
+                .run_tran_resume_with_abort(
+                    &netlist,
+                    &checkpoint,
+                    8e-6,
+                    2e-7,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             assert_bit_exact(&resumed.time, &full.time[offset..], "BJT accepted times");
             assert_bit_exact(
@@ -124,7 +131,7 @@ fn bjt_auxiliary_lte_domain_survives_checkpoint_encoding_and_rejects_mismatch() 
             TransientCheckpoint::from_bytes(text.replace(header, &changed.join(" ")).as_bytes())
                 .unwrap();
         let error = engine
-            .run_tran_resume(&netlist, &changed, 8e-6, 2e-7)
+            .run_tran_resume_with_abort(&netlist, &changed, 8e-6, 2e-7, &rspice_core::NoAbort)
             .unwrap_err();
         assert!(error.to_string().contains("auxiliary domain"), "{error}");
     }

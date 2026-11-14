@@ -234,12 +234,13 @@ mod tests {
         let engine = Engine::new(SimulationConfig::default());
         let times: Vec<_> = (1..=1024).map(|i| f64::from(i) * 1e-6).collect();
         let (baseline, retained) = engine
-            .run_tran_checkpoint_schedule_with_startup_mode(
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                 &netlist,
                 1025e-6,
                 1e-6,
                 TransientStartupMode::OperatingPoint,
                 &times,
+                &crate::NoAbort,
             )
             .unwrap();
         assert_eq!(retained.len(), times.len());
@@ -286,12 +287,13 @@ mod tests {
         assert_eq!(result.voltages, baseline.voltages);
         assert!(
             bounded
-                .run_tran_checkpoint_schedule_with_startup_mode(
+                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                     &netlist,
                     1025e-6,
                     1e-6,
                     TransientStartupMode::OperatingPoint,
                     &times,
+                    &crate::NoAbort
                 )
                 .is_err()
         );

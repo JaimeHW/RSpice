@@ -27,7 +27,7 @@ fn pss_origin_jump_retains_charge_and_delayed_limits_through_resume() {
         config.resource_limits.max_result_values = 2_000_000;
         let engine = Engine::new(config);
         let (pss, state) = engine
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &deck,
                 PssConfig::new(1.0)
                     .with_harmonics(1)
@@ -39,6 +39,7 @@ fn pss_origin_jump_retains_charge_and_delayed_limits_through_resume() {
                             0
                         },
                     ),
+                &rspice_core::NoAbort,
             )
             .unwrap_or_else(|error| panic!("{dialect:?}, TD={delay}, C={capacitor}: {error}"));
         assert!(pss.is_stable);
@@ -78,11 +79,17 @@ fn pss_origin_jump_retains_charge_and_delayed_limits_through_resume() {
             }
         }
         let (first, checkpoint) = engine
-            .run_tran_from_pss_state(&deck, &state, 0.7, 0.005)
+            .run_tran_from_pss_state_with_abort(&deck, &state, 0.7, 0.005, &rspice_core::NoAbort)
             .unwrap();
         let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&deck, &checkpoint, 2.0 * delay + 1.0, 0.005)
+            .run_tran_resume_with_abort(
+                &deck,
+                &checkpoint,
+                2.0 * delay + 1.0,
+                0.005,
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         // A continuation row at a jump publishes its left limit, the solution
         // of the step that ends there, so it is read just before the edge

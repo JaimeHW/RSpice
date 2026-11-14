@@ -267,7 +267,7 @@ fn a_checkpoint_request_this_deck_cannot_satisfy_is_refused_before_the_run() {
          .end\n",
     );
     let error = Engine::default()
-        .run_tran_checkpointed(&netlist, 10.0e-9, 1.0e-9)
+        .run_tran_checkpointed_with_abort(&netlist, 10.0e-9, 1.0e-9, &rspice_core::NoAbort)
         .expect_err("a deck whose accepted state cannot be captured has no checkpoint to return");
     assert_eq!(
         capability_token(&error),

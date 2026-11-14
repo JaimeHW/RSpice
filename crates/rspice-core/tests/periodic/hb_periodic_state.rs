@@ -277,7 +277,12 @@ fn hb_envelope_state_freezes_authenticates_restores_and_reactivates() {
     );
 
     let (hb, state) = engine
-        .run_hb_envelope_continuation_state(&netlist, envelope_hb_config(), &["vMoD".to_string()])
+        .run_hb_envelope_continuation_state_with_abort(
+            &netlist,
+            envelope_hb_config(),
+            &["vMoD".to_string()],
+            &rspice_core::NoAbort,
+        )
         .expect("selected slow source is frozen before the carrier solve");
     assert!(hb.converged);
     let frozen_modulation = hb
@@ -317,13 +322,14 @@ fn hb_envelope_state_freezes_authenticates_restores_and_reactivates() {
         .map(|(_, voltage)| *voltage)
         .expect("out node projected");
     let (transient, _) = engine
-        .run_tran_from_hb_envelope_state(
+        .run_tran_from_hb_envelope_state_with_abort(
             &netlist,
             &envelope_hb_config(),
             &["VMOD".to_string()],
             &state,
             600.0e-9,
             10.0e-9,
+            &rspice_core::NoAbort,
         )
         .expect("original source waveforms reactivate at slow-time origin zero");
     assert_eq!(transient.time.first().copied(), Some(0.0));
@@ -357,30 +363,37 @@ fn hb_envelope_artifact_rejects_every_identity_mismatch() {
     let netlist = envelope_deck();
     let engine = Engine::new(SimulationConfig::default());
     let (_, state) = engine
-        .run_hb_envelope_continuation_state(&netlist, envelope_hb_config(), &["Vmod".to_string()])
+        .run_hb_envelope_continuation_state_with_abort(
+            &netlist,
+            envelope_hb_config(),
+            &["Vmod".to_string()],
+            &rspice_core::NoAbort,
+        )
         .expect("continuation state");
 
     let changed_hb = HbConfig::new(1.0e6).with_harmonics(5);
     let hb_error = engine
-        .run_tran_from_hb_envelope_state(
+        .run_tran_from_hb_envelope_state_with_abort(
             &netlist,
             &changed_hb,
             &["Vmod".to_string()],
             &state,
             100.0e-9,
             10.0e-9,
+            &rspice_core::NoAbort,
         )
         .expect_err("HB configuration mismatch must fail closed");
     assert!(hb_error.to_string().contains("different HB configuration"));
 
     let source_error = engine
-        .run_tran_from_hb_envelope_state(
+        .run_tran_from_hb_envelope_state_with_abort(
             &netlist,
             &envelope_hb_config(),
             &["Vcarrier".to_string()],
             &state,
             100.0e-9,
             10.0e-9,
+            &rspice_core::NoAbort,
         )
         .expect_err("frozen-source mismatch must fail closed");
     assert!(source_error.to_string().contains("frozen-source set"));
@@ -396,13 +409,14 @@ fn hb_envelope_artifact_rejects_every_identity_mismatch() {
     )
     .expect("changed deck parses");
     let netlist_error = engine
-        .run_tran_from_hb_envelope_state(
+        .run_tran_from_hb_envelope_state_with_abort(
             &changed_netlist,
             &envelope_hb_config(),
             &["Vmod".to_string()],
             &state,
             100.0e-9,
             10.0e-9,
+            &rspice_core::NoAbort,
         )
         .expect_err("semantic netlist mismatch must fail closed");
     assert!(
@@ -414,13 +428,14 @@ fn hb_envelope_artifact_rejects_every_identity_mismatch() {
     let mut changed_simulation = SimulationConfig::default();
     changed_simulation.temperature += 5.0;
     let config_error = Engine::new(changed_simulation)
-        .run_tran_from_hb_envelope_state(
+        .run_tran_from_hb_envelope_state_with_abort(
             &netlist,
             &envelope_hb_config(),
             &["Vmod".to_string()],
             &state,
             100.0e-9,
             10.0e-9,
+            &rspice_core::NoAbort,
         )
         .expect_err("resolved simulation configuration mismatch must fail closed");
     assert!(
@@ -436,31 +451,38 @@ fn hb_envelope_resolves_nonlin_hb_and_tahb_identity() {
     let caller_config = envelope_hb_config().with_max_iterations(17);
     let engine = Engine::new(SimulationConfig::default());
     let (analysis, state) = engine
-        .run_hb_envelope_continuation_state(&netlist, caller_config.clone(), &["Vmod".to_string()])
+        .run_hb_envelope_continuation_state_with_abort(
+            &netlist,
+            caller_config.clone(),
+            &["Vmod".to_string()],
+            &rspice_core::NoAbort,
+        )
         .expect("typed direct-HB envelope state is created");
     assert_eq!(analysis.operating_point.config().max_iterations, 2);
 
     engine
-        .run_tran_from_hb_envelope_state(
+        .run_tran_from_hb_envelope_state_with_abort(
             &netlist,
             &caller_config,
             &["Vmod".to_string()],
             &state,
             20.0e-9,
             10.0e-9,
+            &rspice_core::NoAbort,
         )
         .expect("resume derives the same authored MAXSTEP identity as creation");
 
     let changed_budget =
         envelope_deck_with_options(".options hbint tahb=0\n.options nonlin-hb maxstep=3");
     let budget_error = engine
-        .run_tran_from_hb_envelope_state(
+        .run_tran_from_hb_envelope_state_with_abort(
             &changed_budget,
             &caller_config,
             &["Vmod".to_string()],
             &state,
             20.0e-9,
             10.0e-9,
+            &rspice_core::NoAbort,
         )
         .expect_err("changed authored MAXSTEP must change the HB state identity");
     assert!(
@@ -473,21 +495,23 @@ fn hb_envelope_resolves_nonlin_hb_and_tahb_identity() {
     let transient_assisted =
         envelope_deck_with_options(".options hbint tahb=1\n.options nonlin-hb maxstep=2");
     engine
-        .run_hb_envelope_continuation_state(
+        .run_hb_envelope_continuation_state_with_abort(
             &transient_assisted,
             caller_config.clone(),
             &["Vmod".to_string()],
+            &rspice_core::NoAbort,
         )
         .expect("supported TAHB must construct envelope state");
 
     let resume_error = engine
-        .run_tran_from_hb_envelope_state(
+        .run_tran_from_hb_envelope_state_with_abort(
             &transient_assisted,
             &caller_config,
             &["Vmod".to_string()],
             &state,
             20.0e-9,
             10.0e-9,
+            &rspice_core::NoAbort,
         )
         .expect_err("a state created with TAHB=0 must not authenticate under TAHB=1");
     assert!(
@@ -502,25 +526,32 @@ fn hb_envelope_source_selection_and_circuit_subset_fail_closed() {
     let netlist = envelope_deck();
     let engine = Engine::new(SimulationConfig::default());
     let duplicate = engine
-        .run_hb_envelope_continuation_state(
+        .run_hb_envelope_continuation_state_with_abort(
             &netlist,
             envelope_hb_config(),
             &["Vmod".to_string(), "vMOD".to_string()],
+            &rspice_core::NoAbort,
         )
         .expect_err("case-insensitive duplicates must fail");
     assert!(duplicate.to_string().contains("duplicate source 'vmod'"));
     let unknown = engine
-        .run_hb_envelope_continuation_state(
+        .run_hb_envelope_continuation_state_with_abort(
             &netlist,
             envelope_hb_config(),
             &["Vmissing".to_string()],
+            &rspice_core::NoAbort,
         )
         .expect_err("unknown source must fail");
     assert!(unknown.to_string().contains("unknown independent source"));
 
     let unsupported = Netlist::parse("unsupported GP phase history\nV1 in 0 SIN(.7 .01 1meg)\nR1 in out 1k\nQ1 out in 0 QM\n.model QM NPN TF=1n PTF=30\n.end\n").unwrap();
     let error = engine
-        .run_hb_envelope_continuation_state(&unsupported, envelope_hb_config(), &[])
+        .run_hb_envelope_continuation_state_with_abort(
+            &unsupported,
+            envelope_hb_config(),
+            &[],
+            &rspice_core::NoAbort,
+        )
         .unwrap_err();
     assert!(
         error
@@ -537,14 +568,27 @@ fn hb_envelope_accepts_and_resumes_memoryless_classic_mos() {
     let netlist = Netlist::parse("memoryless MOS history\nV1 in 0 SIN(1 .01 1meg)\nR1 in out 1k\nM1 out in 0 0 MM\n.model MM NMOS\n.end\n").unwrap();
     let engine = Engine::default();
     let (_, state) = engine
-        .run_hb_envelope_continuation_state(&netlist, envelope_hb_config(), &[])
+        .run_hb_envelope_continuation_state_with_abort(
+            &netlist,
+            envelope_hb_config(),
+            &[],
+            &rspice_core::NoAbort,
+        )
         .unwrap();
     assert_eq!(
         state.guarantee(),
         rspice_core::engine::HbEnvelopeStateGuarantee::ExactClassicMosRlcMnaV1
     );
     let (transient, _) = engine
-        .run_tran_from_hb_envelope_state(&netlist, &envelope_hb_config(), &[], &state, 20e-9, 1e-9)
+        .run_tran_from_hb_envelope_state_with_abort(
+            &netlist,
+            &envelope_hb_config(),
+            &[],
+            &state,
+            20e-9,
+            1e-9,
+            &rspice_core::NoAbort,
+        )
         .unwrap();
     let input = transient
         .node_names
@@ -572,7 +616,12 @@ fn hb_envelope_initializer_and_resume_are_abort_aware() {
     assert!(matches!(creation, Err(SimulationError::Aborted)));
 
     let (_, state) = engine
-        .run_hb_envelope_continuation_state(&netlist, envelope_hb_config(), &["Vmod".to_string()])
+        .run_hb_envelope_continuation_state_with_abort(
+            &netlist,
+            envelope_hb_config(),
+            &["Vmod".to_string()],
+            &rspice_core::NoAbort,
+        )
         .expect("continuation state");
     let resume = engine.run_tran_from_hb_envelope_state_with_abort(
         &netlist,

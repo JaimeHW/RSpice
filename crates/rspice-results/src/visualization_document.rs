@@ -558,6 +558,7 @@ impl<'de> Deserialize<'de> for TypedValue {
 impl TypedValue {
     /// Preserve numerical gaps at the typed table boundary. Infinities remain
     /// invalid real values and are rejected by source validation.
+    #[cfg(test)]
     pub fn real_sample(value: f64) -> Self {
         if value.is_nan() {
             Self::Missing(ValueType::Real)

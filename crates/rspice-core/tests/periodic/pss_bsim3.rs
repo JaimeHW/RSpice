@@ -75,7 +75,7 @@ fn bsim3_pss_coupled_native_charge_matches_hb_and_resumes() {
             .with_tstab_periods(0);
         config.integration_method = Some(method);
         let (analysis, state) = engine
-            .run_pss_with_continuation_state(&netlist, config)
+            .run_pss_with_continuation_state_abort(&netlist, config, &rspice_core::NoAbort)
             .unwrap_or_else(|error| panic!("{kind} CAPMOD={capmod} NQSMOD={nqs}: {error}"));
         if nqs == 1 && polarity > 0.0 {
             assert_eq!(
@@ -123,13 +123,25 @@ fn bsim3_pss_coupled_native_charge_matches_hb_and_resumes() {
             }
         }
         let (continued, checkpoint) = engine
-            .run_tran_from_pss_state(&netlist, &state, 0.1e-9, 1e-12)
+            .run_tran_from_pss_state_with_abort(
+                &netlist,
+                &state,
+                0.1e-9,
+                1e-12,
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         assert!(continued.time.len() > 2);
         let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
         assert!(checkpoint.capability().is_resumable());
         engine
-            .run_tran_resume(&netlist, &checkpoint, 0.11e-9, 1e-12)
+            .run_tran_resume_with_abort(
+                &netlist,
+                &checkpoint,
+                0.11e-9,
+                1e-12,
+                &rspice_core::NoAbort,
+            )
             .unwrap();
     }
 }

@@ -213,13 +213,21 @@ c1 out 0 100p
         .with_tstab_periods(0)
         .with_tolerance(1.0e-6);
     assert_admitted(
-        engine().run_pss_with_continuation_state(&parse(supported), config.clone()),
+        engine().run_pss_with_continuation_state_abort(
+            &parse(supported),
+            config.clone(),
+            &rspice_core::NoAbort,
+        ),
         "an R/L/C deck",
     );
 
     let diode = "charged diode continuation\nvin in 0 sin(0 0.4 1meg)\nr1 in out 1k\nc1 out 0 100p\nd1 out 0 dmod\n.model dmod d(cjo=1p)\n.end\n";
     assert_admitted(
-        engine().run_pss_with_continuation_state(&parse(diode), config.clone()),
+        engine().run_pss_with_continuation_state_abort(
+            &parse(diode),
+            config.clone(),
+            &rspice_core::NoAbort,
+        ),
         "a diode charge deck",
     );
 
@@ -236,7 +244,11 @@ c1 out 0 100p
     )];
     for (deck, expected) in cases {
         let message = engine()
-            .run_pss_with_continuation_state(&parse(deck), config.clone())
+            .run_pss_with_continuation_state_abort(
+                &parse(deck),
+                config.clone(),
+                &rspice_core::NoAbort,
+            )
             .expect_err("an uncaptured period-map state must fail before the periodic solve")
             .to_string();
         assert!(
@@ -262,20 +274,22 @@ Cout out 0 160p
 .end
 ";
     assert_admitted(
-        engine().run_hb_envelope_continuation_state(
+        engine().run_hb_envelope_continuation_state_with_abort(
             &parse(supported),
             HbConfig::new(F0).with_harmonics(2),
             &["Vmod".to_string()],
+            &rspice_core::NoAbort,
         ),
         "an R/C envelope deck",
     );
 
     let with_inductor = supported.replace("Cout out 0 160p", "Cout out 0 160p\nLout out 0 1u");
     assert_admitted(
-        engine().run_hb_envelope_continuation_state(
+        engine().run_hb_envelope_continuation_state_with_abort(
             &parse(&with_inductor),
             HbConfig::new(F0).with_harmonics(2),
             &["Vmod".to_string()],
+            &rspice_core::NoAbort,
         ),
         "a linear R/L/C envelope deck",
     );
@@ -284,10 +298,11 @@ Cout out 0 160p
         "Cout out 0 160p\nDout out 0 DM\n.model DM D",
     );
     assert_admitted(
-        engine().run_hb_envelope_continuation_state(
+        engine().run_hb_envelope_continuation_state_with_abort(
             &parse(&with_diode),
             HbConfig::new(F0).with_harmonics(2),
             &["Vmod".to_string()],
+            &rspice_core::NoAbort,
         ),
         "a diode envelope deck",
     );
@@ -296,10 +311,11 @@ Cout out 0 160p
         "Cout out 0 160p\nMout out carrier 0 0 MM\n.model MM NMOS",
     );
     assert_admitted(
-        engine().run_hb_envelope_continuation_state(
+        engine().run_hb_envelope_continuation_state_with_abort(
             &parse(&with_mos),
             HbConfig::new(F0).with_harmonics(2),
             &["Vmod".to_string()],
+            &rspice_core::NoAbort,
         ),
         "a classic MOS envelope deck",
     );
@@ -308,10 +324,11 @@ Cout out 0 160p
         "Cout out 0 160p\nSout out 0 carrier 0 SM\n.model SM SW(VT=0 VH=0.1 RON=1 ROFF=1meg)",
     );
     let message = engine()
-        .run_hb_envelope_continuation_state(
+        .run_hb_envelope_continuation_state_with_abort(
             &parse(&with_switch),
             HbConfig::new(F0).with_harmonics(2),
             &["Vmod".to_string()],
+            &rspice_core::NoAbort,
         )
         .unwrap_err()
         .to_string();

@@ -85,18 +85,19 @@ fn checkpoint_text_round_trip_resumes_the_exact_noise_suffix() {
     let engine = engine();
     let deck = deck(71, true);
     let (uninterrupted, scheduled) = engine
-        .run_tran_checkpoint_schedule_with_startup_mode(
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
             &deck,
             8.0e-9,
             0.25e-9,
             TransientStartupMode::OperatingPoint,
             &[3.0e-9],
+            &rspice_core::NoAbort,
         )
         .expect("TEAM RTN checkpoint trajectory solves");
     let checkpoint = TransientCheckpoint::from_text(&scheduled[0].checkpoint.to_text())
         .expect("TEAM RTN checkpoint round-trips");
     let (resumed, _) = engine
-        .run_tran_resume(&deck, &checkpoint, 8.0e-9, 0.25e-9)
+        .run_tran_resume_with_abort(&deck, &checkpoint, 8.0e-9, 0.25e-9, &rspice_core::NoAbort)
         .expect("TEAM RTN checkpoint resumes");
     let seam = uninterrupted
         .time
@@ -115,7 +116,7 @@ fn checkpoint_state_version_and_provenance_fail_closed() {
     let engine = engine();
     let deck = deck(11, true);
     let (_, checkpoint) = engine
-        .run_tran_checkpointed(&deck, 1.0e-9, 0.25e-9)
+        .run_tran_checkpointed_with_abort(&deck, 1.0e-9, 0.25e-9, &rspice_core::NoAbort)
         .expect("TEAM RTN checkpoint captures");
     let checkpoint = checkpoint.into_checkpoint().unwrap();
     let text = checkpoint.to_text();
@@ -142,7 +143,7 @@ fn checkpoint_state_version_and_provenance_fail_closed() {
     let checkpoint = TransientCheckpoint::from_text(&tampered)
         .expect("a syntactically valid provenance mutation parses");
     let error = engine
-        .run_tran_resume(&deck, &checkpoint, 2.0e-9, 0.25e-9)
+        .run_tran_resume_with_abort(&deck, &checkpoint, 2.0e-9, 0.25e-9, &rspice_core::NoAbort)
         .expect_err("TEAM RTN provenance mismatch must reject resume")
         .to_string();
     assert!(error.contains("provenance"), "{error}");

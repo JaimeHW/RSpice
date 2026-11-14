@@ -77,13 +77,7 @@ fn gp_perfect_coupling_preserves_null_flux_current_jumps_and_restart() {
                     config.convergence_config.gmin_target = 0.0;
                     let engine = Engine::new(config);
                     let (full, checkpoints) = engine
-                .run_tran_checkpoint_schedule_with_startup_mode(
-                    &deck,
-                    stop,
-                    step,
-                    TransientStartupMode::OperatingPoint,
-                    &[edge],
-                )
+                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(&deck, stop, step, TransientStartupMode::OperatingPoint, &[edge], &rspice_core::NoAbort)
                 .unwrap_or_else(|error| {
                     panic!("{dialect:?}/{method:?}, k={coupling}, turns={turns}, scale={scale:e}: {error}")
                 });
@@ -131,7 +125,13 @@ fn gp_perfect_coupling_preserves_null_flux_current_jumps_and_restart() {
                     )
                     .unwrap();
                     let (resumed, _) = engine
-                        .run_tran_resume(&deck, &checkpoint, stop, step)
+                        .run_tran_resume_with_abort(
+                            &deck,
+                            &checkpoint,
+                            stop,
+                            step,
+                            &rspice_core::NoAbort,
+                        )
                         .unwrap();
                     assert_eq!(resumed.time, full.time[seam..]);
                     for (actual, expected) in resumed
@@ -171,12 +171,13 @@ fn gp_perfect_coupling_three_windings_preserve_both_voltage_constraints() {
             config.convergence_config.gmin_target = 0.0;
             let engine = Engine::new(config);
             let (full, _) = engine
-                .run_tran_checkpoint_schedule_with_startup_mode(
+                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                     &deck,
                     stop,
                     0.005 * scale,
                     TransientStartupMode::OperatingPoint,
                     &[edge],
+                    &rspice_core::NoAbort,
                 )
                 .unwrap_or_else(|error| panic!("{method:?}, scale={scale:e}: {error}"));
             let currents = ["L1", "L2", "L3"]
@@ -242,12 +243,13 @@ fn gp_events_preserve_mutual_flux_modes_and_exact_checkpoint_continuation() {
                     "GP event mutual flux\nV1 in 0 PWL(0 .5 .5n .5 .5n 1 3n 1)\nR1 in a 1k\nL1 a 0 1u\nL2 b 0 4u\nR2 b 0 4k\nK1 L1 L2 {coupling}\nVC c 0 2\nVB base 0 PWL(0 .6 .5n .6 .5n .601 3n .601)\nQ1 c base 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF=1n PTF=57.29577951308232)\n.options GMIN=0 RELTOL=1e-5 ABSTOL=1e-15 VNTOL=1e-10 CHGTOL=1e-26\n.end\n",
                 )).unwrap();
                 let (full, checkpoints) = engine
-                    .run_tran_checkpoint_schedule_with_startup_mode(
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                         &deck,
                         stop,
                         step,
                         TransientStartupMode::OperatingPoint,
                         &[edge, 1.6e-9],
+                        &rspice_core::NoAbort,
                     )
                     .unwrap_or_else(|error| panic!("{dialect:?}/{method:?}/{coupling}: {error}"));
                 assert_eq!(checkpoints.len(), 2);
@@ -290,7 +292,13 @@ fn gp_events_preserve_mutual_flux_modes_and_exact_checkpoint_continuation() {
                     )
                     .unwrap();
                     let (resumed, _) = engine
-                        .run_tran_resume(&deck, &checkpoint, stop, step)
+                        .run_tran_resume_with_abort(
+                            &deck,
+                            &checkpoint,
+                            stop,
+                            step,
+                            &rspice_core::NoAbort,
+                        )
                         .unwrap();
                     let seam = full
                         .time
@@ -349,12 +357,13 @@ fn gp_small_step_preserves_source_current_and_cccs_feedback() {
                         if polarity > 0.0 { "NPN" } else { "PNP" },
                     )).unwrap();
                     let (result, checkpoints) = engine
-                        .run_tran_checkpoint_schedule_with_startup_mode(
+                        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                             &source,
                             50e-12,
                             2e-12,
                             TransientStartupMode::OperatingPoint,
                             &[25e-12],
+                            &rspice_core::NoAbort,
                         )
                         .unwrap_or_else(|error| {
                             panic!("{dialect:?}/{method:?}/{polarity}/{control}: {error}")
@@ -386,7 +395,13 @@ fn gp_small_step_preserves_source_current_and_cccs_feedback() {
                     )
                     .unwrap();
                     let (resumed, _) = engine
-                        .run_tran_resume(&source, &checkpoint, 50e-12, 2e-12)
+                        .run_tran_resume_with_abort(
+                            &source,
+                            &checkpoint,
+                            50e-12,
+                            2e-12,
+                            &rspice_core::NoAbort,
+                        )
                         .unwrap();
                     let seam = result
                         .time

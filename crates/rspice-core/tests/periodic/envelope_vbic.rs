@@ -201,7 +201,7 @@ fn envelope_vbic_retains_self_heating_and_delay_against_ngspice_orbit() {
     }
     let checkpoint = TransientCheckpoint::from_text(&result.final_checkpoint().to_text()).unwrap();
     let (resumed, _) = engine
-        .run_tran_resume(&deck, &checkpoint, 1.125e-6, 0.5e-9)
+        .run_tran_resume_with_abort(&deck, &checkpoint, 1.125e-6, 0.5e-9, &rspice_core::NoAbort)
         .unwrap();
     let end = resumed.time.len() - 1;
     let thermal = resumed.try_voltage_waveform_named("th").unwrap()[end];

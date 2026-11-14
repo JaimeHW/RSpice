@@ -1,7 +1,7 @@
 //! Retention and phase projection support for converged HB periodic state.
 
 use super::*;
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::analysis::harmonic_balance::HbContinuationLimitation;
 use crate::analysis::harmonic_balance::{HbReactiveKind, HbReactiveSpectrum};
 use crate::circuit::CircuitData;
@@ -742,21 +742,8 @@ impl Engine {
     /// source waveforms frozen at their exact time-zero values, then create a
     /// complete transient continuation state for supported R/L/C networks,
     /// diodes and behavioral equations, including their charge/integral memory.
-    pub fn run_hb_envelope_continuation_state(
-        &self,
-        netlist: &Netlist,
-        config: HbConfig,
-        frozen_source_names: &[String],
-    ) -> Result<(HbAnalysisResult, HbEnvelopeContinuationState), SimulationError> {
-        self.run_hb_envelope_continuation_state_with_abort(
-            netlist,
-            config,
-            frozen_source_names,
-            &NoAbort,
-        )
-    }
-
-    /// Cancellable form of [`Self::run_hb_envelope_continuation_state`].
+    ///
+    /// Honors `abort` cooperatively.
     pub fn run_hb_envelope_continuation_state_with_abort(
         &self,
         netlist: &Netlist,
@@ -908,27 +895,8 @@ impl Engine {
 
     /// Reactivate the original selected source waveforms at slow-time origin
     /// zero and continue transient integration from an authenticated HB state.
-    pub fn run_tran_from_hb_envelope_state(
-        &self,
-        netlist: &Netlist,
-        expected_hb_config: &HbConfig,
-        expected_frozen_source_names: &[String],
-        state: &HbEnvelopeContinuationState,
-        duration: Value,
-        max_step: Value,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
-        self.run_tran_from_hb_envelope_state_with_abort(
-            netlist,
-            expected_hb_config,
-            expected_frozen_source_names,
-            state,
-            duration,
-            max_step,
-            &NoAbort,
-        )
-    }
-
-    /// Cancellable form of [`Self::run_tran_from_hb_envelope_state`].
+    ///
+    /// Honors `abort` cooperatively.
     #[allow(clippy::too_many_arguments)]
     pub fn run_tran_from_hb_envelope_state_with_abort(
         &self,

@@ -36,12 +36,13 @@ fn gp_constant_bias_current_fanout_preserves_resistive_output_and_restart() {
                     if polarity > 0.0 { "NPN" } else { "PNP" }
                 )).unwrap();
                 let (result, checkpoints) = engine
-                    .run_tran_checkpoint_schedule_with_startup_mode(
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                         &source,
                         50e-12,
                         max_step,
                         TransientStartupMode::OperatingPoint,
                         &[25e-12],
+                        &rspice_core::NoAbort,
                     )
                     .unwrap_or_else(|error| panic!("{dialect:?}/{polarity}/{threshold}: {error}"));
                 let voltage = result.try_voltage_waveform_named("copy").unwrap();
@@ -123,12 +124,13 @@ fn gp_finite_behavioral_current_controls_preserve_rl_law_and_packed_restart() {
                         TransientStartupMode::Uic,
                     ] {
                         let (result, checkpoints) = engine
-                            .run_tran_checkpoint_schedule_with_startup_mode(
+                            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                                 &source,
                                 2.5e-9,
                                 1e-12,
                                 startup,
                                 &[1.2e-9],
+                                &rspice_core::NoAbort,
                             )
                             .unwrap_or_else(|error| {
                                 panic!(
@@ -298,11 +300,17 @@ fn gp_current_controlled_sources_preserve_finite_currents_impulses_and_restart()
                 check(&result, startup == TransientStartupMode::Uic);
             }
             let (_, checkpoint) = engine
-                .run_tran_checkpointed(&source, 1.2e-9, 4e-12)
+                .run_tran_checkpointed_with_abort(&source, 1.2e-9, 4e-12, &rspice_core::NoAbort)
                 .unwrap();
             let checkpoint = checkpoint.into_checkpoint().unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&source, &checkpoint, 2.5e-9, 4e-12)
+                .run_tran_resume_with_abort(
+                    &source,
+                    &checkpoint,
+                    2.5e-9,
+                    4e-12,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             check(&resumed, false);
         }
@@ -356,11 +364,17 @@ fn gp_current_controlled_impulse_drives_the_independent_rc_response_after_restar
                     "RC refinement did not reduce the waveform error"
                 );
                 let (_, checkpoint) = engine
-                    .run_tran_checkpointed(&source, 0.4e-9, 1e-12)
+                    .run_tran_checkpointed_with_abort(&source, 0.4e-9, 1e-12, &rspice_core::NoAbort)
                     .unwrap();
                 let checkpoint = checkpoint.into_checkpoint().unwrap();
                 let (resumed, _) = engine
-                    .run_tran_resume(&source, &checkpoint, 2e-9, 1e-12)
+                    .run_tran_resume_with_abort(
+                        &source,
+                        &checkpoint,
+                        2e-9,
+                        1e-12,
+                        &rspice_core::NoAbort,
+                    )
                     .unwrap();
                 for result in [&full, &resumed] {
                     let voltage = result.try_voltage_waveform_named("out").unwrap();
@@ -506,12 +520,13 @@ fn check_gp_finite_ccvs(probe: bool) {
                     TransientStartupMode::Uic,
                 ] {
                     let (result, checkpoints) = engine
-                        .run_tran_checkpoint_schedule_with_startup_mode(
+                        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                             &source,
                             2.5e-9,
                             4e-12,
                             startup,
                             &[1.2e-9],
+                            &rspice_core::NoAbort,
                         )
                         .unwrap_or_else(|error| {
                             panic!("{dialect:?}/{polarity}/{resistance}/{startup:?}: {error}")
@@ -589,12 +604,13 @@ fn check_gp_finite_ccvs_step(probe: bool) {
                     2.0*polarity,0.35*polarity,0.35*polarity,0.3505*polarity,0.3505*polarity,if polarity>0.0 {"NPN"} else {"PNP"},
                 )).unwrap();
                 let (result, checkpoints) = engine
-                    .run_tran_checkpoint_schedule_with_startup_mode(
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                         &source,
                         2e-9,
                         2e-12,
                         TransientStartupMode::OperatingPoint,
                         &[jump, 1.1e-9],
+                        &rspice_core::NoAbort,
                     )
                     .unwrap_or_else(|error| panic!("{dialect:?}/{method:?}/{polarity}: {error}"));
                 let vt = thermal_voltage(dialect);

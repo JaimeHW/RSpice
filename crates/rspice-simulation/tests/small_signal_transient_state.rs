@@ -114,7 +114,7 @@ fn directory_for(circuit: &str, test: &str) -> Directory {
     )
     .expect("the window resolves");
     let (_, checkpoint) = rspice_core::Engine::default()
-        .run_tran_checkpointed(&writer, *stop, max_step)
+        .run_tran_checkpointed_with_abort(&writer, *stop, max_step, &rspice_core::NoAbort)
         .expect("the transient checkpoints");
     checkpoint
         .into_checkpoint()

@@ -467,11 +467,17 @@ mod mixed {
         assert_eq!(a[10].0.to_bits(), (1007.0f64 * 1e-9).to_bits());
         for stop in [1.0e-6, 1.5035e-6, 2.6e-6] {
             let (_, checkpoint) = engine
-                .run_tran_checkpointed(&netlist, stop, 10e-9)
+                .run_tran_checkpointed_with_abort(&netlist, stop, 10e-9, &rspice_core::NoAbort)
                 .expect("checkpoints");
             let checkpoint = checkpoint.into_checkpoint().unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&netlist, &checkpoint, 4.5e-6, 10e-9)
+                .run_tran_resume_with_abort(
+                    &netlist,
+                    &checkpoint,
+                    4.5e-6,
+                    10e-9,
+                    &rspice_core::NoAbort,
+                )
                 .expect("resumes");
             assert_resumes_onto(&whole, &resumed, stop);
         }
@@ -486,7 +492,7 @@ mod mixed {
         let netlist = buffered_deck(&scratch);
         let engine = Engine::default();
         let (_, checkpoint) = engine
-            .run_tran_checkpointed(&netlist, 1.5e-6, 10e-9)
+            .run_tran_checkpointed_with_abort(&netlist, 1.5e-6, 10e-9, &rspice_core::NoAbort)
             .expect("checkpoints");
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         let saved = checkpoint
@@ -508,7 +514,7 @@ mod mixed {
         let reloaded = TransientCheckpoint::from_bytes(&saved).expect("the image reads back");
         for image in [&checkpoint, &reloaded] {
             let error = engine
-                .run_tran_resume(&netlist, image, 4.5e-6, 10e-9)
+                .run_tran_resume_with_abort(&netlist, image, 4.5e-6, 10e-9, &rspice_core::NoAbort)
                 .expect_err("an edited stimulus is refused")
                 .to_string();
             assert!(
@@ -522,7 +528,7 @@ mod mixed {
         // The original bytes resume.
         scratch.write("stim.vcd", &stimulus(false));
         engine
-            .run_tran_resume(&netlist, &reloaded, 4.5e-6, 10e-9)
+            .run_tran_resume_with_abort(&netlist, &reloaded, 4.5e-6, 10e-9, &rspice_core::NoAbort)
             .expect("the unedited file resumes");
     }
 
@@ -531,7 +537,7 @@ mod mixed {
     fn a_deck_without_a_vcd_stimulus_records_no_file() {
         let netlist = Netlist::parse("* resistor\nv1 a 0 1\nr1 a 0 1k\n.end\n").expect("parses");
         let (_, checkpoint) = Engine::default()
-            .run_tran_checkpointed(&netlist, 1e-6, 0.1e-6)
+            .run_tran_checkpointed_with_abort(&netlist, 1e-6, 0.1e-6, &rspice_core::NoAbort)
             .expect("checkpoints");
         let checkpoint = checkpoint.into_checkpoint().unwrap();
         assert!(checkpoint.to_text().contains("\nvcd_files 0\n"));

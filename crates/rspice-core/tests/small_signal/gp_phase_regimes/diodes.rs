@@ -64,12 +64,13 @@ fn gp_diode_charge_jumps_preserve_finite_currents_startup_and_packed_restart() {
             ] {
                 let deck = Netlist::parse("native diode charge event\nVD n 0 DC .2 PWL(0 .2 1n .2 1n .6 3n .6)\nD1 n 0 dm IC=.1\n.model dm D(IS=1e-16 N=1 CJO=2p VJ=.8 M=.4 FC=.5 TT=.3n)\nVC c 0 2\nVB b 0 .6\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF=.1n PTF=57.29577951308232)\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(n) i(vd) i(d1)\n.end\n").unwrap();
                 let (result, checkpoints) = engine
-                    .run_tran_checkpoint_schedule_with_startup_mode(
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                         &deck,
                         3e-9,
                         5e-12,
                         startup,
                         &[1e-9, 1.7e-9],
+                        &rspice_core::NoAbort,
                     )
                     .unwrap_or_else(|error| panic!("{dialect:?}/{method:?}/{startup:?}: {error}"));
                 let voltage = result.try_voltage_waveform_named("n").unwrap();
@@ -165,12 +166,13 @@ fn gp_diode_series_resistance_retains_junction_charge_and_finite_event_current()
             // 0.1-tau window keeps BE global error below 20 uV at a 2 ps step.
             let deck=Netlist::parse("native diode series event\nVD s 0 DC .2 PWL(0 .2 1n .2 1n .6 1.2n .6)\nD1 s 0 dm\n.model dm D(IS=1e-30 N=1 RS=2k CJO=1p VJ=1 M=0 TT=0)\nVC c 0 2\nVB b 0 .6\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF=.1n PTF=57.29577951308232)\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(s) i(vd) i(d1)\n.end\n").unwrap();
             let (result, checkpoints) = engine
-                .run_tran_checkpoint_schedule_with_startup_mode(
+                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                     &deck,
                     1.2e-9,
                     2e-12,
                     TransientStartupMode::OperatingPoint,
                     &[1e-9, 1.1e-9],
+                    &rspice_core::NoAbort,
                 )
                 .unwrap_or_else(|error| panic!("{dialect:?}/{method:?}: {error}"));
             let voltage = result.try_voltage_waveform_named("s").unwrap();
@@ -254,12 +256,13 @@ fn gp_diode_smooth_model_terms_do_not_create_endless_delay_events() {
             ] {
                 let deck = Netlist::parse(&format!("diode event continuity\nVD d 0 {bias}\nD1 d 0 dm PJ=1\n.model dm D(IS=1e-16 CJO=1p {extra})\nVC c 0 2\nVB b 0 DC .6 PWL(0 .6 1n .6 1n .61 20n .61)\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=100 BR=1 TF=.1n PTF=57.29577951308232)\n.options GMIN=0 RELTOL=1e-6 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) v(d) i(vc) i(d1) i(vd)\n.end\n")).unwrap();
                 let (result, checkpoints) = engine
-                    .run_tran_checkpoint_schedule_with_startup_mode(
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                         &deck,
                         20e-9,
                         1e-9,
                         TransientStartupMode::OperatingPoint,
                         &[1e-9, 2e-9],
+                        &rspice_core::NoAbort,
                     )
                     .unwrap_or_else(|error| {
                         panic!("{dialect:?}/{method:?}/{bias}/{extra}: {error}")
@@ -371,12 +374,13 @@ fn gp_xyce_diode_injection_preserves_charge_impulses_and_finite_currents() {
                 let engine = engine(SpiceDialect::Xyce, method);
                 let deck = Netlist::parse(&format!("Xyce injection event\nVD d 0 DC {v0:.17e} PWL(0 {v0:.17e} 1n {v0:.17e} 1n {v1:.17e} 3n {v1:.17e})\nD1 d 0 dm TEMP={temperature} AREA={area} M={mult}\n.model dm D(IS=1e-14 N=1 EG=1.11 XTI=3 TNOM=27 IKF=1m TIKF={coefficient} CJO=0 TT=2n)\nVC c 0 2\nVB b 0 .6\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF=.1n PTF=57.29577951308232)\n.options GMIN={gmin:e} RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(d) i(d1) i(vd)\n.end\n")).unwrap();
                 let (result, checkpoints) = engine
-                    .run_tran_checkpoint_schedule_with_startup_mode(
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
                         &deck,
                         3e-9,
                         5e-12,
                         TransientStartupMode::OperatingPoint,
                         &[1e-9, 1.7e-9],
+                        &rspice_core::NoAbort,
                     )
                     .unwrap();
                 let diode = result.try_branch_current_waveform_named("d1").unwrap();
@@ -473,7 +477,7 @@ fn gp_xyce_diode_model_processing_preserves_current_charge_and_restart() {
                 ] {
                     let engine = engine(SpiceDialect::Xyce, method);
                     let deck = Netlist::parse(&format!("Processed diode model event\nVD d 0 DC {v0} PWL(0 {v0} 1n {v0} 1n {v1} 3n {v1})\nD1 d 0 dm TEMP={temperature}\n.model dm D(IS=1e-14 N=2 {bv} EG=.02 XTI=3 TNOM=27 CJO=2p VJ=1 M=1.2 FC={authored_fc} TT=2n)\nVC c 0 2\nVB b 0 .6\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF=.1n PTF=57.29577951308232)\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(d) i(d1) i(vd)\n.end\n")).unwrap();
-                    let (result, checkpoints) = engine.run_tran_checkpoint_schedule_with_startup_mode(&deck, 3e-9, 5e-12, TransientStartupMode::OperatingPoint, &[1e-9,1.7e-9]).unwrap_or_else(|error| panic!("TEMP={temperature} FC={authored_fc} BV={breakdown} {method:?}: {error}"));
+                    let (result, checkpoints) = engine.run_tran_checkpoint_schedule_with_startup_mode_and_abort(&deck, 3e-9, 5e-12, TransientStartupMode::OperatingPoint, &[1e-9,1.7e-9], &rspice_core::NoAbort).unwrap_or_else(|error| panic!("TEMP={temperature} FC={authored_fc} BV={breakdown} {method:?}: {error}"));
                     let diode = result.try_branch_current_waveform_named("d1").unwrap();
                     let source = result.try_branch_current_waveform_named("vd").unwrap();
                     for (index, &time) in result.time.iter().enumerate() {

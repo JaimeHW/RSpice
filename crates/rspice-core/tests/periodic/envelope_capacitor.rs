@@ -81,7 +81,7 @@ fn envelope_expression_capacitors_keep_coupled_state_integrals_and_charge_drift(
             TransientCheckpoint::from_text(&result.final_checkpoint().to_text()).unwrap();
         assert!(checkpoint.capability().is_resumable());
         let (resumed, _) = engine
-            .run_tran_resume(&deck, &checkpoint, 0.5e-3, 0.5e-6)
+            .run_tran_resume_with_abort(&deck, &checkpoint, 0.5e-3, 0.5e-6, &rspice_core::NoAbort)
             .unwrap();
         for transient in [origin, &resumed] {
             let out = transient.try_voltage_waveform_named("out").unwrap();
@@ -155,7 +155,7 @@ fn prescribed_capacitance_envelope_retains_product_charge_and_current() {
         )
         .unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&deck, &checkpoint, 0.5e-3, 0.5e-6)
+            .run_tran_resume_with_abort(&deck, &checkpoint, 0.5e-3, 0.5e-6, &rspice_core::NoAbort)
             .unwrap();
         for result in [envelope.continued_transient(), &resumed] {
             let voltage = result.try_voltage_waveform_named("out").unwrap();

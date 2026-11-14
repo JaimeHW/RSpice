@@ -18,12 +18,13 @@ fn shooting_delay_keeps_a_period_endpoint_jump_and_its_outgoing_ramp() {
         config.resource_limits.max_result_values = 2_000_000;
         let engine = Engine::new(config);
         let (pss, state) = engine
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &deck,
                 PssConfig::new(1.0)
                     .with_harmonics(1)
                     .with_points_per_period(16)
                     .with_tstab_periods(0),
+                &rspice_core::NoAbort,
             )
             .unwrap_or_else(|error| panic!("{dialect:?}, TD={delay}: {error}"));
         assert!(pss.is_stable);
@@ -52,11 +53,17 @@ fn shooting_delay_keeps_a_period_endpoint_jump_and_its_outgoing_ramp() {
             );
         }
         let (first, checkpoint) = engine
-            .run_tran_from_pss_state(&deck, &state, 0.7, 0.001)
+            .run_tran_from_pss_state_with_abort(&deck, &state, 0.7, 0.001, &rspice_core::NoAbort)
             .unwrap();
         let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&deck, &checkpoint, 2.0 * delay + 1.0, 0.001)
+            .run_tran_resume_with_abort(
+                &deck,
+                &checkpoint,
+                2.0 * delay + 1.0,
+                0.001,
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         // A continuation row at a jump publishes its left limit, the solution
         // of the step that ends there, so it is read just before the edge.
@@ -111,12 +118,13 @@ fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
         simulation.resource_limits.max_result_values = 2_000_000;
         let engine = Engine::new(simulation);
         let (pss, state) = engine
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &deck,
                 PssConfig::new(1.0)
                     .with_harmonics(1)
                     .with_points_per_period(16)
                     .with_tstab_periods(0),
+                &rspice_core::NoAbort,
             )
             .unwrap_or_else(|error| panic!("{dialect:?}, TD={delay}: {error}"));
         assert_eq!(state.time_origin(), 0.0);
@@ -149,11 +157,23 @@ fn shooting_delay_preserves_ideal_repeating_pwl_steps() {
         }
         {
             let (continued, checkpoint) = engine
-                .run_tran_from_pss_state(&deck, &state, 0.7, 0.001)
+                .run_tran_from_pss_state_with_abort(
+                    &deck,
+                    &state,
+                    0.7,
+                    0.001,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
             let (resumed, _) = engine
-                .run_tran_resume(&deck, &checkpoint, 2.0 * delay + 1.0, 0.001)
+                .run_tran_resume_with_abort(
+                    &deck,
+                    &checkpoint,
+                    2.0 * delay + 1.0,
+                    0.001,
+                    &rspice_core::NoAbort,
+                )
                 .unwrap();
             // A continuation row at a jump publishes its left limit, the
             // solution of the step that ends there.
@@ -293,13 +313,14 @@ fn shooting_delay_preserves_pulse_edges_across_the_period_boundary() {
         simulation.resource_limits.max_result_values = 2_000_000;
         let engine = Engine::new(simulation);
         let (pss, state) = engine
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &deck,
                 PssConfig::new(1.0 / period)
                     .with_harmonics(1)
                     .with_points_per_period(16)
                     .with_tstab_periods(0)
                     .with_tolerance(1e-8),
+                &rspice_core::NoAbort,
             )
             .unwrap();
         assert!(
@@ -335,11 +356,11 @@ fn shooting_delay_preserves_pulse_edges_across_the_period_boundary() {
             );
         }
         let (continued, checkpoint) = engine
-            .run_tran_from_pss_state(&deck, &state, 0.2e-6, 2e-9)
+            .run_tran_from_pss_state_with_abort(&deck, &state, 0.2e-6, 2e-9, &rspice_core::NoAbort)
             .unwrap();
         let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&deck, &checkpoint, 2.5e-6, 2e-9)
+            .run_tran_resume_with_abort(&deck, &checkpoint, 2.5e-6, 2e-9, &rspice_core::NoAbort)
             .unwrap();
         for continued in [&continued, &resumed] {
             let far = continued
@@ -375,13 +396,14 @@ fn shooting_delay_lines_match_hb_and_continue_across_full_delay_windows() {
             .run_hb(&deck, HbConfig::new(1e6).with_harmonics(1))
             .unwrap();
         let (pss, state) = engine
-            .run_pss_with_continuation_state(
+            .run_pss_with_continuation_state_abort(
                 &deck,
                 PssConfig::new(1e6)
                     .with_harmonics(1)
                     .with_points_per_period(16)
                     .with_tstab_periods(0)
                     .with_tolerance(1e-8),
+                &rspice_core::NoAbort,
             )
             .unwrap_or_else(|error| panic!("TD={delay}: {error}"));
         assert!(
@@ -416,11 +438,17 @@ fn shooting_delay_lines_match_hb_and_continue_across_full_delay_windows() {
             }
         }
         let (continued, checkpoint) = engine
-            .run_tran_from_pss_state(&deck, &state, 0.2e-6, 1e-9)
+            .run_tran_from_pss_state_with_abort(&deck, &state, 0.2e-6, 1e-9, &rspice_core::NoAbort)
             .unwrap();
         let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
         let (resumed, _) = engine
-            .run_tran_resume(&deck, &checkpoint, 2.0 * delay + 0.4e-6, 1e-9)
+            .run_tran_resume_with_abort(
+                &deck,
+                &checkpoint,
+                2.0 * delay + 0.4e-6,
+                1e-9,
+                &rspice_core::NoAbort,
+            )
             .unwrap();
         for transient in [&continued, &resumed] {
             for (name, values) in transient.node_names.iter().zip(&transient.voltages) {
