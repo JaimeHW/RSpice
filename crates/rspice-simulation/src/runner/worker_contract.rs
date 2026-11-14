@@ -443,7 +443,13 @@ impl WorkerResponse {
         id: u64,
         result: Result<SimulationResult, SimulationError>,
     ) -> Self {
-        let outcome = worker_transfer_outcome_from_result(result);
+        let outcome = match worker_transfer_outcome_from_result(result) {
+            WorkerOutcome::Success(result) => match transfer_limit_failure(&result) {
+                Some(error) => WorkerOutcome::Failure(error),
+                None => WorkerOutcome::Success(result),
+            },
+            failure => failure,
+        };
         Self { id, outcome }
     }
 
@@ -522,6 +528,30 @@ fn worker_transfer_outcome_from_result(
         },
         Err(error) => WorkerOutcome::Failure(WorkerSimulationError::from(error)),
     }
+}
+
+/// The resource limit a waveform result exceeds on the worker transport.
+///
+/// The result could not be encoded, and the worker's host saw only a worker
+/// that threw, which it reports as a stopped engine. It answers as the named
+/// limit instead, with the size it needed, so the run's failure says what to
+/// change: fewer saved signals, or a shorter or coarser run. The time points
+/// are known only once the run ends, so this cannot be refused before it.
+#[cfg(any(feature = "browser-worker", test))]
+fn transfer_limit_failure(result: &WorkerSimulationResult) -> Option<WorkerSimulationError> {
+    let (values, buffers) = transport::waveform_transfer_size(result)?;
+    let (resource, requested, limit) = if values > MAX_WORKER_F64_VALUES {
+        ("waveform values", values, MAX_WORKER_F64_VALUES)
+    } else if buffers > MAX_WORKER_TRANSFER_BUFFERS {
+        ("waveform buffers", buffers, MAX_WORKER_TRANSFER_BUFFERS)
+    } else {
+        return None;
+    };
+    Some(WorkerSimulationError::ResourceLimit {
+        resource: format!("{resource} a browser run can hand back"),
+        requested,
+        limit,
+    })
 }
 
 pub(crate) use rspice_simulation_contract::progress::WorkerProgressSnapshot;

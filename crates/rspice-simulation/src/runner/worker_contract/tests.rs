@@ -243,6 +243,56 @@ fn behavioral_reference_error_round_trips_through_worker_contract() {
 }
 
 #[test]
+fn a_result_too_large_to_hand_back_answers_as_the_limit_it_exceeds() {
+    // One buffer for the time axis and two per waveform: one waveform more
+    // than the transport's buffers hold.
+    let waveforms = MAX_WORKER_TRANSFER_BUFFERS / 2;
+    let result = WorkerSimulationResult::Transient {
+        spectra: Vec::new(),
+        testbench_errors: Vec::new(),
+        checks: Default::default(),
+        convergence: None,
+        time: vec![0.0],
+        waveforms: (0..waveforms)
+            .map(|index| WorkerWaveform {
+                name: format!("V(n{index})"),
+                x_values: vec![0.0],
+                y_values: vec![0.0],
+                y_unit: "V".to_string(),
+                is_complex: false,
+                y_imag: None,
+            })
+            .collect(),
+        measurements: Vec::new(),
+        events: WorkerEventHistory::default(),
+    };
+
+    let response = WorkerResponse::from_result_for_transfer(9, Ok(SimulationResult::from(result)));
+    let expected = WorkerSimulationError::ResourceLimit {
+        resource: "waveform buffers a browser run can hand back".to_string(),
+        requested: MAX_WORKER_TRANSFER_BUFFERS + 1,
+        limit: MAX_WORKER_TRANSFER_BUFFERS,
+    };
+    assert_eq!(response.outcome, WorkerOutcome::Failure(expected));
+
+    // The answer crosses the transport the encoder refused the result on.
+    let error = WorkerResponseTransport::from_response(response)
+        .expect("the limit encodes")
+        .into_response()
+        .expect("the limit decodes")
+        .into_result()
+        .expect_err("the run failed");
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Resource limit exceeded for waveform buffers a browser run can hand back: \
+             requested {}, limit {MAX_WORKER_TRANSFER_BUFFERS}",
+            MAX_WORKER_TRANSFER_BUFFERS + 1
+        )
+    );
+}
+
+#[test]
 fn an_engine_that_stopped_is_not_blamed_on_the_configuration() {
     let expected = SimulationError::EngineStopped("RuntimeError: unreachable".to_string());
     assert_eq!(

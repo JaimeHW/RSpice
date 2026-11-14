@@ -1360,7 +1360,9 @@ impl WorkerOpConfigTransport {
     }
 }
 
-fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Result<(), String> {
+/// The numerical values and transfer buffers a waveform result (transient,
+/// SOA or AC) takes on the worker transport, or `None` for any other result.
+pub(super) fn waveform_transfer_size(result: &WorkerSimulationResult) -> Option<(usize, usize)> {
     let (axis, waveforms, quality, references) = match result {
         WorkerSimulationResult::Transient {
             time,
@@ -1386,7 +1388,7 @@ fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Re
             convergence,
             reference_impedances_ohm.as_ref(),
         ),
-        _ => return Ok(()),
+        _ => return None,
     };
     let mut values = axis
         .len()
@@ -1409,9 +1411,6 @@ fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Re
         buffers = buffers
             .saturating_add(1)
             .saturating_add(source.waveforms.len());
-        if values > MAX_WORKER_F64_VALUES || buffers > MAX_WORKER_TRANSFER_BUFFERS {
-            return Err("SOA observation history exceeds the worker transfer limit".into());
-        }
     }
     if let WorkerSimulationResult::Transient { events, .. } = result
         && let Some(history) = &events.current_impulses
@@ -1442,6 +1441,13 @@ fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Re
             .saturating_add(waveform.y_imag.as_ref().map_or(0, Vec::len));
         buffers = buffers.saturating_add(2 + usize::from(waveform.y_imag.is_some()));
     }
+    Some((values, buffers))
+}
+
+fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Result<(), String> {
+    let Some((values, buffers)) = waveform_transfer_size(result) else {
+        return Ok(());
+    };
     if values > MAX_WORKER_F64_VALUES || buffers > MAX_WORKER_TRANSFER_BUFFERS {
         return Err(
             "Waveform and convergence evidence exceed the worker transfer limit".to_owned(),
