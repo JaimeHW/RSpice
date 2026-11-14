@@ -22,14 +22,14 @@ use crate::state::{
 /// a project runs with when no configuration is used for runs; it is not a
 /// catalog entry and can be neither renamed nor deleted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ConfigurationSelection {
+pub enum ConfigurationSelection {
     Default,
     Configuration(ConfigurationSetId),
 }
 
 /// Edits to one configuration that are not applied yet.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ConfigurationDraft {
+pub struct ConfigurationDraft {
     pub(crate) id: ConfigurationSetId,
     /// The revision the edits started from. Apply commits against it, so a
     /// change made elsewhere in the meantime is refused, never overwritten.
@@ -41,10 +41,10 @@ pub(crate) struct ConfigurationDraft {
 /// commits on Enter or when it loses focus, so typing never re-resolves the
 /// design.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FieldEdit {
+pub struct FieldEdit {
     /// Which field: its own stable key.
     pub(crate) field: String,
-    pub(crate) text: String,
+    pub text: String,
 }
 
 /// One change to an instance or pattern binding, made in the inspector.
@@ -61,7 +61,7 @@ pub(crate) enum BindingChange {
 
 /// The two tables under the global bindings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum ConfigurationTab {
+pub enum ConfigurationTab {
     #[default]
     Instances,
     Cells,
@@ -69,7 +69,7 @@ pub(crate) enum ConfigurationTab {
 
 /// The table row whose properties the inspector shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ConfigurationRow {
+pub enum ConfigurationRow {
     /// One expanded instance, by canonical path.
     Instance(String),
     /// One pattern binding, by its pattern as written.
@@ -80,20 +80,20 @@ pub(crate) enum ConfigurationRow {
 
 /// The Configuration page's own state.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ConfigurationPageState {
+pub struct ConfigurationPageState {
     /// What the reader picked. `None` follows whatever is used for runs, so
     /// a project opens on the configuration it netlists with.
     selection: Option<ConfigurationSelection>,
     draft: Option<ConfigurationDraft>,
     /// Why the last apply, activation or deletion was refused. It stays on
     /// the page until the next transaction or a new selection.
-    pub(crate) refusal: Option<String>,
+    pub refusal: Option<String>,
     /// A configuration the reader picked while the one in front had edits
     /// that are not applied; the page asks before it switches.
     pub(crate) pending_selection: Option<ConfigurationSelection>,
-    pub(crate) tab: ConfigurationTab,
-    pub(crate) row: Option<ConfigurationRow>,
-    pub(crate) field_edit: Option<FieldEdit>,
+    pub tab: ConfigurationTab,
+    pub row: Option<ConfigurationRow>,
+    pub field_edit: Option<FieldEdit>,
     /// Instances whose children the tree hides, by fold key.
     collapsed: BTreeSet<String>,
     resolution: ResolutionCache,
@@ -102,7 +102,7 @@ pub(crate) struct ConfigurationPageState {
 impl ConfigurationPageState {
     /// The configuration in front of the reader. A picked configuration that
     /// no longer exists falls back to the one used for runs.
-    pub(crate) fn selection(&self, catalog: &ConfigurationSetCatalog) -> ConfigurationSelection {
+    pub fn selection(&self, catalog: &ConfigurationSetCatalog) -> ConfigurationSelection {
         match self.selection {
             Some(ConfigurationSelection::Default) => ConfigurationSelection::Default,
             Some(ConfigurationSelection::Configuration(id)) if catalog.find(id).is_some() => {
@@ -119,7 +119,7 @@ impl ConfigurationPageState {
     /// Put `selection` in front of the reader, dropping any edits to the
     /// configuration it replaces. Callers ask first when those edits are not
     /// applied (see [`Self::request_selection`]).
-    pub(crate) fn select(&mut self, selection: ConfigurationSelection) {
+    pub fn select(&mut self, selection: ConfigurationSelection) {
         if self.selection != Some(selection) {
             self.refusal = None;
             self.row = None;
@@ -150,12 +150,12 @@ impl ConfigurationPageState {
     }
 
     /// The unapplied edits, if any.
-    pub(crate) fn draft(&self) -> Option<&ConfigurationDraft> {
+    pub fn draft(&self) -> Option<&ConfigurationDraft> {
         self.draft.as_ref()
     }
 
     /// The name of the configuration whose edits are not applied, if any.
-    pub(crate) fn unapplied_edits(&self, catalog: &ConfigurationSetCatalog) -> Option<String> {
+    pub fn unapplied_edits(&self, catalog: &ConfigurationSetCatalog) -> Option<String> {
         self.draft
             .as_ref()
             .filter(|_| self.is_dirty(catalog))
@@ -164,7 +164,7 @@ impl ConfigurationPageState {
     }
 
     /// Whether there are edits that Apply would commit.
-    pub(crate) fn is_dirty(&self, catalog: &ConfigurationSetCatalog) -> bool {
+    pub fn is_dirty(&self, catalog: &ConfigurationSetCatalog) -> bool {
         self.draft.as_ref().is_some_and(|draft| {
             catalog
                 .find(draft.id)
@@ -174,7 +174,7 @@ impl ConfigurationPageState {
 
     /// The definition the page shows for `id`: the edits when there are
     /// some, otherwise what the project holds.
-    pub(crate) fn definition<'a>(
+    pub fn definition<'a>(
         &'a self,
         catalog: &'a ConfigurationSetCatalog,
         id: ConfigurationSetId,
@@ -188,7 +188,7 @@ impl ConfigurationPageState {
 
     /// Edit `id`'s definition. The first edit starts the draft from what the
     /// project holds; an edit that puts it back the way it was ends it.
-    pub(crate) fn edit(
+    pub fn edit(
         &mut self,
         catalog: &ConfigurationSetCatalog,
         id: ConfigurationSetId,
@@ -233,7 +233,7 @@ impl ConfigurationPageState {
         self.collapsed.contains(&fold(path))
     }
 
-    pub(crate) fn toggle_collapsed(&mut self, path: &str) {
+    pub fn toggle_collapsed(&mut self, path: &str) {
         let key = fold(path);
         if !self.collapsed.remove(&key) {
             self.collapsed.insert(key);
@@ -244,7 +244,7 @@ impl ConfigurationPageState {
     /// The candidate hierarchy for what the page shows: the selection with
     /// its edits applied. It is rebuilt only when the selection, the edits or
     /// the design change, never because a frame was drawn.
-    pub(crate) fn resolution(
+    pub fn resolution(
         &mut self,
         workspace: &ProjectWorkspace,
         libraries: &LibraryManager,
@@ -305,7 +305,7 @@ impl ConfigurationPageState {
     /// The tree rows not hidden under a collapsed instance, as indices into
     /// [`ConfigurationResolution::instances`]. Kept until the tree or its
     /// collapsed set changes, so a frame pays for the rows it draws.
-    pub(crate) fn visible_instances(&mut self) -> Arc<[usize]> {
+    pub fn visible_instances(&mut self) -> Arc<[usize]> {
         if let Some(visible) = &self.resolution.visible {
             return Arc::clone(visible);
         }
@@ -334,8 +334,8 @@ impl ConfigurationPageState {
     }
 
     /// How many times the candidate hierarchy was built.
-    #[cfg(test)]
-    pub(crate) fn resolution_builds(&self) -> u64 {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn resolution_builds(&self) -> u64 {
         self.resolution.builds
     }
 }
@@ -362,7 +362,7 @@ struct ResolutionKey {
 
 /// What the selection, with its edits, resolves every instance to.
 #[derive(Debug)]
-pub(crate) struct ConfigurationResolution {
+pub struct ConfigurationResolution {
     /// The resolved hierarchy, or why the candidate cannot resolve one.
     pub(crate) hierarchy: Result<HierarchyResolution, String>,
     /// Every expanded instance, parents before their children.
@@ -608,7 +608,7 @@ pub(crate) fn apply_cell_binding_change(
 
 /// Bind every instance of `library`/`cell` to exactly `view`, or with
 /// `None` remove the cell binding so they inherit the view list again.
-pub(crate) fn set_cell_view(
+pub fn set_cell_view(
     definition: &mut ConfigurationSetDefinition,
     library: &str,
     cell: &str,
@@ -654,7 +654,7 @@ pub(crate) fn used_for_runs(
 }
 
 /// The exact-path instance binding for `path`, if the definition has one.
-pub(crate) fn instance_binding<'a>(
+pub fn instance_binding<'a>(
     definition: &'a ConfigurationSetDefinition,
     path: &str,
 ) -> Option<&'a ConfigurationSetOverride> {
@@ -692,7 +692,7 @@ pub(crate) fn governing_binding<'a>(
 /// Bind `path` to exactly `view`, or with `None` remove its instance binding
 /// so it inherits the view list again. A binding's other properties survive
 /// a change of view; a new binding runs on every platform.
-pub(crate) fn set_instance_view(
+pub fn set_instance_view(
     definition: &mut ConfigurationSetDefinition,
     path: &str,
     view: Option<&str>,

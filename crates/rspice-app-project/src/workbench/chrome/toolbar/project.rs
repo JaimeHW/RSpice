@@ -8,11 +8,7 @@ use crate::workbench::project::commands::ProjectCommand;
 
 use super::toolbar_text_command;
 
-pub(in crate::workbench) fn no_project_tools(
-    ui: &mut egui::Ui,
-    app: &mut impl WorkbenchHost,
-    layout: LayoutSpec,
-) {
+pub fn no_project_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     toolbar_text_command(
         ui,
         app,
@@ -31,11 +27,7 @@ pub(in crate::workbench) fn no_project_tools(
     );
 }
 
-pub(in crate::workbench) fn project_tools(
-    ui: &mut egui::Ui,
-    app: &mut impl WorkbenchHost,
-    layout: LayoutSpec,
-) {
+pub fn project_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     toolbar_text_command(
         ui,
         app,

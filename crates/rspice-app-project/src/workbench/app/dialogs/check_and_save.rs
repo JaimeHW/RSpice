@@ -22,28 +22,28 @@ use crate::workbench::state::WorkbenchSession;
 /// publication; the editable revision note never mutates the live document
 /// until a canonical save request has been accepted.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct CheckAndSaveDialogState {
-    pub(crate) open: bool,
-    pub(crate) revision_note: String,
+pub struct CheckAndSaveDialogState {
+    pub open: bool,
+    pub revision_note: String,
     pub(crate) revision_note_touched: bool,
-    pub(crate) report: Option<
+    pub report: Option<
         crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport,
     >,
-    pub(crate) validation_error: Option<String>,
+    pub validation_error: Option<String>,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) pending_transaction: Option<crate::product::TransactionId>,
+    pub pending_transaction: Option<crate::product::TransactionId>,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) pending_revision_id: Option<crate::state::ValidatedSchematicRevisionId>,
+    pub pending_revision_id: Option<crate::state::ValidatedSchematicRevisionId>,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) pending_view_key: Option<String>,
+    pub pending_view_key: Option<String>,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) pending_original_journal: Option<crate::state::ValidatedRevisionJournal>,
+    pub pending_original_journal: Option<crate::state::ValidatedRevisionJournal>,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) pending_expected_journal: Option<crate::state::ValidatedRevisionJournal>,
+    pub pending_expected_journal: Option<crate::state::ValidatedRevisionJournal>,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) pending_expected_design_digest: Option<crate::product::ContentDigest>,
+    pub pending_expected_design_digest: Option<crate::product::ContentDigest>,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) pending_original_dirty: bool,
+    pub pending_original_dirty: bool,
 }
 
 impl CheckAndSaveDialogState {
@@ -66,7 +66,7 @@ impl CheckAndSaveDialogState {
         self.validation_error = None;
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         *self = Self::default();
     }
 
@@ -88,7 +88,7 @@ const PRIMARY: &str = "Save";
 const DESCRIPTION: &str = "The design checks have run; save the project as a revision with a note.";
 const SAVING: &str = "Saving. Keep this dialog open until the save completes.";
 const STALE_CHECKS: &str = "The design changed after these checks ran. Save runs them again first.";
-pub(crate) const NEWER_CHANGES: &str = "Edits made after validation are still unsaved.";
+pub const NEWER_CHANGES: &str = "Edits made after validation are still unsaved.";
 const SHOW_IN_PROBLEMS: &str = "Show in Problems";
 const NOTE_FIELD: &str = "check-and-save-revision-note";
 
@@ -145,7 +145,7 @@ fn checks_summary(report: &CheckAndSaveValidationReport) -> String {
 /// session it prompts on, the platform services' state, what the model's
 /// design checks read of the features, and what its report reads of the
 /// results workspace, design and code.
-pub(crate) struct CheckAndSaveParts<'a> {
+pub struct CheckAndSaveParts<'a> {
     pub(crate) dialog: &'a mut CheckAndSaveDialogState,
     pub(crate) model: &'a mut Model,
     pub(crate) platform: &'a PlatformState,
@@ -158,7 +158,7 @@ pub(crate) struct CheckAndSaveParts<'a> {
     pub(crate) commands: &'static Registry,
 }
 
-pub(crate) fn open_check_and_save_dialog(parts: &mut CheckAndSaveParts<'_>) {
+pub fn open_check_and_save_dialog(parts: &mut CheckAndSaveParts<'_>) {
     if !parts.platform.project_lifecycle.is_open() {
         parts.wb.prompt("Check and save needs an open project.");
         return;
@@ -363,7 +363,7 @@ impl CheckAndSaveParts<'_> {
     }
 }
 
-pub(crate) fn revision_note_error(note: &str) -> Option<String> {
+pub fn revision_note_error(note: &str) -> Option<String> {
     let trimmed = note.trim();
     if trimmed.is_empty() {
         return Some("Enter a revision note before saving.".to_owned());
@@ -376,7 +376,7 @@ pub(crate) fn revision_note_error(note: &str) -> Option<String> {
     None
 }
 
-pub(crate) fn rollback_exact_journal(
+pub fn rollback_exact_journal(
     schematic: &mut crate::state::SchematicState,
     original_journal: &ValidatedRevisionJournal,
     expected_journal: &ValidatedRevisionJournal,

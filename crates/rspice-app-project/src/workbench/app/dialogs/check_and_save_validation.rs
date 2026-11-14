@@ -31,17 +31,17 @@ use crate::workbench::state::{WorkbenchSession, Workspace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum CheckAndSaveFindingLevel {
+pub enum CheckAndSaveFindingLevel {
     Blocker,
     Advisory,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub(crate) struct CheckAndSaveFinding {
-    pub(crate) identity: String,
-    pub(crate) level: CheckAndSaveFindingLevel,
-    pub(crate) source: String,
-    pub(crate) message: String,
+pub struct CheckAndSaveFinding {
+    pub identity: String,
+    pub level: CheckAndSaveFindingLevel,
+    pub source: String,
+    pub message: String,
     /// Where the finding points on the canvas, when it points anywhere the
     /// author is currently looking.
     ///
@@ -49,7 +49,7 @@ pub(crate) struct CheckAndSaveFinding {
     /// vocabulary names an object or a coordinate without naming the drawing
     /// that holds it, so a coordinate carried over from another sheet would
     /// send the canvas to a spot in a document nobody asked to see.
-    pub(crate) location: Option<DrcLocation>,
+    pub location: Option<DrcLocation>,
 }
 
 /// What a report is collected from: the model and the platform services'
@@ -58,14 +58,14 @@ pub(crate) struct CheckAndSaveFinding {
 /// publication snapshot reads as the lifecycle does; and what design and code
 /// show.
 #[derive(Clone, Copy)]
-pub(crate) struct ValidationReads<'a> {
-    pub(crate) model: &'a Model,
-    pub(crate) platform: &'a PlatformState,
-    pub(crate) facts: SlotFacts,
-    pub(crate) workspace: Workspace,
-    pub(crate) presentation: &'a dyn ResultPresentationSource,
-    pub(crate) design: &'a dyn DesignPort,
-    pub(crate) code: &'a dyn CodePort,
+pub struct ValidationReads<'a> {
+    pub model: &'a Model,
+    pub platform: &'a PlatformState,
+    pub facts: SlotFacts,
+    pub workspace: Workspace,
+    pub presentation: &'a dyn ResultPresentationSource,
+    pub design: &'a dyn DesignPort,
+    pub code: &'a dyn CodePort,
 }
 
 impl LifecycleSource for ValidationReads<'_> {
@@ -80,8 +80,8 @@ impl LifecycleSource for ValidationReads<'_> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CheckAndSaveValidationReport {
-    pub(crate) effective_scope: SaveScope,
+pub struct CheckAndSaveValidationReport {
+    pub effective_scope: SaveScope,
     active_view: CellViewRef,
     project_id: String,
     project_revision: u64,
@@ -103,7 +103,7 @@ pub(crate) struct CheckAndSaveValidationReport {
 }
 
 impl CheckAndSaveValidationReport {
-    pub(crate) fn collect(reads: &ValidationReads<'_>) -> Result<Self, String> {
+    pub fn collect(reads: &ValidationReads<'_>) -> Result<Self, String> {
         let effective_scope = effective_save_scope(reads.platform, SaveScope::ActiveDocument);
         let active_view = reads.model.workspace.content.active_schematic_reference();
         let project_id = reads.model.workspace.content.project.id().to_string();
@@ -747,7 +747,7 @@ impl CheckAndSaveValidationReport {
         })
     }
 
-    pub(crate) fn can_save(&self) -> bool {
+    pub fn can_save(&self) -> bool {
         self.blockers.is_empty()
     }
 
@@ -762,46 +762,46 @@ impl CheckAndSaveValidationReport {
             && self.active_view == reads.model.workspace.content.active_schematic_reference()
     }
 
-    pub(crate) fn blockers(&self) -> &[CheckAndSaveFinding] {
+    pub fn blockers(&self) -> &[CheckAndSaveFinding] {
         &self.blockers
     }
 
-    pub(crate) fn advisories(&self) -> &[CheckAndSaveFinding] {
+    pub fn advisories(&self) -> &[CheckAndSaveFinding] {
         &self.advisories
     }
 
-    pub(crate) fn counts(&self) -> ValidationFindingCounts {
+    pub fn counts(&self) -> ValidationFindingCounts {
         ValidationFindingCounts {
             blockers: u32::try_from(self.blockers.len()).unwrap_or(u32::MAX),
             advisories: u32::try_from(self.advisories.len()).unwrap_or(u32::MAX),
         }
     }
 
-    pub(crate) fn document_scope_label(&self) -> &str {
+    pub fn document_scope_label(&self) -> &str {
         &self.document_scope_label
     }
 
-    pub(crate) fn stale_interface_instances(&self) -> &[String] {
+    pub fn stale_interface_instances(&self) -> &[String] {
         &self.stale_interface_instances
     }
 
-    pub(crate) fn project_id(&self) -> &str {
+    pub fn project_id(&self) -> &str {
         &self.project_id
     }
 
-    pub(crate) const fn project_revision(&self) -> u64 {
+    pub const fn project_revision(&self) -> u64 {
         self.project_revision
     }
 
-    pub(crate) fn active_view(&self) -> &CellViewRef {
+    pub fn active_view(&self) -> &CellViewRef {
         &self.active_view
     }
 
-    pub(crate) fn dependencies(&self) -> &[ValidatedRevisionDependency] {
+    pub fn dependencies(&self) -> &[ValidatedRevisionDependency] {
         &self.dependencies
     }
 
-    pub(crate) const fn receipt_digest(&self) -> ContentDigest {
+    pub const fn receipt_digest(&self) -> ContentDigest {
         self.receipt_digest
     }
 }
@@ -1018,7 +1018,7 @@ struct WalkedFindings {
 /// re-derived at commit reads the evidence the reader reviewed. A check that
 /// cannot run leaves no current result, which the report states as a
 /// blocker of its own.
-pub(crate) fn run_design_checks(
+pub fn run_design_checks(
     model: &mut Model,
     platform: &PlatformState,
     facts: SlotFacts,

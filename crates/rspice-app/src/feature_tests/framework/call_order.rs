@@ -17,19 +17,22 @@ const FRAME: &str = include_str!("../../workbench/frame.rs");
 const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs");
 const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");
 const COMMAND_HELPERS: &str = include_str!("../../workbench/commands/command_helpers.rs");
-const CONFIGURATION_PAGE: &str = include_str!("../../workbench/surfaces/project/configuration.rs");
+const CONFIGURATION_PAGE: &str =
+    include_str!("../../../../rspice-app-project/src/workbench/surfaces/project/configuration.rs");
 const EXPORT_IMAGE: &str = include_str!("../../workbench/app/actions/export_image.rs");
 const SHELL_HOST: &str = include_str!("../../workbench/shell_host.rs");
 const FEATURES: &str = include_str!("../../workbench/features.rs");
 const MODELS: &str = include_str!("../../../../rspice-app-models/src/workbench/models.rs");
-const PROJECT: &str = include_str!("../../workbench/project.rs");
+const PROJECT: &str = include_str!("../../../../rspice-app-project/src/workbench/project.rs");
 const RESULTS: &str = include_str!("../../../../rspice-app-results/src/workbench/results.rs");
 const SERIALIZATION: &str = include_str!("../../workbench/app_state/session/serialization.rs");
 const STATUS_ORDER: &str = include_str!("../../workbench/shell_host/status_order.rs");
 const PROJECT_TRANSACTIONS: &str = include_str!("../../workbench/session/project_transactions.rs");
-const LIBRARY_SURFACE: &str = include_str!("../../workbench/surfaces/project/library.rs");
+const LIBRARY_SURFACE: &str =
+    include_str!("../../../../rspice-app-project/src/workbench/surfaces/project/library.rs");
 const LIBRARY_HOST: &str = include_str!("../../workbench/shell_host/project/library.rs");
-const TECHNOLOGY_DIALOG: &str = include_str!("../../workbench/surfaces/project/technology.rs");
+const TECHNOLOGY_DIALOG: &str =
+    include_str!("../../../../rspice-app-project/src/workbench/surfaces/project/technology.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
 /// the calls that make it up, in the order they run. A call is matched with
@@ -1796,7 +1799,7 @@ const CONFIGURATION_REFUSAL: &[(&str, &str, &str, &[&str])] = &[
     (
         "the Configuration page",
         CONFIGURATION_PAGE,
-        "pub(crate) fn configuration(",
+        "pub fn configuration(",
         &[
             "if let Some(refusal) = cx.state.configuration.refusal.as_deref() {\
              refusal_strip(ui, refusal);",
@@ -2276,7 +2279,7 @@ const CATALOG_CHANGED: &[Step] = &[(
 fn the_library_dialogs_draw_in_the_project_context_and_a_change_is_answered_as_it_returns() {
     assert_runs_in_order(
         "surfaces::project::library::page",
-        &body(LIBRARY_SURFACE, "pub(crate) fn page("),
+        &body(LIBRARY_SURFACE, "pub fn page("),
         LIBRARY_PAGE,
     );
     let library = body(LIBRARY_HOST, "pub(super) fn library(");

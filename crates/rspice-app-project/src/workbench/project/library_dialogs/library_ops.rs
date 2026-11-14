@@ -23,7 +23,7 @@ use crate::workbench::slots::ProjectState;
 
 impl ProjectState {
     /// Open New Library with an empty name.
-    pub(crate) fn open_new_library_dialog(&mut self, model: &Model) {
+    pub fn open_new_library_dialog(&mut self, model: &Model) {
         self.new_library_name.clear();
         self.new_library_error = None;
         self.new_library_library_revision = model.library_manager.revision();
@@ -31,7 +31,7 @@ impl ProjectState {
     }
 
     /// Open Rename Library pre-filled with the current name.
-    pub(crate) fn open_rename_library_dialog(
+    pub fn open_rename_library_dialog(
         &mut self,
         model: &Model,
         library: &str,
@@ -55,7 +55,7 @@ impl ProjectState {
     }
 
     /// Open the Delete Library review for one existing library.
-    pub(crate) fn open_delete_library_review(
+    pub fn open_delete_library_review(
         &mut self,
         model: &Model,
         library: &str,
@@ -87,7 +87,7 @@ fn commit_new_library_dialog(cx: &mut Cx<'_, ProjectFeature>) -> Result<String, 
 /// Rename the library the dialog names: how many instance references now
 /// name it, and what the rename left outside the model, or `None` when the
 /// name did not change.
-pub(crate) fn commit_rename_library_dialog(
+pub fn commit_rename_library_dialog(
     cx: &mut Cx<'_, ProjectFeature>,
 ) -> Result<Option<(usize, WorkspacePruned)>, String> {
     if cx.model.library_manager.revision() != cx.state.rename_library_library_revision {
@@ -106,7 +106,7 @@ pub(crate) fn commit_rename_library_dialog(
 
 /// Take the library the review names out of the catalog, its revision not
 /// yet published.
-pub(crate) fn commit_delete_library_review(
+pub fn commit_delete_library_review(
     cx: &mut Cx<'_, ProjectFeature>,
 ) -> Result<LibraryRemoval, String> {
     if cx.model.library_manager.revision() != cx.state.delete_library_library_revision {
@@ -118,11 +118,11 @@ pub(crate) fn commit_delete_library_review(
 
 /// Everything the reader loses with the library, counted before the review is
 /// confirmed.
-struct LibraryDeletionImpact {
+pub struct LibraryDeletionImpact {
     cells: usize,
-    views: usize,
-    open_views: usize,
-    instance_references: usize,
+    pub views: usize,
+    pub open_views: usize,
+    pub instance_references: usize,
     source_bundles: usize,
     configuration_roots: usize,
     project_root: bool,

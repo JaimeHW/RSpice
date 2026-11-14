@@ -58,11 +58,11 @@ const LAYERS: &[(&str, u32)] = &[
     // runs, the run preflight and the runs' slot) in `rspice-app-runs`, below
     // every module here; each may reference them. The workbench framework
     // compiles as `rspice-app-workbench`, and the sheets, settings, results,
-    // hardcopy, cloud, models, simulate and code features as `rspice-app-sheets`,
-    // `rspice-app-settings`, `rspice-app-results`, `rspice-app-hardcopy`,
-    // `rspice-app-cloud`, `rspice-app-models`, `rspice-app-simulate` and
-    // `rspice-app-code`, inside `workbench`, where the interior order below
-    // ranks them.
+    // hardcopy, cloud, models, simulate, code and project features as
+    // `rspice-app-sheets`, `rspice-app-settings`, `rspice-app-results`,
+    // `rspice-app-hardcopy`, `rspice-app-cloud`, `rspice-app-models`,
+    // `rspice-app-simulate`, `rspice-app-code` and `rspice-app-project`, inside
+    // `workbench`, where the interior order below ranks them.
     //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, and `automation_workflow`, `simulation` and
@@ -228,13 +228,14 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 }
 
 /// The application crates every whole-file scan must find: this crate and the
-/// twelve split out of it so far. Discovery may find more, never fewer.
-const KNOWN_APP_CRATES: [&str; 13] = [
+/// thirteen split out of it so far. Discovery may find more, never fewer.
+const KNOWN_APP_CRATES: [&str; 14] = [
     "rspice-app",
     "rspice-app-cloud",
     "rspice-app-code",
     "rspice-app-hardcopy",
     "rspice-app-models",
+    "rspice-app-project",
     "rspice-app-results",
     "rspice-app-runs",
     "rspice-app-services",
@@ -774,6 +775,11 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // module keeps.
     "dispatch",
     "surfaces",
+    // The tools' module file. It only re-exports what other crates compile
+    // (the launcher and the examples from project, the notification centre
+    // from the workbench), and with no tools directory left in the shell the
+    // directory rule does not cover it.
+    "tools",
     "tools/notification_center",
     "tools/project_launcher",
     "tools/jobs_manager",
@@ -879,11 +885,11 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     ("docks", "code"),
     // The netlist workflow's cases.
     ("workflows/netlist_workflow", "code"),
-    // The model editor document's tests run over the models feature on its
-    // own, and the feature builds that harness, as the results feature's test
-    // host holds the slot its parts run against. The row retires when the
-    // document moves into the models crate with the feature, where the edge
-    // is internal to it.
+    // The model editor document compiles in rspice-app-models at its
+    // application path, so the guard ranks it as before. The row is its
+    // qualification run calling the models feature's library selection, and
+    // its cases running over `models::tests::harness`. It retires when the
+    // document re-homes under `models`, or when both edges go.
     ("documents/model_editor", "models"),
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
@@ -922,13 +928,14 @@ fn workbench_dir() -> PathBuf {
 }
 
 /// The workbench's framework modules compile as `rspice-app-workbench`, and the
-/// sheets, settings, results, hardcopy, cloud, models, simulate and code features
-/// as `rspice-app-sheets`, `rspice-app-settings`, `rspice-app-results`,
-/// `rspice-app-hardcopy`, `rspice-app-cloud`, `rspice-app-models`,
-/// `rspice-app-simulate` and `rspice-app-code`, at the paths they had here, and
-/// keep their rank in the same order: each crate's `src/workbench` is scanned
-/// beside this crate's.
-fn workbench_roots() -> [PathBuf; 10] {
+/// sheets, settings, results, hardcopy, cloud, models, simulate, code and
+/// project features as `rspice-app-sheets`, `rspice-app-settings`,
+/// `rspice-app-results`, `rspice-app-hardcopy`, `rspice-app-cloud`,
+/// `rspice-app-models`, `rspice-app-simulate`, `rspice-app-code` and
+/// `rspice-app-project`, at the paths they had here, and keep their rank in
+/// the same order: each crate's `src/workbench` is scanned beside this
+/// crate's.
+fn workbench_roots() -> [PathBuf; 11] {
     [
         workbench_dir(),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src/workbench"),
@@ -940,6 +947,7 @@ fn workbench_roots() -> [PathBuf; 10] {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-models/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-simulate/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-code/src/workbench"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-project/src/workbench"),
     ]
 }
 
@@ -1603,6 +1611,7 @@ const PAINTED_UI_CRATES: &[&str] = &[
     "rspice-app-models/src",
     "rspice-app-simulate/src",
     "rspice-app-code/src",
+    "rspice-app-project/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",
@@ -1657,15 +1666,15 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_dialog",
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_group",
     "rspice-app-workbench/src/workbench/tools/notification_center.rs::foot",
-    "rspice-app/src/workbench/app/dialogs/design_management/widgets.rs::schematic_preview",
+    "rspice-app-project/src/workbench/app/dialogs/design_management/widgets.rs::schematic_preview",
     "rspice-app/src/workbench/app/dialogs/design_review_comments.rs::review_message",
     "rspice-app/src/workbench/app/dialogs/help.rs::render_shortcuts_help_dialog",
     "rspice-app/src/workbench/design/navigator.rs::tabs",
     "rspice-app/src/workbench/design/surface/layout_editor.rs::show_canvas",
-    "rspice-app/src/workbench/project/library_dialogs/cell_ops.rs::process_copy_cell_dialog",
-    "rspice-app/src/workbench/surfaces/project/landing.rs::compact_recent_header",
-    "rspice-app/src/workbench/surfaces/project/landing.rs::compact_section_header",
-    "rspice-app/src/workbench/surfaces/project/overview.rs::status_rows",
+    "rspice-app-project/src/workbench/project/library_dialogs/cell_ops.rs::process_copy_cell_dialog",
+    "rspice-app-project/src/workbench/surfaces/project/landing.rs::compact_recent_header",
+    "rspice-app-project/src/workbench/surfaces/project/landing.rs::compact_section_header",
+    "rspice-app-project/src/workbench/surfaces/project/overview.rs::status_rows",
     "rspice-app/src/workbench/surfaces/stimulus/pwl.rs::table_header",
     "rspice-results-ui/src/noise_contrib.rs::contributor_header",
     "rspice-results-ui/src/waves/expression_editor.rs::show",

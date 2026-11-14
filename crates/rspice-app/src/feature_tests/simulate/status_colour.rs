@@ -279,6 +279,7 @@ fn no_surface_paints_a_status_in_colour() {
     let simulate =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-simulate/src/workbench");
     let code = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-code/src/workbench");
+    let project = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-project/src/workbench");
     let mut sites = Vec::new();
     for (surface, files, also) in STATUS_IN_COLOUR_SLICES {
         for file in files {
@@ -291,6 +292,7 @@ fn no_surface_paints_a_status_in_colour() {
                 models.join(file),
                 simulate.join(file),
                 code.join(file),
+                project.join(file),
             ]
             .into_iter()
             .find(|path| path.is_file())

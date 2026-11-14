@@ -9,10 +9,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 
 /// Draw Design management while it is open, and carry out what its body
 /// and its primary and ghost actions asked for.
-pub(crate) fn render_design_management_dialog(
-    parts: &mut DesignManagementParts<'_>,
-    ctx: &Context,
-) {
+pub fn render_design_management_dialog(parts: &mut DesignManagementParts<'_>, ctx: &Context) {
     if !parts.dialog.open {
         return;
     }

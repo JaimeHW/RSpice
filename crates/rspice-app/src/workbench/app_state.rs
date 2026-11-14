@@ -54,10 +54,14 @@ use rspice_app_services::workbench::slots::platform::remember_recent_file;
 #[cfg(test)]
 use rspice_app_services::workbench::slots::platform::trim_recent_files;
 
-pub(crate) use design_checks::{DesignCheckStatus, model_design_view, model_location_anchor};
+#[cfg(test)]
+pub(crate) use design_checks::DesignCheckStatus;
+pub(crate) use design_checks::{model_design_view, model_location_anchor};
+#[cfg(test)]
+pub(crate) use design_history::DesignManagementHistoryEntry;
 pub(crate) use design_history::{
-    DesignManagementHistoryEntry, SymbolDefinitionFixtureDelta,
-    publish_symbol_definition_candidate, publish_symbol_definition_candidate_with_fixture,
+    SymbolDefinitionFixtureDelta, publish_symbol_definition_candidate,
+    publish_symbol_definition_candidate_with_fixture,
 };
 pub(crate) use interaction_state::SchematicKeyboardFocus;
 pub use interaction_state::{ContextTarget, DragType};
@@ -69,15 +73,14 @@ pub use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 pub(crate) use session::shortcuts::{
     accessibility_shortcut_summary, report_engineering_canvas_focus, runtime_command_platform,
 };
-pub(crate) use session::state_init::{
-    default_model_library_manager, restore_session_model_library_manager,
-};
+pub(crate) use session::state_init::default_model_library_manager;
+#[cfg(test)]
+pub(crate) use session::state_init::restore_session_model_library_manager;
 pub use sim_setup::SimSetupState;
 #[cfg(test)]
 pub use sim_setup::TranSetup;
 #[cfg(test)]
 pub use sim_setup::plan_catalog::SimulationPlanCloneOptions;
-pub use sim_setup::plan_catalog::SimulationPlanLineage;
 #[cfg(not(target_arch = "wasm32"))]
 pub use sim_setup::plan_catalog::SimulationPlanName;
 #[cfg(not(target_arch = "wasm32"))]

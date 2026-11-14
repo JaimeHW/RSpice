@@ -5142,6 +5142,7 @@ dependencies = [
  "rspice-app-code",
  "rspice-app-hardcopy",
  "rspice-app-models",
+ "rspice-app-project",
  "rspice-app-results",
  "rspice-app-runs",
  "rspice-app-services",
@@ -5325,6 +5326,29 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "rspice-app-project"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "log",
+ "rfd",
+ "rspice-app-runs",
+ "rspice-app-services",
+ "rspice-app-state",
+ "rspice-app-workbench",
+ "rspice-design",
+ "rspice-design-model",
+ "rspice-project",
+ "rspice-simulation",
+ "rspice-simulation-contract",
+ "rspice-ui-kit",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "uuid",
 ]
 
 [[package]]

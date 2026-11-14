@@ -29,7 +29,7 @@ use crate::workbench::project::workspace_state::{LibraryDeletionTarget, ProjectP
 
 /// One command of the project feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProjectCommand {
+pub enum ProjectCommand {
     ProjectLauncher,
     OpenProject,
     NewProject,
@@ -130,7 +130,7 @@ const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
 
 impl ProjectCommand {
     /// Every command of the feature.
-    pub(crate) const ALL: [Self; 21] = [
+    pub const ALL: [Self; 21] = [
         Self::ProjectLauncher,
         Self::OpenProject,
         Self::NewProject,
@@ -155,7 +155,7 @@ impl ProjectCommand {
     ];
 
     /// The key a shortcut profile names this command by.
-    pub(crate) const fn key(self) -> CommandKey {
+    pub const fn key(self) -> CommandKey {
         match self {
             Self::ProjectLauncher => ids::PROJECT_LAUNCHER,
 
@@ -186,7 +186,7 @@ impl ProjectCommand {
 
     /// The command `key` names; `None` for a key the feature does not
     /// declare.
-    pub(crate) fn from_key(key: CommandKey) -> Option<Self> {
+    pub fn from_key(key: CommandKey) -> Option<Self> {
         Self::ALL.into_iter().find(|command| command.key() == key)
     }
 
@@ -199,7 +199,7 @@ impl ProjectCommand {
     /// edit before they navigate, and the two design commands that edit the
     /// drawing are refused on a read-only one. Open project, New project and
     /// Save leave their primary chord to the browser.
-    pub(crate) const fn declared_spec(self) -> CommandSpec {
+    pub const fn declared_spec(self) -> CommandSpec {
         let waits =
             CommandFlags::PALETTE_VISIBLE.with(CommandFlags::BLOCKED_BY_PROJECT_OPERATION, true);
         let navigates = waits.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
@@ -301,7 +301,7 @@ impl ProjectCommand {
 /// one raises one, carrying everything it once did after that point, in
 /// order. Taken straight after the call that raised it.
 #[derive(Clone, Debug)]
-pub(crate) enum ProjectRequest {
+pub enum ProjectRequest {
     ConfigurationSets,
     OpenView(CellViewRef, ViewType),
     /// Open the project's root schematic in Design, then check it when the
@@ -389,15 +389,15 @@ impl Request for ProjectRequest {
 /// is published once and cannot be cloned, so every clone of the request
 /// shares this one reservation and the answer takes it.
 #[derive(Clone, Debug)]
-pub(crate) struct ReservedLibraryRevision(Rc<RefCell<Option<PreparedProjectLibraryMutation>>>);
+pub struct ReservedLibraryRevision(Rc<RefCell<Option<PreparedProjectLibraryMutation>>>);
 
 impl ReservedLibraryRevision {
-    pub(crate) fn new(mutation: PreparedProjectLibraryMutation) -> Self {
+    pub fn new(mutation: PreparedProjectLibraryMutation) -> Self {
         Self(Rc::new(RefCell::new(Some(mutation))))
     }
 
     /// The reservation, unless a clone of the request was answered first.
-    pub(crate) fn take(&self) -> Option<PreparedProjectLibraryMutation> {
+    pub fn take(&self) -> Option<PreparedProjectLibraryMutation> {
         self.0.borrow_mut().take()
     }
 }

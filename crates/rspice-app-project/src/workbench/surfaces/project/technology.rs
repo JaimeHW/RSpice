@@ -177,10 +177,7 @@ pub(super) fn open_technology_attachment_dialog(cx: &mut Cx<'_, ProjectFeature>)
         .open(selected_library, selected_pdk_package);
 }
 
-pub(in crate::workbench) fn show_technology_attachment_dialog(
-    ctx: &Context,
-    cx: &mut Cx<'_, ProjectFeature>,
-) {
+pub fn show_technology_attachment_dialog(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
     if !cx.state.technology_attachment.open {
         return;
     }

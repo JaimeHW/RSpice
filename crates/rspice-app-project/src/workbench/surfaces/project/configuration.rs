@@ -33,7 +33,7 @@ enum ToolbarIntent {
     Open(ConfigurationDialogRequest),
 }
 
-pub(crate) fn configuration(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+pub fn configuration(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let resolution = cx.state.configuration.resolution(
         &cx.model.workspace,
         &cx.model.library_manager,

@@ -51,7 +51,7 @@ struct RecentProjectRow {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum LandingAction {
+pub enum LandingAction {
     NewProject,
     OpenProject,
     OpenNetlist,
@@ -62,7 +62,7 @@ pub(crate) enum LandingAction {
 
 /// Draw the landing over the project feature's context and return what the
 /// reader asked of it in this frame.
-pub(crate) fn landing(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> Option<LandingAction> {
+pub fn landing(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> Option<LandingAction> {
     let mut action = None;
     egui::Frame::new()
         .fill(Tokens::get(ui.ctx()).color.bg_app)

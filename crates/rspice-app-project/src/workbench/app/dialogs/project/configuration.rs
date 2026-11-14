@@ -21,7 +21,7 @@ use rspice_app_runs::workbench::slots::runs::RunsState;
 
 /// One change to the project's configuration catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ConfigurationTransaction {
+pub enum ConfigurationTransaction {
     /// Netlist with `selection` from now on.
     UseForRuns(ConfigurationSelection),
     /// Commit the Configuration page's edits to the configuration they were
@@ -68,7 +68,7 @@ impl Prepared {
 /// page, the model and the run tier a committed change voids, then drop every
 /// run preparation the old catalog authorised. The error is the refusal, in
 /// words a reader can act on; the catalog is untouched when there is one.
-pub(crate) fn commit_configuration(
+pub fn commit_configuration(
     page: &mut ConfigurationPageState,
     model: &mut Model,
     runs: &mut RunsState,
@@ -268,7 +268,7 @@ fn prepare(
 }
 
 /// Why the configuration used for runs cannot be deleted, and what to do.
-pub(crate) fn delete_refusal(name: &str) -> String {
+pub fn delete_refusal(name: &str) -> String {
     format!(
         "Runs use {name}, so it cannot be deleted. Use another configuration, or Default, for runs first."
     )

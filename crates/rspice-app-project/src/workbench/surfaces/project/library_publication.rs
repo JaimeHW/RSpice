@@ -12,26 +12,26 @@ use crate::product::ObjectRevision;
 use crate::state::workspace::ProjectLibraryPublicationReceipt;
 use crate::workbench::app_state::Model;
 
-pub(crate) const PUBLICATION_DIALOG_ID: &str = "workbench.project.library.publication";
-pub(crate) const ROLLBACK_DIALOG_ID: &str = "workbench.project.library.publication.rollback";
-pub(crate) const PROJECT_ARTIFACT_EXTENSION: &str = "rspiceproj";
+pub const PUBLICATION_DIALOG_ID: &str = "workbench.project.library.publication";
+pub const ROLLBACK_DIALOG_ID: &str = "workbench.project.library.publication.rollback";
+pub const PROJECT_ARTIFACT_EXTENSION: &str = "rspiceproj";
 
 #[derive(Debug, Clone)]
-pub(crate) struct PublicationDraft {
-    pub(crate) source_project_revision: u64,
-    pub(crate) source_library_revision: u64,
-    pub(crate) label: String,
-    pub(crate) actor_id: String,
-    pub(crate) authority_id: String,
-    pub(crate) reason: String,
-    pub(crate) busy: bool,
+pub struct PublicationDraft {
+    pub source_project_revision: u64,
+    pub source_library_revision: u64,
+    pub label: String,
+    pub actor_id: String,
+    pub authority_id: String,
+    pub reason: String,
+    pub busy: bool,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) active_publication_id: Option<uuid::Uuid>,
-    pub(crate) error: Option<String>,
+    pub active_publication_id: Option<uuid::Uuid>,
+    pub error: Option<String>,
 }
 
 impl PublicationDraft {
-    pub(crate) fn new(model: &Model) -> Self {
+    pub fn new(model: &Model) -> Self {
         Self {
             source_project_revision: model.workspace.content.project.revision().get(),
             source_library_revision: model.library_manager.revision(),
@@ -50,7 +50,7 @@ impl PublicationDraft {
         }
     }
 
-    pub(crate) fn field_error(&self) -> Option<&'static str> {
+    pub fn field_error(&self) -> Option<&'static str> {
         for (label, value) in [
             ("Publication label", self.label.as_str()),
             ("Actor identity", self.actor_id.as_str()),
@@ -79,17 +79,17 @@ impl PublicationDraft {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RollbackDraft {
-    pub(crate) publication_id: uuid::Uuid,
-    pub(crate) actor_id: String,
-    pub(crate) authority_id: String,
-    pub(crate) reason: String,
-    pub(crate) artifact_name: Option<String>,
-    pub(crate) artifact_bytes: Option<Vec<u8>>,
-    pub(crate) busy: bool,
+pub struct RollbackDraft {
+    pub publication_id: uuid::Uuid,
+    pub actor_id: String,
+    pub authority_id: String,
+    pub reason: String,
+    pub artifact_name: Option<String>,
+    pub artifact_bytes: Option<Vec<u8>>,
+    pub busy: bool,
     #[cfg(target_arch = "wasm32")]
-    pub(crate) active_picker_id: Option<uuid::Uuid>,
-    pub(crate) error: Option<String>,
+    pub active_picker_id: Option<uuid::Uuid>,
+    pub error: Option<String>,
 }
 
 impl RollbackDraft {
@@ -108,7 +108,7 @@ impl RollbackDraft {
         }
     }
 
-    pub(crate) fn field_error(&self) -> Option<&'static str> {
+    pub fn field_error(&self) -> Option<&'static str> {
         for (label, value) in [
             ("Actor identity", self.actor_id.as_str()),
             ("Authority identity", self.authority_id.as_str()),
@@ -136,28 +136,28 @@ impl RollbackDraft {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) struct BrowserPublicationCompletion {
-    pub(crate) candidate: ProjectLibraryPublicationCandidate,
-    pub(crate) result: crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult,
+pub struct BrowserPublicationCompletion {
+    pub candidate: ProjectLibraryPublicationCandidate,
+    pub result: crate::workbench::lifecycle::project_lifecycle::BrowserWriteResult,
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) struct BrowserRollbackCompletion {
-    pub(crate) picker_id: uuid::Uuid,
-    pub(crate) result: crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult,
+pub struct BrowserRollbackCompletion {
+    pub picker_id: uuid::Uuid,
+    pub result: crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult,
 }
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
-    pub(crate) static BROWSER_PUBLICATION_COMPLETIONS:
+    pub static BROWSER_PUBLICATION_COMPLETIONS:
         std::cell::RefCell<std::collections::VecDeque<BrowserPublicationCompletion>> =
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
-    pub(crate) static BROWSER_ROLLBACK_COMPLETIONS:
+    pub static BROWSER_ROLLBACK_COMPLETIONS:
         std::cell::RefCell<std::collections::VecDeque<BrowserRollbackCompletion>> =
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
 }
 
-pub(crate) fn open_publication(ctx: &Context, model: &Model) {
+pub fn open_publication(ctx: &Context, model: &Model) {
     ctx.data_mut(|data| {
         data.remove::<RollbackDraft>(egui::Id::new(ROLLBACK_DIALOG_ID));
         data.insert_temp(
@@ -167,7 +167,7 @@ pub(crate) fn open_publication(ctx: &Context, model: &Model) {
     });
 }
 
-pub(crate) fn open_rollback(ctx: &Context, model: &Model) {
+pub fn open_rollback(ctx: &Context, model: &Model) {
     let Some(receipt) = model
         .workspace
         .content
@@ -186,23 +186,23 @@ pub(crate) fn open_rollback(ctx: &Context, model: &Model) {
     });
 }
 
-#[cfg(test)]
-pub(crate) fn publication_dialog_open(ctx: &Context) -> bool {
+#[cfg(any(test, feature = "test-support"))]
+pub fn publication_dialog_open(ctx: &Context) -> bool {
     ctx.data(|data| {
         data.get_temp::<PublicationDraft>(egui::Id::new(PUBLICATION_DIALOG_ID))
             .is_some()
     })
 }
 
-#[cfg(test)]
-pub(crate) fn rollback_dialog_open(ctx: &Context) -> bool {
+#[cfg(any(test, feature = "test-support"))]
+pub fn rollback_dialog_open(ctx: &Context) -> bool {
     ctx.data(|data| {
         data.get_temp::<RollbackDraft>(egui::Id::new(ROLLBACK_DIALOG_ID))
             .is_some()
     })
 }
 
-pub(crate) fn publication_fields(ui: &mut Ui, draft: &mut PublicationDraft) {
+pub fn publication_fields(ui: &mut Ui, draft: &mut PublicationDraft) {
     property_card(ui, "Receipt fields", |ui| {
         transaction_field(
             ui,
@@ -235,7 +235,7 @@ pub(crate) fn publication_fields(ui: &mut Ui, draft: &mut PublicationDraft) {
     });
 }
 
-pub(crate) fn rollback_fields(ui: &mut Ui, draft: &mut RollbackDraft) {
+pub fn rollback_fields(ui: &mut Ui, draft: &mut RollbackDraft) {
     property_card(ui, "Rollback receipt", |ui| {
         transaction_field(
             ui,
@@ -292,7 +292,7 @@ fn transaction_field(
     });
 }
 
-pub(crate) fn rollback_receipt_selector(
+pub fn rollback_receipt_selector(
     ui: &mut Ui,
     receipts: &[ProjectLibraryPublicationReceipt],
     draft: &mut RollbackDraft,
@@ -341,7 +341,7 @@ pub(crate) fn rollback_receipt_selector(
     });
 }
 
-pub(crate) fn selected_receipt(
+pub fn selected_receipt(
     receipts: &[ProjectLibraryPublicationReceipt],
     publication_id: uuid::Uuid,
 ) -> Option<&ProjectLibraryPublicationReceipt> {
@@ -350,7 +350,7 @@ pub(crate) fn selected_receipt(
         .find(|receipt| receipt.publication_id() == publication_id)
 }
 
-pub(crate) fn audit_text_valid(value: &str) -> bool {
+pub fn audit_text_valid(value: &str) -> bool {
     !value.is_empty()
         && value == value.trim()
         && value.chars().count() <= 240
@@ -363,7 +363,7 @@ pub(crate) fn audit_text_valid(value: &str) -> bool {
 /// A wait is neither a problem nor news, so it is a line of dim text with no
 /// frame around it — the blue box it used to sit in read as an alert for
 /// something that is simply in progress.
-pub(crate) fn transaction_status(ui: &mut Ui, message: &str, error: bool) {
+pub fn transaction_status(ui: &mut Ui, message: &str, error: bool) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(8.0);
     if error {
@@ -379,13 +379,13 @@ pub(crate) fn transaction_status(ui: &mut Ui, message: &str, error: bool) {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
-pub(crate) enum PublicationAction {
+pub enum PublicationAction {
     Published(String),
     Cancelled,
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn start_browser_rollback_picker(ctx: &Context) -> Result<uuid::Uuid, String> {
+pub fn start_browser_rollback_picker(ctx: &Context) -> Result<uuid::Uuid, String> {
     use crate::workbench::lifecycle::project_lifecycle::start_browser_open;
 
     let picker_id = uuid::Uuid::new_v4();
@@ -401,12 +401,12 @@ pub(crate) fn start_browser_rollback_picker(ctx: &Context) -> Result<uuid::Uuid,
     Ok(picker_id)
 }
 
-pub(crate) fn clear_rollback_artifact(draft: &mut RollbackDraft) {
+pub fn clear_rollback_artifact(draft: &mut RollbackDraft) {
     draft.artifact_name = None;
     draft.artifact_bytes = None;
 }
 
-pub(crate) fn safe_file_stem(value: &str) -> String {
+pub fn safe_file_stem(value: &str) -> String {
     let mut output = String::new();
     let mut separator = false;
     for character in value.chars() {
@@ -426,10 +426,10 @@ pub(crate) fn safe_file_stem(value: &str) -> String {
     }
 }
 
-pub(crate) struct ProjectLibraryPublicationCandidate {
-    pub(crate) draft: crate::state::workspace::ProjectLibraryPublicationDraft,
-    pub(crate) artifact_bytes: Vec<u8>,
-    pub(crate) source_project_revision: ObjectRevision,
+pub struct ProjectLibraryPublicationCandidate {
+    pub draft: crate::state::workspace::ProjectLibraryPublicationDraft,
+    pub artifact_bytes: Vec<u8>,
+    pub source_project_revision: ObjectRevision,
 }
 
 impl ProjectLibraryPublicationCandidate {

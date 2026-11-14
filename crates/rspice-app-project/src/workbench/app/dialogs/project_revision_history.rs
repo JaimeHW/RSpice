@@ -83,8 +83,8 @@ pub(crate) enum ProjectRevisionComparison {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ProjectRevisionHistoryDialogState {
-    pub(crate) open: bool,
+pub struct ProjectRevisionHistoryDialogState {
+    pub open: bool,
     pub(crate) artifact_filter: ProjectRevisionArtifactFilter,
     pub(crate) query: String,
     pub(crate) selected: Vec<String>,

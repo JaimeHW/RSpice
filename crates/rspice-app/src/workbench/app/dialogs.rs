@@ -6,15 +6,16 @@
 //! them all so a single read answers whether any modal owns input this
 //! frame; the dialogs themselves never inspect each other.
 
-pub(crate) mod check_and_save;
-pub(crate) mod check_and_save_validation;
+pub(crate) use rspice_app_project::workbench::app::dialogs::check_and_save;
+pub(crate) use rspice_app_project::workbench::app::dialogs::check_and_save_validation;
 pub(crate) use rspice_app_workbench::workbench::app::dialogs::confirmation;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::confirmation_state;
 pub(in crate::workbench) mod connectivity_manager;
 pub(in crate::workbench) mod create_model_bound_symbol;
 #[cfg(test)]
+pub(crate) use rspice_app_project::workbench::app::dialogs::design_management;
+#[cfg(test)]
 pub(crate) use rspice_app_sheets::workbench::app::dialogs::delete_sheet;
-pub(crate) mod design_management;
 pub(in crate::workbench) mod design_request;
 pub(crate) mod design_review_comments;
 #[cfg(test)]
@@ -39,12 +40,11 @@ pub(crate) mod library;
 pub(crate) use rspice_app_cloud::workbench::app::dialogs::license;
 pub(in crate::workbench) mod object_properties;
 pub(in crate::workbench) mod placement;
+pub(crate) use rspice_app_project::workbench::app::dialogs::project;
 #[cfg(test)]
 pub(crate) use rspice_app_settings::workbench::app::dialogs::preferences;
 #[cfg(test)]
 pub(in crate::workbench) use rspice_app_simulate::workbench::app::dialogs::plan_removal;
-pub(crate) mod project;
-pub(in crate::workbench) mod project_revision_history;
 pub(in crate::workbench) mod property_dialog;
 #[cfg(test)]
 pub(crate) use rspice_app_cloud::workbench::app::dialogs::publish_web;

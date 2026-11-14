@@ -14,21 +14,21 @@ use crate::workbench::workflows::project_workflow::NewProjectParams;
 
 /// Draft identity for one New project transaction.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct NewProjectDialogState {
-    pub(crate) open: bool,
-    pub(crate) name: String,
-    pub(crate) library: String,
+pub struct NewProjectDialogState {
+    pub open: bool,
+    pub name: String,
+    pub library: String,
     /// Set the moment the reader edits Library, which retires the mirror.
-    pub(crate) library_edited: bool,
-    pub(crate) top_cell: String,
+    pub library_edited: bool,
+    pub top_cell: String,
     /// A refusal from a create attempt, distinct from live field validation.
-    pub(crate) error: Option<String>,
+    pub error: Option<String>,
 }
 
 impl NewProjectDialogState {
     /// The identity the reviewed fields describe, trimmed exactly as creation
     /// will record it.
-    pub(crate) fn params(&self) -> NewProjectParams {
+    pub fn params(&self) -> NewProjectParams {
         NewProjectParams {
             name: self.name.trim().to_owned(),
             root_library: self.library.trim().to_owned(),
@@ -39,7 +39,7 @@ impl NewProjectDialogState {
     /// Re-derive Library from the project name. A reader who has typed in
     /// Library owns it from then on: a suggestion that keeps overwriting a
     /// deliberate choice is worse than no suggestion.
-    pub(crate) fn mirror_library_from_name(&mut self) {
+    pub fn mirror_library_from_name(&mut self) {
         if !self.library_edited {
             self.library = library_slug(&self.name);
         }
@@ -49,7 +49,7 @@ impl NewProjectDialogState {
     /// footer names what Create waits for as a plain fact; a filled field the
     /// project file could not record, or a refused create, is stated as a
     /// refusal; a complete identity gets the reminder.
-    pub(crate) fn footer(&self) -> Result<&'static str, String> {
+    pub fn footer(&self) -> Result<&'static str, String> {
         let params = self.params();
         if let Some(wait) = params.missing() {
             return Ok(wait);

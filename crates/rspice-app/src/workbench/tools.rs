@@ -5,8 +5,8 @@
 //! jobs list and the notification centre. Grouping them keeps that
 //! distinction from the canonical surfaces, which do own the route.
 
-pub(crate) mod examples_browser;
+pub(crate) use rspice_app_project::workbench::tools::examples_browser;
+pub(crate) use rspice_app_project::workbench::tools::project_launcher;
 #[cfg(test)]
 pub(crate) use rspice_app_simulate::workbench::tools::jobs_manager;
 pub(crate) use rspice_app_workbench::workbench::tools::notification_center;
-pub(crate) mod project_launcher;

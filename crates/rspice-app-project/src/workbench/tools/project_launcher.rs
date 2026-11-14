@@ -76,13 +76,13 @@ struct LauncherFocusState {
     last_seen_pass: u64,
 }
 
-pub(crate) struct LauncherControlHeightOverride {
+pub struct LauncherControlHeightOverride {
     ctx: Context,
     original: Option<Tokens>,
 }
 
 impl LauncherControlHeightOverride {
-    pub(crate) fn new(ctx: &Context, enabled: bool) -> Self {
+    pub fn new(ctx: &Context, enabled: bool) -> Self {
         let original = (*Tokens::get(ctx)).clone();
         if !enabled || original.metrics.ctl_h >= LAUNCHER_TOUCH_TARGET {
             return Self {
@@ -108,7 +108,7 @@ impl Drop for LauncherControlHeightOverride {
     }
 }
 
-pub(crate) enum LauncherAction {
+pub enum LauncherAction {
     Close,
     Browse,
     NewProject,
@@ -131,12 +131,12 @@ const LAUNCHER_HEADER_HEIGHT: f32 = 48.0;
 const LAUNCHER_COMPACT_HEADER_HEIGHT: f32 = 52.0;
 /// The launcher names the release. The build hash behind it is Help ▸ About's
 /// to give, where a reader goes to quote it in a report.
-pub(crate) const LAUNCHER_VERSION_LABEL: &str = env!("CARGO_PKG_VERSION");
+pub const LAUNCHER_VERSION_LABEL: &str = env!("CARGO_PKG_VERSION");
 const LAUNCHER_NAV_WIDTH: f32 = 184.0;
 const LAUNCHER_COMPACT_NAV_HEIGHT: f32 = 42.0;
 const LAUNCHER_PAGE_FOOTER_MIN_HEIGHT: f32 = 51.0;
 const LAUNCHER_PHONE_MAX_WIDTH: f32 = 460.0;
-pub(crate) const LAUNCHER_TOUCH_MAX_WIDTH: f32 = 820.0;
+pub const LAUNCHER_TOUCH_MAX_WIDTH: f32 = 820.0;
 const LAUNCHER_TOUCH_TARGET: f32 = 44.0;
 const LAUNCHER_SEARCH_MAX_WIDTH: f32 = 420.0;
 const LAUNCHER_SORT_WIDTH: f32 = 145.0;
@@ -148,12 +148,12 @@ const SAFE_MODE_OPTION_HEIGHT: f32 = 54.0;
 const SAFE_MODE_OPTION_HORIZONTAL_INSET: f32 = 16.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct LauncherLayout {
-    pub(crate) surface: Rect,
+pub struct LauncherLayout {
+    pub surface: Rect,
     edge_to_edge: bool,
-    pub(crate) compact: bool,
+    pub compact: bool,
     phone: bool,
-    pub(crate) header_height: f32,
+    pub header_height: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -196,7 +196,7 @@ impl LauncherPageRegions {
 }
 
 impl LauncherLayout {
-    pub(crate) fn resolve(viewport: Rect) -> Self {
+    pub fn resolve(viewport: Rect) -> Self {
         let edge_to_edge = viewport.width() <= LAUNCHER_EDGE_TO_EDGE_MAX_WIDTH;
         let surface = if edge_to_edge {
             viewport
@@ -228,16 +228,16 @@ impl LauncherLayout {
 
 /// What one pass of the launcher leaves the shell: what the reader asked of
 /// it, and where focus goes back to once it closes.
-pub(crate) struct LauncherPass {
-    pub(crate) action: Option<LauncherAction>,
-    pub(crate) focus_state_id: Id,
-    pub(crate) surface_id: Id,
-    pub(crate) modal_layer: egui::LayerId,
+pub struct LauncherPass {
+    pub action: Option<LauncherAction>,
+    pub focus_state_id: Id,
+    pub surface_id: Id,
+    pub modal_layer: egui::LayerId,
 }
 
 /// Draw the launcher over the project feature's context, at `screen` with
 /// touch-sized targets where `large_targets` asks for them.
-pub(crate) fn launcher(
+pub fn launcher(
     ctx: &Context,
     cx: &mut Cx<'_, ProjectFeature>,
     screen: Rect,
@@ -976,7 +976,7 @@ fn launcher_footer_reserve(ui: &Ui, layout: LauncherLayout, buttons: &[(&str, bo
         .max(LAUNCHER_PAGE_FOOTER_MIN_HEIGHT)
 }
 
-pub(crate) fn show_discard_confirmation(ctx: &Context, platform: &mut PlatformState) {
+pub fn show_discard_confirmation(ctx: &Context, platform: &mut PlatformState) {
     let Some(candidate) = platform.recovery_catalog.pending_discard.clone() else {
         return;
     };
@@ -1688,7 +1688,7 @@ fn begin_launcher_focus(ctx: &Context, state_id: Id) -> bool {
     })
 }
 
-pub(crate) fn restore_launcher_focus(
+pub fn restore_launcher_focus(
     ctx: &Context,
     state_id: Id,
     modal_focus_id: Id,

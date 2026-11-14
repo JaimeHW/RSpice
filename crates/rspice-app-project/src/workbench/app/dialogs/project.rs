@@ -6,16 +6,16 @@
 //! technology and recovering from a checkpoint; their drafts live here, below
 //! the dialog aggregate that holds them.
 
-pub(crate) mod configuration;
-pub(crate) mod configuration_dialogs;
-pub(crate) mod new_project;
+pub mod configuration;
+pub mod configuration_dialogs;
+pub mod new_project;
 
 /// Retained draft for the mockup-owned project technology transaction.
 /// Selection remains isolated until the primary action verifies every pinned
 /// source and commits one project metadata revision.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct TechnologyAttachmentDialogState {
-    pub(crate) open: bool,
+pub struct TechnologyAttachmentDialogState {
+    pub open: bool,
     pub(crate) selected_library: Option<String>,
     pub(crate) selected_pdk_package: Option<String>,
     pub(crate) actor_id: String,
@@ -28,14 +28,13 @@ pub(crate) struct TechnologyAttachmentDialogState {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ProjectCheckpointRecoveryState {
-    pub(crate) project_id: Option<String>,
-    pub(crate) checkpoints:
-        Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>,
-    pub(crate) quarantined:
+pub struct ProjectCheckpointRecoveryState {
+    pub project_id: Option<String>,
+    pub checkpoints: Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary>,
+    pub quarantined:
         Vec<crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointQuarantine>,
-    pub(crate) error: Option<String>,
-    pub(crate) initialized: bool,
+    pub error: Option<String>,
+    pub initialized: bool,
     #[cfg(target_arch = "wasm32")]
     pub(crate) loading: bool,
 }

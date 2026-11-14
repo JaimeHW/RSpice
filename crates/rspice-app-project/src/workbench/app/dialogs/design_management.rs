@@ -36,7 +36,7 @@ use rspice_app_runs::simulation::SimulationController;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
 const MANAGER_TITLE: &str = "Sheets, variants, annotation and hierarchy";
-pub(crate) const MANAGER_PRIMARY: &str = "Apply reviewed design changes";
+pub const MANAGER_PRIMARY: &str = "Apply reviewed design changes";
 const MANAGER_DESCRIPTION: &str =
     "Manage sheets, assembly variants, reference designators, and how the hierarchy resolves.";
 const MANAGER_INITIAL_HEIGHT: f32 = 590.0;
@@ -46,7 +46,7 @@ const MAIN_SPLIT_LEFT_FRACTION: f32 = 0.5;
 const SUBFLOW_LEFT_FRACTION: f32 = 0.66;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum DesignManagementTab {
+pub enum DesignManagementTab {
     #[default]
     Sheets,
     Variants,
@@ -73,7 +73,7 @@ impl DesignManagementTab {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum DesignManagementPage {
+pub enum DesignManagementPage {
     #[default]
     Manager,
     NewSheet,
@@ -182,8 +182,8 @@ enum ProtectedBoundaryChecks {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SubflowInputs {
-    pub(crate) sheet_name: String,
+pub struct SubflowInputs {
+    pub sheet_name: String,
     sheet_insert_after: Option<SheetId>,
     sheet_template: SheetTemplate,
     sheet_port_policy: SheetPortPolicy,
@@ -247,14 +247,14 @@ impl Default for SubflowInputs {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DesignManagementDialogState {
-    pub(crate) open: bool,
-    pub(crate) page: DesignManagementPage,
-    pub(crate) active_tab: DesignManagementTab,
+pub struct DesignManagementDialogState {
+    pub open: bool,
+    pub page: DesignManagementPage,
+    pub active_tab: DesignManagementTab,
     owner_key: String,
-    pub(crate) original: Option<DesignManagementCatalog>,
-    pub(crate) draft: Option<DesignManagementCatalog>,
-    pub(crate) inputs: SubflowInputs,
+    pub original: Option<DesignManagementCatalog>,
+    pub draft: Option<DesignManagementCatalog>,
+    pub inputs: SubflowInputs,
     input_baseline: Option<SubflowInputs>,
     selection_object_ids: Vec<u64>,
     all_object_ids: Vec<u64>,
@@ -264,7 +264,7 @@ pub(crate) struct DesignManagementDialogState {
     /// What the last operation did that the manager's own tabs do not show —
     /// a count it produced, not a report that it finished.
     outcome: Option<String>,
-    pub(crate) discard_confirmation: bool,
+    pub discard_confirmation: bool,
     body_scroll_offset: f32,
 }
 
@@ -336,20 +336,20 @@ impl DesignManagementDialogState {
         *self = Self::default();
     }
 
-    pub(crate) fn dirty(&self) -> bool {
+    pub fn dirty(&self) -> bool {
         self.original
             .as_ref()
             .zip(self.draft.as_ref())
             .is_some_and(|(original, draft)| original != draft)
     }
 
-    pub(crate) fn subflow_dirty(&self) -> bool {
+    pub fn subflow_dirty(&self) -> bool {
         self.input_baseline
             .as_ref()
             .is_some_and(|baseline| baseline != &self.inputs)
     }
 
-    pub(crate) fn reset_inputs_for_page(
+    pub fn reset_inputs_for_page(
         &mut self,
         page: DesignManagementPage,
         configurations: Option<&crate::state::ConfigurationSetCatalog>,
@@ -426,19 +426,19 @@ impl DesignManagementDialogState {
 /// feature's context for the one call: the dialog's own state, the Project
 /// page and Configuration tab it can bring forward, the model, the session,
 /// and the run tier a published change voids.
-pub(crate) struct DesignManagementParts<'a> {
-    pub(crate) dialog: &'a mut DesignManagementDialogState,
-    pub(crate) project_page: &'a mut ProjectPage,
-    pub(crate) configuration_tab: &'a mut ConfigurationTab,
-    pub(crate) model: &'a mut Model,
-    pub(crate) platform: &'a PlatformState,
-    pub(crate) wb: &'a mut WorkbenchSession,
-    pub(crate) runs: &'a mut RunsState,
-    pub(crate) run_controller: &'a mut SimulationController,
+pub struct DesignManagementParts<'a> {
+    pub dialog: &'a mut DesignManagementDialogState,
+    pub project_page: &'a mut ProjectPage,
+    pub configuration_tab: &'a mut ConfigurationTab,
+    pub model: &'a mut Model,
+    pub platform: &'a PlatformState,
+    pub wb: &'a mut WorkbenchSession,
+    pub runs: &'a mut RunsState,
+    pub run_controller: &'a mut SimulationController,
 }
 
 /// Open Design management on its Sheets tab.
-pub(crate) fn open_design_management_dialog(
+pub fn open_design_management_dialog(
     dialog: &mut DesignManagementDialogState,
     model: &mut Model,
     platform: &PlatformState,
@@ -452,7 +452,7 @@ pub(crate) fn open_design_management_dialog(
 ///
 /// Like [`open_design_management_dialog`], it expects the caller to have
 /// navigated to the Design management route first.
-pub(crate) fn open_design_management_on(
+pub fn open_design_management_on(
     dialog: &mut DesignManagementDialogState,
     model: &mut Model,
     platform: &PlatformState,
@@ -469,7 +469,7 @@ pub(crate) fn open_design_management_on(
 /// `?surface=design-management` URL. Ordinary opens traverse back to their
 /// exact Design source; direct deep links fail safely to the canonical Design
 /// workspace using a replacement history entry.
-pub(crate) fn close_design_management_dialog_route(wb: &mut crate::workbench::WorkbenchSession) {
+pub fn close_design_management_dialog_route(wb: &mut crate::workbench::WorkbenchSession) {
     if wb.current_route().surface_id() != crate::workbench::SurfaceId::DesignManagement {
         return;
     }
@@ -666,12 +666,12 @@ enum DesignManagementBodyAction {
 
 mod controller;
 mod manager;
-pub(crate) mod operations;
+pub mod operations;
 mod subflows;
-pub(crate) use controller::render_design_management_dialog;
+pub use controller::render_design_management_dialog;
 #[cfg(test)]
 mod tests;
 /// Reachable from the workbench so a surface that composes its own dialog body
 /// can use the concept banner these dialogs already own, rather than grow a
 /// fourth painter for the same box.
-pub(crate) mod widgets;
+pub mod widgets;

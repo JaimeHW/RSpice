@@ -49,8 +49,6 @@ pub(crate) mod browser {
     #[cfg(target_arch = "wasm32")]
     pub(crate) use rspice_app_services::workbench::browser::accessibility;
     pub(crate) use rspice_app_services::workbench::browser::background_alerts;
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) use rspice_app_services::workbench::browser::download;
     #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) use rspice_app_services::workbench::browser::file_import;
     #[cfg(all(target_arch = "wasm32", feature = "browser-qualification"))]
@@ -72,7 +70,7 @@ pub(crate) mod chrome {
         pub use rspice_app_workbench::workbench::chrome::document_bar::*;
         pub(crate) mod design;
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::document_bar::models;
-        pub(in crate::workbench) mod project;
+        pub(in crate::workbench) use rspice_app_project::workbench::chrome::document_bar::project;
         pub(in crate::workbench) use rspice_app_results::workbench::chrome::document_bar::results;
         pub(in crate::workbench) use rspice_app_simulate::workbench::chrome::document_bar::simulate;
     }
@@ -92,7 +90,7 @@ pub(crate) mod chrome {
         pub use rspice_app_workbench::workbench::chrome::toolbar::*;
         pub(in crate::workbench) mod code;
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::toolbar::models;
-        pub(in crate::workbench) mod project;
+        pub(in crate::workbench) use rspice_app_project::workbench::chrome::toolbar::project;
         pub(crate) use rspice_app_results::workbench::chrome::toolbar::results;
         pub(crate) use rspice_app_simulate::workbench::chrome::toolbar::simulate;
     }
@@ -111,18 +109,18 @@ pub(crate) mod docks {
     pub(crate) use navigator::stimulus_browser_state::StimulusBrowserState;
     pub use rspice_app_workbench::workbench::docks::*;
     pub(crate) mod inspector {
-        pub use rspice_app_workbench::workbench::docks::inspector::*;
-        pub(crate) mod project;
+        #[cfg(test)]
+        pub(crate) use rspice_app_project::workbench::docks::inspector::project;
         #[cfg(test)]
         pub(crate) use rspice_app_results::workbench::docks::inspector::results;
         #[cfg(test)]
         pub(crate) use rspice_app_results::workbench::docks::inspector::run_details;
+        pub use rspice_app_workbench::workbench::docks::inspector::*;
     }
     pub(crate) mod navigator {
-        pub use rspice_app_workbench::workbench::docks::navigator::*;
-        pub(crate) mod project;
         #[cfg(test)]
         pub(crate) use rspice_app_simulate::workbench::docks::navigator::simulate;
+        pub use rspice_app_workbench::workbench::docks::navigator::*;
         pub(crate) mod stimulus_browser_state;
         pub(in crate::workbench) use rspice_app_simulate::workbench::docks::navigator::verify;
     }
@@ -172,6 +170,7 @@ pub(crate) mod lifecycle {
     //! views, selection, symbol editor, window bounds — none of which the project
     //! file itself persists.
 
+    #[cfg(test)]
     pub(crate) use rspice_app_services::workbench::lifecycle::project_checkpoint;
     pub(crate) use rspice_app_services::workbench::lifecycle::project_lifecycle;
     pub(crate) use rspice_app_services::workbench::lifecycle::recovery;
@@ -185,7 +184,7 @@ pub(crate) use rspice_app_workbench::workbench::localization;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
 pub(crate) use rspice_app_models::workbench::models;
-pub(crate) mod project;
+pub(crate) use rspice_app_project::workbench::project;
 pub(crate) use rspice_app_results::workbench::results;
 pub(crate) use rspice_app_runs::workbench::preflight;
 pub(crate) use rspice_app_state::workbench::preferences;
@@ -210,7 +209,7 @@ pub(crate) mod surfaces {
     pub(crate) mod code_adapters;
     pub(crate) mod library_cellview_manager;
     pub(crate) use rspice_app_code::workbench::surfaces::netlist;
-    pub(crate) mod project;
+    pub(crate) use rspice_app_project::workbench::surfaces::project;
     pub(crate) use rspice_app_simulate::workbench::surfaces::simulate;
     pub(crate) mod stimulus;
     pub(super) use rspice_app_code::workbench::surfaces::veriloga;
@@ -225,6 +224,7 @@ pub use lifecycle::session::{SymbolGridSpacing, SymbolTool};
 pub use lifecycle::window_session::ApplicationWindowId;
 pub use localization::UiTextLocale;
 pub(crate) use localization::{MessageCatalog, MessageId};
+#[cfg(test)]
 pub(crate) use preferences::DrawingSheetPersonalPreferences;
 pub use preferences::{
     BackgroundTaskAttention, ChoicePreference, TogglePreference, WorkspacePreferences,

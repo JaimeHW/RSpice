@@ -6,7 +6,7 @@
 //! ability to recover from it later.
 
 use super::page::{self, BODY_TOP, CARD_GAP, HEADER_TOP, STACK_BREAKPOINT, paint_elided};
-use super::*;
+pub use super::*;
 use crate::workbench::design_system::{property_row_path, property_row_problem};
 use crate::workbench::lifecycle::project_checkpoint::{
     MAX_RETAINED_CHECKPOINTS, ProjectCheckpointSummary,
@@ -19,7 +19,7 @@ use rspice_simulation_contract::run_set::format_bytes;
 /// promise restoring one keeps.
 const RECOVERY_NOTE: &str = "A checkpoint is a complete, verified copy of the project. \
      Restoring one saves it as a new project file; your current work is never changed.";
-pub(crate) const CHECKPOINT_ROW_HEIGHT: f32 = 52.0;
+pub const CHECKPOINT_ROW_HEIGHT: f32 = 52.0;
 /// Below this card width a row's actions move under its text.
 const CHECKPOINT_ROW_STACK_WIDTH: f32 = 460.0;
 const ROW_INSET: f32 = 12.0;
@@ -154,7 +154,7 @@ fn keep_first(slot: &mut Option<RecoveryIntent>, candidate: Option<RecoveryInten
     }
 }
 
-pub(crate) fn recovery(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+pub fn recovery(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     #[cfg(target_arch = "wasm32")]
     poll_browser_manual_checkpoint(cx);
     ensure_project_recovery_catalog(ui.ctx(), cx);

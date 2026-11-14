@@ -1,7 +1,7 @@
 //! The Project workspace's inspector: the overview, library, configuration,
 //! dependency and recovery pages.
 
-pub(crate) mod configuration;
+pub mod configuration;
 
 use egui::Ui;
 use rspice_app_state::veriloga_library::BuiltinVerilogAModel;
@@ -26,26 +26,26 @@ use crate::workbench::project::workspace_state::ProjectPage;
 /// page, the recovery catalog and the model, with what the design checks
 /// read of the other features' state and the project as its lifecycle reads
 /// it.
-pub(crate) struct ProjectInspector<'a> {
-    pub(crate) page: ProjectPage,
-    pub(crate) configuration: &'a mut ConfigurationPageState,
-    pub(crate) dependency_selection: &'a Option<String>,
-    pub(crate) checkpoint_recovery: &'a ProjectCheckpointRecoveryState,
-    pub(crate) checkpoint_selection: &'a Option<String>,
+pub struct ProjectInspector<'a> {
+    pub page: ProjectPage,
+    pub configuration: &'a mut ConfigurationPageState,
+    pub dependency_selection: &'a Option<String>,
+    pub checkpoint_recovery: &'a ProjectCheckpointRecoveryState,
+    pub checkpoint_selection: &'a Option<String>,
     /// Whether the Library page shows the built-in Verilog-A library rather
     /// than one of the project's.
-    pub(crate) builtin_library_open: bool,
+    pub builtin_library_open: bool,
     /// The model selected in that library.
-    pub(crate) builtin_model: Option<&'static BuiltinVerilogAModel>,
-    pub(crate) model: &'a Model,
-    pub(crate) facts: SlotFacts,
+    pub builtin_model: Option<&'static BuiltinVerilogAModel>,
+    pub model: &'a Model,
+    pub facts: SlotFacts,
     /// Read for how many documents a save would write.
-    pub(crate) lifecycle: LifecycleView<'a>,
+    pub lifecycle: LifecycleView<'a>,
 }
 
 /// What the reader asked of the inspector this frame, raised once it has
 /// drawn.
-pub(crate) enum ProjectInspectorAction {
+pub enum ProjectInspectorAction {
     /// Run the command this key names.
     Execute(CommandKey),
     /// Use this configuration for runs. The feature commits it as the
@@ -191,7 +191,7 @@ fn builtin_model_selection(ui: &mut Ui, model: Option<&BuiltinVerilogAModel>) {
     property_row(ui, "Access", "read only");
 }
 
-pub(crate) fn project_library(
+pub fn project_library(
     ui: &mut Ui,
     inspector: &ProjectInspector<'_>,
 ) -> Option<ProjectInspectorAction> {

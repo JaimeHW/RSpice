@@ -396,6 +396,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-app-models",
             "rspice-app-simulate",
             "rspice-app-code",
+            "rspice-app-project",
             "rspice-core",
             "rspice-core-base",
             "rspice-core-netlist",
@@ -766,6 +767,7 @@ class CiConfigurationTests(unittest.TestCase):
                 "rspice-app-models",
                 "rspice-app-simulate",
                 "rspice-app-code",
+                "rspice-app-project",
             )
             for path in (ROOT / "crates" / crate / "src").rglob("*.rs")
         ):

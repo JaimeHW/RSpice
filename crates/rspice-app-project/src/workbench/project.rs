@@ -5,12 +5,12 @@
 //! session aggregate that holds the project slot and the wire that persists
 //! it, so both name it without reaching up into the surfaces.
 
-pub(crate) mod commands;
-pub(crate) mod configuration_state;
-pub(crate) mod library_dialogs;
+pub mod commands;
+pub mod configuration_state;
+pub mod library_dialogs;
 mod new_project;
 mod revision_history;
-pub(crate) mod workspace_state;
+pub mod workspace_state;
 
 use rspice_app_state::veriloga_library::builtin_veriloga_model;
 
@@ -50,7 +50,7 @@ use revision_history::open_project_revision_history;
 use workspace_state::{ProjectLauncherFilter, ProjectLauncherPage, ProjectPage};
 
 /// The project feature.
-pub(crate) struct ProjectFeature;
+pub struct ProjectFeature;
 
 impl Feature for ProjectFeature {
     type State = ProjectState;
@@ -201,7 +201,7 @@ impl ProjectFeature {
     /// Keep browser-restored manager routes and the transient egui dialog
     /// owner synchronized. Commands open both in one transaction; this hook
     /// covers deep links, Back/Forward, and restored application sessions.
-    pub(crate) fn synchronize_design_management_route(cx: &mut Cx<'_, Self>) {
+    pub fn synchronize_design_management_route(cx: &mut Cx<'_, Self>) {
         let route_active = cx.wb.current_route().surface_id() == SurfaceId::DesignManagement;
         if route_active && !cx.state.design_management.open {
             open_design_management_dialog(
@@ -402,7 +402,7 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
 impl ProjectFeature {
     /// Take the next project the browser finished reading or promoting, if
     /// any, for the shell to open.
-    pub(in crate::workbench) fn poll_browser_project_import(
+    pub fn poll_browser_project_import(
         cx: &mut Cx<'_, Self>,
     ) -> Option<crate::workbench::workflows::project_workflow::BrowserProjectOpen> {
         crate::workbench::workflows::project_workflow::poll_browser_project_import(
@@ -416,7 +416,7 @@ impl ProjectFeature {
 /// with the recovery catalog asked to refresh and the search field asked to
 /// take focus. A route the session refuses is recorded, and the launcher
 /// stays closed.
-pub(crate) fn open_project_launcher(
+pub fn open_project_launcher(
     project: &mut ProjectState,
     wb: &mut WorkbenchSession,
     platform: &mut PlatformState,

@@ -28,7 +28,7 @@ use rspice_app_state::veriloga_library::{
 impl ProjectState {
     /// Open Copy Cell pre-filled from a source cell, targeting the first
     /// writable library (preferring the source's own when writable).
-    pub(crate) fn open_copy_cell_dialog(
+    pub fn open_copy_cell_dialog(
         &mut self,
         model: &Model,
         library: &str,
@@ -113,7 +113,7 @@ impl ProjectState {
     }
 
     /// Open Rename Cell pre-filled with the current name.
-    pub(crate) fn open_rename_cell_dialog(
+    pub fn open_rename_cell_dialog(
         &mut self,
         model: &Model,
         library: &str,
@@ -278,7 +278,7 @@ fn create_cell_from_builtin_model(
 /// Rename the cell the dialog names: how many instance references now name
 /// it, and what the rename left outside the model, or `None` when the name
 /// did not change.
-pub(crate) fn commit_rename_cell_dialog(
+pub fn commit_rename_cell_dialog(
     cx: &mut Cx<'_, ProjectFeature>,
 ) -> Result<Option<(usize, WorkspacePruned)>, String> {
     if cx.model.library_manager.revision() != cx.state.rename_cell_library_revision {

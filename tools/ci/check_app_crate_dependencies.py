@@ -148,19 +148,30 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-design", "rspice-project", "rspice-model-library", "rspice-simulation",
         "rspice-formats", "rspice-results", "rspice-ui-kit", "rspice-vocabulary",
     },
+    # The project feature: the persisted model, the platform services, the run
+    # tier whose run sets its configuration pages read, the workbench framework
+    # it registers with, and the design, design-management, project,
+    # simulation and painting crates its pages, Library browser and dialogs
+    # are built on.
+    "rspice-app-project": {
+        "rspice-app-state", "rspice-app-services", "rspice-app-runs", "rspice-app-workbench",
+        "rspice-design", "rspice-design-model", "rspice-project", "rspice-simulation",
+        "rspice-simulation-contract", "rspice-ui-kit",
+    },
     "rspice-worker": {"rspice-vocabulary", "rspice-design", "rspice-simulation", "rspice-hardcopy"},
 }
 HEADLESS = set(ALLOWED) - {
     "rspice-fonts", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
     "rspice-app-services", "rspice-app-runs", "rspice-app-workbench", "rspice-app-sheets",
     "rspice-app-settings", "rspice-app-results", "rspice-app-hardcopy", "rspice-app-cloud",
-    "rspice-app-models", "rspice-app-simulate", "rspice-app-code",
+    "rspice-app-models", "rspice-app-simulate", "rspice-app-code", "rspice-app-project",
 }
 # The application's feature crates. A feature reaches no other feature, and
 # nothing above the workbench framework.
 FEATURES = {
     "rspice-app-simulate", "rspice-app-results", "rspice-app-models", "rspice-app-sheets",
     "rspice-app-hardcopy", "rspice-app-settings", "rspice-app-cloud", "rspice-app-code",
+    "rspice-app-project",
 }
 GUI_PACKAGES = {"eframe", "winit", "rfd", "wgpu"}
 ENGINE_PACKAGES = {

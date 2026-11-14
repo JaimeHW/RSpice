@@ -4,14 +4,14 @@
 //! project. Every page reads authoritative project state and dispatches real
 //! workbench workflows; no mockup fixture data is admitted here.
 
-pub(crate) mod configuration;
-pub(crate) mod dependencies;
-pub(crate) mod landing;
-pub(crate) mod library;
-pub(crate) mod library_publication;
-pub(crate) mod overview;
+pub mod configuration;
+pub mod dependencies;
+pub mod landing;
+pub mod library;
+pub mod library_publication;
+pub mod overview;
 mod page;
-pub(crate) mod recovery;
+pub mod recovery;
 mod technology;
 
 use egui::{
@@ -39,7 +39,7 @@ use super::super::framework::command_registry::ids;
 use super::super::state::Workspace;
 use crate::workbench::project::workspace_state::ProjectPage;
 use technology::open_technology_attachment_dialog;
-pub(in crate::workbench) use technology::show_technology_attachment_dialog;
+pub use technology::show_technology_attachment_dialog;
 #[cfg(target_arch = "wasm32")]
 use technology::{poll_browser_recovery_completions, poll_browser_technology_checkpoint};
 
@@ -133,10 +133,7 @@ thread_local! {
 /// Take what the browser finished writing or reading for this workspace
 /// before it draws.
 #[cfg(target_arch = "wasm32")]
-pub(in crate::workbench) fn poll_browser_completions(
-    ctx: &Context,
-    cx: &mut Cx<'_, ProjectFeature>,
-) {
+pub fn poll_browser_completions(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
     poll_browser_technology_checkpoint(ctx, cx);
     poll_browser_recovery_completions(ctx, cx);
 }
@@ -153,7 +150,7 @@ enum ChromeRaise {
 /// The tabs and the configuration chip change the page where they are drawn;
 /// what else the reader asked of it is raised once it has drawn and answered
 /// before the page below it draws, in the same frame.
-pub(in crate::workbench) fn chrome(cx: &mut Cx<'_, ProjectFeature>, ui: &mut Ui) {
+pub fn chrome(cx: &mut Cx<'_, ProjectFeature>, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
     let mut raised = None;
     let shown = egui::Frame::new()

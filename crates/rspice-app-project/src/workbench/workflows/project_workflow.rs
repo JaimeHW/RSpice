@@ -28,15 +28,15 @@ use rspice_app_services::workbench::slots::platform::remember_recent_file;
 use rspice_project::ProjectIoError;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum ProjectLoadOrigin<'a> {
+pub enum ProjectLoadOrigin<'a> {
     #[cfg(not(target_arch = "wasm32"))]
     PersistentPath(&'a Path),
     /// A live-session host's project snapshot; carries the host's display
     /// name. Never touches recent files or persistence bindings.
     LiveSession(&'a str),
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     BrowserImport(&'a str),
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     BrowserCanonical(&'a str),
 }
 
@@ -46,7 +46,7 @@ impl<'a> ProjectLoadOrigin<'a> {
             #[cfg(not(target_arch = "wasm32"))]
             Self::PersistentPath(path) => path.display().to_string(),
             Self::LiveSession(host) => host.to_string(),
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::BrowserImport(name) | Self::BrowserCanonical(name) => name.to_string(),
         }
     }
@@ -56,7 +56,7 @@ impl<'a> ProjectLoadOrigin<'a> {
             #[cfg(not(target_arch = "wasm32"))]
             Self::PersistentPath(path) => Some(path),
             Self::LiveSession(_) => None,
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::BrowserImport(_) | Self::BrowserCanonical(_) => None,
         }
     }
@@ -66,9 +66,9 @@ impl<'a> ProjectLoadOrigin<'a> {
             #[cfg(not(target_arch = "wasm32"))]
             Self::PersistentPath(_) => "Opened project",
             Self::LiveSession(_) => "Synchronized live session project",
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::BrowserImport(_) => "Imported project",
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::BrowserCanonical(_) => "Opened project",
         }
     }
@@ -81,10 +81,10 @@ impl<'a> ProjectLoadOrigin<'a> {
 /// project dialog builds the same value from reviewed fields, so both routes
 /// reach one creation path.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NewProjectParams {
-    pub(crate) name: String,
-    pub(crate) root_library: String,
-    pub(crate) top_cell: String,
+pub struct NewProjectParams {
+    pub name: String,
+    pub root_library: String,
+    pub top_cell: String,
 }
 
 impl Default for NewProjectParams {
@@ -115,7 +115,7 @@ impl NewProjectParams {
     /// the three names: the dialog calls it on every keystroke to gate its
     /// primary action, and creation calls it again so a route that skipped the
     /// dialog cannot seed a project whose own `validate` would refuse it.
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         if let Some(wait) = self.missing() {
             return Err(wait.to_owned());
         }
@@ -162,7 +162,7 @@ fn validate_identity_segment(field: &str, value: &str) -> Result<(), String> {
 
 /// How a new project under `params` states itself when it replaces the open
 /// one.
-pub(crate) fn new_project_announcement(params: &NewProjectParams) -> String {
+pub fn new_project_announcement(params: &NewProjectParams) -> String {
     format!(
         "Created project {} (top cell {}/{}).",
         params.name, params.root_library, params.top_cell
@@ -176,7 +176,7 @@ pub(crate) fn new_project_announcement(params: &NewProjectParams) -> String {
 /// The replacement states itself as the netlist that was opened, which is
 /// what the reader asked for; a "Created project" line would describe a
 /// project they never asked for.
-pub(crate) fn netlist_project(display_name: &str) -> (NewProjectParams, String) {
+pub fn netlist_project(display_name: &str) -> (NewProjectParams, String) {
     const FALLBACK_NAME: &str = "Netlist Project";
     let mut params = NewProjectParams {
         name: std::path::Path::new(display_name)
@@ -196,7 +196,7 @@ pub(crate) fn netlist_project(display_name: &str) -> (NewProjectParams, String) 
 
 /// Refuse a new project while a run is in progress or `params` do not name a
 /// valid one, answering the gesture with the refusal.
-pub(crate) fn refuse_new_project(
+pub fn refuse_new_project(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     params: &NewProjectParams,
@@ -218,19 +218,19 @@ pub(crate) fn refuse_new_project(
 }
 
 /// A new project, built off to the side before it replaces the open one.
-pub(crate) struct NewProject {
-    pub(crate) library_manager: crate::state::LibraryManager,
-    pub(crate) workspace: crate::state::ProjectWorkspace,
-    pub(crate) model_library_manager: crate::state::model_library::ModelLibraryManager,
+pub struct NewProject {
+    pub library_manager: crate::state::LibraryManager,
+    pub workspace: crate::state::ProjectWorkspace,
+    pub model_library_manager: crate::state::model_library::ModelLibraryManager,
     /// Why the session's PDK model catalog could not be restored, reported
     /// once the replacement has stated itself.
-    pub(crate) model_restore_errors: Vec<String>,
+    pub model_restore_errors: Vec<String>,
 }
 
 /// Build the empty project `params` names: the session's PDK model catalog
 /// restored for it, its libraries and workspace, and its drawing-sheet
 /// default seeded from the reader's personal one.
-pub(crate) fn build_new_project(model: &mut Model, params: &NewProjectParams) -> NewProject {
+pub fn build_new_project(model: &mut Model, params: &NewProjectParams) -> NewProject {
     let restored_model_catalog =
         crate::workbench::app_state::restore_session_model_library_manager(&mut model.pdk_config);
     let (model_library_manager, model_restore_errors) = match restored_model_catalog {
@@ -259,7 +259,7 @@ pub(crate) fn build_new_project(model: &mut Model, params: &NewProjectParams) ->
 /// Make a replacement project's libraries and workspace the open ones, with
 /// `schematic` as the drawing in front, saved into the workspace, under
 /// fresh library edit locks.
-pub(crate) fn install_project_drawing(
+pub fn install_project_drawing(
     model: &mut Model,
     library_manager: crate::state::LibraryManager,
     mut workspace: crate::state::ProjectWorkspace,
@@ -275,7 +275,7 @@ pub(crate) fn install_project_drawing(
 /// Give a new project the session's first plan, with the data that plan
 /// owns, and the model catalog it was built with. A new project has never
 /// been saved, so it has no browser save name.
-pub(crate) fn settle_new_project(
+pub fn settle_new_project(
     model: &mut Model,
     platform: &mut PlatformState,
     model_library_manager: crate::state::model_library::ModelLibraryManager,
@@ -295,11 +295,7 @@ pub(crate) fn settle_new_project(
 
 /// Record why the session's PDK model catalog could not be restored for
 /// `operation`.
-pub(crate) fn emit_session_model_restore_errors(
-    model: &mut Model,
-    operation: &str,
-    errors: Vec<String>,
-) {
+pub fn emit_session_model_restore_errors(model: &mut Model, operation: &str, errors: Vec<String>) {
     for error in errors {
         model.record(
             LogSeverity::Warning,
@@ -350,7 +346,7 @@ fn seed_new_project_drawing_sheet_default(
     }
 }
 
-pub(crate) fn project_save_dialog_default_name(model: &Model, platform: &PlatformState) -> String {
+pub fn project_save_dialog_default_name(model: &Model, platform: &PlatformState) -> String {
     model
         .workspace
         .content
@@ -364,7 +360,7 @@ pub(crate) fn project_save_dialog_default_name(model: &Model, platform: &Platfor
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SaveRequestOutcome {
+pub enum SaveRequestOutcome {
     CanonicalComplete,
     CanonicalPending(crate::product::TransactionId),
     CopyOnly,
@@ -375,11 +371,11 @@ pub(crate) enum SaveRequestOutcome {
 
 impl SaveRequestOutcome {
     /// Whether the save began: it was neither cancelled nor refused.
-    pub(crate) fn request_started(&self) -> bool {
+    pub fn request_started(&self) -> bool {
         !matches!(self, Self::Cancelled | Self::Failed(_))
     }
 
-    pub(crate) fn authorizes_immediate_destructive_action(&self) -> bool {
+    pub fn authorizes_immediate_destructive_action(&self) -> bool {
         matches!(self, Self::CanonicalComplete)
     }
 }
@@ -387,7 +383,7 @@ impl SaveRequestOutcome {
 /// A streamed mirror never acquires a canonical local binding implicitly.
 /// Policy may authorize an explicit independent copy through Save As; it
 /// never authorizes ordinary Save/Save All to retain or overwrite the mirror.
-pub(crate) fn live_mirror_save_block(model: &Model, project_copy: bool) -> Option<&'static str> {
+pub fn live_mirror_save_block(model: &Model, project_copy: bool) -> Option<&'static str> {
     let locks = &model.live_write_locks;
     if !locks.mirror {
         None
@@ -403,10 +399,10 @@ pub(crate) fn live_mirror_save_block(model: &Model, project_copy: bool) -> Optio
 /// What a project save reads and writes: the lifecycle's parts, the status
 /// bar it answers on, and the features' facts the design checks a save runs
 /// read, taken when the save starts. A save changes none of those facts.
-pub(crate) struct SaveParts<'a> {
-    pub(crate) lifecycle: LifecycleParts<'a>,
-    pub(crate) workbench: &'a mut WorkbenchSession,
-    pub(crate) facts: SlotFacts,
+pub struct SaveParts<'a> {
+    pub lifecycle: LifecycleParts<'a>,
+    pub workbench: &'a mut WorkbenchSession,
+    pub facts: SlotFacts,
 }
 
 impl LifecycleSource for SaveParts<'_> {
@@ -436,7 +432,7 @@ impl LifecycleHost for SaveParts<'_> {
 /// Where a save writes on the desktop: refused for a live mirror, the open
 /// project's own file, or the file the reader picks.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn native_save_destination(
+pub fn native_save_destination(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     platform: &PlatformState,
@@ -465,7 +461,7 @@ pub(crate) fn native_save_destination(
 /// Save `scope` to `path` under `authority`, then remember the file and
 /// record the save, or answer why it failed.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn save_native_scope(
+pub fn save_native_scope(
     mut parts: SaveParts<'_>,
     scope: SaveScope,
     path: &Path,
@@ -510,7 +506,7 @@ pub(crate) fn save_native_scope(
 
 /// Save `scope` through the browser, refused for a live mirror.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn save_scope_in_browser(parts: SaveParts<'_>, scope: SaveScope) -> SaveRequestOutcome {
+pub fn save_scope_in_browser(parts: SaveParts<'_>, scope: SaveScope) -> SaveRequestOutcome {
     if let Some(message) = live_mirror_save_block(parts.lifecycle.model, false) {
         parts.workbench.prompt(message);
         return SaveRequestOutcome::Failed(message.to_owned());
@@ -521,7 +517,7 @@ pub(crate) fn save_scope_in_browser(parts: SaveParts<'_>, scope: SaveScope) -> S
 /// Save a copy of the project through the browser. Returns whether the save
 /// started.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn save_project_copy_in_browser(parts: SaveParts<'_>) -> bool {
+pub fn save_project_copy_in_browser(parts: SaveParts<'_>) -> bool {
     start_browser_project_save(parts, SaveScope::AllDocuments, true).request_started()
 }
 
@@ -696,7 +692,7 @@ thread_local! {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinuationEvent> {
+pub fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinuationEvent> {
     let completion = BROWSER_PROJECT_SAVE_RESULTS.with(|queue| queue.borrow_mut().pop_front())?;
     let project_copy = completion.prepared.save.is_project_copy();
     let transaction = completion.prepared.save.transaction();
@@ -963,7 +959,7 @@ fn canonical_save_continuation_event(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn browser_file_operation_label(platform: &PlatformState) -> Option<String> {
+pub fn browser_file_operation_label(platform: &PlatformState) -> Option<String> {
     if let Some(kind) = crate::workbench::browser::file_import::active_text_import_kind() {
         return Some(format!(
             "Waiting for the browser {} picker or permission request to finish.",
@@ -978,7 +974,7 @@ pub(crate) fn browser_file_operation_label(platform: &PlatformState) -> Option<S
 /// underlying JavaScript promise may still resolve, but transaction and import
 /// lease generations make that completion unable to mutate current state.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn cancel_pending_browser_file_operation(
+pub fn cancel_pending_browser_file_operation(
     platform: &mut PlatformState,
     workbench: &mut WorkbenchSession,
 ) -> bool {
@@ -998,7 +994,7 @@ pub(crate) fn cancel_pending_browser_file_operation(
 
 /// Say how the reverted document's revert went: record it, or answer the
 /// refusal or failure. Returns whether it was reverted.
-pub(crate) fn report_revert(
+pub fn report_revert(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     token: &crate::workbench::lifecycle::project_lifecycle::RevertReviewToken,
@@ -1024,14 +1020,14 @@ pub(crate) fn report_revert(
 /// session reopened: it does when the reader reopens the last project, and
 /// there is nothing to close when no project was reopened.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn startup_keeps_project(model: &Model, platform: &PlatformState) -> bool {
+pub fn startup_keeps_project(model: &Model, platform: &PlatformState) -> bool {
     model.preferences.reopen_last_project() || !platform.project_lifecycle.is_open()
 }
 
 /// Record why "Start with no project" left the reopened project open: it has
 /// unsaved changes.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn report_startup_project_kept(model: &mut Model, platform: &PlatformState) {
+pub fn report_startup_project_kept(model: &mut Model, platform: &PlatformState) {
     if platform.project_lifecycle.accepted().is_some() {
         model.record(
             LogSeverity::Info,
@@ -1043,7 +1039,7 @@ pub(crate) fn report_startup_project_kept(model: &mut Model, platform: &Platform
 
 /// Refuse to close the open project while a run is in progress, answering
 /// the gesture with the refusal. Returns whether it refused.
-pub(crate) fn refuse_project_close(model: &mut Model, workbench: &mut WorkbenchSession) -> bool {
+pub fn refuse_project_close(model: &mut Model, workbench: &mut WorkbenchSession) -> bool {
     if model.simulation.execution.has_active_execution() {
         report_lifecycle_error(
             model,
@@ -1058,14 +1054,14 @@ pub(crate) fn refuse_project_close(model: &mut Model, workbench: &mut WorkbenchS
 
 /// The empty project a close leaves open, built off to the side, with the
 /// announcement that retires the closed project's execution context.
-pub(crate) struct ClosedProject {
-    pub(crate) library_manager: crate::state::LibraryManager,
-    pub(crate) workspace: crate::state::ProjectWorkspace,
-    pub(crate) announcement: String,
+pub struct ClosedProject {
+    pub library_manager: crate::state::LibraryManager,
+    pub workspace: crate::state::ProjectWorkspace,
+    pub announcement: String,
 }
 
 /// Build the empty project a close of the open one leaves behind.
-pub(crate) fn build_closed_project(model: &Model) -> ClosedProject {
+pub fn build_closed_project(model: &Model) -> ClosedProject {
     let announcement = format!(
         "Closed project {}.",
         model.workspace.content.project.display_name()
@@ -1083,10 +1079,7 @@ pub(crate) fn build_closed_project(model: &Model) -> ClosedProject {
 /// the session's PDK model catalog, restored again. It has never been
 /// saved, so it has no browser save name. Returns why the catalog could not
 /// be restored, reported once the close has stated itself.
-pub(crate) fn settle_closed_project(
-    model: &mut Model,
-    platform: &mut PlatformState,
-) -> Vec<String> {
+pub fn settle_closed_project(model: &mut Model, platform: &mut PlatformState) -> Vec<String> {
     model.sim_setup =
         crate::workbench::app_state::SimSetupState::new_with_user_preferences(&model.preferences);
     let restored_model_catalog =
@@ -1105,15 +1098,15 @@ pub(crate) fn settle_closed_project(
 
 /// A project read for opening, validated and taken apart before it replaces
 /// the open one.
-pub(crate) struct LoadedProject {
+pub struct LoadedProject {
     /// Retires the replaced project's execution context.
-    pub(crate) announcement: String,
-    pub(crate) install: LoadedProjectInstall,
-    pub(crate) restore: LoadedProjectRestore,
+    pub announcement: String,
+    pub install: LoadedProjectInstall,
+    pub restore: LoadedProjectRestore,
 }
 
 /// What a loaded project installs as the open one.
-pub(crate) struct LoadedProjectInstall {
+pub struct LoadedProjectInstall {
     library_manager: crate::state::LibraryManager,
     workspace: crate::state::ProjectWorkspace,
     sim_setup: crate::workbench::app_state::SimSetupState,
@@ -1121,7 +1114,7 @@ pub(crate) struct LoadedProjectInstall {
 }
 
 /// What a loaded project brings back once it is installed.
-pub(crate) struct LoadedProjectRestore {
+pub struct LoadedProjectRestore {
     simulation_results: crate::io::ProjectSimulationResults,
     result_presentation: crate::state::result_presentation::ResultPresentation,
     accepted_baseline: ProjectSnapshot,
@@ -1134,7 +1127,7 @@ pub(crate) struct LoadedProjectRestore {
 /// `transaction` reserved for it, restore the execution context it was
 /// saved with, and settle where it saves next. A refusal ends the
 /// transaction and answers the open, and nothing is installed.
-pub(crate) fn prepare_loaded_project(
+pub fn prepare_loaded_project(
     lifecycle: crate::workbench::lifecycle::project_lifecycle::LifecycleParts<'_>,
     workbench: &mut WorkbenchSession,
     mut project: ProjectSnapshot,
@@ -1236,7 +1229,7 @@ pub(crate) fn prepare_loaded_project(
             project.file.workspace.project.path = None;
             platform.browser_project_save_name = None;
         }
-        #[cfg(any(test, target_arch = "wasm32"))]
+        #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
         ProjectLoadOrigin::BrowserImport(name) | ProjectLoadOrigin::BrowserCanonical(name) => {
             project.file.workspace.project.path = None;
             platform.browser_project_save_name = Some(name.to_string());
@@ -1274,7 +1267,7 @@ pub(crate) fn prepare_loaded_project(
 
 /// Make a loaded project's libraries, workspace, plan and model catalog the
 /// open ones, under fresh library edit locks.
-pub(crate) fn install_loaded_project(model: &mut Model, install: LoadedProjectInstall) {
+pub fn install_loaded_project(model: &mut Model, install: LoadedProjectInstall) {
     model.library_manager = install.library_manager;
     model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
     model.workspace = install.workspace;
@@ -1283,14 +1276,14 @@ pub(crate) fn install_loaded_project(model: &mut Model, install: LoadedProjectIn
 }
 
 /// What an installed project's restore leaves for the shell and the report.
-pub(crate) struct OpenedProject {
-    pub(crate) result_presentation: crate::state::result_presentation::ResultPresentation,
-    pub(crate) accepted_baseline: ProjectSnapshot,
-    pub(crate) report: OpenedProjectReport,
+pub struct OpenedProject {
+    pub result_presentation: crate::state::result_presentation::ResultPresentation,
+    pub accepted_baseline: ProjectSnapshot,
+    pub report: OpenedProjectReport,
 }
 
 /// What an opened project has to say once it is open.
-pub(crate) struct OpenedProjectReport {
+pub struct OpenedProjectReport {
     technology_block: Option<String>,
     workspace_migration_warning: Option<String>,
     simulation_results_warning: Option<String>,
@@ -1300,7 +1293,7 @@ pub(crate) struct OpenedProjectReport {
 /// Restore an installed project's simulation: a fresh simulation state, the
 /// technology gate asked of the installed project, then the results it was
 /// saved with.
-pub(crate) fn restore_loaded_simulation(
+pub fn restore_loaded_simulation(
     model: &mut Model,
     restore: LoadedProjectRestore,
 ) -> OpenedProject {
@@ -1344,7 +1337,7 @@ pub(crate) fn restore_loaded_simulation(
 /// Report an opened project: remember the file it came from, then say why
 /// its runs are blocked, what its load lost, and what its plan's migration
 /// dropped.
-pub(crate) fn report_opened_project(
+pub fn report_opened_project(
     model: &mut Model,
     platform: &mut PlatformState,
     origin: ProjectLoadOrigin<'_>,
@@ -1379,7 +1372,7 @@ pub(crate) fn report_opened_project(
 }
 
 /// Outcome of applying a live-session host's project snapshot.
-pub(crate) enum LiveProjectApply {
+pub enum LiveProjectApply {
     Applied,
     /// A local run or lifecycle transaction owns the project right now;
     /// the caller re-applies once it clears.
@@ -1424,7 +1417,7 @@ thread_local! {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn start_browser_project_import(
+pub fn start_browser_project_import(
     transaction: crate::product::TransactionId,
     context: crate::workbench::lifecycle::project_lifecycle::BrowserOperationContext,
 ) -> Result<(), String> {
@@ -1488,7 +1481,7 @@ pub(crate) fn start_browser_project_import(
 
 /// A project the browser read for opening, for the shell to apply.
 #[cfg(target_arch = "wasm32")]
-pub(crate) enum BrowserProjectOpen {
+pub enum BrowserProjectOpen {
     /// A copy imported from a file the reader picked.
     Import {
         project: ProjectSnapshot,
@@ -1501,12 +1494,12 @@ pub(crate) enum BrowserProjectOpen {
 
 /// A project a browser binding opened, with the binding it saves through.
 #[cfg(target_arch = "wasm32")]
-pub(crate) struct BrowserCanonicalOpen {
-    pub(crate) project: ProjectSnapshot,
-    pub(crate) display_name: String,
-    pub(crate) handle_id: u64,
-    pub(crate) binding: PersistenceBinding,
-    pub(crate) transaction: crate::product::TransactionId,
+pub struct BrowserCanonicalOpen {
+    pub project: ProjectSnapshot,
+    pub display_name: String,
+    pub handle_id: u64,
+    pub binding: PersistenceBinding,
+    pub transaction: crate::product::TransactionId,
 }
 
 /// Take the next project the browser finished reading or promoting, if
@@ -1688,7 +1681,7 @@ fn prepare_browser_canonical_open(
 /// its binding record so it reopens when the browser restarts. Returns
 /// whether the project opened.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn settle_browser_canonical_open(
+pub fn settle_browser_canonical_open(
     model: &Model,
     platform: &mut PlatformState,
     opened: bool,
@@ -1732,7 +1725,7 @@ pub(crate) fn settle_browser_canonical_open(
 /// A guard that refused the command (no project, a run in progress, another
 /// operation pending) answers the gesture; a project that could not be read
 /// or written is a failure the session records and tells the user about.
-pub(crate) fn report_lifecycle_error(
+pub fn report_lifecycle_error(
     model: &mut Model,
     workbench: &mut WorkbenchSession,
     error: ProjectLifecycleError,

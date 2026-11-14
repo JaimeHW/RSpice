@@ -13,29 +13,29 @@ use crate::workbench::app_state::{Model, PlatformState};
 use rspice_app_services::workbench::slots::platform::remember_recent_file;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum SchematicLoadOrigin<'a> {
+pub enum SchematicLoadOrigin<'a> {
     PersistentPath(&'a Path),
-    #[cfg(any(test, target_arch = "wasm32"))]
+    #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
     BrowserImport(&'a str),
 }
 
 impl<'a> SchematicLoadOrigin<'a> {
-    pub(crate) fn display_label(self) -> String {
+    pub fn display_label(self) -> String {
         match self {
             Self::PersistentPath(path) => path.display().to_string(),
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::BrowserImport(name) => name.to_string(),
         }
     }
 
     /// The file's name without its extension.
-    pub(crate) fn file_stem(self) -> &'a str {
+    pub fn file_stem(self) -> &'a str {
         match self {
             Self::PersistentPath(path) => path
                 .file_stem()
                 .and_then(std::ffi::OsStr::to_str)
                 .unwrap_or_default(),
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::BrowserImport(name) => Path::new(name)
                 .file_stem()
                 .and_then(std::ffi::OsStr::to_str)
@@ -46,7 +46,7 @@ impl<'a> SchematicLoadOrigin<'a> {
     fn recent_path(self) -> Option<&'a Path> {
         match self {
             Self::PersistentPath(path) => Some(path),
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::BrowserImport(_) => None,
         }
     }
@@ -54,7 +54,7 @@ impl<'a> SchematicLoadOrigin<'a> {
     fn success_prefix(self) -> &'static str {
         match self {
             Self::PersistentPath(_) => "Opened schematic",
-            #[cfg(any(test, target_arch = "wasm32"))]
+            #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
             Self::BrowserImport(_) => "Imported schematic",
         }
     }
@@ -62,7 +62,7 @@ impl<'a> SchematicLoadOrigin<'a> {
 
 /// Remember the file a schematic replacing the drawing in front came from,
 /// and record that it was opened.
-pub(crate) fn settle_loaded_schematic(
+pub fn settle_loaded_schematic(
     model: &mut Model,
     platform: &mut PlatformState,
     origin: SchematicLoadOrigin<'_>,
@@ -84,7 +84,7 @@ pub(crate) fn settle_loaded_schematic(
 
 /// A cell name from a file stem: letters, digits and underscores kept, every
 /// other run of characters one underscore, never empty.
-pub(crate) fn cell_name_from_file(stem: &str) -> String {
+pub fn cell_name_from_file(stem: &str) -> String {
     let mut name = String::new();
     for character in stem.chars() {
         if character.is_alphanumeric() || character == '_' {
@@ -103,7 +103,7 @@ pub(crate) fn cell_name_from_file(stem: &str) -> String {
 
 /// `base`, or `base_2`, `base_3`, … : the first the library does not hold,
 /// compared as cell identities are (ignoring letter case).
-pub(crate) fn unique_cell_name(library: &crate::state::Library, base: &str) -> String {
+pub fn unique_cell_name(library: &crate::state::Library, base: &str) -> String {
     let taken = |candidate: &str| {
         let identity = crate::state::canonical_cell_view_owner_key(&library.name, candidate, "");
         library.cells.values().any(|cell| {
@@ -122,7 +122,7 @@ pub(crate) fn unique_cell_name(library: &crate::state::Library, base: &str) -> S
 /// Settle where a schematic replacing the drawing in front saves next: a
 /// file opened from disk saves back to it, and a browser import keeps its
 /// name as the next save's suggestion and no file binding.
-pub(crate) fn prepare_loaded_schematic(
+pub fn prepare_loaded_schematic(
     platform: &mut PlatformState,
     schematic: SchematicState,
     origin: SchematicLoadOrigin<'_>,
@@ -132,7 +132,7 @@ pub(crate) fn prepare_loaded_schematic(
             platform.browser_schematic_save_name = None;
             schematic
         }
-        #[cfg(any(test, target_arch = "wasm32"))]
+        #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
         SchematicLoadOrigin::BrowserImport(name) => {
             let mut schematic = schematic;
             schematic.session.current_file = None;
@@ -142,7 +142,7 @@ pub(crate) fn prepare_loaded_schematic(
     }
 }
 
-pub(in crate::workbench) fn file_name_string(path: &Path) -> Option<String> {
+pub fn file_name_string(path: &Path) -> Option<String> {
     path.file_name()
         .map(|name| name.to_string_lossy().to_string())
         .filter(|name| !name.trim().is_empty())
@@ -150,7 +150,7 @@ pub(in crate::workbench) fn file_name_string(path: &Path) -> Option<String> {
 
 /// The name the schematic's Save As dialog suggests: its file's, or the
 /// name the browser last read or downloaded it under.
-pub(crate) fn schematic_save_dialog_default_name(
+pub fn schematic_save_dialog_default_name(
     model: &Model,
     platform: &PlatformState,
 ) -> Option<String> {
@@ -185,7 +185,7 @@ thread_local! {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn start_browser_schematic_import() -> Result<(), String> {
+pub fn start_browser_schematic_import() -> Result<(), String> {
     let token = crate::workbench::browser::file_import::try_begin_text_import(
         crate::workbench::browser::file_import::BrowserTextImportKind::Schematic,
     )?;
@@ -215,16 +215,16 @@ pub(crate) fn start_browser_schematic_import() -> Result<(), String> {
 
 /// A schematic the browser read for opening, for the shell to apply.
 #[cfg(target_arch = "wasm32")]
-pub(crate) struct BrowserSchematic {
-    pub(crate) schematic: SchematicState,
+pub struct BrowserSchematic {
+    pub schematic: SchematicState,
     /// The picked file's name, kept as the next save's suggestion.
-    pub(crate) name: String,
+    pub name: String,
 }
 
 /// Take the schematic the browser finished reading, if any, recording why
 /// a read that failed opened nothing.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn poll_browser_schematic_import(model: &mut Model) -> Option<BrowserSchematic> {
+pub fn poll_browser_schematic_import(model: &mut Model) -> Option<BrowserSchematic> {
     let completion = BROWSER_SCHEMATIC_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())?;
     if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
         return None;

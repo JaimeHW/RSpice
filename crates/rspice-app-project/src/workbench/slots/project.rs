@@ -7,7 +7,7 @@ use crate::workbench::app::{DesignManagementDialogState, ProjectRevisionHistoryD
 
 /// What the Library page's built-in Verilog-A library has selected.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct BuiltinModelsBrowser {
+pub struct BuiltinModelsBrowser {
     /// The page shows this library rather than a project library.
     pub open: bool,
     /// The selected model's registry name.
@@ -26,7 +26,7 @@ pub(crate) struct BuiltinModelsBrowser {
 
 /// What the project feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ProjectState {
+pub struct ProjectState {
     /// The Library page's built-in Verilog-A library.
     pub builtin_models: Box<BuiltinModelsBrowser>,
     /// New Cell creation dialog
@@ -48,7 +48,7 @@ pub(crate) struct ProjectState {
     /// New Cell validation error message
     pub new_cell_error: Option<String>,
     /// Exact library catalog revision captured when New Cell opened.
-    pub(crate) new_cell_library_revision: u64,
+    pub new_cell_library_revision: u64,
     /// New View creation dialog
     pub new_view_dialog: bool,
     /// New View target library
@@ -62,7 +62,7 @@ pub(crate) struct ProjectState {
     /// New View validation error message
     pub new_view_error: Option<String>,
     /// Exact library catalog revision captured when New View opened.
-    pub(crate) new_view_library_revision: u64,
+    pub new_view_library_revision: u64,
     /// Copy Cell dialog
     pub copy_cell_dialog: bool,
     /// The built-in model Copy Cell copies, in place of a catalog cell.
@@ -132,33 +132,31 @@ pub(crate) struct ProjectState {
     /// Exact library catalog revision captured when Delete Library opened.
     pub(crate) delete_library_library_revision: u64,
     /// Pending cell deletion (library, cell_name)
-    pub(crate) pending_delete_cell: Option<(String, String)>,
+    pub pending_delete_cell: Option<(String, String)>,
     /// Pending view deletion (library, cell, view_name)
-    pub(crate) pending_delete_view: Option<(String, String, String)>,
+    pub pending_delete_view: Option<(String, String, String)>,
     /// Exact, revision-bound destructive review for deleting one cell or view.
-    pub(crate) library_deletion_review:
+    pub library_deletion_review:
         crate::workbench::project::workspace_state::LibraryDeletionReviewState,
 
     /// Reviewed identity for the project File > New is about to create.
-    pub(crate) new_project:
-        crate::workbench::app::dialogs::project::new_project::NewProjectDialogState,
+    pub new_project: crate::workbench::app::dialogs::project::new_project::NewProjectDialogState,
 
     /// Validated active-document save revision transaction.
-    pub(crate) check_and_save:
-        crate::workbench::app::dialogs::check_and_save::CheckAndSaveDialogState,
+    pub check_and_save: crate::workbench::app::dialogs::check_and_save::CheckAndSaveDialogState,
 
     /// Project-owned sheet, variant, annotation, and hierarchy manager.
-    pub(crate) design_management: DesignManagementDialogState,
+    pub design_management: DesignManagementDialogState,
 
     /// Hash-linked validated schematic revisions and semantic audit workflow.
-    pub(crate) project_revision_history: ProjectRevisionHistoryDialogState,
+    pub project_revision_history: ProjectRevisionHistoryDialogState,
 
     /// Project-owned technology attachment transaction.
-    pub(crate) technology_attachment:
+    pub technology_attachment:
         crate::workbench::app::dialogs::project::TechnologyAttachmentDialogState,
 
     /// Cached, integrity-verified full-project recovery catalog.
-    pub(crate) project_checkpoint_recovery:
+    pub project_checkpoint_recovery:
         crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState,
 
     /// The Project Launcher is an application-level modal, not a workspace.
@@ -171,10 +169,10 @@ pub(crate) struct ProjectState {
     /// application-modal runtime state, never project or user preferences.
     pub project_launcher_page: crate::workbench::project::workspace_state::ProjectLauncherPage,
     /// The Examples dialog, while it is open: the example chosen in it.
-    pub(crate) examples_selection: Option<usize>,
+    pub examples_selection: Option<usize>,
     /// The example New project's prompt let through, which Examples opens
     /// on its next frame once the project it replaces was saved or let go.
-    pub(crate) examples_confirmed: Option<String>,
+    pub examples_confirmed: Option<String>,
     pub project_page: crate::workbench::project::workspace_state::ProjectPage,
     /// Device-local filters and row selections for the Project workspace.
     /// They affect presentation only and never participate in project
@@ -189,23 +187,22 @@ pub(crate) struct ProjectState {
     pub library_cellview_page: crate::workbench::project::workspace_state::LibraryCellviewPage,
     /// The Configuration page: the configuration in front of the reader and
     /// its last refusal.
-    pub(crate) configuration:
-        crate::workbench::project::configuration_state::ConfigurationPageState,
+    pub configuration: crate::workbench::project::configuration_state::ConfigurationPageState,
     /// New configuration, Clone, Rename and Delete.
-    pub(crate) configuration_dialog:
+    pub configuration_dialog:
         crate::workbench::app::dialogs::project::configuration_dialogs::ConfigurationDialogState,
 }
 
 impl ProjectState {
     /// Open the Examples dialog on its first circuit.
-    pub(crate) fn open_examples(&mut self) {
+    pub fn open_examples(&mut self) {
         self.examples_selection = Some(0);
     }
 
     /// The open project is being replaced or closed: a Check and save review
     /// and the Configuration page's selection belong to the project going
     /// away.
-    pub(crate) fn on_project_changed(&mut self) {
+    pub fn on_project_changed(&mut self) {
         self.check_and_save.close();
         self.configuration = Default::default();
         self.configuration_dialog = Default::default();

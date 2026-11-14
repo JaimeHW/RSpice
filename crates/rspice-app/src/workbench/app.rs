@@ -107,10 +107,6 @@ pub use dialogs::confirmation_state::{ConfirmationAction, ConfirmationResponse};
 #[cfg(test)]
 pub(crate) use actions::sheets;
 
-pub(crate) use dialogs::design_management::{
-    DesignManagementDialogState, open_design_management_dialog,
-};
-
 pub(crate) use dialogs::connectivity_manager::ConnectivityManagerDialogState;
 #[cfg(test)]
 pub(crate) use dialogs::connectivity_manager::open_connectivity_manager;
@@ -121,10 +117,6 @@ pub(crate) use dialogs::design_review_comments::DesignReviewCommentsDialogState;
 
 pub(crate) use code_adapters::{open_new_veriloga_device_form, open_source_document_dialog};
 pub(crate) use dialogs::library::new_veriloga_device::new_veriloga_device_available_in;
-pub(crate) use dialogs::project::TechnologyAttachmentDialogState;
-
-pub(crate) use dialogs::project_revision_history::ProjectRevisionHistoryDialogState;
-
 pub(crate) use dialogs::source_language_tools::navigate_source_bundle;
 
 pub(crate) use dialogs::veriloga_build_settings::open_veriloga_build_settings;
@@ -165,7 +157,6 @@ pub(crate) use schematic::named_net::{
     NamedNetTarget, apply_named_net_rename, selected_named_net_target, validate_named_net_rename,
 };
 
-pub(crate) use dialogs::check_and_save::open_check_and_save_dialog;
 pub(crate) use dialogs::hierarchy::create::open_create_hierarchy_dialog;
 pub(crate) use dialogs::replace_instance::{
     open_replace_instance_dialog, replace_instance_available,

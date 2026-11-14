@@ -23,11 +23,11 @@ use crate::workbench::project::workspace_state::{
 use crate::workbench::slots::ProjectState;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct LibraryDeletionImpact {
-    pub(crate) views: usize,
-    pub(crate) open_views: usize,
-    pub(crate) dirty_open_views: usize,
-    pub(crate) instance_references: usize,
+pub struct LibraryDeletionImpact {
+    pub views: usize,
+    pub open_views: usize,
+    pub dirty_open_views: usize,
+    pub instance_references: usize,
     source_bundles: usize,
     configuration_roots: usize,
     project_root: bool,
@@ -36,7 +36,7 @@ pub(crate) struct LibraryDeletionImpact {
 impl ProjectState {
     /// Open the deletion review on the exact cell `library`/`cell`, against
     /// the library revision `model` holds now.
-    pub(crate) fn open_library_cell_deletion_review(
+    pub fn open_library_cell_deletion_review(
         &mut self,
         model: &Model,
         library: &str,
@@ -53,7 +53,7 @@ impl ProjectState {
 
     /// Open the deletion review on the exact view `library`/`cell`/`view`,
     /// against the library revision `model` holds now.
-    pub(crate) fn open_library_view_deletion_review(
+    pub fn open_library_view_deletion_review(
         &mut self,
         model: &Model,
         library: &str,
@@ -85,7 +85,7 @@ impl ProjectState {
         Ok(())
     }
 
-    pub(crate) fn confirm_library_deletion_review(
+    pub fn confirm_library_deletion_review(
         &mut self,
         model: &Model,
         resolution: DeletionInstanceResolution,
@@ -281,7 +281,7 @@ impl ProjectFeature {
     /// leaves outside its catalog change goes to the shell, which carries it
     /// out as this step returns. A review neither opens nor confirms while a
     /// deletion waits, so at most one does.
-    pub(crate) fn process_pending_library_deletions(cx: &mut Cx<'_, Self>) {
+    pub fn process_pending_library_deletions(cx: &mut Cx<'_, Self>) {
         if let Some((lib_name, cell_name)) = cx.state.pending_delete_cell.take() {
             delete_staged_cell(cx, lib_name, cell_name);
         } else if let Some((lib_name, cell_name, view_name)) = cx.state.pending_delete_view.take() {
@@ -518,7 +518,7 @@ fn validate_library_deletion_target(
     Ok(())
 }
 
-pub(crate) fn library_deletion_impact(
+pub fn library_deletion_impact(
     model: &Model,
     target: &LibraryDeletionTarget,
 ) -> LibraryDeletionImpact {

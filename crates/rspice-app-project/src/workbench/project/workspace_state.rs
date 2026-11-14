@@ -137,7 +137,7 @@ mod tests;
 
 /// The exact cell or view a deletion names.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LibraryDeletionTarget {
+pub enum LibraryDeletionTarget {
     Cell {
         library: String,
         cell: String,
@@ -150,26 +150,26 @@ pub(crate) enum LibraryDeletionTarget {
 }
 
 impl LibraryDeletionTarget {
-    pub(crate) fn library(&self) -> &str {
+    pub fn library(&self) -> &str {
         match self {
             Self::Cell { library, .. } | Self::View { library, .. } => library,
         }
     }
 
-    pub(crate) fn cell(&self) -> &str {
+    pub fn cell(&self) -> &str {
         match self {
             Self::Cell { cell, .. } | Self::View { cell, .. } => cell,
         }
     }
 
-    pub(crate) fn view(&self) -> Option<&str> {
+    pub fn view(&self) -> Option<&str> {
         match self {
             Self::Cell { .. } => None,
             Self::View { view, .. } => Some(view),
         }
     }
 
-    pub(crate) fn display_path(&self) -> String {
+    pub fn display_path(&self) -> String {
         match self {
             Self::Cell { library, cell } => format!("{library}/{cell}"),
             Self::View {
@@ -194,7 +194,7 @@ impl LibraryDeletionTarget {
 /// should do about it is a separate design decision, and one the reader has to
 /// make rather than inherit. Nothing is deleted until they have.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum DeletionInstanceResolution {
+pub enum DeletionInstanceResolution {
     /// Leave every placement drawn where it is. Each keeps naming the master
     /// it was placed from and reads as unresolved until it is rebound or
     /// removed, which is what a design review needs to be able to see.
@@ -208,18 +208,18 @@ pub(crate) enum DeletionInstanceResolution {
 /// The cell or view deletion under review, against the library revision it
 /// opened at, and the reader's answer about the placements once confirmed.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct LibraryDeletionReviewState {
-    pub(crate) target: Option<LibraryDeletionTarget>,
+pub struct LibraryDeletionReviewState {
+    pub target: Option<LibraryDeletionTarget>,
     pub(crate) expected_library_revision: u64,
     pub(crate) error: Option<String>,
     /// The choice the reader confirmed for the object's placements. Set when
     /// the deletion is staged and taken exactly once by the staged deletion,
     /// so the two halves of one decision cannot come apart.
-    pub(crate) resolution: Option<DeletionInstanceResolution>,
+    pub resolution: Option<DeletionInstanceResolution>,
 }
 
 impl LibraryDeletionReviewState {
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         *self = Self::default();
     }
 }

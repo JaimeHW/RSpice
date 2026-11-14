@@ -565,6 +565,12 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-code/src")
     }
 
+    /// The project feature's sources, read by the same scans for the same
+    /// reason.
+    fn project_source_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-project/src")
+    }
+
     /// Every authored `.rs` file in the workspace, sorted, with the floors the
     /// whole-workspace scans rest on.
     ///
@@ -662,6 +668,7 @@ mod tests {
         rust_sources(&models_source_root(), &mut paths);
         rust_sources(&simulate_source_root(), &mut paths);
         rust_sources(&code_source_root(), &mut paths);
+        rust_sources(&project_source_root(), &mut paths);
         paths.push(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-results/src/executed_deck.rs"),
         );
@@ -742,6 +749,7 @@ mod tests {
         rust_sources(&models_source_root(), &mut paths);
         rust_sources(&simulate_source_root(), &mut paths);
         rust_sources(&code_source_root(), &mut paths);
+        rust_sources(&project_source_root(), &mut paths);
         paths.sort();
         assert!(
             paths.len() > 100,
@@ -825,6 +833,7 @@ mod tests {
         rust_sources(&models_source_root(), &mut paths);
         rust_sources(&simulate_source_root(), &mut paths);
         rust_sources(&code_source_root(), &mut paths);
+        rust_sources(&project_source_root(), &mut paths);
         paths.sort();
         assert!(
             paths.len() > 100,
@@ -1112,6 +1121,7 @@ mod tests {
             models_source_root(),
             simulate_source_root(),
             code_source_root(),
+            project_source_root(),
         ];
         let mut found = Vec::new();
         for file in FILES {
@@ -1252,6 +1262,7 @@ mod tests {
         rust_sources(&models_source_root(), &mut paths);
         rust_sources(&simulate_source_root(), &mut paths);
         rust_sources(&code_source_root(), &mut paths);
+        rust_sources(&project_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()
@@ -1561,6 +1572,7 @@ mod tests {
         rust_sources(&models_source_root(), &mut paths);
         rust_sources(&simulate_source_root(), &mut paths);
         rust_sources(&code_source_root(), &mut paths);
+        rust_sources(&project_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()
@@ -1674,6 +1686,7 @@ mod tests {
         rust_sources(&models_source_root(), &mut paths);
         rust_sources(&simulate_source_root(), &mut paths);
         rust_sources(&code_source_root(), &mut paths);
+        rust_sources(&project_source_root(), &mut paths);
         paths.sort();
         let sources = paths
             .iter()

@@ -38,7 +38,7 @@ fn new_cell_status<'a>(
 impl ProjectFeature {
     /// Draw New Cell. What a created cell leaves outside its catalog change
     /// goes to the shell, which carries it out as the dialog returns.
-    pub(crate) fn process_new_cell_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    pub fn process_new_cell_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         if !cx.state.new_cell_dialog {
             return;
         }
@@ -145,7 +145,7 @@ impl ProjectFeature {
 /// catalog, so a refusal anywhere creates nothing; the catalog then takes
 /// the copies, and what the creation leaves outside it goes to the shell
 /// in today's order. A refusal is stated in the dialog.
-pub(crate) fn create_new_cell(cx: &mut Cx<'_, ProjectFeature>) -> bool {
+pub fn create_new_cell(cx: &mut Cx<'_, ProjectFeature>) -> bool {
     let name = cx.state.new_cell_name.trim().to_string();
     let library = cx.state.new_cell_library.clone();
 

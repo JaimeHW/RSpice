@@ -532,7 +532,7 @@ pub(super) fn renumber_request(
     })
 }
 
-pub(crate) fn variant_connectivity_difference_count(
+pub fn variant_connectivity_difference_count(
     model: &Model,
     reference: AssemblyVariantId,
     comparison: AssemblyVariantId,

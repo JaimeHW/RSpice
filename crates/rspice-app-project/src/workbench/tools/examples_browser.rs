@@ -28,7 +28,7 @@ const HIGHLIGHT_BLEED: f32 = crate::ui::widgets::DIALOG_BODY_INSET;
 
 /// Why Open is refused, if it is: configuration edits not applied, which
 /// no save prompt resolves.
-pub(crate) fn open_refusal(
+pub fn open_refusal(
     project: &ProjectState,
     model: &Model,
     platform: &PlatformState,
@@ -96,7 +96,7 @@ fn example_row(ui: &mut egui::Ui, example: Example, selected: bool) -> egui::Res
 
 /// The Examples dialog, while it is open. It returns the example the reader
 /// asked to open, for the shell to request in place of the open project.
-pub(crate) fn show(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) -> Option<Example> {
+pub fn show(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) -> Option<Example> {
     let mut selected = cx.state.examples_selection?;
     selected = selected.min(EXAMPLES.len() - 1);
     let refusal = open_refusal(cx.state, cx.model, cx.platform);

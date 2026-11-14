@@ -46,7 +46,7 @@ enum InspectorAction {
 /// edits it asks for land on the page as it draws; using a configuration for
 /// runs commits a project transaction, so the target is handed back for the
 /// shell to carry out.
-pub(crate) fn project_configuration(
+pub fn project_configuration(
     ui: &mut Ui,
     page: &mut ConfigurationPageState,
     model: &Model,

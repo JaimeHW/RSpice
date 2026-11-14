@@ -4,14 +4,14 @@
 //! visible row names a real library, cell, or view, selection writes back to
 //! that manager, and opening a view uses the normal workspace transaction.
 
-use super::*;
+pub use super::*;
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::elide_text;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
 
-pub(crate) mod builtin_models;
+pub mod builtin_models;
 
 const CONTEXT_HEIGHT: f32 = 36.0;
 const DETAIL_HEIGHT: f32 = 40.0;
@@ -19,10 +19,10 @@ const COLUMN_HEADER_HEIGHT: f32 = 28.0;
 const BROWSER_ROW_HEIGHT: f32 = 31.0;
 const MIN_BROWSER_WIDTH: f32 = 680.0;
 const USAGE_REPORT_ID: &str = "workbench.project.library.where-used";
-pub(crate) const AUDIT_REPORT_ID: &str = "workbench.project.library.audit-history";
+pub const AUDIT_REPORT_ID: &str = "workbench.project.library.audit-history";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LibraryIntent {
+pub enum LibraryIntent {
     BuiltinModels(builtin_models::BuiltinModelsIntent),
     SelectLibrary(String),
     SelectCell { library: String, cell: String },
@@ -64,7 +64,7 @@ struct BrowserRowSpec<'a> {
 /// returns, or raised for the shell when it opens a view or runs a command.
 /// The detail reads the selection the browser's intent writes, so that
 /// intent is carried out before the detail draws. Then the reports.
-pub(crate) fn page(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+pub fn page(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let ctx = ui.ctx().clone();
     let (intent, source_height) = library_browser(ui, cx);
     if let Some(intent) = intent {
@@ -225,7 +225,7 @@ fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_vie
     }
 }
 
-pub(crate) fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+pub fn library_context(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let t = Tokens::get(ui.ctx());
     let builtin = &cx.state.builtin_models;
     let selection = if builtin.open {
@@ -885,11 +885,7 @@ fn selected_view(
 /// Carry out what the reader asked of the page: the feature's own intents
 /// in place, and opening a view or creating a cell raised for the shell,
 /// which answers them once the page returns.
-pub(crate) fn apply_library_intent(
-    ctx: &Context,
-    cx: &mut Cx<'_, ProjectFeature>,
-    intent: LibraryIntent,
-) {
+pub fn apply_library_intent(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>, intent: LibraryIntent) {
     match intent {
         LibraryIntent::BuiltinModels(intent) => builtin_models::apply(cx, intent),
         LibraryIntent::SelectLibrary(library) => {
@@ -1239,7 +1235,7 @@ fn library_mutation_summary(mutation: &crate::state::ProjectLibraryMutation) -> 
     }
 }
 
-pub(crate) fn icon_for_view(view_type: ViewType) -> WorkbenchIcon {
+pub fn icon_for_view(view_type: ViewType) -> WorkbenchIcon {
     match view_type {
         ViewType::Schematic | ViewType::Testbench | ViewType::Extracted => WorkbenchIcon::Design,
         ViewType::Symbol => WorkbenchIcon::Project,

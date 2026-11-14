@@ -28,9 +28,7 @@ pub(super) fn columns_height(browser: &BuiltinModelsBrowser, available: f32) -> 
     }
 }
 
-pub(crate) fn selected_model(
-    browser: &BuiltinModelsBrowser,
-) -> Option<&'static BuiltinVerilogAModel> {
+pub fn selected_model(browser: &BuiltinModelsBrowser) -> Option<&'static BuiltinVerilogAModel> {
     builtin_veriloga_model(browser.model.as_deref()?)
 }
 
@@ -94,7 +92,7 @@ fn follow_selection(browser: &mut BuiltinModelsBrowser) {
     }
 }
 
-pub(crate) fn browse(browser: &mut BuiltinModelsBrowser, intent: BuiltinModelsIntent) {
+pub fn browse(browser: &mut BuiltinModelsBrowser, intent: BuiltinModelsIntent) {
     match intent {
         BuiltinModelsIntent::ShowLibrary => {
             browser.open = true;
@@ -124,7 +122,7 @@ pub(crate) fn browse(browser: &mut BuiltinModelsBrowser, intent: BuiltinModelsIn
 
 /// What the page's built-in library can ask for.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BuiltinModelsIntent {
+pub enum BuiltinModelsIntent {
     ShowLibrary,
     SelectModel(&'static str),
     SelectFile(String),
@@ -267,7 +265,7 @@ pub(super) fn view_column(
 /// The band under the columns: what the selected model is, and the two things
 /// a read-only library offers, Copy cell… while `libraries` holds a writable
 /// one. The strip above already names the selection.
-pub(crate) fn detail(
+pub fn detail(
     ui: &mut Ui,
     browser: &BuiltinModelsBrowser,
     libraries: &crate::state::LibraryManager,

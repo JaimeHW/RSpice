@@ -34,7 +34,7 @@ use rspice_app_runs::workbench::slots::runs::RunsState;
 
 /// Where a new configuration's view list and stop list come from.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum StartFrom {
+pub enum StartFrom {
     /// The built-in order, written out as a configuration's lists.
     #[default]
     Default,
@@ -103,7 +103,7 @@ impl StartFrom {
 
 /// The dialog that is open, with what has been entered in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ConfigurationDialog {
+pub enum ConfigurationDialog {
     New {
         name: String,
         start: StartFrom,
@@ -125,21 +125,21 @@ pub(crate) enum ConfigurationDialog {
 /// A request that takes the open project away, held while the configuration
 /// in front has edits that are not applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Leaving {
-    pub(crate) action: ConfirmationAction,
+pub struct Leaving {
+    pub action: ConfirmationAction,
     /// The recent project an Open recent asked for.
-    pub(crate) recent: Option<(std::path::PathBuf, RecentKind)>,
+    pub recent: Option<(std::path::PathBuf, RecentKind)>,
 }
 
 /// The configuration dialogs' state, held by the project feature.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ConfigurationDialogState {
-    pub(crate) open: Option<ConfigurationDialog>,
+pub struct ConfigurationDialogState {
+    pub open: Option<ConfigurationDialog>,
     /// Why the last commit was refused; the dialog stays open to say so.
     refusal: Option<String>,
     /// Opening, creating or importing another project, closing this one, or
     /// exiting, waiting for the edits not applied to be applied or discarded.
-    pub(crate) leaving: Option<Leaving>,
+    pub leaving: Option<Leaving>,
 }
 
 impl ConfigurationDialogState {
@@ -155,7 +155,7 @@ impl ConfigurationDialogState {
 
 /// Which dialog to open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ConfigurationDialogRequest {
+pub enum ConfigurationDialogRequest {
     New,
     Clone(ConfigurationSetId),
     Rename(ConfigurationSetId),
@@ -163,7 +163,7 @@ pub(crate) enum ConfigurationDialogRequest {
 }
 
 /// Open the dialog `request` names, filled in from the project.
-pub(crate) fn open_configuration_dialog(
+pub fn open_configuration_dialog(
     dialogs: &mut ConfigurationDialogState,
     model: &Model,
     request: ConfigurationDialogRequest,
@@ -208,7 +208,7 @@ fn name_id() -> Id {
 }
 
 /// [`show_configuration_page`] over the parts it reads and writes.
-pub(in crate::workbench) fn show_configuration_page_in(
+pub fn show_configuration_page_in(
     platform: &PlatformState,
     wb: &mut WorkbenchSession,
     project_page: &mut ProjectPage,
@@ -254,21 +254,21 @@ pub(in crate::workbench) fn configuration_actions_menu(
 /// project feature's context for the one call: their own state, the
 /// Configuration page and the Project page they bring forward, the model,
 /// the session, and the run tier a committed change voids.
-pub(crate) struct ConfigurationDialogParts<'a> {
-    pub(crate) dialogs: &'a mut ConfigurationDialogState,
-    pub(crate) configuration: &'a mut ConfigurationPageState,
-    pub(crate) project_page: &'a mut ProjectPage,
-    pub(crate) model: &'a mut Model,
-    pub(crate) platform: &'a PlatformState,
-    pub(crate) wb: &'a mut WorkbenchSession,
-    pub(crate) runs: &'a mut RunsState,
-    pub(crate) run_controller: &'a mut SimulationController,
+pub struct ConfigurationDialogParts<'a> {
+    pub dialogs: &'a mut ConfigurationDialogState,
+    pub configuration: &'a mut ConfigurationPageState,
+    pub project_page: &'a mut ProjectPage,
+    pub model: &'a mut Model,
+    pub platform: &'a PlatformState,
+    pub wb: &'a mut WorkbenchSession,
+    pub runs: &'a mut RunsState,
+    pub run_controller: &'a mut SimulationController,
 }
 
 /// Draw the question about edits not applied, asked before leaving the
 /// project or picking another configuration, or the configuration dialog
 /// that is open, and commit what the reader chose.
-pub(crate) fn render_configuration_dialog(parts: &mut ConfigurationDialogParts<'_>, ctx: &Context) {
+pub fn render_configuration_dialog(parts: &mut ConfigurationDialogParts<'_>, ctx: &Context) {
     if parts.dialogs.leaving.is_some() {
         let choice =
             edits_prompt(ctx, parts.configuration, parts.model).unwrap_or(DialogChoice::Secondary);
@@ -369,7 +369,7 @@ fn commit(
 /// What the answer to the question asked before leaving the project leaves
 /// to do.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum LeavingAnswer {
+pub enum LeavingAnswer {
     /// Stay in the project: cancelled, or not answered yet.
     Stay,
     /// Apply the edits, then go on leaving.
@@ -381,7 +381,7 @@ pub(crate) enum LeavingAnswer {
 /// Take the reader's answer about the configuration edits held before
 /// leaving the project. Discard drops them here; Apply is the caller's,
 /// because it commits through the application.
-pub(crate) fn answer_leaving(
+pub fn answer_leaving(
     dialogs: &mut ConfigurationDialogState,
     configuration: &mut ConfigurationPageState,
     choice: DialogChoice,

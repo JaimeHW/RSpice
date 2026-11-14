@@ -21,7 +21,7 @@ use rspice_design::symbol::generated::{GENERATED_SYMBOL_VIEW, store_generated_sy
 /// Other persisted `ViewType` variants remain valid for project interchange,
 /// but must not be offered by the creation workflow until their editor and
 /// storage contract are implemented end to end.
-pub(crate) const CREATABLE_VIEW_TYPES: [crate::state::ViewType; 5] = [
+pub const CREATABLE_VIEW_TYPES: [crate::state::ViewType; 5] = [
     crate::state::ViewType::Schematic,
     crate::state::ViewType::Testbench,
     crate::state::ViewType::Symbol,
@@ -32,7 +32,7 @@ pub(crate) const CREATABLE_VIEW_TYPES: [crate::state::ViewType; 5] = [
 /// What a Type segment says: the view type in sentence case. The view keeps
 /// its lowercase name in the library and the project; the segments read
 /// "schematic testbench symbol layout veriloga" beside capitalised labels.
-pub(crate) const fn view_type_label(view_type: crate::state::ViewType) -> &'static str {
+pub const fn view_type_label(view_type: crate::state::ViewType) -> &'static str {
     match view_type {
         crate::state::ViewType::Schematic => "Schematic",
         crate::state::ViewType::Testbench => "Testbench",
@@ -84,7 +84,7 @@ impl ProjectState {
     /// The target is resolved before any dialog state changes. This keeps a
     /// stale row click from opening an apparently valid transaction against a
     /// different or read-only object.
-    pub(crate) fn open_new_view_dialog(
+    pub fn open_new_view_dialog(
         &mut self,
         model: &Model,
         library: &str,
@@ -139,17 +139,17 @@ pub(crate) fn new_view_opening(
 }
 
 /// Why Create is waiting while the view has no name.
-pub(crate) const NEW_VIEW_NAME_MISSING: &str = "Enter a name for the view.";
+pub const NEW_VIEW_NAME_MISSING: &str = "Enter a name for the view.";
 
 /// What the footer says about the view name when Create cannot run on it.
-pub(crate) enum NameLine {
+pub enum NameLine {
     /// Nothing typed yet: what Create waits for, not a refusal.
     Missing,
     /// A name the library would refuse, and why.
     Refused(String),
 }
 
-pub(crate) fn new_view_name_line(name: &str) -> Option<NameLine> {
+pub fn new_view_name_line(name: &str) -> Option<NameLine> {
     let name = name.trim();
     if name.is_empty() {
         return Some(NameLine::Missing);
@@ -160,7 +160,7 @@ pub(crate) fn new_view_name_line(name: &str) -> Option<NameLine> {
 impl ProjectFeature {
     /// Draw New View. What a created view leaves outside its catalog change
     /// goes to the shell, which carries it out as the dialog returns.
-    pub(crate) fn process_new_view_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+    pub fn process_new_view_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
         if !cx.state.new_view_dialog {
             return;
         }
@@ -238,7 +238,7 @@ impl ProjectFeature {
 
 /// Create the view the dialog names, and whether it was created. A refusal
 /// is stated in the dialog and changes nothing.
-pub(crate) fn create_new_view(cx: &mut Cx<'_, ProjectFeature>) -> bool {
+pub fn create_new_view(cx: &mut Cx<'_, ProjectFeature>) -> bool {
     let view_name = cx.state.new_view_name.trim().to_string();
     let library = cx.state.new_view_library.clone();
     let cell = cx.state.new_view_cell.clone();
@@ -619,7 +619,7 @@ fn create_veriloga_cell_view(
 /// [`GENERATED_SYMBOL_VIEW`] additionally carries the `generated` marker, so
 /// the schematic keeps the symbol in step as ports come and go until the
 /// first hand edit takes ownership by clearing the marker.
-pub(crate) fn seeded_symbol_view(
+pub fn seeded_symbol_view(
     view_name: &str,
     ports: &[crate::state::PortSpec],
 ) -> Result<crate::state::View, String> {
