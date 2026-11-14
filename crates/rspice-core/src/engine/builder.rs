@@ -2892,7 +2892,20 @@ fn collect_flat_analog_nodes(
             }
             continue;
         }
-        for node_name in &element.nodes {
+        // A controlled source or a switch reads its controlling pair as a
+        // voltage, an electrical use the terminal list leaves out.
+        let control = match &element.kind {
+            ElementKind::Vcvs { control_nodes, .. } | ElementKind::Vccs { control_nodes, .. } => {
+                Some([&control_nodes.0, &control_nodes.1])
+            }
+            ElementKind::VSwitch {
+                control_pos,
+                control_neg,
+                ..
+            } => Some([control_pos, control_neg]),
+            _ => None,
+        };
+        for node_name in element.nodes.iter().chain(control.into_iter().flatten()) {
             if let Some(node) = circuit.get_node_by_name(node_name) {
                 insert_non_ground_node(nodes, node);
             }

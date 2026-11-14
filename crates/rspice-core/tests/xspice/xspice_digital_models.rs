@@ -4684,6 +4684,72 @@ a_digital [mix] converted dtr
     );
 }
 
+/// A switch and a controlled source read their controlling pair as a
+/// voltage, so a digital output only such a control reads gets the bridge
+/// any other analog reader gets.
+///
+/// The controlling pairs were missing from the nodes analog devices use, so
+/// no bridge was planted: `dosc` had no voltage, the switch it clocks stayed
+/// open for the whole run and the source it controls stayed at 0 V.
+#[test]
+fn a_switch_and_a_controlled_source_follow_the_digital_output_on_their_controls() {
+    let netlist = Netlist::parse(
+        "\
+* a clock that only a switch control and a controlling pair read
+vc cntl 0 0.5
+aosc cntl dosc osc1
+.model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] duty_cycle=0.5 init_phase=0 rise_delay=1e-10 fall_delay=1e-10)
+vdd vdd 0 1
+r1 vdd a 1k
+s1 a 0 dosc 0 swm
+.model swm sw vt=0.5 vh=0.1 ron=1 roff=1e9
+e1 b 0 dosc 0 1
+r2 b 0 1k
+.end
+",
+    )
+    .expect("switch deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 2.0e-6, 1.0e-8)
+        .expect("transient solves");
+
+    let a = transient_node_series(&result, "a");
+    let b = transient_node_series(&result, "b");
+    let at = |series: &[f64], time: f64| {
+        let index = result
+            .time
+            .iter()
+            .position(|&t| t >= time)
+            .expect("the run reaches the sample");
+        series[index]
+    };
+    // The clock is low over the first half period and high over the second.
+    for (time, high) in [
+        (0.25e-6, false),
+        (0.75e-6, true),
+        (1.25e-6, false),
+        (1.75e-6, true),
+    ] {
+        let (a, b) = (at(a, time), at(b, time));
+        if high {
+            assert!(
+                a < 0.01,
+                "the closed switch pulls `a` low at {time:e} s: {a}"
+            );
+            assert!(b > 3.0, "`b` follows the high clock at {time:e} s: {b}");
+        } else {
+            assert!(
+                a > 0.99,
+                "the open switch leaves `a` high at {time:e} s: {a}"
+            );
+            assert!(
+                b.abs() < 0.01,
+                "`b` follows the low clock at {time:e} s: {b}"
+            );
+        }
+    }
+}
+
 //=============================================================================
 // The same rule at a solved DC point (R2.15 part C)
 //=============================================================================
