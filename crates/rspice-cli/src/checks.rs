@@ -88,11 +88,16 @@ fn first_interval(analysis: AssertAnalysis, violation: &AssertViolation) -> Stri
 }
 
 /// The text report's closing rows: one per violated or unevaluated
-/// assertion, with its level, violation count, first interval and extreme.
+/// assertion, with its level, violation count, first interval and extreme,
+/// and one per vector file whose expected outputs ran past the stop time.
 pub(crate) fn print_rows(assertions: &[RunAssertion]) -> Result<(), CliError> {
     let rows = assertions
         .iter()
-        .filter(|entry| entry.report.error.is_some() || !entry.report.violations.is_empty())
+        .filter(|entry| {
+            entry.report.error.is_some()
+                || !entry.report.violations.is_empty()
+                || entry.report.after_stop.is_some()
+        })
         .collect::<Vec<_>>();
     if rows.is_empty() {
         return Ok(());
@@ -108,6 +113,21 @@ pub(crate) fn print_rows(assertions: &[RunAssertion]) -> Result<(), CliError> {
         if let Some(error) = &report.error {
             crate::console::line(format_args!(
                 "  {name}{run} ({}, {analysis}): not evaluated: {error}",
+                report.level
+            ))?;
+            continue;
+        }
+        if let Some(late) = report.after_stop.filter(|_| report.violations.is_empty()) {
+            let unchecked = match &report.message {
+                Some(message) => message.clone(),
+                None => format!(
+                    "{} expected-output sample(s) after the stop time, the first at {}, not checked",
+                    late.count,
+                    coordinate(analysis, late.first_time)
+                ),
+            };
+            crate::console::line(format_args!(
+                "  {name}{run} ({}, {analysis}): {unchecked}",
                 report.level
             ))?;
             continue;
@@ -163,6 +183,10 @@ pub(crate) fn assertion_json(entry: &RunAssertion) -> serde_json::Value {
         "passed": !fails(report),
         "error": report.error,
         "unknown_stretches": report.unknown_stretches,
+        "after_stop": report.after_stop.map(|late| serde_json::json!({
+            "count": late.count,
+            "first_time": late.first_time,
+        })),
         "violations": report.violations.iter().map(|violation| serde_json::json!({
             "start": violation.start,
             "end": violation.end,

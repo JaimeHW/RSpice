@@ -497,7 +497,8 @@ mod vector_files {
 
     /// Expected outputs due after the stop time are not checked, and the file
     /// says so once: a WARNING naming how many and the first row that states
-    /// one, with no violation.
+    /// one, with no violation. The report carries the count and the first
+    /// late time as fields too, so nothing has to read them off the message.
     #[test]
     fn samples_after_the_stop_time_are_one_warning_naming_the_first_row() {
         register(
@@ -529,6 +530,14 @@ mod vector_files {
                  checked; the first is on the row at assertions-vec/late.vec:11"
             )
         );
+        assert_eq!(
+            late.after_stop,
+            Some(rspice_core::analysis::SamplesAfterStop {
+                count: 2,
+                first_time: 25.0e-9,
+            })
+        );
+        assert_eq!(checked.after_stop, None);
     }
 
     /// The C4 corpus file against an ideal register: b7..b0 hold `S_k` from

@@ -1260,6 +1260,58 @@ fn an_error_level_assertion_violation_exits_3_and_the_summary_lists_it() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A vector file whose last two expected outputs fall after the stop time:
+/// they are not checked, the text report says so in a row of its own, the
+/// summary carries how many and the first of their times, and the run still
+/// passes, since a sample nobody could check is a warning, not a violation.
+#[test]
+fn expected_outputs_after_the_stop_time_are_a_warning_row_and_a_typed_summary_field() {
+    let dir = test_dir("after_stop");
+    std::fs::write(
+        dir.join("late.vec"),
+        "radix 1 1\nvname a y\nio i o\ntunit ns\nvih 1.8\nvil 0\ntrise 1\n\
+         0 0 0\n10 1 X\n15 1 1\n25 1 1\n30 1 0\n",
+    )
+    .expect("write the vector file");
+    std::fs::write(
+        dir.join("late.sp"),
+        "* vec late\nr1 a y 1\nr2 y 0 1meg\n.vec 'late.vec'\n.tran 0.1n 20n\n.end\n",
+    )
+    .expect("write deck");
+
+    let output = run_rspice_in_dir(&["run", "late.sp", "--summary", "summary.json"], &dir);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(
+            "late.vec (warning, tran): 2 expected-output samples after the transient's stop \
+             time 2e-8 s are not checked; the first is on the row at late.vec:11"
+        ),
+        "the text report names the unchecked samples: {stdout}"
+    );
+
+    let json = common::read_json(&dir.join("summary.json"));
+    assert_eq!(json["passed"], true);
+    // The vector file's checks are one report and the warning another, of
+    // the same name; only the warning carries the field.
+    let reports = json["assertions"].as_array().expect("assertions");
+    let [checked, late] = [false, true].map(|warning| {
+        reports
+            .iter()
+            .find(|report| {
+                report["name"] == "late.vec" && report["after_stop"].is_null() != warning
+            })
+            .unwrap_or_else(|| panic!("the vector file's reports: {json}"))
+    });
+    assert_eq!(checked["passed"], true);
+    assert_eq!(late["level"], "warning");
+    assert_eq!(late["after_stop"]["count"], 2);
+    let first = late["after_stop"]["first_time"].as_f64().expect("a time");
+    assert!((first - 25.0e-9).abs() < 1.0e-21, "{first:e}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn output_write_failure_is_an_output_commit_failure_and_not_a_success_summary() {
     let dir = test_dir("output_write_io");

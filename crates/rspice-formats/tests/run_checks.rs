@@ -2,7 +2,7 @@
 //! the project results format, result schema v45.
 #![cfg(feature = "project-results")]
 
-use rspice_core::analysis::{AssertViolation, AssertionReport};
+use rspice_core::analysis::{AssertViolation, AssertionReport, SamplesAfterStop};
 use rspice_core::config::{HdlOrigin, HdlPoint, HdlSeverity};
 use rspice_core::netlist::{AssertAnalysis, AssertLevel, NetlistSourceLocation};
 use rspice_formats::project_results::{
@@ -42,6 +42,7 @@ fn checks() -> RunChecks {
                 }],
                 unknown_stretches: 2,
                 error: None,
+                after_stop: None,
             },
             AssertionReport {
                 name: "mpsat".into(),
@@ -54,6 +55,27 @@ fn checks() -> RunChecks {
                 violations: Vec::new(),
                 unknown_stretches: 0,
                 error: Some("@mp[vds] is not in the result".into()),
+                after_stop: None,
+            },
+            AssertionReport {
+                name: "late.vec".into(),
+                analysis: AssertAnalysis::Tran,
+                target: "late.vec".into(),
+                instance: None,
+                level: AssertLevel::Warning,
+                message: Some(
+                    "2 expected-output samples after the transient's stop time 2e-8 s are not \
+                     checked; the first is on the row at late.vec:11"
+                        .into(),
+                ),
+                origin: NetlistSourceLocation::in_file("late.vec", 11),
+                violations: Vec::new(),
+                unknown_stretches: 0,
+                error: None,
+                after_stop: Some(SamplesAfterStop {
+                    count: 2,
+                    first_time: 2.5e-8,
+                }),
             },
         ],
         finish: None,

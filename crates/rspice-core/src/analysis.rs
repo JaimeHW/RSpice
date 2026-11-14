@@ -106,8 +106,8 @@ pub use transfer::TransferFunctionResult;
 pub use {
     ac::AcResult,
     assertions::{
-        AssertViolation, AssertionReport, evaluate_dc_assertions, evaluate_op_assertions,
-        evaluate_tran_assertions,
+        AssertViolation, AssertionReport, SamplesAfterStop, evaluate_dc_assertions,
+        evaluate_op_assertions, evaluate_tran_assertions,
     },
     dc::{DcAnalysis, DcSweep},
     distortion::{

@@ -42,6 +42,16 @@ struct WorkerAssertionReport {
     unknown_stretches: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    after_stop: Option<WorkerSamplesAfterStop>,
+}
+
+/// [`rspice_core::analysis::SamplesAfterStop`] on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkerSamplesAfterStop {
+    count: usize,
+    first_time: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -186,6 +196,10 @@ impl From<AssertionReport> for WorkerAssertionReport {
                 .collect(),
             unknown_stretches: report.unknown_stretches,
             error: report.error,
+            after_stop: report.after_stop.map(|late| WorkerSamplesAfterStop {
+                count: late.count,
+                first_time: late.first_time,
+            }),
         }
     }
 }
@@ -223,6 +237,12 @@ impl From<WorkerAssertionReport> for AssertionReport {
                 .collect(),
             unknown_stretches: report.unknown_stretches,
             error: report.error,
+            after_stop: report
+                .after_stop
+                .map(|late| rspice_core::analysis::SamplesAfterStop {
+                    count: late.count,
+                    first_time: late.first_time,
+                }),
         }
     }
 }

@@ -692,6 +692,7 @@ mod tests {
                 }],
                 unknown_stretches: 0,
                 error: None,
+                after_stop: None,
             }],
             finish: Some(ModelFinish {
                 instance: "tb".into(),

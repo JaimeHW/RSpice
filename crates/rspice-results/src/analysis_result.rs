@@ -45,16 +45,11 @@ pub struct RunChecks {
 }
 
 /// How many expected outputs a vector file's report says were due after the
-/// stop time: the one warning the evaluator gives them, which carries no
-/// violation and states the count first. `None` for every other report.
+/// stop time: the one warning the evaluator gives them
+/// ([`rspice_core::analysis::AssertionReport::after_stop`]). `None` for every
+/// other report.
 pub fn samples_after_stop(report: &rspice_core::analysis::AssertionReport) -> Option<usize> {
-    if !report.violations.is_empty() || report.error.is_some() {
-        return None;
-    }
-    let (count, rest) = report.message.as_deref()?.split_once(' ')?;
-    (rest.starts_with("expected-output sample") && rest.contains("after the transient's stop time"))
-        .then(|| count.parse().ok())
-        .flatten()
+    report.after_stop.map(|late| late.count)
 }
 
 /// What a run's checks say of it, worst first in [`RunChecks::verdict`].
@@ -603,6 +598,7 @@ mod verdict_tests {
             },
             unknown_stretches: 0,
             error: None,
+            after_stop: None,
         }
     }
 
@@ -672,8 +668,8 @@ mod verdict_tests {
     }
 
     /// The vector file's one warning for expected outputs after the stop
-    /// time is counted and warns; a passing card that carries a message of
-    /// its own is no such warning.
+    /// time is counted and warns, by its typed field; a passing card whose
+    /// message reads like one is no such warning.
     #[test]
     fn samples_after_the_stop_time_are_counted_and_warn() {
         let late = AssertionReport {
@@ -683,6 +679,10 @@ mod verdict_tests {
                  checked; the first is on the row at late.vec:11"
                     .into(),
             ),
+            after_stop: Some(rspice_core::analysis::SamplesAfterStop {
+                count: 2,
+                first_time: 25.0e-9,
+            }),
             ..report(AssertLevel::Warning, false)
         };
         assert_eq!(super::samples_after_stop(&late), Some(2));
@@ -692,7 +692,10 @@ mod verdict_tests {
         };
         assert_eq!(checks.verdict(), CheckVerdict::Warned);
         let noted = AssertionReport {
-            message: Some("p must stay low".into()),
+            message: Some(
+                "3 expected-output samples after the transient's stop time are what p counts"
+                    .into(),
+            ),
             ..report(AssertLevel::Warning, false)
         };
         assert_eq!(super::samples_after_stop(&noted), None);

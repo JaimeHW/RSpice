@@ -282,6 +282,7 @@ fn checks_cross_the_worker_field_for_field() {
                 }],
                 unknown_stretches: 2,
                 error: None,
+                after_stop: None,
             },
             AssertionReport {
                 name: "mpsat".to_owned(),
@@ -294,6 +295,7 @@ fn checks_cross_the_worker_field_for_field() {
                 violations: Vec::new(),
                 unknown_stretches: 0,
                 error: Some("mp publishes no vds".to_owned()),
+                after_stop: None,
             },
         ],
         finish: Some(rspice_core::ModelFinish {
@@ -368,6 +370,7 @@ fn a_non_finite_assertion_value_is_refused_at_the_worker_boundary() {
         }],
         unknown_stretches: 0,
         error: None,
+        after_stop: None,
     };
     let response = WorkerResponse::from_result_for_transfer(
         72,

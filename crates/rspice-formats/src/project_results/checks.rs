@@ -4,7 +4,7 @@
 //! `$fatal` that ended the run.
 
 use super::*;
-use rspice_core::analysis::{AssertViolation, AssertionReport};
+use rspice_core::analysis::{AssertViolation, AssertionReport, SamplesAfterStop};
 use rspice_core::netlist::{AssertAnalysis, AssertLevel, NetlistSourceLocation};
 use rspice_results::analysis_result::{HdlDiagnostic, RunChecks};
 
@@ -45,6 +45,18 @@ pub struct ProjectAssertionReport {
     pub unknown_stretches: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// A vector file's expected outputs after the stop time: how many, and
+    /// the first of their times.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_stop: Option<ProjectSamplesAfterStop>,
+}
+
+/// [`rspice_core::analysis::SamplesAfterStop`], persisted.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectSamplesAfterStop {
+    pub count: usize,
+    pub first_time: f64,
 }
 
 /// One violation: absent `start` and `end` at an operating point, an absent
@@ -107,6 +119,10 @@ impl From<&AssertionReport> for ProjectAssertionReport {
                 .collect(),
             unknown_stretches: report.unknown_stretches,
             error: report.error.clone(),
+            after_stop: report.after_stop.map(|late| ProjectSamplesAfterStop {
+                count: late.count,
+                first_time: late.first_time,
+            }),
         }
     }
 }
@@ -169,6 +185,9 @@ impl ProjectRunChecks {
                 require_optional_finite(violation.extreme, &field("extreme"))?;
                 require_optional_finite(violation.at, &field("at"))?;
             }
+            if let Some(late) = report.after_stop {
+                require_finite(late.first_time, &format!("{at}.after_stop.first_time"))?;
+            }
         }
         Ok(())
     }
@@ -199,6 +218,10 @@ impl ProjectAssertionReport {
                 .collect(),
             unknown_stretches: self.unknown_stretches,
             error: self.error,
+            after_stop: self.after_stop.map(|late| SamplesAfterStop {
+                count: late.count,
+                first_time: late.first_time,
+            }),
         })
     }
 }

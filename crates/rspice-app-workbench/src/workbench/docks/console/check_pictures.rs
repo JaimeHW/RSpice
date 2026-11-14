@@ -160,6 +160,7 @@ fn checked_run() -> PictureHost {
             }],
             unknown_stretches: 0,
             error: None,
+            after_stop: None,
         }],
         finish: Some(ModelFinish {
             instance: "xtb".into(),

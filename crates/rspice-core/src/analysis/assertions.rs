@@ -59,6 +59,16 @@ pub struct AssertViolation {
     pub at: Option<Value>,
 }
 
+/// Expected outputs a vector file states for after the transient's stop
+/// time, which no run that stopped there can check.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SamplesAfterStop {
+    /// How many expected-output samples fall after the stop time.
+    pub count: usize,
+    /// The earliest of their times, in seconds.
+    pub first_time: Value,
+}
+
 /// One assertion's outcome after one analysis, for one checked instance.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssertionReport {
@@ -81,6 +91,10 @@ pub struct AssertionReport {
     pub unknown_stretches: usize,
     /// Why the assertion could not be evaluated; `None` when it was.
     pub error: Option<String>,
+    /// For a vector file's warning that some of its expected outputs fall
+    /// after the stop time, how many and the first of them; `None` for every
+    /// other report. The message says the same in words.
+    pub after_stop: Option<SamplesAfterStop>,
 }
 
 /// Evaluate every assertion that applies to a transient analysis over its
@@ -136,6 +150,7 @@ pub fn evaluate_tran_assertions(
                 violations: Vec::new(),
                 unknown_stretches: 0,
                 error: Some(error),
+                after_stop: None,
             }),
         }
     }
@@ -163,6 +178,10 @@ fn samples_after_stop(
         .collect();
     let first = late.iter().min_by_key(|sample| sample.origin.line)?;
     let count = late.len();
+    let first_time = late
+        .iter()
+        .map(|sample| sample.time)
+        .fold(Value::INFINITY, Value::min);
     Some(AssertionReport {
         name: reference.report_name(),
         analysis: AssertAnalysis::Tran,
@@ -180,6 +199,7 @@ fn samples_after_stop(
         violations: Vec::new(),
         unknown_stretches: 0,
         error: None,
+        after_stop: Some(SamplesAfterStop { count, first_time }),
     })
 }
 
@@ -838,6 +858,7 @@ fn blank_report(
         violations: Vec::new(),
         unknown_stretches: 0,
         error: None,
+        after_stop: None,
     }
 }
 
