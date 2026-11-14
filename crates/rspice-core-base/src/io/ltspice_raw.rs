@@ -418,11 +418,14 @@ fn parse_plot(
 }
 
 /// Whether the plot's time scale can carry LTspice's compression marks: a
-/// real transient whose scale is time. Time never runs negative in a
-/// transient, so a set sign bit there is a mark, never a value. A table
-/// RSpice wrote with its own layout metadata keeps its scale as written.
+/// real transient whose scale is time, in a file LTspice wrote (its
+/// `Command:` line names it). The mark is LTspice's own convention, so a file
+/// any other writer produced keeps every bit of its scale, a signed zero
+/// included. A table RSpice wrote with its own layout metadata keeps its
+/// scale as written.
 fn time_carries_compression_marks(header: &RawFileHeader, variables: &[RawVariable]) -> bool {
     !header.is_complex
+        && header.command.to_ascii_lowercase().contains("ltspice")
         && header
             .plotname
             .trim()
