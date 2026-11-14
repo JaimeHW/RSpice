@@ -51,6 +51,9 @@ pub(in crate::engine) use mesh::PssIntegrationMesh;
 
 type AutonomousNewtonStep = (Vec<Value>, Value, Vec<Vec<Value>>);
 
+/// The largest step a Newton update may move a generated model's node by.
+const GENERATED_STEP_LIMIT: Value = 0.5;
+
 struct PssGridSolution {
     state: ShootingState,
     waveform: TransientResult,
@@ -4127,6 +4130,7 @@ impl Engine {
             };
             match solved {
                 Ok(()) => {
+                    Self::pss_limit_generated_step(circuit, &new_solution, &mut proposal);
                     let physical_update_converged =
                         new_solution.iter().zip(&proposal).enumerate().all(
                             |(index, (&old, &new))| {
@@ -4213,6 +4217,25 @@ impl Engine {
     /// an exactly projected forced solution. Limiter companions cannot serve
     /// as the acceptance residual.
     #[allow(clippy::too_many_arguments)]
+    /// Scale a Newton update so no electrical node a generated model reaches
+    /// moves by more than [`GENERATED_STEP_LIMIT`], as the transient and
+    /// harmonic balance limit them: a compact model's exponentials overflow
+    /// on a full step from far away, where the native families limit their
+    /// junctions themselves.
+    fn pss_limit_generated_step(circuit: &PssCircuit, old: &[Value], proposal: &mut [Value]) {
+        let largest = circuit
+            .generated_step_rows
+            .iter()
+            .map(|&row| (proposal[row] - old[row]).abs())
+            .fold(0.0, Value::max);
+        if largest > GENERATED_STEP_LIMIT {
+            let scale = GENERATED_STEP_LIMIT / largest;
+            for (value, &previous) in proposal.iter_mut().zip(old) {
+                *value = previous + scale * (*value - previous);
+            }
+        }
+    }
+
     fn pss_check_physical_candidate(
         &self,
         circuit: &mut PssCircuit,
@@ -4566,6 +4589,24 @@ impl Engine {
             circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, coeff);
         }
 
+        // A generated model integrates its own `ddt` sites with this step's
+        // companion rule, from the history the period start seeded and each
+        // accepted step advanced. The consistency solve, like every native
+        // family's, stamps no charge current.
+        #[cfg(feature = "veriloga-builtins-base")]
+        if circuit.has_generated_veriloga_devices() {
+            if initialization {
+                circuit.generated_veriloga_devices_mut().set_timepoint(
+                    t_next,
+                    0.0,
+                    crate::device::veriloga_builtins::GeneratedDdtCoefficients::inactive(),
+                );
+            } else {
+                circuit
+                    .prepare_generated_veriloga_timepoint(t_next, dt, coeff, 1.0, false, false)
+                    .map_err(SimulationError::Circuit)?;
+            }
+        }
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(linearize_at);
             if physical_probe {
@@ -5199,6 +5240,19 @@ impl Engine {
                     },
                     bsim4_history,
                 );
+                // The step's own companion rule is still installed: the
+                // charges and companion currents accepted are this step's.
+                #[cfg(feature = "veriloga-builtins-base")]
+                if circuit.has_generated_veriloga_devices() {
+                    circuit
+                        .evaluate_generated_veriloga_timepoint(matrix, &new_solution)
+                        .map_err(SimulationError::Circuit)?;
+                    let devices = circuit.generated_veriloga_devices_mut();
+                    devices
+                        .validate_state_acceptance()
+                        .map_err(SimulationError::Circuit)?;
+                    devices.apply_validated_state_acceptance();
+                }
             }
 
             circuit.accept_node_solution(&new_solution);

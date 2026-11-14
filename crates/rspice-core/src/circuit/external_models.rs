@@ -3827,6 +3827,52 @@ impl CircuitData {
         Ok(())
     }
 
+    /// Seed every generated Verilog-A device's accepted state at a solved
+    /// bias, as an operating point seeds it: each `ddt` holds its charge
+    /// there with no companion current, and each limiter is anchored there.
+    /// A shooting period starts from this state, so nothing a previous
+    /// period or derivative probe accepted reaches the next.
+    ///
+    /// The evaluation stamps into a one-entry sink: every write a generated
+    /// model makes is position- or index-checked, so only its state is left.
+    #[cfg(feature = "veriloga-builtins-base")]
+    pub(crate) fn seed_generated_veriloga_bias(
+        &mut self,
+        solution: &[Value],
+    ) -> Result<(), String> {
+        if self.generated_veriloga_devices.is_empty() {
+            return Ok(());
+        }
+        let mut sink =
+            StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).map_err(|error| error.to_string())?;
+        let mut sink_rhs = [0.0];
+        let devices = &mut self.generated_veriloga_devices;
+        devices.set_timepoint(
+            0.0,
+            0.0,
+            crate::device::veriloga_builtins::GeneratedDdtCoefficients::inactive(),
+        );
+        devices.set_analysis_step(false, false);
+        devices
+            .stamp_all_with_task_recording(
+                &mut sink,
+                &mut sink_rhs,
+                solution,
+                self.num_nodes,
+                crate::device::veriloga_builtins::GeneratedEvaluationRequest {
+                    analysis: crate::device::veriloga_builtins::GeneratedAnalysisKind::Tran,
+                    simparams: self.generated_simulation_parameters,
+                    evaluation_mode:
+                        crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                },
+                false,
+            )
+            .map_err(|error| error.to_string())?;
+        devices.validate_state_acceptance()?;
+        devices.apply_validated_state_acceptance();
+        Ok(())
+    }
+
     /// Re-evaluate generated Verilog-A devices at an exact accepted solution
     /// without disturbing the live Newton matrix. Static-probe evaluation
     /// recomputes DDT/IDT candidates, event-controlled variables, and terminal-

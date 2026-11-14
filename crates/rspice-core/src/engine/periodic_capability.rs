@@ -695,7 +695,7 @@ pub(crate) const fn periodic_capability_descriptor(
             dynamic_state: Complete,
             small_signal: Inapplicable,
             noise: Absent("periodic generated Verilog-A noise sources are not declared"),
-            pss_state: Absent("generated Verilog-A integration state"),
+            pss_state: Restricted(GENERATED_VERILOGA_HB_RESIDUAL),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         // A mixed module refuses all six outright, and for one reason rather
@@ -1364,6 +1364,19 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
                         gaps.push(CapabilityGap::new(
                             family,
                             "thermal resistor accepted temperature state",
+                        ));
+                    }
+                }
+                F::GeneratedVerilogA => {
+                    #[cfg(feature = "veriloga-builtins-base")]
+                    if circuit
+                        .generated_veriloga_devices
+                        .iter()
+                        .any(|device| device.harmonic_balance_refusal().is_some())
+                    {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "generated Verilog-A integration state outside F(x) + dQ(x)/dt",
                         ));
                     }
                 }

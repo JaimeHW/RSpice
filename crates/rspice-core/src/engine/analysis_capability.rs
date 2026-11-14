@@ -253,8 +253,9 @@ pub enum InstanceGate {
     HbAdmissibleVerilogA,
     /// The periodic steady state the analysis linearizes around decides: on a
     /// harmonic-balance carrier, every Verilog-A module
-    /// [`Self::HbAdmissibleVerilogA`] admits; on a shooting carrier, whose
-    /// period map carries no Verilog-A state, none.
+    /// [`Self::HbAdmissibleVerilogA`] admits; on a shooting carrier, the
+    /// generated models it admits, whose charges the period map carries, and
+    /// no runtime module, whose state it does not.
     CarrierAdmitsVerilogA,
 }
 
@@ -413,6 +414,23 @@ const fn hb_admissible_generated() -> CellSupport {
     }
 }
 
+const PSS_GENERATED_EVIDENCE: &[&str] = &[
+    "tests/generated/generated_hb.rs::generated_models_reach_the_settled_transients_steady_state_by_shooting",
+    "tests/generated/generated_hb.rs::shooting_refuses_a_generated_model_by_its_reason",
+];
+
+/// Shooting takes the generated compact models harmonic balance takes: the
+/// period map integrates their charges from the state the period starts at,
+/// whose coordinates fix every node they reach.
+const fn pss_admissible_generated() -> CellSupport {
+    CellSupport::Restricted {
+        gate: InstanceGate::HbAdmissibleVerilogA,
+        token: HB_VERILOGA_OPERATOR,
+        condition: "every generated compact model harmonic balance admits (residual F(x) + dQ(x)/dt with nothing kept between evaluations); its charges are integrated over the period from the state the period starts at",
+        evidence: PSS_GENERATED_EVIDENCE,
+    }
+}
+
 /// The periodic steady state a periodic small-signal analysis linearizes
 /// around.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -431,19 +449,21 @@ const PAC_VERILOGA_EVIDENCE: &[&str] = &[
 
 const PAC_GENERATED_EVIDENCE: &[&str] = &[
     "tests/generated/generated_hb.rs::a_generated_resistor_mixes_its_native_twins_sidebands",
-    "tests/generated/generated_hb.rs::a_shooting_carrier_refuses_a_generated_model_by_name",
+    "tests/generated/generated_hb.rs::a_generated_resistor_mixes_its_native_twins_sidebands_on_a_shooting_carrier",
 ];
 
 /// Periodic AC and periodic transfer functions linearize harmonic balance's
-/// own F/Q samples on a harmonic-balance carrier, so they take what harmonic
-/// balance takes there; a shooting carrier's period map carries no Verilog-A
-/// state, so it takes none.
+/// own F/Q samples of the carrier's orbit, solved by harmonic balance or
+/// projected from a shooting orbit, so they take what the carrier's analysis
+/// takes: on a harmonic-balance carrier what harmonic balance takes; on a
+/// shooting carrier the generated models shooting takes, and no runtime
+/// module, whose state no period map carries.
 const fn carrier_admits_veriloga(generated: bool) -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::CarrierAdmitsVerilogA,
         token: PERIODIC_VERILOGA,
         condition: if generated {
-            "on a harmonic-balance carrier, every generated compact model harmonic balance admits; a shooting (PSS) carrier admits none"
+            "every generated compact model harmonic balance admits, on a harmonic-balance or a shooting (PSS) carrier"
         } else {
             "on a harmonic-balance carrier, every Verilog-A module harmonic balance admits; a shooting (PSS) carrier admits none"
         },
@@ -558,6 +578,7 @@ pub const fn capability_cell(
                 reason: periodic_veriloga_reason(analysis, false),
             },
             F::VerilogAGenerated if matches!(analysis, A::Hb) => hb_admissible_generated(),
+            F::VerilogAGenerated if matches!(analysis, A::Pss) => pss_admissible_generated(),
             F::VerilogAGenerated if matches!(analysis, A::Pac | A::Pxf) => {
                 carrier_admits_veriloga(true)
             }
@@ -920,8 +941,9 @@ fn hb_admission_refusal(
 }
 
 /// A periodic small-signal analysis on a shooting carrier refuses the first
-/// Verilog-A instance of `family`: the period map the carrier was solved
-/// through carries no Verilog-A state, so it has no linearization of one.
+/// runtime Verilog-A instance of `family`: the period map the carrier was
+/// solved through carries no runtime module's state, so it has no
+/// linearization of one.
 fn carrier_refusal(
     circuit: &CircuitData,
     family: CapabilityFamily,
@@ -959,6 +981,14 @@ const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[(
      quasi-static sweep disagree on the fundamental by 12%",
 )];
 
+/// Why shooting refuses a generated model with a source branch: its period
+/// map fixes every node the model reaches at the period start, and a voltage
+/// contribution already ties some of them, so the consistent start would fix
+/// them twice.
+#[cfg(feature = "veriloga-builtins-base")]
+const PSS_GENERATED_SOURCE_BRANCH: &str = "it has a voltage contribution (a source branch), which \
+     ties nodes the shooting coordinates would each fix at the period start";
+
 /// Harmonic balance refuses a generated compact model whose generator could
 /// not prove its residual `F(x) + dQ(x)/dt`, with the generator's reason, or
 /// one whose harmonics have not been checked, with what is missing.
@@ -968,12 +998,20 @@ fn hb_generated_refusal(
 ) -> Option<UnsupportedCapabilityError> {
     #[cfg(feature = "veriloga-builtins-base")]
     for device in circuit.generated_veriloga_devices().iter() {
-        let Some(reason) = device.harmonic_balance_refusal().or_else(|| {
-            HB_UNVERIFIED_GENERATED_MODELS
-                .iter()
-                .find(|(model, _)| *model == device.model_name)
-                .map(|(_, reason)| *reason)
-        }) else {
+        let Some(reason) = device
+            .harmonic_balance_refusal()
+            .or_else(|| {
+                HB_UNVERIFIED_GENERATED_MODELS
+                    .iter()
+                    .find(|(model, _)| *model == device.model_name)
+                    .map(|(_, reason)| *reason)
+            })
+            .or_else(|| {
+                (matches!(analysis, CapabilityAnalysis::Pss)
+                    && device.branches.iter().any(|&branch| branch > 0))
+                .then_some(PSS_GENERATED_SOURCE_BRANCH)
+            })
+        else {
             continue;
         };
         let instance = device.instance_name.clone();
@@ -1189,6 +1227,14 @@ impl Engine {
                     InstanceGate::CarrierAdmitsVerilogA => {
                         let refusal = match carrier {
                             Some(PeriodicCarrier::HarmonicBalance) => {
+                                hb_admission_refusal(circuit, family, analysis)
+                            }
+                            // A shooting orbit carries the generated models
+                            // shooting takes, which are those harmonic
+                            // balance takes.
+                            Some(PeriodicCarrier::Shooting)
+                                if family == CapabilityFamily::VerilogAGenerated =>
+                            {
                                 hb_admission_refusal(circuit, family, analysis)
                             }
                             Some(PeriodicCarrier::Shooting) | None => {

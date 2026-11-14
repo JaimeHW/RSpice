@@ -88,6 +88,17 @@ enum ChargeBranch {
         device: usize,
         node: usize,
     },
+    /// A node a generated compact model may store charge on, against ground:
+    /// the model's charges are a function of its nodes' voltages, which these
+    /// coordinates fix at the period start. A build without generated models
+    /// has none.
+    #[cfg_attr(not(feature = "veriloga-builtins-base"), allow(dead_code))]
+    Generated {
+        device: usize,
+        slot: usize,
+        pos: usize,
+        neg: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -446,6 +457,23 @@ impl PssStateBasis {
                 }
             }
         }
+        // A generated model's charges are opaque functions of its node
+        // voltages, so every node it reaches is a coordinate unless a
+        // source or another storage branch already fixes it. A node that
+        // stores nothing only adds a column the period map does not move.
+        #[cfg(feature = "veriloga-builtins-base")]
+        for (device, instance) in circuit.generated_veriloga_devices().iter().enumerate() {
+            for (slot, &pos) in instance.nodes.iter().enumerate() {
+                if pos != 0 && add(pos, 0, ForestValue::State(charge_branches.len()))? {
+                    charge_branches.push(ChargeBranch::Generated {
+                        device,
+                        slot,
+                        pos,
+                        neg: 0,
+                    });
+                }
+            }
+        }
         let mut visited = vec![false; forest_node_count];
         let mut forest = Vec::new();
         let mut pending = Vec::new();
@@ -562,6 +590,20 @@ impl PssStateBasis {
                 ChargeBranch::Bsim4Nqs { device, .. } => {
                     format!("M:{}:qchannel/1e-9", circuit.bsim4v8.devices[device].name)
                 }
+                ChargeBranch::Generated { device, slot, .. } => {
+                    #[cfg(feature = "veriloga-builtins-base")]
+                    let name = circuit
+                        .generated_veriloga_devices()
+                        .iter()
+                        .nth(device)
+                        .map_or("", |instance| instance.instance_name.as_str());
+                    #[cfg(not(feature = "veriloga-builtins-base"))]
+                    let name = {
+                        let _ = device;
+                        ""
+                    };
+                    format!("A:{name}:n{slot}")
+                }
             })
             .chain(
                 self.currents
@@ -586,7 +628,8 @@ impl PssStateBasis {
             | ChargeBranch::Jfet { pos, neg, .. }
             | ChargeBranch::Mosfet { pos, neg, .. }
             | ChargeBranch::Bsim3 { pos, neg, .. }
-            | ChargeBranch::Bsim4 { pos, neg, .. } => (pos, neg),
+            | ChargeBranch::Bsim4 { pos, neg, .. }
+            | ChargeBranch::Generated { pos, neg, .. } => (pos, neg),
             ChargeBranch::Bsim3Nqs { node, .. } | ChargeBranch::Bsim4Nqs { node, .. } => (node, 0),
         }
     }
@@ -634,6 +677,36 @@ pub(in crate::engine) struct PssCircuit {
     charge_source_rates: Vec<Value>,
     charge_source_offsets: [Vec<Value>; 3],
     current_source_times: [Value; 2],
+    /// Solution rows of the electrical nodes generated models reach, whose
+    /// Newton steps are limited as the transient limits them.
+    pub(super) generated_step_rows: Vec<usize>,
+}
+
+/// See [`PssCircuit::generated_step_rows`]: every node a generated model
+/// reaches except the private states it keeps on nodes (a thermal network).
+fn generated_step_rows(circuit: &CircuitData) -> Vec<usize> {
+    #[cfg(feature = "veriloga-builtins-base")]
+    {
+        let mut rows = Vec::new();
+        for device in circuit.generated_veriloga_devices().iter() {
+            let private: Vec<usize> = device.non_electrical_node_indices().collect();
+            rows.extend(
+                device
+                    .nodes
+                    .iter()
+                    .filter(|&&node| node > 0 && !private.contains(&node))
+                    .map(|&node| node - 1),
+            );
+        }
+        rows.sort_unstable();
+        rows.dedup();
+        rows
+    }
+    #[cfg(not(feature = "veriloga-builtins-base"))]
+    {
+        let _ = circuit;
+        Vec::new()
+    }
 }
 
 impl std::ops::Deref for PssCircuit {
@@ -731,6 +804,7 @@ impl PssCircuit {
             circuit.behavioral_sources.integral_count()
                 + circuit.capacitors.integral_count()
         ];
+        let generated_step_rows = generated_step_rows(&circuit);
         Ok(Self {
             circuit,
             diode_history,
@@ -758,6 +832,7 @@ impl PssCircuit {
             charge_source_rates,
             charge_source_offsets,
             current_source_times: [0.0; 2],
+            generated_step_rows,
         })
     }
 
@@ -937,7 +1012,8 @@ impl PssCircuit {
                 | ChargeBranch::Jfet { pos, neg, .. }
                 | ChargeBranch::Mosfet { pos, neg, .. }
                 | ChargeBranch::Bsim3 { pos, neg, .. }
-                | ChargeBranch::Bsim4 { pos, neg, .. } => {
+                | ChargeBranch::Bsim4 { pos, neg, .. }
+                | ChargeBranch::Generated { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
                 }
                 ChargeBranch::Bsim3Nqs { device, .. } => {
@@ -1107,6 +1183,10 @@ impl PssCircuit {
         }
         self.bsim3_history = Engine::initialize_bsim3_history(circuit, &self.solution_scratch[1..]);
         self.bsim4_history = Engine::initialize_bsim4_history(circuit, &self.solution_scratch[1..]);
+        #[cfg(feature = "veriloga-builtins-base")]
+        circuit
+            .seed_generated_veriloga_bias(&self.solution_scratch[1..])
+            .map_err(SimulationError::Circuit)?;
         Ok(())
     }
 
@@ -1150,6 +1230,10 @@ impl PssCircuit {
         }
         self.bsim3_history = Engine::initialize_bsim3_history(&self.circuit, solution);
         self.bsim4_history = Engine::initialize_bsim4_history(&self.circuit, solution);
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.circuit
+            .seed_generated_veriloga_bias(solution)
+            .map_err(SimulationError::Circuit)?;
         Ok(())
     }
 
@@ -1241,7 +1325,8 @@ impl PssCircuit {
                 | ChargeBranch::Jfet { pos, neg, .. }
                 | ChargeBranch::Mosfet { pos, neg, .. }
                 | ChargeBranch::Bsim3 { pos, neg, .. }
-                | ChargeBranch::Bsim4 { pos, neg, .. } => {
+                | ChargeBranch::Bsim4 { pos, neg, .. }
+                | ChargeBranch::Generated { pos, neg, .. } => {
                     self.solution_scratch[pos] - self.solution_scratch[neg]
                 }
                 ChargeBranch::Bsim3Nqs { device, .. } => {
@@ -1267,7 +1352,8 @@ impl PssCircuit {
                 | ChargeBranch::Bsim3 { .. }
                 | ChargeBranch::Bsim3Nqs { .. }
                 | ChargeBranch::Bsim4 { .. }
-                | ChargeBranch::Bsim4Nqs { .. } => None,
+                | ChargeBranch::Bsim4Nqs { .. }
+                | ChargeBranch::Generated { .. } => None,
             };
             let branch = existing_branch.unwrap_or_else(|| self.circuit.allocate_branch());
             self.circuit.voltage_sources.add(

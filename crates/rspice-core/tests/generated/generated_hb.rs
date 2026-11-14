@@ -6,6 +6,7 @@
 //! transient everywhere.
 
 use num_complex::Complex64;
+use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::harmonic_balance::HbConfig;
 use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig, TransientStartupMode};
 use rspice_core::netlist::Netlist;
@@ -165,26 +166,9 @@ fn period_spectrum(time: &[f64], waveform: &[f64], end: f64, samples: usize) -> 
         .collect()
 }
 
-/// Each admitted family's fixture: a model driven by one tone through a
-/// resistor. Its harmonic-balance spectrum must be the spectrum of RSpice's
-/// own transient once that has settled. A thermal terminal is a node of its
-/// own, which the model's thermal network defines: grounding it would add a
-/// second constraint where the model already holds it at ambient.
-/// The larger MOSFET models need `RUST_MIN_STACK=67108864` in a debug build.
-///
-/// Settle test: the transient starts from rest (UIC), so no DC solve decides
-/// the fixture, and runs `PERIODS` periods at a step of at most T/512; the
-/// DC term and first three harmonics of its last period must differ from
-/// those of the period before by at most 1e-5 of the fundamental.
-/// Allowance, fixed before the first comparison: each of those four
-/// coefficients of the harmonic-balance spectrum is within 1e-3 of the
-/// fundamental's amplitude of the transient's, which bounds the transient's
-/// own truncation error at 512 steps a period with a wide margin.
-#[test]
-fn generated_models_reach_the_settled_transients_steady_state() {
-    const PERIODS: f64 = 24.0;
-    const SAMPLES: usize = 512;
-    let fixtures: Vec<(&str, &str, &str)> = vec![
+/// Each admitted family's fixture: the family, its circuit and the node read.
+fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
+    vec![
         #[cfg(feature = "veriloga-model-r2-cmc")]
         (
             "resistor (R2_CMC)",
@@ -219,7 +203,7 @@ fn generated_models_reach_the_settled_transients_steady_state() {
         (
             "bipolar transistor (HICUM/L0)",
             "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
-             XQ c b 0 0 t hicuml0va\n",
+                 XQ c b 0 0 t hicuml0va\n",
             "c",
         ),
         // The VBIC 4T et source opens a zero series resistance rather than
@@ -230,69 +214,88 @@ fn generated_models_reach_the_settled_transients_steady_state() {
         (
             "self-heating bipolar transistor (VBIC 4T et)",
             "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
-             Q1 c b 0 0 t qv\n.model qv VBIC_4T_ET_CF RCX=10 RCI=10 RBX=10 RBI=10 RE=1 RBP=10 \
-             RS=10 RTH=300 CTH=1n\n",
+                 Q1 c b 0 0 t qv\n.model qv VBIC_4T_ET_CF RCX=10 RCI=10 RBX=10 RBI=10 RE=1 RBP=10 \
+                 RS=10 RTH=300 CTH=1n\n",
             "c",
         ),
         #[cfg(feature = "veriloga-model-angelov")]
         (
             "GaAs FET (Angelov)",
             "VDD vdd 0 3\nV1 in 0 SIN(-0.5 0.3 1meg)\nRG in g 1k\nRD vdd d 100\n\
-             XA d g 0 angelov\n",
+                 XA d g 0 angelov\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-bsimcmg110")]
         (
             "FinFET (BSIM-CMG)",
             "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
-             XM d g 0 0 bsimcmg110\n",
+                 XM d g 0 0 bsimcmg110\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-bsimcmg108")]
         (
             "FinFET (BSIM-CMG 108)",
             "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
-             XM d g 0 0 bsimcmg108\n",
+                 XM d g 0 0 bsimcmg108\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
         (
             "UTBB FD-SOI MOSFET (L-UTSOI)",
             "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
-             XM d g 0 0 t l_utsoi__832ce87d\n",
+                 XM d g 0 0 t l_utsoi__832ce87d\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
         (
             "UTBB FD-SOI MOSFET, NQS build (L-UTSOI)",
             "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
-             XM d g 0 0 t l_utsoi__485e0ac9\n",
+                 XM d g 0 0 t l_utsoi__485e0ac9\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-epfl-hemt-10a")]
         (
             "GaN HEMT (EPFL HEMT)",
             "VDD vdd 0 10\nV1 in 0 SIN(-2 0.5 1meg)\nRG in g 1k\nRD vdd d 10\n\
-             XH d g 0 0 t EPFL_HEMT_10a\n",
+                 XH d g 0 0 t EPFL_HEMT_10a\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-hisimsotb-va")]
         (
             "thin-BOX SOI MOSFET (HiSIM-SOTB)",
             "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
-             XM d g 0 0 hisimsotb_va\n",
+                 XM d g 0 0 hisimsotb_va\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-bsimimg")]
         (
             "MOSFET (BSIM-IMG)",
             "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
-             XM d g 0 0 t bsimimg\n",
+                 XM d g 0 0 t bsimimg\n",
             "d",
         ),
-    ];
+    ]
+}
+
+/// Each admitted family's fixture: a model driven by one tone through a
+/// resistor. Its harmonic-balance spectrum must be the spectrum of RSpice's
+/// own transient once that has settled. A thermal terminal is a node of its
+/// own, which the model's thermal network defines: grounding it would add a
+/// second constraint where the model already holds it at ambient.
+/// The larger MOSFET models need `RUST_MIN_STACK=67108864` in a debug build.
+///
+/// Settle test: the transient starts from rest (UIC), so no DC solve decides
+/// the fixture, and runs `PERIODS` periods at a step of at most T/512; the
+/// DC term and first three harmonics of its last period must differ from
+/// those of the period before by at most 1e-5 of the fundamental.
+/// Allowance, fixed before the first comparison: each of those four
+/// coefficients of the harmonic-balance spectrum is within 1e-3 of the
+/// fundamental's amplitude of the transient's, which bounds the transient's
+/// own truncation error at 512 steps a period with a wide margin.
+#[test]
+fn generated_models_reach_the_settled_transients_steady_state() {
     let mut failures = Vec::new();
-    for (family, circuit, node) in fixtures {
+    for (family, circuit, node) in settled_fixtures() {
         let deck = format!("* {family} periodic steady state\n{circuit}.end\n");
         let netlist = Netlist::parse(&deck).expect("parse");
         let hb = match engine().run_hb(
@@ -307,48 +310,125 @@ fn generated_models_reach_the_settled_transients_steady_state() {
                 continue;
             }
         };
-        let tstop = PERIODS / F0;
-        let tran = match engine().run_tran_with_startup_mode_and_abort(
+        compare_with_settled_transient(
             &netlist,
-            tstop,
-            1.0 / (F0 * SAMPLES as f64),
-            TransientStartupMode::Uic,
-            &rspice_core::NoAbort,
+            family,
+            node,
+            "harmonic balance",
+            &hb,
+            &mut failures,
+        );
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Compare `periodic`, a steady-state spectrum of V(`node`), with the
+/// spectrum of RSpice's own transient of `netlist` once it has settled, under
+/// the allowance [`generated_models_reach_the_settled_transients_steady_state`]
+/// states.
+fn compare_with_settled_transient(
+    netlist: &Netlist,
+    family: &str,
+    node: &str,
+    method: &str,
+    periodic: &[Complex64],
+    failures: &mut Vec<String>,
+) {
+    const PERIODS: f64 = 24.0;
+    const SAMPLES: usize = 512;
+    let tstop = PERIODS / F0;
+    let tran = match engine().run_tran_with_startup_mode_and_abort(
+        netlist,
+        tstop,
+        1.0 / (F0 * SAMPLES as f64),
+        TransientStartupMode::Uic,
+        &rspice_core::NoAbort,
+    ) {
+        Ok(tran) => tran,
+        Err(error) => {
+            failures.push(format!(
+                "{family}: transient must run: {error}; {method} V({node}) {:?}",
+                &periodic[..4]
+            ));
+            return;
+        }
+    };
+    let waveform = tran
+        .try_voltage_waveform_named(node)
+        .unwrap_or_else(|| panic!("{family}: V({node}) present"));
+    let last = period_spectrum(&tran.time, waveform, tstop, SAMPLES);
+    let before = period_spectrum(&tran.time, waveform, tstop - 1.0 / F0, SAMPLES);
+    let fundamental = last[1].norm();
+    for k in 0..=3 {
+        if (last[k] - before[k]).norm() > 1e-5 * fundamental {
+            failures.push(format!(
+                "{family}: V({node}) harmonic {k} has not settled: {} then {}",
+                before[k], last[k]
+            ));
+        }
+        if (periodic[k] - last[k]).norm() > 1e-3 * fundamental {
+            failures.push(format!(
+                "{family}: V({node}) harmonic {k}: {method} {} against the settled transient {} \
+                 (fundamental {fundamental})",
+                periodic[k], last[k]
+            ));
+        }
+    }
+    eprintln!(
+        "{family}: V({node}) {method} {:?} transient {:?}",
+        &periodic[..4],
+        &last[..4]
+    );
+}
+
+/// Why shooting refuses a generated model with a source branch.
+const SOURCE_BRANCH: &str = "it has a voltage contribution (a source branch), which ties nodes \
+                             the shooting coordinates would each fix at the period start";
+
+/// Shooting reaches the same settled transient for every fixture harmonic
+/// balance does, under the same allowance, or refuses the model before
+/// solving: the period map integrates each generated model's charges from the
+/// state the period starts at.
+#[test]
+fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
+    let mut failures = Vec::new();
+    for (family, circuit, node) in settled_fixtures() {
+        let deck = format!("* {family} periodic steady state\n{circuit}.end\n");
+        let netlist = Netlist::parse(&deck).expect("parse");
+        let pss = match engine().run_pss(
+            &netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(512)
+                .with_tolerance(1e-9),
         ) {
-            Ok(tran) => tran,
+            Ok(result) => result.result,
+            // A model with a source branch is refused before solving, by name
+            // and reason (see `shooting_refuses_a_generated_model_by_its_reason`).
+            Err(rspice_core::SimulationError::UnsupportedCapability(refusal))
+                if refusal.detail.ends_with(SOURCE_BRANCH) =>
+            {
+                eprintln!("{family}: shooting refuses it: {}", refusal.detail);
+                continue;
+            }
             Err(error) => {
-                failures.push(format!(
-                    "{family}: transient must run: {error}; HB V({node}) {:?}",
-                    &hb[..4]
-                ));
+                failures.push(format!("{family}: shooting must run: {error}"));
                 continue;
             }
         };
-        let waveform = tran
-            .try_voltage_waveform_named(node)
+        let output = pss
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node))
             .unwrap_or_else(|| panic!("{family}: V({node}) present"));
-        let last = period_spectrum(&tran.time, waveform, tstop, SAMPLES);
-        let before = period_spectrum(&tran.time, waveform, tstop - 1.0 / F0, SAMPLES);
-        let fundamental = last[1].norm();
-        for k in 0..=3 {
-            if (last[k] - before[k]).norm() > 1e-5 * fundamental {
-                failures.push(format!(
-                    "{family}: V({node}) harmonic {k} has not settled: {} then {}",
-                    before[k], last[k]
-                ));
-            }
-            if (hb[k] - last[k]).norm() > 1e-3 * fundamental {
-                failures.push(format!(
-                    "{family}: V({node}) harmonic {k}: harmonic balance {} against the settled \
-                     transient {} (fundamental {fundamental})",
-                    hb[k], last[k]
-                ));
-            }
-        }
-        eprintln!(
-            "{family}: V({node}) HB {:?} transient {:?}",
-            &hb[..4],
-            &last[..4]
+        let end = *pss.time.last().expect("a periodic waveform");
+        let spectrum = period_spectrum(&pss.time, &pss.waveforms[output].values, end, 512);
+        compare_with_settled_transient(
+            &netlist,
+            family,
+            node,
+            "shooting",
+            &spectrum,
+            &mut failures,
         );
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -422,6 +502,65 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
         );
         assert!(
             detail.contains("harmonic-balance analysis") && detail.ends_with(reason),
+            "{module}: the refusal must name the analysis and its reason: {detail}"
+        );
+    }
+}
+
+/// Shooting refuses the generated models harmonic balance refuses, before
+/// solving, by instance and module, with the generator's reason.
+#[test]
+fn shooting_refuses_a_generated_model_by_its_reason() {
+    use rspice_core::identity::AnalysisKind;
+    use rspice_core::{SimulationError, UnsupportedCapabilityError};
+    let cases: Vec<(&str, &str, &str, &str)> = vec![
+        #[cfg(feature = "veriloga-model-ekv-va")]
+        (
+            "XE d 0 0 0 ekv_va",
+            "XE",
+            "ekv_va",
+            "`E0_Q_1` is read before it is assigned, so it keeps its value from the last \
+             accepted time point, which no harmonic-balance spectrum carries",
+        ),
+        #[cfg(feature = "veriloga-model-asmesd-dio")]
+        (
+            "XA d 0 asmesd_dio",
+            "XA",
+            "asmesd_dio",
+            "it scales a `ddt` by a quantity that varies with bias, so its residual is not \
+             F(x) + dQ(x)/dt",
+        ),
+        #[cfg(feature = "veriloga-model-hicuml0va")]
+        ("XQ d d 0 0 t hicuml0va", "XQ", "hicuml0va", SOURCE_BRANCH),
+    ];
+    for (card, instance, module, reason) in cases {
+        let deck =
+            format!("* refused generated model\nV1 in 0 SIN(0 1 1meg)\nR1 in d 1k\n{card}\n.end\n");
+        let netlist = Netlist::parse(&deck).expect("parse");
+        let error = engine()
+            .run_pss(&netlist, PssConfig::new(F0))
+            .map(drop)
+            .expect_err("shooting must refuse the model");
+        let SimulationError::UnsupportedCapability(refusal) = &error else {
+            panic!("{module}: expected a capability refusal, got {error}");
+        };
+        let UnsupportedCapabilityError {
+            analysis_kind,
+            instance: refused_instance,
+            module: refused_module,
+            detail,
+            ..
+        } = refusal.as_ref();
+        assert_eq!(*analysis_kind, Some(AnalysisKind::Pss), "{error}");
+        assert_eq!(refused_instance.as_deref(), Some(instance), "{error}");
+        assert!(
+            refused_module
+                .as_deref()
+                .is_some_and(|name| name.eq_ignore_ascii_case(module)),
+            "{error}"
+        );
+        assert!(
+            detail.contains("PSS analysis") && detail.ends_with(reason),
             "{module}: the refusal must name the analysis and its reason: {detail}"
         );
     }
@@ -524,43 +663,91 @@ fn a_generated_resistor_mixes_its_native_twins_sidebands() {
     );
 }
 
-/// A shooting carrier's period map carries no generated Verilog-A state, so
-/// the shooting route refuses a generated model by instance and module before
-/// periodic AC or a periodic transfer function could linearize around it.
+/// Periodic AC from `vrf` into sidebands -2..=2 of `V(a)` at three offsets,
+/// and the periodic transfer function into the upper first sideband, on the
+/// deck's shooting carrier.
 #[cfg(feature = "veriloga-model-r2-cmc")]
-#[test]
-fn a_shooting_carrier_refuses_a_generated_model_by_name() {
-    use rspice_core::analysis::PssConfig;
-    use rspice_core::identity::AnalysisKind;
-    use rspice_core::{NoAbort, SimulationError, UnsupportedCapabilityError};
-    let netlist = Netlist::parse(&pumped_mixer("XR3 a 0 r2_cmc r=2k")).expect("parse");
-    let error = engine()
+fn shooting_carrier_transfers(deck: &str) -> Vec<Complex64> {
+    use rspice_core::NoAbort;
+    use rspice_core::analysis::pac::{PacConfig, PacSweepType};
+    use rspice_core::netlist::{FreqVariation, PeriodicSourceSelector, PeriodicSweep, PxfCard};
+    let (start, stop) = (0.13 * F0, 0.37 * F0);
+    let netlist = Netlist::parse(deck).expect("parse");
+    let point = engine()
         .run_pss_operating_point_with_abort(
             &netlist,
-            PssConfig::new(F0).with_harmonics(4),
+            PssConfig::new(F0)
+                .with_harmonics(HARMONICS)
+                .with_points_per_period(256)
+                .with_tolerance(1e-9),
             &NoAbort,
         )
-        .map(drop)
-        .expect_err("the shooting carrier must refuse the model");
-    let SimulationError::UnsupportedCapability(refusal) = &error else {
-        panic!("expected a capability refusal, got {error}");
+        .unwrap_or_else(|error| panic!("shooting must run: {error}\n{deck}"));
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(start, stop, 3)
+        .with_sweep_type(PacSweepType::Linear)
+        .with_sidebands(-2, 2)
+        .with_input_source("vrf")
+        .with_output_node("a");
+    let card = PxfCard {
+        sweep: PeriodicSweep {
+            variation: FreqVariation::Lin,
+            points: 3,
+            start_freq: start,
+            stop_freq: stop,
+        },
+        input_source: "vrf".into(),
+        input_sideband: 0,
+        output_node: "a".into(),
+        output_ref: None,
+        output_sideband: 1,
+        max_sideband: 2,
+        reltol: 1e-9,
+        abstol: 1e-15,
+        source: PeriodicSourceSelector::Preceding,
     };
-    let UnsupportedCapabilityError {
-        capability,
-        analysis_kind,
-        instance,
-        module,
-        detail,
-        ..
-    } = refusal.as_ref();
-    assert_eq!(*capability, "analysis.periodic.veriloga", "{error}");
-    assert_eq!(*analysis_kind, Some(AnalysisKind::Pss), "{error}");
-    assert_eq!(instance.as_deref(), Some("XR3"), "{error}");
+    let pac = engine()
+        .run_pac_from_pss_with_abort(&netlist, config, &point, &NoAbort)
+        .unwrap_or_else(|error| panic!("PAC on the shooting carrier must run: {error}\n{deck}"));
+    let pxf = engine()
+        .run_pxf_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
+        .unwrap_or_else(|error| panic!("PXF on the shooting carrier must run: {error}\n{deck}"));
+    let mut transfers = Vec::new();
+    for offset in 0..3 {
+        for sideband in -2..=2 {
+            transfers.push(
+                pac.result
+                    .conversion_matrix
+                    .get(offset, sideband, 0)
+                    .expect("sideband present"),
+            );
+        }
+    }
+    transfers.extend(pxf.points.iter().map(|point| point.transfer));
+    assert_eq!(transfers.len(), 3 * 5 + 3);
+    transfers
+}
+
+/// A shooting carrier now carries a generated model's charges, and periodic
+/// AC and periodic transfer functions linearize its projected orbit through
+/// harmonic balance's own samples, so the generated R2_CMC in a pumped mixer
+/// gives every sideband transfer its native twin gives on that carrier.
+/// Allowance: 1e-6 of the largest native transfer, as on the HB carrier.
+#[cfg(feature = "veriloga-model-r2-cmc")]
+#[test]
+fn a_generated_resistor_mixes_its_native_twins_sidebands_on_a_shooting_carrier() {
+    let native = shooting_carrier_transfers(&pumped_mixer("R3 a 0 2k"));
+    let twin = shooting_carrier_transfers(&pumped_mixer("XR3 a 0 r2_cmc r=2k"));
+    let scale = native.iter().map(|value| value.norm()).fold(0.0, f64::max);
+    for (index, (twin_value, native_value)) in twin.iter().zip(&native).enumerate() {
+        assert!(
+            (twin_value - native_value).norm() <= 1e-6 * scale,
+            "transfer {index}: generated {twin_value} against native {native_value}"
+        );
+    }
     assert!(
-        module
-            .as_deref()
-            .is_some_and(|name| name.eq_ignore_ascii_case("r2_cmc")),
-        "{error}"
+        native[1].norm() > 1e-3 * scale && native[3].norm() > 1e-3 * scale,
+        "the pumped diode must convert into the first sidebands: {native:?}"
     );
-    assert!(detail.contains("PSS analysis"), "{detail}");
 }
