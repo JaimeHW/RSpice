@@ -110,6 +110,60 @@ pub(super) fn diode_model_param(
     params.get(name).copied().filter(|value| value.is_finite())
 }
 
+/// What a diode `.MODEL` card alone decides, read once per card rather than
+/// once per instance: its parameters keyed in upper case, which of them were
+/// given, and a diode at SPICE defaults with the card applied.
+pub(super) struct DiodeModelSetup {
+    pub params: std::collections::HashMap<String, f64>,
+    pub rs_given: bool,
+    pub cj0_given: bool,
+    pub sidewall_cj0_given: bool,
+    /// Unnamed and unconnected; each instance takes a copy.
+    prototype: Diode,
+}
+
+impl DiodeModelSetup {
+    /// Validate `card` for the instance `element_name` and apply it.
+    pub(super) fn new(
+        element_name: &str,
+        model: &str,
+        card: &crate::netlist::ModelDef,
+    ) -> Result<Self, SimulationError> {
+        let params = model_params_upper_map(&card.params);
+        super::model_policy::validate_diode_model_level(
+            element_name,
+            model,
+            &params,
+            &card.expr_params,
+            &card.string_params,
+            !card.string_vector_params.is_empty()
+                || !card.real_vector_params.is_empty()
+                || !card.real_vector_expr_params.is_empty()
+                || !card.integer_vector_params.is_empty(),
+        )?;
+        Ok(Self {
+            rs_given: params.contains_key("RS"),
+            cj0_given: ["CJO", "CJ0", "CJ"]
+                .iter()
+                .any(|name| params.contains_key(*name)),
+            sidewall_cj0_given: ["CJSW", "CJP"]
+                .iter()
+                .any(|name| params.contains_key(*name)),
+            prototype: Diode::spice_defaults(String::new(), 0, 0).with_model_params(&params),
+            params,
+        })
+    }
+
+    /// The card applied to one named, connected instance.
+    pub(super) fn instance(&self, name: String, anode: usize, cathode: usize) -> Diode {
+        let mut diode = self.prototype.clone();
+        diode.name = name;
+        diode.node_anode = anode;
+        diode.node_cathode = cathode;
+        diode
+    }
+}
+
 fn normalize_temperature_param_to_celsius(value: f64) -> f64 {
     // Netlist TEMP/TNOM parameters are specified in Celsius. Device internals
     // convert to Kelvin explicitly at their API boundary.

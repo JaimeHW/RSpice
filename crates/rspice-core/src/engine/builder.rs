@@ -7067,6 +7067,8 @@ impl Engine {
                 .filter(|element| matches!(element.kind, ElementKind::Resistor { .. }))
                 .count(),
         );
+        let mut diode_model_setups: HashMap<*const crate::netlist::ModelDef, DiodeModelSetup> =
+            HashMap::new();
         for (element_index, element) in flat_elements.iter().enumerate() {
             if element_index.is_multiple_of(64) {
                 check_build_abort(abort)?;
@@ -7795,8 +7797,7 @@ impl Engine {
                     // Model cards start from ngspice's defaults: parameters a
                     // card omits must mean what they mean in SPICE, not
                     // inherit the 1N4148-like convenience values.
-                    let mut diode =
-                        crate::device::Diode::spice_defaults(element.name.clone(), anode, cathode);
+                    let mut diode;
 
                     // Junction temperature: instance TEMP is absolute (C),
                     // DTEMP offsets the circuit temperature; the model TNOM
@@ -7817,7 +7818,9 @@ impl Engine {
                     // carries AREA/PJ defaults and the metal/poly overlap
                     // dimensions, all of which the instance scaling below
                     // still needs.
-                    let model_params: HashMap<String, f64>;
+                    let owned_model_params: HashMap<String, f64>;
+                    let model_params: &HashMap<String, f64>;
+                    let owned_setup: DiodeModelSetup;
                     if let Some(device_model) = selected_diode_model {
                         ensure_model_type(
                             "Diode",
@@ -7826,27 +7829,34 @@ impl Engine {
                             device_model,
                             &["D", "DIODE"],
                         )?;
-                        let params_map = model_params_upper_map(&device_model.params);
-                        validate_diode_model_level(
-                            &element.name,
-                            model,
-                            &params_map,
-                            &device_model.expr_params,
-                            &device_model.string_params,
-                            !device_model.string_vector_params.is_empty()
-                                || !device_model.real_vector_params.is_empty()
-                                || !device_model.real_vector_expr_params.is_empty()
-                                || !device_model.integer_vector_params.is_empty(),
-                        )?;
-                        rs_given = params_map.contains_key("RS");
-                        cj0_given = ["CJO", "CJ0", "CJ"]
-                            .iter()
-                            .any(|name| params_map.contains_key(*name));
-                        sidewall_cj0_given = ["CJSW", "CJP"]
-                            .iter()
-                            .any(|name| params_map.contains_key(*name));
-                        diode = diode.with_model_params(&params_map);
-                        model_params = params_map;
+                        // A card resolved without expressions is the deck's
+                        // own and stays put for the whole build, so what it
+                        // decides is read once for all its instances.
+                        let setup = match &resolved_model {
+                            Some(std::borrow::Cow::Borrowed(card)) => {
+                                match diode_model_setups.entry(std::ptr::from_ref(*card)) {
+                                    std::collections::hash_map::Entry::Occupied(entry) => {
+                                        entry.into_mut()
+                                    }
+                                    std::collections::hash_map::Entry::Vacant(entry) => entry
+                                        .insert(DiodeModelSetup::new(
+                                            &element.name,
+                                            model,
+                                            device_model,
+                                        )?),
+                                }
+                            }
+                            _ => {
+                                owned_setup =
+                                    DiodeModelSetup::new(&element.name, model, device_model)?;
+                                &owned_setup
+                            }
+                        };
+                        rs_given = setup.rs_given;
+                        cj0_given = setup.cj0_given;
+                        sidewall_cj0_given = setup.sidewall_cj0_given;
+                        diode = setup.instance(element.name.clone(), anode, cathode);
+                        model_params = &setup.params;
                     } else if let Some(card) = foundation_model_card(model).filter(|card| {
                         card.model_type.eq_ignore_ascii_case("D")
                             || card.model_type.eq_ignore_ascii_case("DIODE")
@@ -7859,8 +7869,14 @@ impl Engine {
                         sidewall_cj0_given = ["CJSW", "CJP"]
                             .iter()
                             .any(|name| params_map.contains_key(*name));
-                        diode = diode.with_model_params(params_map);
-                        model_params = params_map.clone();
+                        diode = crate::device::Diode::spice_defaults(
+                            element.name.clone(),
+                            anode,
+                            cathode,
+                        )
+                        .with_model_params(params_map);
+                        owned_model_params = params_map.clone();
+                        model_params = &owned_model_params;
                         // Once per run, not once per elaboration of it.
                         let line = format!(
                             "{} uses the built-in diode model '{}': the deck defines no .MODEL \
@@ -7877,7 +7893,13 @@ impl Engine {
                         rs_given = false;
                         cj0_given = false;
                         sidewall_cj0_given = false;
-                        model_params = HashMap::new();
+                        diode = crate::device::Diode::spice_defaults(
+                            element.name.clone(),
+                            anode,
+                            cathode,
+                        );
+                        owned_model_params = HashMap::new();
+                        model_params = &owned_model_params;
                         let line = format!(
                             "{} uses default diode parameters: the deck defines no .MODEL '{}'",
                             element.name, model
