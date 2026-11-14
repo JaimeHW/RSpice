@@ -4247,8 +4247,9 @@ D1 d 0 DM
 .MODEL DM D IS=1e-14 CJO=1p
 .END
 ";
-        // RB above RBM gives the device a private base node, and the floating
-        // capacitor puts the transient in correction form.
+        // RB above RBM gives the device a private base node. A promoted
+        // device puts the transient in correction form, where the floating
+        // capacitor adds its Norton residual to the direct correction.
         const GUMMEL_POON_DECK: &str = "\
 Xyce damped status assembly, Gummel-Poon
 VCC vcc 0 5
