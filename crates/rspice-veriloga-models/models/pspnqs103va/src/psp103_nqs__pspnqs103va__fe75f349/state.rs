@@ -1850,6 +1850,7 @@ impl Instance {
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const HB_ADMISSIBLE: bool = false;
 	pub const HB_REFUSAL: Option<&'static str> = Some("it uses `idt`, whose integral the generated model accumulates as accepted transient history rather than as an unknown the analysis solves for");
+	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "fa22ca44c6c2bab869ae428b971898a41391613d666b3fbf3250f14e094c3ebc";

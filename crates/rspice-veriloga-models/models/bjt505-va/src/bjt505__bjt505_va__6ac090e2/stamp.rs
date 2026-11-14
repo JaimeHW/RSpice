@@ -3472,8 +3472,8 @@ impl Instance {
 		BLD=BLI;
 		}
 		let BLK=C+ BLJ;
-		let BLL=ddt(9, BLJ);
-		let BLM=ddt_derivative(9,BLL,1f64);
+		let BLL=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, BLJ, 0.0), None => ddt(9, BLJ) };
+		let BLM=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, 1f64, 0.0, 11u32), None => ddt_derivative(9,BLL,1f64) };
 		let BLN=BLD* BLL;
 		let BLO=L5([BLN[0],BLN[1],BLN[2],BLN[3],0.0])+ L5([0.0,0.0,0.0,0.0,(BLM* BLC)]);
 		let BLP=BLC;

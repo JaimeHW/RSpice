@@ -2070,6 +2070,7 @@ impl Instance {
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const HB_ADMISSIBLE: bool = false;
 	pub const HB_REFUSAL: Option<&'static str> = Some("`LeffCV_acc`, `T3`, `PTWGR_t`, `veseff`, `Tcen0`, `UC_t`, `RSDRR_t`, `RDDRR_t`, `VSAT1R_t`, `MEXPR_t`, `CDSCDR_i`, `ETA0R_i`, `PHIBE_i`, `K1_i`, `K11_i`, `K1SAT_i`, `K1SAT1_i`, `VSAT1R_i`, `PTWGR_i`, `PDIBL1R_i`, `MEXPR_i`, `UC_i` and `UC1_i` are read before they are assigned, so they keep their values from the last accepted time point, which no harmonic-balance spectrum carries");
+	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "fbb7cc38f187187f6e05d0cfd0f6118a5de4a71787d81c9bb8a19bddcbed3a7d";

@@ -2704,8 +2704,8 @@ impl Instance {
 		AWZ=AXE;
 		}
 		let AXG=BT+ AXF;
-		let AXH=ddt(14, AXF);
-		let AXI=ddt_derivative(14,AXH,1f64);
+		let AXH=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, AXF, 0.0), None => ddt(14, AXF) };
+		let AXI=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, 1f64, 0.0, 11u32), None => ddt_derivative(14,AXH,1f64) };
 		let AXJ=AWZ* AXH;
 		let AXK=L5([AXJ[0],AXJ[1],AXJ[2],AXJ[3],0.0])+ L5([0.0,0.0,0.0,0.0,(AXI* AWY)]);
 		let AXL=AWY;

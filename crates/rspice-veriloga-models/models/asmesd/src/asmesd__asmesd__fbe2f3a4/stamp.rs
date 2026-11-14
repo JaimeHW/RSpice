@@ -926,8 +926,8 @@ impl Instance {
 		let AJO=L6([0.0,0.0,AJM[0],AJM[1],AJM[2],AJM[3]])+ L6([AJN[0],AJN[1],0.0,0.0,0.0,0.0]);
 		let NR=A+ NQ;
 		let NT=A+ NS;
-		let NU=ddt(1, NS);
-		let AJP=ddt_derivative(1,NU,ZY);
+		let NU=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, NS, 0.0), None => ddt(1, NS) };
+		let AJP=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, ZY, 0.0, 8u32), None => ddt_derivative(1,NU,ZY) };
 		let AJQ=AJC* NU;
 		let AJR=L3([AJQ[0],AJQ[1],0.0])+ L3([0.0,0.0,(AJP* NL)]);
 		let ZC=NL;

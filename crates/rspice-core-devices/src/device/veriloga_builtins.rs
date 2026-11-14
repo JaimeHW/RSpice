@@ -167,6 +167,10 @@ pub struct BuiltinVerilogAInstance {
     /// Xyce's `DEVICE VOLTLIM`: off, the model's `$limit` hands back its
     /// argument in every Newton load.
     voltage_limiting: bool,
+    /// Outputs a periodic solver supplies for the model's carried operator
+    /// sites, and the record of the last stamp under them; `None` outside
+    /// harmonic balance.
+    periodic_frame: Option<Box<rspice_veriloga_runtime::GeneratedPeriodicFrame>>,
     /// The `OFF` startup state still owns the next Newton evaluation.
     initial_off_seed_pending: bool,
     /// How many Newton evaluations the startup state has already served.
@@ -1138,6 +1142,49 @@ impl BuiltinVerilogAInstance {
         self.kind.harmonic_balance_refusal()
     }
 
+    /// The operator sites harmonic balance carries as unknowns of their own,
+    /// as the generator decided.
+    pub fn harmonic_balance_periodic_sites(
+        &self,
+    ) -> &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] {
+        self.kind.harmonic_balance_periodic_sites()
+    }
+
+    /// Evaluate the carried operator sites at the outputs the installed
+    /// frame supplies from now on (see
+    /// [`rspice_veriloga_runtime::GeneratedPeriodicFrame`]).
+    pub fn install_periodic_frame(&mut self) {
+        let sites = self.harmonic_balance_periodic_sites().len();
+        self.periodic_frame = Some(Box::new(
+            rspice_veriloga_runtime::GeneratedPeriodicFrame::new(sites),
+        ));
+    }
+
+    /// The installed periodic frame's record of the last stamp.
+    pub fn periodic_frame(&self) -> Option<&rspice_veriloga_runtime::GeneratedPeriodicFrame> {
+        self.periodic_frame.as_deref()
+    }
+
+    /// The installed periodic frame, to supply outputs and read the record.
+    pub fn periodic_frame_mut(
+        &mut self,
+    ) -> Option<&mut rspice_veriloga_runtime::GeneratedPeriodicFrame> {
+        self.periodic_frame.as_deref_mut()
+    }
+
+    /// The zero-based circuit unknown a derivative lane (a model unknown:
+    /// nodes, then branch unknowns) stamps into, or `None` for ground.
+    pub fn lane_unknown(&self, lane: u32, num_nodes: usize) -> Option<usize> {
+        let lane = usize::try_from(lane).ok()?;
+        match self.nodes.get(lane) {
+            Some(&node) => node.checked_sub(1),
+            None => {
+                let branch = *self.branches.get(lane - self.nodes.len())?;
+                (branch > 0).then(|| num_nodes + branch - 1)
+            }
+        }
+    }
+
     /// Whether this instance's contributions connect an electrical port to
     /// node 0: the generator's reading of its module, decided with this
     /// instance's parameter values and the terminals its card connected.
@@ -1419,6 +1466,7 @@ impl BuiltinVerilogAInstance {
             terminal_current_aliases: &[],
             initial_off: false,
             voltage_limiting: true,
+            periodic_frame: None,
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
             initial_off_seed_anchor: None,
@@ -2162,7 +2210,8 @@ impl BuiltinVerilogAInstance {
         )
         .with_analysis_phase(self.analysis_phase)
         .with_analog_task_recording(record_tasks)
-        .with_voltage_limiting(self.voltage_limiting);
+        .with_voltage_limiting(self.voltage_limiting)
+        .with_periodic_frame(self.periodic_frame.as_deref());
         // A StaticDaeProbe is a discarded F(x)-B(t) observation used by the
         // OneStep history path. It must not replace any candidate produced by
         // the preceding complete transient evaluation, including ordinary
@@ -2972,6 +3021,7 @@ pub fn instantiate_builtin_scoped(
         terminal_current_aliases: &[],
         initial_off: false,
         voltage_limiting: true,
+        periodic_frame: None,
         initial_off_seed_pending: true,
         initial_off_seed_evaluations: 0,
         initial_off_seed_anchor: None,

@@ -195,7 +195,7 @@ impl HbSolver {
         }
         #[cfg(feature = "veriloga-builtins-base")]
         for device in &self.generated_nonlinear_devices {
-            for &row in device.rows() {
+            for &row in device.stamped_rows() {
                 linear[row] = false;
             }
         }

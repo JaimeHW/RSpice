@@ -613,6 +613,7 @@ impl Instance {
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const HB_ADMISSIBLE: bool = false;
 	pub const HB_REFUSAL: Option<&'static str> = Some("`tiniK`, `Iikr`, `Iikp`, `Ihrcf`, `Ivtf`, `Iitf`, `sltf`, `VmaxExp`, `VBICtype`, `gminMod` and `imaxMod` are read before they are assigned, so they keep their values from the last accepted time point, which no harmonic-balance spectrum carries");
+	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "27eb6713a3e4ace39e34dcec84d3fe0574a269af475ba3855952c7cb3714335b";

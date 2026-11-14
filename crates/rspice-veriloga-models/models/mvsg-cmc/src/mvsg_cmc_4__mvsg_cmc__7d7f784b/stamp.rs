@@ -1656,8 +1656,8 @@ impl Instance {
 		let QGO=KNG* (ctx.checked_derivative_value(LV, 1f64));
 		let LW=A+ LV;
 		let KNI=IRZ* LX;
-		let LY=ddt(1, (LX* LU));
-		let KNJ=ddt_derivative(1,LY,KNI);
+		let LY=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, (LX* LU), 0.0), None => ddt(1, (LX* LU)) };
+		let KNJ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, KNI, 0.0, 20u32), None => ddt_derivative(1,LY,KNI) };
 		let QGP=KNI* (ctx.checked_derivative_value(LY, 1f64));
 		let KNK=KNJ* KLF;
 		let RFS=QGP* KLF;
@@ -1813,8 +1813,8 @@ impl Instance {
 		let KMA=L2([0.0,ISA]);
 		let KMB=(KLZ- KMA)/ NA;
 		let NB=A+ ((MK- ML)/ NA);
-		let ND=ddt(2, ML);
-		let KMC=ddt_derivative(2,ND,ISA);
+		let ND=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, ML, 0.0), None => ddt(2, ML) };
+		let KMC=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(1, ISA, 0.0, 23u32), None => ddt_derivative(2,ND,ISA) };
 		let QGI=ISA* (ctx.checked_derivative_value(ND, 1f64));
 		let NE=NC* ND;
 		let NH=NG* BB;
@@ -1864,8 +1864,8 @@ impl Instance {
 		let KMO=L2([0.0,ISB]);
 		let KMP=(KMN- KMO)/ NA;
 		let OC=A+ ((NO- NP)/ NA);
-		let OD=ddt(3, NP);
-		let KMQ=ddt_derivative(3,OD,ISB);
+		let OD=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(2, NP, 0.0), None => ddt(3, NP) };
+		let KMQ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(2, ISB, 0.0, 26u32), None => ddt_derivative(3,OD,ISB) };
 		let QGL=ISB* (ctx.checked_derivative_value(OD, 1f64));
 		let OE=NC* OD;
 		let OH=OG* BB;
@@ -16405,8 +16405,8 @@ impl Instance {
 		HJY=A;
 		KBO=OKO;
 		}
-		let HKA=ddt(138, HJZ);
-		let OPO=L2(std::array::from_fn(|i| ddt_derivative(138,HKA,(KAY)[i])));
+		let HKA=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(3, HJZ, 0.0), None => ddt(138, HJZ) };
+		let OPO=L2(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(3, (KAY)[i], 0.0, [7u32, 8u32][i]), None => ddt_derivative(138,HKA,(KAY)[i]) }));
 		let QOL=KAY* (ctx.checked_derivative_value(HKA, 1f64));
 		let OPP=OPO* KLF;
 		let RHA=QOL* KLF;
@@ -18015,8 +18015,8 @@ impl Instance {
 		let QFY;
 		if IDN{
 		let OZG=IRR* IDO;
-		let IDP=ddt(145, (IDO* F));
-		let OZH=ddt_derivative(145,IDP,OZG);
+		let IDP=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(4, (IDO* F), 0.0), None => ddt(145, (IDO* F)) };
+		let OZH=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(4, OZG, 0.0, 4u32), None => ddt_derivative(145,IDP,OZG) };
 		let QOV=OZG* (ctx.checked_derivative_value(IDP, 1f64));
 		let OZI=OZH* KLF;
 		let RHC=QOV* KLF;

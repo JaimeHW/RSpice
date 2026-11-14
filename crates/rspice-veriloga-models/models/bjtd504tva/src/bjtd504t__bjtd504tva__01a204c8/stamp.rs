@@ -2498,8 +2498,8 @@ impl Instance {
 		}
 		let ALF=A+ ALE;
 		let ALH=A+ ALG;
-		let ALK=ddt(14, ALG);
-		let BRH=ddt_derivative(14,ALK,1f64);
+		let ALK=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, ALG, 0.0), None => ddt(14, ALG) };
+		let BRH=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, 1f64, 0.0, 11u32), None => ddt_derivative(14,ALK,1f64) };
 		let BRI=AWN* ALK;
 		let BRJ=L6([BRI[0],BRI[1],BRI[2],BRI[3],BRI[4],0.0])+ L6([0.0,0.0,0.0,0.0,0.0,(BRH* ALI)]);
 		let ARN=ALI;

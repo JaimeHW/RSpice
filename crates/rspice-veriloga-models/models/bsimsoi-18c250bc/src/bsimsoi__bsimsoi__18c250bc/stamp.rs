@@ -11883,8 +11883,8 @@ impl Instance {
 		}
 		let FZB=FYJ* FSX;
 		let FZC=FTH* FYJ;
-		let FZD=ddt(3, FZB);
-		let FZE=L7(std::array::from_fn(|i| ddt_derivative(3,FZD,(FZC)[i])));
+		let FZD=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, FZB, 0.0), None => ddt(3, FZB) };
+		let FZE=L7(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, (FZC)[i], 0.0, [3u32, 4u32, 5u32, 6u32, 7u32, 8u32, 9u32][i]), None => ddt_derivative(3,FZD,(FZC)[i]) }));
 		let FZF=FZE* EM;
 		let FZG=(FZC* (ctx.checked_derivative_value(FZD, 1f64)))* EM;
 		let FZH=(ctx.checked_derivative_value(FXC, FYZ))+ (-FZD);

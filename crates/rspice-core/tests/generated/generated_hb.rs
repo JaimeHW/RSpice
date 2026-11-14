@@ -274,6 +274,124 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
                  XM d g 0 0 t bsimimg\n",
             "d",
         ),
+        #[cfg(feature = "veriloga-model-bjt504va")]
+        (
+            "bipolar transistor (Mextram 504)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 0 bjt504va\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-bjt504tva")]
+        (
+            "bipolar transistor (Mextram 504, self-heating)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 0 t bjt504tva\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-bjtd504va")]
+        (
+            "bipolar transistor (Mextram 504, no substrate)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 bjtd504va\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-bjtd504tva")]
+        (
+            "bipolar transistor (Mextram 504, no substrate, self-heating)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 t bjtd504tva\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-bjt505-va")]
+        (
+            "bipolar transistor (Mextram 505)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 0 bjt505_va\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-bjt505t-va")]
+        (
+            "bipolar transistor (Mextram 505, self-heating)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 0 t bjt505t_va\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-bjtd505-va")]
+        (
+            "bipolar transistor (Mextram 505, no substrate)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 bjtd505_va\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-bjtd505t-va")]
+        (
+            "bipolar transistor (Mextram 505, no substrate, self-heating)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 t bjtd505t_va\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+        (
+            "high-voltage MOSFET (HiSIM-HV, 4 terminals)",
+            "VDD vdd 0 5\nV1 in 0 SIN(1.5 0.2 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 hisimhv_n4_va\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+        (
+            "high-voltage MOSFET (HiSIM-HV, 5 terminals)",
+            "VDD vdd 0 5\nV1 in 0 SIN(1.5 0.2 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 0 hisimhv_n5_va\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-hisimhv-va")]
+        (
+            "high-voltage MOSFET (HiSIM-HV, self-heating)",
+            "VDD vdd 0 5\nV1 in 0 SIN(1.5 0.2 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 0 t hisimhv_va\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-asmesd-dio")]
+        (
+            "ESD diode (ASM-ESD)",
+            "V1 in 0 SIN(0.3 0.6 1meg)\nR1 in a 1k\nXD a 0 t asmesd_dio\n",
+            "a",
+        ),
+        #[cfg(feature = "veriloga-model-asmesd")]
+        (
+            "ESD bipolar clamp (ASM-ESD)",
+            "VCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\nRB in b 10k\nRC vcc c 1k\n\
+                 XQ c b 0 t asmesd\n",
+            "c",
+        ),
+        #[cfg(feature = "veriloga-model-ekv3-rf")]
+        (
+            "MOSFET (EKV3 RF)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 ekv3_rf\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-angelov-gan")]
+        (
+            "GaN FET (Angelov-GaN)",
+            "VDD vdd 0 3\nV1 in 0 SIN(-0.5 0.3 1meg)\nRG in g 1k\nRD vdd d 100\n\
+                 XA d g 0 t r angelov_gan\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-asmhemt")]
+        (
+            "GaN HEMT (ASM-HEMT)",
+            "VDD vdd 0 10\nV1 in 0 SIN(-1 0.5 1meg)\nRG in g 1k\nRD vdd d 100\n\
+                 XH d g 0 0 t asmhemt\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+        (
+            "SOI MOSFET (BSIM-SOI 4.7)",
+            "VDD vdd 0 1\nV1 in 0 SIN(1 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 0 b t bsimsoi__18c250bc\n",
+            "d",
+        ),
     ]
 }
 
@@ -374,8 +492,12 @@ fn compare_with_settled_transient(
             ));
         }
     }
+    let worst = (0..=3)
+        .map(|k| (periodic[k] - last[k]).norm() / fundamental)
+        .fold(0.0, f64::max);
     eprintln!(
-        "{family}: V({node}) {method} {:?} transient {:?}",
+        "{family}: V({node}) {method} worst {worst:.3e} of the fundamental; {method} {:?} \
+         transient {:?}",
         &periodic[..4],
         &last[..4]
     );
@@ -437,8 +559,8 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
 /// A generated model whose generator could not prove its residual
 /// `F(x) + dQ(x)/dt` is refused before solving, by instance and module, with
 /// the generator's reason: a variable read back after the body assigned it
-/// (EKV 2.6), or a `ddt` scaled by a quantity that varies with bias (the
-/// ASM-ESD diode).
+/// (EKV 2.6, HICUM/L2). So is one whose harmonics no settled transient has
+/// confirmed, with what is missing (BSIM-SOI 4.6.1 and e2aff994, MVSG).
 #[test]
 fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
     use rspice_core::identity::AnalysisKind;
@@ -452,13 +574,13 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
             "`E0_Q_1` is read before it is assigned, so it keeps its value from the last \
              accepted time point, which no harmonic-balance spectrum carries",
         ),
-        #[cfg(feature = "veriloga-model-asmesd-dio")]
+        #[cfg(feature = "veriloga-model-hicuml2va")]
         (
-            "XA d 0 asmesd_dio",
-            "XA",
-            "asmesd_dio",
-            "it scales a `ddt` by a quantity that varies with bias, so its residual is not \
-             F(x) + dQ(x)/dt",
+            "XQ d d 0 0 t hicuml2va",
+            "XQ",
+            "hicuml2va",
+            "`pterm` is read before it is assigned, so it keeps its value from the last \
+             accepted time point, which no harmonic-balance spectrum carries",
         ),
         #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
         (
@@ -466,6 +588,20 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
             "XM",
             "bsimsoi__e2aff994",
             "harmonic balance and a quasi-static sweep disagree on the fundamental by 12%",
+        ),
+        #[cfg(feature = "veriloga-model-bsimsoi-va")]
+        (
+            "XM d d 0 0 bsimsoi_va",
+            "XM",
+            "bsimsoi_va",
+            "its floating body is still charging after 24 periods",
+        ),
+        #[cfg(feature = "veriloga-model-mvsg-cmc")]
+        (
+            "XH d d 0 0 t mvsg_cmc",
+            "XH",
+            "mvsg_cmc",
+            "its thermal network's time constant",
         ),
     ];
     for (card, instance, module, reason) in cases {

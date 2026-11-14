@@ -651,8 +651,9 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([244, 200, 207, 118, 13, 154, 22, 238, 18, 200, 171, 52, 66, 228, 84, 138, 228, 223, 134, 118, 85, 7, 142, 96, 123, 4, 138, 35, 53, 170, 45, 198]);
 	pub const EVENT_STATE_COUNT: usize = 2;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
-	pub const HB_ADMISSIBLE: bool = false;
-	pub const HB_REFUSAL: Option<&'static str> = Some("it scales a `ddt` by a quantity that varies with bias, so its residual is not F(x) + dQ(x)/dt");
+	pub const HB_ADMISSIBLE: bool = true;
+	pub const HB_REFUSAL: Option<&'static str> = None;
+	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[rspice_veriloga_runtime::GeneratedPeriodicKind::Derivative];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "87e98612c391312c98b4f10922d63c75ffa080cbf6e01889433a772d9b281b52";

@@ -445,8 +445,8 @@ impl Instance {
 		let RM=L5([0.0,0.0,RK[0],RK[1],RK[2]])+ L5([RL[0],RL[1],0.0,0.0,0.0]);
 		let FS=A+ (FR* FO);
 		let FU=A+ FT;
-		let FV=ddt(0, FT);
-		let RN=ddt_derivative(0,FV,MS);
+		let FV=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, FT, 0.0), None => ddt(0, FT) };
+		let RN=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, MS, 0.0, 6u32), None => ddt_derivative(0,FV,MS) };
 		let RO=RC* FV;
 		let RP=L3([RO[0],RO[1],0.0])+ L3([0.0,0.0,(RN* FO)]);
 		let LY=FO;

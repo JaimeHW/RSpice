@@ -2433,8 +2433,8 @@ impl Instance {
 		ASF=ASK;
 		}
 		let ASM=BN+ ASL;
-		let ASN=ddt(13, ASL);
-		let ASO=ddt_derivative(13,ASN,1f64);
+		let ASN=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, ASL, 0.0), None => ddt(13, ASL) };
+		let ASO=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, 1f64, 0.0, 10u32), None => ddt_derivative(13,ASN,1f64) };
 		let ASP=ASF* ASN;
 		let ASQ=L5([ASP[0],ASP[1],ASP[2],ASP[3],0.0])+ L5([0.0,0.0,0.0,0.0,(ASO* ASE)]);
 		let ASR=ASE;

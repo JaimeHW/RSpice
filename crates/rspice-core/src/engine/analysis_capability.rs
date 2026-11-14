@@ -392,7 +392,7 @@ const fn hb_admissible_veriloga() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::HbAdmissibleVerilogA,
         token: HB_VERILOGA_OPERATOR,
-        condition: "every Verilog-A module whose analog body is memoryless equations, `ddt` of the charges it contributes (F(x) + dQ(x)/dt), `idt` with an initial condition, which fixes its DC output, rational `laplace_*` filters with no pole at the origin, and `absdelay` by a fixed delay, with no transition, slew, cross, above, timer, last_crossing, idtmod, zi_*, $abstime or variable kept between time points",
+        condition: "every Verilog-A module whose analog body is memoryless equations, `ddt` (of a charge it contributes, or carried as an unknown of its own), `idt` with an initial condition, which fixes its DC output, rational `laplace_*` filters with no pole at the origin, and `absdelay` by a fixed delay, with no transition, slew, cross, above, timer, last_crossing, idtmod, zi_*, $abstime or variable kept between time points",
         evidence: HB_VERILOGA_EVIDENCE,
     }
 }
@@ -409,7 +409,7 @@ const fn hb_admissible_generated() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::HbAdmissibleVerilogA,
         token: HB_VERILOGA_OPERATOR,
-        condition: "every generated compact model whose generator proved its residual memoryless equations plus `ddt` of the charges it contributes (F(x) + dQ(x)/dt): no idt, idtmod, cross, above, timer, last_crossing or $abstime in its equations, and no variable the next evaluation reads back after the body assigned it",
+        condition: "every generated compact model whose harmonics a settled-transient fixture confirmed and whose generator proved its residual memoryless equations plus `ddt` (of a charge it contributes, or carried as an unknown of its own): no idt, idtmod, cross, above, timer, last_crossing or $abstime in its equations, no `ddt` a bias-dependent condition switches, and no variable the next evaluation reads back after the body assigned it",
         evidence: HB_GENERATED_EVIDENCE,
     }
 }
@@ -790,8 +790,9 @@ fn rational_descriptor_refusal(
 #[cfg(feature = "veriloga")]
 fn hb_operator_reason(operator: &str) -> Option<&'static str> {
     Some(match operator {
-        // `ddt` becomes jω; `idt`, `laplace_*` and `absdelay` become
-        // unknowns of their own tied by 1/(jω), H(jω) and e^(-jωτ).
+        // `ddt` becomes jω or an unknown of its own; `idt`, `laplace_*` and
+        // `absdelay` become unknowns of their own tied by 1/(jω), H(jω) and
+        // e^(-jωτ).
         "ddt" | "idt" | "laplace_*" | "absdelay" => return None,
         "transition" | "slew" | "cross" | "last_crossing" | "above" | "timer" => {
             "which schedules events in time that a harmonic-balance spectrum does not carry; \
@@ -973,12 +974,27 @@ fn carrier_refusal(
 /// Generated compact models whose residual the generator proves but whose
 /// harmonics no settled transient has confirmed, with what is missing.
 #[cfg(feature = "veriloga-builtins-base")]
-const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[(
-    "bsimsoi__e2aff994",
-    "its harmonics have not been checked against a settled transient: on a common-source \
-     stage its transient is still drifting after 24 periods, and harmonic balance and a \
-     quasi-static sweep disagree on the fundamental by 12%",
-)];
+const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[
+    (
+        "bsimsoi__e2aff994",
+        "its harmonics have not been checked against a settled transient: on a common-source \
+         stage its transient is still drifting after 24 periods, and harmonic balance and a \
+         quasi-static sweep disagree on the fundamental by 12%",
+    ),
+    (
+        "bsimsoi_va",
+        "its harmonics have not been checked against a settled transient: on a common-source \
+         stage its floating body is still charging after 24 periods, and harmonic balance and \
+         the transient disagree on the fundamental by a factor of 9",
+    ),
+    (
+        "mvsg_cmc",
+        "its harmonics have not been checked against a settled transient: its thermal \
+         network's time constant (rth times cth, 2.5 ms by default) leaves a 1 MHz \
+         common-source stage's transient drifting after 24 periods, and harmonic balance's \
+         fundamental is 6% above the transient's",
+    ),
+];
 
 /// Why shooting refuses a generated model with a source branch: its period
 /// map fixes every node the model reaches at the period start, and a voltage

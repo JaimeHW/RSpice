@@ -555,6 +555,7 @@ impl Instance {
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const HB_ADMISSIBLE: bool = true;
 	pub const HB_REFUSAL: Option<&'static str> = None;
+	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Conditional(rspice_veriloga_runtime::GroundReferenceGraph { group_count: 3, port_groups: &[1], joins: &[rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [0, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [1, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [2, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [3, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 0], guard: [4, 1] }], guards: &[rspice_veriloga_runtime::GroundGuardOp::PortConnected(0), rspice_veriloga_runtime::GroundGuardOp::PortConnected(1), rspice_veriloga_runtime::GroundGuardOp::PortConnected(2), rspice_veriloga_runtime::GroundGuardOp::PortConnected(3), rspice_veriloga_runtime::GroundGuardOp::PortConnected(4)] });
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "1b109f5f10fb3cad09643cb4ccd7ef99cd19f811d6223fa39075f73292addf24";

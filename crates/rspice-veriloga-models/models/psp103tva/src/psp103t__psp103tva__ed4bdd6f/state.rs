@@ -1861,6 +1861,7 @@ impl Instance {
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const HB_ADMISSIBLE: bool = false;
 	pub const HB_REFUSAL: Option<&'static str> = Some("`idmult`, `vj`, `zinv`, `vjsrh`, `vav`, `vbi_minus_vjsrh`, `wsrh`, `wdep` and `asrh` are read before they are assigned, so they keep their values from the last accepted time point, which no harmonic-balance spectrum carries");
+	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "618e0f38a7c70b1b40302351d4c402ec2f58c8a7cc245a62b00525e417918cc0";

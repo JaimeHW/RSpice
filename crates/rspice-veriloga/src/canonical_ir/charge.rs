@@ -610,18 +610,6 @@ pub(crate) fn one_step_dae_split_safe(artifact: &super::CanonicalIrArtifact) -> 
     charge_split_obstacle(artifact, true).is_none()
 }
 
-/// Prove that the module's residual is `F(x) + dQ(x)/dt`, where every `Q` is
-/// a charge it contributes, so that a static stamp and a companion stamp of
-/// the same point sample `F` and `Q` exactly. A periodic solver reads only
-/// the residual: what a readback, a noise magnitude or a task makes of a
-/// `ddt` value does not enter it.
-#[cfg(feature = "rust-codegen")]
-pub(crate) fn residual_charge_split_obstacle(
-    artifact: &super::CanonicalIrArtifact,
-) -> Option<ChargeSplitObstacle> {
-    charge_split_obstacle(artifact, false)
-}
-
 /// The first obstacle to the weighted F/Q split; `observed` also counts the
 /// values a readback, a noise magnitude or a task observes.
 fn charge_split_obstacle(
@@ -758,13 +746,14 @@ fn lowered_charge_split_obstacle(
 ///   derivative);
 /// * the body reads a branch current, which sees every `ddt` contributed to
 ///   the branch (then every site is carried);
-/// * it reaches an equation whose charge the walk cannot recover, or whose
-///   charge is scaled by a quantity that varies with bias (then every site
-///   reaching that equation is carried).
+/// * it reaches an equation whose charge the walk cannot recover (then every
+///   site reaching that equation is carried), or a quantity that varies with
+///   bias scales it.
 ///
 /// The answer is checked, not trusted: with the carried sites replaced by
-/// opaque inputs, the same proof [`residual_charge_split_obstacle`] runs must
-/// find no obstacle. An empty list means the residual is already
+/// opaque inputs, the charge-split proof of the residual alone (what a
+/// readback, a noise magnitude or a task makes of a `ddt` value does not
+/// enter it) must find no obstacle. An empty list means the residual is already
 /// `F(x) + dQ(x)/dt`.
 pub(crate) fn periodic_derivative_operators(
     artifact: &super::CanonicalIrArtifact,

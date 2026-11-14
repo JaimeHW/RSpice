@@ -2787,8 +2787,8 @@ impl Instance {
 		}
 		let AQO=A+ AQN;
 		let AQQ=A+ AQP;
-		let AQT=ddt(15, AQP);
-		let BZW=ddt_derivative(15,AQT,1f64);
+		let AQT=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, AQP, 0.0), None => ddt(15, AQP) };
+		let BZW=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, 1f64, 0.0, 12u32), None => ddt_derivative(15,AQT,1f64) };
 		let BZX=BCO* AQT;
 		let BZY=L6([BZX[0],BZX[1],BZX[2],BZX[3],BZX[4],0.0])+ L6([0.0,0.0,0.0,0.0,0.0,(BZW* AQR)]);
 		let AXD=AQR;

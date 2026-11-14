@@ -209,7 +209,7 @@ impl ExactPeriodicNetwork {
                     }
                 }
             }
-            #[cfg(feature = "veriloga")]
+            #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
             Self::VerilogAOperator {
                 name,
                 input,
@@ -360,13 +360,13 @@ fn complex_exprel(z: Complex64) -> Complex64 {
 /// The transfer `T(jω)` of a Verilog-A operator, or its divided difference
 /// `(T(j(ω + δ)) - T(jω)) / (jδ)`; `None` where it couples nothing, which is
 /// an `idt` at DC, whose output its initial condition fixes instead.
-#[cfg(feature = "veriloga")]
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 fn operator_coefficient(
-    transfer: &super::veriloga::HbOperatorTransfer,
+    transfer: &super::HbOperatorTransfer,
     omega: Value,
     difference: Option<Value>,
 ) -> Result<Option<Complex64>, String> {
-    use super::veriloga::HbOperatorTransfer as Transfer;
+    use super::HbOperatorTransfer as Transfer;
     let complex = |(re, im): (Value, Value)| Complex64::new(re, im);
     Ok(Some(match transfer {
         Transfer::Integral => match difference {
@@ -380,12 +380,14 @@ fn operator_coefficient(
                 Complex64::new((omega * other).recip(), 0.0)
             }
         },
+        #[cfg(feature = "veriloga")]
         Transfer::Laplace(filter) => match difference {
             None => filter.transfer_at(omega),
             Some(delta) => filter.transfer_divided_difference(omega, omega + delta),
         }
         .map(complex)
         .map_err(|error| format!("has no transfer at omega={omega}: {error}"))?,
+        #[cfg(feature = "veriloga")]
         Transfer::Delay(delay) => wave_coefficient(omega, *delay, difference),
         Transfer::Derivative => match difference {
             None => Complex64::new(0.0, omega),

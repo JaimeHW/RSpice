@@ -493,6 +493,7 @@ impl Instance {
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const HB_ADMISSIBLE: bool = false;
 	pub const HB_REFUSAL: Option<&'static str> = Some("`E0_Q_1` is read before it is assigned, so it keeps its value from the last accepted time point, which no harmonic-balance spectrum carries");
+	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "d3ef249171eeb0fd8da41a18d7cd45c6c46fd9821703c542847e6cdc9f4809b9";

@@ -52,6 +52,9 @@ pub(super) struct StateFileExtensions {
     /// Why harmonic balance cannot sample the model's residual, or `None`
     /// when the generator proved it `F(x) + dQ(x)/dt`.
     pub harmonic_balance_refusal: Option<String>,
+    /// The kind of each operator site harmonic balance carries as unknowns
+    /// of its own, in site order, as `GeneratedPeriodicKind` names it.
+    pub harmonic_balance_periodic_sites: Vec<&'static str>,
     /// Whether generated state uses accepted/candidate `cross`, `above`, or `last_crossing`
     /// detector records and therefore needs their runtime helpers imported.
     pub uses_cross_event_state: bool,
@@ -98,6 +101,7 @@ impl Default for StateFileExtensions {
         Self {
             idtmod_state_count: 0,
             harmonic_balance_refusal: Some("the generator did not decide it".to_owned()),
+            harmonic_balance_periodic_sites: Vec::new(),
             uses_cross_event_state: false,
             uses_analog_tasks: false,
             uses_point_analog_tasks: false,
@@ -480,6 +484,17 @@ pub(super) fn generate_state_file_with_extensions(
             .harmonic_balance_refusal
             .as_ref()
             .map_or_else(|| "None".to_owned(), |reason| format!("Some({reason:?})"))
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[{}];",
+        extensions
+            .harmonic_balance_periodic_sites
+            .iter()
+            .map(|kind| format!("rspice_veriloga_runtime::GeneratedPeriodicKind::{kind}"))
+            .collect::<Vec<_>>()
+            .join(", ")
     )
     .unwrap();
     out.push_str(&format!(

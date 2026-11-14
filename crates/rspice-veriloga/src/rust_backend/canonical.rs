@@ -57,7 +57,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
 use super::harmonic_balance;
-use crate::canonical_ir::charge::{ChargeSplitObstacle, recover_stored_charges};
+use crate::canonical_ir::charge::recover_stored_charges;
 pub(crate) use crate::canonical_ir::charge::{stored_charges, values_reaching_a_ddt};
 
 use crate::canonical_ir::ad::{DifferentiationError, differentiate_with_control_for_roots};
@@ -1021,6 +1021,9 @@ struct ModelPlan {
     /// Why harmonic balance cannot sample this model's residual as
     /// `F(x) + dQ(x)/dt`, or `None` when it can.
     harmonic_balance_refusal: Option<String>,
+    /// The `ddt` sites harmonic balance carries as unknowns of their own,
+    /// each to its index among the model's carried sites, in slot order.
+    periodic_ddt: HashMap<ExprId, usize>,
     requires_nodeset_phase: bool,
 }
 
@@ -1208,9 +1211,43 @@ impl ModelPlan {
                 && idtmod_slots.is_empty()
                 && !ddt_controls_flow
                 && charges_complete;
-        let residual_split = crate::canonical_ir::charge::residual_charge_split_obstacle(artifact)
-            .or_else(|| ddt_controls_flow.then_some(ChargeSplitObstacle::DerivativeSteersControl))
-            .or_else(|| (!charges_complete).then_some(ChargeSplitObstacle::UnrecoveredCharge));
+        // A `ddt` the residual cannot read as the derivative of a contributed
+        // charge is carried by harmonic balance as an unknown of its own; the
+        // model is refused only when no choice of carried sites leaves the
+        // rest `F(x, y) + dQ(x, y)/dt`.
+        let periodic_derivatives =
+            crate::canonical_ir::charge::periodic_derivative_operators(artifact);
+        let mut periodic_ddt = HashMap::new();
+        if let Ok(carried) = &periodic_derivatives {
+            let mut slots = carried
+                .iter()
+                .map(|operator| {
+                    ddt_slots
+                        .get(operator)
+                        .map(|&slot| (slot, *operator))
+                        .ok_or_else(|| {
+                            unsupported(
+                                artifact,
+                                format!("a carried ddt at {operator} with no generated state slot"),
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            slots.sort_unstable();
+            periodic_ddt = slots
+                .into_iter()
+                .enumerate()
+                .map(|(site, (_, operator))| (operator, site))
+                .collect();
+        }
+        // Where the proof finds the residual in charge form but this
+        // generator's own reading of its body does not (a `ddt` that steers
+        // control, a charge it could not recover, or a held coefficient its
+        // schedule finds varying), every `ddt` is carried instead: with none
+        // left in the residual, harmonic balance samples it exactly.
+        let proved_charge_form = matches!(&periodic_derivatives, Ok(carried) if carried.is_empty());
+        let mut carry_every_ddt = proved_charge_form && (ddt_controls_flow || !charges_complete);
+        let residual_split = periodic_derivatives.err();
         let mut harmonic_balance_refusal = harmonic_balance::harmonic_balance_refusal(
             artifact,
             &cfg,
@@ -1218,6 +1255,12 @@ impl ModelPlan {
             &cfg.activations,
             residual_split,
         );
+        // A model harmonic balance refuses carries nothing: its evaluation
+        // stays exactly the transient's.
+        if harmonic_balance_refusal.is_some() {
+            periodic_ddt.clear();
+            carry_every_ddt = false;
+        }
         cfg.function
             .validate()
             .map_err(|error| unsupported(artifact, format!("charge recovery: {error}")))?;
@@ -1589,11 +1632,41 @@ impl ModelPlan {
             ) || schedule.class(value.id) <= InvalidationClass::Temperature
         });
         one_step_dae_split_safe &= frozen_coefficients_static;
-        if !frozen_coefficients_static && harmonic_balance_refusal.is_none() {
-            harmonic_balance_refusal = Some(
-                harmonic_balance::split_refusal(ChargeSplitObstacle::BiasScaledDerivative)
-                    .to_owned(),
+        carry_every_ddt |=
+            !frozen_coefficients_static && harmonic_balance_refusal.is_none() && proved_charge_form;
+        if carry_every_ddt {
+            let mut slots: Vec<(usize, ExprId)> = ddt_slots
+                .iter()
+                .map(|(&operator, &slot)| (slot, operator))
+                .collect();
+            slots.sort_unstable();
+            periodic_ddt = slots
+                .into_iter()
+                .enumerate()
+                .map(|(site, (_, operator))| (operator, site))
+                .collect();
+        }
+        // A carried site under a condition that holds once the temperature is
+        // fixed is either evaluated on every sample or on none, and one on
+        // none is never read; a site a bias-dependent condition switches on
+        // and off over the period has no waveform harmonic balance can carry.
+        if !periodic_ddt.is_empty() {
+            let conditional = crate::canonical_ir::schedule::computed_under_varying_condition(
+                &function,
+                &parameter_scopes,
             );
+            if function.values.iter().any(|value| {
+                matches!(value.kind, CfgValueKind::Ddt { operator, .. }
+                    if periodic_ddt.contains_key(&operator))
+                    && conditional[usize::from(value.id)]
+            }) {
+                harmonic_balance_refusal = Some(
+                    "a `ddt` it would carry as an unknown of its own is evaluated only while a \
+                     bias-dependent condition holds, so it switches on and off over the period"
+                        .to_owned(),
+                );
+                periodic_ddt.clear();
+            }
         }
         measurements.metrics_mut().kernel_regions =
             kernel_region_metrics(artifact, &function, &schedule);
@@ -1749,6 +1822,7 @@ impl ModelPlan {
             limit_slots,
             one_step_dae_split_safe,
             harmonic_balance_refusal,
+            periodic_ddt,
             requires_nodeset_phase,
         })
     }
@@ -2551,6 +2625,7 @@ impl ModelPlan {
     fn emit_bindings(&self) -> EmitBindings {
         EmitBindings {
             ddt_slots: self.ddt_slots.clone(),
+            periodic_ddt: self.periodic_ddt.clone(),
             idt_slots: self.idt_slots.clone(),
             idtmod_slots: self.idtmod_slots.clone(),
             cross_slots: self.cross_slots.clone(),
@@ -4926,6 +5001,12 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
             .any(|value| matches!(value.kind, CfgValueKind::AnalogTask(_)))
     }
 
+    /// The kind of each operator site harmonic balance carries as unknowns
+    /// of its own, in site order, as `GeneratedPeriodicKind` names it.
+    fn harmonic_balance_periodic_sites(&self) -> Vec<&'static str> {
+        vec!["Derivative"; self.periodic_ddt.len()]
+    }
+
     fn has_analog_tasks(&self) -> bool {
         self.has_newton_tasks()
             || self.initialization.iter().any(|plan| {
@@ -4944,6 +5025,7 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
         let mut extensions = state_file::StateFileExtensions {
             idtmod_state_count: self.idtmod_slots.len(),
             harmonic_balance_refusal: self.harmonic_balance_refusal.clone(),
+            harmonic_balance_periodic_sites: self.harmonic_balance_periodic_sites(),
             uses_analog_tasks: self.has_analog_tasks(),
             uses_point_analog_tasks: self.has_newton_tasks(),
             uses_initialization: !self.initialization.is_empty(),

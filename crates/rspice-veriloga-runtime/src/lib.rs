@@ -32,6 +32,7 @@ mod integration_state;
 mod lanes;
 mod limexp;
 mod noise_frequency;
+mod periodic;
 pub mod polynomial;
 mod simparam;
 pub mod transport_delay;
@@ -40,6 +41,7 @@ pub use ground_reference::{
     GroundGuardOp, GroundJoin, GroundReference, GroundReferenceGraph, GroundReferenceInputs,
     evaluate_guard as evaluate_ground_guard,
 };
+pub use periodic::{GeneratedPeriodicFrame, GeneratedPeriodicKind};
 pub use simparam::{GeneratedSimulationParameters, SimulationParameter};
 
 pub use analog_effects::{
@@ -1074,6 +1076,8 @@ pub struct GeneratedEvalContext<'a> {
     /// Newton load too.
     voltage_limiting: bool,
     evaluation_error: std::cell::Cell<Option<GeneratedEvaluationError>>,
+    /// Outputs a periodic solver supplies for the carried operator sites.
+    periodic: Option<&'a GeneratedPeriodicFrame>,
 }
 
 impl<'a> GeneratedEvalContext<'a> {
@@ -1159,6 +1163,7 @@ impl<'a> GeneratedEvalContext<'a> {
             record_analog_tasks: matches!(evaluation_mode, GeneratedEvaluationMode::NewtonLimited),
             voltage_limiting: true,
             evaluation_error: std::cell::Cell::new(None),
+            periodic: None,
         }
     }
 
@@ -1302,6 +1307,20 @@ impl<'a> GeneratedEvalContext<'a> {
     pub fn with_voltage_limiting(mut self, enabled: bool) -> Self {
         self.voltage_limiting = enabled;
         self
+    }
+
+    /// Evaluate the model's carried operator sites at the outputs `frame`
+    /// supplies, recording their inputs there (see [`GeneratedPeriodicFrame`]).
+    #[inline]
+    pub fn with_periodic_frame(mut self, frame: Option<&'a GeneratedPeriodicFrame>) -> Self {
+        self.periodic = frame;
+        self
+    }
+
+    /// The periodic frame this evaluation runs under, if any.
+    #[inline]
+    pub fn periodic_frame(&self) -> Option<&'a GeneratedPeriodicFrame> {
+        self.periodic
     }
 
     #[inline]

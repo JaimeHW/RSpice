@@ -3958,6 +3958,7 @@ impl Instance {
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const HB_ADMISSIBLE: bool = false;
 	pub const HB_REFUSAL: Option<&'static str> = Some("`ETA0CV_t`, `UACV_t`, `UDCV_t`, `qis_cv`, `qid_cv`, `qia_cv`, `qia2_cv`, `dqi_cv`, `u0_cv`, `ETA0CV_i`, `U0CV_i`, `UACV_i`, `UCCV_i`, `UDCV_i`, `UA1CV_i`, `UA2CV_i`, `UC1CV_i`, `UD1CV_i`, `UD2CV_i`, `UTECV_i`, `UTE1CV_i` and `UTLCV_i` are read before they are assigned, so they keep their values from the last accepted time point, which no harmonic-balance spectrum carries");
+	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "982766450bfee0b78baeaba18a8f5163defd9bfa4e27abb0ec1901945c36274b";

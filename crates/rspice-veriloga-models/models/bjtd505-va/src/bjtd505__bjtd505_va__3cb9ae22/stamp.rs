@@ -3160,8 +3160,8 @@ impl Instance {
 		BFM=BFR;
 		}
 		let BFT=C+ BFS;
-		let BFU=ddt(8, BFS);
-		let BFV=ddt_derivative(8,BFU,1f64);
+		let BFU=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, BFS, 0.0), None => ddt(8, BFS) };
+		let BFV=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, 1f64, 0.0, 10u32), None => ddt_derivative(8,BFU,1f64) };
 		let BFW=BFM* BFU;
 		let BFX=L5([BFW[0],BFW[1],BFW[2],BFW[3],0.0])+ L5([0.0,0.0,0.0,0.0,(BFV* BFL)]);
 		let BFY=BFL;

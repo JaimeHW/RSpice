@@ -1011,8 +1011,9 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([185, 126, 176, 200, 121, 8, 73, 160, 7, 178, 194, 217, 255, 203, 131, 187, 129, 108, 150, 214, 172, 191, 134, 139, 67, 54, 244, 251, 177, 13, 3, 199]);
 	pub const EVENT_STATE_COUNT: usize = 22;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
-	pub const HB_ADMISSIBLE: bool = false;
-	pub const HB_REFUSAL: Option<&'static str> = Some("it uses `ddt` on something other than a charge it contributes, so its residual is not F(x) + dQ(x)/dt");
+	pub const HB_ADMISSIBLE: bool = true;
+	pub const HB_REFUSAL: Option<&'static str> = None;
+	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[rspice_veriloga_runtime::GeneratedPeriodicKind::Derivative, rspice_veriloga_runtime::GeneratedPeriodicKind::Derivative, rspice_veriloga_runtime::GeneratedPeriodicKind::Derivative, rspice_veriloga_runtime::GeneratedPeriodicKind::Derivative, rspice_veriloga_runtime::GeneratedPeriodicKind::Derivative];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "fe498fe3f53c7cc7ac75a2e27700ce0a9d5d35ce550c31873dbea7f13ce95994";

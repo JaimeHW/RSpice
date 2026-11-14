@@ -235,6 +235,47 @@ pub fn structural_guards(
     guards
 }
 
+/// Per value: whether a branch whose condition can change once the
+/// temperature is fixed (with time, bias or the Newton iterate) decides
+/// whether the value is computed at all.
+///
+/// The conditions are classified by what they read and the guards they sit
+/// under alone, before a loop or projection is raised for staging: those
+/// raisings make a value as volatile as its neighbours in the stage split,
+/// not dependent on what they read.
+#[cfg(feature = "rust-codegen")]
+pub(crate) fn computed_under_varying_condition(
+    function: &CfgFunction,
+    parameter_scopes: &[ParameterScope],
+) -> Vec<bool> {
+    let direct = control_dependence(function);
+    let block_of = block_of_value(function);
+    let incoming = incoming_values(function);
+    let classes = classify(function, parameter_scopes, &direct, &block_of, &incoming);
+    let control = transitive_control_dependence(&direct);
+    let varying: Vec<bool> = function
+        .blocks
+        .iter()
+        .map(|block| {
+            matches!(
+                block.terminator,
+                CfgTerminator::Branch { condition, .. }
+                    if classes.class(condition) > InvalidationClass::Temperature
+            )
+        })
+        .collect();
+    block_of
+        .into_iter()
+        .map(|block| {
+            block.is_some_and(|block| {
+                control[usize::from(block)]
+                    .iter()
+                    .any(|source| varying[usize::from(*source)])
+            })
+        })
+        .collect()
+}
+
 fn transitive_control_dependence(direct: &[Vec<BlockId>]) -> Vec<Vec<BlockId>> {
     direct
         .iter()

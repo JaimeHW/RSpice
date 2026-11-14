@@ -10871,8 +10871,8 @@ impl Instance {
 		FFD=D;
 		FFE=DAQ;
 		}
-		let FFF=ddt(1, FCN);
-		let FFG=L6(std::array::from_fn(|i| ddt_derivative(1,FFF,(FCX)[i])));
+		let FFF=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, FCN, 0.0), None => ddt(1, FCN) };
+		let FFG=L6(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, (FCX)[i], 0.0, [3u32, 5u32, 6u32, 7u32, 8u32, 9u32][i]), None => ddt_derivative(1,FFF,(FCX)[i]) }));
 		let FFH=FFG* EJ;
 		let FFI=(FCX* (ctx.checked_derivative_value(FFF, 1f64)))* EJ;
 		let FFJ=(ctx.checked_derivative_value(FDZ, FFD))+ (-FFF);

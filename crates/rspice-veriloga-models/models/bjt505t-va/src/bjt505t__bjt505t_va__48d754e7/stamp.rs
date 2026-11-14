@@ -3687,8 +3687,8 @@ impl Instance {
 		}
 		let BLI=A+ BLH;
 		let BLK=A+ BLJ;
-		let BLN=ddt(10, BLJ);
-		let CZT=ddt_derivative(10,BLN,1f64);
+		let BLN=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, BLJ, 0.0), None => ddt(10, BLJ) };
+		let CZT=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, 1f64, 0.0, 12u32), None => ddt_derivative(10,BLN,1f64) };
 		let CZU=BWB* BLN;
 		let CZV=L6([CZU[0],CZU[1],CZU[2],CZU[3],CZU[4],0.0])+ L6([0.0,0.0,0.0,0.0,0.0,(CZT* BLL)]);
 		let BQI=BLL;

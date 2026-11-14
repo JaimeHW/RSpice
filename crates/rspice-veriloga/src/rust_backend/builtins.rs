@@ -3077,6 +3077,28 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n\n");
+    // The operator sites harmonic balance carries as unknowns of their own.
+    out.push_str(
+        "    pub fn harmonic_balance_periodic_sites(&self) -> &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str(
+            "        unreachable!(\"empty generated Verilog-A registry has no model capability\")\n",
+        );
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(_) => {}::Instance::HB_PERIODIC_SITES,",
+                devices[index].folder_name,
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str(
         "    pub fn transient_step_bound(&self) -> Result<Option<crate::Value>, String> {\n",
     );

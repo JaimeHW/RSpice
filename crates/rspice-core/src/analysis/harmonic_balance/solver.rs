@@ -32,6 +32,23 @@ mod result_builder;
 #[cfg(feature = "veriloga")]
 mod veriloga;
 
+/// The transfer a Verilog-A operator site carried as unknowns of its own
+/// applies at each harmonic.
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+#[derive(Debug, Clone)]
+pub(crate) enum HbOperatorTransfer {
+    /// `idt`: `1/(jω)`, its DC output fixed by its initial condition.
+    Integral,
+    /// A rational `laplace_*` filter: `H(jω)`.
+    #[cfg(feature = "veriloga")]
+    Laplace(Box<rspice_veriloga::laplace::StateSpaceFilter>),
+    /// `absdelay` by a fixed delay `τ`: `e^{-jωτ}`.
+    #[cfg(feature = "veriloga")]
+    Delay(Value),
+    /// A `ddt` that is not the derivative of a contributed charge: `jω`.
+    Derivative,
+}
+
 #[cfg(feature = "veriloga-builtins-base")]
 use generated_veriloga::HbGeneratedDevice;
 #[cfg(feature = "veriloga")]
@@ -928,12 +945,12 @@ pub(crate) enum ExactPeriodicNetwork {
     /// A Verilog-A operator with state carried as two unknowns of its own:
     /// the output row holds `y - T(jω) u = 0`, where `u` is the operator's
     /// input, which the module's sampler constrains, and `T` its transfer.
-    #[cfg(feature = "veriloga")]
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
     VerilogAOperator {
         name: String,
         input: usize,
         output: usize,
-        transfer: veriloga::HbOperatorTransfer,
+        transfer: HbOperatorTransfer,
     },
     LosslessCpl {
         name: String,

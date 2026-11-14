@@ -1717,8 +1717,8 @@ impl Instance {
 		ABW=AM;
 		ABX=ABV;
 		}
-		let ABY=ddt(3, RZ);
-		let ABZ=L4(std::array::from_fn(|i| ddt_derivative(3,ABY,(SD)[i])));
+		let ABY=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, RZ, 0.0), None => ddt(3, RZ) };
+		let ABZ=L4(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, (SD)[i], 0.0, [3u32, 5u32, 8u32, 11u32][i]), None => ddt_derivative(3,ABY,(SD)[i]) }));
 		let ACA=(ctx.checked_derivative_value(ZU, ABW))+ ABY;
 		let ACB=L4([ABX[0],0.0,ABX[1],ABX[2]])+ ABZ;
 		let ACD=ACC+ (SD* (ctx.checked_derivative_value(ABY, 1f64)));
@@ -1749,8 +1749,8 @@ impl Instance {
 		}
 		let ACH=R* SB;
 		let ACI=(SF* P)+ L4([0.0,0.0,ACH[0],ACH[1]]);
-		let ACJ=ddt(5, (SB* P));
-		let ACK=L4(std::array::from_fn(|i| ddt_derivative(5,ACJ,(ACI)[i])));
+		let ACJ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, (SB* P), 0.0), None => ddt(5, (SB* P)) };
+		let ACK=L4(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(1, (ACI)[i], 0.0, [3u32, 5u32, 8u32, 11u32][i]), None => ddt_derivative(5,ACJ,(ACI)[i]) }));
 		let ACL=(ctx.checked_derivative_value(ZU, ACF))+ ACJ;
 		let ACM=L4([ACG[0],0.0,ACG[1],ACG[2]])+ ACK;
 		let ACN=ACC+ (ACI* (ctx.checked_derivative_value(ACJ, 1f64)));

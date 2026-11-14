@@ -3374,8 +3374,8 @@ impl Instance {
 		}
 		let BFH=A+ BFG;
 		let BFJ=A+ BFI;
-		let BFM=ddt(9, BFI);
-		let CPY=ddt_derivative(9,BFM,1f64);
+		let BFM=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, BFI, 0.0), None => ddt(9, BFI) };
+		let CPY=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, 1f64, 0.0, 11u32), None => ddt_derivative(9,BFM,1f64) };
 		let CPZ=BPF* BFM;
 		let CQA=L6([CPZ[0],CPZ[1],CPZ[2],CPZ[3],CPZ[4],0.0])+ L6([0.0,0.0,0.0,0.0,0.0,(CPY* BFK)]);
 		let BJW=BFK;

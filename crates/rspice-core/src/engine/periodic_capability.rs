@@ -350,17 +350,18 @@ const RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR: &str = "an analog body without `absd
      with no rational transfer function, and a `zi_*` filter or an `idtmod` modulus is \
      discrete or wrapping state with no finite `G + sC` realization";
 /// The condition behind a runtime Verilog-A module's harmonic-balance
-/// residual: the static and companion stamps sample `F` and `Q` exactly only
-/// when every `ddt` is the derivative of a contributed charge and no other
-/// operator keeps state.
+/// residual: the static and companion stamps sample `F` and `Q` exactly once
+/// every `ddt` that is not the derivative of a contributed charge, and every
+/// other operator that keeps state, is carried as unknowns of its own.
 const RUNTIME_VERILOGA_HB_RESIDUAL: &str = "an analog body of memoryless equations and `ddt` of the charges it contributes, \
-     F(x) + dQ(x)/dt, with no other operator that keeps state and no variable kept between \
-     time points";
+     F(x) + dQ(x)/dt, with every other `ddt` and every `idt`, `laplace_*` and `absdelay` \
+     carried as an unknown of its own, no `$abstime`, no event operator and no variable kept \
+     between time points";
 /// The condition behind a generated compact model's harmonic-balance
 /// residual, which its generator decides once per model.
 const GENERATED_VERILOGA_HB_RESIDUAL: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \
-     charges it contributes, F(x) + dQ(x)/dt, with no operator that keeps state in time and \
-     no variable the next evaluation reads back";
+     charges it contributes, F(x) + dQ(x)/dt, with every other `ddt` carried as an unknown \
+     of its own, no `idt`, no event operator and no variable the next evaluation reads back";
 /// One reason covers all six contracts for a mixed Verilog-AMS module, so it
 /// is stated once instead of six near-identical times.
 const MIXED_SIGNAL_INTERLEAVE: &str = "periodic steady state with running discrete state (P7): a mixed Verilog-AMS module's \

@@ -652,7 +652,7 @@ impl HbSolver {
         }
         #[cfg(feature = "veriloga-builtins-base")]
         for device in &mut self.generated_nonlinear_devices {
-            if selected.is_some_and(|rows| !device.rows().iter().any(|&row| rows[row])) {
+            if selected.is_some_and(|rows| !device.stamped_rows().iter().any(|&row| rows[row])) {
                 continue;
             }
             device.stamp_periodic_fq(solution, f, q)?;

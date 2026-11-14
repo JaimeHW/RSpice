@@ -1067,8 +1067,8 @@ impl Instance {
 		let BC=(BA- BB)/ 10f64;
 		let MEU=(((L2([0.0,KMD])- L2([KME,0.0]))/ 10f64)* (rspice_limited_exp_derivative(BC)))* AZ;
 		let BD=A+ (AZ* ((rspice_limited_exp(BC))- B));
-		let BF=ddt(0, BB);
-		let MEV=ddt_derivative(0,BF,KME);
+		let BF=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, BB, 0.0), None => ddt(0, BB) };
+		let MEV=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, KME, 0.0, 5u32), None => ddt_derivative(0,BF,KME) };
 		let TKI=KME* (ctx.checked_derivative_value(BF, 1f64));
 		let MEW=(MEV* BE)* MAK;
 		let VCU=(TKI* BE)* MAK;
@@ -1281,8 +1281,8 @@ impl Instance {
 		CS=A;
 		KPR=MED;
 		}
-		let CU=ddt(1, BB);
-		let MEE=ddt_derivative(1,CU,KME);
+		let CU=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, BB, 0.0), None => ddt(1, BB) };
+		let MEE=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(1, KME, 0.0, 5u32), None => ddt_derivative(1,CU,KME) };
 		let TJZ=KME* (ctx.checked_derivative_value(CU, 1f64));
 		let CV=(ctx.checked_derivative_value(CQ, CS))+ (-(CT* CU));
 		let TKA=L3([0.0,0.0,((TJZ* CT)* MAK)]);
@@ -1311,8 +1311,8 @@ impl Instance {
 		DC=A;
 		KPT=MEJ;
 		}
-		let DE=ddt(2, BA);
-		let MEK=ddt_derivative(2,DE,KMD);
+		let DE=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(2, BA, 0.0), None => ddt(2, BA) };
+		let MEK=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(2, KMD, 0.0, 6u32), None => ddt_derivative(2,DE,KMD) };
 		let TKC=KMD* (ctx.checked_derivative_value(DE, 1f64));
 		let DF=(ctx.checked_derivative_value(DA, DC))+ (-(DD* DE));
 		let TKD=L3([0.0,0.0,((TKC* DD)* MAK)]);
@@ -1493,8 +1493,8 @@ impl Instance {
 		ES=A;
 		KQM=MDO;
 		}
-		let ET=ddt(3, BB);
-		let MDP=ddt_derivative(3,ET,KME);
+		let ET=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(3, BB, 0.0), None => ddt(3, BB) };
+		let MDP=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(3, KME, 0.0, 5u32), None => ddt_derivative(3,ET,KME) };
 		let TJT=KME* (ctx.checked_derivative_value(ET, 1f64));
 		let MDQ=MDK* ET;
 		let TJU=L3([0.0,0.0,(TJT* EL)]);
@@ -1624,8 +1624,8 @@ impl Instance {
 		let FT=FO/ FS;
 		let MCB=(MCA).product_sum_div(KLV,(((((MCA/ FP)* FQ)* FM)).product_div((-FS),FR)),(-FT),FS);
 		let FU=A+ FT;
-		let FV=ddt(4, FN);
-		let MCC=ddt_derivative(4,FV,KMG);
+		let FV=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(4, FN, 0.0), None => ddt(4, FN) };
+		let MCC=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(4, KMG, 0.0, 12u32), None => ddt_derivative(4,FV,KMG) };
 		let TJP=KMG* (ctx.checked_derivative_value(FV, 1f64));
 		let TJQ=(TJP* BE)+ VCS;
 		let MCD=((MCC* BE)+ (KMG* FW))* MAK;
@@ -1643,8 +1643,8 @@ impl Instance {
 		let GI=GD/ GH;
 		let MCG=(MCF).product_sum_div(KLV,(((((MCF/ GE)* GF)* GB)).product_div((-GH),GG)),(-GI),GH);
 		let GJ=A+ GI;
-		let GL=ddt(5, GC);
-		let MCH=ddt_derivative(5,GL,KMH);
+		let GL=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(5, GC, 0.0), None => ddt(5, GC) };
+		let MCH=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(5, KMH, 0.0, 14u32), None => ddt_derivative(5,GL,KMH) };
 		let TJR=KMH* (ctx.checked_derivative_value(GL, 1f64));
 		let TJS=(TJR* GK)+ VCT;
 		let MCI=((MCH* GK)+ (KMH* FW))* MAK;
@@ -1817,8 +1817,8 @@ impl Instance {
 		IW=A;
 		KRM=LZY;
 		}
-		let IX=ddt(6, BB);
-		let MAQ=ddt_derivative(6,IX,KME);
+		let IX=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(6, BB, 0.0), None => ddt(6, BB) };
+		let MAQ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(6, KME, 0.0, 5u32), None => ddt_derivative(6,IX,KME) };
 		let TJJ=KME* (ctx.checked_derivative_value(IX, 1f64));
 		let IY=(ctx.checked_derivative_value(IU, IW))+ (-(IJ* IX));
 		let TJK=L5([0.0,0.0,0.0,0.0,((TJJ* IJ)* MAK)]);
@@ -1867,8 +1867,8 @@ impl Instance {
 		JX=A;
 		KRO=LZZ;
 		}
-		let JY=ddt(7, BA);
-		let MBC=ddt_derivative(7,JY,KMD);
+		let JY=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(7, BA, 0.0), None => ddt(7, BA) };
+		let MBC=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(7, KMD, 0.0, 6u32), None => ddt_derivative(7,JY,KMD) };
 		let TJM=KMD* (ctx.checked_derivative_value(JY, 1f64));
 		let JZ=(ctx.checked_derivative_value(JV, JX))+ (-(JK* JY));
 		let TJN=L5([0.0,0.0,0.0,0.0,((TJM* JK)* MAK)]);
@@ -15945,8 +15945,8 @@ impl Instance {
 		IXH=A;
 		LOH=MHK;
 		}
-		let IXI=ddt(25, IWD);
-		let QPZ=L7(std::array::from_fn(|i| ddt_derivative(25,IXI,(KVD)[i])));
+		let IXI=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(8, IWD, 0.0), None => ddt(25, IWD) };
+		let QPZ=L7(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(8, (KVD)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 15u32][i]), None => ddt_derivative(25,IXI,(KVD)[i]) }));
 		let TKW=KVD* (ctx.checked_derivative_value(IXI, 1f64));
 		let QQA=QPZ* IUY;
 		let VDW=TKW* IUY;
@@ -16348,8 +16348,8 @@ impl Instance {
 		IZF=A;
 		LPL=MHK;
 		}
-		let IZG=ddt(37, IYD);
-		let QRD=L7(std::array::from_fn(|i| ddt_derivative(37,IZG,(KXJ)[i])));
+		let IZG=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(9, IYD, 0.0), None => ddt(37, IYD) };
+		let QRD=L7(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(9, (KXJ)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 19u32][i]), None => ddt_derivative(37,IZG,(KXJ)[i]) }));
 		let TLM=KXJ* (ctx.checked_derivative_value(IZG, 1f64));
 		let QRE=(QRD* IUY)* MAK;
 		let VEK=(TLM* IUY)* MAK;
@@ -16386,8 +16386,8 @@ impl Instance {
 		LPP=NJN;
 		TBF=VEC;
 		}
-		let IZN=ddt(39, IYK);
-		let QRN=L7(std::array::from_fn(|i| ddt_derivative(39,IZN,(KXK)[i])));
+		let IZN=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(10, IYK, 0.0), None => ddt(39, IYK) };
+		let QRN=L7(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(10, (KXK)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 19u32][i]), None => ddt_derivative(39,IZN,(KXK)[i]) }));
 		let TLU=KXK* (ctx.checked_derivative_value(IZN, 1f64));
 		let QRO=(QRN* IUY)* IWQ;
 		let VEN=(TLU* IUY)* IWQ;
@@ -16417,8 +16417,8 @@ impl Instance {
 		LPQ=NJN;
 		TBG=VEC;
 		}
-		let IZR=ddt(40, IYK);
-		let QRG=L7(std::array::from_fn(|i| ddt_derivative(40,IZR,(KXK)[i])));
+		let IZR=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(11, IYK, 0.0), None => ddt(40, IYK) };
+		let QRG=L7(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(11, (KXK)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 19u32][i]), None => ddt_derivative(40,IZR,(KXK)[i]) }));
 		let TLP=KXK* (ctx.checked_derivative_value(IZR, 1f64));
 		let QRH=QRG* IUY;
 		let VEO=TLP* IUY;
@@ -16778,8 +16778,8 @@ impl Instance {
 		LQU=MXK;
 		TCJ=VDO;
 		}
-		let JBJ=ddt(49, JAE);
-		let QSJ=L8(std::array::from_fn(|i| ddt_derivative(49,JBJ,(KZK)[i])));
+		let JBJ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(12, JAE, 0.0), None => ddt(49, JAE) };
+		let QSJ=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(12, (KZK)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 15u32, 16u32][i]), None => ddt_derivative(49,JBJ,(KZK)[i]) }));
 		let TMH=KZK* (ctx.checked_derivative_value(JBJ, 1f64));
 		let QSK=QSJ* IUY;
 		let VEY=TMH* IUY;
@@ -17181,8 +17181,8 @@ impl Instance {
 		LRX=NJN;
 		TDM=VEC;
 		}
-		let JDG=ddt(61, JCE);
-		let QTN=L8(std::array::from_fn(|i| ddt_derivative(61,JDG,(LBP)[i])));
+		let JDG=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(13, JCE, 0.0), None => ddt(61, JCE) };
+		let QTN=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(13, (LBP)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 19u32, 20u32][i]), None => ddt_derivative(61,JDG,(LBP)[i]) }));
 		let TMZ=LBP* (ctx.checked_derivative_value(JDG, 1f64));
 		let QTO=(QTN* IUY)* MAK;
 		let VFL=(TMZ* IUY)* MAK;
@@ -17219,8 +17219,8 @@ impl Instance {
 		LSB=OIK;
 		TDQ=VFM;
 		}
-		let JDN=ddt(63, JCL);
-		let QTX=L8(std::array::from_fn(|i| ddt_derivative(63,JDN,(LBQ)[i])));
+		let JDN=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(14, JCL, 0.0), None => ddt(63, JCL) };
+		let QTX=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(14, (LBQ)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 19u32, 20u32][i]), None => ddt_derivative(63,JDN,(LBQ)[i]) }));
 		let TNH=LBQ* (ctx.checked_derivative_value(JDN, 1f64));
 		let QTY=(QTX* IUY)* JAQ;
 		let VFP=(TNH* IUY)* JAQ;
@@ -17250,8 +17250,8 @@ impl Instance {
 		LSC=OIK;
 		TDR=VFM;
 		}
-		let JDR=ddt(64, JCL);
-		let QTQ=L8(std::array::from_fn(|i| ddt_derivative(64,JDR,(LBQ)[i])));
+		let JDR=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(15, JCL, 0.0), None => ddt(64, JCL) };
+		let QTQ=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(15, (LBQ)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 19u32, 20u32][i]), None => ddt_derivative(64,JDR,(LBQ)[i]) }));
 		let TNC=LBQ* (ctx.checked_derivative_value(JDR, 1f64));
 		let QTR=QTQ* IUY;
 		let VFQ=TNC* IUY;
@@ -17610,8 +17610,8 @@ impl Instance {
 		LTG=NVW;
 		TEU=VEQ;
 		}
-		let JFH=ddt(73, JEE);
-		let QUS=L8(std::array::from_fn(|i| ddt_derivative(73,JFH,(LDS)[i])));
+		let JFH=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(16, JEE, 0.0), None => ddt(73, JEE) };
+		let QUS=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(16, (LDS)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 16u32, 17u32][i]), None => ddt_derivative(73,JFH,(LDS)[i]) }));
 		let TNT=LDS* (ctx.checked_derivative_value(JFH, 1f64));
 		let QUT=QUS* IUY;
 		let VGA=TNT* IUY;
@@ -18011,8 +18011,8 @@ impl Instance {
 		LUJ=OIK;
 		TFX=VFM;
 		}
-		let JHC=ddt(85, JGA);
-		let QVW=L8(std::array::from_fn(|i| ddt_derivative(85,JHC,(LFX)[i])));
+		let JHC=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(17, JGA, 0.0), None => ddt(85, JGA) };
+		let QVW=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(17, (LFX)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 20u32, 21u32][i]), None => ddt_derivative(85,JHC,(LFX)[i]) }));
 		let TOL=LFX* (ctx.checked_derivative_value(JHC, 1f64));
 		let QVX=(QVW* IUY)* MAK;
 		let VGO=(TOL* IUY)* MAK;
@@ -18049,8 +18049,8 @@ impl Instance {
 		LUN=QVZ;
 		TGB=VGP;
 		}
-		let JHJ=ddt(87, JGH);
-		let QWH=L8(std::array::from_fn(|i| ddt_derivative(87,JHJ,(LFY)[i])));
+		let JHJ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(18, JGH, 0.0), None => ddt(87, JGH) };
+		let QWH=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(18, (LFY)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 20u32, 21u32][i]), None => ddt_derivative(87,JHJ,(LFY)[i]) }));
 		let TOT=LFY* (ctx.checked_derivative_value(JHJ, 1f64));
 		let QWI=(QWH* IUY)* JER;
 		let VGS=(TOT* IUY)* JER;
@@ -18080,8 +18080,8 @@ impl Instance {
 		LUO=QVZ;
 		TGC=VGP;
 		}
-		let JHN=ddt(88, JGH);
-		let QWA=L8(std::array::from_fn(|i| ddt_derivative(88,JHN,(LFY)[i])));
+		let JHN=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(19, JGH, 0.0), None => ddt(88, JGH) };
+		let QWA=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(19, (LFY)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 20u32, 21u32][i]), None => ddt_derivative(88,JHN,(LFY)[i]) }));
 		let TOO=LFY* (ctx.checked_derivative_value(JHN, 1f64));
 		let QWB=QWA* IUY;
 		let VGT=TOO* IUY;
@@ -18440,8 +18440,8 @@ impl Instance {
 		LVS=QXC;
 		THF=VGB;
 		}
-		let JJD=ddt(97, JIA);
-		let QXD=L8(std::array::from_fn(|i| ddt_derivative(97,JJD,(LIA)[i])));
+		let JJD=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(20, JIA, 0.0), None => ddt(97, JIA) };
+		let QXD=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(20, (LIA)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 17u32, 18u32][i]), None => ddt_derivative(97,JJD,(LIA)[i]) }));
 		let TPF=LIA* (ctx.checked_derivative_value(JJD, 1f64));
 		let QXE=QXD* IUY;
 		let VHD=TPF* IUY;
@@ -18849,8 +18849,8 @@ impl Instance {
 		LWU=QVZ;
 		TIF=VGP;
 		}
-		let JLI=ddt(109, JJW);
-		let QYH=L8(std::array::from_fn(|i| ddt_derivative(109,JLI,(LKF)[i])));
+		let JLI=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(21, JJW, 0.0), None => ddt(109, JJW) };
+		let QYH=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(21, (LKF)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 21u32, 22u32][i]), None => ddt_derivative(109,JLI,(LKF)[i]) }));
 		let TPX=LKF* (ctx.checked_derivative_value(JLI, 1f64));
 		let QYI=(QYH* IUY)* MAK;
 		let VHW=(TPX* IUY)* MAK;
@@ -18887,8 +18887,8 @@ impl Instance {
 		LWY=QYK;
 		TIJ=VHX;
 		}
-		let JLP=ddt(111, JKD);
-		let QYS=L8(std::array::from_fn(|i| ddt_derivative(111,JLP,(LKG)[i])));
+		let JLP=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(22, JKD, 0.0), None => ddt(111, JKD) };
+		let QYS=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(22, (LKG)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 21u32, 22u32][i]), None => ddt_derivative(111,JLP,(LKG)[i]) }));
 		let TQF=LKG* (ctx.checked_derivative_value(JLP, 1f64));
 		let QYT=(QYS* IUY)* JIN;
 		let VIA=(TQF* IUY)* JIN;
@@ -18918,8 +18918,8 @@ impl Instance {
 		LWZ=QYK;
 		TIK=VHX;
 		}
-		let JLT=ddt(112, JKD);
-		let QYL=L8(std::array::from_fn(|i| ddt_derivative(112,JLT,(LKG)[i])));
+		let JLT=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(23, JKD, 0.0), None => ddt(112, JKD) };
+		let QYL=L8(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(23, (LKG)[i], 0.0, [2u32, 3u32, 4u32, 7u32, 8u32, 9u32, 21u32, 22u32][i]), None => ddt_derivative(112,JLT,(LKG)[i]) }));
 		let TQA=LKG* (ctx.checked_derivative_value(JLT, 1f64));
 		let QYM=QYL* IUY;
 		let VIB=TQA* IUY;

@@ -164,17 +164,50 @@ impl HbSolver {
         device: crate::device::veriloga_builtins::BuiltinVerilogAInstance,
         simparams: rspice_veriloga_runtime::GeneratedSimulationParameters,
     ) -> Result<(), HbError> {
+        // Each carried operator site's input and output are unknowns of
+        // their own; a network ties them at every harmonic.
+        let mut ports = Vec::new();
+        for (index, kind) in device.harmonic_balance_periodic_sites().iter().enumerate() {
+            let mut rows = [0; 2];
+            for (row, role) in rows.iter_mut().zip(["input", "output"]) {
+                let branch_ordinal = self.exact_mna_branches().len() + 1;
+                *row = self.num_nodes + self.exact_mna_branches().len();
+                self.try_push_periodic_mna_branch(
+                    ExactMnaBranch::AuxiliaryState {
+                        branch_ordinal,
+                        canonical: false,
+                    },
+                    &format!("{}:{kind:?}{index}:{role}", device.instance_name),
+                )?;
+            }
+            ports.push((rows[0], rows[1]));
+        }
+        let name = device.instance_name.clone();
         let unknowns = self.num_nodes + self.exact_mna_branches().len();
-        let device = HbGeneratedDevice::try_new(
+        let (device, transfers) = HbGeneratedDevice::try_new(
             device,
             self.config.fundamental_freq,
             self.num_nodes,
             unknowns,
             simparams,
+            &ports,
         )?;
+        for (index, (input, output, transfer)) in transfers.into_iter().enumerate() {
+            self.try_add_exact_periodic_network(ExactPeriodicNetwork::VerilogAOperator {
+                name: format!("{name}:operator{index}"),
+                input,
+                output,
+                transfer,
+            })?;
+        }
         let num_nodes = self.num_nodes;
-        self.generated_step_nodes
-            .extend(device.rows().iter().copied().filter(|&row| row < num_nodes));
+        self.generated_step_nodes.extend(
+            device
+                .stamped_rows()
+                .iter()
+                .copied()
+                .filter(|&row| row < num_nodes),
+        );
         self.generated_step_nodes.sort_unstable();
         self.generated_step_nodes.dedup();
         self.generated_nonlinear_devices.push(device);

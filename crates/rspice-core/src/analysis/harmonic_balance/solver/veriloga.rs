@@ -69,18 +69,7 @@ const TRANSIENT_ANALYSIS: u8 = 2;
 /// entries `(row, column, dF/dx)`.
 type Probe = (Vec<Value>, Vec<(usize, usize, Value)>);
 
-/// The transfer an operator site applies at each harmonic.
-#[derive(Debug, Clone)]
-pub(crate) enum HbOperatorTransfer {
-    /// `idt`: `1/(jω)`, its DC output fixed by its initial condition.
-    Integral,
-    /// A rational `laplace_*` filter: `H(jω)`.
-    Laplace(Box<rspice_veriloga::laplace::StateSpaceFilter>),
-    /// `absdelay` by a fixed delay `τ`: `e^{-jωτ}`.
-    Delay(Value),
-    /// A `ddt` that is not the derivative of a contributed charge: `jω`.
-    Derivative,
-}
+use super::HbOperatorTransfer;
 
 /// One operator site's unknowns and what fixes them.
 #[derive(Debug, Clone)]

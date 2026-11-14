@@ -1182,6 +1182,24 @@ impl Engine {
             )
             .saturating_mul(3)
             .saturating_add(Self::hb_veriloga_operator_auxiliary_count(circuit))
+            .saturating_add(Self::hb_generated_operator_auxiliary_count(circuit))
+    }
+
+    /// Each operator site a generated model carries as unknowns of its own
+    /// has its input and its output as periodic unknowns.
+    #[cfg(feature = "veriloga-builtins-base")]
+    fn hb_generated_operator_auxiliary_count(circuit: &CircuitData) -> usize {
+        circuit
+            .generated_veriloga_devices()
+            .iter()
+            .map(|device| device.harmonic_balance_periodic_sites().len())
+            .fold(0usize, usize::saturating_add)
+            .saturating_mul(2)
+    }
+
+    #[cfg(not(feature = "veriloga-builtins-base"))]
+    fn hb_generated_operator_auxiliary_count(_circuit: &CircuitData) -> usize {
+        0
     }
 
     /// Each Verilog-A operator site with state carries its input and its
