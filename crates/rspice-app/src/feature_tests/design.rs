@@ -13,6 +13,7 @@ mod canvas_keyboard;
 mod cell_deletion_transactions;
 mod connectivity_manager_drawn;
 mod context_menu;
+mod create_model_bound_symbol;
 mod create_model_bound_symbol_drawn;
 mod current_finding_marks;
 mod design_checks;

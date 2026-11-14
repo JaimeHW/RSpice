@@ -1,10 +1,11 @@
 //! Creating a model-bound symbol, drawn through a whole application.
 
+use crate::feature_tests::design::create_model_bound_symbol::{
+    open_create_model_bound_symbol_dialog, state_with_bound_mos_model,
+};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::create_model_bound_symbol::state::*;
-use crate::workbench::app::dialogs::create_model_bound_symbol::tests::{
-    node_bounds, open_create_model_bound_symbol_dialog, render, state_with_bound_mos_model,
-};
+use crate::workbench::app::dialogs::create_model_bound_symbol::tests::{node_bounds, render};
 use egui::{Context, Rect, vec2};
 
 fn render_accessibility_frame(
