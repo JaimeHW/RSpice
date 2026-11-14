@@ -5,9 +5,6 @@
 //! it, drawn dimmed through the instance's transform and taking no input.
 //! Leaving with unsaved edits asks whether to save them first.
 
-#[cfg(test)]
-mod tests;
-
 use crate::state::{CellViewRef, ComponentType, ViewType};
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;

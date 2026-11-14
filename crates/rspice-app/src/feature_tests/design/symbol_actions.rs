@@ -1,8 +1,8 @@
 //! The symbol editor's actions run through a whole application.
 
+use crate::feature_tests::design::symbol_actions_drawn::open_symbol;
 use crate::state::Point;
 use crate::state::{CellViewRef, SymbolEditorMetadata, SymbolShape};
-use crate::workbench::app::actions::symbol::tests::open_symbol;
 use crate::workbench::app::actions::symbol::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;

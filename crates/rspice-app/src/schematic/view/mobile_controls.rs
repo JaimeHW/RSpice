@@ -58,7 +58,7 @@ const fn product_command(action: MobileCanvasAction) -> Option<CommandKey> {
 
 /// Whether a route, a move, a placement or a box is live: what Esc would
 /// cancel on the canvas.
-fn operation_live(state: &CanvasFacts<'_>) -> bool {
+pub(crate) fn operation_live(state: &CanvasFacts<'_>) -> bool {
     let editor = &state.model.schematic.session.editor;
     state.model.schematic.canvas_settings_change_blocked()
         || editor.tool != Tool::Select

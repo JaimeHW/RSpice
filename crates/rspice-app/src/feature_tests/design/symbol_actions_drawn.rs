@@ -1,11 +1,14 @@
-//! Commands publish through the app's symbol transaction owner and reject stale input.
+//! The symbol actions drawn through a whole application.
 
-use super::*;
+use crate::state::Point;
 use crate::state::{
     Cell, CellViewRef, Library, PortDirection, SymbolDocument, SymbolPin, SymbolShape, View,
     ViewType,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::app::actions::symbol::*;
+use rspice_schematic_editor::symbol_editor::commands::SymbolEditAction;
+use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
 pub(crate) fn open_symbol() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();

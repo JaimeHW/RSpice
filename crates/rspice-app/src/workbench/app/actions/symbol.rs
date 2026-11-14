@@ -310,6 +310,3 @@ fn apply_current_symbol_edit_request(
         }
     }
 }
-
-#[cfg(test)]
-pub(crate) mod tests;
