@@ -7061,12 +7061,18 @@ impl Engine {
         // State machines read nodes any element may create, so they are built
         // once every other element is.
         let mut machines = Vec::new();
-        circuit.resistors.reserve(
+        // A diode's series resistance is a resistor of its own, so a column
+        // sized for the authored resistors alone is copied again halfway.
+        let (resistor_count, diode_count) =
             flat_elements
                 .iter()
-                .filter(|element| matches!(element.kind, ElementKind::Resistor { .. }))
-                .count(),
-        );
+                .fold((0, 0), |(resistors, diodes), element| match element.kind {
+                    ElementKind::Resistor { .. } => (resistors + 1, diodes),
+                    ElementKind::Diode { .. } => (resistors, diodes + 1),
+                    _ => (resistors, diodes),
+                });
+        circuit.resistors.reserve(resistor_count + diode_count);
+        circuit.diodes.devices.reserve(diode_count);
         let mut diode_model_setups: HashMap<*const crate::netlist::ModelDef, DiodeModelSetup> =
             HashMap::new();
         for (element_index, element) in flat_elements.iter().enumerate() {
