@@ -1,0 +1,79 @@
+//! Create symbol from schematic, carried out through whole frames of the
+//! application on a project that has just been created.
+
+use egui::accesskit::Role;
+
+use crate::state::{CellViewRef, ViewType};
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::project_transactions::open_new_project_dialog;
+use crate::workbench::project::commands::ProjectCommand;
+use crate::workbench::state::Workspace;
+
+use super::super::replay::{Control, Replay};
+
+/// A project just created under the defaults New project offers, holding
+/// only its top cell's schematic, with the Design workspace in front.
+fn new_project() -> Replay {
+    let mut app = RSpiceApp::test_instance();
+    open_new_project_dialog(&mut app.state);
+    app.state.project.new_project.name = "untitled".to_owned();
+    let params = app.state.project.new_project.params();
+    app.state
+        .create_new_project_with(&params)
+        .expect("the default identity creates a project");
+    app.state.workbench.activate(Workspace::Design);
+    Replay::of(app)
+}
+
+/// The view type the catalog records for `reference`.
+fn catalog_type(app: &RSpiceApp, reference: &CellViewRef) -> Option<ViewType> {
+    app.state
+        .model
+        .library_manager
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| cell.get_view(&reference.view))
+        .map(|view| view.view_type)
+}
+
+/// Whether a frame drew the symbol editor's canvas, and whether it drew the
+/// schematic canvas.
+fn canvases(controls: &[Control]) -> (bool, bool) {
+    let canvas = |prefix: &str| {
+        controls
+            .iter()
+            .any(|control| control.role == Role::Canvas && control.label.starts_with(prefix))
+    };
+    (canvas("Symbol editor canvas."), canvas("Schematic canvas"))
+}
+
+/// Create symbol on a new project's schematic adds a symbol view to the top
+/// cell and opens it in the symbol editor, not in a schematic canvas.
+#[test]
+fn create_symbol_on_a_new_project_opens_the_symbol_editor() {
+    let mut replay = new_project();
+    let top = replay.app.state.model.workspace.content.active_view.clone();
+    assert_eq!((top.cell.as_str(), top.view.as_str()), ("top", "schematic"));
+    replay.frames(Vec::new());
+
+    replay
+        .app
+        .execute_command_key(ProjectCommand::CreateSymbol.key());
+    replay.frames(Vec::new());
+    let controls = replay.click("Create", Role::Button);
+
+    let symbol = CellViewRef::new(&top.library, &top.cell, "symbol");
+    assert_eq!(
+        catalog_type(&replay.app, &symbol),
+        Some(ViewType::Symbol),
+        "the library holds a symbol view named symbol"
+    );
+    let content = &replay.app.state.model.workspace.content;
+    assert_eq!(content.active_view, symbol);
+    assert_eq!(content.active_view_type(), ViewType::Symbol);
+    assert_eq!(
+        canvases(&controls),
+        (true, false),
+        "the symbol editor is drawn in place of the schematic canvas"
+    );
+}

@@ -9,7 +9,8 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{CellViewRef, View, ViewType};
 use crate::workbench::app_state::design_history::DesignManagementHistoryEntry;
 use rspice_design::symbol::generated::{
-    GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
+    GENERATED_PORTS_KEY, GENERATED_SYMBOL_VIEW, decode_ports, is_generated_symbol,
+    store_generated_symbol,
 };
 use rspice_ui_kit::accessibility::counted;
 use std::collections::BTreeMap;
@@ -240,7 +241,17 @@ impl Model {
         let ports = self.schematic.interface_ports();
 
         if ports.is_empty() {
-            if !existing_symbol.as_ref().is_some_and(is_generated_symbol) {
+            // Only a symbol that had ports goes with the last of them. One
+            // made while the schematic had none, as Create symbol makes on a
+            // new cell, already stands for the empty interface and stays.
+            let had_ports = existing_symbol.as_ref().is_some_and(|view| {
+                is_generated_symbol(view)
+                    && view
+                        .metadata
+                        .get(GENERATED_PORTS_KEY)
+                        .is_some_and(|recorded| !decode_ports(recorded).is_empty())
+            });
+            if !had_ports {
                 return;
             }
             if let Some(mut library) = self.library_manager.edit_library(&reference.library) {

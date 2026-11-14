@@ -60,6 +60,36 @@ fn generated_symbol_sync_advances_the_catalog_only_for_real_changes() {
     );
 }
 
+/// A generated symbol made while the schematic has no ports, as Create symbol
+/// makes on a new cell, survives the sync: it never had a port to lose.
+#[test]
+fn a_generated_symbol_made_before_any_port_survives_the_sync() {
+    let mut state = DesignTestHost::default();
+    let active = state.model.workspace.content.active_view.clone();
+    let mut symbol = View::new("symbol", ViewType::Symbol);
+    rspice_design::symbol::generated::store_generated_symbol(&mut symbol, &[], |_| None)
+        .expect("an empty interface encodes");
+    state
+        .model
+        .library_manager
+        .edit_library(&active.library)
+        .expect("the active library")
+        .add_view(&active.cell, symbol)
+        .expect("the active cell");
+    assert!(state.model.schematic.interface_ports().is_empty());
+
+    state.sync_active_schematic_to_workspace();
+
+    let kept = state
+        .model
+        .library_manager
+        .get_library(&active.library)
+        .and_then(|library| library.get_cell(&active.cell))
+        .and_then(|cell| cell.get_view("symbol"))
+        .map(|view| view.view_type);
+    assert_eq!(kept, Some(ViewType::Symbol));
+}
+
 #[test]
 fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() {
     let mut state = DesignTestHost::default();
