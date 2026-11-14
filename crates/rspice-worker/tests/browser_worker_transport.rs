@@ -956,6 +956,63 @@ fn a_project_verilog_a_device_loads_an_hdl_process_in_the_worker() {
     assert_sealed_clock_runs_in_the_worker(21, &deck, serde_json::to_value(&set).unwrap());
 }
 
+/// An instance whose parameter reshapes its module compiles anew when the
+/// circuit is built, to a JIT model no sealed runtime has. The worker's
+/// preparation builds the circuit once to find each such model, so both
+/// instances, one width each, run on models the browser installed first.
+#[wasm_bindgen_test]
+fn instances_a_parameter_recompiles_run_on_models_the_worker_prepared() {
+    const TICK: &str = "`include \"disciplines.vams\"\n`timescale 1ns/1ps\nmodule tick(p);\n  \
+                        inout p;\n  electrical p;\n  parameter integer width = 1;\n  \
+                        reg [width-1:0] count;\n  initial count = 0;\n  \
+                        always #5 count = count + 1;\n  analog I(p) <+ V(p) / 1000.0;\nendmodule\n";
+    let files = [("tick.vams", TICK)];
+    let (key, digest) = deck_key(&files, &["tick.vams"], "tick");
+    let deck = format!(
+        "Worker specialized instances\n.veriloga \"{key}\" tick\nV1 a 0 1\n\
+         X1 a tick width=2\nX2 a tick width=3\n.end\n"
+    );
+    let netlist = rspice_core::Netlist::parse(&deck).expect("the deck parses");
+    let runtime = sealed_runtime(&netlist, key, digest, &files, &["tick.vams"], "tick");
+    let set = rspice_simulation::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
+        .expect("one runtime is a set");
+    let mut request = worker_request_json(
+        23,
+        serde_json::json!({"Transient": {
+            "stop_time": 20e-9, "step_time": 1e-10, "start_time": 0.0,
+            "max_timestep": 1e-10, "uic": false
+        }}),
+        &deck,
+    );
+    request["request"]["request"]["project_veriloga_runtimes"] =
+        serde_json::to_value(&set).unwrap();
+    // The sealed runtime's model, and one per width the build compiles.
+    let preparation = rspice_worker::prepare_rspice_ui_wasm_jit_request(
+        js_sys::JSON::parse(&request.to_string()).unwrap(),
+    )
+    .expect("the request prepares for the JIT");
+    let artifacts = property(&preparation, "artifacts")
+        .dyn_into::<js_sys::Array>()
+        .unwrap();
+    assert_eq!(artifacts.length(), 3);
+    rspice_worker::cancel_prepared_rspice_ui_wasm_jit_request(
+        property(&preparation, "dispatchToken").as_f64().unwrap() as u32,
+    )
+    .unwrap();
+    let dispatch_token = install_wasm_jit_models(&request);
+    let response = rspice_worker::run_prepared_rspice_ui_wasm_jit_request(dispatch_token)
+        .expect("a prepared request is answered");
+    let response = structured_clone(&response);
+    let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+        js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        metadata["outcome"]["Success"]["Transient"].is_object(),
+        "{metadata}"
+    );
+}
+
 /// A file the HDL reads that the run did not seal is a located warning in
 /// the browser, for `$readmemh` and for a read-mode `$fopen` alike: the
 /// browser has no file system, so the message names the cause, and each

@@ -384,6 +384,48 @@ impl EngineBridge {
         Ok(netlist)
     }
 
+    /// Build once the circuit a run of `request` builds first, and drop it:
+    /// for a host that must know what that build asks for before the run
+    /// starts. The deck is read as the run reads it; an error is the run's to
+    /// report when it makes the same build.
+    #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+    pub(crate) fn build_circuit_once(
+        &self,
+        request: &crate::runner::SimulationRequest,
+        netlist_str: &str,
+        source_path: Option<&Path>,
+        environment: Option<crate::runner::AnalysisExecutionEnvironment>,
+    ) {
+        use rspice_core::abort_signal::NoAbort;
+
+        let netlist = match request {
+            crate::runner::SimulationRequest::Config(config) => self.materialize_input(
+                &SimulationInput {
+                    config,
+                    netlist_str,
+                    source_path,
+                    supply_corner: None,
+                    environment,
+                },
+                &NoAbort,
+            ),
+            // A spec's analyses read the deck at the run's environment.
+            crate::runner::SimulationRequest::Spec { .. } => self
+                .parse_netlist_with_abort_and_source_path(netlist_str, source_path, &NoAbort)
+                .map(|mut netlist| {
+                    if let Some(environment) = &environment {
+                        netlist.options.temp = Some(environment.temperature_celsius);
+                    }
+                    netlist
+                }),
+        };
+        if let Ok(netlist) = netlist {
+            let _ = self
+                .engine_for_netlist(&netlist)
+                .build_circuit_with_abort(&netlist, &NoAbort);
+        }
+    }
+
     fn run_request_with_checkpoint(
         &self,
         input: SimulationInput<'_>,
