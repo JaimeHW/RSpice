@@ -1607,30 +1607,12 @@ mod tests {
     /// nothing says only that it completed.
     #[test]
     fn a_completed_run_states_its_check_verdict_and_nothing_without_checks() {
-        use rspice_core::config::{HdlOrigin, HdlPoint, HdlSeverity};
-        use rspice_results::analysis_result::{HdlDiagnostic, RunChecks};
+        use rspice_core::config::HdlSeverity;
 
         let state = SimulateTestHost::default();
         let status = |severities: &[HdlSeverity]| {
             let mut run = SimulationRun::new(3);
-            let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
-            analysis.checks = RunChecks {
-                hdl: severities
-                    .iter()
-                    .map(|severity| HdlDiagnostic {
-                        severity: *severity,
-                        text: "checked".into(),
-                        point: HdlPoint::Transient { time: 1e-9 },
-                        origin: HdlOrigin {
-                            scope: "tb".into(),
-                            file: "tb.v".into(),
-                            line: 4,
-                        },
-                    })
-                    .collect(),
-                ..RunChecks::default()
-            };
-            run.add_analysis(analysis);
+            run.add_analysis(checked_analysis(severities));
             run.lifecycle = SimulationRunLifecycle::Completed;
             let row = RunRow::from_run(&state.model, &run, false);
             (row.status, row.tone.problem())
@@ -1648,6 +1630,63 @@ mod tests {
             status(&[HdlSeverity::Warning, HdlSeverity::Error]),
             ("Checks failed".to_owned(), Some(Problem::Failure))
         );
+    }
+
+    /// A transient whose testbench reported one record of each severity.
+    fn checked_analysis(severities: &[rspice_core::config::HdlSeverity]) -> AnalysisResult {
+        use rspice_core::config::{HdlOrigin, HdlPoint};
+        use rspice_results::analysis_result::{HdlDiagnostic, RunChecks};
+
+        let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+        analysis.checks = RunChecks {
+            hdl: severities
+                .iter()
+                .map(|severity| HdlDiagnostic {
+                    severity: *severity,
+                    text: "checked".into(),
+                    point: HdlPoint::Transient { time: 1e-9 },
+                    origin: HdlOrigin {
+                        scope: "tb".into(),
+                        file: "tb.v".into(),
+                        line: 4,
+                    },
+                })
+                .collect(),
+            ..RunChecks::default()
+        };
+        analysis
+    }
+
+    /// Four completed runs in the queue: one without checks, and one whose
+    /// checks passed, warned and failed.
+    #[test]
+    #[ignore = "writes the review pictures"]
+    fn write_the_check_verdict_picture() {
+        use rspice_core::config::HdlSeverity;
+
+        let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
+            return;
+        };
+        let mut state = SimulateTestHost::default();
+        for severities in [
+            &[][..],
+            &[HdlSeverity::Info],
+            &[HdlSeverity::Warning],
+            &[HdlSeverity::Error],
+        ] {
+            let run = state.model.simulation.start_run();
+            run.add_analysis(checked_analysis(severities));
+            run.lifecycle = SimulationRunLifecycle::Completed;
+        }
+        let snapshot = JobsSnapshot::capture(&state.model, None, JobsPlanScope::AllPlans);
+        let canvas = rspice_ui_kit::raster::render(egui::vec2(1000.0, 230.0), |ui, _| {
+            render_queue_and_graph(ui, &snapshot, &mut None, &mut None);
+        });
+        std::fs::write(
+            format!("{directory}/jobs-run-check-verdicts.png"),
+            canvas.png(canvas.height()),
+        )
+        .expect("the picture is written");
     }
 
     #[test]

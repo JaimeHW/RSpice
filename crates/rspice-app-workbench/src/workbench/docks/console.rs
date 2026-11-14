@@ -5,6 +5,9 @@ pub mod problems;
 mod references;
 pub mod transcript;
 
+#[cfg(test)]
+mod check_pictures;
+
 use problems::{ProblemCount, active_problem_count, problems};
 
 use egui::{Align, Layout, ScrollArea, Sense, Ui, Vec2};
