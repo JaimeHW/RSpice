@@ -304,8 +304,7 @@ fn a_discrete_state_that_repeats_every_second_period_is_refused_by_name() {
     let netlist = Netlist::parse(&deck).expect("the deck parses");
     let error = Engine::new(SimulationConfig::default())
         .run_event_pss(&netlist, &PssConfig::new(1.0e6), None, &NoAbort)
-        .err()
-        .expect("a divide-by-two orbit is not periodic at the clock");
+        .expect_err("a divide-by-two orbit is not periodic at the clock");
     let text = error.to_string();
     assert!(
         text.contains("analysis.pss.discrete_state_not_periodic")
