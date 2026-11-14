@@ -344,7 +344,9 @@ pub struct Resistors {
     /// Per-instance flicker noise with a retained coefficient scale.
     pub flicker: Vec<Option<ResistorFlickerNoise>>,
     /// Optional Xyce LEVEL=2 thermal state aligned with the resistor arrays.
-    pub thermal: Vec<Option<ThermalResistorState>>,
+    /// Boxed: the state carries a whole parameter scope, about a kilobyte,
+    /// and almost every resistor has none.
+    pub thermal: Vec<Option<Box<ThermalResistorState>>>,
 }
 
 /// The three resistances a resistor carries: the value the DC/transient stamp
@@ -447,7 +449,7 @@ impl Resistors {
         state.output_resistance = state.reported_resistance;
         state.output_conductance = 1.0 / state.electrical_resistance();
         if let Some(slot) = self.thermal.last_mut() {
-            *slot = Some(state);
+            *slot = Some(Box::new(state));
         }
     }
 

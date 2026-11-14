@@ -8,7 +8,7 @@ fn thermal_state(declarations: &str, fields: &str) -> rspice_core::circuit::Ther
     let circuit = Engine::default()
         .build_circuit(&Netlist::parse(&source).unwrap())
         .unwrap();
-    circuit.resistor_storage().thermal[0].clone().unwrap()
+    *circuit.resistor_storage().thermal[0].clone().unwrap()
 }
 
 #[test]
