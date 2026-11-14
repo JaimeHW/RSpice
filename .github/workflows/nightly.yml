@@ -470,6 +470,8 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: mixed-corpus-${{ matrix.route }}${{ matrix.os == 'ubuntu-24.04-arm' && '-arm64' || '' }}
+          # A cell that drifted still built everything; keep the build.
+          cache-on-failure: true
       # The shipped browser worker image and its bindings, where the
       # application's simulation-worker.js loads them. Built as ci.yml builds
       # the production image, with the generated compact-model catalog: C5's
