@@ -7,7 +7,7 @@
 //! that are wired to it.
 
 use super::*;
-use crate::workbench::app_state::AppState;
+use crate::workbench::design::test_host::DesignTestHost;
 
 use crate::diagnostics::LogSeverity;
 use crate::state::{
@@ -35,8 +35,8 @@ fn interface() -> Vec<PortSpec> {
 /// `parent_instances` are placed in a sibling sheet's stored buffer and one
 /// more on the live sheet, so a transaction claiming to reach "every buffer
 /// and the live sheet" is held to both.
-fn state_with_open_symbol(parent_instances: usize) -> AppState {
-    let mut state = AppState::default();
+fn state_with_open_symbol(parent_instances: usize) -> DesignTestHost {
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
@@ -103,7 +103,7 @@ fn place_instance(schematic: &mut SchematicState, id: u64, x: i32) {
         });
 }
 
-fn terminal_names(state: &AppState) -> Vec<String> {
+fn terminal_names(state: &DesignTestHost) -> Vec<String> {
     let mut names: Vec<String> = state
         .model
         .workspace
@@ -130,7 +130,7 @@ fn terminal_names(state: &AppState) -> Vec<String> {
 
 /// The interface's own generated symbol: pin order, electrical types and
 /// terminal placement all agree with the contract by construction.
-fn contract_matching_document(state: &AppState) -> SymbolDocument {
+fn contract_matching_document(state: &DesignTestHost) -> SymbolDocument {
     SymbolDocument::generated_from_ports(&crate::workbench::app::active_symbol_ports(&state.model))
 }
 
@@ -464,8 +464,8 @@ fn a_generated_symbol_round_trips_through_its_view() {
 
 /// A symbol view whose paired schematic declares `count` ports that the
 /// symbol places none of, so the pin checks report one finding per port.
-fn state_with_unplaced_amp_symbol_pins(count: usize) -> AppState {
-    let mut state = AppState::default();
+fn state_with_unplaced_amp_symbol_pins(count: usize) -> DesignTestHost {
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
@@ -547,7 +547,7 @@ fn pin_findings_digest_nothing_while_idle_and_stale_on_either_input() {
     };
 
     let subject = CellViewRef::new("work", "amp", "symbol");
-    let current = |state: &AppState| {
+    let current = |state: &DesignTestHost| {
         let batch = state
             .model
             .diagnostics

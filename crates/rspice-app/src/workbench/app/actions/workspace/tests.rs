@@ -66,7 +66,7 @@ fn generated_symbol_sync_advances_the_catalog_only_for_real_changes() {
 
 #[test]
 fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .preferences
@@ -102,7 +102,7 @@ fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() 
 
 #[test]
 fn new_document_preserves_the_exact_runtime_wire_and_bus_routing_mode() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.design.schematic_routing_mode = crate::state::WireRoutingMode::VerticalFirst;
 
     let created = state.new_schematic_document();
@@ -119,7 +119,7 @@ fn new_document_preserves_the_exact_runtime_wire_and_bus_routing_mode() {
 
 #[test]
 fn new_document_inherits_snap_targets_and_reconciles_the_preferred_pitch() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.design.schematic_snap.snap_radius = 9;
     state.design.schematic_snap.snap_to_grid = false;
     state.design.schematic_snap.snap_to_wire_segments = false;
@@ -185,8 +185,8 @@ fn amp_binding(pins: &[(&str, PortDirection)]) -> LibraryCellInstance {
     binding
 }
 
-fn state_with_amp_symbol(document: SymbolDocument) -> AppState {
-    let mut state = AppState::default();
+fn state_with_amp_symbol(document: SymbolDocument) -> DesignTestHost {
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
@@ -464,7 +464,7 @@ fn generating_active_symbol_document_writes_symbol_view_metadata() {
 
 #[test]
 fn generate_symbol_document_is_one_undoable_transaction() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
@@ -531,7 +531,7 @@ fn generate_symbol_document_is_one_undoable_transaction() {
 
 #[test]
 fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
@@ -616,7 +616,7 @@ fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
 
 #[test]
 fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
@@ -1040,7 +1040,7 @@ fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
 
 #[test]
 fn symbol_undo_history_is_scoped_to_active_view() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     for cell_name in ["amp_a", "amp_b"] {
@@ -1108,7 +1108,7 @@ fn symbol_undo_history_is_scoped_to_active_view() {
 
 #[test]
 fn symbol_undo_and_redo_restore_editor_sidecar_atomically() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let mut library = Library::new("work");
     let mut cell = Cell::new("amp");
     cell.add_view(View::new("symbol", ViewType::Symbol));
@@ -1131,7 +1131,7 @@ fn symbol_undo_and_redo_restore_editor_sidecar_atomically() {
         .store_active_symbol_editor_bundle(&document, &edited)
         .expect("edited symbol bundle stores");
 
-    let annotation = |state: &mut AppState| {
+    let annotation = |state: &mut DesignTestHost| {
         crate::workbench::app::load_active_symbol_editor_metadata(&state.model, &document)
             .expect("the sidecar loads")
             .attribute(crate::state::SymbolAttributeKind::Value)
@@ -1156,7 +1156,7 @@ fn symbol_undo_and_redo_restore_editor_sidecar_atomically() {
 
 #[test]
 fn symbol_store_refuses_read_only_libraries() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("readonly");
     library.read_only = true;
@@ -1175,7 +1175,7 @@ fn symbol_store_refuses_read_only_libraries() {
 
 #[test]
 fn read_only_symbol_edit_paths_use_consistent_refusal_text() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("readonly");
     library.read_only = true;
@@ -2109,10 +2109,10 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
 
 /// A sheet drawing the conductors `OUT` and `MID`, with a cross-probe map
 /// captured at the topology it is currently drawn at.
-fn state_with_probed_conductors() -> AppState {
+fn state_with_probed_conductors() -> DesignTestHost {
     use std::collections::HashMap;
 
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let out_a = Point::new(0, 0);
     let out_b = Point::new(40, 0);
     let mid_a = Point::new(0, 40);
@@ -2138,7 +2138,7 @@ fn state_with_probed_conductors() -> AppState {
     state
 }
 
-fn prompt_text(state: &AppState) -> String {
+fn prompt_text(state: &DesignTestHost) -> String {
     state.prompt_text().unwrap_or_default().to_owned()
 }
 

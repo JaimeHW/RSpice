@@ -8,12 +8,20 @@
 
 use rspice_app_state::workbench::workspace::restore_session_model_library_manager;
 
+use crate::diagnostics::LogAnchor;
 use crate::properties::PropertyEditorSchema;
 use crate::schematic::view::{CanvasFacts, CanvasParts, canvas_facts_lent, canvas_parts_lent};
-use crate::state::CellViewRef;
 use crate::state::pdk_config::PdkConfig;
-use crate::workbench::app::actions::workspace::{NavigationParts, sync_active_schematic};
-use crate::workbench::app_state::Model;
+use crate::state::{CellViewRef, SchematicState, SymbolDocument, SymbolEditorMetadata};
+use crate::workbench::app::actions::workspace::symbol_document::{
+    can_undo_active_symbol_document, redo_active_symbol_document, refuse_unsavable_active_symbol,
+    store_active_symbol_document, store_active_symbol_editor_bundle, undo_active_symbol_document,
+};
+use crate::workbench::app::actions::workspace::{
+    NavigationParts, new_schematic_document, sync_active_schematic,
+};
+use crate::workbench::app_state::diagnostic_store::{BatchStanding, DiagnosticBatch};
+use crate::workbench::app_state::{Model, SlotFacts, prompt_text};
 use crate::workbench::framework::feature::harness::fresh_session_results;
 use crate::workbench::slots::{DesignState, RunsState};
 use crate::workbench::state::WorkbenchSession;
@@ -74,6 +82,81 @@ impl DesignTestHost {
     pub(crate) fn navigation(&mut self) -> NavigationParts<'_> {
         self.design
             .navigation_parts(&mut self.model, &mut self.workbench, &self.runs)
+    }
+
+    /// `AppState::new_schematic_document`, the same one line.
+    pub(crate) fn new_schematic_document(&self) -> SchematicState {
+        new_schematic_document(
+            &self.model,
+            &self.design.schematic_snap,
+            self.design.schematic_routing_mode,
+        )
+    }
+
+    /// `AppState::jump_to_log_anchor`, the same one line.
+    pub(crate) fn jump_to_log_anchor(&mut self, anchor: LogAnchor) {
+        self.navigation().navigate_to_log_anchor(anchor);
+    }
+
+    /// `AppState::store_active_symbol_document`, the same one line.
+    pub(crate) fn store_active_symbol_document(
+        &mut self,
+        document: &SymbolDocument,
+    ) -> Result<(), String> {
+        store_active_symbol_document(&mut self.design.symbol, &mut self.model, document)
+    }
+
+    /// `AppState::store_active_symbol_editor_bundle`, the same one line.
+    pub(crate) fn store_active_symbol_editor_bundle(
+        &mut self,
+        document: &SymbolDocument,
+        metadata: &SymbolEditorMetadata,
+    ) -> Result<(), String> {
+        store_active_symbol_editor_bundle(
+            &mut self.design.symbol,
+            &mut self.model,
+            &mut self.workbench,
+            document,
+            metadata,
+        )
+    }
+
+    /// `AppState::refuse_unsavable_active_symbol`, the same one line.
+    pub(crate) fn refuse_unsavable_active_symbol(&self) -> Option<String> {
+        refuse_unsavable_active_symbol(&self.model)
+    }
+
+    /// `AppState::can_undo_active_symbol_document`, the same one line.
+    pub(crate) fn can_undo_active_symbol_document(&self) -> bool {
+        can_undo_active_symbol_document(&self.design.symbol, &self.model)
+    }
+
+    /// `AppState::undo_active_symbol_document`, the same one line.
+    pub(crate) fn undo_active_symbol_document(&mut self) -> Result<bool, String> {
+        undo_active_symbol_document(&mut self.design.symbol, &mut self.model)
+    }
+
+    /// `AppState::redo_active_symbol_document`, the same one line.
+    pub(crate) fn redo_active_symbol_document(&mut self) -> Result<bool, String> {
+        redo_active_symbol_document(&mut self.design.symbol, &mut self.model)
+    }
+
+    /// `AppState::slot_facts`, the same one line: what model code reads of
+    /// the runs and the design state.
+    pub(crate) fn slot_facts(&self) -> SlotFacts {
+        self.runs
+            .slot_facts(self.design.schematic_visibility.review_markers)
+    }
+
+    /// `AppState::diagnostic_batch_standing`, the same one line.
+    pub(crate) fn diagnostic_batch_standing(&self, batch: &DiagnosticBatch) -> BatchStanding {
+        self.model
+            .diagnostic_batch_standing(batch, self.slot_facts())
+    }
+
+    /// `AppState::prompt_text`, the same one line.
+    pub(crate) fn prompt_text(&self) -> Option<&str> {
+        prompt_text(&self.workbench)
     }
 }
 

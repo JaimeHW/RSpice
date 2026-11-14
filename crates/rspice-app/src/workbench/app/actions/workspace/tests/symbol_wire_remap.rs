@@ -5,10 +5,11 @@
 //! exactly once.
 
 use super::*;
+use crate::workbench::design::test_host::DesignTestHost;
 
 #[test]
 fn storing_symbol_document_remaps_open_instance_wires_by_pin_name() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
