@@ -1229,7 +1229,8 @@ fn study_run_replays_a_d_vcd_dump() {
         vcd.push_str(&format!("#{}\n{}!\n", tick * 500, tick % 2));
     }
     std::fs::write(root.join("circuits/clk.vcd"), &vcd).unwrap();
-    let document = rspice_core::io::parse_vcd_reader(vcd.as_bytes()).unwrap();
+    let document =
+        rspice_core::io::parse_vcd_bytes_with_limits(vcd.as_bytes(), Default::default()).unwrap();
     let expected: Vec<(u64, u64)> = document.signals[0]
         .changes
         .iter()

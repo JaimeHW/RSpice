@@ -1216,6 +1216,7 @@ impl EkvMosfet {
         self.setup.initial_off
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_geometry(mut self, w: Value, l: Value) -> Self {
         self.setup.w = w;
         self.setup.l = l;

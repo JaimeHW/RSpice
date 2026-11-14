@@ -42,7 +42,7 @@ fn add_resistors_copy_builds_with_its_generated_resistors() {
     assert_eq!(original_circuit.device_count(), 2);
 
     let materialized = netlist
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&rspice_core::NoAbort)
         .expect("derived copy materializes");
     let generated_circuit = Engine::default()
         .build_circuit(&materialized.netlist)
@@ -58,7 +58,7 @@ fn materialized_zero_negative_and_open_resistors_build() {
             "finite resistor\n.PREPROCESS ADDRESISTORS ONETERMINAL {raw}\nV1 1 0 1\n.END\n"
         );
         let materialized = parse_xyce(&source)
-            .materialize_xyce_add_resistors()
+            .materialize_xyce_add_resistors_with_abort(&rspice_core::NoAbort)
             .expect("canonical resistor value is retained");
         assert_eq!(materialized.report.generated[0].resistance, expected);
         Engine::default()

@@ -4,6 +4,7 @@
 //! (moments, bounds) and the determinism contract: a given seed must
 //! reproduce the identical draw sequence on every platform and run.
 
+use super::behavioral::behavioral_expression_references_frequency;
 use super::eval::evaluate_complex_with_functions;
 use super::*;
 use crate::abort_signal::CountingAbort;

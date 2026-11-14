@@ -12,7 +12,6 @@ pub mod lib_parser;
 mod manager;
 mod parser;
 mod spice_packs;
-mod veriloga_discovery;
 
 pub use encrypted::{EncryptedDefinition, EncryptionScheme};
 pub use foundation_defaults::{
@@ -30,4 +29,3 @@ pub use manager::ModelType;
 // this is where a library consumer looks for it.
 pub use crate::netlist::spectre_adapter::{SpectreModelAdapterError, adapt_spectre_model_library};
 pub use spice_packs::{CatalogEntry, LicenseTier, MODELS_DIR_ENV, SpiceLibraryIndex, SpicePack};
-pub use veriloga_discovery::{VerilogAModelEntry, discover_veriloga_models};

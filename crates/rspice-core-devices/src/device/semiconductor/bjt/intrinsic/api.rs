@@ -20,6 +20,7 @@ impl Bjt {
     }
 
     /// Return cached collector, base, and emitter currents at the operating point.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn operating_point_currents(&self) -> (Value, Value, Value) {
         (self.ic, self.ib, self.ie)
     }

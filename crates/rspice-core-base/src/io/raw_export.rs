@@ -28,7 +28,7 @@
 //! the event histories a transient captured, one plot per node, after the
 //! analysis plot — which is left byte-identical, so a reader that wants only
 //! the analysis reads the first plot and stops exactly where it stopped
-//! before. [`crate::io::parse_raw_plots_file_with_limits`] is the reader that
+//! before. [`crate::io::parse_raw_plots_bytes_with_limits`] is the reader that
 //! returns all of them, and
 //! `execution::decode_event_plots` turns the appended ones back into
 //! event histories.
@@ -847,8 +847,8 @@ mod export_tests {
             write_event_plots(&mut bytes, &event_timelines(), &[], format)
                 .expect("append the event plots");
 
-            let file = crate::io::parse_raw_plots_reader_with_limits(
-                &mut Cursor::new(bytes),
+            let file = crate::io::parse_raw_plots_bytes_with_limits(
+                &bytes,
                 crate::resource::ResourceLimits::default(),
             )
             .expect("parse every plot");

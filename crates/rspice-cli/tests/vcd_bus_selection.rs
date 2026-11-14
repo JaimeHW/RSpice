@@ -2,7 +2,7 @@
 mod common;
 
 use common::test_dir;
-use rspice_core::io::{VcdDocument, parse_vcd_file};
+use rspice_core::io::{VcdDocument, parse_vcd_bytes_with_limits};
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -74,7 +74,11 @@ fn scoped_qualified_and_alias_bus_names_resolve_the_same_vector() {
         let output = convert(&source, &destination, selector, false);
         assert!(output.status.success(), "{selector}: {output:?}");
         assert!(output.stderr.is_empty(), "{selector}: {output:?}");
-        let document = parse_vcd_file(&destination).unwrap();
+        let document = parse_vcd_bytes_with_limits(
+            &std::fs::read(&destination).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         only_scope(&document, "left");
         assert_eq!(document.signals.len(), 1);
         assert_eq!(document.signals[0].variables.len(), 2);
@@ -102,7 +106,11 @@ fn scoped_bit_selections_keep_the_vector_and_report_widening() {
             stderr.contains(selector) && stderr.contains("whole"),
             "{stderr}"
         );
-        let document = parse_vcd_file(&destination).unwrap();
+        let document = parse_vcd_bytes_with_limits(
+            &std::fs::read(&destination).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         only_scope(&document, scope);
         assert_eq!(document.signals.len(), 1);
         assert_eq!(document.signals[0].width, 4);
@@ -148,7 +156,11 @@ fn expanded_bus_names_keep_every_member_and_each_alias() {
         let output = convert(&source, &destination, selector, true);
         assert!(output.status.success(), "{selector}: {output:?}");
         assert!(output.stderr.is_empty(), "{output:?}");
-        let document = parse_vcd_file(&destination).unwrap();
+        let document = parse_vcd_bytes_with_limits(
+            &std::fs::read(&destination).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         only_scope(&document, "left");
         assert_eq!(document.signals.len(), 4);
         for (position, signal) in document.signals.iter().enumerate() {
@@ -194,7 +206,11 @@ fn expanded_bus_bit_aliases_reach_one_correct_member_without_widening() {
         let output = convert(&source, &destination, selector, true);
         assert!(output.status.success(), "{selector}: {output:?}");
         assert!(output.stderr.is_empty(), "{output:?}");
-        let document = parse_vcd_file(&destination).unwrap();
+        let document = parse_vcd_bytes_with_limits(
+            &std::fs::read(&destination).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         only_scope(&document, "left");
         assert_eq!(document.signals.len(), 1);
         assert_eq!(document.signals[0].width, 1);
@@ -218,7 +234,11 @@ fn expanded_bus_bit_aliases_reach_one_correct_member_without_widening() {
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
-    let document = parse_vcd_file(&destination).unwrap();
+    let document = parse_vcd_bytes_with_limits(
+        &std::fs::read(&destination).expect("read the VCD file"),
+        Default::default(),
+    )
+    .unwrap();
     let changes = &document.signals[0].changes;
     assert_eq!(changes.len(), 2);
     assert_eq!(
@@ -278,7 +298,11 @@ fn one_bit_declared_ranges_select_without_a_widening_note() {
                 "{selector}, expanded={expanded}: {output:?}"
             );
             assert!(output.stderr.is_empty(), "{output:?}");
-            let document = parse_vcd_file(&destination).unwrap();
+            let document = parse_vcd_bytes_with_limits(
+                &std::fs::read(&destination).expect("read the VCD file"),
+                Default::default(),
+            )
+            .unwrap();
             assert_eq!(document.signals.len(), 1);
             assert_eq!(document.signals[0].width, 1);
             assert_eq!(document.signals[0].changes.len(), 2);

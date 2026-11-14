@@ -60,7 +60,6 @@ mod step_temp;
 mod subckt_instance_params;
 mod temperature_options;
 mod temperature_replay_budget;
-mod veriloga_library_discovery;
 mod xyce_core_ac;
 mod xyce_core_temperature;
 mod xyce_core_transient;

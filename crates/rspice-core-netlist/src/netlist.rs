@@ -105,9 +105,8 @@ pub use output_symbols::{
     InterfaceNodeAliases, OutputAnalysisKind, OutputDirectiveKind, OutputExpressionIssue,
     OutputExpressionValidationError, OutputRequest, OutputSymbolDependency, OutputSymbolKind,
     OutputSymbolValidationError, PrintDelimiter, UnresolvedOutputSymbol,
-    collect_requested_interface_node_aliases_with_abort, validate_output_expressions,
-    validate_output_expressions_with_abort, validate_output_requests,
-    validate_output_requests_with_abort, validate_output_symbols,
+    collect_requested_interface_node_aliases_with_abort, validate_output_expressions_with_abort,
+    validate_output_requests, validate_output_requests_with_abort, validate_output_symbols,
     validate_output_symbols_with_abort,
 };
 #[doc(hidden)]
@@ -2284,25 +2283,6 @@ impl Netlist {
             abort,
         )
         .map(|(source, _)| source)
-    }
-
-    /// Parse a netlist from a file with additional include search directories
-    /// and an explicit resource policy.
-    ///
-    /// Like [`Netlist::parse_file`], but `.include`/`.lib` references that do
-    /// not resolve relative to the including file are also searched in
-    /// `search_paths`, in order.
-    pub fn parse_file_with_search_paths_and_options(
-        path: &std::path::Path,
-        search_paths: &[std::path::PathBuf],
-        options: NetlistParseOptions,
-    ) -> Result<Self, ParseError> {
-        finish_non_aborting_parse(Self::parse_file_with_search_paths_and_options_and_abort(
-            path,
-            search_paths,
-            options,
-            &NoAbort,
-        ))
     }
 
     /// Parse a file with search paths, explicit options, and cancellation.

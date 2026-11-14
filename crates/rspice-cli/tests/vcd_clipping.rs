@@ -1,5 +1,5 @@
 mod common;
-use rspice_core::io::{VcdBit, VcdValue, parse_vcd_file};
+use rspice_core::io::{VcdBit, VcdValue, parse_vcd_bytes_with_limits};
 use std::process::Command;
 
 const VCD: &str = "$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! changing $end\n$var wire 1 \" held $end\n$var wire 4 # bus [3:0] $end\n$var real 64 $ real $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n1\"\nb10xz #\nr1.25 $\n#10\n1!\nr2.5 $\n#20\n0!\n";
@@ -41,7 +41,11 @@ fn selected_raw_sections_keep_the_same_clipped_state() {
         .output()
         .unwrap();
     assert!(clipped.status.success(), "{clipped:?}");
-    let document = parse_vcd_file(&output).unwrap();
+    let document = parse_vcd_bytes_with_limits(
+        &std::fs::read(&output).expect("read the VCD file"),
+        Default::default(),
+    )
+    .unwrap();
     let changes = &document.signals[0].changes;
     assert_eq!(changes[0].value, VcdValue::Logic(vec![VcdBit::Zero]));
     assert_eq!(changes[0].tick as f64 * document.timescale.seconds(), 5e-9);
@@ -74,7 +78,11 @@ fn clipping_keeps_the_state_at_the_start_including_constant_signals() {
             .output()
             .unwrap();
         assert!(result.status.success(), "{start}: {result:?}");
-        let document = parse_vcd_file(&output).unwrap();
+        let document = parse_vcd_bytes_with_limits(
+            &std::fs::read(&output).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         let observed: Vec<_> = document.signals[0]
             .changes
             .iter()
@@ -125,7 +133,11 @@ fn clipping_compares_integer_ticks_without_rounding_distinct_events_together() {
         .output()
         .unwrap();
     assert!(result.status.success(), "{result:?}");
-    let document = parse_vcd_file(&output).unwrap();
+    let document = parse_vcd_bytes_with_limits(
+        &std::fs::read(&output).expect("read the VCD file"),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(
         document.signals[0]
             .changes
@@ -191,7 +203,11 @@ fn decimal_clip_bounds_retain_all_authored_digits() {
             .output()
             .unwrap();
         assert!(result.status.success(), "{boundary}: {result:?}");
-        let document = parse_vcd_file(&output).unwrap();
+        let document = parse_vcd_bytes_with_limits(
+            &std::fs::read(&output).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(document.timescale.to_string(), scale);
         assert_eq!(document.signals[0].changes.len(), 1);
         assert_eq!(document.signals[0].changes[0].tick, expected);
@@ -260,7 +276,11 @@ fn fractional_stop_bounds_never_include_the_next_tick() {
             .output()
             .unwrap();
         assert!(result.status.success(), "{stop}: {result:?}");
-        let document = parse_vcd_file(&output).unwrap();
+        let document = parse_vcd_bytes_with_limits(
+            &std::fs::read(&output).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(
             document.signals[0]
                 .changes
@@ -329,7 +349,11 @@ fn unrepresentable_clip_boundaries_and_tick_overflow_preserve_existing_output() 
         .output()
         .unwrap();
     assert!(result.status.success(), "{result:?}");
-    let document = parse_vcd_file(&output).unwrap();
+    let document = parse_vcd_bytes_with_limits(
+        &std::fs::read(&output).expect("read the VCD file"),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(document.timescale.to_string(), "100 ms");
     assert_eq!(document.signals[0].changes[0].tick, 5);
     assert_eq!(

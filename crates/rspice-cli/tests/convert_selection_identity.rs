@@ -117,7 +117,11 @@ fn ambiguous_vcd_scope_aliases_require_a_full_name() {
     assert_eq!(std::fs::read_to_string(&output).unwrap(), "preserve output");
     let result = convert(&source, &output, "vcd", &["D(left.clk)"]);
     assert!(result.status.success(), "{result:?}");
-    let document = rspice_core::io::parse_vcd_file(&output).unwrap();
+    let document = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&output).expect("read the VCD file"),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(document.signals.len(), 1);
     assert_eq!(document.signals[0].variables[0].scope, ["left"]);
 }
@@ -153,7 +157,11 @@ fn scalar_vcd_selectors_resolve_scoped_and_relative_aliases_with_quantity() {
     let source = dir.join("source.vcd");
     let output = dir.join("selected.vcd");
     std::fs::write(&source, SCALAR_ALIASES).unwrap();
-    let original = rspice_core::io::parse_vcd_file(&source).unwrap();
+    let original = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&source).expect("read the VCD file"),
+        Default::default(),
+    )
+    .unwrap();
     for (selector, index) in [
         ("D(top.left.clk)", 0),
         ("D(top.left.alias)", 0),
@@ -170,7 +178,11 @@ fn scalar_vcd_selectors_resolve_scoped_and_relative_aliases_with_quantity() {
     ] {
         let result = convert(&source, &output, "vcd", &[selector]);
         assert!(result.status.success(), "{selector}: {result:?}");
-        let selected = rspice_core::io::parse_vcd_file(&output).unwrap();
+        let selected = rspice_core::io::parse_vcd_bytes_with_limits(
+            &std::fs::read(&output).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(selected.signals.len(), 1);
         assert_eq!(
             selected.signals[0].variables,

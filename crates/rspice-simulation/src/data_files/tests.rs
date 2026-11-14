@@ -176,7 +176,8 @@ fn a_d_vcd_replays_its_dump_through_a_prepared_run() {
         vcd.push_str(&format!("#{}\n{}!\n", tick * 500, tick % 2));
     }
     fixture.write("clk.vcd", &vcd);
-    let document = rspice_core::io::parse_vcd_reader(vcd.as_bytes()).unwrap();
+    let document =
+        rspice_core::io::parse_vcd_bytes_with_limits(vcd.as_bytes(), Default::default()).unwrap();
     let expected: Vec<(u64, u8)> = document.signals[0]
         .changes
         .iter()

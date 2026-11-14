@@ -254,38 +254,6 @@ pub fn parse_raw_reader_with_limits<R: Read>(
     parse_raw_bytes(&bytes, resource_limits)
 }
 
-/// Parse every plot in a `.raw` file with explicit resource limits.
-///
-/// Each plot is bounded by its own declared `No. Points`, so a file whose
-/// analysis plot is followed by further plots yields all of them. Limits are
-/// enforced across the complete file, before each plot's storage is allocated.
-pub fn parse_raw_plots_file_with_limits(
-    path: &Path,
-    resource_limits: ResourceLimits,
-) -> Result<RawFile, RawParseError> {
-    let bytes = read_file_bytes_limited(
-        path,
-        ResourceKind::ExternalDataBytes,
-        resource_limits.max_external_data_bytes,
-    )?;
-    parse_raw_plots_bytes_with_limits(&bytes, resource_limits)
-}
-
-/// Parse every plot in `.raw` data from a reader with explicit resource limits.
-///
-/// The file-backed sibling is [`parse_raw_plots_file_with_limits`].
-pub fn parse_raw_plots_reader_with_limits<R: Read>(
-    reader: &mut R,
-    resource_limits: ResourceLimits,
-) -> Result<RawFile, RawParseError> {
-    let bytes = read_bytes_limited(
-        reader,
-        ResourceKind::ExternalDataBytes,
-        resource_limits.max_external_data_bytes,
-    )?;
-    parse_raw_plots_bytes_with_limits(&bytes, resource_limits)
-}
-
 fn parse_raw_bytes(
     bytes: &[u8],
     resource_limits: ResourceLimits,
@@ -1535,7 +1503,7 @@ mod tests {
     }
 
     fn parse_plots(bytes: Vec<u8>) -> Result<RawFile, RawParseError> {
-        parse_raw_plots_reader_with_limits(&mut Cursor::new(bytes), ResourceLimits::default())
+        parse_raw_plots_bytes_with_limits(&bytes, ResourceLimits::default())
     }
 
     #[test]
@@ -1660,7 +1628,7 @@ mod tests {
 
         // Each plot fits on its own (four and twelve values); retaining both
         // exceeds the aggregate budget before the second allocation.
-        let error = parse_raw_plots_reader_with_limits(&mut Cursor::new(bytes.clone()), limits)
+        let error = parse_raw_plots_bytes_with_limits(&bytes, limits)
             .expect_err("the second plot must include values already retained");
         assert!(
             matches!(

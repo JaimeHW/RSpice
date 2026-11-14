@@ -99,7 +99,11 @@ fn unrelated_analog_columns_do_not_hide_or_prevent_event_exports() {
     .unwrap();
     let converted = convert(&source, &output, "vcd");
     assert!(converted.status.success(), "{converted:?}");
-    let document = rspice_core::io::parse_vcd_file(&output).unwrap();
+    let document = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&output).expect("read the VCD file"),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(document.signals.len(), 2);
     for (signal, name) in document.signals.iter().zip(["clk", "sample"]) {
         assert_eq!(signal.variables[0].name, name);

@@ -100,7 +100,7 @@ fn addresistors_materialization_preserves_authored_count() {
     assert_eq!(netlist.pspice_chebyshev_source_count(), 1);
 
     let materialized = netlist
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&rspice_core::NoAbort)
         .expect("ADDRESISTORS derived netlist materializes");
     assert_eq!(
         materialized.netlist.pspice_chebyshev_source_count(),

@@ -14,7 +14,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use rspice_core::Netlist;
-use rspice_core::netlist::multi_run::expand_multi_run;
+use rspice_core::netlist::multi_run::try_expand_multi_run;
 use rspice_core::netlist::spef::SpefFile;
 
 /// Deterministic xorshift64* stream.
@@ -164,12 +164,18 @@ fn behavioral_poly_probe_survives_multibyte_non_keyword_prefixes() {
 
 #[test]
 fn multi_run_expansion_survives_chaos() {
-    chaos("expand_multi_run", SEED_DECKS, 0x5EED_0002, 4000, |input| {
-        // Expansion output must itself parse without panicking.
-        for deck in expand_multi_run(input) {
-            let _ = Netlist::parse(&deck.source);
-        }
-    });
+    chaos(
+        "try_expand_multi_run",
+        SEED_DECKS,
+        0x5EED_0002,
+        4000,
+        |input| {
+            // Expansion output must itself parse without panicking.
+            for deck in try_expand_multi_run(input).into_iter().flatten() {
+                let _ = Netlist::parse(&deck.source);
+            }
+        },
+    );
 }
 
 #[test]

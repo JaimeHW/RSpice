@@ -90,7 +90,11 @@ fn event_seconds_metadata_and_same_time_changes_remain_lossless() {
             .output()
             .unwrap();
         assert!(result.status.success(), "{unit}: {result:?}");
-        let document = rspice_core::io::parse_vcd_file(&output).unwrap();
+        let document = rspice_core::io::parse_vcd_bytes_with_limits(
+            &std::fs::read(&output).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         let changes = &document.signals[0].changes;
         assert_eq!(changes.len(), 3);
         assert_eq!(changes[1].tick, changes[2].tick);

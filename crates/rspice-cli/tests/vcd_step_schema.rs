@@ -2,7 +2,7 @@
 mod common;
 
 use common::{read_json, test_dir};
-use rspice_core::io::{VcdSignalKind, parse_vcd_file};
+use rspice_core::io::{VcdSignalKind, parse_vcd_bytes_with_limits};
 use std::collections::BTreeSet;
 use std::process::Command;
 
@@ -51,7 +51,12 @@ fn check(circuit: &str, expected: &[&str]) {
             coordinate["validity"],
             serde_json::json!(vec![true; schema.len()])
         );
-        let dump = parse_vcd_file(&dir.join(coordinate["artifact"].as_str().unwrap())).unwrap();
+        let dump = parse_vcd_bytes_with_limits(
+            &std::fs::read(&dir.join(coordinate["artifact"].as_str().unwrap()))
+                .expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(dump.signals.len(), schema.len());
         for signal in dump.signals {
             let (prefix, kind, value_type, unit) = match signal.kind {

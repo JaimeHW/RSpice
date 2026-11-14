@@ -2,7 +2,7 @@
 //!
 //! Both constructs multiply one deck into several concrete runs, so they
 //! are resolved *textually, before parsing* — the model HSPICE itself uses
-//! (every alter re-reads the modified deck). [`expand_multi_run`] turns raw
+//! (every alter re-reads the modified deck). [`try_expand_multi_run`] turns raw
 //! deck text into self-contained single-run decks:
 //!
 //! * `.ALTER [title]` — each block edits the deck cumulatively: element and
@@ -105,21 +105,6 @@ struct DataTable {
     name: String,
     params: Vec<String>,
     rows: Vec<Vec<Value>>,
-}
-
-/// Expand a deck into its concrete runs. Decks without `.ALTER`/`.DATA`
-/// constructs pass through untouched as a single unlabeled run.
-pub fn expand_multi_run(source: &str) -> Vec<RunDeck> {
-    match try_expand_multi_run(source) {
-        Ok(decks) => decks,
-        Err(error) => {
-            log::warn!("multi-run expansion failed: {error}");
-            vec![RunDeck {
-                label: None,
-                source: source.to_owned(),
-            }]
-        }
-    }
 }
 
 /// Checked expansion for production callers. Malformed `.DATA` constructs
@@ -1256,7 +1241,7 @@ mod tests {
 
     #[test]
     fn plain_deck_passes_through_untouched() {
-        let decks = expand_multi_run(BASE);
+        let decks = try_expand_multi_run(BASE).unwrap();
         assert_eq!(decks.len(), 1);
         assert!(decks[0].label.is_none());
         assert_eq!(decks[0].source, BASE);
@@ -1279,7 +1264,7 @@ mod tests {
             .model d1 d is=2e-14 n=1.5\n\
             .end\n";
 
-        let decks = expand_multi_run(source);
+        let decks = try_expand_multi_run(source).unwrap();
         assert_eq!(decks.len(), 3);
         assert_eq!(decks[0].label.as_deref(), Some("base"));
         assert_eq!(decks[1].label.as_deref(), Some("hot"));
@@ -1314,7 +1299,7 @@ mod tests {
             .alter\n\
             R1 a b 2k\n\
             .end\n";
-        let decks = expand_multi_run(source);
+        let decks = try_expand_multi_run(source).unwrap();
         assert!(decks[1].source.contains("R1 a b 2k"));
         assert!(!decks[1].source.contains("temp=27"));
     }
@@ -1322,7 +1307,7 @@ mod tests {
     #[test]
     fn alter_appends_new_statements() {
         let source = "t\nR1 a 0 1k\n.alter\nR2 a 0 2k\n.end\n";
-        let decks = expand_multi_run(source);
+        let decks = try_expand_multi_run(source).unwrap();
         assert!(decks[1].source.contains("R1 a 0 1k"));
         assert!(decks[1].source.contains("R2 a 0 2k"));
     }
@@ -1340,7 +1325,7 @@ mod tests {
             .enddata\n\
             .dc data=tbl\n\
             .end\n";
-        let decks = expand_multi_run(source);
+        let decks = try_expand_multi_run(source).unwrap();
         assert_eq!(decks.len(), 3);
         assert_eq!(decks[0].label.as_deref(), Some("tbl row 1"));
         // Row values override the .param assignments in place.
@@ -1564,7 +1549,7 @@ mod tests {
             .enddata\n\
             .tran 1n 4u sweep data=pts\n\
             .end\n";
-        let decks = expand_multi_run(source);
+        let decks = try_expand_multi_run(source).unwrap();
         assert_eq!(decks.len(), 2);
         assert!(decks[0].source.contains(".tran 1n 4u"));
         assert!(!decks[0].source.to_lowercase().contains("sweep"));
@@ -1642,7 +1627,7 @@ mod tests {
             .alter big load\n\
             R1 a 0 10k\n\
             .end\n";
-        let decks = expand_multi_run(source);
+        let decks = try_expand_multi_run(source).unwrap();
         assert_eq!(decks.len(), 4);
         assert_eq!(decks[0].label.as_deref(), Some("base · tbl row 1"));
         assert_eq!(decks[3].label.as_deref(), Some("big load · tbl row 2"));

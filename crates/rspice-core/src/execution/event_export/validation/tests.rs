@@ -1,11 +1,11 @@
 use super::*;
 use crate::ResourceLimits;
-use crate::io::parse_raw_plots_reader_with_limits;
+use crate::io::parse_raw_plots_bytes_with_limits;
 use std::io::Cursor;
 
 fn fixture() -> RawFile {
     let source = "Title: event\nPlotname: Digital Events (rspice-digital-events/1)\nFlags: real\nNo. Variables: 2\nNo. Points: 2\nVariables:\n0 time time\n1 D(clk) digital\nValues:\n0 0 0\n1 1 1\n";
-    parse_raw_plots_reader_with_limits(&mut Cursor::new(source), ResourceLimits::default()).unwrap()
+    parse_raw_plots_bytes_with_limits(source.as_bytes(), ResourceLimits::default()).unwrap()
 }
 
 #[test]

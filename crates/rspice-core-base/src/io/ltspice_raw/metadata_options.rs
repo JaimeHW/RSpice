@@ -242,11 +242,9 @@ mod tests {
         let plot = format!(
             "Title: escaped\nPlotname: escaped\nOption: ordinary = value\n{metadata}{DATA}"
         );
-        let file = parse_raw_plots_reader_with_limits(
-            &mut std::io::Cursor::new(plot.repeat(2)),
-            ResourceLimits::default(),
-        )
-        .unwrap();
+        let file =
+            parse_raw_plots_bytes_with_limits(plot.repeat(2).as_bytes(), ResourceLimits::default())
+                .unwrap();
         assert_eq!(file.plots.len(), 2);
         for plot in file.plots {
             assert_eq!(plot.header.plotname, name);

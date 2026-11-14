@@ -69,7 +69,11 @@ fn undefined_real_prefixes_survive_table_and_vcd_round_trips() {
         }
         let output = directory.join("roundtrip.vcd");
         convert(&table, &output, "vcd");
-        let dump = rspice_core::io::parse_vcd_file(&output).unwrap();
+        let dump = rspice_core::io::parse_vcd_bytes_with_limits(
+            &std::fs::read(&output).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(dump.signals.len(), 4);
         let real = |name: &str| {
             dump.signals

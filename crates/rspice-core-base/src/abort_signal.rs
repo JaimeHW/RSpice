@@ -498,7 +498,7 @@ impl CountingAbort {
     ///
     /// With a threshold of `n`, an analysis that stops the instant it is told
     /// to leaves `count() == n + 1`, so `observed_at() == Some(n + 1)` and
-    /// [`polls_after_abort`](Self::polls_after_abort) is zero.
+    /// `polls_after_abort` is zero.
     pub fn observed_at(&self) -> Option<usize> {
         (self.count() > self.threshold).then_some(self.threshold + 1)
     }
@@ -507,6 +507,7 @@ impl CountingAbort {
     ///
     /// Zero means the analysis returned without polling again, which is the
     /// contract every bounded loop is held to.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn polls_after_abort(&self) -> usize {
         self.count().saturating_sub(self.threshold + 1)
     }

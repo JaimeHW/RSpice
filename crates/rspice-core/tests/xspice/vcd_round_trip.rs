@@ -19,7 +19,7 @@ use rspice_core::engine::{
 use rspice_core::execution::{EventProjectionError, event_vcd_document, vcd_event_histories};
 use rspice_core::io::{
     VcdBit, VcdChange, VcdDocument, VcdMagnitude, VcdSignal, VcdSignalKind, VcdTimeUnit,
-    VcdTimescale, VcdValue, VcdVariable, parse_vcd_reader, write_vcd,
+    VcdTimescale, VcdValue, VcdVariable, parse_vcd_bytes_with_limits, write_vcd,
 };
 use rspice_core::xspice::DigitalValue;
 
@@ -160,7 +160,8 @@ fn document() -> impl Strategy<Value = VcdDocument> {
 fn round_trip(document: &VcdDocument) -> VcdDocument {
     let mut bytes = Vec::new();
     write_vcd(&mut bytes, document).expect("the generated document is writable");
-    parse_vcd_reader(bytes.as_slice()).expect("what the writer emits, the reader reads")
+    parse_vcd_bytes_with_limits(bytes.as_slice(), Default::default())
+        .expect("what the writer emits, the reader reads")
 }
 
 proptest! {

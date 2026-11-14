@@ -86,10 +86,11 @@ fn parsed_include_inventory_retains_empty_nested_and_selected_library_sources() 
     expected.sort();
     for netlist in [
         Netlist::parse_file(&deck).unwrap(),
-        Netlist::parse_file_with_search_paths_and_options(
+        Netlist::parse_file_with_search_paths_and_options_and_abort(
             &deck,
             &[dir.path().to_path_buf()],
             NetlistParseOptions::default(),
+            &rspice_core::NoAbort,
         )
         .unwrap(),
     ] {

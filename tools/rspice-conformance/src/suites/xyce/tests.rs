@@ -1013,7 +1013,7 @@ fn addresistors_policy_resistance_and_precedence_mutations_are_causal() {
     let original = XyceTestRunner::parse_xyce_netlist(&source, &corpus)
         .expect("canonical ADDRESISTORS source parses");
     let materialized = original
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&rspice_core::NoAbort)
         .expect("canonical ADDRESISTORS source materializes");
     XyceTestRunner::validate_addresistors_report(
         &materialized.report,
@@ -1045,7 +1045,7 @@ fn addresistors_policy_resistance_and_precedence_mutations_are_causal() {
         XyceTestRunner::parse_xyce_netlist(&policy_off, &corpus).expect("policy-off source parses");
     assert!(
         matches!(
-            policy_off.materialize_xyce_add_resistors(),
+            policy_off.materialize_xyce_add_resistors_with_abort(&rspice_core::NoAbort),
             Err(rspice_core::netlist::XyceAddResistorsMaterializationError::MissingPolicy)
         ),
         "disabling both cards must causally prevent generation"
@@ -1058,7 +1058,7 @@ fn addresistors_policy_resistance_and_precedence_mutations_are_causal() {
     );
     let wrong_resistance = XyceTestRunner::parse_xyce_netlist(&wrong_resistance, &corpus)
         .expect("wrong-resistance mutation parses")
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&rspice_core::NoAbort)
         .expect("wrong-resistance mutation materializes");
     assert!(
         XyceTestRunner::validate_addresistors_report(
@@ -1086,7 +1086,7 @@ fn addresistors_policy_resistance_and_precedence_mutations_are_causal() {
                               .END\n";
     let overlap = XyceTestRunner::parse_xyce_netlist(overlap_source, Path::new("overlap.cir"))
         .expect("overlap fixture parses")
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&rspice_core::NoAbort)
         .expect("overlap fixture materializes");
     assert_eq!(overlap.report.one_terminal_candidates, ["2".to_string()]);
     assert!(overlap.report.no_dc_path_candidates.is_empty());
@@ -1112,7 +1112,7 @@ fn addresistors_snapshot_layout_serialization_and_deadline_mutations_fail_closed
     let original = XyceTestRunner::parse_xyce_netlist(&source, &corpus)
         .expect("canonical ADDRESISTORS source parses");
     let materialized = original
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&rspice_core::NoAbort)
         .expect("canonical ADDRESISTORS source materializes");
 
     let mut value_mutation = materialized.netlist.clone();

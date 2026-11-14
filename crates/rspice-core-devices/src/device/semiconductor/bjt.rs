@@ -870,7 +870,7 @@ pub struct Bjt {
     legacy_emitter_lead: Option<(NodeId, Value)>,
 
     // MNA-promoted BJT internal nodes (ngspice vbicsetup.c topology). The
-    // circuit builder assigns these through `assign_vbic_internal_nodes`,
+    // circuit builder assigns these through `assign_mna_internal_nodes`,
     // aliasing collapsed states onto their parent nodes (`cx` onto the
     // collector when RCX is zero, `ci` onto `cx` when RCI is zero, and so on)
     // so every state keeps exactly one matrix column. `node_rth` and the

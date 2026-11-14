@@ -7,18 +7,6 @@ use crate::config::ExpressionDialect;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Resolve Xyce inline and file-backed table functions into VM-ready lookup data.
-pub fn resolve_file_lookup_functions(
-    expr: Expr,
-    source_path: Option<&Path>,
-) -> Result<Expr, String> {
-    resolve_file_lookup_functions_with_limits(
-        expr,
-        source_path,
-        crate::resource::ResourceLimits::default(),
-    )
-}
-
 /// Resolve lookup functions under an explicit resource policy.
 pub fn resolve_file_lookup_functions_with_limits(
     expr: Expr,
@@ -838,8 +826,12 @@ mod tests {
         let expression =
             parse_expression_strict("blifile(\"wave.dat\")").expect("table expression parses");
 
-        let error = resolve_file_lookup_functions(expression, Some(&deck_path))
-            .expect_err("oversized barycentric setup must fail");
+        let error = resolve_file_lookup_functions_with_limits(
+            expression,
+            Some(&deck_path),
+            Default::default(),
+        )
+        .expect_err("oversized barycentric setup must fail");
         assert!(error.contains("barycentric interpolation is limited to 4096 points"));
 
         let _ = std::fs::remove_dir_all(dir);
@@ -863,7 +855,8 @@ mod tests {
 
         let ast = parse_expression_strict("table(\"wave.dat\")").expect("table expression parses");
         let resolved =
-            resolve_file_lookup_functions(ast, Some(&deck_path)).expect("table file resolves");
+            resolve_file_lookup_functions_with_limits(ast, Some(&deck_path), Default::default())
+                .expect("table file resolves");
         let program = compile(&resolved);
         let mut vm = Vm::new();
 
@@ -922,8 +915,9 @@ mod tests {
 
         let ast =
             parse_expression_strict("table(\"pulse.dat\", 5)").expect("downsampled table parses");
-        let resolved = resolve_file_lookup_functions(ast, Some(&deck_path))
-            .expect("downsampled table resolves");
+        let resolved =
+            resolve_file_lookup_functions_with_limits(ast, Some(&deck_path), Default::default())
+                .expect("downsampled table resolves");
         let Expr::LookupTable { input, table } = resolved else {
             panic!("file table should resolve into lookup data");
         };
@@ -991,8 +985,9 @@ mod tests {
             .expect("write two-point spline data");
         let ast = parse_expression_strict("akima(\"two-points.dat\")")
             .expect("two-point Akima expression parses");
-        let resolved = resolve_file_lookup_functions(ast, Some(&deck_path))
-            .expect("two-point Akima file resolves");
+        let resolved =
+            resolve_file_lookup_functions_with_limits(ast, Some(&deck_path), Default::default())
+                .expect("two-point Akima file resolves");
         let program = compile(&resolved);
         let mut vm = Vm::new();
         let midpoint = vm.execute(&program, &Context::transient(&[], &[], 0.5));
@@ -1011,7 +1006,7 @@ mod tests {
         for (expression, expected_at) in cases {
             let ast = parse_expression_strict(expression)
                 .unwrap_or_else(|error| panic!("inline lookup should parse: {error}"));
-            let resolved = resolve_file_lookup_functions(ast, None)
+            let resolved = resolve_file_lookup_functions_with_limits(ast, None, Default::default())
                 .unwrap_or_else(|error| panic!("inline lookup should resolve: {error}"));
             let Expr::LookupTable { input, table } = &resolved else {
                 panic!("constant inline lookup should lower to precomputed data");
@@ -1046,7 +1041,7 @@ mod tests {
         for (expression, expected_at) in cases {
             let ast = parse_expression_strict(expression)
                 .unwrap_or_else(|error| panic!("constant expression should parse: {error}"));
-            let resolved = resolve_file_lookup_functions(ast, None)
+            let resolved = resolve_file_lookup_functions_with_limits(ast, None, Default::default())
                 .unwrap_or_else(|error| panic!("constant points should resolve: {error}"));
             let Expr::LookupTable { table, .. } = &resolved else {
                 panic!("constant point expressions should lower to precomputed data");
@@ -1167,16 +1162,17 @@ mod tests {
     fn inline_lookup_resolution_fails_closed_on_invalid_precomputed_points() {
         let duplicate = parse_expression_strict("akima(v(a),0,1,0,2)")
             .expect("duplicate-point expression parses");
-        let error = resolve_file_lookup_functions(duplicate, None)
+        let error = resolve_file_lookup_functions_with_limits(duplicate, None, Default::default())
             .expect_err("duplicate abscissas must fail")
             .to_string();
         assert!(error.contains("distinct x values"), "{error}");
 
         let runtime_knot = parse_expression_strict("akima(v(a),v(knot),1,1,2)")
             .expect("runtime-knot expression parses");
-        let error = resolve_file_lookup_functions(runtime_knot, None)
-            .expect_err("runtime spline knots must fail")
-            .to_string();
+        let error =
+            resolve_file_lookup_functions_with_limits(runtime_knot, None, Default::default())
+                .expect_err("runtime spline knots must fail")
+                .to_string();
         assert!(
             error.contains("constant after parameter expansion"),
             "{error}"
@@ -1218,8 +1214,9 @@ mod tests {
 
         let akima = parse_expression_strict("akima(\"curve.dat\")")
             .expect("Akima comparison expression parses");
-        let akima = resolve_file_lookup_functions(akima, Some(&deck_path))
-            .expect("Akima comparison resolves");
+        let akima =
+            resolve_file_lookup_functions_with_limits(akima, Some(&deck_path), Default::default())
+                .expect("Akima comparison resolves");
         let mut vm = Vm::new();
         let midpoint = vm.execute(&compile(&akima), &Context::transient(&[], &[], 2.5));
         assert!((midpoint - 0.875).abs() < 1.0e-14);
@@ -1236,8 +1233,12 @@ mod tests {
         for function in ["bli", "blifile"] {
             let ast = parse_expression_strict(&format!("{function}(\"curve.dat\")"))
                 .expect("barycentric expression parses");
-            let resolved = resolve_file_lookup_functions(ast, Some(&deck_path))
-                .expect("barycentric file resolves");
+            let resolved = resolve_file_lookup_functions_with_limits(
+                ast,
+                Some(&deck_path),
+                Default::default(),
+            )
+            .expect("barycentric file resolves");
             let Expr::LookupTable { input, table } = &resolved else {
                 panic!("barycentric file should resolve into lookup data");
             };
@@ -1319,8 +1320,12 @@ mod tests {
         for function in functions {
             let ast = parse_expression_strict(&format!("{function}(\"curve.dat\")"))
                 .expect("spline expression parses");
-            let resolved =
-                resolve_file_lookup_functions(ast, Some(&deck_path)).expect("spline file resolves");
+            let resolved = resolve_file_lookup_functions_with_limits(
+                ast,
+                Some(&deck_path),
+                Default::default(),
+            )
+            .expect("spline file resolves");
             let Expr::LookupTable { input, table } = &resolved else {
                 panic!("{function} file should resolve into lookup data");
             };

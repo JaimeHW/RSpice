@@ -5017,7 +5017,7 @@ pub struct SimulationOptions {
     pub remove_unused: Option<RemoveUnusedPolicy>,
     /// Xyce `.PREPROCESS ADDRESISTORS` generation policy. Parsing records the
     /// request but never mutates the first-run circuit; callers opt into the
-    /// generated semantic copy through `Netlist::materialize_xyce_add_resistors`.
+    /// generated semantic copy through `Netlist::materialize_xyce_add_resistors_with_abort`.
     pub add_resistors: Option<XyceAddResistorsPolicy>,
     /// Xyce `.OPTIONS MEASURE MEASFAIL`: emit `FAILED` rather than the
     /// calculation default value in machine-readable measurement files.

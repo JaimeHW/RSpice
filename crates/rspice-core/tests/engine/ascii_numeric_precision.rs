@@ -1,5 +1,5 @@
 //! A finite decimal must not silently disappear while reading waveform data.
-use rspice_core::io::{VcdValue, parse_raw_reader, parse_vcd_reader};
+use rspice_core::io::{VcdValue, parse_raw_reader, parse_vcd_bytes_with_limits};
 use std::io::Cursor;
 
 fn raw(complex: bool, rows: bool, fields: [&str; 4]) -> String {
@@ -79,7 +79,8 @@ fn raw_ascii_signed_zero_and_representable_subnormals_keep_every_bit() {
 #[test]
 fn vcd_real_changes_refuse_underflow_with_a_source_line() {
     for literal in ["1e-999", "-1e-999", "2e-324", "-2e-324"] {
-        let error = parse_vcd_reader(vcd(literal).as_bytes()).unwrap_err();
+        let error =
+            parse_vcd_bytes_with_limits(vcd(literal).as_bytes(), Default::default()).unwrap_err();
         let message = error.to_string();
         assert!(
             message.contains("underflow") && message.contains("line 5"),
@@ -97,7 +98,8 @@ fn vcd_real_signed_zero_and_representable_subnormals_keep_every_bit() {
         ("5e-324", 5e-324_f64),
         ("-5e-324", -5e-324_f64),
     ] {
-        let data = parse_vcd_reader(vcd(literal).as_bytes()).unwrap();
+        let data =
+            parse_vcd_bytes_with_limits(vcd(literal).as_bytes(), Default::default()).unwrap();
         let VcdValue::Real(value) = data.signals[0].changes[0].value else {
             panic!("expected a real event")
         };

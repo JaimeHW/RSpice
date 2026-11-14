@@ -162,7 +162,8 @@ fn sealed_code_model_data_files_travel_with_the_worker_request() {
         .iter()
         .find(|history| history.node_name.eq_ignore_ascii_case("clk"))
         .unwrap_or_else(|| panic!("no clk history: {:?}", events.digital));
-    let document = rspice_core::io::parse_vcd_reader(vcd.as_bytes()).unwrap();
+    let document =
+        rspice_core::io::parse_vcd_bytes_with_limits(vcd.as_bytes(), Default::default()).unwrap();
     let expected = document.signals[0]
         .changes
         .iter()

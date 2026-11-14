@@ -49,9 +49,6 @@ use crate::Value;
 use std::error::Error;
 use std::fmt;
 
-/// Xyce model level implemented by this module.
-pub const XYCE_TEAM_MEMRISTOR_LEVEL: u8 = 2;
-
 /// Wire/runtime version for accepted TEAM resistance-RTN state.
 pub const XYCE_TEAM_RESISTANCE_NOISE_STATE_VERSION: u32 = 1;
 
@@ -1071,7 +1068,6 @@ mod tests {
     #[test]
     fn defaults_match_xyce_7_10_level_two_metadata() {
         let model = XyceTeamModelParams::default();
-        assert_eq!(XYCE_TEAM_MEMRISTOR_LEVEL, 2);
         assert_eq!(model.k_on, -8.0e-13);
         assert_eq!(model.k_off, 8.0e-13);
         assert_eq!(model.alpha_on, 3.0);

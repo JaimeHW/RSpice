@@ -567,6 +567,7 @@ pub(crate) fn validate_prepared_behavioral_runtime_expression(
 /// Return whether an expression depends specifically on the active AC
 /// frequency. Unlike textual scans, this ignores quoted text, function formal
 /// names, and parameter-definition left-hand sides.
+#[cfg(test)]
 pub fn behavioral_expression_references_frequency(expression: &str) -> bool {
     if let Ok(expression) = parse_net_expr(expression) {
         return net_expr_references_frequency(&expression);
@@ -673,6 +674,7 @@ pub fn validate_parameter_expressions(params: &ParamContext) -> Result<(), Strin
 /// Static globals receive numeric projections while retaining their bodies.
 /// Xyce definitions that still reference `TIME` or `FREQ` remain symbolic
 /// for device binding at the active analysis point.
+#[cfg(any(test, feature = "test-support"))]
 pub fn finalize_parameter_expressions(params: &mut ParamContext) -> Result<(), String> {
     finalize_parameter_expressions_with_abort(params, &NoAbort).map_err(|error| error.to_string())
 }
@@ -993,6 +995,7 @@ fn is_file_table_call(name: &str, args: &[NetExpr]) -> bool {
     file_capable && matches!(args.first(), Some(NetExpr::StringLiteral(_)))
 }
 
+#[cfg(test)]
 fn net_expr_references_frequency(expression: &NetExpr) -> bool {
     match expression {
         NetExpr::Param(name) => matches!(name.to_ascii_uppercase().as_str(), "FREQ" | "HERTZ"),

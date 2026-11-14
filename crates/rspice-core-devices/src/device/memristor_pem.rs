@@ -21,9 +21,6 @@ use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
-/// Xyce model level implemented by this module.
-pub const XYCE_PEM_MEMRISTOR_LEVEL: u8 = 4;
-
 /// Xyce 7.10's default positive-state table filename.
 pub const XYCE_PEM_DEFAULT_POSITIVE_TABLE_FILE: &str = "filep.dat";
 
@@ -393,7 +390,8 @@ impl fmt::Display for XycePemLegacyTableParseError {
 
 impl Error for XycePemLegacyTableParseError {}
 
-/// Parse a PEM table with Xyce 7.10's legacy two-extraction convention.
+/// Parse a PEM table with Xyce 7.10's legacy two-extraction convention,
+/// enforcing a hard point-count budget before each allocation.
 ///
 /// Xyce extracts `double`, then `char`, then `double`.  A comma-delimited row
 /// therefore behaves normally.  On a whitespace-delimited row, formatted
@@ -410,17 +408,8 @@ impl Error for XycePemLegacyTableParseError {}
 /// the exact next byte before formatted extraction. Unlike C++ iostream
 /// failbit, malformed input produces a deterministic error instead of silently
 /// truncating an otherwise valid prefix; this is an intentional fail-closed
-/// diagnostic policy and does not change valid-table semantics.
-pub fn parse_xyce_7_10_legacy_two_column_table(
-    source_name: &str,
-    text: &str,
-) -> Result<XycePemPwlTable, XycePemLegacyTableParseError> {
-    parse_xyce_7_10_legacy_two_column_table_bounded(source_name, text, usize::MAX)
-}
-
-/// Parse a PEM table while enforcing a hard point-count budget before each
-/// allocation. This is the resource-safe entry point used for external model
-/// data; the limit is independent from the byte cap applied by the loader.
+/// diagnostic policy and does not change valid-table semantics. The point
+/// limit is independent from the byte cap applied by the loader.
 #[doc(hidden)]
 pub fn parse_xyce_7_10_legacy_two_column_table_bounded(
     source_name: &str,
@@ -1018,7 +1007,6 @@ mod tests {
 
     #[test]
     fn defaults_match_xyce_7_10_level_four_metadata() {
-        assert_eq!(XYCE_PEM_MEMRISTOR_LEVEL, 4);
         assert_eq!(XYCE_PEM_DEFAULT_POSITIVE_TABLE_FILE, "filep.dat");
         assert_eq!(XYCE_PEM_DEFAULT_NEGATIVE_TABLE_FILE, "filem.dat");
         assert_eq!(
@@ -1120,9 +1108,10 @@ mod tests {
 
     #[test]
     fn legacy_parser_handles_csv_and_column_one_comments() {
-        let data = parse_xyce_7_10_legacy_two_column_table(
+        let data = parse_xyce_7_10_legacy_two_column_table_bounded(
             "positive.csv",
             "# x,f(x)\n0.0,1.0\n0.5, 0.25\n1.0,0.0\n",
+            usize::MAX,
         )
         .unwrap();
         assert_eq!(
@@ -1137,9 +1126,10 @@ mod tests {
 
     #[test]
     fn legacy_parser_reproduces_whitespace_separator_character_quirk() {
-        let data = parse_xyce_7_10_legacy_two_column_table(
+        let data = parse_xyce_7_10_legacy_two_column_table_bounded(
             "legacy.dat",
             "9.33E-02 6.30E-01\n1.00E-01 -7.25E-01\n",
+            usize::MAX,
         )
         .unwrap();
         assert_close(data.points()[0].value, 0.030, 1e-15, 1e-15);
@@ -1149,9 +1139,10 @@ mod tests {
 
     #[test]
     fn legacy_parser_extracts_records_as_a_continuous_stream() {
-        let data = parse_xyce_7_10_legacy_two_column_table(
+        let data = parse_xyce_7_10_legacy_two_column_table_bounded(
             "stream.csv",
             "# header\n0.0,1.0 0.5,\n0.25 1.0,0.0\n",
+            usize::MAX,
         )
         .expect("records may share or span physical lines");
         assert_eq!(
@@ -1179,9 +1170,12 @@ mod tests {
 
     #[test]
     fn legacy_parser_reports_stable_file_line_and_column_errors() {
-        let error =
-            parse_xyce_7_10_legacy_two_column_table("bad.dat", "# header\n0.0,1.0\n0.5,broken\n")
-                .unwrap_err();
+        let error = parse_xyce_7_10_legacy_two_column_table_bounded(
+            "bad.dat",
+            "# header\n0.0,1.0\n0.5,broken\n",
+            usize::MAX,
+        )
+        .unwrap_err();
         assert_eq!(error.source_name(), "bad.dat");
         assert_eq!(error.line(), Some(3));
         assert_eq!(error.column(), Some(5));
@@ -1194,7 +1188,9 @@ mod tests {
             "bad.dat:3:5: missing second numeric value"
         );
 
-        let error = parse_xyce_7_10_legacy_two_column_table("empty.csv", "# only\n").unwrap_err();
+        let error =
+            parse_xyce_7_10_legacy_two_column_table_bounded("empty.csv", "# only\n", usize::MAX)
+                .unwrap_err();
         assert_eq!(error.line(), None);
         assert_eq!(error.kind(), XycePemLegacyTableParseErrorKind::TooFewPoints);
     }

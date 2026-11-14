@@ -1299,8 +1299,8 @@ fn transient_rawfile_appends_lossless_event_plots() {
             "{format}: the digital column is still on the analysis grid"
         );
 
-        let file = rspice_core::io::parse_raw_plots_file_with_limits(
-            &path,
+        let file = rspice_core::io::parse_raw_plots_bytes_with_limits(
+            &std::fs::read(&path).expect("read the raw file"),
             rspice_core::ResourceLimits::default(),
         )
         .unwrap_or_else(|error| panic!("{format}: multi-plot read: {error}"));
@@ -1623,15 +1623,19 @@ fn transient_vcd_carries_every_event_node_at_its_own_time() {
     let raw = run_export(&dir, "events_reference", XSPICE_EVENT_TRAN_DECK, "raw");
 
     let reference = rspice_core::execution::decode_event_plots(
-        &rspice_core::io::parse_raw_plots_file_with_limits(
-            &raw,
+        &rspice_core::io::parse_raw_plots_bytes_with_limits(
+            &std::fs::read(&raw).expect("read the raw file"),
             rspice_core::ResourceLimits::default(),
         )
         .expect("read the reference rawfile"),
     )
     .expect("decode the reference event plots");
 
-    let document = rspice_core::io::parse_vcd_file(&vcd).expect("read the published dump");
+    let document = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&vcd).expect("read the VCD file"),
+        Default::default(),
+    )
+    .expect("read the published dump");
     assert_eq!(
         document.signals.len(),
         reference.digital_traces.len() + reference.real_traces.len(),
@@ -1739,7 +1743,11 @@ fn transient_vcd_without_event_nodes_declares_nothing_and_warns() {
         "the run must say the dump is empty: {stderr}"
     );
 
-    let document = rspice_core::io::parse_vcd_file(&out).expect("an empty dump is still valid VCD");
+    let document = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&out).expect("read the VCD file"),
+        Default::default(),
+    )
+    .expect("an empty dump is still valid VCD");
     assert!(document.signals.is_empty());
     let text = std::fs::read_to_string(&out).expect("read the dump");
     assert!(

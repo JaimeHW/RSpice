@@ -5,7 +5,7 @@
 //! drive through its 20 Ω into 1 MΩ.
 
 use rspice_core::engine::{Engine, TransientResult};
-use rspice_core::io::parse_vcd_reader;
+use rspice_core::io::parse_vcd_bytes_with_limits;
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::DigitalValue;
 use std::path::PathBuf;
@@ -88,7 +88,8 @@ fn a_clock_changes_at_exactly_the_ticks_the_reader_places() {
     let scratch = Scratch::new("clock");
     let vcd = clock_vcd();
     scratch.write("clk.vcd", &vcd);
-    let document = parse_vcd_reader(vcd.as_bytes()).expect("the dump reads");
+    let document =
+        parse_vcd_bytes_with_limits(vcd.as_bytes(), Default::default()).expect("the dump reads");
     let changes = &document.signals[0].changes;
     let expected: Vec<f64> = changes
         .iter()
@@ -142,7 +143,8 @@ fn a_change_no_delay_reaches_still_lands_on_its_tick() {
     let vcd = "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$upscope $end\n\
                $enddefinitions $end\n#0\n$dumpvars\n0!\n$end\n#2\n1!\n#7\n0!\n";
     scratch.write("clk.vcd", vcd);
-    let document = parse_vcd_reader(vcd.as_bytes()).expect("the dump reads");
+    let document =
+        parse_vcd_bytes_with_limits(vcd.as_bytes(), Default::default()).expect("the dump reads");
     let expected: Vec<f64> = document.signals[0]
         .changes
         .iter()

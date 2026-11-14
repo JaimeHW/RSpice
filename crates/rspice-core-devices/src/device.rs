@@ -52,11 +52,10 @@ pub use controlled::{Cccs, Ccvs, Vccs, Vcvs};
 pub use coupled_transmission_line::CoupledTransmissionLine;
 pub use memristor_pem::{
     XYCE_PEM_DEFAULT_NEGATIVE_TABLE_FILE, XYCE_PEM_DEFAULT_POSITIVE_TABLE_FILE,
-    XYCE_PEM_MEMRISTOR_LEVEL, XycePemEvaluationMode, XycePemInstanceParams,
-    XycePemLegacyTableParseError, XycePemLegacyTableParseErrorKind, XycePemMemristor,
-    XycePemMemristorCache, XycePemMemristorError, XycePemModelParams, XycePemPwlPoint,
-    XycePemPwlSample, XycePemPwlTable, XycePemPwlTableError,
-    parse_xyce_7_10_legacy_two_column_table,
+    XycePemEvaluationMode, XycePemInstanceParams, XycePemLegacyTableParseError,
+    XycePemLegacyTableParseErrorKind, XycePemMemristor, XycePemMemristorCache,
+    XycePemMemristorError, XycePemModelParams, XycePemPwlPoint, XycePemPwlSample, XycePemPwlTable,
+    XycePemPwlTableError,
 };
 #[doc(hidden)]
 pub use memristor_pem::{
@@ -64,9 +63,9 @@ pub use memristor_pem::{
     parse_xyce_7_10_legacy_two_column_table_bounded,
 };
 pub use memristor_team::{
-    XYCE_TEAM_MEMRISTOR_LEVEL, XYCE_TEAM_RESISTANCE_NOISE_STATE_VERSION, XyceTeamEvaluationMode,
-    XyceTeamInstanceParams, XyceTeamMemristor, XyceTeamMemristorCache, XyceTeamMemristorError,
-    XyceTeamModelParams, XyceTeamResistanceNoiseParams, XyceTeamStateDrive,
+    XYCE_TEAM_RESISTANCE_NOISE_STATE_VERSION, XyceTeamEvaluationMode, XyceTeamInstanceParams,
+    XyceTeamMemristor, XyceTeamMemristorCache, XyceTeamMemristorError, XyceTeamModelParams,
+    XyceTeamResistanceNoiseParams, XyceTeamStateDrive,
 };
 #[doc(hidden)]
 pub use memristor_team::{XyceTeamResistanceNoiseCheckpoint, XyceTeamResistanceNoiseRuntime};

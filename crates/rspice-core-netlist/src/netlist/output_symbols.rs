@@ -1336,14 +1336,6 @@ fn output_runtime_scalar_identifiers(
     Ok(names)
 }
 
-/// Validate authored output expressions without cancellation.
-pub fn validate_output_expressions(netlist: &Netlist) -> Result<(), ParseError> {
-    super::finish_non_aborting_parse(validate_output_expressions_with_abort(
-        netlist,
-        &crate::abort_signal::NoAbort,
-    ))
-}
-
 /// Validate the complete authored output contract in deterministic order.
 pub fn validate_output_requests_with_abort(
     netlist: &Netlist,

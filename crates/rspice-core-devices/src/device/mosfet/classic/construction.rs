@@ -203,6 +203,7 @@ impl Mosfet {
     }
 
     /// Set device geometry
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_geometry(mut self, w: Value, l: Value) -> Self {
         self.w = w;
         self.l = l;

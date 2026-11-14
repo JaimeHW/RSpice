@@ -30,7 +30,7 @@ pub use derivative::Derivative;
 pub(crate) use derivative::derivative_pair;
 #[doc(hidden)]
 pub use file_table::file_lookup_dependency;
-pub use file_table::{resolve_file_lookup_functions, resolve_file_lookup_functions_with_limits};
+pub use file_table::resolve_file_lookup_functions_with_limits;
 pub use parser::{ParseError, parse_expression, parse_expression_strict};
 #[doc(hidden)]
 pub use parser::{ParseExpressionWithAbortError, parse_expression_strict_with_abort};

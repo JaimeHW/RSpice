@@ -1133,7 +1133,11 @@ fn expanded_native_bus_selections_retain_authored_member_names_and_histories() {
         let source = simulate(&dir, &deck, format, name);
         let complete = dir.join("complete.vcd");
         convert(&source, &complete, "vcd", &["--expand-buses"]);
-        let expected = rspice_core::io::parse_vcd_file(&complete).unwrap();
+        let expected = rspice_core::io::parse_vcd_bytes_with_limits(
+            &std::fs::read(&complete).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         for (selector, count) in [
             ("x1.count", 2),
             ("D(x1.count[1:0])", 2),
@@ -1149,7 +1153,11 @@ fn expanded_native_bus_selections_retain_authored_member_names_and_histories() {
                 "vcd",
                 &["--expand-buses", "--variables", selector],
             );
-            let document = rspice_core::io::parse_vcd_file(&selected).unwrap();
+            let document = rspice_core::io::parse_vcd_bytes_with_limits(
+                &std::fs::read(&selected).expect("read the VCD file"),
+                Default::default(),
+            )
+            .unwrap();
             assert_eq!(document.signals.len(), count, "{format}, {selector}");
             for signal in &document.signals {
                 let name = &signal.variables[0].name;
@@ -1333,8 +1341,8 @@ fn event_plots_reach_a_table_through_a_dump_with_only_the_drive_band_lost() {
     let dir = test_dir("vcd_event_roundtrip");
     let raw = simulate(&dir, XSPICE_EVENT_DECK, "raw", "run.raw");
     let history = rspice_core::execution::decode_event_plots(
-        &rspice_core::io::parse_raw_plots_file_with_limits(
-            &raw,
+        &rspice_core::io::parse_raw_plots_bytes_with_limits(
+            &std::fs::read(&raw).expect("read the raw file"),
             rspice_core::ResourceLimits::default(),
         )
         .expect("read the rawfile's plots"),
@@ -1343,7 +1351,11 @@ fn event_plots_reach_a_table_through_a_dump_with_only_the_drive_band_lost() {
 
     let dump = dir.join("events.vcd");
     convert(&raw, &dump, "vcd", &[]);
-    let document = rspice_core::io::parse_vcd_file(&dump).expect("read the dump");
+    let document = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&dump).expect("read the VCD file"),
+        Default::default(),
+    )
+    .expect("read the dump");
 
     for trace in &history.digital_traces {
         let signal = document
@@ -1452,14 +1464,22 @@ fn selecting_a_raw_event_plot_preserves_every_xspice_state() {
     std::fs::write(&event, &text).unwrap();
     let expected = dir.join("expected.vcd");
     convert(&event, &expected, "vcd", &[]);
-    let expected = rspice_core::io::parse_vcd_file(&expected).unwrap();
+    let expected = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&expected).expect("read the VCD file"),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(expected.signals[0].changes.len(), 13);
     let multi = dir.join("multi.raw");
     std::fs::write(&multi, format!("Title: Grid\nPlotname: Transient Analysis\nFlags: real double\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0 1\n{text}")).unwrap();
     for section in ["2", "Digital Events (rspice-digital-events/1)"] {
         let selected = dir.join("selected.vcd");
         convert(&multi, &selected, "vcd", &["--section", section]);
-        let actual = rspice_core::io::parse_vcd_file(&selected).unwrap();
+        let actual = rspice_core::io::parse_vcd_bytes_with_limits(
+            &std::fs::read(&selected).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(actual.timescale, expected.timescale);
         assert_eq!(actual.signals, expected.signals);
     }
@@ -1479,8 +1499,16 @@ fn selecting_a_raw_bus_plot_keeps_its_declaration_and_expansion() {
         convert(&raw, &expected, "vcd", &args);
         args.extend(["--section", "Digital Bus (rspice-digital-bus/1)"]);
         convert(&raw, &selected, "vcd", &args);
-        let expected = rspice_core::io::parse_vcd_file(&expected).unwrap();
-        let actual = rspice_core::io::parse_vcd_file(&selected).unwrap();
+        let expected = rspice_core::io::parse_vcd_bytes_with_limits(
+            &std::fs::read(&expected).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
+        let actual = rspice_core::io::parse_vcd_bytes_with_limits(
+            &std::fs::read(&selected).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(actual.timescale, expected.timescale);
         assert_eq!(actual.signals, expected.signals);
     }
@@ -1506,7 +1534,11 @@ fn a_grid_digital_column_converts_to_a_dump_one_change_at_a_time() {
 
     let dump = dir.join("grid.vcd");
     convert(&input, &dump, "vcd", &[]);
-    let document = rspice_core::io::parse_vcd_file(&dump).expect("read the dump");
+    let document = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&dump).expect("read the VCD file"),
+        Default::default(),
+    )
+    .expect("read the dump");
 
     assert_eq!(
         document.signals.len(),
@@ -1552,7 +1584,11 @@ fn a_grid_digital_column_converts_to_a_dump_one_change_at_a_time() {
         convert(&input, &intermediate, format, &[]);
         let recovered = dir.join("recovered.vcd");
         convert(&intermediate, &recovered, "vcd", &[]);
-        let actual = rspice_core::io::parse_vcd_file(&recovered).unwrap();
+        let actual = rspice_core::io::parse_vcd_bytes_with_limits(
+            &std::fs::read(&recovered).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(actual.timescale, document.timescale, "{format}");
         assert_eq!(actual.signals, document.signals, "{format}");
     }
@@ -1602,7 +1638,11 @@ fn variable_and_range_filters_apply_to_a_dump() {
         "vcd",
         &["--variables", "d", "--start", "5e-9"],
     );
-    let document = rspice_core::io::parse_vcd_file(&filtered).expect("read the filtered dump");
+    let document = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&filtered).expect("read the VCD file"),
+        Default::default(),
+    )
+    .expect("read the filtered dump");
     assert_eq!(document.signals.len(), 1, "only one node was asked for");
     assert!(
         document.signals[0].variables[0]

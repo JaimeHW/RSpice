@@ -1079,7 +1079,14 @@ mod tests {
     fn expression_entries_allow_group_whitespace_without_merging_adjacent_values() {
         let mut stream = TokenStream::new(tokenize("min(1, max(2, 3)) 4").unwrap());
         let expression = collect_contiguous_expression(&mut stream).unwrap();
-        assert_eq!(crate::netlist::expr::eval_simple(&expression).unwrap(), 1.0);
+        assert_eq!(
+            crate::netlist::expr::eval_expression(
+                &expression,
+                &crate::netlist::ParamContext::new()
+            )
+            .unwrap(),
+            1.0
+        );
         assert_eq!(
             collect_contiguous_expression(&mut stream).as_deref(),
             Some("4")
@@ -1098,7 +1105,14 @@ mod tests {
     fn expression_delimiters_do_not_end_nested_comparisons() {
         let mut stream = TokenStream::new(tokenize("(min(1, 2) > 0)> 5").unwrap());
         let expression = collect_delimited_expression(&mut stream, Some('>')).unwrap();
-        assert_eq!(crate::netlist::expr::eval_simple(&expression).unwrap(), 1.0);
+        assert_eq!(
+            crate::netlist::expr::eval_expression(
+                &expression,
+                &crate::netlist::ParamContext::new()
+            )
+            .unwrap(),
+            1.0
+        );
         assert!(matches!(stream.peek().kind, TokenKind::Other('>')));
         stream.advance();
         assert_eq!(

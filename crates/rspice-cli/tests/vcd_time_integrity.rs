@@ -44,7 +44,11 @@ fn declared_time_units_survive_every_metadata_preserving_carrier() {
             let output = dir.join("events.vcd");
             let converted = convert(&source, &output, "vcd", &[]);
             assert!(converted.status.success(), "{unit} {format}: {converted:?}");
-            let document = rspice_core::io::parse_vcd_file(&output).unwrap();
+            let document = rspice_core::io::parse_vcd_bytes_with_limits(
+                &std::fs::read(&output).expect("read the VCD file"),
+                Default::default(),
+            )
+            .unwrap();
             assert_eq!(
                 document.signals[0].changes[1].tick * document.timescale.femtoseconds(),
                 femtoseconds,
@@ -141,7 +145,11 @@ fn close_events_on_long_timelines_keep_distinct_ticks() {
     );
     let converted = convert(&input, &output, "vcd", &[]);
     assert!(converted.status.success(), "{converted:?}");
-    let document = rspice_core::io::parse_vcd_file(&output).unwrap();
+    let document = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&output).expect("read the VCD file"),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(
         document.signals[0]
             .changes
@@ -165,7 +173,11 @@ fn long_duration_waveforms_use_the_available_vcd_tick_range() {
         table(&input, "time", None, &times, &[0.0, 1.0, 0.0]);
         let converted = convert(&input, &output, "vcd", &[]);
         assert!(converted.status.success(), "{times:?}: {converted:?}");
-        let document = rspice_core::io::parse_vcd_file(&output).unwrap();
+        let document = rspice_core::io::parse_vcd_bytes_with_limits(
+            &std::fs::read(&output).expect("read the VCD file"),
+            Default::default(),
+        )
+        .unwrap();
         assert_eq!(document.timescale.to_string(), scale);
         assert_eq!(
             document.signals[0]
@@ -360,7 +372,11 @@ fn one_signal_cannot_hold_two_values_on_one_tick() {
     ]));
     let converted = convert(&input, &output, "vcd", &[]);
     assert!(converted.status.success(), "{converted:?}");
-    let document = rspice_core::io::parse_vcd_file(&output).unwrap();
+    let document = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&output).expect("read the VCD file"),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(document.timescale.to_string(), "1 ns");
     for signal in &document.signals {
         let ticks: Vec<u64> = signal.changes.iter().map(|change| change.tick).collect();
@@ -388,7 +404,11 @@ fn vcd_clipping_uses_seconds_after_converting_the_declared_time_unit() {
         &["--start", "500u", "--stop", "1.5m"],
     );
     assert!(converted.status.success(), "{converted:?}");
-    let document = rspice_core::io::parse_vcd_file(&output).unwrap();
+    let document = rspice_core::io::parse_vcd_bytes_with_limits(
+        &std::fs::read(&output).expect("read the VCD file"),
+        Default::default(),
+    )
+    .unwrap();
     assert_eq!(
         document.signals[0]
             .changes

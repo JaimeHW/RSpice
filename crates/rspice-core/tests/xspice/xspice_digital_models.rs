@@ -4476,8 +4476,8 @@ fn the_refusals_carriers_are_spellings_the_export_surfaces_really_publish() {
             "the rawfile must declare {spelling}, got:\n{text}"
         );
     }
-    let file = rspice_core::io::parse_raw_plots_reader_with_limits(
-        &mut std::io::Cursor::new(raw),
+    let file = rspice_core::io::parse_raw_plots_bytes_with_limits(
+        &raw,
         rspice_core::resource::ResourceLimits::default(),
     )
     .expect("the rawfile parses back");

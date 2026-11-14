@@ -153,11 +153,6 @@ pub(crate) fn eval_expression_complex_with_probe_and_resolver(
     evaluate_complex_with_functions_and_abort(&expr, ctx, resolver, &mut |_, _| Ok(None), abort)
 }
 
-/// Evaluate a simple expression without parameters
-pub fn eval_simple(input: &str) -> Result<Value, ExprError> {
-    eval_expression(input, &ParamContext::new())
-}
-
 /// Known scalar bindings and builtin functions cannot introduce a missing name.
 /// Keep their common path free of full parameter-environment snapshots. User
 /// functions and retained bindings are conservatively probed because their

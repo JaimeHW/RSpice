@@ -1811,7 +1811,7 @@ fn the_live_hook_names_the_bus_the_result_declares() {
 #[test]
 fn a_boundary_bus_reaches_the_vcd_and_the_rawfile_as_one_vector() {
     use rspice_core::execution::{decode_event_plots, transient_bus_plots, transient_event_plots};
-    use rspice_core::io::{RawFormat, parse_raw_plots_reader_with_limits, write_event_plots};
+    use rspice_core::io::{RawFormat, parse_raw_plots_bytes_with_limits, write_event_plots};
     use rspice_core::resource::ResourceLimits;
 
     let model = ModelFile::new("vector_routes", VECTOR_PORT);
@@ -1845,11 +1845,8 @@ fn a_boundary_bus_reaches_the_vcd_and_the_rawfile_as_one_vector() {
         RawFormat::Ascii,
     )
     .expect("the run's event histories write as rawfile plots");
-    let file = parse_raw_plots_reader_with_limits(
-        &mut std::io::Cursor::new(raw),
-        ResourceLimits::default(),
-    )
-    .expect("the rawfile parses back");
+    let file = parse_raw_plots_bytes_with_limits(&raw, ResourceLimits::default())
+        .expect("the rawfile parses back");
     let decoded = decode_event_plots(&file).expect("the appended plots decode");
     assert_eq!(
         decoded.digital_buses.len(),
@@ -2049,8 +2046,8 @@ fn a_boundary_port_declared_above_bit_zero_bridges_every_bit_it_names() {
         rspice_core::io::RawFormat::Ascii,
     )
     .expect("the run's event histories write as rawfile plots");
-    let file = rspice_core::io::parse_raw_plots_reader_with_limits(
-        &mut std::io::Cursor::new(raw),
+    let file = rspice_core::io::parse_raw_plots_bytes_with_limits(
+        &raw,
         rspice_core::resource::ResourceLimits::default(),
     )
     .expect("the rawfile parses back");
@@ -6178,8 +6175,11 @@ fn a_rolled_back_trial_writes_nothing_to_its_files() {
         .map(|count| format!("edge {count} at {}\n", 10 * count - 5))
         .collect();
     assert_eq!(coarse_edges, expected);
-    let dump = rspice_core::io::vcd::parse_vcd_reader(coarse_dump.as_bytes())
-        .unwrap_or_else(|error| panic!("{error}:\n{coarse_dump}"));
+    let dump = rspice_core::io::vcd::parse_vcd_bytes_with_limits(
+        coarse_dump.as_bytes(),
+        Default::default(),
+    )
+    .unwrap_or_else(|error| panic!("{error}:\n{coarse_dump}"));
     let clk = dump
         .signals
         .iter()
@@ -6226,8 +6226,9 @@ fn the_designs_own_dump_names_its_ports_as_the_source_does() {
         .expect("the run completes");
     let text = std::fs::read_to_string(directory.join("ports.vcd")).unwrap();
     let _ = std::fs::remove_dir_all(&directory);
-    let dump = rspice_core::io::vcd::parse_vcd_reader(text.as_bytes())
-        .unwrap_or_else(|error| panic!("{error}:\n{text}"));
+    let dump =
+        rspice_core::io::vcd::parse_vcd_bytes_with_limits(text.as_bytes(), Default::default())
+            .unwrap_or_else(|error| panic!("{error}:\n{text}"));
     let base = |name: &str| name.split('[').next().unwrap().trim().to_string();
     let mut vars: Vec<(Vec<String>, String, u32)> = dump
         .signals

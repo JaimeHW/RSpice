@@ -1,7 +1,7 @@
 //! Expression evaluator for `.PARAM` statements and behavioral sources.
 //!
 //! Evaluation is complex-valued throughout so the same expressions serve AC
-//! analysis; real-only callers use the `eval_simple*` entry points.
+//! analysis; real-only callers use `eval_expression`.
 //!
 //! Supports arithmetic (`+ - * / **`), comparison and boolean operators,
 //! parenthesized grouping, parameter substitution from a [`ParamContext`],
@@ -52,8 +52,10 @@ pub use api::{
     parse_control_expression_prefix_with_abort, parse_control_expression_with_abort,
     parse_expression_with_abort, parse_xyce_expression_with_abort,
 };
-pub use api::{eval_expression, eval_expression_complex, eval_simple, parse_expression};
+pub use api::{eval_expression, eval_expression_complex, parse_expression};
 pub(crate) use api::{eval_expression_complex_with_probe_and_abort, needs_forward_reference_probe};
+#[cfg(any(test, feature = "test-support"))]
+pub use behavioral::finalize_parameter_expressions;
 #[doc(hidden)]
 pub use behavioral::{
     BehavioralPreparationError, expand_output_user_functions_with_abort,
@@ -62,11 +64,11 @@ pub use behavioral::{
 };
 pub use behavioral::{
     ParameterCircuitProbe, ParameterCircuitProbeKind, RuntimeSpecialQuantity,
-    behavioral_expression_references_frequency, behavioral_expression_references_runtime_quantity,
+    behavioral_expression_references_runtime_quantity,
     behavioral_expression_references_unbound_frequency, expand_output_user_functions,
-    finalize_parameter_expressions, materialize_available_parameter_expressions,
-    parameter_expression_circuit_probe, prepare_behavioral_expression, runtime_special_quantity,
-    validate_global_parameter_expressions, validate_parameter_expressions,
+    materialize_available_parameter_expressions, parameter_expression_circuit_probe,
+    prepare_behavioral_expression, runtime_special_quantity, validate_global_parameter_expressions,
+    validate_parameter_expressions,
 };
 pub(crate) use behavioral::{
     finalize_parameter_expressions_with_abort,

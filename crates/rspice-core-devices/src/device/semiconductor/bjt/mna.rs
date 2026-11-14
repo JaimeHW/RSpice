@@ -898,6 +898,7 @@ impl Bjt {
     /// so each retains exactly one matrix column; disabled states (thermal
     /// without self-heating, excess phase without TD) stay at ground and all
     /// of their stamps drop.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn assign_vbic_internal_nodes(&mut self, alloc: impl FnMut(&str) -> NodeId) {
         debug_assert!(self.uses_vbic_dynamic_charges());
         self.assign_mna_internal_nodes(alloc);

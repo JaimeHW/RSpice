@@ -65,7 +65,14 @@ fn imprecise_vcd_ticks_cannot_be_flattened_compared_or_blessed() {
         let output = dir.join("exact.vcd");
         assert!(convert(&input, &output, "vcd", &[]).status.success());
         assert_eq!(
-            rspice_core::io::parse_vcd_file(&output).unwrap().signals[0].changes[1].tick,
+            rspice_core::io::parse_vcd_bytes_with_limits(
+                &std::fs::read(&output).expect("read the VCD file"),
+                Default::default()
+            )
+            .unwrap()
+            .signals[0]
+                .changes[1]
+                .tick,
             tick
         );
     }

@@ -52,7 +52,11 @@ fn control_original_scripts_preserve_every_ordered_analysis_and_alteration() {
         let (target, value) = pair[0].arguments.split_once('=').unwrap();
         assert_eq!(target.trim(), "ic");
         assert_eq!(
-            crate::netlist::expr::eval_simple(value.trim()).unwrap(),
+            crate::netlist::expr::eval_expression(
+                value.trim(),
+                &crate::netlist::ParamContext::new()
+            )
+            .unwrap(),
             expected
         );
         assert_eq!(pair[1].name, "ac");

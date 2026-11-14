@@ -245,6 +245,7 @@ pub enum CapacitorIcDcMode {
 impl DcGroundPathDiagnostics {
     /// Fatal no-path nodes, retaining their first source spelling and deck
     /// order for deterministic user-facing diagnostics.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn fatal_nodes(&self) -> impl Iterator<Item = &str> {
         self.node_diagnostics.iter().filter_map(|diagnostic| {
             (diagnostic.severity == DcGroundPathSeverity::FatalCurrentDriven)

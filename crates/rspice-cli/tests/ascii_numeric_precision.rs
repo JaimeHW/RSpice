@@ -2,7 +2,7 @@
 mod common;
 
 use common::{assert_underflow, convert_with_flags as convert};
-use rspice_core::io::{VcdValue, parse_vcd_file};
+use rspice_core::io::{VcdValue, parse_vcd_bytes_with_limits};
 use std::process::Command;
 
 fn raw(literal: &str, complex: bool) -> String {
@@ -131,7 +131,11 @@ fn text_conversion_preserves_authored_zero_and_representable_subnormals() {
                 let output = dir.join("native.vcd");
                 let result = convert(&input, &output, "vcd", &[]);
                 assert!(result.status.success(), "{literal}: {result:?}");
-                let document = parse_vcd_file(&output).unwrap();
+                let document = parse_vcd_bytes_with_limits(
+                    &std::fs::read(&output).expect("read the VCD file"),
+                    Default::default(),
+                )
+                .unwrap();
                 let VcdValue::Real(value) = document.signals[0].changes[0].value else {
                     panic!("expected real event")
                 };

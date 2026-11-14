@@ -485,7 +485,8 @@ fn a_sealed_vcd_dump_travels_with_the_request_and_replays_in_the_worker() {
                 .is_some_and(|name| name.eq_ignore_ascii_case("clk"))
         })
         .unwrap_or_else(|| panic!("{replayed}"));
-    let document = rspice_core::io::parse_vcd_reader(VCD.as_bytes()).unwrap();
+    let document =
+        rspice_core::io::parse_vcd_bytes_with_limits(VCD.as_bytes(), Default::default()).unwrap();
     let expected: Vec<(u64, u64)> = document.signals[0]
         .changes
         .iter()

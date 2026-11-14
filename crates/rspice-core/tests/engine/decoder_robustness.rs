@@ -31,7 +31,7 @@ use rspice_core::engine::{
 use rspice_core::execution::result_document::AnalysisResultDocument;
 use rspice_core::execution::{DeckPlan, SignalProjection};
 use rspice_core::netlist::{
-    validate_output_expressions, validate_output_requests, validate_output_symbols,
+    validate_output_expressions_with_abort, validate_output_requests, validate_output_symbols,
 };
 
 /// Deterministic xorshift64* stream, matching `parser_robustness.rs`.
@@ -412,7 +412,7 @@ fn output_symbol_resolution_survives_chaos() {
                     return;
                 };
                 let _ = validate_output_requests(&netlist);
-                let _ = validate_output_expressions(&netlist);
+                let _ = validate_output_expressions_with_abort(&netlist, &rspice_core::NoAbort);
                 let _ = validate_output_symbols(&netlist);
                 let _ = SignalProjection::from_netlist(&netlist);
             },
@@ -433,7 +433,7 @@ fn output_symbol_resolution_survives_every_truncation() {
                     return;
                 };
                 let _ = validate_output_requests(&netlist);
-                let _ = validate_output_expressions(&netlist);
+                let _ = validate_output_expressions_with_abort(&netlist, &rspice_core::NoAbort);
                 let _ = validate_output_symbols(&netlist);
                 let _ = SignalProjection::from_netlist(&netlist);
             },

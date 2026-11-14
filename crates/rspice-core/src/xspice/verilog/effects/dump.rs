@@ -8,7 +8,7 @@
 //! [`crate::io::vcd::VcdDocument`], because a dump grows for the whole run,
 //! but it numbers its variables with the same identifier scheme as
 //! [`crate::io::vcd::write_vcd`] and reads back through
-//! [`crate::io::vcd::parse_vcd_reader`] like any other.
+//! [`crate::io::vcd::parse_vcd_bytes_with_limits`] like any other.
 //!
 //! # When things are written
 //!

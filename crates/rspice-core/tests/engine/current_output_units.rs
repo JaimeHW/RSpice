@@ -105,9 +105,16 @@ fn current_output_units_parse_the_last_hierarchy_separator_as_the_parameter() {
 
 #[test]
 fn current_output_probes_preserve_builtins_and_reject_incomplete_parameters() {
-    use rspice_core::netlist::expr::{eval_simple, parse_expression};
+    use rspice_core::netlist::expr::{eval_expression, parse_expression};
 
-    assert_eq!(eval_simple("IF(1, INT(2.5), 9)").unwrap(), 2.0);
+    assert_eq!(
+        eval_expression(
+            "IF(1, INT(2.5), 9)",
+            &rspice_core::netlist::ParamContext::new()
+        )
+        .unwrap(),
+        2.0
+    );
     for malformed in ["@Q1[ic", "@Q1[]", "@[ic]", "@X1:Q1[ic]]"] {
         assert!(parse_expression(malformed).is_err(), "{malformed}");
     }

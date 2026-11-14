@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use crate::Value;
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 
 use super::expr::eval_expression;
 use super::lexer::parse_spice_value_complete;
@@ -115,13 +115,6 @@ pub enum XyceAddResistorsMaterializationError {
 }
 
 impl Netlist {
-    /// Materialize the Xyce ADDRESISTORS derived semantic copy.
-    pub fn materialize_xyce_add_resistors(
-        &self,
-    ) -> Result<XyceAddResistorsMaterialization, XyceAddResistorsMaterializationError> {
-        self.materialize_xyce_add_resistors_with_abort(&NoAbort)
-    }
-
     /// Materialize the derived copy with cooperative cancellation.
     pub fn materialize_xyce_add_resistors_with_abort(
         &self,
@@ -1046,7 +1039,7 @@ mod tests {
         );
 
         let materialized = netlist
-            .materialize_xyce_add_resistors()
+            .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
             .expect("derived copy materializes");
         assert_eq!(materialized.report.one_terminal_candidates, ["1"]);
         assert_eq!(materialized.report.no_dc_path_candidates, ["2"]);
@@ -1100,7 +1093,7 @@ mod tests {
              C1 1 2 1u\n\
              .END\n",
         )
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
         .expect("capacitive leaf materializes");
         assert_eq!(capacitive.report.no_dc_path_candidates, ["2"]);
 
@@ -1111,7 +1104,7 @@ mod tests {
              R1 1 2 1k\n\
              .END\n",
         )
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
         .expect("DC bridge materializes with no generated cards");
         assert!(bridged.report.no_dc_path_candidates.is_empty());
         assert!(bridged.report.generated.is_empty());
@@ -1132,7 +1125,7 @@ mod tests {
              .END\n",
         );
         let materialized = netlist
-            .materialize_xyce_add_resistors()
+            .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
             .expect("hierarchical copy materializes");
         assert_eq!(materialized.report.one_terminal_candidates, ["X1.MID"]);
         assert_eq!(materialized.netlist.subcircuits.len(), 1);
@@ -1171,7 +1164,7 @@ mod tests {
              X1 in CELL\n\
              .END\n",
         )
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
         .expect("hierarchical nodeset copy materializes");
         assert_eq!(nodeset.netlist.subcircuits[0].node_sets.len(), 1);
     }
@@ -1192,7 +1185,7 @@ mod tests {
              V2 named.with.period 0 1\n\
              .END\n",
         )
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
         .expect("nested hierarchy materializes");
 
         assert_eq!(
@@ -1241,7 +1234,7 @@ mod tests {
              RONETERM1 a b 1\n\
              .END\n",
         )
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
         .expect_err("generated name collision is fatal");
         assert!(matches!(
             collision,
@@ -1255,7 +1248,7 @@ mod tests {
                 "invalid resistance\n.PREPROCESS ADDRESISTORS ONETERMINAL {raw}\nV1 1 0 1\n.END\n"
             );
             let error = parse(&source)
-                .materialize_xyce_add_resistors()
+                .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
                 .expect_err("invalid resistance is rejected at materialization");
             assert!(matches!(
                 error,
@@ -1268,13 +1261,13 @@ mod tests {
                 "finite resistor\n.PREPROCESS ADDRESISTORS ONETERMINAL {raw}\nV1 1 0 1\n.END\n"
             );
             let materialized = parse(&source)
-                .materialize_xyce_add_resistors()
+                .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
                 .expect("canonical resistor value is retained");
             assert_eq!(materialized.report.generated[0].resistance, expected);
         }
 
         let no_policy = parse("no policy\nV1 1 0 1\n.END\n")
-            .materialize_xyce_add_resistors()
+            .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
             .expect_err("missing policy is explicit");
         assert!(matches!(
             no_policy,
@@ -1307,7 +1300,7 @@ mod tests {
                 "strict resistance\n.PREPROCESS ADDRESISTORS ONETERMINAL {raw}\nV1 1 0 1\n.END\n"
             );
             let materialized = parse(&source)
-                .materialize_xyce_add_resistors()
+                .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
                 .expect("complete numeric/expression form resolves");
             assert_eq!(materialized.report.resolved_modes[0].raw_resistance, raw);
             assert_eq!(materialized.report.resolved_modes[0].resistance, expected);
@@ -1336,7 +1329,7 @@ mod tests {
              R1 1 2 1k\n\
              .END\n",
         )
-        .materialize_xyce_add_resistors()
+        .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
         .expect("unused resistance is not evaluated");
         assert_eq!(materialized.report.configured_modes.len(), 1);
         assert_eq!(
@@ -1361,7 +1354,7 @@ mod tests {
         assert_eq!(netlist.elements.len(), 1);
         assert_eq!(netlist.elements[0].nodes, ["KEEP", "0"]);
         let materialized = netlist
-            .materialize_xyce_add_resistors()
+            .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
             .expect("interacting policies materialize");
         assert_eq!(materialized.report.one_terminal_candidates, ["KEEP"]);
         let flattened = flatten_netlist_with_models(&materialized.netlist)
@@ -1391,7 +1384,7 @@ mod tests {
         );
         let original = parse(source);
         let materialized = original
-            .materialize_xyce_add_resistors()
+            .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
             .expect("derived root artifact materializes");
         assert_eq!(
             materialized.derived_source,
@@ -1448,7 +1441,7 @@ mod tests {
             "zero artifact\n.PREPROCESS ADDRESISTORS NODCPATH {UNUSED+}\nV1 1 0 1\nR1 1 2 1k\n.END\n",
         );
         let materialized = original
-            .materialize_xyce_add_resistors()
+            .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
             .expect("zero-candidate copy still renders");
         assert!(materialized.report.generated.is_empty());
         assert_eq!(
@@ -1470,7 +1463,7 @@ mod tests {
         let mut unavailable = original;
         unavailable.source_text = None;
         let error = unavailable
-            .materialize_xyce_add_resistors()
+            .materialize_xyce_add_resistors_with_abort(&crate::abort_signal::NoAbort)
             .expect_err("missing root source cannot fabricate an artifact");
         assert!(matches!(
             error,

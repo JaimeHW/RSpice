@@ -584,10 +584,9 @@ fn event_code(value: Value) -> Option<DigitalValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::{RawFormat, parse_raw_plots_reader_with_limits, write_event_plots};
+    use crate::io::{RawFormat, parse_raw_plots_bytes_with_limits, write_event_plots};
     use crate::resource::ResourceLimits;
     use crate::xspice::{DigitalState, DigitalStrength};
-    use std::io::Cursor;
 
     fn digital_trace() -> DigitalTrace {
         DigitalTrace {
@@ -634,9 +633,8 @@ mod tests {
         let timelines = transient_event_plots(&[digital_trace()], &[real_trace()]);
         let mut bytes = Vec::new();
         write_event_plots(&mut bytes, &timelines, &[], format).expect("write event plots");
-        let file =
-            parse_raw_plots_reader_with_limits(&mut Cursor::new(bytes), ResourceLimits::default())
-                .expect("parse event plots");
+        let file = parse_raw_plots_bytes_with_limits(&bytes, ResourceLimits::default())
+            .expect("parse event plots");
         decode_event_plots(&file).expect("decode event plots")
     }
 
@@ -675,11 +673,8 @@ mod tests {
                 1,
                 "{format:?}"
             );
-            let mut file = parse_raw_plots_reader_with_limits(
-                &mut Cursor::new(bytes),
-                ResourceLimits::default(),
-            )
-            .expect("parse event plots");
+            let mut file = parse_raw_plots_bytes_with_limits(&bytes, ResourceLimits::default())
+                .expect("parse event plots");
             assert_eq!(
                 decode_event_plots(&file)
                     .expect("decode event plots")
@@ -720,9 +715,8 @@ mod tests {
         )
         .expect("append event plot");
 
-        let file =
-            parse_raw_plots_reader_with_limits(&mut Cursor::new(bytes), ResourceLimits::default())
-                .expect("parse mixed file");
+        let file = parse_raw_plots_bytes_with_limits(&bytes, ResourceLimits::default())
+            .expect("parse mixed file");
         assert_eq!(file.plots.len(), 2);
         let decoded = decode_event_plots(&file).expect("decode event plots");
         assert_eq!(decoded.digital_traces, vec![digital_trace()]);
@@ -732,11 +726,8 @@ mod tests {
     #[test]
     fn a_digital_plot_carrying_a_value_that_is_not_a_code_is_refused() {
         let source = "Plotname: Digital Events (rspice-digital-events/1)\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n\t0\ttime\ttime\n\t1\tD(clk)\tdigital\nValues:\n0\t0.0\t13.0\n";
-        let file = parse_raw_plots_reader_with_limits(
-            &mut Cursor::new(source.as_bytes()),
-            ResourceLimits::default(),
-        )
-        .expect("parse digital event plot");
+        let file = parse_raw_plots_bytes_with_limits(source.as_bytes(), ResourceLimits::default())
+            .expect("parse digital event plot");
 
         assert_eq!(
             decode_event_plots(&file),
@@ -751,11 +742,8 @@ mod tests {
     #[test]
     fn a_plot_that_declares_a_family_and_contradicts_it_is_refused() {
         let source = "Plotname: Real Events (rspice-real-events/1)\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n\t0\ttime\ttime\n\t1\tV(out)\tvoltage\nValues:\n0\t0.0\t1.0\n";
-        let file = parse_raw_plots_reader_with_limits(
-            &mut Cursor::new(source.as_bytes()),
-            ResourceLimits::default(),
-        )
-        .expect("parse mis-declared event plot");
+        let file = parse_raw_plots_bytes_with_limits(source.as_bytes(), ResourceLimits::default())
+            .expect("parse mis-declared event plot");
 
         assert_eq!(
             decode_event_plots(&file),
@@ -769,11 +757,8 @@ mod tests {
     #[test]
     fn a_family_plot_typing_its_value_column_as_something_else_is_refused() {
         let source = "Plotname: Real Events (rspice-real-events/1)\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n\t0\ttime\ttime\n\t1\tE(vctrl)\tvoltage\nValues:\n0\t0.0\t1.0\n";
-        let file = parse_raw_plots_reader_with_limits(
-            &mut Cursor::new(source.as_bytes()),
-            ResourceLimits::default(),
-        )
-        .expect("parse mistyped event plot");
+        let file = parse_raw_plots_bytes_with_limits(source.as_bytes(), ResourceLimits::default())
+            .expect("parse mistyped event plot");
 
         assert_eq!(
             decode_event_plots(&file),
@@ -789,11 +774,8 @@ mod tests {
     #[test]
     fn a_family_plot_carrying_more_than_one_node_is_refused() {
         let source = "Plotname: Digital Events (rspice-digital-events/1)\nFlags: real\nNo. Variables: 3\nNo. Points: 1\nVariables:\n\t0\ttime\ttime\n\t1\tD(a)\tdigital\n\t2\tD(b)\tdigital\nValues:\n0\t0.0\t1.0\t0.0\n";
-        let file = parse_raw_plots_reader_with_limits(
-            &mut Cursor::new(source.as_bytes()),
-            ResourceLimits::default(),
-        )
-        .expect("parse wide event plot");
+        let file = parse_raw_plots_bytes_with_limits(source.as_bytes(), ResourceLimits::default())
+            .expect("parse wide event plot");
 
         assert_eq!(
             decode_event_plots(&file),
@@ -808,9 +790,8 @@ mod tests {
 #[cfg(test)]
 mod bus_tests {
     use super::*;
-    use crate::io::{RawFormat, parse_raw_plots_reader_with_limits, write_event_plots};
+    use crate::io::{RawFormat, parse_raw_plots_bytes_with_limits, write_event_plots};
     use crate::resource::ResourceLimits;
-    use std::io::Cursor;
 
     fn trace(node: &str, points: &[(Value, DigitalValue)]) -> DigitalTrace {
         DigitalTrace {
@@ -887,11 +868,9 @@ mod bus_tests {
     fn a_bus_round_trips_in_both_encodings_and_the_member_plots_stay_authoritative() {
         let (traces, buses) = two_bit_fixture();
         for format in [RawFormat::Binary, RawFormat::Ascii] {
-            let file = parse_raw_plots_reader_with_limits(
-                &mut Cursor::new(written(format)),
-                ResourceLimits::default(),
-            )
-            .expect("parse");
+            let file =
+                parse_raw_plots_bytes_with_limits(&written(format), ResourceLimits::default())
+                    .expect("parse");
             let decoded = decode_event_plots(&file).expect("decode");
             let expected: Vec<DigitalBusDeclaration> = buses
                 .iter()
@@ -916,8 +895,8 @@ mod bus_tests {
         // The compatibility claim the family rests on: adding the grouping
         // must cost a reader that has never heard of it nothing.
         let (traces, _) = two_bit_fixture();
-        let file = parse_raw_plots_reader_with_limits(
-            &mut Cursor::new(written(RawFormat::Binary)),
+        let file = parse_raw_plots_bytes_with_limits(
+            &written(RawFormat::Binary),
             ResourceLimits::default(),
         )
         .expect("parse");
@@ -945,8 +924,7 @@ mod bus_tests {
         )
         .expect("write a bus plot with only one member plot beside it");
         let trimmed =
-            parse_raw_plots_reader_with_limits(&mut Cursor::new(bytes), ResourceLimits::default())
-                .expect("parse");
+            parse_raw_plots_bytes_with_limits(&bytes, ResourceLimits::default()).expect("parse");
         let decoded = decode_event_plots(&trimmed).expect("decode");
 
         let recovered = decoded
@@ -1004,11 +982,8 @@ mod bus_tests {
     #[test]
     fn a_bus_plot_whose_title_does_not_declare_a_range_is_refused() {
         let source = "Title: not a declaration\nPlotname: Digital Bus (rspice-digital-bus/1)\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n\t0\ttime\ttime\n\t1\tD(d0)\tdigital\nValues:\n0\t0.0\t1.0\n";
-        let file = parse_raw_plots_reader_with_limits(
-            &mut Cursor::new(source.as_bytes()),
-            ResourceLimits::default(),
-        )
-        .expect("parse");
+        let file = parse_raw_plots_bytes_with_limits(source.as_bytes(), ResourceLimits::default())
+            .expect("parse");
         assert_eq!(
             decode_event_plots(&file),
             Err(EventPlotError::BusTitle {
@@ -1020,11 +995,8 @@ mod bus_tests {
     #[test]
     fn a_bus_plot_whose_range_and_columns_disagree_is_refused() {
         let source = "Title: d[7:0]\nPlotname: Digital Bus (rspice-digital-bus/1)\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n\t0\ttime\ttime\n\t1\tD(d0)\tdigital\nValues:\n0\t0.0\t1.0\n";
-        let file = parse_raw_plots_reader_with_limits(
-            &mut Cursor::new(source.as_bytes()),
-            ResourceLimits::default(),
-        )
-        .expect("parse");
+        let file = parse_raw_plots_bytes_with_limits(source.as_bytes(), ResourceLimits::default())
+            .expect("parse");
         assert_eq!(
             decode_event_plots(&file),
             Err(EventPlotError::BusWidth {

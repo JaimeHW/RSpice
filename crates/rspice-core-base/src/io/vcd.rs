@@ -47,7 +47,7 @@
 //! information this document models, and inventing one back would be a claim
 //! the data does not support. Everything that is modelled — ticks, bits,
 //! reals, widths, aliases and scope paths — comes back from
-//! [`parse_vcd_reader`] exactly as it went in. `$dumpoff` stretches are the
+//! [`parse_vcd_bytes_with_limits`] exactly as it went in. `$dumpoff` stretches are the
 //! exception: RSpice's dumps have none, and the writer does not emit them.
 //!
 //! ## Versioning
@@ -63,13 +63,11 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::io::{Read, Write};
-use std::path::Path;
 
 use thiserror::Error;
 
 use crate::resource::{
     ResourceKind, ResourceLimitError, ResourceLimits, ResourceReadError, read_bytes_limited,
-    read_file_bytes_limited,
 };
 
 /// The `$version` string RSpice stamps on the documents it produces.
@@ -479,29 +477,6 @@ impl VcdDocument {
 
 // -------------------------------------------------------------------------
 // Reading
-
-/// Parse a VCD file from a path.
-pub fn parse_vcd_file(path: &Path) -> Result<VcdDocument, VcdError> {
-    parse_vcd_file_with_limits(path, ResourceLimits::default())
-}
-
-/// Parse a VCD file with explicit external-data and retained-result limits.
-pub fn parse_vcd_file_with_limits(
-    path: &Path,
-    resource_limits: ResourceLimits,
-) -> Result<VcdDocument, VcdError> {
-    let bytes = read_file_bytes_limited(
-        path,
-        ResourceKind::ExternalDataBytes,
-        resource_limits.max_external_data_bytes,
-    )?;
-    parse_vcd_bytes_with_limits(&bytes, resource_limits)
-}
-
-/// Parse VCD data from a reader.
-pub fn parse_vcd_reader<R: Read>(reader: R) -> Result<VcdDocument, VcdError> {
-    parse_vcd_reader_with_limits(reader, ResourceLimits::default())
-}
 
 /// Parse VCD data from a reader with explicit resource limits.
 ///
@@ -1373,7 +1348,7 @@ mod tests {
         #0\n0!\nb00 \"\n#5\n1!\nb01 \"\n#10\n0!\nb10 \"\n";
 
     fn parse(text: &str) -> Result<VcdDocument, VcdError> {
-        parse_vcd_reader(text.as_bytes())
+        parse_vcd_bytes_with_limits(text.as_bytes(), Default::default())
     }
 
     fn bits(text: &str) -> VcdValue {

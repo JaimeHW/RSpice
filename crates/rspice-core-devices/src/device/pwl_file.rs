@@ -532,16 +532,11 @@ impl PwlWaveform {
 // File Loading
 //=============================================================================
 
-/// Load PWL waveform from a CSV file
+/// Load a CSV/whitespace PWL waveform under an explicit resource policy.
 ///
 /// Expected format: two columns (time, value) separated by comma, semicolon,
 /// tab, or whitespace. Lines starting with '#' or containing non-numeric
 /// data are skipped (header lines).
-pub fn load_csv<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileError> {
-    load_csv_with_limits(path, crate::resource::ResourceLimits::default())
-}
-
-/// Load a CSV/whitespace PWL waveform under an explicit resource policy.
 pub fn load_csv_with_limits<P: AsRef<Path>>(
     path: P,
     resource_limits: crate::resource::ResourceLimits,
@@ -645,16 +640,10 @@ pub fn load_csv_with_limits<P: AsRef<Path>>(
     Ok(points)
 }
 
-/// Load PWL waveform from a WAV audio file
-///
-/// Converts audio samples to time-value pairs where:
-/// - Time is derived from sample rate
-/// - Values are normalized to -1.0 to +1.0 range
-pub fn load_wav<P: AsRef<Path>>(path: P) -> Result<Vec<(Value, Value)>, PwlFileError> {
-    load_wav_with_limits(path, crate::resource::ResourceLimits::default())
-}
-
 /// Load a PCM WAV waveform under an explicit resource policy.
+///
+/// Time is derived from the sample rate and values are normalized to the
+/// -1.0 to +1.0 range.
 pub fn load_wav_with_limits<P: AsRef<Path>>(
     path: P,
     resource_limits: crate::resource::ResourceLimits,
@@ -1129,7 +1118,8 @@ mod tests {
 
     fn assert_wav_error_contains(bytes: Vec<u8>, needle: &str) {
         let path = write_temp_wav("bad-metadata", &bytes);
-        let err = load_wav(&path).expect_err("malformed WAV metadata must be rejected");
+        let err = load_wav_with_limits(&path, crate::resource::ResourceLimits::default())
+            .expect_err("malformed WAV metadata must be rejected");
         let _ = fs::remove_file(&path);
         match err {
             PwlFileError::WavError(message) => {
@@ -1156,7 +1146,8 @@ mod tests {
     fn standard_pcm_wav_loads_samples() {
         let path = write_temp_wav("standard", &pcm_wav_bytes(1, 8_000, 8, &[0, 128, 255]));
 
-        let points = load_wav(&path).expect("standard PCM WAV should load");
+        let points = load_wav_with_limits(&path, crate::resource::ResourceLimits::default())
+            .expect("standard PCM WAV should load");
         let _ = fs::remove_file(&path);
 
         assert_eq!(points.len(), 3);
@@ -1179,7 +1170,8 @@ mod tests {
     fn csv_loader_rejects_short_rows_after_data_starts() {
         let path = write_temp_csv("short-row", "time,value\n0,0\n1e-6\n2e-6,1\n");
 
-        let err = load_csv(&path).expect_err("short CSV rows after data starts must reject");
+        let err = load_csv_with_limits(&path, crate::resource::ResourceLimits::default())
+            .expect_err("short CSV rows after data starts must reject");
         let _ = fs::remove_file(&path);
 
         match err {
