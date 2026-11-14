@@ -3,10 +3,11 @@
 
 use super::*;
 use crate::state::{NetLabel, NetNamingPolicy, Wire};
+use crate::workbench::design::test_host::DesignTestHost;
 
 #[test]
 fn global_alias_repairs_are_derived_from_real_label_ids() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -35,7 +36,7 @@ fn global_alias_repairs_are_derived_from_real_label_ids() {
 
 #[test]
 fn technology_catalog_promotes_exact_declared_aliases() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -172,7 +173,7 @@ fn the_declaration_line_reads_off_the_declaration() {
 /// project-level catalog adds a row to it.
 #[test]
 fn the_bus_report_is_exactly_the_schematics_typed_buses() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -200,7 +201,7 @@ fn the_bus_report_is_exactly_the_schematics_typed_buses() {
 /// path names an instance the expanded hierarchy has not got. The design
 /// projection refuses such a configuration, so a report produced
 /// afterwards would be a report on the editor buffer.
-fn unresolve_configuration(state: &mut AppState) {
+fn unresolve_configuration(state: &mut DesignTestHost) {
     let root = state.model.workspace.content.active_view.clone();
     state
         .model
@@ -226,7 +227,7 @@ fn unresolve_configuration(state: &mut AppState) {
 
 #[test]
 fn the_report_states_an_unresolved_configuration_instead_of_buffer_connectivity() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -264,7 +265,7 @@ fn the_report_states_an_unresolved_configuration_instead_of_buffer_connectivity(
 /// to go.
 #[test]
 fn only_this_views_findings_are_net_issues_and_repairs() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let mut work = crate::state::Library::new("work");
     let mut pad = crate::state::Cell::new("pad");
     pad.add_view(crate::state::View::new(
@@ -350,7 +351,7 @@ fn only_this_views_findings_are_net_issues_and_repairs() {
 /// design nor the repaired design, so it must not refuse the repair.
 #[test]
 fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let mut work = crate::state::Library::new("work");
     let mut amp = crate::state::Cell::new("amp");
     for view in ["schematic", "fixed"] {
@@ -501,7 +502,7 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
 /// cannot name a document the connectivity pane never resolved.
 #[test]
 fn every_pane_reads_one_projection_of_the_design() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state
         .model
         .schematic
@@ -529,10 +530,10 @@ fn every_pane_reads_one_projection_of_the_design() {
 /// Sheet 1 draws `DATA[7:0]` from (0, 0) to (200, 0). Sheet 2 draws
 /// `ADDR[7:0]` down from (100, 0), a T at the same coordinates, and
 /// `DATA<7:0>` well clear of both.
-fn buses_on_two_sheets() -> AppState {
+fn buses_on_two_sheets() -> DesignTestHost {
     use crate::state::{Bus, SheetDefinition, SheetPortPolicy, SheetTemplate};
     let declared = |text| Some(BusDeclaration::parse(text).unwrap());
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     state.model.schematic.document_mut_for_test().buses = vec![
         Bus::segment(
             1,
