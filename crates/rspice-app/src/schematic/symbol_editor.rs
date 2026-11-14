@@ -17,7 +17,7 @@ use crate::workbench::app::{
 use rspice_schematic_editor::symbol_editor::surface::{
     self, SymbolSurfaceAction, SymbolSurfaceRequest,
 };
-use rspice_schematic_editor::symbol_editor::{draw_canvas, update_viewport};
+use rspice_schematic_editor::symbol_editor::{draw_canvas, paint_zoom_box, update_viewport};
 
 pub(crate) fn symbol_canvas_accessibility_label(
     document: &SymbolDocument,
@@ -117,6 +117,12 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
             let canvas_size = vec2(ui.available_width().max(180.0), height);
             let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
             let navigation = canvas.model.preferences.canvas_navigation();
+            // A Space or Alt pan, or the armed zoom box, holds the primary
+            // drag; the tools act on none of it.
+            let navigating = canvas.design.symbol.editor.zoom_box.armed
+                || rspice_schematic_editor::view::navigation::primary_pan_gesture_active(
+                    ui, &response,
+                );
             // Edited in place, the canvas frames the parent sheet and the symbol
             // stands where its instance does.
             let in_place = in_place::frame(ui, &mut canvas.parts(), rect, &response);
@@ -131,13 +137,15 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
                     navigation,
                 ),
             };
-            interaction::handle_canvas(
-                &mut canvas.parts(),
-                &mut document,
-                &mut editor,
-                viewport,
-                &response,
-            );
+            if !navigating {
+                interaction::handle_canvas(
+                    &mut canvas.parts(),
+                    &mut document,
+                    &mut editor,
+                    viewport,
+                    &response,
+                );
+            }
             match &in_place {
                 Some(frame) => {
                     in_place::draw(
@@ -160,6 +168,7 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
                     &canvas.model.workspace.content.active_view,
                 ),
             }
+            paint_zoom_box(ui, &canvas.design.symbol.editor, viewport);
             // The canvas takes keyboard focus on every press for its shortcuts, so
             // only focus that Tab moved here shows the ring: a press never frames
             // the drawing. Painted after the artwork so the ring is not drawn over.

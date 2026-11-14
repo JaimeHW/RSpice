@@ -310,6 +310,10 @@ pub struct SymbolEditorSession {
     /// The views the canvas showed before this one, for Zoom previous.
     pub view_history: crate::view::navigation::ViewHistory<(f32, (f32, f32))>,
     pub needs_fit: bool,
+    /// A change of view a command asked for, carried out on the canvas's
+    /// next frame.
+    pub zoom_request: Option<crate::view::navigation::ZoomRequest>,
+    pub zoom_box: crate::view::navigation::ZoomBox,
     pub pending_polyline: Vec<rspice_design_model::Point>,
     /// A rectangle's first corner, or a circle's or an arc's center.
     pub shape_start: Option<rspice_design_model::Point>,
@@ -349,6 +353,8 @@ impl Default for SymbolEditorSession {
             pan: (0.0, 0.0),
             view_history: Default::default(),
             needs_fit: true,
+            zoom_request: None,
+            zoom_box: Default::default(),
             pending_polyline: Vec::new(),
             shape_start: None,
             arc_sweep: None,

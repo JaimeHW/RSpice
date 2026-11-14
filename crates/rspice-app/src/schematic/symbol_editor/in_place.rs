@@ -17,7 +17,7 @@ use rspice_schematic_editor::view::{
     design_view::DesignView,
     drawing::ProbeVisualStatus,
     navigation::{
-        SCHEMATIC_ZOOM_MAX, SCHEMATIC_ZOOM_MIN, ZoomRequest, apply_zoom_request,
+        SCHEMATIC_ZOOM_MIN, ZoomRequest, apply_zoom_request, frame_world_rect,
         handle_viewport_navigation,
     },
     scene,
@@ -36,9 +36,6 @@ use crate::ui::tokens::Tokens;
 /// colour laid over it. What it draws stays legible, its wires included, so
 /// a moved pin can be judged against them.
 const PARENT_VEIL: f32 = 0.6;
-
-/// Screen space kept clear around the symbol when Fit frames it.
-const FIT_INSET: f64 = 48.0;
 
 /// The canvas's two views for one frame: the parent sheet, and the symbol as
 /// the instance places it on that sheet.
@@ -63,6 +60,7 @@ pub(super) fn frame(
         return None;
     };
     let navigation = state.model.preferences.canvas_navigation();
+    let mut zoom_box = state.design.symbol.editor.zoom_box;
     let session = state.symbol_in_place_mut()?;
     match session.zoom_request.take() {
         Some(ZoomRequest::Frame(bounds)) => {
@@ -86,31 +84,28 @@ pub(super) fn frame(
         SCHEMATIC_ZOOM_MIN,
         navigation,
     );
+    // The zoom box frames a rectangle of the parent sheet.
+    if zoom_box.armed {
+        let (zoom, pan) = (session.zoom, session.pan);
+        let to_world = |pos: egui::Pos2| {
+            (
+                (f64::from(pos.x) - f64::from(rect.min.x) - pan.0) / zoom,
+                (f64::from(pos.y) - f64::from(rect.min.y) - pan.1) / zoom,
+            )
+        };
+        if let Some(request) = zoom_box.drive(ui, response, zoom, to_world) {
+            session.zoom_request = Some(request);
+        }
+    }
     session
         .view_history
         .observe((session.zoom, session.pan), ui.input(|input| input.time));
     let parent = viewport_from_camera(session.pan, session.zoom, rect, ui.ctx().pixels_per_point());
+    state.design.symbol.editor.zoom_box = zoom_box;
     Some(InPlaceFrame {
         symbol: SymbolViewport::on_sheet(&parent, placement),
         parent,
     })
-}
-
-/// Centre `bounds` on the canvas at the zoom that shows all of it.
-fn frame_world_rect(
-    zoom: &mut f64,
-    pan: &mut (f64, f64),
-    rect: Rect,
-    (min_x, min_y, max_x, max_y): (f64, f64, f64, f64),
-) {
-    let (width, height) = (f64::from(rect.width()), f64::from(rect.height()));
-    let fit = ((width - 2.0 * FIT_INSET).max(1.0) / (max_x - min_x).max(1.0))
-        .min((height - 2.0 * FIT_INSET).max(1.0) / (max_y - min_y).max(1.0));
-    *zoom = fit.clamp(SCHEMATIC_ZOOM_MIN, SCHEMATIC_ZOOM_MAX);
-    *pan = (
-        width * 0.5 - (min_x + max_x) * 0.5 * *zoom,
-        height * 0.5 - (min_y + max_y) * 0.5 * *zoom,
-    );
 }
 
 /// The parent, dimmed, and the symbol over it at full strength.

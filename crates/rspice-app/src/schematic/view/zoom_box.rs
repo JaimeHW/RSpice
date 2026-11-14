@@ -4,16 +4,11 @@
 //! armed the canvas's primary drag draws the box instead of acting through
 //! the current tool, and the release frames it.
 
-use egui::{Painter, PointerButton, Pos2, Rect, Response, Stroke, Ui};
-use rspice_schematic_editor::view::navigation::ZoomRequest;
+use egui::{Painter, Pos2, Rect, Response, Stroke, Ui};
 
 use super::parts::CanvasParts;
 use super::viewport::Viewport;
 use crate::workbench::app_state::Model;
-
-/// A box narrower or shorter than this on screen is a slip of the pointer,
-/// not a rectangle to frame.
-const MIN_BOX_PIXELS: f64 = 4.0;
 
 fn screen_to_world(viewport: &Viewport, pos: Pos2) -> (f64, f64) {
     let zoom = f64::from(viewport.zoom).max(f64::EPSILON);
@@ -32,33 +27,13 @@ pub(super) fn handle_zoom_box(
     state: &mut CanvasParts<'_>,
     viewport: &Viewport,
 ) {
-    let zoom_box = &mut state.model.schematic.session.editor.zoom_box;
-    if response.drag_started_by(PointerButton::Primary)
-        && let Some(origin) = ui.input(|input| input.pointer.press_origin())
+    let editor = &mut state.model.schematic.session.editor;
+    let zoom = f64::from(viewport.zoom);
+    if let Some(request) = editor
+        .zoom_box
+        .drive(ui, response, zoom, |pos| screen_to_world(viewport, pos))
     {
-        let anchor = screen_to_world(viewport, origin);
-        zoom_box.drag = Some((anchor, anchor));
-    }
-    if (response.dragged_by(PointerButton::Primary)
-        || response.drag_stopped_by(PointerButton::Primary))
-        && let Some(pointer) = response.interact_pointer_pos()
-        && let Some((anchor, _)) = zoom_box.drag
-    {
-        zoom_box.drag = Some((anchor, screen_to_world(viewport, pointer)));
-    }
-    if response.drag_stopped_by(PointerButton::Primary) {
-        let zoom = f64::from(viewport.zoom);
-        let framed = zoom_box
-            .world_rect()
-            .filter(|(min_x, min_y, max_x, max_y)| {
-                (max_x - min_x) * zoom >= MIN_BOX_PIXELS && (max_y - min_y) * zoom >= MIN_BOX_PIXELS
-            });
-        zoom_box.disarm();
-        if let Some(rect) = framed {
-            state.model.schematic.session.editor.zoom_request = Some(ZoomRequest::Frame(rect));
-        }
-    } else if response.clicked_by(PointerButton::Primary) {
-        zoom_box.disarm();
+        editor.zoom_request = Some(request);
     }
 }
 

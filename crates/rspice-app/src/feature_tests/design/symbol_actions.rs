@@ -302,3 +302,44 @@ fn placing_text_is_one_edit_and_a_stale_request_places_nothing() {
     );
     assert!(!app.state.can_undo_active_symbol_document());
 }
+
+/// The symbol canvas navigates as the schematic does: the zoom commands
+/// share the schematic's range, Zoom box arms over the symbol, and Zoom to
+/// selection frames what is selected.
+#[test]
+fn the_symbol_canvas_shares_the_schematic_navigation() {
+    use crate::feature_tests::replay::Replay;
+    use rspice_schematic_editor::view::navigation::SCHEMATIC_ZOOM_MAX;
+    let mut replay = Replay::of(open_symbol());
+    replay.frames(Vec::new());
+    for _ in 0..30 {
+        replay.app.execute_command_key(Command::ZoomIn.key());
+        replay.frame(Vec::new());
+    }
+    assert_eq!(
+        f64::from(replay.app.state.design.symbol.editor.zoom),
+        SCHEMATIC_ZOOM_MAX,
+        "Zoom in stops where the schematic's does"
+    );
+
+    replay.app.execute_command_key(Command::ZoomBox.key());
+    assert!(replay.app.state.design.symbol.editor.zoom_box.armed);
+    replay.app.state.design.symbol.editor.zoom_box.disarm();
+
+    // The dot at (20, 10) is framed in the middle of the canvas.
+    replay.app.state.design.symbol.editor.select_shape(1);
+    replay.app.execute_command_key(Command::ZoomOut.key());
+    replay.frame(Vec::new());
+    replay
+        .app
+        .execute_command_key(Command::ZoomToSelection.key());
+    replay.frame(Vec::new());
+    let editor = &replay.app.state.design.symbol.editor;
+    assert!(
+        (editor.pan.0 + 20.0 * editor.zoom).abs() < 1.0
+            && (editor.pan.1 + 10.0 * editor.zoom).abs() < 1.0,
+        "zoom {} pan {:?}",
+        editor.zoom,
+        editor.pan
+    );
+}

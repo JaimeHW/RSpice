@@ -345,8 +345,18 @@ const VIEW_MENU: &[MenuEntry] = &[
     command(Command::ZoomIn).access('I'),
     command(Command::ZoomOut).access('O'),
     command(Command::ZoomOneToOne).access('Z'),
-    command(Command::ZoomFit).access('S'),
-    design(DesignCommand::FitSchematicContent).access('F'),
+    // A symbol has no sheet: its Fit frames the symbol.
+    MenuEntry::Only(
+        MenuContext::NotSymbolView,
+        &[
+            command(Command::ZoomFit).access('S'),
+            design(DesignCommand::FitSchematicContent).access('F'),
+        ],
+    ),
+    MenuEntry::Only(
+        MenuContext::SymbolView,
+        &[command_as(Command::ZoomFit, "Fit").access('F')],
+    ),
     command(Command::ZoomToSelection).access('T'),
     command(Command::ZoomBox).access('B'),
     command(Command::ZoomPrevious).access('V'),

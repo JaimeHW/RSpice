@@ -7,7 +7,10 @@ pub mod placement;
 pub mod session;
 pub mod surface;
 
-use crate::view::navigation::{CanvasNavigation, WheelAction};
+use crate::view::navigation::{
+    CanvasNavigation, SCHEMATIC_ZOOM_MIN, ZoomRequest, apply_zoom_request, frame_world_rect,
+    handle_viewport_navigation,
+};
 use crate::view::resolved_symbol_render::draw_resolved_symbol;
 use egui::{Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2, pos2, vec2};
 use placement::SymbolPlacement;
@@ -34,7 +37,6 @@ use rspice_ui_kit::{
 use session::{SymbolEditorSession, SymbolGridSpacing, SymbolTool};
 
 const PIN_HIT_RADIUS: f32 = 10.0;
-const SCROLL_ZOOM_SENSITIVITY: f32 = 0.001;
 const PREVIEW_TILE_MAX_WIDTH: f32 = 240.0;
 const PREVIEW_TILE_MAX_HEIGHT: f32 = 168.0;
 const PREVIEW_TILE_MIN_WIDTH: f32 = 168.0;
@@ -103,6 +105,9 @@ impl SymbolViewport {
     }
 }
 
+/// This frame's view of the symbol after the canvas's own navigation: the
+/// schematic canvas's wheel, pinch and pan, its zoom range, its zoom box and
+/// the zoom commands' requests, so a symbol navigates as a schematic does.
 pub fn update_viewport(
     ui: &mut Ui,
     session: &mut SymbolEditorSession,
@@ -111,35 +116,64 @@ pub fn update_viewport(
     response: &egui::Response,
     navigation: CanvasNavigation,
 ) -> SymbolViewport {
-    if session.needs_fit {
-        fit_symbol_view(session, rect, document);
-        session.needs_fit = false;
+    // The session keeps its pan from the canvas's middle; the shared code
+    // reads it from the top-left corner.
+    let half = (
+        f64::from(rect.width()) * 0.5,
+        f64::from(rect.height()) * 0.5,
+    );
+    let mut zoom = f64::from(session.zoom);
+    let mut pan = (
+        half.0 + f64::from(session.pan.0),
+        half.1 + f64::from(session.pan.1),
+    );
+    if std::mem::take(&mut session.needs_fit) {
+        let (min, max) = document_bounds(document);
+        frame_world_rect(
+            &mut zoom,
+            &mut pan,
+            rect,
+            (
+                f64::from(min.x),
+                f64::from(min.y),
+                f64::from(max.x),
+                f64::from(max.y),
+            ),
+        );
     }
-    if response.hovered() {
-        let (scroll, ctrl_zoom) = ui.input(|input| (input.smooth_scroll_delta, input.zoom_delta()));
-        let step = match navigation.wheel {
-            // egui turns Shift+wheel into sideways travel, which scrolls.
-            WheelAction::Zoom => {
-                session.pan.0 += scroll.x;
-                symbol_scroll_zoom_factor(scroll.y)
-            }
-            // egui hands Ctrl+wheel over as a zoom rather than a scroll.
-            WheelAction::Scroll => {
-                session.pan.0 += scroll.x;
-                session.pan.1 += scroll.y;
-                (ctrl_zoom != 1.0).then_some(ctrl_zoom)
-            }
+    match session.zoom_request.take() {
+        Some(ZoomRequest::Frame(bounds)) => frame_world_rect(&mut zoom, &mut pan, rect, bounds),
+        Some(request) => apply_zoom_request(
+            &mut zoom,
+            &mut pan,
+            (half.0 * 2.0, half.1 * 2.0),
+            request,
+            SCHEMATIC_ZOOM_MIN,
+        ),
+        None => {}
+    }
+    handle_viewport_navigation(
+        ui,
+        response,
+        rect,
+        &mut zoom,
+        &mut pan,
+        SCHEMATIC_ZOOM_MIN,
+        navigation,
+    );
+    if session.zoom_box.armed {
+        let to_world = |pos: Pos2| {
+            (
+                (f64::from(pos.x) - f64::from(rect.min.x) - pan.0) / zoom,
+                (f64::from(pos.y) - f64::from(rect.min.y) - pan.1) / zoom,
+            )
         };
-        if let Some(factor) = step {
-            let factor = navigation.scale_zoom_step(f64::from(factor)) as f32;
-            session.zoom = (session.zoom * factor).clamp(1.0, 18.0);
+        if let Some(request) = session.zoom_box.drive(ui, response, zoom, to_world) {
+            session.zoom_request = Some(request);
         }
     }
-    if response.dragged_by(navigation.pan_pointer_button()) {
-        let delta = ui.input(|input| input.pointer.delta());
-        session.pan.0 += delta.x;
-        session.pan.1 += delta.y;
-    }
+    session.zoom = zoom as f32;
+    session.pan = ((pan.0 - half.0) as f32, (pan.1 - half.1) as f32);
     let time = ui.input(|input| input.time);
     session
         .view_history
@@ -147,23 +181,20 @@ pub fn update_viewport(
     SymbolViewport::new(rect, session.zoom, vec2(session.pan.0, session.pan.1))
 }
 
-fn symbol_scroll_zoom_factor(scroll: f32) -> Option<f32> {
-    if scroll.abs() <= f32::EPSILON {
-        return None;
-    }
-    Some((scroll * SCROLL_ZOOM_SENSITIVITY).exp().clamp(0.5, 2.0))
-}
-
-fn fit_symbol_view(session: &mut SymbolEditorSession, rect: Rect, document: &SymbolDocument) {
-    let (min, max) = document_bounds(document);
-    let width = (max.x - min.x).abs().max(80) as f32;
-    let height = (max.y - min.y).abs().max(80) as f32;
-    let zoom = ((rect.width() - 96.0).max(80.0) / width)
-        .min((rect.height() - 96.0).max(80.0) / height)
-        .clamp(1.0, 8.0);
-    let center = Point::new((min.x + max.x) / 2, (min.y + max.y) / 2);
-    session.zoom = zoom;
-    session.pan = (-(center.x as f32) * zoom, -(center.y as f32) * zoom);
+/// Outline the zoom box being dragged over the symbol's own view.
+pub fn paint_zoom_box(ui: &Ui, session: &SymbolEditorSession, viewport: SymbolViewport) {
+    let Some((min_x, min_y, max_x, max_y)) = session.zoom_box.world_rect() else {
+        return;
+    };
+    let to_screen = |x: f64, y: f64| {
+        viewport.rect.center() + viewport.pan + vec2(x as f32, y as f32) * viewport.zoom
+    };
+    ui.painter().rect_stroke(
+        Rect::from_min_max(to_screen(min_x, min_y), to_screen(max_x, max_y)),
+        0.0,
+        Stroke::new(1.0, Tokens::get(ui.ctx()).color.accent),
+        egui::StrokeKind::Inside,
+    );
 }
 
 pub fn draw_canvas(

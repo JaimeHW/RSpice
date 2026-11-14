@@ -722,19 +722,33 @@ fn core_menu_commands_are_all_real_dispatch_commands() {
 ///
 /// `Visibility options…` was listed in the viewport group and then emitted a
 /// second time immediately after the loop, so the menu showed the same row
-/// twice in a row with the same shortcut and the same enablement.
+/// twice in a row with the same shortcut and the same enablement. A row
+/// offered under another name in a symbol view is still drawn once there.
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_view_menu_lists_each_viewport_row_exactly_once() {
-    let mut seen = std::collections::BTreeSet::new();
-    let listed = listed_commands(application_menu_entries(ApplicationMenu::View));
-    for command in &listed {
+    let entries = application_menu_entries(ApplicationMenu::View);
+    for (view, app) in [
+        ("schematic", title_test_app()),
+        ("symbol", symbol_view_app()),
+    ] {
+        let rows = menu_pin(entries, &app);
+        let mut seen = std::collections::BTreeSet::new();
+        for row in &rows {
+            let fields: Vec<&str> = row.trim_start().split(" | ").collect();
+            if fields.len() >= 4 {
+                assert!(
+                    seen.insert(fields[1].to_owned()),
+                    "{} is drawn twice in the {view} View menu: {rows:#?}",
+                    fields[1]
+                );
+            }
+        }
         assert!(
-            seen.insert(command.as_str()),
-            "{command:?} appears twice in the View menu"
+            seen.contains(DesignCommand::VisibilityOptions.key().as_str()),
+            "{rows:#?}"
         );
     }
-    assert_eq!(seen.len(), listed.len());
-    assert!(listed.contains(&DesignCommand::VisibilityOptions.key()));
 }
 
 const DESIGN_PLACEMENT_COMMANDS: [CommandKey; 10] = [
@@ -924,6 +938,34 @@ fn symbol_undo_and_redo_name_the_step_they_take() {
 
     app.execute(Command::Undo.key());
     assert_eq!(edit_rows(&app), ["Undo", "Redo delete dot"]);
+}
+
+/// A symbol has no drawing sheet: its View menu's Fit reads "Fit" and
+/// frames the symbol, and the schematic's sheet and content fits are not
+/// offered beside it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_symbol_view_fits_the_symbol_not_a_sheet() {
+    let rows = menu_pin(
+        application_menu_entries(ApplicationMenu::View),
+        &symbol_view_app(),
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row == "Fit | canvas-fit-sheet | F | on"),
+        "{rows:#?}"
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.starts_with("Fit drawing sheet") || row.starts_with("Fit content")),
+        "{rows:#?}"
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.starts_with("Zoom box | zoom-box |") && row.ends_with("| on")),
+        "{rows:#?}"
+    );
 }
 
 /// Deselect all clears the selection Select all made, and is grey with

@@ -18,7 +18,7 @@ use rspice_schematic_editor::view::navigation::ZoomRequest;
 
 use crate::state::ViewType;
 use crate::workbench::app::actions::workspace::symbol_in_place::{
-    in_place_bounds, in_place_session, in_place_session_mut,
+    in_place_bounds, in_place_placement, in_place_session, in_place_session_mut,
 };
 use crate::workbench::app::actions::workspace::{
     HistoryDirection, HistoryStepParts, take_history_step,
@@ -73,17 +73,27 @@ pub(super) const ROUTED: &[RoutedCommand<DesignFeature>] = &[
     },
     RoutedCommand {
         key: ids::ZOOM_TO_SELECTION,
-        takes: in_schematic,
-        enabled: |reads| schematic_selection_has_live_object(&reads.model.schematic),
+        takes: in_editor,
+        enabled: |reads| {
+            if symbol_editor(reads.wb.workspace, reads.model) {
+                !reads.state.symbol.editor.effective_selection().is_empty()
+            } else {
+                schematic_selection_has_live_object(&reads.model.schematic)
+            }
+        },
         execute: zoom_to_selection,
     },
     RoutedCommand {
         key: ids::ZOOM_BOX,
-        takes: in_schematic,
+        takes: in_editor,
         enabled: |_| true,
         execute: |cx| {
-            cx.wb.activate(Workspace::Design);
-            cx.model.schematic.session.editor.zoom_box.arm();
+            if symbol_editor(cx.wb.workspace, cx.model) {
+                cx.state.symbol.editor.zoom_box.arm();
+            } else {
+                cx.wb.activate(Workspace::Design);
+                cx.model.schematic.session.editor.zoom_box.arm();
+            }
         },
     },
     RoutedCommand {
@@ -182,8 +192,7 @@ fn zoom_in(cx: &mut Cx<'_, DesignFeature>) {
     if let Some(session) = in_place_session_mut(&mut cx.state.symbol.in_place, cx.model) {
         session.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR));
     } else if symbol_editor(cx.wb.workspace, cx.model) {
-        let editor = &mut cx.state.symbol.editor;
-        editor.zoom = (editor.zoom * COMMAND_ZOOM_FACTOR as f32).min(16.0);
+        cx.state.symbol.editor.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR));
     } else {
         cx.model.schematic.session.editor.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR));
     }
@@ -193,8 +202,7 @@ fn zoom_out(cx: &mut Cx<'_, DesignFeature>) {
     if let Some(session) = in_place_session_mut(&mut cx.state.symbol.in_place, cx.model) {
         session.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR.recip()));
     } else if symbol_editor(cx.wb.workspace, cx.model) {
-        let editor = &mut cx.state.symbol.editor;
-        editor.zoom = (editor.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
+        cx.state.symbol.editor.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR.recip()));
     } else {
         cx.model.schematic.session.editor.zoom_request =
             Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR.recip()));
@@ -222,13 +230,30 @@ fn zoom_one_to_one(cx: &mut Cx<'_, DesignFeature>) {
     if let Some(session) = in_place_session_mut(&mut cx.state.symbol.in_place, cx.model) {
         session.zoom_request = Some(ZoomRequest::To(1.0));
     } else if symbol_editor(cx.wb.workspace, cx.model) {
-        cx.state.symbol.editor.zoom = 1.0;
+        cx.state.symbol.editor.zoom_request = Some(ZoomRequest::To(1.0));
     } else {
         cx.model.schematic.session.editor.zoom_request = Some(ZoomRequest::To(1.0));
     }
 }
 
+/// Frame the selection: the symbol's pins and shapes, on the parent sheet
+/// where the symbol is edited in place, or the schematic's objects.
 fn zoom_to_selection(cx: &mut Cx<'_, DesignFeature>) {
+    if symbol_editor(cx.wb.workspace, cx.model) {
+        let selection = cx.state.symbol.editor.effective_selection();
+        let placement = in_place_session(&cx.state.symbol.in_place, cx.model)
+            .and_then(|session| in_place_placement(session, cx.model))
+            .unwrap_or_default();
+        let Some(bounds) = symbol_selection_bounds(cx.model, &selection, placement) else {
+            return;
+        };
+        if let Some(session) = in_place_session_mut(&mut cx.state.symbol.in_place, cx.model) {
+            session.zoom_request = Some(ZoomRequest::Frame(bounds));
+        } else {
+            cx.state.symbol.editor.zoom_request = Some(ZoomRequest::Frame(bounds));
+        }
+        return;
+    }
     let symbol_context = cx.model.schematic_symbol_context();
     let schematic = &cx.model.schematic;
     if let Some((min_x, min_y, max_x, max_y)) =
@@ -241,6 +266,32 @@ fn zoom_to_selection(cx: &mut Cx<'_, DesignFeature>) {
             f64::from(max_y),
         )));
     }
+}
+
+/// The extent of the selected pins and shapes, carried by `placement` into
+/// the plane the canvas frames: the identity in the symbol's own view, the
+/// instance's transform onto its parent sheet in place.
+fn symbol_selection_bounds(
+    model: &Model,
+    selection: &rspice_schematic_editor::symbol_editor::session::SymbolSelection,
+    placement: rspice_schematic_editor::symbol_editor::placement::SymbolPlacement,
+) -> Option<(f64, f64, f64, f64)> {
+    use rspice_design_model::Point;
+    let document = model.load_active_symbol_document().ok()?;
+    let (min, max) = rspice_schematic_editor::symbol_editor::commands::clipboard_from_selection(
+        &document, selection,
+    )
+    .bounds()?;
+    let corners = [min, max, Point::new(min.x, max.y), Point::new(max.x, min.y)]
+        .map(|corner| placement.place(corner));
+    let low = |pick: fn(&Point) -> i32| corners.iter().map(pick).min().map(f64::from);
+    let high = |pick: fn(&Point) -> i32| corners.iter().map(pick).max().map(f64::from);
+    Some((
+        low(|point| point.x)?,
+        low(|point| point.y)?,
+        high(|point| point.x)?,
+        high(|point| point.y)?,
+    ))
 }
 
 /// Whether the view in front has one to step back to.

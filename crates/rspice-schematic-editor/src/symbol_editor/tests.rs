@@ -3,20 +3,6 @@
 use super::*;
 
 #[test]
-fn smooth_scroll_zoom_factor_is_proportional_not_binary() {
-    let tiny = symbol_scroll_zoom_factor(1.0).expect("tiny smooth scroll should zoom");
-    assert!(
-        tiny > 1.0 && tiny < 1.01,
-        "tiny smooth-scroll residue must not apply a full wheel notch: {tiny}"
-    );
-
-    let wheel = symbol_scroll_zoom_factor(120.0).expect("wheel scroll should zoom");
-    assert!(
-        wheel > tiny && wheel < 1.2,
-        "a normal wheel notch should be noticeable but restrained: {wheel}"
-    );
-}
-#[test]
 fn preview_viewport_fits_large_symbols_inside_tile_body() {
     let document = SymbolDocument {
         body: vec![SymbolShape::Polyline {

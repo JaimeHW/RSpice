@@ -362,7 +362,7 @@ const SYMBOL: &[ToolbarEntry<DesignFeature>] = &[
     ToolbarEntry::Separator,
     icon(ids::ZOOM_OUT, WorkbenchIcon::ZoomOut),
     icon(ids::ZOOM_IN, WorkbenchIcon::ZoomIn),
-    icon(ids::ZOOM_FIT, WorkbenchIcon::ZoomFit),
+    named(ids::ZOOM_FIT, WorkbenchIcon::ZoomFit, "Fit"),
     ToolbarEntry::Control(ToolbarControl {
         show: show_grid_toggle,
         overflow: None,

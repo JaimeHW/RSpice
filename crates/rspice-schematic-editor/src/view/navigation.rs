@@ -3,7 +3,7 @@
 //! Viewport movement: wheel and pinch zoom about the pointer, drag panning,
 //! and the fit/zoom-to-selection commands.
 
-use egui::{Event, MouseWheelUnit, Pos2, Rect, Response, TouchPhase, Ui, Vec2};
+use egui::{Event, MouseWheelUnit, PointerButton, Pos2, Rect, Response, TouchPhase, Ui, Vec2};
 
 /// The lowest zoom offered whatever the sheet: 25 %.
 pub const SCHEMATIC_ZOOM_MIN: f64 = 0.25;
@@ -58,6 +58,70 @@ impl ZoomBox {
         let ((ax, ay), (bx, by)) = self.drag?;
         Some((ax.min(bx), ay.min(by), ax.max(bx), ay.max(by)))
     }
+
+    /// Follow this frame's primary drag on `response`, reading the pointer
+    /// in world coordinates through `to_world`. A drag frames its rectangle
+    /// on release; a click, or a box too small at `zoom` to frame, lets go
+    /// and leaves the view as it was. Returns the frame to carry out.
+    pub fn drive(
+        &mut self,
+        ui: &Ui,
+        response: &Response,
+        zoom: f64,
+        to_world: impl Fn(Pos2) -> (f64, f64),
+    ) -> Option<ZoomRequest> {
+        if response.drag_started_by(PointerButton::Primary)
+            && let Some(origin) = ui.input(|input| input.pointer.press_origin())
+        {
+            let anchor = to_world(origin);
+            self.drag = Some((anchor, anchor));
+        }
+        if (response.dragged_by(PointerButton::Primary)
+            || response.drag_stopped_by(PointerButton::Primary))
+            && let Some(pointer) = response.interact_pointer_pos()
+            && let Some((anchor, _)) = self.drag
+        {
+            self.drag = Some((anchor, to_world(pointer)));
+        }
+        if response.drag_stopped_by(PointerButton::Primary) {
+            let framed = self.world_rect().filter(|(min_x, min_y, max_x, max_y)| {
+                (max_x - min_x) * zoom >= ZOOM_BOX_MIN_PIXELS
+                    && (max_y - min_y) * zoom >= ZOOM_BOX_MIN_PIXELS
+            });
+            self.disarm();
+            return framed.map(ZoomRequest::Frame);
+        }
+        if response.clicked_by(PointerButton::Primary) {
+            self.disarm();
+        }
+        None
+    }
+}
+
+/// A zoom box narrower or shorter than this on screen is a slip of the
+/// pointer, not a rectangle to frame.
+const ZOOM_BOX_MIN_PIXELS: f64 = 4.0;
+
+/// Screen space kept clear around a framed rectangle.
+const FRAME_INSET: f64 = 48.0;
+
+/// Centre `bounds` on a canvas `rect` at the zoom that shows all of it, kept
+/// within the zoom range. `pan` is the world origin's offset from the
+/// canvas's top-left corner.
+pub fn frame_world_rect(
+    zoom: &mut f64,
+    pan: &mut (f64, f64),
+    rect: Rect,
+    (min_x, min_y, max_x, max_y): (f64, f64, f64, f64),
+) {
+    let (width, height) = (f64::from(rect.width()), f64::from(rect.height()));
+    let fit = ((width - 2.0 * FRAME_INSET).max(1.0) / (max_x - min_x).max(1.0))
+        .min((height - 2.0 * FRAME_INSET).max(1.0) / (max_y - min_y).max(1.0));
+    *zoom = fit.clamp(SCHEMATIC_ZOOM_MIN, SCHEMATIC_ZOOM_MAX);
+    *pan = (
+        width * 0.5 - (min_x + max_x) * 0.5 * *zoom,
+        height * 0.5 - (min_y + max_y) * 0.5 * *zoom,
+    );
 }
 
 /// What the mouse wheel does over a canvas.
