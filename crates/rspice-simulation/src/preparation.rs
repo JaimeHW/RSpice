@@ -36,6 +36,16 @@ pub struct PreparationError {
     /// The 1-based deck line this failure named, where it named one.
     line: Option<usize>,
     interruption: Option<PreparationInterruption>,
+    refusal: Option<PreparationRefusal>,
+}
+
+/// What a failure that refuses a deck, rather than finding it wrong, says
+/// the host cannot do: the capability by its token, and the instances that
+/// need it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparationRefusal {
+    pub capability: &'static str,
+    pub instances: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +61,24 @@ impl PreparationError {
             message: message.into(),
             line: None,
             interruption: None,
+            refusal: None,
         }
+    }
+
+    /// The same failure, as a refusal: the host lacks `capability`, which
+    /// `instances` need.
+    pub fn refusing(mut self, capability: &'static str, instances: Vec<String>) -> Self {
+        self.refusal = Some(PreparationRefusal {
+            capability,
+            instances,
+        });
+        self
+    }
+
+    /// The capability this failure says the host lacks, when it refuses the
+    /// deck for one.
+    pub fn refusal(&self) -> Option<&PreparationRefusal> {
+        self.refusal.as_ref()
     }
 
     /// The same failure, at the line the parser reported it on.

@@ -140,6 +140,24 @@ pub fn reject_deferred_external_sources_with_project_runtimes(
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
 ) -> Result<(), PreparationError> {
+    reject_deferred_external_sources_for_host(
+        netlist,
+        project_runtimes,
+        measurement_references,
+        process_programs::STARTS_PROGRAMS,
+    )
+}
+
+/// [`reject_deferred_external_sources_with_project_runtimes`] for a run
+/// prepared here for a host that starts programs or not: a run prepared for
+/// the browser worker refuses every `d_process` instance's program, as the
+/// browser itself does.
+pub(crate) fn reject_deferred_external_sources_for_host(
+    netlist: &str,
+    project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+    measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
+    starts_programs: bool,
+) -> Result<(), PreparationError> {
     measurement_references
         .validate_source(netlist)
         .map_err(|error| {
@@ -151,10 +169,14 @@ pub fn reject_deferred_external_sources_with_project_runtimes(
     reject_deferred_external_sources_on(
         netlist,
         project_runtimes,
-        process_programs::STARTS_PROGRAMS,
+        starts_programs,
         std::env::var_os("PATH").as_deref(),
     )
 }
+
+/// The capability a host that cannot start a program lacks for a
+/// `d_process` instance.
+pub(crate) const PROCESS_PROGRAM_CAPABILITY: &str = "xspice.d_process.program";
 
 /// [`reject_deferred_external_sources_with_project_runtimes`] on a host that
 /// starts programs or not, looking a bare program name up on `search_path`.
@@ -234,6 +256,11 @@ fn admit_process_programs(
                  application or the CLI",
                 programs.first().copied().unwrap_or_default()
             ),
+        )
+        .at_line(Some(line_number))
+        .refusing(
+            PROCESS_PROGRAM_CAPABILITY,
+            instances.into_iter().map(str::to_owned).collect(),
         ));
     }
     match programs.iter().find(|program| {

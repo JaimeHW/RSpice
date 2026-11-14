@@ -24,7 +24,7 @@ use crate::measurement_references::PreparedMeasurementReferences;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::netlist_preparation::IncludeSearchChain;
 use crate::netlist_preparation::{
-    reject_deferred_external_sources_with_project_runtimes,
+    STARTS_PROGRAMS, reject_deferred_external_sources_for_host,
     validated_parsed_hierarchy_with_limits_and_abort,
 };
 use crate::preparation::{PreparationError, PreparationStage};
@@ -63,6 +63,11 @@ pub struct HeadlessRunInput<'a> {
     /// expansion writes each in place of its line, as the prepared
     /// manual-deck route does, so the line names its sealed runtime.
     pub included_hdl_lines: BTreeMap<(PathBuf, usize), String>,
+    /// Whether the host the run is prepared for starts the program a
+    /// `d_process` instance names. The browser worker does not, so a run
+    /// prepared here for it refuses each such instance by name, as the
+    /// browser does; by default, whether this host does.
+    pub starts_programs: bool,
     pub measurement_references: PreparedMeasurementReferences,
     pub saved_outputs: Vec<SavedOutput>,
     pub save_policy: SavePolicy,
@@ -88,6 +93,7 @@ impl<'a> HeadlessRunInput<'a> {
             reference_temperature_celsius: 27.0,
             veriloga_runtimes: PreparedVerilogARuntimeSet::default(),
             included_hdl_lines: BTreeMap::new(),
+            starts_programs: STARTS_PROGRAMS,
             measurement_references: PreparedMeasurementReferences::default(),
             saved_outputs: Vec::new(),
             save_policy: SavePolicy::RetainEngineProducedResults,
@@ -240,10 +246,11 @@ pub fn prepare_headless_run(
     ) {
         return Err(refusal.into());
     }
-    reject_deferred_external_sources_with_project_runtimes(
+    reject_deferred_external_sources_for_host(
         &expanded,
         &input.veriloga_runtimes,
         &input.measurement_references,
+        input.starts_programs,
     )?;
     // The files the deck's code models read, from beside the root deck. A
     // sealed bundle carries no data file, so its deck can name none.

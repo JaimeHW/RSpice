@@ -281,6 +281,12 @@ fn a_host_that_cannot_start_programs_refuses_each_d_process_instance_by_name() {
             && message.contains("cannot start a program"),
         "{message}"
     );
+    // The refusal is structured: the capability, the instances needing it,
+    // and the line naming their program.
+    let refusal = error.refusal().expect("a refusal, not a defect");
+    assert_eq!(refusal.capability, PROCESS_PROGRAM_CAPABILITY);
+    assert_eq!(refusal.instances, ["Aone", "Atwo"]);
+    assert_eq!(error.line(), Some(2));
 }
 
 #[test]
