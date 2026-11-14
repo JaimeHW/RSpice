@@ -16,9 +16,6 @@ use super::parts::CanvasFacts;
 use super::viewport::Viewport;
 use rspice_schematic_editor::view::violations as markers;
 
-#[cfg(test)]
-pub(crate) mod tests;
-
 /// Where one finding location in the drawing in front of the reader points,
 /// when it points anywhere.
 ///

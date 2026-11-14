@@ -325,4 +325,4 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
