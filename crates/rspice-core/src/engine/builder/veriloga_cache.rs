@@ -3761,7 +3761,10 @@ fn install_project_veriloga_sources(
     // Compare the whole candidate set against the live registry while holding
     // the one cache lock. Nothing can change between validation and commit.
     // The same source compiled against another cell table, or under another
-    // min:typ:max selection, is another key.
+    // min:typ:max selection, is another key; so is the compile a build made
+    // of it under a deck's connect-rule configuration, `wreal` resolution or
+    // macros, which stays cached after the run that made it, so a second run
+    // in the same session installs the source beside it.
     for (cached_key, cached_entry) in cache.iter() {
         if !is_sealed_veriloga_virtual_path(&cached_key.source_path) {
             continue;
@@ -3770,9 +3773,13 @@ fn install_project_veriloga_sources(
             validate_sealed_runtime_source_key(&cached_key.source_path)?;
         let cached_fingerprint = cached_entry.artifact_fingerprint()?;
         for runtime in &prepared {
+            let registered = runtime.cache_key();
+            let same_compile = VerilogASourceKey {
+                source_path: registered.source_path.clone(),
+                ..cached_key.clone()
+            } == registered;
             if cached_folded_key == runtime.folded_key
-                && cached_key.external_cells == runtime.cells
-                && cached_key.delay_select == runtime.delay_select
+                && same_compile
                 && cached_fingerprint != runtime.artifact_fingerprint
             {
                 return Err(format!(
@@ -4688,6 +4695,56 @@ endmodule
         assert_eq!(entry.model.name.as_str(), "owned");
         assert!(entry.canonical_ir.is_some());
         cache.remove(&key);
+    }
+
+    #[test]
+    fn a_source_installs_again_beside_the_compile_a_configured_build_made_of_it() {
+        let source_key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-000000000033/digest/derived.va",
+        );
+        let compile = |gain: &str| {
+            rspice_veriloga::VerilogACompiler::default()
+                .compile_runtime(
+                    &format!(
+                        "module derived(p, n); inout p, n; electrical p, n; \
+                         analog I(p,n) <+ {gain}*V(p,n); endmodule\n"
+                    ),
+                    None,
+                )
+                .expect("compile in-memory source")
+        };
+        let registered = compile("1.0");
+        install_runtime(
+            &source_key,
+            registered.model.clone(),
+            registered.canonical_ir.clone(),
+        )
+        .expect("the first run installs the source");
+        // That run's build compiled the source again under its deck's
+        // connect-rule configuration, and the compile stays cached after it.
+        let other = compile("2.0");
+        let mut configured = VerilogASourceKey::new(&source_key, None);
+        configured.configuration = Some([7; 32]);
+        retain_veriloga_model_sized(
+            configured.clone(),
+            CachedVerilogAModel {
+                dependencies: Vec::new(),
+                model: std::sync::Arc::new(other.model),
+                canonical_ir: Some(std::sync::Arc::new(other.canonical_ir)),
+                diagnostics: std::sync::Arc::from([]),
+            },
+            1,
+            usize::MAX,
+            true,
+        )
+        .expect("the configured compile is retained");
+
+        install_runtime(&source_key, registered.model, registered.canonical_ir)
+            .expect("the next run installs the same source again");
+
+        let mut cache = veriloga_source_cache().write().expect("cache lock");
+        cache.remove(&VerilogASourceKey::new(&source_key, None));
+        cache.remove(&configured);
     }
 
     #[test]
