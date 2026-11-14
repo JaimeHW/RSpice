@@ -489,9 +489,13 @@ impl Engine {
                     bjt.name
                 )));
             }
+            // A promoted device's charge branches, which its lead currents
+            // read again below.
+            let mut promoted_branches = None;
             let (charges, internal, linear, voltages, mut lead_currents) = if bjt.mna_promoted() {
                 let (branches, internal, _) = bjt.mna_charge_state_at_solution(solution);
                 let mut charges = branches.map(|branch| branch.charge);
+                promoted_branches = Some(branches);
                 if let Some(charge) = bjt.legacy_external_bc_charge(solution) {
                     charges[BJT_QBCX_BRANCH_INDEX] = charge.charge;
                 }
@@ -579,7 +583,7 @@ impl Engine {
                     },
                 )
             });
-            if bjt.mna_promoted() {
+            if let Some(branches) = &promoted_branches {
                 let mut terminal = bjt.mna_terminal_currents_at_solution(solution);
                 if let Some(phase) = phase_view.trial(idx, accepted_time) {
                     let correction = phase.correction(bjt, &internal).map_err(|error| {
@@ -595,7 +599,6 @@ impl Engine {
                         terminal[index] -= correction.current;
                     }
                 }
-                let (branches, _, _) = bjt.mna_charge_state_at_solution(solution);
                 for (index, (branch, current)) in branches.iter().zip(currents).enumerate() {
                     let current = bjt.charge_branch_polarity(index) * current;
                     if let Some(index) =

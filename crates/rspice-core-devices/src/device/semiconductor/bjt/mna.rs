@@ -1608,7 +1608,7 @@ impl Bjt {
         &self,
         bias: &[Value; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM],
         rbi_current: Value,
-    ) -> Option<EvaluatedBjtState> {
+    ) -> Option<&EvaluatedBjtState> {
         let held = [
             self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
         ];
@@ -1616,7 +1616,7 @@ impl Bjt {
             && same_bits(&self.eval_anchor, &bias[..EXTERNAL_DIM])
             && same_bits(&held, &bias[EXTERNAL_DIM..EXTERNAL_DIM + INTERNAL_DIM])
             && self.mna_rbi_current.to_bits() == rbi_current.to_bits();
-        self.mna_eval.filter(|_| at)
+        self.mna_eval.as_ref().filter(|_| at)
     }
 
     #[doc(hidden)]
@@ -1625,9 +1625,12 @@ impl Bjt {
         let delayed = self.uses_vbic_dynamic_charges() && self.td > 0.0;
         let rbi_current = Self::node_voltage(solution, self.mna_rbi_matrix_node);
         if !delayed && let Some(eval) = self.mna_eval_at(&v, rbi_current) {
-            // The last evaluation was of this very bias.
+            // The last evaluation was of this very bias, and the update that
+            // cached it summed its terminal rows.
             return self
-                .external_terminal_branches(eval)
+                .mna_terminal_rows
+                .0
+                .unwrap_or_else(|| self.external_terminal_branches(*eval))
                 .map(|branch| branch.current);
         }
         let eval = self.evaluate_state_with_rbi_current(
