@@ -139,6 +139,11 @@ pub struct CompiledModel {
     /// no source text to locate them in.
     #[serde(default)]
     pub analog_operator_origins: Vec<AnalogOperatorOrigin>,
+    /// The `ddt` records, by slot, harmonic balance carries as unknowns of
+    /// their own because the residual is not `F(x) + dQ(x)/dt` with them in
+    /// it; `None` when no choice of records leaves it so.
+    #[serde(default)]
+    pub periodic_derivative_slots: Option<Vec<u32>>,
     /// Compiled stamp programs for each contribution
     pub stamp_programs: Vec<StampProgram>,
     /// Lookup tables for $table_model (x_data, y_data pairs)
@@ -1131,6 +1136,12 @@ impl CompiledModel {
     /// Every located analog operator with state, by family and slot.
     pub fn analog_operator_origins(&self) -> &[AnalogOperatorOrigin] {
         &self.analog_operator_origins
+    }
+
+    /// The `ddt` records harmonic balance carries as unknowns of its own,
+    /// or `None` when it cannot sample the module's residual.
+    pub fn periodic_derivative_slots(&self) -> Option<&[u32]> {
+        self.periodic_derivative_slots.as_deref()
     }
 
     /// Where the operator owning slot `slot` of state family `family` (a

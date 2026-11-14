@@ -387,6 +387,10 @@ fn operator_coefficient(
         .map(complex)
         .map_err(|error| format!("has no transfer at omega={omega}: {error}"))?,
         Transfer::Delay(delay) => wave_coefficient(omega, *delay, difference),
+        Transfer::Derivative => match difference {
+            None => Complex64::new(0.0, omega),
+            Some(_) => Complex64::new(1.0, 0.0),
+        },
     }))
 }
 

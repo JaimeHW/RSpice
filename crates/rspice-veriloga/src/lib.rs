@@ -1004,6 +1004,7 @@ impl VerilogACompiler {
         )?;
         let mut model = model;
         Self::renumber_state_slots(&mut model, &canonical_ir, measurements.control())?;
+        model.periodic_derivative_slots = Self::periodic_derivative_slots(&canonical_ir);
         Self::locate_analog_tasks(
             &mut model,
             &executable,
@@ -1078,6 +1079,24 @@ impl VerilogACompiler {
     /// refusal of one can say which line of the model it was, and so is every
     /// analog operator with state, by the record it owns, so an analysis that
     /// cannot carry one can say where it was written.
+    /// The `ddt` records harmonic balance carries as unknowns of their own,
+    /// by the slot the renumbered state layout gives the executed site each
+    /// body-copy operator names.
+    fn periodic_derivative_slots(
+        canonical_ir: &canonical_ir::CanonicalIrArtifact,
+    ) -> Option<Vec<u32>> {
+        let operators = canonical_ir::charge::periodic_derivative_operators(canonical_ir).ok()?;
+        let hir = &canonical_ir.hir;
+        let layout = canonical_ir::state::CanonicalStateLayout::from_hir(hir);
+        operators
+            .into_iter()
+            .map(|operator| {
+                let site = layout.site(hir.executed_correspondence.executed(operator)?)?;
+                (site.kind == canonical_ir::state::CanonicalStateOperator::Ddt).then_some(site.slot)
+            })
+            .collect()
+    }
+
     fn locate_analog_tasks(
         model: &mut CompiledModel,
         executable: &semantic::AnalyzedModule,
@@ -2473,6 +2492,7 @@ impl VerilogACompiler {
         )?;
         let mut model = model;
         Self::renumber_state_slots(&mut model, &canonical_ir, measurements.control())?;
+        model.periodic_derivative_slots = Self::periodic_derivative_slots(&canonical_ir);
         Self::locate_analog_tasks(
             &mut model,
             &executable,

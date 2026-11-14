@@ -3955,6 +3955,13 @@ impl VerilogADevice {
         self.context.set_transition_input_step_origin(origin);
     }
 
+    /// The `ddt` records harmonic balance carries as unknowns of its own
+    /// because the residual is not `F(x) + dQ(x)/dt` with them in it, or
+    /// `None` when no choice of records leaves it so.
+    pub fn periodic_derivative_slots(&self) -> Option<&[u32]> {
+        self.model.periodic_derivative_slots()
+    }
+
     /// Whether the full model permits the externally weighted F/Q formulation.
     /// False selects ordinary companions without changing the authored equations.
     pub fn one_step_dae_split_safe(&self) -> bool {
@@ -4469,13 +4476,16 @@ impl VerilogADevice {
             .collect()
     }
 
-    /// The `idt`, `laplace_*` and `absdelay` sites of the analog body, each
-    /// once, in family and slot order: the operators with state a periodic
-    /// solver carries as unknowns of its own (see
+    /// The `idt`, `laplace_*` and `absdelay` sites of the analog body, and
+    /// its `ddt` sites that are not the derivative of a charge it contributes
+    /// (see [`crate::codegen::CompiledModel::periodic_derivative_slots`]),
+    /// each once, in family and slot order: the operators with state a
+    /// periodic solver carries as unknowns of its own (see
     /// [`Self::try_install_periodic_operator_frame`]).
     pub fn periodic_operator_sites(&self) -> Vec<crate::vm::PeriodicOperatorSite> {
         use crate::vm::{PeriodicOperatorKind as Kind, PeriodicOperatorSite as Site};
 
+        let carried = self.model.periodic_derivative_slots().unwrap_or_default();
         let mut sites = std::collections::BTreeSet::new();
         Self::for_each_bytecode_program(&self.model, false, &mut |program| {
             for instruction in &program.instructions {
@@ -4492,6 +4502,11 @@ impl VerilogADevice {
                     | Instruction::AbsDelayStateMixedDerivative(buffer)
                     | Instruction::AbsDelayStateMixedDerivativeMax(buffer) => {
                         (Kind::Delay, *buffer)
+                    }
+                    Instruction::DdtState(slot) | Instruction::DdtDerivativeState(slot)
+                        if u32::try_from(*slot).is_ok_and(|slot| carried.contains(&slot)) =>
+                    {
+                        (Kind::Derivative, *slot)
                     }
                     _ => continue,
                 };

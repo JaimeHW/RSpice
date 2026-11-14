@@ -528,6 +528,7 @@ impl CodeGenerator {
             analog_task_origins: Vec::new(),
             contribution_sources: Vec::new(),
             analog_operator_origins: Vec::new(),
+            periodic_derivative_slots: Some(Vec::new()),
             stamp_programs: Vec::new(),
             lookup_tables: Vec::new(),
             internal_nodes: ir.internal_nodes.len(),

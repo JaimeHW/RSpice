@@ -29,15 +29,19 @@
 //!
 //! # Operators with state
 //!
-//! An `idt`, `laplace_*` or `absdelay` site keeps state outside `F + dQ/dt`.
-//! Each becomes two periodic unknowns of its own, its input `u` and its
-//! output `y`. The module's residual is sampled with every output held at
+//! An `idt`, `laplace_*` or `absdelay` site keeps state outside `F + dQ/dt`,
+//! and so does a `ddt` the compiler could not prove the derivative of a
+//! charge the module contributes (one scaled by a quantity that varies with
+//! bias, a nested one, one that steers a branch, one a branch-current read
+//! sees, or one whose charge it cannot recover). Each becomes two periodic
+//! unknowns of its own, its input `u` and its output `y`. The module's residual is sampled with every output held at
 //! the solver's `y` (see [`rspice_veriloga::vm::PeriodicOperatorRecord`]), the
 //! input row holds `u - x(v, y) = 0` for the input `x` the module computes,
 //! and a [`super::ExactPeriodicNetwork::VerilogAOperator`] holds
 //! `Y - T(jω) U = 0` at every harmonic: `1/(jω)` for `idt`, whose DC output
-//! its initial condition fixes instead, `H(jω)` for a Laplace filter and
-//! `e^{-jωτ}` for a delay.
+//! its initial condition fixes instead, `H(jω)` for a Laplace filter,
+//! `e^{-jωτ}` for a delay and `jω` for a `ddt`. The other `ddt` sites keep
+//! the charge path above.
 //!
 //! The Jacobian stays exact. One evaluation with every output tangent zero
 //! gives the partials with the outputs held, and the difference of an
@@ -74,6 +78,8 @@ pub(crate) enum HbOperatorTransfer {
     Laplace(Box<rspice_veriloga::laplace::StateSpaceFilter>),
     /// `absdelay` by a fixed delay `τ`: `e^{-jωτ}`.
     Delay(Value),
+    /// A `ddt` that is not the derivative of a contributed charge: `jω`.
+    Derivative,
 }
 
 /// One operator site's unknowns and what fixes them.
@@ -250,6 +256,7 @@ impl HbVerilogADevice {
                 PeriodicOperatorKind::Integral => ("idt", "idt"),
                 PeriodicOperatorKind::Laplace => ("laplace", "laplace_*"),
                 PeriodicOperatorKind::Delay => ("absdelay", "absdelay"),
+                PeriodicOperatorKind::Derivative => ("ddt", "ddt"),
             };
             let origin = self.static_probe.analog_operator_origin(family, site.slot);
             let label = match origin {
@@ -300,6 +307,7 @@ impl HbVerilogADevice {
                         .ok_or_else(|| refuse("its delay is not a finite nonnegative time"))?;
                     (Some(delay), HbOperatorTransfer::Delay(delay))
                 }
+                PeriodicOperatorKind::Derivative => (None, HbOperatorTransfer::Derivative),
             };
             networks.push(HbOperatorNetwork {
                 name: format!("{name}:{family}{}", site.slot),
@@ -516,7 +524,7 @@ impl HbVerilogADevice {
                         return Err(fail(&ports.label, "its delay changes over the period"));
                     }
                 }
-                PeriodicOperatorKind::Laplace => {}
+                PeriodicOperatorKind::Laplace | PeriodicOperatorKind::Derivative => {}
             }
             f.stamp_rhs(ports.input + 1, input - solution[ports.input]);
             f.stamp(ports.input + 1, ports.input + 1, 1.0);

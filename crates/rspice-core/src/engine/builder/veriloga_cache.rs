@@ -561,7 +561,12 @@ use super::*;
 // Version 183 records where the module wrote each analog operator with state,
 // which harmonic balance reads to name the source line of an operator it
 // refuses or cannot carry. An earlier record carries no operator origins.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 183;
+//
+// Version 184 records which `ddt` sites harmonic balance carries as unknowns
+// of their own because the residual is not `F(x) + dQ(x)/dt` with them in it.
+// An earlier record carries none, which harmonic balance would read as a
+// module it cannot sample.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 184;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_RECORD_EXTENSION: &str = "record";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

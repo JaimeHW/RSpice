@@ -859,10 +859,10 @@ fn laplace_pole_at_origin(device: &crate::device::veriloga::VerilogADevice) -> O
 /// naming the first operator in the way and where the module wrote it.
 ///
 /// The residual is sampled through the module's own static and companion
-/// stamps, so it needs every `ddt` to be the derivative of a charge the
-/// module contributes — the compiler's proof of the weighted F/Q split — and
-/// no other operator with state. A variable kept between time points is
-/// history no spectrum carries.
+/// stamps, so it needs every `ddt` it does not carry as an unknown of its own
+/// to be the derivative of a charge the module contributes — the compiler's
+/// proof of the weighted F/Q split — and no other operator with state. A
+/// variable kept between time points is history no spectrum carries.
 fn hb_veriloga_operator_refusal(
     circuit: &CircuitData,
     analysis: CapabilityAnalysis,
@@ -899,10 +899,9 @@ fn hb_veriloga_operator_refusal(
                 "it uses {written}, whose transfer has a pole at the origin, so its DC output \
                  is undefined"
             )
-        } else if inventory.contains(&"ddt") && !device.one_step_dae_split_safe() {
-            "it uses `ddt` on something other than a charge it contributes (a nested \
-             derivative, or one scaled by a varying quantity), so its residual is not \
-             F(x) + dQ(x)/dt"
+        } else if inventory.contains(&"ddt") && device.periodic_derivative_slots().is_none() {
+            "it uses `ddt` in a form harmonic balance can neither sample as the derivative \
+             of a charge it contributes nor carry as an unknown of its own"
                 .to_owned()
         } else {
             continue;

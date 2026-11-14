@@ -685,6 +685,13 @@ impl<'a> Vm<'a> {
             // State-based ddt using the transient solver's companion rule.
             Instruction::DdtState(idx) => {
                 let current_value = self.pop()?;
+                if let Some(frame) = self.context.periodic_frame.as_deref_mut()
+                    && let Some(site) = frame.site(PeriodicOperatorKind::Derivative, *idx)
+                {
+                    let output = frame.primal(site, current_value, None, None);
+                    self.stack.push(output);
+                    return Ok(());
+                }
                 if !self.context.evaluation_mode.dynamic_operators_enabled()
                     || (matches!(self.context.analysis_type, 1 | 3)
                         && !self.context.analysis_phase.is_equilibrium())
@@ -846,6 +853,13 @@ impl<'a> Vm<'a> {
                     return Err(VmError::InvalidNumericResult(
                         "ddt derivative operands must be finite".into(),
                     ));
+                }
+                if let Some(frame) = self.context.periodic_frame.as_deref_mut()
+                    && let Some(site) = frame.site(PeriodicOperatorKind::Derivative, *idx)
+                {
+                    let tangent = frame.derivative(site, input, 0.0);
+                    self.stack.push(tangent);
+                    return Ok(());
                 }
                 if !self.context.evaluation_mode.dynamic_operators_enabled()
                     || (matches!(self.context.analysis_type, 1 | 3)

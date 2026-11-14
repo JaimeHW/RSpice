@@ -1,7 +1,7 @@
 use num_complex::Complex64;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::harmonic_balance::HbConfig;
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, TransientStartupMode};
 use rspice_core::identity::AnalysisKind;
 use rspice_core::netlist::Netlist;
 use rspice_core::{SimulationError, UnsupportedCapabilityError};
@@ -273,7 +273,6 @@ fn harmonic_balance_refuses_each_operator_family_by_name() {
             "I(out) <+ 1.0e-3 * sin(6.283185307e6 * $abstime);",
             false,
         ),
-        ("ddt", "I(out) <+ 1.0e-21 * ddt(ddt(V(in)));", false),
     ] {
         let module = "va_hb_refused";
         let name = format!(
@@ -341,6 +340,154 @@ fn harmonic_balance_refuses_each_operator_family_by_name() {
                 "{operator}: the refusal must name the source line: {detail}"
             );
         }
+    }
+}
+
+/// The spectrum of `waveform`'s last period ending at `end`, sampled at
+/// `samples` uniform points by linear interpolation: `c_0` the mean and
+/// `c_k = (2/N) sum v(t_n) e^{-jk w t_n}`, the convention harmonic balance
+/// reports.
+fn period_spectrum(
+    time: &[f64],
+    waveform: &[f64],
+    end: f64,
+    samples: usize,
+    harmonics: usize,
+) -> Vec<Complex64> {
+    let period = F0.recip();
+    let start = end - period;
+    let at = |t: f64| {
+        let index = time
+            .partition_point(|&sample| sample < t)
+            .clamp(1, time.len() - 1);
+        let (t0, t1) = (time[index - 1], time[index]);
+        let (v0, v1) = (waveform[index - 1], waveform[index]);
+        v0 + (v1 - v0) * (t - t0) / (t1 - t0)
+    };
+    (0..=harmonics)
+        .map(|k| {
+            let sum: Complex64 = (0..samples)
+                .map(|n| {
+                    let phase = n as f64 / samples as f64;
+                    at(start + phase * period)
+                        * Complex64::from_polar(1.0, -std::f64::consts::TAU * k as f64 * phase)
+                })
+                .sum();
+            let scale = if k == 0 { 1.0 } else { 2.0 };
+            sum * scale / samples as f64
+        })
+        .collect()
+}
+
+/// Every shape of `ddt` the residual cannot carry as the derivative of a
+/// contributed charge becomes an unknown of its own, and its harmonics are
+/// those of RSpice's own settled transient: one scaled by a quantity that
+/// varies with bias, a nested one, one that steers a branch, one a
+/// branch-current read sees, and one inside a nonlinear function, whose
+/// charge nothing recovers.
+///
+/// Each module drives `out`, loaded by 1 kΩ and 50 pF, from `in`, driven by
+/// one tone. Settle test and allowance as for the generated models' fixtures,
+/// fixed before the first comparison: the transient starts from rest (UIC)
+/// and runs 24 periods at T/512; the DC term and first three harmonics of
+/// its last period differ from the period before by at most 1e-5 of the
+/// fundamental, and harmonic balance's are within 1e-3 of the fundamental of
+/// the transient's. 32 harmonics keep the truncation of the steered case's
+/// `d|d|` (harmonics falling as 1/k^3) far inside the allowance.
+#[test]
+fn every_ddt_shape_reaches_its_settled_transient() {
+    const PERIODS: f64 = 24.0;
+    const SAMPLES: usize = 512;
+    const HARMONICS: usize = 32;
+    for (shape, declarations, body) in [
+        (
+            "bias_scaled",
+            "",
+            "I(out) <+ -(1.0 + 0.5 * V(in) * V(in)) * 1.0e-10 * ddt(V(in));",
+        ),
+        ("nested", "", "I(out) <+ -2.5e-17 * ddt(ddt(V(in)));"),
+        (
+            "steering",
+            "real d;",
+            "d = 1.0e-7 * ddt(V(in));\n\
+             if (d > 0) I(out) <+ -1.0e-3 * d * d; else I(out) <+ 1.0e-3 * d * d;",
+        ),
+        (
+            "flow_probe",
+            "",
+            "I(in, out) <+ 2.0e-11 * ddt(V(in, out));\n\
+             I(out) <+ 0.5 * I(in, out);",
+        ),
+        (
+            "unrecovered",
+            "",
+            "I(out) <+ -1.0e-3 * tanh(1.0e-7 * ddt(V(in)));",
+        ),
+    ] {
+        let module = format!("va_hb_ddt_{shape}");
+        let model = write_model(
+            &format!("ddt_{shape}"),
+            &format!(
+                "`include \"disciplines.vams\"\n\
+                 module {module}(in, out);\n\
+                 inout in, out;\n\
+                 electrical in, out;\n\
+                 {declarations}\n\
+                 analog begin\n\
+                 {body}\n\
+                 end\n\
+                 endmodule\n"
+            ),
+        );
+        let deck = format!(
+            "* harmonic balance carries a {shape} ddt\n\
+             V1 in 0 DC 0 SIN(0.5 1 1meg)\n\
+             R1 out 0 1k\n\
+             C1 out 0 50p\n\
+             XVA in out {module}\n\
+             .va \"{model}\" {module}\n\
+             .end\n"
+        );
+        let hb = node(&run_hb(&deck, HARMONICS), "out");
+        let netlist = Netlist::parse(&deck).expect("parse");
+        let tstop = PERIODS / F0;
+        let tran = Engine::new(SimulationConfig::default())
+            .run_tran_with_startup_mode_and_abort(
+                &netlist,
+                tstop,
+                1.0 / (F0 * SAMPLES as f64),
+                TransientStartupMode::Uic,
+                &rspice_core::NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("{shape}: transient must run: {error}"));
+        let _ = std::fs::remove_file(&model);
+        let waveform = tran
+            .try_voltage_waveform_named("out")
+            .unwrap_or_else(|| panic!("{shape}: V(out) present"));
+        let last = period_spectrum(&tran.time, waveform, tstop, SAMPLES, 3);
+        let before = period_spectrum(&tran.time, waveform, tstop - 1.0 / F0, SAMPLES, 3);
+        let fundamental = last[1].norm();
+        for k in 0..=3 {
+            assert!(
+                (last[k] - before[k]).norm() <= 1e-5 * fundamental,
+                "{shape}: harmonic {k} has not settled: {} then {}",
+                before[k],
+                last[k]
+            );
+            assert!(
+                (hb[k] - last[k]).norm() <= 1e-3 * fundamental,
+                "{shape}: harmonic {k}: harmonic balance {} against the settled transient {} \
+                 (fundamental {fundamental})",
+                hb[k],
+                last[k]
+            );
+        }
+        eprintln!(
+            "{shape}: worst {:.3e} of the fundamental {fundamental:.6}",
+            (0..=3)
+                .map(|k| (hb[k] - last[k]).norm() / fundamental)
+                .fold(0.0, f64::max)
+        );
     }
 }
 

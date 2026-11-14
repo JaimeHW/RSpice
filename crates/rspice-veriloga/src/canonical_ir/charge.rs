@@ -143,6 +143,27 @@ enum ChargeOp {
     },
 }
 
+impl Charge {
+    /// Every coefficient held outside a `ddt` anywhere in this charge, with
+    /// the product or quotient it scales.
+    fn held_coefficients(&self) -> Vec<(ValueId, ValueId)> {
+        let mut found = Vec::new();
+        let mut pending = vec![self];
+        while let Some(charge) = pending.pop() {
+            match charge {
+                Self::HeldCoefficient { anchor, value } => found.push((*anchor, *value)),
+                Self::Merge { arms, .. } => pending.extend(arms),
+                Self::Op { kind, .. } => match kind.as_ref() {
+                    ChargeOp::Binary { left, right, .. } => pending.extend([left, right]),
+                    ChargeOp::Unary { input, .. } => pending.push(input),
+                },
+                Self::Value(_) | Self::Nothing => {}
+            }
+        }
+        found
+    }
+}
+
 /// Which values can reach a `ddt` at all.
 ///
 /// A fixed point rather than one pass, because a loop-carried block parameter
@@ -607,10 +628,21 @@ fn charge_split_obstacle(
     artifact: &super::CanonicalIrArtifact,
     observed: bool,
 ) -> Option<ChargeSplitObstacle> {
-    let Ok(mut cfg) = super::CfgModel::from_hir_with_observations(&artifact.hir, &artifact.mir)
-    else {
+    let Ok(cfg) = super::CfgModel::from_hir_with_observations(&artifact.hir, &artifact.mir) else {
         return Some(ChargeSplitObstacle::Unlowered);
     };
+    lowered_charge_split_obstacle(artifact, cfg, observed)
+}
+
+/// [`charge_split_obstacle`] of a lowered body. A branch-current read is an
+/// obstacle only while some `ddt` remains in the body, when `observed` is
+/// false and every `ddt` has been carried elsewhere (see
+/// [`periodic_derivative_operators`]).
+fn lowered_charge_split_obstacle(
+    artifact: &super::CanonicalIrArtifact,
+    mut cfg: super::CfgModel,
+    observed: bool,
+) -> Option<ChargeSplitObstacle> {
     let reaches = values_reaching_a_ddt(&cfg.function);
     let reaches_ddt = |id: ValueId| reaches[usize::from(id)];
     if cfg.function.blocks.iter().any(|block| {
@@ -678,7 +710,8 @@ fn charge_split_obstacle(
         if matches!(
             kind,
             CfgValueKind::BranchFlow(_) | CfgValueKind::ContributedCurrent { .. }
-        ) {
+        ) && (observed || reaches.iter().any(|reached| *reached))
+        {
             return Some(ChargeSplitObstacle::FlowProbe);
         }
     }
@@ -709,6 +742,179 @@ fn charge_split_obstacle(
         ) && schedule.class(value.id) > super::schedule::InvalidationClass::Temperature
     });
     frozen_varies.then_some(ChargeSplitObstacle::BiasScaledDerivative)
+}
+
+/// The `ddt` operators harmonic balance carries as unknowns of their own, or
+/// the obstacle no choice of them removes.
+///
+/// Harmonic balance can give any `ddt` site two waveforms, its input `u` and
+/// its output `y`, tied by `Y = jkω U` at every harmonic; the residual then
+/// reads `y` as an ordinary input. That is exact for every shape of `ddt`,
+/// but each carried site costs the solver unknowns and samples, so a site is
+/// carried only when the residual is not `F(x, y) + dQ(x, y)/dt` without it:
+///
+/// * its value steers a branch condition or a topology activation;
+/// * another operator with state reads it (the inner `ddt` of a nested
+///   derivative);
+/// * the body reads a branch current, which sees every `ddt` contributed to
+///   the branch (then every site is carried);
+/// * it reaches an equation whose charge the walk cannot recover, or whose
+///   charge is scaled by a quantity that varies with bias (then every site
+///   reaching that equation is carried).
+///
+/// The answer is checked, not trusted: with the carried sites replaced by
+/// opaque inputs, the same proof [`residual_charge_split_obstacle`] runs must
+/// find no obstacle. An empty list means the residual is already
+/// `F(x) + dQ(x)/dt`.
+pub(crate) fn periodic_derivative_operators(
+    artifact: &super::CanonicalIrArtifact,
+) -> Result<Vec<super::ExprId>, ChargeSplitObstacle> {
+    use std::collections::BTreeSet;
+    let Ok(cfg) = super::CfgModel::from_hir_with_observations(&artifact.hir, &artifact.mir) else {
+        return Err(ChargeSplitObstacle::Unlowered);
+    };
+    if lowered_charge_split_obstacle(artifact, cfg.clone(), false).is_none() {
+        return Ok(Vec::new());
+    }
+    let incoming = block_parameter_arguments(&cfg.function);
+    let everything: BTreeSet<super::ExprId> = cfg
+        .function
+        .values
+        .iter()
+        .filter_map(|value| match value.kind {
+            CfgValueKind::Ddt { operator, .. } => Some(operator),
+            _ => None,
+        })
+        .collect();
+    let reached_from = |roots: &mut dyn Iterator<Item = ValueId>| {
+        derivatives_reached(&cfg.function, &incoming, roots)
+    };
+    let mut carried: BTreeSet<super::ExprId> = BTreeSet::new();
+    // Control: a branch condition or an activation.
+    carried.extend(reached_from(
+        &mut cfg
+            .function
+            .blocks
+            .iter()
+            .filter_map(|block| match block.terminator {
+                CfgTerminator::Branch { condition, .. } => Some(condition),
+                _ => None,
+            })
+            .chain(cfg.activations.iter().flatten().copied()),
+    ));
+    // The inner site of a nested derivative.
+    carried.extend(reached_from(
+        &mut cfg
+            .function
+            .values
+            .iter()
+            .filter(|value| value.kind.state_site().is_some())
+            .flat_map(|value| value.kind.operands()),
+    ));
+    if cfg.function.values.iter().any(|value| {
+        matches!(
+            value.kind,
+            CfgValueKind::BranchFlow(_) | CfgValueKind::ContributedCurrent { .. }
+        )
+    }) {
+        carried.clone_from(&everything);
+    }
+    let scopes: Vec<_> = artifact
+        .mir
+        .parameters
+        .iter()
+        .map(|parameter| parameter.scope)
+        .collect();
+    loop {
+        let held = holding_derivatives(&cfg, &carried);
+        let Some(obstacle) = lowered_charge_split_obstacle(artifact, held.clone(), false) else {
+            return Ok(carried.into_iter().collect());
+        };
+        // Every site of an equation whose charge is unrecovered, and every
+        // site a quantity that varies with bias scales.
+        let reaches = values_reaching_a_ddt(&held.function);
+        let schedule = super::schedule::schedule_with_parameter_scopes(&held.function, &scopes);
+        let held_incoming = block_parameter_arguments(&held.function);
+        let mut more = BTreeSet::new();
+        for &residual in &held.residuals {
+            if !reaches[usize::from(residual)] {
+                continue;
+            }
+            let mut complete = true;
+            let charge = resolve_charge(&held.function, &reaches, residual, 0, &mut complete);
+            let scaled: Vec<ValueId> = match &charge {
+                Some(charge) if complete => charge
+                    .held_coefficients()
+                    .into_iter()
+                    .filter(|&(_, value)| {
+                        schedule.class(value) > super::schedule::InvalidationClass::Temperature
+                    })
+                    .map(|(anchor, _)| anchor)
+                    .collect(),
+                _ => vec![residual],
+            };
+            more.extend(derivatives_reached(
+                &held.function,
+                &held_incoming,
+                &mut scaled.into_iter(),
+            ));
+        }
+        let before = carried.len();
+        carried.extend(more);
+        if carried.len() == before {
+            if carried == everything {
+                return Err(obstacle);
+            }
+            carried.clone_from(&everything);
+        }
+    }
+}
+
+/// The `ddt` operators whose values reach any of `roots`, through operands
+/// and the arguments a merge chooses among.
+fn derivatives_reached(
+    function: &CfgFunction,
+    incoming: &HashMap<ValueId, Vec<ValueId>>,
+    roots: &mut dyn Iterator<Item = ValueId>,
+) -> Vec<super::ExprId> {
+    let mut seen = vec![false; function.values.len()];
+    let mut pending: Vec<ValueId> = roots.collect();
+    let mut found = Vec::new();
+    while let Some(id) = pending.pop() {
+        let index = usize::from(id);
+        if std::mem::replace(&mut seen[index], true) {
+            continue;
+        }
+        match &function.value(id).kind {
+            CfgValueKind::Ddt { operator, input } => {
+                found.push(*operator);
+                pending.push(*input);
+            }
+            CfgValueKind::BlockParameter => {
+                pending.extend(incoming.get(&id).into_iter().flatten().copied());
+            }
+            kind => pending.extend(kind.operands()),
+        }
+    }
+    found
+}
+
+/// `cfg` with every `ddt` of `carried` read as an opaque input, which varies
+/// with bias and stores no charge: the residual as harmonic balance samples it
+/// with those sites' outputs supplied.
+fn holding_derivatives(
+    cfg: &super::CfgModel,
+    carried: &std::collections::BTreeSet<super::ExprId>,
+) -> super::CfgModel {
+    let mut held = cfg.clone();
+    for value in &mut held.function.values {
+        if let CfgValueKind::Ddt { operator, .. } = value.kind
+            && carried.contains(&operator)
+        {
+            value.kind = CfgValueKind::EvaluationInput(u32::MAX);
+        }
+    }
+    held
 }
 
 #[cfg(test)]
@@ -746,6 +952,47 @@ mod tests {
             )
             .unwrap();
             assert_eq!(device.one_step_dae_split_safe(), safe);
+        }
+    }
+
+    /// Harmonic balance carries exactly the `ddt` sites the residual cannot
+    /// read as the derivative of a contributed charge, by the slot their
+    /// instructions address.
+    #[test]
+    fn harmonic_balance_carries_only_the_derivatives_outside_the_charge_form() {
+        for (body, carried) in [
+            ("I(p,n)<+2*V(p,n)+ddt(V(p,n)*V(p,n));", 0),
+            ("I(p,n)<+k*ddt(V(p,n));", 0),
+            ("I(p,n)<+V(p,n)*ddt(V(p,n));", 1),
+            ("I(p,n)<+V(p,n)*ddt(V(p,n))+ddt(2*V(p,n));", 1),
+            ("I(p,n)<+ddt(ddt(V(p,n)));", 1),
+            ("I(p,n)<+ddt(V(p,n))+sin(ddt(3*V(p,n)));", 2),
+            ("if(ddt(V(p,n))>0) I(p,n)<+V(p,n);", 1),
+            // A branch current read after the branch's contributions is the
+            // sum of them, recomputed: the charge stays recoverable.
+            ("I(p,n)<+ddt(V(p,n)); I(n)<+I(p,n);", 0),
+        ] {
+            let source = format!(
+                "module m(p,n); inout p,n; electrical p,n; parameter real k=2; \
+                 analog begin {body} end endmodule"
+            );
+            let report = VerilogACompiler::default()
+                .compile_runtime(&source, None)
+                .unwrap();
+            let slots = report
+                .model
+                .periodic_derivative_slots()
+                .unwrap_or_else(|| panic!("{body}: harmonic balance must carry it"));
+            assert_eq!(slots.len(), carried, "{body}: {slots:?}");
+            let device = crate::device::VerilogADevice::try_new_with_canonical_ir(
+                "carried",
+                report.model.clone(),
+                &report.canonical_ir,
+                &[1, 0],
+            )
+            .unwrap();
+            let sites = device.periodic_operator_sites();
+            assert_eq!(sites.len(), carried, "{body}: {sites:?}");
         }
     }
 

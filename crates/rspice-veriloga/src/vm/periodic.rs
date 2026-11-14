@@ -1,7 +1,8 @@
 //! Operators with state evaluated at outputs a periodic solver supplies.
 //!
-//! Harmonic balance carries every `idt`, `laplace_*` and `absdelay` site as
-//! unknowns of its own: the site's output is a waveform the solver owns, tied
+//! Harmonic balance carries every `idt`, `laplace_*` and `absdelay` site, and
+//! every `ddt` site that is not the derivative of a charge the module
+//! contributes, as unknowns of its own: the site's output is a waveform the solver owns, tied
 //! to the site's input by the operator's transfer at each harmonic. To build
 //! that system it needs, at every collocation sample, the module's residual
 //! with each output held at a supplied value, each site's input there, and the
@@ -33,6 +34,9 @@ pub enum PeriodicOperatorKind {
     Laplace,
     /// `absdelay(expr, td)`: `e^{-jωτ}` at each harmonic.
     Delay,
+    /// `ddt(expr)` the residual cannot carry as the derivative of a charge it
+    /// contributes: `jω` at each harmonic.
+    Derivative,
 }
 
 /// One operator site, by family and the slot its instructions address: the
