@@ -624,6 +624,11 @@ impl KluSolver {
             })
     }
 
+    /// Whether the current factors replay pivots chosen for earlier values.
+    pub(crate) fn replays_pivots(&self) -> bool {
+        self.factored && self.pivots_reused
+    }
+
     #[cfg(test)]
     pub(crate) fn full_factorization_count(&self) -> u64 {
         self.full_factorization_count

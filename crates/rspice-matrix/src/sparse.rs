@@ -414,6 +414,46 @@ pub struct StaticMatrix {
     stamping_error: Option<MatrixStampError>,
     /// Newton candidates returned without the backward-error certificate.
     newton_certificate_misses: NewtonCertificateMisses,
+    /// Per-phase solve times, kept only after [`Self::enable_phase_timing`].
+    phase_times: Option<LinearSolvePhaseTimes>,
+}
+
+/// Wall-clock time the real solves of one matrix spent in each phase, kept
+/// only while timing is enabled. Diagnostics: no solve reads them.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LinearSolvePhaseTimes {
+    /// Circuit LU symbolic analysis, numeric factorization and
+    /// refactorization, and a re-pivot after damaging growth.
+    pub factor: std::time::Duration,
+    /// Forward and back substitution of each solve's first answer.
+    pub solve: std::time::Duration,
+    /// The backward-error certificate with its refinement solves, and the
+    /// equilibrated fallback a refused Circuit LU answer takes.
+    pub certificate: std::time::Duration,
+    /// Numeric factorizations that searched for pivots.
+    pub factorizations: u64,
+    /// Values-only refactorizations that replayed earlier pivots.
+    pub refactorizations: u64,
+}
+
+/// A phase-timing clock reading: absent while timing is off, and always on
+/// bare wasm, whose `Instant::now` aborts.
+#[inline]
+fn phase_clock(enabled: bool) -> Option<std::time::Instant> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = enabled;
+        None
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        enabled.then(std::time::Instant::now)
+    }
+}
+
+#[inline]
+fn phase_elapsed(start: Option<std::time::Instant>) -> std::time::Duration {
+    start.map(|start| start.elapsed()).unwrap_or_default()
 }
 
 /// Newton linear solves whose finite candidate missed the componentwise
@@ -2109,6 +2149,7 @@ impl StaticMatrix {
             add_sequence: LIVE_ADD_SEQUENCE,
             stamping_error: None,
             newton_certificate_misses: NewtonCertificateMisses::default(),
+            phase_times: None,
         }
     }
 
@@ -2293,6 +2334,7 @@ impl StaticMatrix {
             add_sequence: LIVE_ADD_SEQUENCE,
             stamping_error: None,
             newton_certificate_misses: NewtonCertificateMisses::default(),
+            phase_times: None,
         })
     }
 
@@ -4065,6 +4107,19 @@ impl StaticMatrix {
         self.newton_certificate_misses
     }
 
+    /// Keep per-phase times for the real solves from now on; see
+    /// [`Self::take_phase_times`]. Off by default, when no clock is read.
+    pub fn enable_phase_timing(&mut self) {
+        self.phase_times
+            .get_or_insert_with(LinearSolvePhaseTimes::default);
+    }
+
+    /// The phase times kept since timing was enabled or last taken, which
+    /// this resets; `None` while timing is off.
+    pub fn take_phase_times(&mut self) -> Option<LinearSolvePhaseTimes> {
+        self.phase_times.as_mut().map(std::mem::take)
+    }
+
     fn solve_real_into(
         &mut self,
         rhs: &[Value],
@@ -4084,14 +4139,24 @@ impl StaticMatrix {
             )));
         }
 
-        if self.solver_options.real_backend != RealSolverBackend::Faer {
-            match self.try_solve_klu_operation_into(
+        let circuit_lu = self.solver_options.real_backend != RealSolverBackend::Faer;
+        if circuit_lu {
+            let started = phase_clock(self.phase_times.is_some());
+            let timed_before = self.phase_times.map(|times| times.factor + times.solve);
+            let attempt = self.try_solve_klu_operation_into(
                 rhs,
                 solution,
                 RealSolveOp::Normal,
                 factorization,
                 miss,
-            ) {
+            );
+            if let (Some(times), Some(timed_before)) = (self.phase_times.as_mut(), timed_before) {
+                // What the factor and first solve did not take is the
+                // certificate's: the backward error and its refinement.
+                let timed = (times.factor + times.solve).saturating_sub(timed_before);
+                times.certificate += phase_elapsed(started).saturating_sub(timed);
+            }
+            match attempt {
                 Ok(true) => {
                     return if solution.iter().all(|value| value.is_finite()) {
                         Ok(())
@@ -4104,7 +4169,25 @@ impl StaticMatrix {
             }
         }
 
-        self.solve_faer_operation_into_with_floors(rhs, solution, RealSolveOp::Normal, None, miss)
+        let started = phase_clock(self.phase_times.is_some());
+        let solved = self.solve_faer_operation_into_with_floors(
+            rhs,
+            solution,
+            RealSolveOp::Normal,
+            None,
+            miss,
+        );
+        if let Some(times) = self.phase_times.as_mut() {
+            // A fallback after Circuit LU refused is part of certifying the
+            // answer; the configured faer backend's solve is its factor.
+            let elapsed = phase_elapsed(started);
+            if circuit_lu {
+                times.certificate += elapsed;
+            } else {
+                times.factor += elapsed;
+            }
+        }
+        solved
     }
 
     /// Form the Newton correction right-hand side `b - A*x` without changing
@@ -4539,10 +4622,13 @@ impl StaticMatrix {
             residual_row_nnz_scratch,
             klu_correction_scratch,
             newton_certificate_misses,
+            phase_times,
             ..
         } = self;
         let n = *nrows;
         let faithful = solver_options.circuit_lu_robustness == CircuitLuRobustness::BackendFaithful;
+        let timing = phase_times.is_some();
+        let factor_started = phase_clock(timing);
         // A large Newton iterate whose system Circuit LU finds numerically
         // singular fails rather than falling back to faer. A non-finite factor
         // or solve and a failed growth retry are that same singularity at
@@ -4582,13 +4668,28 @@ impl StaticMatrix {
             klu_factored_values.clear();
             return if faithful { Err(error) } else { Ok(false) };
         }
-        if let Err(error) = apply_klu_numeric_action(
+        let factored = apply_klu_numeric_action(
             backend,
             factor_values,
             action,
             solver_options.circuit_lu_robustness,
             miss == CertificateMiss::ReturnToNewton,
-        ) {
+        );
+        if let Some(times) = phase_times.as_mut() {
+            times.factor += phase_elapsed(factor_started);
+            if factored.is_ok() {
+                match action {
+                    KluNumericAction::Reuse => {}
+                    KluNumericAction::Refactor if backend.replays_pivots() => {
+                        times.refactorizations += 1;
+                    }
+                    KluNumericAction::Refactor | KluNumericAction::Factor => {
+                        times.factorizations += 1;
+                    }
+                }
+            }
+        }
+        if let Err(error) = factored {
             // A numeric failure belongs to this changing Jacobian, not to the
             // frozen sparsity pattern: the next solve retries Circuit LU after
             // faer's per-solve fallback.
@@ -4610,10 +4711,14 @@ impl StaticMatrix {
             klu_factored_values.copy_from_slice(values);
         }
         let backend_operation = operation.for_circuit_lu(solver_options.circuit_lu_orientation);
+        let solve_started = phase_clock(timing);
         let solve_result = match backend_operation {
             RealSolveOp::Normal => backend.solve(rhs, solution),
             RealSolveOp::Transpose => backend.solve_transpose(rhs, solution),
         };
+        if let Some(times) = phase_times.as_mut() {
+            times.solve += phase_elapsed(solve_started);
+        }
         if let Err(error) = solve_result {
             return if faithful {
                 Err(error)
@@ -4787,12 +4892,17 @@ impl StaticMatrix {
         // solver reorders when a reused pivot fails; keep whichever candidate
         // has the smaller backward error.
         if backend.reused_pivots_show_damaging_growth(factor_values) {
+            let repivot_started = phase_clock(timing);
             let repivoted = backend
                 .factor(factor_values)
                 .and_then(|()| match backend_operation {
                     RealSolveOp::Normal => backend.solve(rhs, klu_correction_scratch),
                     RealSolveOp::Transpose => backend.solve_transpose(rhs, klu_correction_scratch),
                 });
+            if let Some(times) = phase_times.as_mut() {
+                times.factor += phase_elapsed(repivot_started);
+                times.factorizations += u64::from(repivoted.is_ok());
+            }
             if repivoted.is_err() {
                 klu_factored_values.clear();
             } else if klu_correction_scratch.iter().all(|value| value.is_finite())
