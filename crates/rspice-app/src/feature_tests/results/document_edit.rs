@@ -2,12 +2,6 @@
 
 use crate::product::DatasetBinding;
 use crate::product::ResultDocumentId;
-use crate::results::visualization_document::DocumentEdit;
-use crate::results::visualization_document::EntityRef;
-use crate::results::visualization_document::PageLayout;
-use crate::results::visualization_document::PaneDataBinding;
-use crate::results::visualization_document::VisualizationDocument;
-use crate::results::visualization_document::{LinkKind, Pane};
 use crate::state::AnalysisResult;
 use crate::state::{AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle};
 use crate::workbench::RSpiceApp;
@@ -15,6 +9,12 @@ use crate::workbench::documents::result_document::ResultViewer;
 use crate::workbench::documents::result_document::document_edit::*;
 use crate::workbench::state::Workspace;
 use crate::workbench::state::WorkspaceDocumentId;
+use rspice_app_state::results::visualization_document::DocumentEdit;
+use rspice_app_state::results::visualization_document::EntityRef;
+use rspice_app_state::results::visualization_document::PageLayout;
+use rspice_app_state::results::visualization_document::PaneDataBinding;
+use rspice_app_state::results::visualization_document::VisualizationDocument;
+use rspice_app_state::results::visualization_document::{LinkKind, Pane};
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 use rspice_results_ui::document_dialogs::ResultDocumentDialog;
 
@@ -263,7 +263,7 @@ fn fixture_binding(app: &RSpiceApp) -> PaneDataBinding {
 /// another, so such a page was unreachable.
 #[test]
 fn a_saved_document_shows_the_second_page_once_it_is_picked() {
-    use crate::results::visualization_document::{
+    use rspice_app_state::results::visualization_document::{
         NewPage, NewPagePane, PageUpdatePolicy, PaneKind,
     };
     let (mut app, document_id) = document_fixture("single-pane");
@@ -741,7 +741,7 @@ fn a_family_slice_over_a_quick_view_draws_only_the_rows_it_keeps() {
 /// A project result document over `run` whose copy of the result keeps each
 /// row's time and sample, the dimensions a family slice is kept over.
 fn family_document(app: &mut RSpiceApp) -> ResultDocumentId {
-    use crate::results::visualization_document::{
+    use rspice_app_state::results::visualization_document::{
         ColumnRole, SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType,
     };
     let run = &app.state.model.simulation.retained.runs[0];
@@ -892,11 +892,11 @@ fn drawing_a_pane_family_slice_keeps_the_pane_cursors() {
         vec![
             (
                 "A".to_owned(),
-                crate::results::visualization_document::TypedValue::Real(0.25)
+                rspice_app_state::results::visualization_document::TypedValue::Real(0.25)
             ),
             (
                 "B".to_owned(),
-                crate::results::visualization_document::TypedValue::Real(0.5)
+                rspice_app_state::results::visualization_document::TypedValue::Real(0.5)
             ),
         ]
     );

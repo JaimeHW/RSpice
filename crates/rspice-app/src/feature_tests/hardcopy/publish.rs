@@ -22,11 +22,11 @@ use rspice_hardcopy_contract::PrinterMediaSource;
 #[test]
 fn results_export_selects_the_active_project_document_pane_authority() {
     use crate::product::{AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId};
-    use crate::results::visualization_document::{
+    use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+    use rspice_app_state::results::visualization_document::{
         ColumnRole, DocumentEdit, PaneDataBinding, SourceColumn, SourceDataset, SourceRow,
         TypedValue, ValueType, VisualizationDocument,
     };
-    use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
     let binding = DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([0x6e; 32]));
     let source = SourceDataset::new(

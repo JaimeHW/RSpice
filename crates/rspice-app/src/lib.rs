@@ -43,10 +43,6 @@
 // Domain Modules (Organized by Feature)
 // =============================================================================
 
-/// Calculator adaptation over retained application results.
-#[cfg(test)]
-pub(crate) use rspice_app_results::analysis;
-
 /// Application binding for schematic and symbol editors.
 pub(crate) mod schematic;
 
@@ -58,17 +54,7 @@ pub(crate) mod simulation {
     //! complete simulation workflow from netlist generation to result display.
 
     pub(crate) use rspice_app_runs::simulation::controller;
-    #[cfg(test)]
-    pub(crate) use rspice_app_runs::simulation::multi_run;
-    #[cfg(test)]
-    pub(crate) use rspice_app_runs::simulation::output_contract;
-    #[cfg(test)]
-    pub(crate) use rspice_app_runs::simulation::results;
     pub(crate) use rspice_app_runs::simulation::status;
-    #[cfg(test)]
-    pub(crate) use rspice_app_runs::simulation::veriloga_tests;
-    #[cfg(test)]
-    pub(crate) use rspice_app_simulate::simulation::dialog;
     pub(crate) use rspice_app_state::simulation::placed_sources;
     pub(crate) use rspice_app_state::simulation::plan;
     pub(crate) use rspice_app_state::simulation::stimulus_realize;
@@ -101,15 +87,9 @@ pub(crate) use rspice_app_workbench::ui;
 /// application chrome, responsive composition, and top-level navigation.
 pub(crate) mod workbench;
 
-/// Result document exports and application integration fixtures.
-#[cfg(test)]
-pub(crate) use rspice_app_state::results;
-
 /// Shared product identity and outcome vocabulary.
 pub(crate) use rspice_app_state::product;
 
-#[cfg(test)]
-pub(crate) use rspice_app_code::automation_workflow;
 /// Strict project-scoped Automation/CI workflow language and deterministic
 /// evidence artifact rendering. This domain is UI-framework independent.
 use rspice_app_services::automation_runtime;

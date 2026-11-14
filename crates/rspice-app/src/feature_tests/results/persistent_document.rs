@@ -4,12 +4,6 @@
 use crate::product::{
     AnalysisInstanceId, ContentDigest, ObjectRevision, ResultDocumentId, SimulationPlanId,
 };
-use crate::results::visualization_document::AxisOrientation;
-use crate::results::visualization_document::AxisRange;
-use crate::results::visualization_document::DocumentEdit;
-use crate::results::visualization_document::Marker;
-use crate::results::visualization_document::PaneId;
-use crate::results::visualization_document::TypedValue;
 use crate::state::SimulationRunLifecycle;
 use crate::state::{AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun};
 use crate::workbench::AppState;
@@ -22,6 +16,12 @@ use crate::workbench::documents::result_document::persistent_document::{
 };
 use crate::workbench::documents::result_document::test_fixtures::{completed_prepared_run, digest};
 use egui::Ui;
+use rspice_app_state::results::visualization_document::AxisOrientation;
+use rspice_app_state::results::visualization_document::AxisRange;
+use rspice_app_state::results::visualization_document::DocumentEdit;
+use rspice_app_state::results::visualization_document::Marker;
+use rspice_app_state::results::visualization_document::PaneId;
+use rspice_app_state::results::visualization_document::TypedValue;
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 
 /// A document that follows the newest run of one authored analysis, plus
@@ -66,7 +66,7 @@ fn authored_run(
 }
 
 fn latest_tracking_fixture() -> LatestFixture {
-    use crate::results::visualization_document::{
+    use rspice_app_state::results::visualization_document::{
         DocumentEdit, ResultDocumentTracking, ResultDocumentTrackingMode,
     };
 
@@ -587,8 +587,8 @@ fn projecting_a_retained_marker_never_adopts_it_into_the_quick_list() {
                 trace_id,
                 coordinate: TypedValue::Real(0.5),
                 label: "retained".to_owned(),
-                kind: crate::results::visualization_document::PlotMarkerKind::PointNote,
-                scope: crate::results::visualization_document::PlotMarkerScope::Pane,
+                kind: rspice_app_state::results::visualization_document::PlotMarkerKind::PointNote,
+                scope: rspice_app_state::results::visualization_document::PlotMarkerScope::Pane,
                 source_specification: None,
             }],
         )
@@ -883,7 +883,7 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
     assert_eq!(retained[0].label, "retained");
     assert_eq!(
         retained[0].kind,
-        crate::results::visualization_document::PlotMarkerKind::Peak
+        rspice_app_state::results::visualization_document::PlotMarkerKind::Peak
     );
     assert_eq!(
         app.state.results.results.session.markers[0].note, "quick",
@@ -1697,11 +1697,8 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
         .visualization_document(document_id)
         .expect("the project retains the document");
     assert!(
-        !document
-            .link_groups()
-            .iter()
-            .any(|group| group.kind
-                == crate::results::visualization_document::LinkKind::CursorPosition),
+        !document.link_groups().iter().any(|group| group.kind
+            == rspice_app_state::results::visualization_document::LinkKind::CursorPosition),
         "the second toggle takes the links away"
     );
 }

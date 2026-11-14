@@ -1,7 +1,6 @@
 //! Creating a result document through a whole application: the dialog's
 //! family, name and viewer choices, and a commit that the project owns.
 
-use crate::results::visualization_document::ResultDocumentTracking;
 use crate::state::AnalysisResult;
 use crate::state::AnalysisResultFamilyMetadata;
 use crate::state::AnalysisResultPayload;
@@ -20,6 +19,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::create_document::*;
 use crate::workbench::state::Workspace;
 use crate::workbench::state::WorkspaceDocumentId;
+use rspice_app_state::results::visualization_document::ResultDocumentTracking;
 use rspice_results::document_creation::ResultDocumentFamily;
 use rspice_results::document_creation::ResultDocumentLayout;
 use rspice_results_ui::create_document::{CreateDocumentHost, CreateResultDocumentDialogState};
@@ -272,9 +272,9 @@ fn typed_release_target_campaign_viewers_commit_with_embedded_source_evidence() 
                 "#ffbd2e",
             ),
             RetainedTrace::new(
-                crate::results::safety::soa_stress_waveform_name(
+                rspice_app_state::results::safety::soa_stress_waveform_name(
                     "M1",
-                    crate::results::safety::SoAParameter::Vds,
+                    rspice_app_state::results::safety::SoAParameter::Vds,
                 ),
                 soa_time,
                 vec![2.0, 3.0],
@@ -705,8 +705,10 @@ fn an_edit_marks_only_its_own_document_tab_until_the_project_is_saved() {
             first,
             revision,
             vec![
-                crate::results::visualization_document::DocumentEdit::Rename {
-                    entity: crate::results::visualization_document::EntityRef::Page(page),
+                rspice_app_state::results::visualization_document::DocumentEdit::Rename {
+                    entity: rspice_app_state::results::visualization_document::EntityRef::Page(
+                        page,
+                    ),
                     value: "Settling".to_owned(),
                 },
             ],

@@ -8,8 +8,8 @@ use rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM;
 use crate::simulation::SampledWaveform;
 use crate::simulation::controller::SimulationController;
 use crate::simulation::controller::results_post::LOOP_GAIN_LOCUS_LABEL;
-use crate::simulation::multi_run::AnalysisSpec;
 use crate::workbench::app_state::AppState;
+use rspice_app_runs::simulation::multi_run::AnalysisSpec;
 
 fn stb_spec() -> AnalysisSpec {
     AnalysisSpec::Stb {

@@ -1,13 +1,6 @@
 //! Report authoring in a whole application: its commands, read through the
 //! product's own registry, and the document transactions they commit.
 
-use crate::results::report_document::ReportBlockKind;
-use crate::results::report_document::ReportDocument;
-use crate::results::report_document::ReportEntityRef;
-use crate::results::report_document::ReportFigureSourceLocator;
-use crate::results::report_document::ReportPageEvidenceBinding;
-use crate::results::report_document::ReportSourceId;
-use crate::results::report_document::ReportTemplate;
 use crate::services::model_hub::ModelHubService;
 use crate::simulation::SimulationController;
 use crate::workbench::SurfaceId;
@@ -21,6 +14,13 @@ use crate::workbench::hardcopy::report_authoring::result_insert::commit_insert_r
 use crate::workbench::hardcopy::report_authoring::result_insert::open_insert_result_document;
 use crate::workbench::hardcopy::report_authoring::*;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_state::results::report_document::ReportBlockKind;
+use rspice_app_state::results::report_document::ReportDocument;
+use rspice_app_state::results::report_document::ReportEntityRef;
+use rspice_app_state::results::report_document::ReportFigureSourceLocator;
+use rspice_app_state::results::report_document::ReportPageEvidenceBinding;
+use rspice_app_state::results::report_document::ReportSourceId;
+use rspice_app_state::results::report_document::ReportTemplate;
 use rspice_results::report_document::{
     ReportBlockedGateTextPolicy, ReportDraftMarking, ReportOutputFormats, ReportPageInclusion,
     ReportPageNumbering, ReportPublicationPageSize, ReportPublicationProfile,
@@ -641,7 +641,7 @@ fn publication_inspector_edits_are_canonical_document_transactions() {
 
 #[test]
 fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
-    use crate::results::visualization_document::{
+    use rspice_app_state::results::visualization_document::{
         ColumnRole, SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType,
         VisualizationDocument,
     };
@@ -796,8 +796,8 @@ fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
         .transact(
             changed_source.revision(),
             vec![
-                crate::results::visualization_document::DocumentEdit::Rename {
-                    entity: crate::results::visualization_document::EntityRef::Page(
+                rspice_app_state::results::visualization_document::DocumentEdit::Rename {
+                    entity: rspice_app_state::results::visualization_document::EntityRef::Page(
                         changed_source.pages()[0].id,
                     ),
                     value: "Updated source page".to_owned(),
@@ -898,7 +898,7 @@ fn invalid_report_page_selection_chooses_a_retained_page() {
         &mut app.model_hub,
     ));
     app.state.hardcopy.report_authoring.selected_page =
-        Some(crate::results::report_document::ReportPageId::new());
+        Some(rspice_app_state::results::report_document::ReportPageId::new());
 
     synchronize_report_selection(&mut cx(
         &mut app.state,

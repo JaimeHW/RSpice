@@ -1082,7 +1082,7 @@ fn a_source_across_a_winding_runs_and_is_warned_of_on_the_winding() {
 fn under_ngspice_a_source_across_a_winding_is_refused_on_the_winding() {
     let (mut app, root) = app_with_a_source_across_a_winding();
     app.state.model.sim_setup.options.compatibility =
-        crate::simulation::dialog::SimulationCompatibility::Ngspice;
+        rspice_app_simulate::simulation::dialog::SimulationCompatibility::Ngspice;
 
     start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();

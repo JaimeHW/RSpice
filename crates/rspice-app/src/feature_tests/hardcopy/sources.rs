@@ -9,36 +9,6 @@ use crate::product::ContentDigest;
 use crate::product::DatasetBinding;
 use crate::product::DatasetId;
 use crate::product::ObjectRevision;
-use crate::results::report_document::DataTableBlock;
-use crate::results::report_document::FigureSizing;
-use crate::results::report_document::FrozenReportArtifact;
-use crate::results::report_document::PlotFigureBlock;
-use crate::results::report_document::ReportBlockKind;
-use crate::results::report_document::ReportDocument;
-use crate::results::report_document::ReportEdit;
-use crate::results::report_document::ReportEntityRef;
-use crate::results::report_document::ReportFigureSourceLocator;
-use crate::results::report_document::ReportReferenceCurrentness;
-use crate::results::report_document::ReportReferenceInventory;
-use crate::results::report_document::ReportReferenceInventoryEntry;
-use crate::results::report_document::ReportReferenceMode;
-use crate::results::report_document::ReportReferenceSnapshot;
-use crate::results::report_document::ReportSourceId;
-use crate::results::report_document::TableCell;
-use crate::results::report_document::TableColumn;
-use crate::results::visualization_document::AxisOrientation;
-use crate::results::visualization_document::AxisScale;
-use crate::results::visualization_document::ColumnRole;
-use crate::results::visualization_document::DocumentEdit;
-use crate::results::visualization_document::EntityRef;
-use crate::results::visualization_document::NewAxis;
-use crate::results::visualization_document::NewTrace;
-use crate::results::visualization_document::SourceColumn;
-use crate::results::visualization_document::SourceDataset;
-use crate::results::visualization_document::SourceRow;
-use crate::results::visualization_document::TypedValue;
-use crate::results::visualization_document::ValueType;
-use crate::results::visualization_document::VisualizationDocument;
 use crate::state::AnalysisResult;
 use crate::state::AnalysisResultFamilyMetadata;
 use crate::state::AnalysisType;
@@ -64,6 +34,36 @@ use crate::workbench::hardcopy_adapters::sources::quick_result_availability;
 use crate::workbench::hardcopy_adapters::sources::*;
 use crate::workbench::state::Workspace;
 use crate::workbench::state::WorkspaceDocumentId;
+use rspice_app_state::results::report_document::DataTableBlock;
+use rspice_app_state::results::report_document::FigureSizing;
+use rspice_app_state::results::report_document::FrozenReportArtifact;
+use rspice_app_state::results::report_document::PlotFigureBlock;
+use rspice_app_state::results::report_document::ReportBlockKind;
+use rspice_app_state::results::report_document::ReportDocument;
+use rspice_app_state::results::report_document::ReportEdit;
+use rspice_app_state::results::report_document::ReportEntityRef;
+use rspice_app_state::results::report_document::ReportFigureSourceLocator;
+use rspice_app_state::results::report_document::ReportReferenceCurrentness;
+use rspice_app_state::results::report_document::ReportReferenceInventory;
+use rspice_app_state::results::report_document::ReportReferenceInventoryEntry;
+use rspice_app_state::results::report_document::ReportReferenceMode;
+use rspice_app_state::results::report_document::ReportReferenceSnapshot;
+use rspice_app_state::results::report_document::ReportSourceId;
+use rspice_app_state::results::report_document::TableCell;
+use rspice_app_state::results::report_document::TableColumn;
+use rspice_app_state::results::visualization_document::AxisOrientation;
+use rspice_app_state::results::visualization_document::AxisScale;
+use rspice_app_state::results::visualization_document::ColumnRole;
+use rspice_app_state::results::visualization_document::DocumentEdit;
+use rspice_app_state::results::visualization_document::EntityRef;
+use rspice_app_state::results::visualization_document::NewAxis;
+use rspice_app_state::results::visualization_document::NewTrace;
+use rspice_app_state::results::visualization_document::SourceColumn;
+use rspice_app_state::results::visualization_document::SourceDataset;
+use rspice_app_state::results::visualization_document::SourceRow;
+use rspice_app_state::results::visualization_document::TypedValue;
+use rspice_app_state::results::visualization_document::ValueType;
+use rspice_app_state::results::visualization_document::VisualizationDocument;
 use rspice_hardcopy::sources::HardcopySemanticDocument;
 use rspice_hardcopy::sources::PLOT_INSET_UM;
 use rspice_hardcopy::sources::PLOT_WIDTH_UM;
@@ -838,7 +838,7 @@ fn project_visualization_hardcopy_uses_the_selected_pane_not_the_first_pane() {
     let mut document = VisualizationDocument::new("Selected pane", vec![dataset]).unwrap();
     let page_id = document.pages()[0].id;
     let first_pane = document.panes()[0].id;
-    let pane_binding = crate::results::visualization_document::PaneDataBinding {
+    let pane_binding = rspice_app_state::results::visualization_document::PaneDataBinding {
         analysis_id: crate::product::AnalysisInstanceId::new(),
         dataset: binding,
     };
@@ -856,15 +856,16 @@ fn project_visualization_hardcopy_uses_the_selected_pane_not_the_first_pane() {
         .transact(
             document.revision(),
             vec![DocumentEdit::AddBoundPane(
-                crate::results::visualization_document::NewPane {
+                rspice_app_state::results::visualization_document::NewPane {
                     page_id,
                     title: "Selected second pane".to_owned(),
-                    kind: crate::results::visualization_document::PaneKind::Cartesian,
+                    kind: rspice_app_state::results::visualization_document::PaneKind::Cartesian,
                     viewer_id: "viewer-waveform".to_owned(),
                     binding: Some(pane_binding),
-                    placement: crate::results::visualization_document::PanePlacement::Below {
-                        anchor_pane_id: first_pane,
-                    },
+                    placement:
+                        rspice_app_state::results::visualization_document::PanePlacement::Below {
+                            anchor_pane_id: first_pane,
+                        },
                 },
             )],
         )
@@ -895,7 +896,7 @@ fn project_visualization_hardcopy_uses_the_selected_pane_not_the_first_pane() {
 
 #[test]
 fn qpnoise_result_noise_figure_export_preserves_signed_output_frequencies() {
-    let result = crate::simulation::results::qpnoise_retained_test_fixture();
+    let result = rspice_app_runs::simulation::results::qpnoise_retained_test_fixture();
     let expected = result.waveforms.len();
     let state = quick_view_state(result, ResultViewer::NoiseContrib);
     let resolved = resolve_quick_view(&state).unwrap();

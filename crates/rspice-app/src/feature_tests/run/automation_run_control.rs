@@ -13,7 +13,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use egui::accesskit::Role;
 use egui::{Key, Modifiers, Pos2};
 
-use crate::automation_workflow::{ArtifactKind, RenderedArtifact};
 use crate::feature_tests::replay::{Control, Replay, controls, only};
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::workbench::documents::code_workspace::{
@@ -21,6 +20,7 @@ use crate::workbench::documents::code_workspace::{
     CodeWorkspacePage, PendingAutomationRuntimeExecution, SourceOperationToken,
 };
 use crate::workbench::state::Workspace;
+use rspice_app_code::automation_workflow::{ArtifactKind, RenderedArtifact};
 
 /// A session with a project open, on the Automation page.
 fn automation_page() -> Replay {

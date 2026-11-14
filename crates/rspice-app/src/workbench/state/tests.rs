@@ -60,11 +60,11 @@ fn every_claimed_viewer_document_is_in_the_catalog() {
             continue;
         };
         assert!(
-            crate::results::viewer_catalog::viewer_document(id).is_some(),
+            rspice_app_state::results::viewer_catalog::viewer_document(id).is_some(),
             "{viewer:?} claims the unregistered document {id}"
         );
     }
-    let noise = crate::results::viewer_catalog::viewer_document("viewer-spectrum")
+    let noise = rspice_app_state::results::viewer_catalog::viewer_document("viewer-spectrum")
         .expect("the spectrum document is registered");
     assert!(
         !noise.analysis_ids.contains(&"noise"),

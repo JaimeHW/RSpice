@@ -3,14 +3,14 @@
 
 use rspice_simulation::output_contract::PreparedSavedOutput;
 
-use crate::analysis::calculator;
 use crate::product::AnalysisInstanceId;
-use crate::simulation::output_contract::fixtures::{ac, output};
-use crate::simulation::output_contract::materialize_live_saved_outputs;
 use crate::state::{
     AnalysisResult, ComplexExpressionPolicy, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace,
     SavedOutputKind, SavedOutputStreaming,
 };
+use rspice_app_results::analysis::calculator;
+use rspice_app_runs::simulation::output_contract::fixtures::{ac, output};
+use rspice_app_runs::simulation::output_contract::materialize_live_saved_outputs;
 
 #[test]
 fn complex_live_outputs_keep_aligned_components_and_full_precision_source_knots() {

@@ -4,11 +4,11 @@ use super::session_of;
 use crate::simulation::controller::SimulationController;
 use crate::simulation::controller::test_execution::state_with_current_clean_drc;
 use crate::simulation::controller::test_execution::{MockExportWorkflowIo, bind_test_run_running};
-use crate::simulation::multi_run::AnalysisSpec;
 use crate::state::{
     AnalysisResult, AnalysisResultSourceDomain, AnalysisType, SimulationRunLifecycle,
 };
 use crate::workbench::app_state::AppState;
+use rspice_app_runs::simulation::multi_run::AnalysisSpec;
 
 #[test]
 fn controller_plan_run_receipt_survives_production_project_round_trip() {

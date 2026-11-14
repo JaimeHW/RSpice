@@ -888,8 +888,8 @@ fn a_project_whose_plan_needs_no_technology_opens_without_a_blocked_run_warning(
 
 #[test]
 fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
-    use crate::simulation::dialog::IntegrationMethod;
     use crate::workbench::ChoicePreference;
+    use rspice_app_simulate::simulation::dialog::IntegrationMethod;
 
     let mut state = AppState::default();
     state
@@ -1028,9 +1028,9 @@ fn new_project_custom_default_is_exact_and_has_no_personal_preset_dependency() {
 
 #[test]
 fn project_import_restores_plan_order_solver_options_and_model_catalog() {
-    use crate::simulation::dialog::{IntegrationMethod, MatrixSolver};
     use crate::simulation::plan::{AnalysisKind, AnalysisLifecycleState};
     use crate::state::model_library::{ModelLibrary, ModelLibraryManager};
+    use rspice_app_simulate::simulation::dialog::{IntegrationMethod, MatrixSolver};
 
     let mut source = AppState::default();
     let source_plan = source
@@ -1138,7 +1138,7 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
     }));
     assert_eq!(
         target.model.sim_setup.session.options_draft.reltol,
-        crate::simulation::dialog::options::format_si_value(2e-4)
+        rspice_app_simulate::simulation::dialog::options::format_si_value(2e-4)
     );
     assert_eq!(target.model.model_library_manager.library_count(), 1);
     assert!(
@@ -1648,7 +1648,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn save_project_to_path_round_trips_canonical_result_document_entities() {
-    use crate::results::visualization_document::{
+    use rspice_app_state::results::visualization_document::{
         AnnotationAnchor, DocumentEdit, PaneDataBinding, TypedValue, VisualizationDocument,
         VisualizationPresentationPolicy,
     };
@@ -1710,7 +1710,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
         .created
         .iter()
         .find_map(|entity| match entity {
-            crate::results::visualization_document::EntityRef::Trace(id) => Some(*id),
+            rspice_app_state::results::visualization_document::EntityRef::Trace(id) => Some(*id),
             _ => None,
         })
         .expect("bound pane provisions a trace");
@@ -1729,8 +1729,8 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
                     trace_id,
                     coordinate: TypedValue::Real(1.0),
                     label: "M1".to_owned(),
-                    kind: crate::results::visualization_document::PlotMarkerKind::PointNote,
-                    scope: crate::results::visualization_document::PlotMarkerScope::Document,
+                    kind: rspice_app_state::results::visualization_document::PlotMarkerKind::PointNote,
+                    scope: rspice_app_state::results::visualization_document::PlotMarkerScope::Document,
                     source_specification: None,
                 },
                 DocumentEdit::AddScalarMeasurement {

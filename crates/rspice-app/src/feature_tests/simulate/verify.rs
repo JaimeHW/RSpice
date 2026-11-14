@@ -202,9 +202,9 @@ fn soa_evidence_analysis() -> AnalysisResult {
         let worst_actual_value = y[EVIDENCE_SAMPLES - 1];
         let worst_time_s = time[EVIDENCE_SAMPLES - 1];
         waveforms.push(RetainedTrace::new(
-            crate::results::safety::soa_stress_waveform_name(
+            rspice_app_state::results::safety::soa_stress_waveform_name(
                 &device_id,
-                crate::results::safety::SoAParameter::Vds,
+                rspice_app_state::results::safety::SoAParameter::Vds,
             ),
             time.clone(),
             y,

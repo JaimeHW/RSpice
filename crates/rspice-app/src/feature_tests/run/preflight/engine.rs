@@ -757,7 +757,7 @@ fn a_winding_loop_inside_an_instance_is_warned_of_in_the_cell_that_draws_it() {
 fn under_xyce_a_winding_loop_inside_an_instance_is_refused_in_the_cell_that_draws_it() {
     let (mut app, amp, winding) = app_with_a_winding_loop_in_amp();
     app.state.model.sim_setup.options.compatibility =
-        crate::simulation::dialog::SimulationCompatibility::Xyce;
+        rspice_app_simulate::simulation::dialog::SimulationCompatibility::Xyce;
 
     start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
