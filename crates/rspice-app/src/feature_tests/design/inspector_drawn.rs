@@ -1,10 +1,11 @@
 //! The inspector drawn through a whole application: the sheet an inspected object names and
 //! the models a bound instance is offered.
 
+use super::inspector::app_with_model_bound_instance;
 use crate::state::{Point, SchematicProbe};
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::inspector::component::{bound_model_choices, catalog_model_location};
-use crate::workbench::design::inspector::tests::{app_with_model_bound_instance, painted_panel};
+use crate::workbench::design::inspector::tests::painted_panel;
 use crate::workbench::design::inspector::*;
 
 /// One retained probe on a cell view whose sheet catalog holds `sheets`

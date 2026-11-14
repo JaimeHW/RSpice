@@ -17,13 +17,40 @@ use crate::workbench::design::inspector::inline_instance::{
 };
 use crate::workbench::design::inspector::model_evidence::component_model_evidence;
 use crate::workbench::design::inspector::tests::{
-    accesskit_nodes, app_with_model_bound_instance, painted_panel, seed_two_components,
+    accesskit_nodes, painted_panel, seed_two_components,
 };
 use crate::workbench::design::inspector::*;
 use crate::workbench::framework::feature::SimulatePort as _;
 use crate::workbench::state::{InlineEditField, InlineEditSession, Workspace};
 use crate::workbench::{AppState, RSpiceApp};
 use std::collections::HashMap;
+
+/// A whole application whose sheet holds one instance bound to a vendor model
+/// library, and the instance's id.
+pub(super) fn app_with_model_bound_instance() -> (RSpiceApp, u64) {
+    let mut app = RSpiceApp::test_instance();
+    let mut library = ModelLibrary::new("vendor_analog");
+    library.add_model(DeviceModel::new("OPA189_A", ModelType::Other));
+    library.add_model(DeviceModel::new("OPA189_B", ModelType::Other));
+    library.add_model(DeviceModel::new("unrelated_nmos", ModelType::Nmos));
+    app.state.model.model_library_manager.add_library(library);
+
+    let mut binding = LibraryCellInstance::new("vendor_analog", "OPA189", "spice");
+    binding.module_name = Some("OPA189_A".to_owned());
+    binding.netlist_template = Some("X{name} {nodes} {model} {params}".to_owned());
+    binding.model_section = Some("tt".to_owned());
+    let component = Component::new(41, ComponentType::CellInstance, Point::origin())
+        .with_library_cell(binding)
+        .with_name_value("XU1", "OPA189");
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(component);
+    app.state.model.schematic.init_undo_history();
+    (app, 41)
+}
 
 fn state_with_two_components() -> AppState {
     let mut state = AppState::default();

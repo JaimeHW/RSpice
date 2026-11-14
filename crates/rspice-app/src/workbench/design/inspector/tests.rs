@@ -12,7 +12,6 @@ use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use crate::state::{
     Cell, Library, LibraryCellInstance, Point, PortDirection, SchematicProbe, View, ViewType,
 };
-use crate::workbench::RSpiceApp;
 use crate::workbench::design::test_host::DesignTestHost;
 use crate::workbench::docks::inspector::shared::{
     checks_status, sheet_floating_net_findings, sheet_open_pin_findings,
@@ -33,31 +32,6 @@ pub(crate) fn state_with_two_components() -> DesignTestHost {
     let mut state = DesignTestHost::default();
     seed_two_components(&mut state.model);
     state
-}
-
-pub(crate) fn app_with_model_bound_instance() -> (RSpiceApp, u64) {
-    let mut app = RSpiceApp::test_instance();
-    let mut library = ModelLibrary::new("vendor_analog");
-    library.add_model(DeviceModel::new("OPA189_A", ModelType::Other));
-    library.add_model(DeviceModel::new("OPA189_B", ModelType::Other));
-    library.add_model(DeviceModel::new("unrelated_nmos", ModelType::Nmos));
-    app.state.model.model_library_manager.add_library(library);
-
-    let mut binding = LibraryCellInstance::new("vendor_analog", "OPA189", "spice");
-    binding.module_name = Some("OPA189_A".to_owned());
-    binding.netlist_template = Some("X{name} {nodes} {model} {params}".to_owned());
-    binding.model_section = Some("tt".to_owned());
-    let component = Component::new(41, ComponentType::CellInstance, Point::origin())
-        .with_library_cell(binding)
-        .with_name_value("XU1", "OPA189");
-    app.state
-        .model
-        .schematic
-        .document_mut_for_test()
-        .components
-        .push(component);
-    app.state.model.schematic.init_undo_history();
-    (app, 41)
 }
 
 fn validation_slot_height(editing: bool, reason: Option<&str>) -> f32 {
