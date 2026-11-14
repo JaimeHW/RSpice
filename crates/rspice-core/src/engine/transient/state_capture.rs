@@ -41,8 +41,12 @@ pub(in crate::engine) struct CapturedTransientState {
     pub(in crate::engine) solver: Option<rspice_matrix::StaticMatrixSolverCheckpoint>,
 }
 
+/// Offered every accepted point of a run, with the circuit and solution as
+/// accepted there; it reads and changes nothing of the run.
+pub(in crate::engine) type AcceptedPointObserver<'a> =
+    dyn Fn(Value, &CircuitData, &[Value]) -> Result<(), SimulationError> + 'a;
+
 /// A run's capture request and the states it has captured so far.
-#[derive(Debug)]
 pub(in crate::engine) struct TransientStateCapture<'a> {
     /// Requested times, finite, non-negative and strictly increasing.
     times: &'a [Value],
@@ -52,6 +56,21 @@ pub(in crate::engine) struct TransientStateCapture<'a> {
     /// The live image a segment starts from, in place of an operating point
     /// or a checkpoint: the run continues the circuit the image holds.
     start: Option<&'a CapturedTransientState>,
+    /// Offered every accepted point before any capture.
+    observer: Option<&'a AcceptedPointObserver<'a>>,
+}
+
+impl std::fmt::Debug for TransientStateCapture<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TransientStateCapture")
+            .field("times", &self.times)
+            .field("stops_at_last", &self.stops_at_last)
+            .field("captured", &self.captured.borrow().len())
+            .field("start", &self.start.map(|image| image.time))
+            .field("observed", &self.observer.is_some())
+            .finish()
+    }
 }
 
 impl<'a> TransientStateCapture<'a> {
@@ -100,6 +119,7 @@ impl<'a> TransientStateCapture<'a> {
             stops_at_last,
             captured: RefCell::new(Vec::with_capacity(times.len())),
             start: None,
+            observer: None,
         })
     }
 
@@ -127,6 +147,9 @@ impl<'a> TransientStateCapture<'a> {
         solution: &[Value],
         matrix: &crate::solver::StaticMatrix,
     ) -> Result<bool, SimulationError> {
+        if let Some(observer) = self.observer {
+            observer(time, circuit, solution)?;
+        }
         let mut captured = self.captured.borrow_mut();
         let Some(&requested) = self.times.get(captured.len()) else {
             return Ok(self.stops_at_last);
@@ -259,6 +282,55 @@ impl Engine {
         Ok((result, captured))
     }
 
+    /// Run a transient from its operating point (or `dc_seed`) to `tstop`,
+    /// capturing the accepted state at each of `times` and offering every
+    /// accepted point to `observer`; the run continues past the last capture
+    /// to `tstop`.
+    pub(in crate::engine) fn run_tran_observed(
+        &self,
+        netlist: &Netlist,
+        (tstop, max_step): (Value, Value),
+        dc_seed: Option<&crate::engine::PeriodicDcOperatingPointSeed>,
+        times: &[Value],
+        observer: &AcceptedPointObserver<'_>,
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResult, Vec<CapturedTransientState>), SimulationError> {
+        validate_transient_window(tstop, max_step)?;
+        let mut capture = TransientStateCapture::through_stop(times, tstop)?;
+        capture.observer = Some(observer);
+        let requested = times.len();
+        let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_transient_request_floor(tstop, max_step)?;
+        let (result, _, _) = engine.run_tran_resolved_with_resume(
+            netlist,
+            netlist,
+            TransientRunWindow {
+                tstop,
+                max_step,
+                startup_mode: TransientStartupMode::from_uic(false),
+                dc_seed,
+                integral_trace: None,
+            },
+            abort,
+            TransientResumePlan {
+                resume: None,
+                resume_validation: ResumeValidation::ExactNetlist,
+                final_checkpoint_retention: FinalCheckpointRetention::Discarded,
+                scheduled_checkpoint_times: &[],
+                checkpoint_observer: None,
+                state_capture: Some(&capture),
+            },
+        )?;
+        let captured = capture.into_captured();
+        if captured.len() != requested {
+            return Err(SimulationError::Circuit(format!(
+                "the transient captured {} of {requested} requested states",
+                captured.len(),
+            )));
+        }
+        Ok((result, captured))
+    }
+
     /// Continue the circuit `image` holds over `mesh`, a locked time grid
     /// after the image's time, and capture the state accepted at the mesh's
     /// last time.
@@ -285,16 +357,16 @@ impl Engine {
     /// so the change is dated where it happens rather than at the next mesh
     /// time; there the segment departs from a run, which dates the change at
     /// its first accepted point past the crossing.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the event-shooting period map is its caller")
-    )]
+    ///
+    /// `observer`, when given, is offered every accepted point of the
+    /// segment, its starting image included.
     pub(in crate::engine) fn run_tran_segment_from_image(
         &self,
         netlist: &Netlist,
         image: &CapturedTransientState,
         (mesh, steps): (&[Value], Option<&[Value]>),
         max_step: Value,
+        observer: Option<&AcceptedPointObserver<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<(TransientResult, CapturedTransientState), SimulationError> {
         let Some(&tstop) = mesh.last() else {
@@ -328,6 +400,7 @@ impl Engine {
         let times = [tstop];
         let mut capture = TransientStateCapture::new(&times, tstop)?;
         capture.start = Some(image);
+        capture.observer = observer;
         let mut engine = self.resolved_for_netlist(netlist);
         engine.small_signal_state = None;
         engine.config.locked_time_grid = Some(std::sync::Arc::new(mesh.to_vec()));
@@ -622,6 +695,7 @@ mod tests {
                     &captured[0],
                     (mesh, Some(steps)),
                     max_step,
+                    None,
                     &NoAbort,
                 )
                 .expect("the segment converges");
@@ -655,7 +729,7 @@ mod tests {
         image.solution[out] = 0.3;
         let mesh: Vec<Value> = (1..=200).map(|k| t0 + Value::from(k) * 1.0e-8).collect();
         let (segment, _) = engine
-            .run_tran_segment_from_image(&netlist, &image, (&mesh, None), max_step, &NoAbort)
+            .run_tran_segment_from_image(&netlist, &image, (&mesh, None), max_step, None, &NoAbort)
             .expect("the segment converges");
         let values = segment.try_voltage_waveform_named("out").expect("out");
         let tau = 1.0e3 * 1.0e-9;

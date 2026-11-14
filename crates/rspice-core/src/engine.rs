@@ -94,6 +94,7 @@ mod noise;
 pub(crate) mod periodic_capability;
 mod pole_zero;
 mod pss;
+mod pss_event;
 mod pss_noise;
 mod pstb;
 use crate::analysis::transient as result;

@@ -1481,6 +1481,73 @@ impl Engine {
     }
 }
 
+/// Whether native shooting refuses a runtime Verilog-A module of `circuit`
+/// for state its period map does not carry: an event operator, `$abstime`,
+/// a variable kept between time points, `idt`, a `ddt` it does not
+/// contribute as a charge, or a voltage contribution. Event shooting carries
+/// that state through the transient itself.
+pub(in crate::engine) fn native_shooting_refuses_runtime_veriloga(circuit: &CircuitData) -> bool {
+    pss_veriloga_refusal(circuit, CapabilityAnalysis::Pss).is_some()
+        || retained_state_refusal(circuit, CapabilityAnalysis::Pss).is_some()
+}
+
+/// The PSS capability gate as event shooting answers it: every family keeps
+/// native shooting's cell and token except the runtime Verilog-A modules,
+/// whose state event shooting reads from the transient's own image and
+/// whose admission it answers itself.
+pub(in crate::engine) fn event_shooting_capability_refusal(
+    circuit: &CircuitData,
+) -> Option<UnsupportedCapabilityError> {
+    let analysis = CapabilityAnalysis::Pss;
+    if let Some(refusal) = non_rational_transfer_refusal(circuit, analysis) {
+        return Some(refusal);
+    }
+    for family in REFUSAL_ORDER {
+        if family == CapabilityFamily::VerilogARuntime {
+            continue;
+        }
+        let refusal = match capability_cell(family, analysis) {
+            CellSupport::Supported { .. } => None,
+            CellSupport::Restricted { gate, .. } => match gate {
+                InstanceGate::RationalDescriptor => rational_descriptor_refusal(circuit, analysis),
+                InstanceGate::HbAdmissibleVerilogA | InstanceGate::CarrierAdmitsVerilogA => {
+                    hb_admission_refusal(circuit, family, analysis)
+                }
+                InstanceGate::PssAdmissibleVerilogA => pss_veriloga_refusal(circuit, analysis),
+                InstanceGate::PeriodicContracts
+                | InstanceGate::NativeDeviceChecks
+                | InstanceGate::TransientNoiseRenderable => None,
+            },
+            CellSupport::Refused { token, reason } => {
+                first_instance(circuit, family).map(|(instance, module)| {
+                    let module_text = module
+                        .as_deref()
+                        .map(|module| format!(" (module '{module}')"))
+                        .unwrap_or_default();
+                    let refusal = UnsupportedCapabilityError::new(
+                        token,
+                        format!(
+                            "{} '{instance}'{module_text} cannot take part in {}: {reason}",
+                            family.label(),
+                            analysis.label(),
+                        ),
+                    )
+                    .for_analysis_kind(analysis.kind())
+                    .for_instance(instance);
+                    match module {
+                        Some(module) => refusal.for_module(module),
+                        None => refusal,
+                    }
+                })
+            }
+        };
+        if refusal.is_some() {
+            return refusal;
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

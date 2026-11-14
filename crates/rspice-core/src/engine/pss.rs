@@ -21,7 +21,9 @@
 //!    repeat the shooting solve if voltage or current waveforms disagree
 //! 5. Verify the retained traversal and build `PssResult` with Floquet evidence
 
-use super::{Engine, SimulationError, TransientCheckpoint, TransientResult};
+use super::{
+    Engine, SimulationError, TransientCheckpoint, TransientResult, UnsupportedCapabilityError,
+};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{
     FloquetOrbitKind, FloquetSpectrumError, FloquetSpectrumEvidence, PeriodDetector,
@@ -462,14 +464,14 @@ fn is_canonical_pss_identity(value: &str) -> bool {
 /// uses it only as a right preconditioner; a singular factor disables the
 /// matrix-free attempt and sends the caller to the established full-Jacobian
 /// path.
-struct PssDenseLu {
+pub(in crate::engine) struct PssDenseLu {
     n: usize,
     lu: Vec<Value>,
     pivots: Vec<usize>,
 }
 
 impl PssDenseLu {
-    fn factor(matrix: &[Vec<Value>]) -> Option<Self> {
+    pub(in crate::engine) fn factor(matrix: &[Vec<Value>]) -> Option<Self> {
         let n = matrix.len();
         if matrix.iter().any(|row| row.len() != n) {
             return None;
@@ -507,7 +509,7 @@ impl PssDenseLu {
         Some(Self { n, lu, pivots })
     }
 
-    fn solve(&self, rhs: &[Value]) -> Vec<Value> {
+    pub(in crate::engine) fn solve(&self, rhs: &[Value]) -> Vec<Value> {
         debug_assert_eq!(rhs.len(), self.n);
         let mut solution = rhs.to_vec();
         for k in 0..self.n {
@@ -1134,6 +1136,15 @@ impl PssOperatingPoint {
         self.producer_identity.as_ref()
     }
 
+    /// Whether event shooting solved the orbit: its coordinates are the
+    /// event engine's, named with its prefix, which the retained-state
+    /// identity authenticates with the rest of the basis.
+    pub(in crate::engine) fn is_event_orbit(&self) -> bool {
+        self.shooting_state_basis
+            .first()
+            .is_some_and(|name| name.starts_with(super::pss_event::EVENT_BASIS_PREFIX))
+    }
+
     /// Highest Fourier harmonic that can be projected without exceeding the
     /// sampling limit set by the largest retained time interval. Extra local
     /// source corners do not increase the capacity of sparsely sampled phases.
@@ -1452,6 +1463,15 @@ impl PssOperatingPoint {
         simulation_config: &super::SimulationConfig,
         pss_config: &PssConfig,
     ) -> Result<(), SimulationError> {
+        if self.is_event_orbit() {
+            return Err(UnsupportedCapabilityError::new(
+                super::pss_event::EVENT_CARRIER,
+                "the periodic steady state was solved by event shooting, and the periodic \
+                 small-signal analyses (PAC, PXF, PNOISE, PSTB) linearize only an orbit native \
+                 shooting solved",
+            )
+            .into());
+        }
         let retained = self.producer_identity.as_ref().ok_or_else(|| {
             SimulationError::Circuit(
                 "retained PSS operating point is a legacy identityless artifact and is not trusted for dependent numerical reuse"
@@ -1721,6 +1741,11 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<PssAnalysisResult, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
+        if engine.pss_takes_event_shooting(netlist, &config, abort)? {
+            return engine
+                .run_event_pss(netlist, &config, None, abort)
+                .map(|event| event.analysis);
+        }
         engine
             .run_pss_with_state_abort(netlist, config, abort)
             .map(|(result, _, _, _)| result)
@@ -1741,6 +1766,11 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<PssAnalysisResult, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
+        if engine.pss_takes_event_shooting(netlist, &config, abort)? {
+            return engine
+                .run_event_pss(netlist, &config, Some(dc_seed), abort)
+                .map(|event| event.analysis);
+        }
         engine
             .run_pss_with_state_and_frozen_sources_abort(
                 netlist,
@@ -1762,6 +1792,9 @@ impl Engine {
     ) -> Result<PssOperatingPoint, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
         config.validate().map_err(PssError::InvalidConfig)?;
+        if engine.pss_takes_event_shooting(netlist, &config, abort)? {
+            return engine.event_pss_operating_point(netlist, config, None, abort);
+        }
         let retained_config = config.clone();
         let producer =
             PssOperatingPointIdentity::capture(netlist, &engine.config, &retained_config)?;
@@ -1804,6 +1837,9 @@ impl Engine {
     ) -> Result<PssOperatingPoint, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
         config.validate().map_err(PssError::InvalidConfig)?;
+        if engine.pss_takes_event_shooting(netlist, &config, abort)? {
+            return engine.event_pss_operating_point(netlist, config, Some(dc_seed), abort);
+        }
         let retained_config = config.clone();
         let producer =
             PssOperatingPointIdentity::capture(netlist, &engine.config, &retained_config)?;
@@ -2092,6 +2128,63 @@ impl Engine {
     /// The blockers come from the declared `PssStateMap` capability of every
     /// family present, so a device family that gains or loses period-map state
     /// changes this answer by editing its declaration, not this function.
+    /// Whether event shooting solves this netlist's PSS: native shooting
+    /// refuses it only for state event shooting carries, and event shooting's
+    /// own preflight admits it. A circuit the preflight refuses is refused
+    /// here, by name, before any solver work.
+    fn pss_takes_event_shooting(
+        &self,
+        netlist: &Netlist,
+        config: &PssConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<bool, SimulationError> {
+        let circuit = self.build_circuit_with_abort(netlist, abort)?;
+        if !super::pss_event::takes_event_shooting(&circuit) {
+            return Ok(false);
+        }
+        match super::pss_event::admission_refusal(&circuit, netlist, config) {
+            Some(refusal) => Err(refusal),
+            None => Ok(true),
+        }
+    }
+
+    /// Solve PSS by event shooting and retain its orbit as an operating
+    /// point whose coordinates name the event engine.
+    fn event_pss_operating_point(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        dc_seed: Option<&PssDcOperatingPointSeed>,
+        abort: &dyn AbortSignal,
+    ) -> Result<PssOperatingPoint, SimulationError> {
+        let producer = PssOperatingPointIdentity::capture(netlist, &self.config, &config)?;
+        let event = self.run_event_pss(netlist, &config, dc_seed, abort)?;
+        log::debug!(
+            "PSS event shooting: {} corrections, certified {:?}",
+            event.analysis.iterations,
+            event.certification
+        );
+        if producer != PssOperatingPointIdentity::capture(netlist, &self.config, &config)? {
+            return Err(SimulationError::Circuit(
+                "PSS semantic producer inputs changed during the periodic solve".to_owned(),
+            ));
+        }
+        let identity = PssOperatingPointIdentity::bind(
+            producer,
+            &config,
+            &event.analysis,
+            &event.basis,
+            &event.state,
+        );
+        PssOperatingPoint::try_from_authenticated_parts(
+            identity,
+            config,
+            event.analysis,
+            event.basis,
+            event.state,
+        )
+    }
+
     fn ensure_pss_state_supported(circuit: &CircuitData) -> Result<(), SimulationError> {
         match periodic_capability::summarize(&periodic_capability::pss_state_gaps(circuit)) {
             None => Ok(()),
