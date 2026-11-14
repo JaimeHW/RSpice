@@ -629,11 +629,16 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                                 expression_conversions(ui, host, model, index, expr, &t);
                             }
                         };
+                        // The window controls the header keeps: maximize,
+                        // and close beside it when several strips are shown.
+                        // Each pane's row ends under them.
+                        let closable = pane_chrome && !maximized && n > 1;
+                        let window_slots = 1 + usize::from(closable);
                         let header = StripHeader::new(&model.kind_tag, &model.subtitle, &legend)
                             .id_salt(model.analysis_key)
                             .incomplete(model.incomplete)
                             .maximized(maximized)
-                            .closable(pane_chrome && !maximized && n > 1)
+                            .closable(closable)
                             .zoomed(zoomed)
                             .expr_action(pane_chrome)
                             .removable_from(0)
@@ -698,7 +703,7 @@ pub fn show(ui: &mut Ui, host: &mut impl StackHost, models: &[StripModel], optio
                             show_strip_plot(
                                 ui,
                                 host,
-                                model,
+                                (model, window_slots),
                                 linked_cursor_domain.as_ref(),
                                 options,
                                 &mut edits,
@@ -828,6 +833,9 @@ pub(crate) struct StripFrame<'a> {
     pub(crate) linked_cursor_domain: Option<&'a CursorDomain>,
     pub(crate) options: StackOptions,
     pub(crate) gutter: Gutter,
+    /// How many window controls the strip header keeps, so each pane's row
+    /// ends under them on the same rule.
+    pub(crate) window_slots: usize,
 }
 
 /// The share of a strip its ruler takes, up to the ruler's own height.
@@ -874,6 +882,7 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
         linked_cursor_domain,
         options,
         gutter,
+        ..
     } = frame;
     if height <= 1.0 {
         return;
@@ -938,7 +947,7 @@ struct ExpressionEdits {
 fn show_strip_plot(
     ui: &mut Ui,
     host: &mut impl StackHost,
-    model: &StripModel,
+    (model, window_slots): (&StripModel, usize),
     linked_cursor_domain: Option<&CursorDomain>,
     options: StackOptions,
     edits: &mut ExpressionEdits,
@@ -1003,6 +1012,7 @@ fn show_strip_plot(
         linked_cursor_domain,
         options,
         gutter,
+        window_slots,
     };
 
     for (ordinal, pane) in panes.iter().enumerate() {
@@ -1258,6 +1268,7 @@ fn show_xy_strip(
         linked_cursor_domain,
         options,
         gutter,
+        window_slots: slots,
     };
 
     // The pane's header: its legend, its unit and its scale, which the strip
@@ -1286,6 +1297,7 @@ fn show_xy_strip(
         abscissa: options
             .pane_chrome
             .then(|| abscissa_menu(host.session(), model, pane, Some(strip.abscissa.clone()))),
+        window_slots: slots,
     };
     let header = ui
         .push_id(("xy-strip-pane", identity), |ui| {
@@ -1464,6 +1476,7 @@ fn show_unit_pane(
         linked_cursor_domain,
         options,
         gutter,
+        window_slots,
     } = frame;
     let t = Tokens::get(ui.ctx());
     let presentation = options.readout;
@@ -1528,6 +1541,7 @@ fn show_unit_pane(
         abscissa: options
             .pane_chrome
             .then(|| abscissa_menu(host.session(), model, pane, None)),
+        window_slots,
     };
     let header = host.pane_header(ui, model, pane, input);
     edits.toggle = edits.toggle.or(header.toggle_expression);

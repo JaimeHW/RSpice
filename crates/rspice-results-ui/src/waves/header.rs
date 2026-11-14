@@ -2,7 +2,7 @@
 
 use super::pane::SwatchStyle;
 use super::{ReadoutPolicy, StripModel, StripTrace, UnitPane, cursor_interpolation};
-use crate::strip::HEADER_PADDING_X;
+use crate::strip::{self, HEADER_PADDING_X};
 use egui::Ui;
 use rspice_results::visualization_document::Abscissa;
 use rspice_ui_kit::{
@@ -17,14 +17,9 @@ use std::borrow::Cow;
 
 pub const WAVE_PANE_HEADER_HEIGHT: f32 = 25.0;
 
-/// The strip header's icon side and the gap between its trailing actions:
-/// the pane's icon takes the same rectangle as the strip's maximize icon
-/// above it.
+/// The height of the row's controls: the header chip's and the strip
+/// header's icon side.
 const ACTION_ICON_SIDE: f32 = 22.0;
-const ACTION_ITEM_GAP: f32 = 1.0;
-/// The space, beyond the item gap, between the icon and the scale chip left
-/// of it, as the strip header spaces its own chip.
-const SCALE_CHIP_SPACE: f32 = 4.0;
 
 /// Source-qualified actions applied immediately in legend order.
 ///
@@ -77,6 +72,9 @@ pub struct PaneHeader {
     /// What the pane's curves may be plotted against, when the host offers
     /// a choice.
     pub abscissa: Option<AbscissaMenu>,
+    /// How many window controls the strip header above keeps: the row's fit
+    /// icon stands under the leftmost, its scale chip on the same rule.
+    pub window_slots: usize,
 }
 
 /// What a unit pane's curves may be plotted against: one of the strip's
@@ -170,36 +168,25 @@ pub struct UnitPaneHeaderResponse {
     pub abscissa: Option<Abscissa>,
 }
 
-/// The two regions of a pane header, across its row.
-struct PaneHeaderRegions {
-    legend: egui::Rect,
-    actions: egui::Rect,
-}
-
-/// Where those regions sit.
+/// Where the legend runs in a pane header spanning `rect` whose trailing
+/// controls take `action_width` from its right inset.
 ///
 /// Arithmetic rather than inline layout because the edges are the whole
 /// point: this row and the strip header above it are two rows of chrome in
 /// one card, and both start and stop [`HEADER_PADDING_X`] in from the pane's
-/// edges. This row used to run its log toggle into the pane edge while the
-/// row above it stopped short. A function can be asserted about without
-/// standing up a strip, a host and a projection.
-fn header_regions(rect: egui::Rect, action_width: f32) -> PaneHeaderRegions {
+/// edges. A function can be asserted about without standing up a strip, a
+/// host and a projection.
+fn legend_region(rect: egui::Rect, action_width: f32) -> egui::Rect {
     // The inset is a floor as well as a start: a pane narrower than its two
-    // insets must not hand a region a rectangle whose right edge is left of
-    // its left one, which clips to nothing and reads as a widget that
+    // insets must not hand the legend a rectangle whose right edge is left
+    // of its left one, which clips to nothing and reads as a widget that
     // vanished rather than one that had no room.
     let left = (rect.left() + HEADER_PADDING_X).min(rect.right());
-    let actions_right = (rect.right() - HEADER_PADDING_X).max(left);
-    let actions = egui::Rect::from_min_max(
-        egui::pos2((actions_right - action_width).max(left), rect.top()),
-        egui::pos2(actions_right, rect.bottom()),
-    );
-    let legend = egui::Rect::from_min_max(
+    let actions_left = ((rect.right() - HEADER_PADDING_X).max(left) - action_width).max(left);
+    egui::Rect::from_min_max(
         egui::pos2(left, rect.top()),
-        egui::pos2((actions.left() - 3.0).max(left), rect.bottom()),
-    );
-    PaneHeaderRegions { legend, actions }
+        egui::pos2((actions_left - 3.0).max(left), rect.bottom()),
+    )
 }
 
 /// Draw the legend using design-aware names while keeping source identities intact.
@@ -220,6 +207,7 @@ pub fn show_header(
         expressions,
         plotted,
         abscissa,
+        window_slots,
     } = input;
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -268,50 +256,61 @@ pub fn show_header(
     // need, so the legend is measured against what is left of the row and no
     // chip of it runs under them.
     let action_width = if plotted {
-        let space = header_regions(rect, f32::INFINITY).actions;
-        let drawn = ui.scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(space)
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-            |ui| {
-                ui.set_clip_rect(space);
-                // The row ends as the strip header above it does: the icon
-                // in the strip's icon column, then the axis' scale chip the
-                // same gap to its left, so every scale toggle of the strip
-                // stands in one right-hand column.
-                ui.spacing_mut().item_spacing.x = ACTION_ITEM_GAP;
-                if IconButton::new(Icon::ZoomFit)
-                    .side(ACTION_ICON_SIDE)
-                    .tooltip("Fit Y to the traces in view")
-                    .show(ui)
-                    .clicked()
-                {
-                    output.autoscale_y = true;
-                }
-                ui.add_space(SCALE_CHIP_SPACE);
-                let log = ui
-                    .add_enabled_ui(log_y_available, |ui| chip(ui, "log Y", log_y))
-                    .inner
-                    .on_hover_text(if log_y_available {
-                        "Toggle logarithmic Y axis"
-                    } else {
-                        "Logarithmic Y needs a positive value to draw"
-                    });
-                if log.clicked() {
-                    output.toggle_log_y = true;
-                }
-            },
-        );
-        space.right() - drawn.response.rect.left()
+        // The row ends as the strip header above it does: the fit icon in
+        // the place of the strip's maximize control, and the axis' scale
+        // chip on the rule the strip's "log X" ends on, so every scale
+        // toggle of the strip stands in one right-hand column.
+        let icon = strip::window_control_rect(rect, window_slots.max(1) - 1);
+        let chip_right = strip::scale_chip_right(rect, window_slots);
+        let chip_width = chip_width(ui, "log Y");
+        let centred = |left: f32, width: f32| {
+            egui::Rect::from_center_size(
+                egui::pos2(left + 0.5 * width, rect.center().y),
+                egui::vec2(width, ACTION_ICON_SIDE),
+            )
+        };
+        let fit = ui
+            .scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(centred(icon.left(), icon.width()))
+                    .id_salt("pane-fit-y"),
+                |ui| {
+                    IconButton::new(Icon::ZoomFit)
+                        .side(ACTION_ICON_SIDE)
+                        .tooltip("Fit Y to the traces in view")
+                        .show(ui)
+                },
+            )
+            .inner;
+        if fit.clicked() {
+            output.autoscale_y = true;
+        }
+        let log = ui
+            .scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(centred(chip_right - chip_width, chip_width))
+                    .id_salt("pane-log-y"),
+                |ui| {
+                    ui.add_enabled_ui(log_y_available, |ui| chip(ui, "log Y", log_y))
+                        .inner
+                },
+            )
+            .inner
+            .on_hover_text(if log_y_available {
+                "Toggle logarithmic Y axis"
+            } else {
+                "Logarithmic Y needs a positive value to draw"
+            });
+        if log.clicked() {
+            output.toggle_log_y = true;
+        }
+        (rect.right() - HEADER_PADDING_X) - (chip_right - chip_width)
     } else {
         // A pane with nothing plotted draws no axis controls, and its legend
         // has the row.
         0.0
     };
-    let PaneHeaderRegions {
-        legend: legend_rect,
-        ..
-    } = header_regions(rect, action_width);
+    let legend_rect = legend_region(rect, action_width);
 
     // The row names exactly what the pane draws, the same traces its fit
     // and its curves read, and offers the hidden signals of its unit. A
@@ -859,23 +858,17 @@ mod tests {
     #[test]
     fn the_pane_header_trails_on_the_strip_header_s_own_inset() {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 28.0), egui::vec2(900.0, 25.0));
-        let regions = header_regions(rect, 58.0);
+        let legend = legend_region(rect, 58.0);
         assert!(
-            (regions.legend.left() - rect.left() - HEADER_PADDING_X).abs() < f32::EPSILON,
+            (legend.left() - rect.left() - HEADER_PADDING_X).abs() < f32::EPSILON,
             "the legend starts at {}, not {} in from the pane edge",
-            regions.legend.left(),
+            legend.left(),
             HEADER_PADDING_X
         );
         assert!(
-            (rect.right() - regions.actions.right() - HEADER_PADDING_X).abs() < f32::EPSILON,
-            "actions end at {}, not {} from the pane edge",
-            regions.actions.right(),
-            HEADER_PADDING_X
-        );
-        assert!(regions.actions.width() >= 58.0, "the actions lost room");
-        assert!(
-            regions.legend.right() <= regions.actions.left(),
-            "the legend runs into the actions"
+            legend.right() <= rect.right() - HEADER_PADDING_X - 58.0,
+            "the legend runs into the actions: it ends at {}",
+            legend.right()
         );
     }
 
@@ -885,11 +878,9 @@ mod tests {
     fn a_narrow_pane_header_collapses_without_inverting_a_region() {
         for width in [0.0_f32, 12.0, 46.0, 60.0, 120.0] {
             let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 25.0));
-            let regions = header_regions(rect, 58.0);
-            for region in [regions.legend, regions.actions] {
-                assert!(region.width() >= 0.0, "{width}: inverted {region:?}");
-            }
-            assert!(regions.actions.left() >= regions.legend.right());
+            let legend = legend_region(rect, 58.0);
+            assert!(legend.width() >= 0.0, "{width}: inverted {legend:?}");
+            assert!(legend.right() <= rect.right().max(HEADER_PADDING_X));
         }
     }
 }

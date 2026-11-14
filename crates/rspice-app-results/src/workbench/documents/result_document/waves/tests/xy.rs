@@ -121,13 +121,15 @@ fn dots(shapes: &[ClippedShape], color: egui::Color32) -> Vec<egui::Pos2> {
 }
 
 /// Where the frame painted the volts pane's unit tag: the topmost "V".
-fn volts_unit_tag(ctx: &egui::Context, state: &mut ResultsTestHost) -> egui::Pos2 {
-    texts(&frame(ctx, state, Vec::new()))
+/// A point on the top volts pane's header band clear of its controls, where
+/// its context menu opens.
+fn volts_pane_band(ctx: &egui::Context, state: &mut ResultsTestHost) -> egui::Pos2 {
+    frame(ctx, state, Vec::new());
+    controls_named(ctx, state, "V pane")
         .into_iter()
-        .filter(|(text, _)| text == "V")
-        .min_by(|(_, a), (_, b)| a.top().total_cmp(&b.top()))
-        .map(|(_, rect)| rect.center())
-        .expect("the volts pane's header names its unit")
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .map(|band| band.center())
+        .expect("the volts pane has a header band")
 }
 
 fn painted_texts(ctx: &egui::Context, state: &mut ResultsTestHost) -> Vec<(String, egui::Rect)> {
@@ -181,7 +183,7 @@ fn the_panes_menu_makes_a_strip_against_a_signal_and_its_x_axis_chooses_again() 
         "a result drawn against time alone has no strip against a signal: {painted:?}"
     );
 
-    let unit = volts_unit_tag(&ctx, &mut state);
+    let unit = volts_pane_band(&ctx, &mut state);
     click(&ctx, &mut state, unit, egui::PointerButton::Secondary);
     assert!(
         texts(&frame(&ctx, &mut state, Vec::new()))
@@ -205,7 +207,7 @@ fn the_panes_menu_makes_a_strip_against_a_signal_and_its_x_axis_chooses_again() 
         .unwrap_or_else(|| panic!("the ruler names the abscissa and its unit: {painted:?}"));
 
     // The pane's menu again, on V(a): the strip already shows it.
-    let unit = volts_unit_tag(&ctx, &mut state);
+    let unit = volts_pane_band(&ctx, &mut state);
     click(&ctx, &mut state, unit, egui::PointerButton::Secondary);
     let item = find(&ctx, &mut state, "V(a)");
     click(&ctx, &mut state, item, egui::PointerButton::Primary);
@@ -224,18 +226,18 @@ fn the_panes_menu_makes_a_strip_against_a_signal_and_its_x_axis_chooses_again() 
         [XyStrip::new(analysis, "V", signal("V(b)"))]
     );
 
-    // The strip header's close button, its one action, takes it away. Both
-    // header rows end on one rule, where the pane header's log chip ends 9
-    // px past its text; the button is 22 px wide.
-    let painted = painted_texts(&ctx, &mut state);
-    let top = strip_top(&painted, "vs V(b)");
-    let log = painted
-        .iter()
-        .find(|(text, rect)| text == "log" && rect.top() > top)
-        .map(|(_, rect)| *rect)
-        .expect("the strip's pane header has its log chip");
-    let close = egui::pos2(log.right() + 9.0 - 11.0, top + 7.0);
-    click(&ctx, &mut state, close, egui::PointerButton::Primary);
+    // The strip header's close button, its one action, takes it away. The
+    // strip against the signal is drawn after the time strip.
+    let close = controls_named(&ctx, &mut state, "Close strip")
+        .into_iter()
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the strip against a signal can be closed");
+    click(
+        &ctx,
+        &mut state,
+        close.center(),
+        egui::PointerButton::Primary,
+    );
     assert!(strips(&state).is_empty());
 }
 
@@ -268,7 +270,7 @@ fn a_strip_against_a_signal_draws_one_horizontal_axis_on_a_ruler_without_an_over
     );
     assert_eq!(count(&all, "log X"), 2, "{painted:?}");
     assert_eq!(
-        count(&below, "log"),
+        count(&below, "log Y"),
         1,
         "the pane's Y toggle alone under the strip's header: {below:?}"
     );
@@ -556,17 +558,41 @@ fn every_scale_chip_ends_on_one_rule_beside_its_window_control() {
         "each chip stands the same gap left of its window control"
     );
     assert!(time.bottom() <= maximize[0].bottom() + 0.5 && time.top() >= maximize[0].top() - 0.5);
-    // A pane's own scale chip, once it reads "log Y", ends on the same rule.
+    // Each pane's own scale chip, "log Y", ends on the same rule, and its
+    // fit icon stands under the strip's maximize control, in the time strip
+    // and in the strip drawn against a signal alike.
     let painted = painted_texts(&ctx, &mut state);
     let x_label = painted
         .iter()
         .find(|(text, _)| text == "log X")
         .map(|(_, rect)| rect.right())
         .expect("the strip header reads log X");
-    for (_, rect) in painted.iter().filter(|(text, _)| text == "log Y") {
+    let y_labels: Vec<egui::Rect> = painted
+        .iter()
+        .filter(|(text, _)| text == "log Y")
+        .map(|(_, rect)| *rect)
+        .collect();
+    assert!(
+        y_labels.len() >= 2,
+        "each strip's pane reads log Y: {y_labels:?}"
+    );
+    for rect in &y_labels {
         assert!(
             (rect.right() - x_label).abs() <= 0.5,
             "{rect:?} against {x_label}"
+        );
+    }
+    let y_chips = controls_named(&ctx, &mut state, "log Y");
+    let fits = controls_named(&ctx, &mut state, "Fit Y to the traces in view");
+    assert_eq!(fits.len(), y_chips.len(), "{fits:?} {y_chips:?}");
+    for (fit, chip) in fits.iter().zip(&y_chips) {
+        assert!(
+            (fit.center().x - maximize[0].center().x).abs() <= 0.5,
+            "the pane's fit icon {fit:?} stands under the maximize control {maximize:?}"
+        );
+        assert!(
+            (chip.right() - time.right()).abs() <= 0.5,
+            "the pane's chip {chip:?} ends on the strip's rule {time:?}"
         );
     }
 }

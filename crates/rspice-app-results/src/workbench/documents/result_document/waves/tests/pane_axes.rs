@@ -359,7 +359,7 @@ fn the_scale_toggles_of_a_strip_stand_in_one_column() {
                  strip's window control {window:?}"
             );
             assert!(
-                (icon.left() - chip.right() - 5.0).abs() <= 0.5,
+                (icon.left() - chip.right() - 4.0).abs() <= 0.5,
                 "{count} panes at {size:?}: \"log Y\" {chip:?} ends the strip header's \
                  chip gap left of its icon {icon:?}"
             );
