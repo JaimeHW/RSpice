@@ -302,6 +302,7 @@ impl Engine {
             time: state_time,
             circuit: mut adopted,
             solution: bias,
+            solver: _,
         } = captured;
         Self::ensure_analysis_capability(&adopted, analysis)?;
         Self::ensure_small_signal_devices(&adopted, analysis, physical)?;

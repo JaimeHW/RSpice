@@ -4651,7 +4651,13 @@ impl Engine {
         } else {
             None
         };
-        let circuit = self.build_transient_circuit_with_abort(netlist, window.tstop, abort)?;
+        let circuit = match plan
+            .state_capture
+            .and_then(state_capture::TransientStateCapture::start)
+        {
+            Some(image) => image.circuit.clone(),
+            None => self.build_transient_circuit_with_abort(netlist, window.tstop, abort)?,
+        };
         if let Some(seed) = window.dc_seed {
             seed.validate_for_circuit(&circuit)?;
         }
@@ -4758,6 +4764,11 @@ impl Engine {
             checkpoint_observer,
             state_capture,
         } = plan;
+        // A segment continues a live image the way a resume continues its
+        // checkpoint: every startup step a resume skips, it skips too, and the
+        // integration leaves the image's time as from a breakpoint.
+        let image = state_capture.and_then(state_capture::TransientStateCapture::start);
+        let resumed = resume.is_some() || image.is_some();
         let mut scheduled_checkpoints = Vec::with_capacity(if checkpoint_observer.is_some() {
             0
         } else {
@@ -4776,7 +4787,7 @@ impl Engine {
             || !circuit.veriloga_terminal_meters().is_empty();
         // Pre-simulation effects also belong to models with no matrix unknowns.
         // Run them before the empty-circuit shortcut can manufacture a trace.
-        if resume.is_none() {
+        if !resumed {
             if startup_mode.is_uic() {
                 circuit.begin_veriloga_analysis(2)
             } else {
@@ -4996,12 +5007,15 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?;
         }
         source_basis.validate().map_err(SimulationError::Circuit)?;
-        circuit.set_independent_source_context(
-            source_basis,
-            self.config.spice_dialect,
-            self.config.resource_limits,
-        );
-        circuit.set_xspice_transient_context(source_basis.tstep, source_basis.tstop);
+        // A segment's sources keep the context of the run its image came from.
+        if image.is_none() {
+            circuit.set_independent_source_context(
+                source_basis,
+                self.config.spice_dialect,
+                self.config.resource_limits,
+            );
+            circuit.set_xspice_transient_context(source_basis.tstep, source_basis.tstop);
+        }
 
         // `.TRAN ... UIC` skips the operating point: integration starts
         // from zero everywhere except user-supplied .IC node voltages
@@ -5012,7 +5026,7 @@ impl Engine {
         // The origin is the first accepted model point, including UIC's
         // authored initial state. Positive timesteps must not replay it.
         #[cfg(feature = "veriloga")]
-        if resume.is_none() {
+        if !resumed {
             circuit
                 .prepare_veriloga_timepoint(
                     0.0,
@@ -5024,7 +5038,7 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?;
         }
         #[cfg(feature = "veriloga-builtins-base")]
-        if resume.is_none() {
+        if !resumed {
             circuit
                 .generated_veriloga_devices_mut()
                 .set_analysis_step(true, false);
@@ -5048,6 +5062,19 @@ impl Engine {
                 (
                     checkpoint.solution.clone(),
                     checkpoint.initial_solution_mode(),
+                    None,
+                )
+            } else if let Some(image) = image {
+                if image.solution.len() != circuit.matrix_size() {
+                    return Err(SimulationError::Circuit(format!(
+                        "segment image solution has {} unknowns, circuit has {}",
+                        image.solution.len(),
+                        circuit.matrix_size()
+                    )));
+                }
+                (
+                    image.solution.clone(),
+                    startup::InitialSolutionMode::TransientOperatingPoint,
                     None,
                 )
             } else if let Some(seed) = dc_seed {
@@ -5099,7 +5126,7 @@ impl Engine {
                 (solution, mode, contract)
             };
         let mut origin_model_finish = None;
-        if resume.is_none() && !uic_requested && circuit.has_any_veriloga_devices() {
+        if !resumed && !uic_requested && circuit.has_any_veriloga_devices() {
             Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &solution)?;
             origin_model_finish = Self::inspect_transient_model_candidate(
                 abort,
@@ -5163,7 +5190,10 @@ impl Engine {
 
         // Resume primes derived device caches from the accepted solution;
         // complete checkpoint histories are injected below after setup.
-        let resume_time = resume.map_or(0.0, |checkpoint| checkpoint.time);
+        let resume_time = resume.map_or_else(
+            || image.map_or(0.0, |image| image.time),
+            |checkpoint| checkpoint.time,
+        );
         if self.config.spice_dialect == SpiceDialect::Xyce {
             // A resumed source must observe the tolerance belonging to the
             // restored accepted state before branch-current capture or any
@@ -5183,7 +5213,7 @@ impl Engine {
         // already solved them as clamps, and reasserting the authored value
         // there would overwrite the node an ideal source legitimately
         // outvoted -- ngspice reports the source's voltage on such a node.
-        let applied_ic = if resume.is_none() && uic_requested {
+        let applied_ic = if !resumed && uic_requested {
             self.apply_initial_condition_overrides(netlist, &circuit, &mut solution)
         } else {
             0
@@ -5193,7 +5223,7 @@ impl Engine {
         // device priming below, and the reactive-history seeding all see
         // one consistent state (ngspice holds UIC capacitors at their IC
         // value at the first instant).
-        if resume.is_none() && uic_requested {
+        if !resumed && uic_requested {
             Self::apply_capacitor_element_initial_conditions(&circuit, &mut solution);
             let num_nodes = circuit.num_nodes();
             for (ind_idx, ic) in circuit.inductors.ic.iter().enumerate() {
@@ -5209,7 +5239,7 @@ impl Engine {
                 }
             }
         }
-        if resume.is_none() && uic_requested && circuit.has_any_veriloga_devices() {
+        if !resumed && uic_requested && circuit.has_any_veriloga_devices() {
             Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &solution)?;
             origin_model_finish = Self::inspect_transient_model_candidate(
                 abort,
@@ -5254,7 +5284,7 @@ impl Engine {
         //
         // It runs after the `.IC`/element-IC writes above so bridges see the
         // same analog node voltages the first accepted point reports.
-        if resume.is_none() && uic_requested && circuit.has_independent_xspice_evaluation() {
+        if !resumed && uic_requested && circuit.has_independent_xspice_evaluation() {
             circuit.evaluate_xspice_with_analysis(
                 0.0,
                 0.0,
@@ -5523,7 +5553,7 @@ impl Engine {
                 &mut breakpoints,
                 resume_time,
                 tstop,
-                resume.is_none(),
+                !resumed,
             )?;
         }
         // A checkpoint taken on a zero-duration edge holds the completion the
@@ -5707,6 +5737,11 @@ impl Engine {
             checkpoint
                 .restore_lte_references(&mut lte_estimator)
                 .map_err(SimulationError::Circuit)?;
+        } else if image.is_some() {
+            // The run an image came from restarted its predictor at the
+            // image's time, a hard breakpoint; the segment's history starts
+            // there too.
+            lte_estimator.restart_history_from(&solution);
         }
 
         // Floor-dt livelock detection: dozens of consecutive accepted points
@@ -5735,7 +5770,7 @@ impl Engine {
         // always starts with one stored point, so its local length cannot
         // reconstruct either state.
         let mut analysis_first_step_pending = resume_continuation.map_or_else(
-            || resume.is_none() || resume_time.to_bits() == 0.0_f64.to_bits(),
+            || !resumed || resume_time.to_bits() == 0.0_f64.to_bits(),
             |continuation| continuation.analysis_first_step_pending,
         );
         // Keep the Xyce restart phase inactive for native LTE: native
@@ -5743,7 +5778,7 @@ impl Engine {
         // for truncation and order promotion, including after checkpoint resume.
         let mut xyce_lte_restart_first_step = resume_continuation.map_or_else(
             || {
-                resume.is_some()
+                resumed
                     && resume_time.to_bits() != 0.0_f64.to_bits()
                     && lte_estimator.uses_accepted_solution_reference()
             },
@@ -5839,7 +5874,7 @@ impl Engine {
                 applied_ic
             );
         }
-        if resume.is_none() {
+        if !resumed {
             // Xyce seeds both accepted store-vector history levels from the
             // operating-point trial before the first real transient timepoint.
             circuit.initialize_generic_switch_transient_history();
@@ -5964,7 +5999,7 @@ impl Engine {
                 .values
                 .reserve(trace_capacity.saturating_sub(trace.values.len()));
         }
-        if resume.is_none() {
+        if !resumed {
             circuit
                 .behavioral_sources
                 .accept_transient_step(&solution, resume_time)
@@ -5986,7 +6021,7 @@ impl Engine {
         // final t=0 Verilog-A pass against the solution that will actually be
         // reported. Commit it exactly once so sampled/event operators advance
         // their origin-time state before the first positive timestep.
-        if resume.is_none() && circuit.has_any_veriloga_devices() {
+        if !resumed && circuit.has_any_veriloga_devices() {
             let origin_state = circuit.nonlinear_state_snapshot();
             let origin_result = (|| -> Result<(), SimulationError> {
                 Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &solution)?;
@@ -6058,7 +6093,7 @@ impl Engine {
                 return Err(error);
             }
         }
-        if resume.is_none() {
+        if !resumed {
             circuit
                 .set_veriloga_analysis_phase(rspice_veriloga_runtime::AnalogAnalysisPhase::Point)
                 .map_err(SimulationError::Circuit)?;
@@ -6393,7 +6428,7 @@ impl Engine {
         // complete accepted delay history; unsupported distributed/coupled
         // line state fails closed during injection instead of starting a new
         // wave trajectory at the seam.
-        let line_seed = if resume.is_none() && uic_requested {
+        let line_seed = if !resumed && uic_requested {
             ReactiveHistorySeed::UicStartup
         } else {
             ReactiveHistorySeed::SolvedBias
@@ -6473,10 +6508,14 @@ impl Engine {
             })
             .transpose()
             .map_err(SimulationError::Circuit)?;
-        let resume_is_restart_normalized = matches!(
-            restored_accepted_integration_runtime,
-            Some(ValidatedAcceptedIntegrationRuntime::RestartNormalized(_))
-        );
+        // A segment from a live image leaves its time as a restart-normalized
+        // resume does: from a breakpoint, its histories taken from the image's
+        // accepted solution.
+        let resume_is_restart_normalized = image.is_some()
+            || matches!(
+                restored_accepted_integration_runtime,
+                Some(ValidatedAcceptedIntegrationRuntime::RestartNormalized(_))
+            );
         if resume_is_restart_normalized {
             xyce_lte_restart_first_step = lte_estimator.uses_accepted_solution_reference();
             if fixed_method.is_none() {
@@ -6484,6 +6523,27 @@ impl Engine {
             }
         }
 
+        // A segment's image holds its devices' accepted state already; only
+        // the Verilog-A event they hold pending is read from it.
+        if let Some(image) = image {
+            if let Some(solver) = &image.solver {
+                matrix
+                    .restore_solver_checkpoint(solver)
+                    .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            }
+            (
+                pending_veriloga_event_time,
+                pending_analog_model_event,
+                pending_landing_serves_activation,
+            ) = accepted_veriloga_event_time(
+                &circuit,
+                &mut veriloga_floor_grid,
+                resume_time,
+                timestep.hard_min_dt(),
+                tstop,
+                breakpoints.next_after(resume_time),
+            )?;
+        }
         // Resume: replace the flat (DC-style) reactive and transmission-line
         // histories written above with the exact checkpointed state.
         if let Some(checkpoint) = resume {
@@ -6675,7 +6735,7 @@ impl Engine {
         // `MODEINITJCT|MODETRANOP|MODEUIC` device load, which is the one place
         // either reference reads a device-line `IC=` vector. A resumed run is
         // already mid-trajectory and an ordinary startup has a solved bias.
-        let reactive_seed = if resume.is_none() && uic_requested {
+        let reactive_seed = if !resumed && uic_requested {
             ReactiveHistorySeed::UicStartup
         } else {
             ReactiveHistorySeed::SolvedBias
@@ -6787,9 +6847,7 @@ impl Engine {
         // limit. A checkpoint taken there carries that row.
         let mut published_row_is_not_restart_state =
             resume.is_some_and(|checkpoint| checkpoint.published_row().is_some());
-        if resume.is_none()
-            && let Some(plan) = &physical_impulse_plan
-        {
+        if !resumed && let Some(plan) = &physical_impulse_plan {
             let (startup, observation) = self.transition_physical_startup_with_observation(
                 state_commit::physical_event::PhysicalStartupTargets {
                     circuit: &mut circuit,
@@ -6825,7 +6883,7 @@ impl Engine {
             published_row_is_not_restart_state = true;
         }
 
-        if resume.is_some() {
+        if resumed {
             // Derived branches are initialized before checkpoint injection
             // and before integration-owned junction history exists. Rebuild
             // the seam only after both state owners are authoritative so a
@@ -6847,7 +6905,7 @@ impl Engine {
             }
         }
 
-        if resume.is_some() && record_device_op_traces {
+        if resumed && record_device_op_traces {
             // The initial seam report was created before checkpoint injection
             // and before the accepted terminal-current history was installed.
             // Recording at the same sample index overwrites it in place with
@@ -7672,7 +7730,7 @@ impl Engine {
         // The starting point is accepted state too, so a capture requested at
         // the run's first time is taken here.
         if let Some(capture) = state_capture
-            && capture.offer(t, &circuit, &solution)?
+            && capture.offer(t, &circuit, &solution, &matrix)?
         {
             tstop = t;
         }
@@ -12072,7 +12130,7 @@ impl Engine {
                         abort,
                     )?;
                     if let Some(capture) = state_capture
-                        && capture.offer(t, &circuit, &solution)?
+                        && capture.offer(t, &circuit, &solution, &matrix)?
                     {
                         tstop = t;
                     }
@@ -12809,7 +12867,7 @@ impl Engine {
                 abort,
             )?;
             if let Some(capture) = state_capture
-                && capture.offer(t, &circuit, &solution)?
+                && capture.offer(t, &circuit, &solution, &matrix)?
             {
                 tstop = t;
             }

@@ -35,6 +35,10 @@ pub(in crate::engine) struct CapturedTransientState {
     pub(in crate::engine) circuit: CircuitData,
     /// The accepted solution at `time`.
     pub(in crate::engine) solution: Vec<Value>,
+    /// The sparse solver's accepted state at `time` (its pivot order and
+    /// factors), which a segment from this image restores so that it solves
+    /// as the run it continues does.
+    pub(in crate::engine) solver: Option<rspice_matrix::StaticMatrixSolverCheckpoint>,
 }
 
 /// A run's capture request and the states it has captured so far.
@@ -45,6 +49,9 @@ pub(in crate::engine) struct TransientStateCapture<'a> {
     /// Whether the run stops once the last time is captured.
     stops_at_last: bool,
     captured: RefCell<Vec<CapturedTransientState>>,
+    /// The live image a segment starts from, in place of an operating point
+    /// or a checkpoint: the run continues the circuit the image holds.
+    start: Option<&'a CapturedTransientState>,
 }
 
 impl<'a> TransientStateCapture<'a> {
@@ -92,7 +99,13 @@ impl<'a> TransientStateCapture<'a> {
             times,
             stops_at_last,
             captured: RefCell::new(Vec::with_capacity(times.len())),
+            start: None,
         })
+    }
+
+    /// The live image the run starts from, when it is a segment.
+    pub(in crate::engine) fn start(&self) -> Option<&'a CapturedTransientState> {
+        self.start
     }
 
     /// The requested times, which the run adds as hard breakpoints.
@@ -112,6 +125,7 @@ impl<'a> TransientStateCapture<'a> {
         time: Value,
         circuit: &CircuitData,
         solution: &[Value],
+        matrix: &crate::solver::StaticMatrix,
     ) -> Result<bool, SimulationError> {
         let mut captured = self.captured.borrow_mut();
         let Some(&requested) = self.times.get(captured.len()) else {
@@ -123,6 +137,7 @@ impl<'a> TransientStateCapture<'a> {
                 time,
                 circuit: circuit.clone(),
                 solution: solution.to_vec(),
+                solver: matrix.capture_solver_checkpoint().ok(),
             });
         } else if time > requested {
             return Err(SimulationError::Circuit(format!(
@@ -244,6 +259,105 @@ impl Engine {
         Ok((result, captured))
     }
 
+    /// Continue the circuit `image` holds over `mesh`, a locked time grid
+    /// after the image's time, and capture the state accepted at the mesh's
+    /// last time.
+    ///
+    /// The segment is the run the image was captured from, restarted at the
+    /// image's time the way a breakpoint restarts the integrator: the step
+    /// that leaves it is order one and the predictor starts from the image's
+    /// solution, so the segment depends on the image's accepted state and not
+    /// on the history before it. Every device keeps the state the image
+    /// holds, and the reactive histories are taken from the image's
+    /// solution, as a run takes them at its starting point. A caller writes
+    /// shooting coordinates into the image's solution and device states
+    /// before handing it over. The sources keep the context of the run the
+    /// image came from.
+    ///
+    /// `steps`, when given, are the intervals that reach each mesh time
+    /// from the one before it (from the image's time, for the first): the
+    /// segment takes them as they are rather than the differences of the
+    /// mesh's rounded times. Over the accepted times and step sizes of a run
+    /// that captured `image` (a capture time is a hard breakpoint of that
+    /// run), the segment repeats the run bit for bit.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the event-shooting period map is its caller")
+    )]
+    pub(in crate::engine) fn run_tran_segment_from_image(
+        &self,
+        netlist: &Netlist,
+        image: &CapturedTransientState,
+        (mesh, steps): (&[Value], Option<&[Value]>),
+        max_step: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResult, CapturedTransientState), SimulationError> {
+        let Some(&tstop) = mesh.last() else {
+            return Err(SimulationError::Circuit(
+                "a transient segment needs at least one mesh time".to_string(),
+            ));
+        };
+        if !image.time.is_finite()
+            || mesh.first().is_none_or(|&first| first <= image.time)
+            || mesh.windows(2).any(|pair| pair[1] <= pair[0])
+            || !tstop.is_finite()
+            || steps.is_some_and(|steps| {
+                steps.len() != mesh.len()
+                    || steps.iter().any(|step| !(step.is_finite() && *step > 0.0))
+            })
+        {
+            return Err(SimulationError::Circuit(format!(
+                "a transient segment from t={:e} s needs a finite, strictly increasing mesh \
+                 after it",
+                image.time
+            )));
+        }
+        if netlist.options.transient_noise.is_some() {
+            return Err(SimulationError::Circuit(
+                "a transient segment from a live image cannot continue transient noise: the \
+                 image does not carry its streams' position"
+                    .to_string(),
+            ));
+        }
+        validate_transient_window(tstop, max_step)?;
+        let times = [tstop];
+        let mut capture = TransientStateCapture::new(&times, tstop)?;
+        capture.start = Some(image);
+        let mut engine = self.resolved_for_netlist(netlist);
+        engine.small_signal_state = None;
+        engine.config.locked_time_grid = Some(std::sync::Arc::new(mesh.to_vec()));
+        engine.config.locked_time_step_sizes =
+            steps.map(|steps| std::sync::Arc::new(steps.to_vec()));
+        engine.ensure_transient_request_floor(tstop - image.time, max_step)?;
+        let (result, _, _) = engine.run_tran_resolved_with_resume(
+            netlist,
+            netlist,
+            TransientRunWindow {
+                tstop,
+                max_step,
+                startup_mode: TransientStartupMode::from_uic(false),
+                dc_seed: None,
+                integral_trace: None,
+            },
+            abort,
+            TransientResumePlan {
+                resume: None,
+                resume_validation: ResumeValidation::ExactNetlist,
+                final_checkpoint_retention: FinalCheckpointRetention::Discarded,
+                scheduled_checkpoint_times: &[],
+                checkpoint_observer: None,
+                state_capture: Some(&capture),
+            },
+        )?;
+        let end = capture.into_captured().pop().ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "the transient segment from t={:e} s did not reach its stop time {tstop:e} s",
+                image.time
+            ))
+        })?;
+        Ok((result, end))
+    }
+
     /// Resume the transient `checkpoint` holds on `netlist`, as an authored
     /// restart of it, and capture the state at the checkpoint's own time.
     ///
@@ -322,6 +436,148 @@ mod tests {
                            C1 out 0 1n\n\
                            .TRAN 10n 5u\n\
                            .END\n";
+
+    /// A nonlinear deck: a sine drives an RC, a diode with junction charge
+    /// clamps the capacitor, and an RL branch carries an inductor current.
+    const NONLINEAR_DECK: &str = "segment from a live image\n\
+                                 V1 in 0 SIN(0.5 2 1meg)\n\
+                                 R0 in a 10\n\
+                                 R1 a out 1k\n\
+                                 C1 out 0 1n\n\
+                                 D1 out 0 dclamp\n\
+                                 R2 out m 100\n\
+                                 L1 m 0 10u\n\
+                                 .model dclamp d is=1e-14 cjo=2p\n\
+                                 .TRAN 10n 5u\n\
+                                 .END\n";
+
+    /// A segment from a live image over a run's own later accepted times and
+    /// steps is that run, bit for bit: the image's time is a capture, so a
+    /// hard breakpoint the run restarts its integrator and predictor at, and
+    /// the segment leaves it the same way, from the same accepted state and
+    /// sparse-solver state.
+    #[test]
+    fn a_segment_from_a_live_image_repeats_the_run_bit_for_bit() {
+        for deck in [RC_DECK, NONLINEAR_DECK] {
+            let (run, segment, first) = segment_of_its_own_run(deck);
+            for node in ["in", "a", "out", "m"] {
+                let Some(from_run) = run.0.try_voltage_waveform_named(node) else {
+                    continue;
+                };
+                let from_segment = segment
+                    .0
+                    .try_voltage_waveform_named(node)
+                    .expect("the segment retains the run's nodes");
+                for (index, (left, right)) in from_run[first..].iter().zip(from_segment).enumerate()
+                {
+                    assert_eq!(
+                        left.to_bits(),
+                        right.to_bits(),
+                        "V({node}) at t={:e} s: the run holds {left:e}, the segment {right:e}",
+                        segment.0.time[index]
+                    );
+                }
+            }
+            let bits =
+                |solution: &[Value]| solution.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+            assert_eq!(
+                bits(&segment.1.solution),
+                bits(&run.1.solution),
+                "the segment ends on the state the run accepts there"
+            );
+        }
+    }
+
+    /// A run that captures its state at 2.25 us and stops at 4 us, and the
+    /// segment from that image over the run's later accepted times and steps:
+    /// (the run and its last capture, the segment and its end, the index of
+    /// the image's time in the run).
+    fn segment_of_its_own_run(
+        deck: &str,
+    ) -> (
+        (TransientResult, CapturedTransientState),
+        (TransientResult, CapturedTransientState),
+        usize,
+    ) {
+        {
+            let netlist = Netlist::parse(deck).expect("the deck parses");
+            let engine = Engine::default();
+            let (tstop, max_step) = (4.0e-6, 1.0e-8);
+            let times = [2.25e-6, tstop];
+            let (run, mut captured) = engine
+                .run_tran_capturing_states(
+                    &netlist,
+                    tstop,
+                    max_step,
+                    TransientStartupMode::OperatingPoint,
+                    &times,
+                    &NoAbort,
+                )
+                .expect("the captured run converges");
+            let first = run
+                .time
+                .iter()
+                .position(|time| *time == times[0])
+                .expect("the run lands on the image's time");
+            let mesh = &run.time[first + 1..];
+            let steps = &run.step_sizes[first + 1..];
+            let (segment, end) = engine
+                .run_tran_segment_from_image(
+                    &netlist,
+                    &captured[0],
+                    (mesh, Some(steps)),
+                    max_step,
+                    &NoAbort,
+                )
+                .expect("the segment converges");
+            assert_eq!(
+                segment.time,
+                run.time[first..],
+                "the segment lands on every mesh time"
+            );
+            assert_eq!(end.time, captured[1].time);
+            let last = captured.pop().expect("two captures");
+            ((run, last), (segment, end), first)
+        }
+    }
+
+    /// The shooting coordinates a caller writes into an image are where the
+    /// segment starts: an RC whose capacitor is written to 0.3 V with its
+    /// source held at 0 decays as 0.3·e^{−t/RC}.
+    #[test]
+    fn a_segment_starts_from_the_state_written_into_its_image() {
+        let netlist = Netlist::parse(RC_DECK).expect("the deck parses");
+        let engine = Engine::default();
+        // The pulse is low from 10 us to 20 us; C1 has discharged by 15 us.
+        let (t0, max_step) = (15.0e-6, 1.0e-9);
+        let (_, mut captured) = engine
+            .run_tran_capturing_states(
+                &netlist,
+                t0,
+                max_step,
+                TransientStartupMode::OperatingPoint,
+                &[t0],
+                &NoAbort,
+            )
+            .expect("the captured run converges");
+        let mut image = captured.remove(0);
+        let out = image.circuit.get_node_by_name("out").expect("out") - 1;
+        image.solution[out] = 0.3;
+        let mesh: Vec<Value> = (1..=200).map(|k| t0 + Value::from(k) * 1.0e-8).collect();
+        let (segment, _) = engine
+            .run_tran_segment_from_image(&netlist, &image, (&mesh, None), max_step, &NoAbort)
+            .expect("the segment converges");
+        let values = segment.try_voltage_waveform_named("out").expect("out");
+        let tau = 1.0e3 * 1.0e-9;
+        for (time, value) in segment.time.iter().zip(values) {
+            let expected = 0.3 * (-(time - t0) / tau).exp();
+            // Order one leaves the image, then the trapezoid at h = tau/100.
+            assert!(
+                (value - expected).abs() <= 2.0e-4 * 0.3,
+                "at t={time:e} s v(out) = {value}, the decay gives {expected}"
+            );
+        }
+    }
 
     /// Linear interpolation of a waveform at `time`.
     fn interpolate(times: &[Value], values: &[Value], time: Value) -> Value {
