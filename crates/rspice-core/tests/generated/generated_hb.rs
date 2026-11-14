@@ -301,3 +301,141 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
         );
     }
 }
+
+/// Periodic AC from the small-signal source `vrf` into sidebands -2..=2 of
+/// `V(a)` at three offsets, and the periodic transfer function from it into
+/// the upper first sideband, on the deck's harmonic-balance carrier: once
+/// solved by periodic AC itself and once retained from `.hb`.
+#[cfg(feature = "veriloga-model-r2-cmc")]
+fn hb_carrier_transfers(deck: &str) -> Vec<Complex64> {
+    use rspice_core::NoAbort;
+    use rspice_core::analysis::pac::{PacConfig, PacSweepType};
+    use rspice_core::netlist::{FreqVariation, PeriodicSourceSelector, PeriodicSweep, PxfCard};
+    let (start, stop) = (0.13 * F0, 0.37 * F0);
+    let netlist = Netlist::parse(deck).expect("parse");
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(start, stop, 3)
+        .with_sweep_type(PacSweepType::Linear)
+        .with_sidebands(-2, 2)
+        .with_input_source("vrf")
+        .with_output_node("a");
+    let card = PxfCard {
+        sweep: PeriodicSweep {
+            variation: FreqVariation::Lin,
+            points: 3,
+            start_freq: start,
+            stop_freq: stop,
+        },
+        input_source: "vrf".into(),
+        input_sideband: 0,
+        output_node: "a".into(),
+        output_ref: None,
+        output_sideband: 1,
+        max_sideband: 2,
+        reltol: 1e-9,
+        abstol: 1e-15,
+        source: PeriodicSourceSelector::Preceding,
+    };
+    let hb = run_hb(deck);
+    let fresh = engine()
+        .run_pac(&netlist, config.clone())
+        .unwrap_or_else(|error| panic!("PAC must run: {error}\n{deck}"));
+    let retained = engine()
+        .run_pac_from_hb_with_abort(&netlist, config, &hb.operating_point, &NoAbort)
+        .unwrap_or_else(|error| panic!("PAC on the HB carrier must run: {error}\n{deck}"));
+    let pxf = engine()
+        .run_pxf_card_from_hb_with_abort(&netlist, &card, &hb.operating_point, &NoAbort)
+        .unwrap_or_else(|error| panic!("PXF on the HB carrier must run: {error}\n{deck}"));
+    let mut transfers = Vec::new();
+    for pac in [&fresh, &retained] {
+        for offset in 0..3 {
+            for sideband in -2..=2 {
+                transfers.push(
+                    pac.result
+                        .conversion_matrix
+                        .get(offset, sideband, 0)
+                        .expect("sideband present"),
+                );
+            }
+        }
+    }
+    transfers.extend(pxf.points.iter().map(|point| point.transfer));
+    assert_eq!(transfers.len(), 2 * 3 * 5 + 3);
+    transfers
+}
+
+/// A pumped diode mixer whose load resistor is native or the generated
+/// R2_CMC.
+#[cfg(feature = "veriloga-model-r2-cmc")]
+fn pumped_mixer(resistor: &str) -> String {
+    format!(
+        "* pumped diode mixer\nVLO lo 0 SIN(0.6 0.4 1meg)\nR1 lo a 1k\nVRF rf 0 DC 0\n\
+         R2 rf a 10k\n{resistor}\nD1 a 0 dm\nC1 a 0 50p\n.model dm D IS=1e-14 CJO=2p\n.end\n"
+    )
+}
+
+/// Periodic AC and periodic transfer functions on a harmonic-balance carrier
+/// linearize harmonic balance's own samples of a generated model, so the
+/// generated R2_CMC in a pumped mixer gives every sideband transfer its native
+/// twin gives. Allowance: 1e-6 of the largest native transfer, at each of
+/// three offsets, on a carrier periodic AC solves itself and on one retained
+/// from `.hb`.
+#[cfg(feature = "veriloga-model-r2-cmc")]
+#[test]
+fn a_generated_resistor_mixes_its_native_twins_sidebands() {
+    let native = hb_carrier_transfers(&pumped_mixer("R3 a 0 2k"));
+    let twin = hb_carrier_transfers(&pumped_mixer("XR3 a 0 r2_cmc r=2k"));
+    let scale = native.iter().map(|value| value.norm()).fold(0.0, f64::max);
+    for (index, (twin_value, native_value)) in twin.iter().zip(&native).enumerate() {
+        assert!(
+            (twin_value - native_value).norm() <= 1e-6 * scale,
+            "transfer {index}: generated {twin_value} against native {native_value}"
+        );
+    }
+    assert!(
+        native[1].norm() > 1e-3 * scale && native[3].norm() > 1e-3 * scale,
+        "the pumped diode must convert into the first sidebands: {native:?}"
+    );
+}
+
+/// A shooting carrier's period map carries no generated Verilog-A state, so
+/// the shooting route refuses a generated model by instance and module before
+/// periodic AC or a periodic transfer function could linearize around it.
+#[cfg(feature = "veriloga-model-r2-cmc")]
+#[test]
+fn a_shooting_carrier_refuses_a_generated_model_by_name() {
+    use rspice_core::analysis::PssConfig;
+    use rspice_core::identity::AnalysisKind;
+    use rspice_core::{NoAbort, SimulationError, UnsupportedCapabilityError};
+    let netlist = Netlist::parse(&pumped_mixer("XR3 a 0 r2_cmc r=2k")).expect("parse");
+    let error = engine()
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::new(F0).with_harmonics(4),
+            &NoAbort,
+        )
+        .map(drop)
+        .expect_err("the shooting carrier must refuse the model");
+    let SimulationError::UnsupportedCapability(refusal) = &error else {
+        panic!("expected a capability refusal, got {error}");
+    };
+    let UnsupportedCapabilityError {
+        capability,
+        analysis_kind,
+        instance,
+        module,
+        detail,
+        ..
+    } = refusal.as_ref();
+    assert_eq!(*capability, "analysis.periodic.veriloga", "{error}");
+    assert_eq!(*analysis_kind, Some(AnalysisKind::Pss), "{error}");
+    assert_eq!(instance.as_deref(), Some("XR3"), "{error}");
+    assert!(
+        module
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case("r2_cmc")),
+        "{error}"
+    );
+    assert!(detail.contains("PSS analysis"), "{detail}");
+}

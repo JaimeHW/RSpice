@@ -7,6 +7,7 @@
 use super::*;
 use crate::analysis::pac::PacConfig;
 use crate::analysis::s_param::MaterializedRfPort;
+use crate::engine::analysis_capability::PeriodicCarrier;
 
 pub(super) enum PacOperatingPoint<'a> {
     Shooting(&'a super::super::PssOperatingPoint),
@@ -133,7 +134,18 @@ impl Engine {
         // projected from a retained carrier or solved outright — and without
         // it the harmonic system would be assembled with a mixed host's
         // equations simply absent, which answers rather than refuses.
-        Self::ensure_analysis_capability(&circuit, crate::engine::CapabilityAnalysis::Pac)?;
+        // The carrier decides what Verilog-A it linearizes: harmonic balance's
+        // own F/Q samples, or a shooting orbit that carries none.
+        Self::ensure_carrier_analysis_capability(
+            &circuit,
+            crate::engine::CapabilityAnalysis::Pac,
+            match &operating_point {
+                Some(PacOperatingPoint::Shooting(_)) => PeriodicCarrier::Shooting,
+                Some(PacOperatingPoint::HarmonicBalance(_)) | None => {
+                    PeriodicCarrier::HarmonicBalance
+                }
+            },
+        )?;
         let hb_config = match &operating_point {
             Some(PacOperatingPoint::HarmonicBalance(_)) => hb_config,
             point => self.hb_config_for_dependent_sources(

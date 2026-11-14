@@ -664,3 +664,148 @@ fn periodic_analyses_refuse_retained_variables_by_name_before_solving() {
         let _ = std::fs::remove_file(model);
     }
 }
+
+/// Periodic AC from the small-signal source `vrf` into sidebands -2..=2 of
+/// `V(a)` at three offsets, and the periodic transfer function from it into
+/// the upper first sideband, on the deck's harmonic-balance carrier: once
+/// solved by periodic AC itself and once retained from `.hb`.
+fn hb_carrier_transfers(deck: &str) -> Vec<Complex64> {
+    use rspice_core::NoAbort;
+    use rspice_core::analysis::pac::{PacConfig, PacSweepType};
+    use rspice_core::netlist::{FreqVariation, PeriodicSourceSelector, PeriodicSweep, PxfCard};
+    let (start, stop) = (0.13 * F0, 0.37 * F0);
+    let netlist = Netlist::parse(deck).expect("parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(start, stop, 3)
+        .with_sweep_type(PacSweepType::Linear)
+        .with_sidebands(-2, 2)
+        .with_input_source("vrf")
+        .with_output_node("a");
+    let card = PxfCard {
+        sweep: PeriodicSweep {
+            variation: FreqVariation::Lin,
+            points: 3,
+            start_freq: start,
+            stop_freq: stop,
+        },
+        input_source: "vrf".into(),
+        input_sideband: 0,
+        output_node: "a".into(),
+        output_ref: None,
+        output_sideband: 1,
+        max_sideband: 2,
+        reltol: 1e-9,
+        abstol: 1e-15,
+        source: PeriodicSourceSelector::Preceding,
+    };
+    let hb = engine
+        .run_hb(&netlist, HbConfig::new(F0).with_harmonics(8))
+        .unwrap_or_else(|error| panic!("HB must run: {error}\n{deck}"));
+    let fresh = engine
+        .run_pac(&netlist, config.clone())
+        .unwrap_or_else(|error| panic!("PAC must run: {error}\n{deck}"));
+    let retained = engine
+        .run_pac_from_hb_with_abort(&netlist, config, &hb.operating_point, &NoAbort)
+        .unwrap_or_else(|error| panic!("PAC on the HB carrier must run: {error}\n{deck}"));
+    let pxf = engine
+        .run_pxf_card_from_hb_with_abort(&netlist, &card, &hb.operating_point, &NoAbort)
+        .unwrap_or_else(|error| panic!("PXF on the HB carrier must run: {error}\n{deck}"));
+    let mut transfers = Vec::new();
+    for pac in [&fresh, &retained] {
+        for offset in 0..3 {
+            for sideband in -2..=2 {
+                transfers.push(
+                    pac.result
+                        .conversion_matrix
+                        .get(offset, sideband, 0)
+                        .expect("sideband present"),
+                );
+            }
+        }
+    }
+    transfers.extend(pxf.points.iter().map(|point| point.transfer));
+    assert_eq!(transfers.len(), 2 * 3 * 5 + 3);
+    transfers
+}
+
+/// The pumped diode mixer periodic AC and PXF linearize, with its diode
+/// native or written in Verilog-A.
+fn pumped_mixer(diode: &str, cards: &str) -> String {
+    format!(
+        "* pumped diode mixer\n\
+         VLO lo 0 DC 0.6 SIN(0.6 0.4 1meg)\n\
+         R1 lo a 1k\n\
+         VRF rf 0 DC 0\n\
+         R2 rf a 10k\n\
+         C1 a 0 100p\n\
+         {diode}\n\
+         .model dmod D IS=1e-14 N=1\n\
+         {cards}\n\
+         .end\n"
+    )
+}
+
+/// Periodic AC and periodic transfer functions on a harmonic-balance carrier
+/// linearize harmonic balance's own samples of a Verilog-A module, so a
+/// pumped Verilog-A diode converts a small signal into every sideband as its
+/// native twin does. Reference: the native diode on the same carrier.
+/// Allowance, as for the large-signal twins: 1e-6 of the largest native
+/// transfer, at each of three offsets, on a carrier periodic AC solves itself
+/// and on one retained from `.hb`.
+#[test]
+fn a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_harmonic_balance_carrier() {
+    let (model, card) = two_terminal("pac_twin", DIODE);
+    let native = hb_carrier_transfers(&pumped_mixer("D1 a 0 dmod", ""));
+    let twin = hb_carrier_transfers(&pumped_mixer("XD1 a 0 va_hb_diode is=1e-14", &card));
+    let scale = native.iter().map(|value| value.norm()).fold(0.0, f64::max);
+    for (index, (twin_value, native_value)) in twin.iter().zip(&native).enumerate() {
+        assert!(
+            (twin_value - native_value).norm() <= 1.0e-6 * scale,
+            "transfer {index}: Verilog-A {twin_value} against native {native_value}"
+        );
+    }
+    // Sideband -1 and +1 of the first offset: the carrier must mix.
+    assert!(
+        native[1].norm() > 1e-3 * scale && native[3].norm() > 1e-3 * scale,
+        "the pumped diode must convert into the first sidebands: {native:?}"
+    );
+    let _ = std::fs::remove_file(model);
+}
+
+/// A shooting carrier's period map carries no Verilog-A state, so the
+/// shooting route refuses a Verilog-A module by instance and module before
+/// periodic AC or a periodic transfer function could linearize around it.
+#[test]
+fn a_shooting_carrier_refuses_a_veriloga_module_by_name() {
+    use rspice_core::NoAbort;
+    let (model, card) = two_terminal("pss_carrier", DIODE);
+    let deck = pumped_mixer("XD1 a 0 va_hb_diode is=1e-14", &card);
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let error = Engine::new(SimulationConfig::default())
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::new(F0).with_harmonics(4),
+            &NoAbort,
+        )
+        .map(drop)
+        .expect_err("the shooting carrier must refuse the module");
+    let SimulationError::UnsupportedCapability(refusal) = &error else {
+        panic!("expected a capability refusal, got {error}");
+    };
+    let UnsupportedCapabilityError {
+        capability,
+        analysis_kind,
+        instance,
+        module,
+        detail,
+        ..
+    } = refusal.as_ref();
+    assert_eq!(*capability, "analysis.periodic.veriloga", "{error}");
+    assert_eq!(*analysis_kind, Some(AnalysisKind::Pss), "{error}");
+    assert_eq!(instance.as_deref(), Some("XD1"), "{error}");
+    assert_eq!(module.as_deref(), Some("va_hb_diode"), "{error}");
+    assert!(detail.contains("PSS analysis"), "{detail}");
+    let _ = std::fs::remove_file(model);
+}

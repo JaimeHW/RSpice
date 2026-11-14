@@ -251,6 +251,11 @@ pub enum InstanceGate {
     /// Every Verilog-A module's operator inventory admits a harmonic-balance
     /// residual `F(x) + dQ(x)/dt`.
     HbAdmissibleVerilogA,
+    /// The periodic steady state the analysis linearizes around decides: on a
+    /// harmonic-balance carrier, every Verilog-A module
+    /// [`Self::HbAdmissibleVerilogA`] admits; on a shooting carrier, whose
+    /// period map carries no Verilog-A state, none.
+    CarrierAdmitsVerilogA,
 }
 
 impl InstanceGate {
@@ -262,6 +267,7 @@ impl InstanceGate {
             Self::TransientNoiseRenderable => "transient-noise-renderable",
             Self::NativeDeviceChecks => "native-device-checks",
             Self::HbAdmissibleVerilogA => "hb-admissible-veriloga",
+            Self::CarrierAdmitsVerilogA => "carrier-admits-veriloga",
         }
     }
 }
@@ -407,6 +413,48 @@ const fn hb_admissible_generated() -> CellSupport {
     }
 }
 
+/// The periodic steady state a periodic small-signal analysis linearizes
+/// around.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::engine) enum PeriodicCarrier {
+    /// A harmonic-balance spectrum, solved by the analysis or retained from
+    /// `.hb`.
+    HarmonicBalance,
+    /// A shooting (PSS) orbit.
+    Shooting,
+}
+
+const PAC_VERILOGA_EVIDENCE: &[&str] = &[
+    "tests/veriloga/veriloga_hb.rs::a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_harmonic_balance_carrier",
+    "tests/veriloga/veriloga_hb.rs::a_shooting_carrier_refuses_a_veriloga_module_by_name",
+];
+
+const PAC_GENERATED_EVIDENCE: &[&str] = &[
+    "tests/generated/generated_hb.rs::a_generated_resistor_mixes_its_native_twins_sidebands",
+    "tests/generated/generated_hb.rs::a_shooting_carrier_refuses_a_generated_model_by_name",
+];
+
+/// Periodic AC and periodic transfer functions linearize harmonic balance's
+/// own F/Q samples on a harmonic-balance carrier, so they take what harmonic
+/// balance takes there; a shooting carrier's period map carries no Verilog-A
+/// state, so it takes none.
+const fn carrier_admits_veriloga(generated: bool) -> CellSupport {
+    CellSupport::Restricted {
+        gate: InstanceGate::CarrierAdmitsVerilogA,
+        token: PERIODIC_VERILOGA,
+        condition: if generated {
+            "on a harmonic-balance carrier, every generated compact model harmonic balance admits; a shooting (PSS) carrier admits none"
+        } else {
+            "on a harmonic-balance carrier, every Verilog-A module harmonic balance admits; a shooting (PSS) carrier admits none"
+        },
+        evidence: if generated {
+            PAC_GENERATED_EVIDENCE
+        } else {
+            PAC_VERILOGA_EVIDENCE
+        },
+    }
+}
+
 const fn renderable(condition: &'static str, evidence: &'static [&'static str]) -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::TransientNoiseRenderable,
@@ -502,11 +550,17 @@ pub const fn capability_cell(
                 reason: DISCRETE_STATE_REASON,
             },
             F::VerilogARuntime if matches!(analysis, A::Hb) => hb_admissible_veriloga(),
+            F::VerilogARuntime if matches!(analysis, A::Pac | A::Pxf) => {
+                carrier_admits_veriloga(false)
+            }
             F::VerilogARuntime => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, false),
             },
             F::VerilogAGenerated if matches!(analysis, A::Hb) => hb_admissible_generated(),
+            F::VerilogAGenerated if matches!(analysis, A::Pac | A::Pxf) => {
+                carrier_admits_veriloga(true)
+            }
             F::VerilogAGenerated => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, true),
@@ -865,6 +919,36 @@ fn hb_admission_refusal(
     }
 }
 
+/// A periodic small-signal analysis on a shooting carrier refuses the first
+/// Verilog-A instance of `family`: the period map the carrier was solved
+/// through carries no Verilog-A state, so it has no linearization of one.
+fn carrier_refusal(
+    circuit: &CircuitData,
+    family: CapabilityFamily,
+    analysis: CapabilityAnalysis,
+) -> Option<UnsupportedCapabilityError> {
+    let (instance, module) = first_instance(circuit, family)?;
+    let module_text = module
+        .as_deref()
+        .map(|module| format!(" (module '{module}')"))
+        .unwrap_or_default();
+    let mut refusal = UnsupportedCapabilityError::new(
+        PERIODIC_VERILOGA,
+        format!(
+            "{} '{instance}'{module_text} cannot take part in {} on a shooting (PSS) carrier: \
+             its period map carries no Verilog-A state; a harmonic-balance carrier takes it",
+            family.label(),
+            analysis.label(),
+        ),
+    )
+    .for_analysis_kind(analysis.kind())
+    .for_instance(instance);
+    if let Some(module) = module {
+        refusal = refusal.for_module(module);
+    }
+    Some(refusal)
+}
+
 /// Harmonic balance refuses a generated compact model whose generator could
 /// not prove its residual `F(x) + dQ(x)/dt`, with the generator's reason.
 fn hb_generated_refusal(
@@ -1041,6 +1125,26 @@ impl Engine {
         circuit: &CircuitData,
         analysis: CapabilityAnalysis,
     ) -> Result<(), SimulationError> {
+        Self::ensure_capability_on_carrier(circuit, analysis, None)
+    }
+
+    /// [`Self::ensure_analysis_capability`] for a periodic small-signal
+    /// analysis, which takes what its carrier takes.
+    pub(in crate::engine) fn ensure_carrier_analysis_capability(
+        circuit: &CircuitData,
+        analysis: CapabilityAnalysis,
+        carrier: PeriodicCarrier,
+    ) -> Result<(), SimulationError> {
+        Self::ensure_capability_on_carrier(circuit, analysis, Some(carrier))
+    }
+
+    /// The gate itself. Without a carrier, a cell that depends on one admits
+    /// nothing it restricts.
+    fn ensure_capability_on_carrier(
+        circuit: &CircuitData,
+        analysis: CapabilityAnalysis,
+        carrier: Option<PeriodicCarrier>,
+    ) -> Result<(), SimulationError> {
         if let Some(refusal) = retained_state_refusal(circuit, analysis)
             .or_else(|| non_rational_transfer_refusal(circuit, analysis))
         {
@@ -1063,6 +1167,19 @@ impl Engine {
                     }
                     InstanceGate::HbAdmissibleVerilogA => {
                         if let Some(refusal) = hb_admission_refusal(circuit, family, analysis) {
+                            return Err(refusal.into());
+                        }
+                    }
+                    InstanceGate::CarrierAdmitsVerilogA => {
+                        let refusal = match carrier {
+                            Some(PeriodicCarrier::HarmonicBalance) => {
+                                hb_admission_refusal(circuit, family, analysis)
+                            }
+                            Some(PeriodicCarrier::Shooting) | None => {
+                                carrier_refusal(circuit, family, analysis)
+                            }
+                        };
+                        if let Some(refusal) = refusal {
                             return Err(refusal.into());
                         }
                     }
