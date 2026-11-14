@@ -124,6 +124,17 @@ pub fn show(
                 property_row(ui, "Run", &manifest.run_label);
                 property_row(ui, "Duration", &manifest.elapsed_time);
                 property_row(ui, "State", &manifest.lifecycle);
+                // Stated only for a run whose checks reported something: a
+                // run that checked nothing has not passed anything.
+                if let Some(verdict) = run.check_verdict() {
+                    use rspice_results::analysis_result::CheckVerdict;
+                    let verdict = match verdict {
+                        CheckVerdict::Passed => "Passed",
+                        CheckVerdict::Warned => "Warned",
+                        CheckVerdict::Failed => "Failed",
+                    };
+                    property_row(ui, "Checks", verdict);
+                }
                 property_row(ui, "Execution target", &manifest.execution_target);
                 property_row(ui, "Run ID", &manifest.run_id);
                 if let Some(job) = run.job_id {

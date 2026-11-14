@@ -9,6 +9,7 @@ use egui::{
     Align, Align2, Color32, Frame, Layout, Margin, Rect, RichText, ScrollArea, Sense, Stroke, Ui,
     WidgetInfo, WidgetType, pos2, vec2,
 };
+use rspice_results::analysis_result::CheckVerdict;
 use serde_json::json;
 
 use crate::diagnostics::{LogSeverity, LogSource};
@@ -130,7 +131,15 @@ impl RunRow {
                 )
             }
             SimulationRunLifecycle::Cancelling => ("Cancelling".to_owned(), RunTone::Warning),
-            SimulationRunLifecycle::Completed => ("Complete".to_owned(), RunTone::Success),
+            // A completed run states its checks' verdict where it reported
+            // any, and nothing where it checked nothing: it has not passed
+            // what it never checked.
+            SimulationRunLifecycle::Completed => match run.check_verdict() {
+                None => ("Complete".to_owned(), RunTone::Success),
+                Some(CheckVerdict::Passed) => ("Checks passed".to_owned(), RunTone::Success),
+                Some(CheckVerdict::Warned) => ("Checks warned".to_owned(), RunTone::Warning),
+                Some(CheckVerdict::Failed) => ("Checks failed".to_owned(), RunTone::Error),
+            },
             SimulationRunLifecycle::Failed => ("Failed".to_owned(), RunTone::Error),
             SimulationRunLifecycle::Aborted => ("Aborted".to_owned(), RunTone::Warning),
             SimulationRunLifecycle::Interrupted => ("Interrupted".to_owned(), RunTone::Warning),
@@ -1591,6 +1600,54 @@ mod tests {
         assert!(all.rows.iter().any(|row| row.run_id == inactive_run));
         assert_eq!(all.campaigns.len(), 1);
         assert_eq!(all.campaigns[0].retained_members, 2);
+    }
+
+    /// A completed run's status states its checks' verdict, with the
+    /// failure or warning mark the verdict earns, and a run that checked
+    /// nothing says only that it completed.
+    #[test]
+    fn a_completed_run_states_its_check_verdict_and_nothing_without_checks() {
+        use rspice_core::config::{HdlOrigin, HdlPoint, HdlSeverity};
+        use rspice_results::analysis_result::{HdlDiagnostic, RunChecks};
+
+        let state = SimulateTestHost::default();
+        let status = |severities: &[HdlSeverity]| {
+            let mut run = SimulationRun::new(3);
+            let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+            analysis.checks = RunChecks {
+                hdl: severities
+                    .iter()
+                    .map(|severity| HdlDiagnostic {
+                        severity: *severity,
+                        text: "checked".into(),
+                        point: HdlPoint::Transient { time: 1e-9 },
+                        origin: HdlOrigin {
+                            scope: "tb".into(),
+                            file: "tb.v".into(),
+                            line: 4,
+                        },
+                    })
+                    .collect(),
+                ..RunChecks::default()
+            };
+            run.add_analysis(analysis);
+            run.lifecycle = SimulationRunLifecycle::Completed;
+            let row = RunRow::from_run(&state.model, &run, false);
+            (row.status, row.tone.problem())
+        };
+        assert_eq!(status(&[]), ("Complete".to_owned(), None));
+        assert_eq!(
+            status(&[HdlSeverity::Info]),
+            ("Checks passed".to_owned(), None)
+        );
+        assert_eq!(
+            status(&[HdlSeverity::Info, HdlSeverity::Warning]),
+            ("Checks warned".to_owned(), Some(Problem::Warning))
+        );
+        assert_eq!(
+            status(&[HdlSeverity::Warning, HdlSeverity::Error]),
+            ("Checks failed".to_owned(), Some(Problem::Failure))
+        );
     }
 
     #[test]
