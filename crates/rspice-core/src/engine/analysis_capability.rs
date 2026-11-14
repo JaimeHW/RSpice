@@ -1548,7 +1548,7 @@ pub(in crate::engine) fn event_shooting_capability_refusal(
             CellSupport::Restricted { gate, .. } => match gate {
                 InstanceGate::RationalDescriptor => rational_descriptor_refusal(circuit, analysis),
                 InstanceGate::HbAdmissibleVerilogA | InstanceGate::CarrierAdmitsVerilogA => {
-                    hb_admission_refusal(circuit, family, analysis)
+                    hb_admission_refusal::<true>(circuit, family, analysis)
                 }
                 InstanceGate::PssAdmissibleVerilogA => pss_veriloga_refusal(circuit, analysis),
                 InstanceGate::PeriodicContracts
