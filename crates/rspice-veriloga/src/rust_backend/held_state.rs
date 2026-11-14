@@ -474,7 +474,8 @@ impl<'a> HeldStateProof<'a> {
                 self.evaluation_conditions(*right, leaves);
             }
             CfgValueKind::Analysis(name)
-                if is_step(name, "__rspice_initial_step") || is_step(name, "__rspice_final_step") => {}
+                if is_step(name, "__rspice_initial_step")
+                    || is_step(name, "__rspice_final_step") => {}
             _ => leaves.push(condition),
         }
     }
