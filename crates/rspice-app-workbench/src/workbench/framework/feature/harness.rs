@@ -381,6 +381,13 @@ impl ResultPresentationSource for NullPorts {
     }
 }
 
+/// The results workspace as a fresh session shows it: the same answers a
+/// [`FeatureHarness`] lends its feature as the results peer, for a test that
+/// lends a feature's parts without a harness.
+pub fn fresh_session_results() -> &'static dyn ResultsPort {
+    &NullPorts
+}
+
 /// A feature, its own state and what it runs, and the model and session its
 /// commands run over.
 pub struct FeatureHarness<F: Feature> {
