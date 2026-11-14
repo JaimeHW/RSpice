@@ -337,22 +337,13 @@ mod tests {
     /// `test-support` is on.
     #[test]
     fn only_dev_dependencies_turn_test_support_on() {
-        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        let mut manifests = 0;
+        // Every application crate's manifest; the discovery asserts it found them.
         let mut strays = Vec::new();
-        for entry in std::fs::read_dir(&crates)
-            .unwrap_or_else(|error| panic!("read {}: {error}", crates.display()))
-        {
-            let directory = entry.expect("directory entry").path();
-            let manifest = directory.join("Cargo.toml");
-            let application = directory
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("rspice-app"));
-            if !application || !manifest.is_file() {
-                continue;
-            }
-            manifests += 1;
+        for root in app_source_roots() {
+            let manifest = root
+                .parent()
+                .expect("a source root sits in its crate's directory")
+                .join("Cargo.toml");
             let text = std::fs::read_to_string(&manifest)
                 .unwrap_or_else(|error| panic!("read {}: {error}", manifest.display()));
             let mut table = String::new();
@@ -370,11 +361,6 @@ mod tests {
                 }
             }
         }
-        assert!(
-            manifests >= 1,
-            "the scan read no rspice-app manifest under {}",
-            crates.display()
-        );
         assert!(
             strays.is_empty(),
             "test-support is turned on outside [dev-dependencies], so a module under its gate \
@@ -499,76 +485,62 @@ mod tests {
         }
     }
 
-    /// The platform services' sources. They compile as their own crate, but the
-    /// rules the scans of this crate's `src` hold are the application's, so
-    /// each of those scans reads these too.
-    fn services_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-services/src")
+    /// Every application crate's `src`: this crate's and each `rspice-app-*`
+    /// crate's, read at run time rather than listed here.
+    ///
+    /// The rules the crate-wide scans hold are the application's, not one
+    /// crate's, so each of them reads every crate the application compiles as.
+    /// A module that moves to another application crate keeps its path under
+    /// that crate's `src` and is still read there, and a new application crate
+    /// is read without an edit here.
+    fn app_source_roots() -> Vec<PathBuf> {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let crates = manifest
+            .parent()
+            .expect("this crate sits in the workspace's crates/ directory");
+        let mut roots: Vec<PathBuf> = std::fs::read_dir(crates)
+            .unwrap_or_else(|error| panic!("read {}: {error}", crates.display()))
+            .map(|entry| entry.expect("directory entry").path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name == "rspice-app" || name.starts_with("rspice-app-"))
+                    && path.join("Cargo.toml").is_file()
+            })
+            .map(|path| path.join("src"))
+            .collect();
+        roots.sort();
+        // A floor, not a tally: the application is this crate and the thirteen
+        // split out of it, and a discovery that finds fewer has lost its roots.
+        assert!(
+            roots.len() >= 14 && roots.contains(&manifest.join("src")),
+            "the scan found only {} application crates under {}; a root list that stops \
+             resolving is a scan that has stopped scanning",
+            roots.len(),
+            crates.display()
+        );
+        roots
     }
 
-    /// The run tier's sources, read by the same scans for the same reason.
-    fn runs_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-runs/src")
-    }
-
-    /// The workbench framework's sources, read by the same scans for the same
-    /// reason.
-    fn workbench_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src")
-    }
-
-    /// The sheets feature's sources, read by the same scans for the same
-    /// reason.
-    fn sheets_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-sheets/src")
-    }
-
-    /// The settings feature's sources, read by the same scans for the same
-    /// reason.
-    fn settings_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-settings/src")
-    }
-
-    /// The results feature's sources, read by the same scans for the same
-    /// reason.
-    fn results_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-results/src")
-    }
-
-    /// The hardcopy feature's sources, read by the same scans for the same
-    /// reason.
-    fn hardcopy_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-hardcopy/src")
-    }
-
-    /// The cloud feature's sources, read by the same scans for the same
-    /// reason.
-    fn cloud_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-cloud/src")
-    }
-
-    /// The models feature's sources, read by the same scans for the same
-    /// reason.
-    fn models_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-models/src")
-    }
-
-    /// The simulate feature's sources, read by the same scans for the same
-    /// reason.
-    fn simulate_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-simulate/src")
-    }
-
-    /// The code feature's sources, read by the same scans for the same
-    /// reason.
-    fn code_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-code/src")
-    }
-
-    /// The project feature's sources, read by the same scans for the same
-    /// reason.
-    fn project_source_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-project/src")
+    /// Every authored `.rs` file of every application crate, sorted.
+    ///
+    /// Each crate is asserted to have contributed files: a root that stops
+    /// resolving is a scan that has stopped scanning, and a scan that reaches
+    /// nothing passes forever.
+    fn app_rust_sources() -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        for root in app_source_roots() {
+            let before = paths.len();
+            rust_sources(&root, &mut paths);
+            assert!(
+                paths.len() > before,
+                "the scan found no Rust source under {}; a root that stops resolving is a \
+                 scan that has stopped scanning",
+                root.display()
+            );
+        }
+        paths.sort();
+        paths
     }
 
     /// Every authored `.rs` file in the workspace, sorted, with the floors the
@@ -654,31 +626,16 @@ mod tests {
             "session does not hold it",
         ];
 
-        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut paths = Vec::new();
-        rust_sources(&source_root, &mut paths);
-        rust_sources(&services_source_root(), &mut paths);
-        rust_sources(&runs_source_root(), &mut paths);
-        rust_sources(&workbench_source_root(), &mut paths);
-        rust_sources(&sheets_source_root(), &mut paths);
-        rust_sources(&settings_source_root(), &mut paths);
-        rust_sources(&results_source_root(), &mut paths);
-        rust_sources(&hardcopy_source_root(), &mut paths);
-        rust_sources(&cloud_source_root(), &mut paths);
-        rust_sources(&models_source_root(), &mut paths);
-        rust_sources(&simulate_source_root(), &mut paths);
-        rust_sources(&code_source_root(), &mut paths);
-        rust_sources(&project_source_root(), &mut paths);
+        let mut paths = app_rust_sources();
         paths.push(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-results/src/executed_deck.rs"),
         );
         paths.sort();
         assert!(
             paths.len() > 100,
-            "the crate-wide scan found only {} files under {}; a scan that reaches nothing \
-             passes forever",
-            paths.len(),
-            source_root.display()
+            "the crate-wide scan found only {} files; a scan that reaches nothing passes \
+             forever",
+            paths.len()
         );
 
         let sources = paths
@@ -735,28 +692,12 @@ mod tests {
     /// `#[cfg(test)]` items inside the remaining ones taken out.
     #[test]
     fn no_shipped_code_names_a_design_reference_fixture() {
-        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut paths = Vec::new();
-        rust_sources(&source_root, &mut paths);
-        rust_sources(&services_source_root(), &mut paths);
-        rust_sources(&runs_source_root(), &mut paths);
-        rust_sources(&workbench_source_root(), &mut paths);
-        rust_sources(&sheets_source_root(), &mut paths);
-        rust_sources(&settings_source_root(), &mut paths);
-        rust_sources(&results_source_root(), &mut paths);
-        rust_sources(&hardcopy_source_root(), &mut paths);
-        rust_sources(&cloud_source_root(), &mut paths);
-        rust_sources(&models_source_root(), &mut paths);
-        rust_sources(&simulate_source_root(), &mut paths);
-        rust_sources(&code_source_root(), &mut paths);
-        rust_sources(&project_source_root(), &mut paths);
-        paths.sort();
+        let paths = app_rust_sources();
         assert!(
             paths.len() > 100,
-            "the crate-wide scan found only {} files under {}; a scan that reaches \
-             nothing passes forever",
-            paths.len(),
-            source_root.display()
+            "the crate-wide scan found only {} files; a scan that reaches nothing passes \
+             forever",
+            paths.len()
         );
 
         let sources = paths
@@ -819,22 +760,7 @@ mod tests {
         let needle = format!("\"{}\"", ["Open", "task", "deck"].join(" "));
         let owner = Path::new("workbench").join("localization.rs");
 
-        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut paths = Vec::new();
-        rust_sources(&source_root, &mut paths);
-        rust_sources(&services_source_root(), &mut paths);
-        rust_sources(&runs_source_root(), &mut paths);
-        rust_sources(&workbench_source_root(), &mut paths);
-        rust_sources(&sheets_source_root(), &mut paths);
-        rust_sources(&settings_source_root(), &mut paths);
-        rust_sources(&results_source_root(), &mut paths);
-        rust_sources(&hardcopy_source_root(), &mut paths);
-        rust_sources(&cloud_source_root(), &mut paths);
-        rust_sources(&models_source_root(), &mut paths);
-        rust_sources(&simulate_source_root(), &mut paths);
-        rust_sources(&code_source_root(), &mut paths);
-        rust_sources(&project_source_root(), &mut paths);
-        paths.sort();
+        let paths = app_rust_sources();
         assert!(
             paths.len() > 100,
             "the crate-wide scan found only {} files; a scan that reaches nothing passes \
@@ -1108,29 +1034,23 @@ mod tests {
         const PALETTE_RECEIVERS: [&str; 4] = ["color", "colors", "c", "palette"];
         const BANNED_ROLES: [&str; 2] = ["ok", "info"];
 
-        // A file the run tier compiles keeps its path under that crate's `src`.
-        let roots = [
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-            runs_source_root(),
-            workbench_source_root(),
-            sheets_source_root(),
-            settings_source_root(),
-            results_source_root(),
-            hardcopy_source_root(),
-            cloud_source_root(),
-            models_source_root(),
-            simulate_source_root(),
-            code_source_root(),
-            project_source_root(),
-        ];
+        // A file that moved to another application crate keeps its path under
+        // that crate's `src`.
+        let roots = app_source_roots();
         let mut found = Vec::new();
         for file in FILES {
-            let path = roots
+            let homes: Vec<PathBuf> = roots
                 .iter()
                 .map(|root| root.join(file))
-                .find(|path| path.is_file())
-                .unwrap_or_else(|| roots[0].join(file));
-            let source = std::fs::read_to_string(&path)
+                .filter(|path| path.is_file())
+                .collect();
+            let [path] = homes.as_slice() else {
+                panic!(
+                    "{file} is in {} application crates; the scan reads it in exactly one",
+                    homes.len()
+                );
+            };
+            let source = std::fs::read_to_string(path)
                 .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
             for (index, line) in without_test_items(&source).lines().enumerate() {
                 let code = line.split("//").next().unwrap_or_default();
@@ -1248,22 +1168,7 @@ mod tests {
             ".run_line(",
             "write_run_line(",
         ];
-        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut paths = Vec::new();
-        rust_sources(&source_root, &mut paths);
-        rust_sources(&services_source_root(), &mut paths);
-        rust_sources(&runs_source_root(), &mut paths);
-        rust_sources(&workbench_source_root(), &mut paths);
-        rust_sources(&sheets_source_root(), &mut paths);
-        rust_sources(&settings_source_root(), &mut paths);
-        rust_sources(&results_source_root(), &mut paths);
-        rust_sources(&hardcopy_source_root(), &mut paths);
-        rust_sources(&cloud_source_root(), &mut paths);
-        rust_sources(&models_source_root(), &mut paths);
-        rust_sources(&simulate_source_root(), &mut paths);
-        rust_sources(&code_source_root(), &mut paths);
-        rust_sources(&project_source_root(), &mut paths);
-        paths.sort();
+        let paths = app_rust_sources();
         let sources = paths
             .iter()
             .map(|path| {
@@ -1558,22 +1463,7 @@ mod tests {
             .join("documents")
             .join("netlist_document")
             .join("deck_transaction.rs");
-        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut paths = Vec::new();
-        rust_sources(&source_root, &mut paths);
-        rust_sources(&services_source_root(), &mut paths);
-        rust_sources(&runs_source_root(), &mut paths);
-        rust_sources(&workbench_source_root(), &mut paths);
-        rust_sources(&sheets_source_root(), &mut paths);
-        rust_sources(&settings_source_root(), &mut paths);
-        rust_sources(&results_source_root(), &mut paths);
-        rust_sources(&hardcopy_source_root(), &mut paths);
-        rust_sources(&cloud_source_root(), &mut paths);
-        rust_sources(&models_source_root(), &mut paths);
-        rust_sources(&simulate_source_root(), &mut paths);
-        rust_sources(&code_source_root(), &mut paths);
-        rust_sources(&project_source_root(), &mut paths);
-        paths.sort();
+        let paths = app_rust_sources();
         let sources = paths
             .iter()
             .map(|path| {
@@ -1672,22 +1562,7 @@ mod tests {
             .join("lifecycle")
             .join("project_lifecycle.rs");
         let fact = Path::new("state").join("project_open.rs");
-        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut paths = Vec::new();
-        rust_sources(&source_root, &mut paths);
-        rust_sources(&services_source_root(), &mut paths);
-        rust_sources(&runs_source_root(), &mut paths);
-        rust_sources(&workbench_source_root(), &mut paths);
-        rust_sources(&sheets_source_root(), &mut paths);
-        rust_sources(&settings_source_root(), &mut paths);
-        rust_sources(&results_source_root(), &mut paths);
-        rust_sources(&hardcopy_source_root(), &mut paths);
-        rust_sources(&cloud_source_root(), &mut paths);
-        rust_sources(&models_source_root(), &mut paths);
-        rust_sources(&simulate_source_root(), &mut paths);
-        rust_sources(&code_source_root(), &mut paths);
-        rust_sources(&project_source_root(), &mut paths);
-        paths.sort();
+        let paths = app_rust_sources();
         let sources = paths
             .iter()
             .map(|path| {
