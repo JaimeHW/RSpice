@@ -148,6 +148,7 @@ fn event_source_vcd_export_reimport_keeps_levels_and_marks_canonical_strengths()
         }],
         real_traces: Vec::new(),
         digital_buses: Vec::new(),
+        hdl_sources: Vec::new(),
     });
     let prepared = encode_result_vcd(&analysis).unwrap();
     let mut state = AppState::default();

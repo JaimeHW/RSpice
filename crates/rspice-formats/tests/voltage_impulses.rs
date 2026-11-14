@@ -56,6 +56,7 @@ fn analysis(voltage: Option<VoltageImpulseHistoryEvidence>) -> AnalysisResult {
             digital_traces: vec![],
             real_traces: vec![],
             digital_buses: vec![],
+            hdl_sources: Vec::new(),
         })
 }
 

@@ -186,6 +186,7 @@ fn mixed_transient() -> AnalysisResult<RetainedWaveform> {
                 members: vec!["q1".to_owned(), "q0".to_owned()],
                 source: DigitalBusSourceEvidence::Engine,
             }],
+            hdl_sources: Vec::new(),
         })
 }
 

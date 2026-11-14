@@ -145,6 +145,7 @@ fn current_impulse_derivatives_participate_in_authenticated_identity() {
                     derivatives: point.into_iter().collect(),
                 }],
             }),
+            hdl_sources: Vec::new(),
         };
         let mut writer =
             ResultDigestWriter::new("test-current-derivatives", ResultDigestEncoding::CURRENT);

@@ -149,7 +149,7 @@ fn a_retained_waveform_unit_survives_the_current_schema_round_trip() {
     simulation.retained.next_run_id = 34;
 
     let persisted = crate::io::capture_simulation_results(&simulation);
-    assert_eq!(persisted.schema_version, 45);
+    assert_eq!(persisted.schema_version, 46);
     let restored = crate::io::simulation_state_from_results(persisted)
         .expect("current result history restores");
 

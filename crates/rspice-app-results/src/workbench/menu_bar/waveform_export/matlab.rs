@@ -569,6 +569,7 @@ mod tests {
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
             digital_buses: Vec::new(),
+            hdl_sources: Vec::new(),
         });
         let refusal = event_only_refusal(&events).expect("an event schedule is not a table");
         assert!(refusal.contains("event schedule"), "{refusal}");

@@ -1168,6 +1168,7 @@ fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResu
             digital_buses,
             current_impulses,
             voltage_impulses,
+            hdl_sources,
         } => {
             writer.u8(7);
             writer.option(current_impulses.as_ref(), |writer, history| {
@@ -1264,6 +1265,42 @@ fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResu
                 }
                 writer.u8(digital_bus_source_tag(bus.source));
             }
+            // A typed extension, so every result without a source map keeps
+            // the digest it had before the map was retained.
+            if !hdl_sources.is_empty() {
+                writer.string("hdl-sources-v1");
+                encode_hdl_sources(writer, hdl_sources);
+            }
+        }
+    }
+}
+
+fn encode_hdl_sources(
+    writer: &mut ResultDigestWriter,
+    sources: &[crate::events::HdlSourceEvidence],
+) {
+    use crate::events::{HdlDriverKindEvidence, HdlSourceLineEvidence};
+    let line = |writer: &mut ResultDigestWriter, line: Option<&HdlSourceLineEvidence>| {
+        writer.option(line, |writer, line| {
+            writer.string(&line.file);
+            writer.u64(u64::from(line.line));
+        });
+    };
+    writer.sequence(sources.len());
+    for source in sources {
+        writer.string(&source.trace);
+        writer.string(&source.instance);
+        writer.string(&source.identifier);
+        line(writer, source.declaration.as_ref());
+        writer.sequence(source.drivers.len());
+        for driver in &source.drivers {
+            writer.string(&driver.scope);
+            writer.u8(match driver.kind {
+                HdlDriverKindEvidence::Initial => 0,
+                HdlDriverKindEvidence::Always => 1,
+                HdlDriverKindEvidence::Assign => 2,
+            });
+            line(writer, driver.source.as_ref());
         }
     }
 }

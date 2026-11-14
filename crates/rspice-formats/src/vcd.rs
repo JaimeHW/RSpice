@@ -162,6 +162,7 @@ mod tests {
             digital_traces,
             real_traces,
             digital_buses: Vec::new(),
+            hdl_sources: Vec::new(),
         }
     }
 
@@ -308,6 +309,7 @@ mod tests {
                 members: vec!["count#1".to_owned(), "count#0".to_owned()],
                 source: rspice_results::events::DigitalBusSourceEvidence::Engine,
             }],
+            hdl_sources: Vec::new(),
         }
     }
 

@@ -837,6 +837,7 @@ fn bussed_event_payload(digital_buses: Vec<DigitalBusEvidence>) -> AnalysisResul
         digital_traces: vec![trace("count#1"), trace("count#0")],
         real_traces: Vec::new(),
         digital_buses,
+        hdl_sources: Vec::new(),
     }
 }
 

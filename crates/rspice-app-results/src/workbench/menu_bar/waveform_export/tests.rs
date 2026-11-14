@@ -638,6 +638,7 @@ fn current_impulse_csv_retains_exact_charge_owner_and_zero_event_coverage() {
                 real_traces: vec![],
                 digital_buses: vec![],
                 current_impulses: Some(history),
+                hdl_sources: Vec::new(),
             });
     let csv = prepare_typed_result_csv(&analysis).unwrap();
     let rows: Vec<Vec<_>> = csv
@@ -1754,6 +1755,7 @@ fn stacked_export_state(preference: usize) -> ResultsTestHost {
                 }],
                 real_traces: Vec::new(),
                 digital_buses: Vec::new(),
+                hdl_sources: Vec::new(),
             });
         }
         run.add_analysis(analysis);

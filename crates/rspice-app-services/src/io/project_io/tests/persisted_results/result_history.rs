@@ -1157,6 +1157,7 @@ fn current_impulse_project_history_round_trips_and_authenticates_charge() {
                 real_traces: vec![],
                 digital_buses: vec![],
                 current_impulses: Some(crate::state::current_impulse_history_fixture()),
+                hdl_sources: Vec::new(),
             },
         ),
     );

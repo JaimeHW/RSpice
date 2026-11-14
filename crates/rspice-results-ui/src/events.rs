@@ -758,6 +758,7 @@ pub mod test_support {
             }],
             real_traces: Vec::new(),
             digital_buses: Vec::new(),
+            hdl_sources: Vec::new(),
         }
     }
     pub(super) fn counter(members: &[(&str, &[(f64, u8)])], msb: i64, lsb: i64) -> AnalysisResult {
@@ -787,6 +788,7 @@ pub mod test_support {
                     members: members.iter().map(|(name, _)| (*name).to_owned()).collect(),
                     source: DigitalBusSourceEvidence::Engine,
                 }],
+                hdl_sources: Vec::new(),
             },
         )
     }
@@ -925,6 +927,7 @@ mod tests {
             }],
             real_traces: Vec::new(),
             digital_buses: Vec::new(),
+            hdl_sources: Vec::new(),
         };
         let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0)
             .with_waveforms(vec![RetainedTrace::new(
@@ -971,6 +974,7 @@ mod tests {
             ],
             real_traces: Vec::new(),
             digital_buses: Vec::new(),
+            hdl_sources: Vec::new(),
         };
         let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0)
             .with_result_payload(payload);
@@ -1130,6 +1134,7 @@ mod tests {
                 }],
                 real_traces: Vec::new(),
                 digital_buses: Vec::new(),
+                hdl_sources: Vec::new(),
             });
         let (cache, rows) = event_rows_with(&analysis, BusRadix::Hex, &collapsed());
         assert!(cache.buses().is_empty());

@@ -386,3 +386,98 @@ fn a_transient_carries_the_source_map_of_its_hdl_traces() {
     );
     assert_eq!(events.hdl_sources, expected);
 }
+
+/// A testbench that ends on `$fatal` keeps the task that ended it and the
+/// source map of its traces through the browser worker's contract, as JSON,
+/// and both reach the retained result: the finish in its checks, the map in
+/// its event payload, entry for entry what the native run retains.
+#[test]
+fn a_testbench_keeps_its_finish_and_source_map_through_the_worker_into_its_result() {
+    use crate::runner::worker_contract::WorkerSimulationResult;
+    use rspice_core::ModelFinishTask;
+    use rspice_results::analysis_payload::AnalysisResultPayload;
+    use rspice_results::analysis_result::CheckVerdict;
+
+    let directory = std::env::temp_dir().join(format!(
+        "rspice_simulation_worker_fatal_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("create the module directory");
+    let path = directory.join("gen.v");
+    std::fs::write(
+        &path,
+        "`timescale 1ns/1ns\n\
+         module gen(q);\n  output q;\n  reg q;\n\
+         \x20 initial begin q = 0; #3 q = 1; #4 $fatal(1, \"stuck at %0d\", q); end\nendmodule\n",
+    )
+    .expect("write the module");
+    let deck = format!(
+        "* hdl fatal through the worker\n.hdl \"{}\"\nx1 q gen\nrq q 0 1k\n.tran 1n 20n\n.end\n",
+        path.display().to_string().replace('\\', "/")
+    );
+    let native = EngineBridge::new()
+        .run(
+            &AnalysisConfig::Transient(TransientAnalysisConfig {
+                stop_time: 20e-9,
+                step_time: 1e-9,
+                ..TransientAnalysisConfig::default()
+            }),
+            &deck,
+        )
+        .expect("the transient runs");
+    let _ = std::fs::remove_dir_all(&directory);
+
+    let wire = serde_json::to_string(
+        &WorkerSimulationResult::try_from(native.clone()).expect("the worker carries a transient"),
+    )
+    .expect("the worker result serializes");
+    let worker = SimulationResult::from(
+        serde_json::from_str::<WorkerSimulationResult>(&wire).expect("the worker result reads"),
+    );
+
+    let finish = checks(&native)
+        .finish
+        .clone()
+        .expect("the $fatal ended the run");
+    assert_eq!(finish.task, ModelFinishTask::Fatal);
+    assert_eq!(finish.message.as_deref(), Some("stuck at 1"));
+    assert_eq!(checks(&worker).finish.as_ref(), Some(&finish));
+    let (
+        SimulationResult::Transient {
+            events: native_events,
+            ..
+        },
+        SimulationResult::Transient {
+            events: worker_events,
+            ..
+        },
+    ) = (&native, &worker)
+    else {
+        panic!("transient results");
+    };
+    assert!(
+        native_events
+            .hdl_sources
+            .iter()
+            .any(|source| source.trace == "Q" && source.declaration.is_some()),
+        "{:?}",
+        native_events.hdl_sources
+    );
+    assert_eq!(worker_events.hdl_sources, native_events.hdl_sources);
+
+    let retained = |result: SimulationResult| {
+        crate::result_conversion::convert(result, AnalysisType::Transient, "Transient", || 0.0)
+    };
+    let source_map =
+        |result: &rspice_results::analysis_result::AnalysisResult| match &result.result_payload {
+            Some(AnalysisResultPayload::TransientEvents { hdl_sources, .. }) => hdl_sources.clone(),
+            other => panic!("an event payload: {other:?}"),
+        };
+    let native = retained(native);
+    let worker = retained(worker);
+    assert_eq!(native.checks.finish.as_ref(), Some(&finish));
+    assert_eq!(worker.checks, native.checks);
+    assert_eq!(worker.checks.verdict(), CheckVerdict::Failed);
+    assert!(!source_map(&native).is_empty(), "the map is retained");
+    assert_eq!(source_map(&worker), source_map(&native));
+}

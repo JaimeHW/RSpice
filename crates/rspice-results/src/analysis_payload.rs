@@ -315,6 +315,12 @@ pub enum AnalysisResultPayload {
         /// so nothing is painted for it.
         #[serde(default)]
         digital_buses: Vec<DigitalBusEvidence>,
+        /// Where each traced HDL net or variable was declared and which
+        /// processes drive it, by the trace or bus it was published under.
+        /// Empty without an HDL instance. A claim about the traces beside it,
+        /// as a bus is: it makes no history non-empty on its own.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        hdl_sources: Vec<crate::events::HdlSourceEvidence>,
     },
     /// One `.FFT` spectrum the transient engine computed inside the solve that
     /// carried its card.
@@ -1061,12 +1067,15 @@ impl AnalysisResultPayload {
                     previous = Some(violation);
                 }
             }
+            // The source map is a claim about the traces beside it, read by
+            // whatever names a trace; it bounds nothing the histories hold.
             Self::TransientEvents {
                 digital_traces,
                 real_traces,
                 digital_buses,
                 current_impulses,
                 voltage_impulses,
+                hdl_sources: _,
             } => {
                 if analysis_type != AnalysisType::Transient {
                     return Err(format!(

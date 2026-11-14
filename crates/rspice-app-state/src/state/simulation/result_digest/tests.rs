@@ -1002,6 +1002,7 @@ fn events_with_and_without_a_bus() -> (AnalysisResult, AnalysisResult) {
         digital_traces: vec![trace("count#1"), trace("count#0")],
         real_traces: Vec::new(),
         digital_buses,
+        hdl_sources: Vec::new(),
     };
     let analysis = |digital_buses| {
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN")

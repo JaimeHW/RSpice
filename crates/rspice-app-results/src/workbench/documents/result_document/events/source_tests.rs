@@ -293,6 +293,7 @@ fn scalar_state(source: EventSelectionSource) -> (ResultsTestHost, &'static str)
                         },
                     ],
                 }],
+                hdl_sources: Vec::new(),
             });
             "level"
         }
@@ -914,6 +915,7 @@ fn mixed_event_state() -> ResultsTestHost {
                 },
             ],
         }],
+        hdl_sources: Vec::new(),
     });
     state_with(analysis)
 }

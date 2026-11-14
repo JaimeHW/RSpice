@@ -87,7 +87,7 @@ fn run_checks_survive_the_project_file_and_are_sealed_into_the_result_digest() {
         ..Default::default()
     });
     current.validate().unwrap();
-    assert_eq!(current.schema_version, 45);
+    assert_eq!(current.schema_version, 46);
     let json = serde_json::to_string(&current).unwrap();
     assert!(json.contains("\"checks\":"), "{json}");
     let restored: ProjectSimulationResults = serde_json::from_str(&json).unwrap();

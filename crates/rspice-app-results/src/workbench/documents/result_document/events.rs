@@ -356,6 +356,7 @@ mod tests {
                 real_traces: vec![],
                 digital_buses: vec![],
                 current_impulses: Some(history),
+                hdl_sources: Vec::new(),
             },
         );
         assert!(analysis_is_renderable(&analysis));
@@ -489,6 +490,7 @@ mod availability_tests {
             }],
             real_traces: Vec::new(),
             digital_buses: Vec::new(),
+            hdl_sources: Vec::new(),
         };
         // A waveform with more coordinates than values is exactly what
         // `validate_retained_evidence` exists to refuse.

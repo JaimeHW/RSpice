@@ -124,6 +124,7 @@ fn transient_analysis() -> AnalysisResult {
             digital_traces,
             real_traces: Vec::new(),
             digital_buses: Vec::new(),
+            hdl_sources: Vec::new(),
         })
 }
 

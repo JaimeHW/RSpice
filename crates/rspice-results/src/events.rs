@@ -228,6 +228,7 @@ pub fn imported_event_payload(
         digital_traces,
         real_traces,
         digital_buses,
+        hdl_sources: Vec::new(),
     })
 }
 

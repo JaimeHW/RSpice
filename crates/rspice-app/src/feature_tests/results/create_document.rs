@@ -257,6 +257,7 @@ fn typed_release_target_campaign_viewers_commit_with_embedded_source_evidence() 
             }],
             real_traces: Vec::new(),
             digital_buses: Vec::new(),
+            hdl_sources: Vec::new(),
         });
     let soa_time = vec![0.0, 1.0e-9];
     let soa = AnalysisResult::new(22, AnalysisType::Soa, "SOA")

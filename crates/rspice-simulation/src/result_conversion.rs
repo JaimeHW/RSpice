@@ -97,12 +97,17 @@ fn transient_events_payload(
     // traces are.
     let mut digital_buses = events.digital_buses;
     digital_buses.sort_by(|left, right| left.name.cmp(&right.name));
+    // Kept with the histories it names, so a retained or reopened result can
+    // still say where each traced signal was declared and who drives it.
+    let mut hdl_sources = events.hdl_sources;
+    hdl_sources.sort_by(|left, right| left.trace.cmp(&right.trace));
     let payload = AnalysisResultPayload::TransientEvents {
         voltage_impulses: events.voltage_impulses,
         current_impulses: events.current_impulses,
         digital_traces,
         real_traces,
         digital_buses,
+        hdl_sources,
     };
     // A history the validator would reject is retained as nothing at all: a
     // viewer must never have to decide whether its own evidence is usable.

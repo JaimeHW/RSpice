@@ -332,6 +332,7 @@ impl LiveTransientAccumulator {
             digital_traces,
             real_traces,
             digital_buses,
+            hdl_sources: Vec::new(),
         };
         payload
             .validate_for(analysis_type)

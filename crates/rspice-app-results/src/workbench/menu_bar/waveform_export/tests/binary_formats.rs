@@ -284,6 +284,7 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
             }],
             real_traces: Vec::new(),
             digital_buses: Vec::new(),
+            hdl_sources: Vec::new(),
         });
     let mut vcd_state = state_with_typed_result(events);
     vcd_state

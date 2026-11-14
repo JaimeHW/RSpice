@@ -146,6 +146,7 @@ pub fn events_analysis() -> AnalysisResult {
                 }],
             }],
             digital_buses: vec![bus("addr"), bus("data")],
+            hdl_sources: Vec::new(),
         },
     )
 }

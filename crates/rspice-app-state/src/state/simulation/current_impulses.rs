@@ -38,6 +38,7 @@ mod tests {
             real_traces: vec![],
             digital_buses: vec![],
             current_impulses: Some(history),
+            hdl_sources: Vec::new(),
         })
     }
 

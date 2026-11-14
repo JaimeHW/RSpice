@@ -81,6 +81,7 @@ fn model(plotted: &[&str]) -> StripModel {
                     members: vec!["q[1]".to_owned(), "q[0]".to_owned()],
                     source: DigitalBusSourceEvidence::Engine,
                 }],
+                hdl_sources: Vec::new(),
             }),
     );
     let mut models = crate::waves::build_models(
