@@ -16,8 +16,10 @@
 //!   isolation on circuit-shaped matrices, with optional per-nonzero budgets.
 //! * `native-jit` — in-process Verilog-A native JIT gate.
 //! * `run` — execute the benchmark suite and write the JSON scoreboard.
+//! * `paired` — time two RSpice executables in alternating pairs over one
+//!   population, disqualifying workloads whose outputs differ.
 //!
-//! `rspice-bench --spawn-floor` exits at once; `run` times it as
+//! `rspice-bench --spawn-floor` exits at once; `run` and `paired` time it as
 //! the process floor under every measurement.
 //!
 //! The `generated-stamp` subcommand is behind `generated-stamp-base`, the gate
@@ -33,8 +35,10 @@ mod generated_rust;
 mod generated_stamp;
 mod klu;
 mod native_jit;
+mod paired;
 mod population;
 mod provenance;
+mod rawcmp;
 mod report;
 mod runner;
 
@@ -65,6 +69,8 @@ enum BenchCommand {
     NativeJit(native_jit::NativeJitArgs),
     /// Run the benchmark suite and emit a JSON scoreboard.
     Run(runner::RunArgs),
+    /// Time two RSpice executables against each other in alternating pairs.
+    Paired(paired::PairedArgs),
 }
 
 pub(crate) fn workspace_root() -> PathBuf {
@@ -91,6 +97,7 @@ fn main() -> ExitCode {
         BenchCommand::Klu(args) => klu::run(&args),
         BenchCommand::NativeJit(args) => native_jit::run(&args),
         BenchCommand::Run(args) => runner::run(&args),
+        BenchCommand::Paired(args) => paired::run(&args),
     };
     match outcome {
         Ok(code) => code,

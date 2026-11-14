@@ -61,7 +61,7 @@ Use `rspice-bench <command> --help` for all flags and defaults.
 
 ## Named populations
 
-`run --suite <name>` times a fixed population
+`run --suite <name>` and `paired --suite <name>` time a fixed population
 instead of the default deck set. Each run writes the suite's generated decks
 fresh into `target/benchmarks/decks/<suite>/`; corpus decks run in place under
 `tests/`, because they include model files by relative path.
@@ -94,6 +94,36 @@ averages it started under, and the table prints the one-minute figure;
 Windows has no load average, so there the label is the only record.
 `RSPICE_BENCH_ESPICE` adds a column for an ESpice executable run as
 `<exe> <deck>` on simulating workloads.
+
+## Paired A/B timing
+
+`paired` is the way to measure a change: it times two RSpice executables
+against each other, interleaved, over one population.
+
+```sh
+target/release/rspice-bench paired \
+  --a target/benchmarks/rspice-main --b target/release/rspice \
+  --suite neospice --label "idle box"
+```
+
+For each workload, A and B first run once writing a rawfile each. The rawfiles
+must be byte-identical (or, with `--tolerance <rel>`, agree within that
+relative difference per value); a workload whose outputs differ is
+DISQUALIFIED, reported, and excluded from every summary. Those runs also warm
+the file cache. `--warmups` untimed pairs (default 1) and `--pairs` timed pairs
+(default 10) follow, in alternating order (AB, BA, ...); a minute-scale
+workload takes no warm-up pairs and `--heavy-pairs` timed pairs (default 3).
+Each pair gives a B/A ratio; the table shows each workload's median ratio with
+its min and max and, where the platform reports one, the one-minute load
+average, and ends with the geometric mean over the workloads that counted. A
+run that fails or times out (`--timeout-secs`) marks its workload FAILED, also
+excluded; the table lists every excluded workload with the reason. The JSON
+report goes to `target/benchmarks/paired.json` (`--out`); any disqualified or
+failed workload makes the exit code nonzero.
+
+Run `paired` with the same executable as A and B first: the spread of that
+A/A run is the harness noise on the machine at that moment, the floor under
+any B/A difference worth reporting.
 
 ## Other commands
 
