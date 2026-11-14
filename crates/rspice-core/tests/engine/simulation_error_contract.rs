@@ -292,7 +292,6 @@ fn result_schema_mismatch_is_a_typed_non_retryable_output_failure() {
         ResultSchemaMismatchError {
             analysis: None,
             analysis_label: "AC".to_string(),
-            coordinate: None,
             coordinate_label: Some("frequency point 7 (1.0000000000000000e+6 Hz)".to_string()),
             signal_family: "node voltages".to_string(),
             expected_names,

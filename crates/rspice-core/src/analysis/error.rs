@@ -715,15 +715,14 @@ impl std::error::Error for OutputCommitError {}
 ///
 /// The original spelling is retained verbatim so frontends never have to
 /// reverse a canonicalized registry name to identify the failing request.
-/// `analysis` and `coordinate` are typed identities; `analysis_label` and
-/// `coordinate_label` exist only so the human-facing message can name the
-/// analysis the way the deck did.
+/// `analysis` is a typed identity; `analysis_label` and `coordinate_label`
+/// exist only so the human-facing message can name the analysis the way the
+/// deck did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestedSignalUnavailableError {
     pub signal: String,
     pub analysis: Option<AnalysisInstanceId>,
     pub analysis_label: String,
-    pub coordinate: Option<RunCoordinateId>,
     pub coordinate_label: Option<String>,
 }
 
@@ -737,7 +736,6 @@ impl RequestedSignalUnavailableError {
             signal: signal.into(),
             analysis: None,
             analysis_label: analysis_label.into(),
-            coordinate: None,
             coordinate_label,
         }
     }
@@ -775,7 +773,6 @@ impl std::error::Error for RequestedSignalUnavailableError {}
 pub struct ResultSchemaMismatchError {
     pub analysis: Option<AnalysisInstanceId>,
     pub analysis_label: String,
-    pub coordinate: Option<RunCoordinateId>,
     pub coordinate_label: Option<String>,
     pub signal_family: String,
     pub expected_names: Vec<String>,
@@ -797,7 +794,6 @@ impl ResultSchemaMismatchError {
         Self {
             analysis: None,
             analysis_label: analysis_label.into(),
-            coordinate: None,
             coordinate_label,
             signal_family: signal_family.into(),
             expected_names,
@@ -1359,9 +1355,6 @@ impl SimulationError {
     /// Typed run coordinate this failure belongs to, when it names one.
     pub fn run_coordinate(&self) -> Option<RunCoordinateId> {
         match self {
-            Self::UnsupportedCapability(error) => error.coordinate,
-            Self::RequestedSignalUnavailable(error) => error.coordinate,
-            Self::ResultSchemaMismatch(error) => error.coordinate,
             Self::MaterializationMismatch(error) => error.coordinate(),
             _ => None,
         }

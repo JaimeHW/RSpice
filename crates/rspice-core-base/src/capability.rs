@@ -5,7 +5,7 @@
 //! that raises it, and `analysis::error` re-exports it beside the failure
 //! taxonomy that carries it.
 
-use crate::identity::{AnalysisInstanceId, AnalysisKind, RunCoordinateId};
+use crate::identity::{AnalysisInstanceId, AnalysisKind};
 use crate::source_location::NetlistSourceLocation;
 
 /// A well-formed authored construct that this build deliberately refuses.
@@ -34,8 +34,6 @@ pub struct UnsupportedCapabilityError {
     /// Kind of analysis that refused, when the site knows the kind but not
     /// the authored card.
     pub analysis_kind: Option<AnalysisKind>,
-    /// Run coordinate the refusal belongs to, when one is in scope.
-    pub coordinate: Option<RunCoordinateId>,
     /// Deck instance name the refusal belongs to, as elaborated.
     pub instance: Option<String>,
     /// The module or model the refused instance is built from.
@@ -53,7 +51,6 @@ impl UnsupportedCapabilityError {
             capability,
             analysis: None,
             analysis_kind: None,
-            coordinate: None,
             instance: None,
             module: None,
             detail: detail.into(),
@@ -105,9 +102,6 @@ impl std::fmt::Display for UnsupportedCapabilityError {
             write!(formatter, " in {analysis}")?;
         } else if let Some(kind) = self.analysis_kind {
             write!(formatter, " in {}", kind.tag())?;
-        }
-        if let Some(coordinate) = self.coordinate {
-            write!(formatter, " at run {coordinate}")?;
         }
         if let Some(instance) = &self.instance {
             write!(formatter, " for '{instance}'")?;
