@@ -343,3 +343,23 @@ fn the_symbol_canvas_shares_the_schematic_navigation() {
         editor.pan
     );
 }
+
+/// A tool chosen on the toolbar hands the keyboard back to the canvas, so
+/// the canvas's single keys work at once: G steps the grid.
+#[test]
+fn a_toolbar_tool_hands_the_keyboard_back_to_the_canvas() {
+    use crate::feature_tests::replay::Replay;
+    use rspice_schematic_editor::symbol_editor::session::SymbolTool;
+    let mut replay = Replay::of(open_symbol());
+    replay.click("Draw symbol rectangle (R)", egui::accesskit::Role::Button);
+    assert_eq!(
+        replay.app.state.design.symbol.editor.tool,
+        SymbolTool::Rectangle
+    );
+    let shown = replay.app.state.design.symbol.editor.show_grid;
+    replay.key(egui::Key::G, egui::Modifiers::NONE);
+    assert_ne!(
+        replay.app.state.design.symbol.editor.show_grid, shown,
+        "G reached the canvas right after the toolbar"
+    );
+}

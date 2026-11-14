@@ -72,7 +72,7 @@ pub(in crate::workbench) use crate::workbench::slots::PlatformState;
 pub use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 pub(crate) use session::shortcuts::{
     accessibility_shortcut_summary, report_engineering_canvas_focus,
-    request_engineering_canvas_focus, runtime_command_platform,
+    request_engineering_canvas_focus, return_engineering_canvas_focus, runtime_command_platform,
 };
 pub(crate) use session::state_init::default_model_library_manager;
 #[cfg(test)]

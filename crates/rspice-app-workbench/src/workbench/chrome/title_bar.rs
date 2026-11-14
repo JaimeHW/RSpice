@@ -598,6 +598,10 @@ fn menu_trigger(
     let popup_shown = popup.is_some();
     if let Some(choice) = popup.and_then(|shown| shown.inner) {
         choice.run(app);
+        // The keyboard goes back to the canvas for its single keys, not to
+        // the menu's title.
+        response.surrender_focus();
+        crate::workbench::app_state::session::shortcuts::return_engineering_canvas_focus(ui.ctx());
     }
     if keyboard_focus.is_some() || (response.hovered() && another_application_menu_is_open) {
         // Opening after `Popup::show` keeps egui's toggle policy from closing a

@@ -149,6 +149,9 @@ pub fn more_tools<H: WorkbenchHost>(ui: &mut egui::Ui, app: &mut H, layout: Layo
                     }
                     OverflowAction::Run(run) => run(app.session_mut()),
                 }
+                crate::workbench::app_state::session::shortcuts::return_engineering_canvas_focus(
+                    ui.ctx(),
+                );
                 ui.close();
             }
         }

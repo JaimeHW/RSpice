@@ -611,6 +611,9 @@ fn toolbar_command(
     }
     if response.clicked() {
         app.execute(command);
+        // The keyboard goes back to the canvas for its single keys.
+        response.surrender_focus();
+        crate::workbench::app_state::session::shortcuts::return_engineering_canvas_focus(ui.ctx());
     }
 }
 

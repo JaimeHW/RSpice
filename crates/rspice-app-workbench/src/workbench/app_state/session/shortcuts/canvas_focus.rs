@@ -11,6 +11,7 @@ use crate::workbench::state::Workspace;
 const CANVAS_FOCUS_RECORD_ID: &str = "rspice-engineering-canvas-focus-owner";
 const CANVAS_FOCUS_REQUEST_ID: &str = "rspice-engineering-canvas-focus-request";
 const CANVAS_FOCUS_IN_PASS_ID: &str = "rspice-engineering-canvas-focus-in-pass";
+const CANVAS_FOCUS_RETURN_ID: &str = "rspice-engineering-canvas-focus-return";
 const ESCAPE_OWNER_RECORD_ID: &str = "rspice-escape-owner";
 
 /// How many passes a request for canvas focus waits for a canvas to be drawn.
@@ -52,6 +53,20 @@ pub fn request_engineering_canvas_focus_in_this_pass(ctx: &egui::Context) {
     ctx.data_mut(|data| data.insert_temp(Id::new(CANVAS_FOCUS_IN_PASS_ID), pass));
 }
 
+/// Give the keyboard back to the canvas after a toolbar button or a menu row
+/// ran a command, unless something else holds it by then.
+///
+/// Pressing the button took the keyboard from the canvas, and the canvas's
+/// single-key shortcuts act only while it holds focus, so a tool chosen on
+/// the toolbar was followed by a G or an R that did nothing. A dialog the
+/// command opened keeps the field it focused: the return is answered only
+/// while no widget holds focus, by a canvas drawn on a later pass within the
+/// same margin a request has.
+pub fn return_engineering_canvas_focus(ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(Id::new(CANVAS_FOCUS_RETURN_ID), pass));
+}
+
 /// Report the exact egui response that owns keyboard focus for a schematic,
 /// testbench, or symbol canvas. Pointer activation explicitly transfers focus
 /// from any prior text/control owner to the engineering canvas, and so does a
@@ -82,7 +97,17 @@ pub fn report_engineering_canvas_focus(response: &Response, view_type: Option<Vi
         data.remove::<u64>(id);
         pass == Some(now)
     });
-    if response.clicked() || response.drag_started() || requested || requested_in_pass {
+    let returned = response.ctx.data_mut(|data| {
+        let id = Id::new(CANVAS_FOCUS_RETURN_ID);
+        match data.get_temp::<u64>(id) {
+            Some(pass) if pass < now => {
+                data.remove::<u64>(id);
+                now <= pass + CANVAS_FOCUS_REQUEST_PASSES
+            }
+            Some(_) | None => false,
+        }
+    }) && response.ctx.memory(|memory| memory.focused().is_none());
+    if response.clicked() || response.drag_started() || requested || requested_in_pass || returned {
         response.request_focus();
     }
     // Esc drops the canvas's tool, not its keyboard. egui lets go of a
@@ -270,5 +295,40 @@ mod tests {
             !focused(),
             "a request no canvas answered in time takes nothing from the reader",
         );
+    }
+
+    /// After a toolbar button or a menu row, the next canvas drawn takes
+    /// the keyboard back, but never from a field that took it first.
+    #[test]
+    fn a_return_gives_the_canvas_the_keyboard_only_when_nothing_holds_it() {
+        let ctx = egui::Context::default();
+        let canvas = Id::new("canvas");
+        let field = Id::new("field");
+        let pass = |give_back: bool| {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                if give_back {
+                    return_engineering_canvas_focus(ui.ctx());
+                }
+                let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
+                // accessibility-pointer-shim: test-only stand-in for an
+                // engineering canvas, which publishes its own semantics.
+                let response = ui.interact(rect, canvas, egui::Sense::click());
+                report_engineering_canvas_focus(&response, ViewType::Symbol);
+            });
+        };
+        let focused = |id| ctx.memory(|memory| memory.focused() == Some(id));
+
+        pass(true);
+        assert!(!focused(canvas), "the pass the button ran in is left alone");
+        pass(false);
+        assert!(focused(canvas), "the canvas takes the keyboard back");
+
+        ctx.memory_mut(|memory| memory.request_focus(field));
+        pass(true);
+        pass(false);
+        assert!(focused(field), "a field that holds the keyboard keeps it");
+        ctx.memory_mut(|memory| memory.surrender_focus(field));
+        pass(false);
+        assert!(!focused(canvas), "a return is answered once");
     }
 }

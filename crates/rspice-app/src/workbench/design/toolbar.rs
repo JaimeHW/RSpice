@@ -420,6 +420,7 @@ fn symbol_toggle(ui: &mut egui::Ui, value: &mut bool, index: usize, layout: Layo
     let response = icon_button(ui, icon, label, *value, toolbar_icon_button_size(layout));
     if response.clicked() {
         *value = !*value;
+        crate::workbench::app_state::return_engineering_canvas_focus(ui.ctx());
     }
 }
 
@@ -430,7 +431,12 @@ fn symbol_grid_spacing(cx: &mut Cx<'_, DesignFeature>, ui: &mut egui::Ui, _layou
         .width(72.0)
         .show_ui(ui, |ui| {
             for spacing in crate::workbench::SymbolGridSpacing::ALL {
-                ui.selectable_value(&mut editor.grid_spacing, spacing, spacing.label());
+                if ui
+                    .selectable_value(&mut editor.grid_spacing, spacing, spacing.label())
+                    .clicked()
+                {
+                    crate::workbench::app_state::return_engineering_canvas_focus(ui.ctx());
+                }
             }
         });
 }
