@@ -180,16 +180,16 @@ fn snaps(model: &Model, symbols: &SchematicSymbolContext) -> Vec<Snap> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::AppState;
     use super::*;
     use crate::state::{Component, ComponentType, Wire};
+    use crate::workbench::design::test_host::DesignTestHost;
 
     /// A part placed off the grid, with a wire from its pin, lands on the
     /// nearest grid point; the wire follows square; one undo puts it back
     /// (audit G-8).
     #[test]
     fn an_off_grid_part_lands_on_the_grid_and_its_wire_follows_square() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let grid = state.model.schematic.document().grid_size;
         let part = Component::new(1, ComponentType::Resistor, Point::new(103, 47));
         let symbols = super::super::schematic_symbol_context(&state);

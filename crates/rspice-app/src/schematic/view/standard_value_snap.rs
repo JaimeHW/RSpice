@@ -81,9 +81,9 @@ pub(crate) fn run_snap_to_standard_value(model: &mut Model, wb: &mut WorkbenchSe
 
 #[cfg(test)]
 mod tests {
-    use super::super::AppState;
     use super::*;
     use crate::state::Point;
+    use crate::workbench::design::test_host::DesignTestHost;
     use rspice_vocabulary::quantity::ESeries;
 
     /// The selected resistor and capacitor snap to the project's series with
@@ -91,7 +91,7 @@ mod tests {
     /// and one undo puts both values back.
     #[test]
     fn selected_values_snap_to_the_project_series_as_one_undo_step() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state.model.workspace.content.standard_value_series = ESeries::E12;
         let part = |id, kind, name: &str, value: &str| {
             Component::new(id, kind, Point::new(id as i32 * 200, 0)).with_name_value(name, value)

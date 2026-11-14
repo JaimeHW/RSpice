@@ -3,11 +3,11 @@
 
 use super::*;
 use crate::state::ComponentType;
-use crate::workbench::AppState;
+use crate::workbench::design::test_host::DesignTestHost;
 
 #[test]
 fn native_component_never_claims_a_resolved_catalog_model() {
-    let state = AppState::default();
+    let state = DesignTestHost::default();
     let component = Component::new(1, ComponentType::Resistor, crate::state::Point::origin());
 
     let evidence = component_model_evidence(&state.model, &component);
@@ -18,7 +18,7 @@ fn native_component_never_claims_a_resolved_catalog_model() {
 
 #[test]
 fn missing_explicit_model_is_reported_as_unresolved_review_evidence() {
-    let state = AppState::default();
+    let state = DesignTestHost::default();
     let component = Component::new(2, ComponentType::NpnBjt, crate::state::Point::origin())
         .with_name_value("Q1", "vendor_npn");
 
@@ -32,7 +32,7 @@ fn missing_explicit_model_is_reported_as_unresolved_review_evidence() {
 
 #[test]
 fn a_model_resolves_only_from_a_file_its_library_records() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let path = std::path::PathBuf::from("models/vendor.lib");
     let mut library = crate::state::model_library::ModelLibrary::new("vendor");
     library.root_path = Some(path.clone());
@@ -73,7 +73,7 @@ fn a_model_resolves_only_from_a_file_its_library_records() {
 
 #[test]
 fn bound_model_evidence_uses_the_instance_model_and_section_overrides() {
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let mut library = crate::state::model_library::ModelLibrary::new("vendor_analog");
     library.add_model(crate::state::model_library::DeviceModel::new(
         "OPA189_A",

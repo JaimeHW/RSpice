@@ -2,6 +2,7 @@
 //! lands, and which names it counts as one net.
 
 use super::*;
+use crate::workbench::design::test_host::DesignTestHost;
 
 /// The canvas can draw that a name crosses sheets but not where it lands, so
 /// the inspector is the only surface that can answer "which page". A net no
@@ -13,7 +14,7 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
         SheetTemplate,
     };
 
-    let mut state = AppState::default();
+    let mut state = DesignTestHost::default();
     let key = state
         .model
         .workspace
@@ -133,7 +134,7 @@ fn the_net_inspector_folds_case_the_way_connectivity_does() {
         NetNamingPolicy::StrictCaseSensitive,
         NetNamingPolicy::SpiceCompatibleRelaxed,
     ] {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         let document = state.model.schematic.document_mut_for_test();
         document.document_policy.net_naming = policy;
         for (id, x, name, direction) in [

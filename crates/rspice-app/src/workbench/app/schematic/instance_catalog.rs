@@ -548,11 +548,11 @@ fn enum_key(kind: ComponentType) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
     #[test]
     fn primitive_catalog_is_deterministic_resolvable_and_excludes_non_instances() {
-        let state = AppState::default();
+        let state = DesignTestHost::default();
         let first = instance_catalog(&state.design.property_registry, &state.model);
         let second = instance_catalog(&state.design.property_registry, &state.model);
         assert_eq!(
@@ -577,7 +577,7 @@ mod tests {
 
     #[test]
     fn catalog_rejects_empty_unknown_and_ambiguous_queries() {
-        let state = AppState::default();
+        let state = DesignTestHost::default();
         let entries = instance_catalog(&state.design.property_registry, &state.model);
         assert!(resolve_instance_catalog_entry(&entries, " ").is_err());
         assert!(resolve_instance_catalog_entry(&entries, "not-a-real-master").is_err());

@@ -110,10 +110,10 @@ fn strip(ui: &mut Ui, command: &str, options: impl FnOnce(&mut Ui)) {
 mod tests {
     use super::*;
     use crate::state::{ComponentType, Point, Wire};
-    use crate::workbench::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
-    fn armed_move() -> AppState {
-        let mut state = AppState::default();
+    fn armed_move() -> DesignTestHost {
+        let mut state = DesignTestHost::default();
         let id = state
             .model
             .schematic
@@ -134,8 +134,8 @@ mod tests {
         state
     }
 
-    fn armed_stretch() -> AppState {
-        let mut state = AppState::default();
+    fn armed_stretch() -> DesignTestHost {
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -164,7 +164,7 @@ mod tests {
     /// while Move or Stretch is running and at no other time.
     #[test]
     fn the_strip_is_there_only_while_a_tool_with_an_option_is_armed() {
-        fn painted(state: &mut AppState) -> bool {
+        fn painted(state: &mut DesignTestHost) -> bool {
             let mut shown = false;
             let _ = crate::ui::raster::render(egui::vec2(900.0, 60.0), |ui, _background| {
                 let before = ui.cursor().top();
@@ -174,7 +174,7 @@ mod tests {
             shown
         }
 
-        assert!(!painted(&mut AppState::default()));
+        assert!(!painted(&mut DesignTestHost::default()));
         assert!(painted(&mut armed_move()));
         assert!(painted(&mut armed_stretch()));
 
@@ -197,7 +197,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         // Where the canvas starts (the cursor below the strip) and where the
         // drawing's origin lands on screen.
-        let frame = |state: &mut AppState| {
+        let frame = |state: &mut DesignTestHost| {
             let mut measured = (0.0, 0.0);
             let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
                 show(ui, &mut state.model, &mut state.design);

@@ -188,10 +188,10 @@ fn exactly_one<'a>(mut values: impl Iterator<Item = &'a DesignNet>) -> Option<&'
 mod tests {
     use super::*;
     use crate::state::{ComponentType, NetLabel, Point, Wire};
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::design::test_host::DesignTestHost;
 
-    fn named_wire_state(name: &str) -> AppState {
-        let mut state = AppState::default();
+    fn named_wire_state(name: &str) -> DesignTestHost {
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -252,7 +252,7 @@ mod tests {
     /// that would silently re-merge under the old name.
     #[test]
     fn renaming_one_group_renames_the_net_the_deck_actually_has() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn unnamed_and_multi_net_wire_selections_fail_closed() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn selected_interface_port_renames_its_logical_net_not_reference_designator() {
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         state
             .model
             .schematic
