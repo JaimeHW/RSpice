@@ -1416,13 +1416,63 @@ fn stamped_system_residual(
     residual.iter().all(|value| value.is_finite())
 }
 
+/// `|A|*|x| + |b|`, equation by equation, for the system
+/// [`stamped_system_residual`] measures: the magnitudes against which the
+/// residual of each equation is judged.
+fn stamped_system_scale(
+    csc: &SymbolicSparseColMat<usize>,
+    residual_layout: &ResidualLayout,
+    values: &[Value],
+    solution: &[Value],
+    rhs: &[Value],
+    scale: &mut Vec<Value>,
+    operation: RealSolveOp,
+) {
+    scale.clear();
+    scale.extend(rhs.iter().map(|value| value.abs()));
+    match operation {
+        RealSolveOp::Normal => {
+            for (row, scale) in scale.iter_mut().enumerate() {
+                for position in residual_layout.row_ptr[row]..residual_layout.row_ptr[row + 1] {
+                    let x = solution[residual_layout.col_idx[position]];
+                    *scale += values[residual_layout.csc_idx[position]].abs() * x.abs();
+                }
+            }
+        }
+        RealSolveOp::Transpose => {
+            let (col_ptr, row_idx) = (csc.col_ptr(), csc.row_idx());
+            for (col, scale) in scale.iter_mut().enumerate() {
+                for index in col_ptr[col]..col_ptr[col + 1] {
+                    *scale += values[index].abs() * solution[row_idx[index]].abs();
+                }
+            }
+        }
+    }
+}
+
 /// Iteratively refine a Circuit-LU solution whose factors lost digits to
 /// cancellation (see [`crate::KluSolver::pivots_lost_digits`]).
 ///
 /// Each step solves the same factors against [`stamped_system_residual`].
 /// Refinement stops once the largest componentwise correction reaches the
 /// rounding unit or fails to halve; a step that makes it grow is undone.
-/// Returns the steps kept and the last componentwise correction.
+///
+/// A step is also undone when it raises the stamped residual beyond
+/// rounding. A step maps the residual `r` to `(I - A*M^-1)*r`, where `M` is
+/// the factored matrix, so the residual shrinks when the factors are fit to
+/// refine the system. Factors that lost too many digits are not, and their
+/// corrections can still pass the componentwise test: each correction
+/// swamps the entry it is added to, so the ratio stays near one instead of
+/// growing.
+///
+/// Each equation's residual is divided by its magnitudes `|A|*|x| + |b|` at
+/// the unrefined solution, and a step may raise the largest of these ratios
+/// by at most the rounding unit: rounding a solution to working precision
+/// moves each ratio by up to half of it. The allowance keeps a step that
+/// corrects a cancelled equation, whose residual can lie far below the
+/// rounding of the others. The fixed magnitudes refuse a step that stays
+/// backward stable only by inflating the solution. Returns the steps kept
+/// and the last componentwise correction.
 #[allow(clippy::too_many_arguments)]
 fn refine_cancelled_solution(
     backend: &mut crate::KluSolver,
@@ -1436,13 +1486,22 @@ fn refine_cancelled_solution(
     residual: &mut Vec<Value>,
     correction: &mut Vec<Value>,
     previous: &mut Vec<Value>,
+    scale: &mut Vec<Value>,
     operation: RealSolveOp,
 ) -> (usize, Value) {
     const MAX_STEPS: usize = 30;
     const MIN_IMPROVEMENT_FACTOR: Value = 0.5;
-    let mut last = Value::INFINITY;
-    for step in 0..MAX_STEPS {
-        if !stamped_system_residual(
+    stamped_system_scale(
+        csc,
+        residual_layout,
+        values,
+        solution,
+        rhs,
+        scale,
+        operation,
+    );
+    let scaled_residual = |solution: &[Value], residual: &mut Vec<Value>| {
+        stamped_system_residual(
             csc,
             residual_layout,
             values,
@@ -1451,9 +1510,21 @@ fn refine_cancelled_solution(
             rhs,
             residual,
             operation,
-        ) {
-            return (step, last);
-        }
+        )
+        .then(|| {
+            residual
+                .iter()
+                .zip(scale.iter())
+                .fold(0.0, |largest: Value, (value, scale)| {
+                    largest.max(value.abs() / scale.max(Value::MIN_POSITIVE))
+                })
+        })
+    };
+    let Some(mut kept_residual) = scaled_residual(solution, residual) else {
+        return (0, Value::INFINITY);
+    };
+    let mut last = Value::INFINITY;
+    for step in 0..MAX_STEPS {
         let solved = match backend_operation {
             RealSolveOp::Normal => backend.solve(residual, correction),
             RealSolveOp::Transpose => backend.solve_transpose(residual, correction),
@@ -1473,6 +1544,13 @@ fn refine_cancelled_solution(
         if !relative.is_finite() || relative >= last {
             solution.copy_from_slice(previous);
             return (step, last);
+        }
+        match scaled_residual(solution, residual) {
+            Some(refined) if refined <= kept_residual + Value::EPSILON => kept_residual = refined,
+            _ => {
+                solution.copy_from_slice(previous);
+                return (step, last);
+            }
         }
         let improved = relative < MIN_IMPROVEMENT_FACTOR * last;
         last = relative;
@@ -4408,6 +4486,7 @@ impl StaticMatrix {
                 residual_scratch,
                 klu_correction_scratch,
                 residual_gross_scratch,
+                residual_compensation_scratch,
                 operation,
             );
             log::debug!(
@@ -9548,6 +9627,62 @@ mod tests {
             solution.iter().all(|x| (x - 1.0).abs() <= 1.0e-12),
             "{solution:?}"
         );
+    }
+
+    /// Refines the solve of `I*x = (1, 0)` with factors of `diag(pivot, 1)`;
+    /// returns the steps kept, the last correction, and the solution before
+    /// and after.
+    fn refine_identity_solve_with_factors_of(
+        pivot: Value,
+    ) -> (usize, Value, Vec<Value>, Vec<Value>) {
+        let csc = SymbolicSparseColMat::new_checked(2, 2, vec![0, 1, 2], None, vec![0, 1]);
+        let layout = ResidualLayout::from_csc(&csc);
+        let mut backend = crate::KluSolver::new();
+        backend.analyze(2, &[0, 1, 2], &[0, 1]).unwrap();
+        backend.factor(&[pivot, 1.0]).unwrap();
+        let rhs = [1.0, 0.0];
+        let mut solution = Vec::new();
+        backend.solve(&rhs, &mut solution).unwrap();
+        let unrefined = solution.clone();
+        let (mut residual, mut correction) = (Vec::new(), Vec::new());
+        let (mut previous, mut scale) = (Vec::new(), Vec::new());
+        let (steps, last) = refine_cancelled_solution(
+            &mut backend,
+            RealSolveOp::Normal,
+            &csc,
+            &layout,
+            &[1.0, 1.0],
+            &[0.0, 0.0],
+            &rhs,
+            &mut solution,
+            &mut residual,
+            &mut correction,
+            &mut previous,
+            &mut scale,
+            RealSolveOp::Normal,
+        );
+        (steps, last, unrefined, solution)
+    }
+
+    #[test]
+    fn refinement_converges_with_factors_fit_for_the_system() {
+        let (steps, last, _, solution) = refine_identity_solve_with_factors_of(0.99);
+        assert!(steps >= 2, "{steps} steps");
+        assert!(last <= 1.0e-12, "last correction {last:e}");
+        assert!((solution[0] - 1.0).abs() <= Value::EPSILON, "{solution:?}");
+        assert_eq!(solution[1], 0.0);
+    }
+
+    /// Factors of `diag(0.3, 1)` triple the error of `I*x = (1, 0)` at every
+    /// step. Each correction swamps the entry it lands on, so the ratio test
+    /// alone kept two steps: x = 13.7 with residual 12.7, where the unrefined
+    /// x = 3.33 leaves 2.33. The first step raises the residual to 5.44.
+    #[test]
+    fn refinement_keeps_no_step_that_raises_the_stamped_residual() {
+        let (steps, last, unrefined, solution) = refine_identity_solve_with_factors_of(0.3);
+        assert_eq!((steps, last), (0, Value::INFINITY));
+        assert_eq!(solution, unrefined);
+        assert!((unrefined[0] - 1.0 / 0.3).abs() <= 1.0e-15, "{unrefined:?}");
     }
 
     #[test]
