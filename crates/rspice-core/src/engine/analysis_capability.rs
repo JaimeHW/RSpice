@@ -949,15 +949,31 @@ fn carrier_refusal(
     Some(refusal)
 }
 
+/// Generated compact models whose residual the generator proves but whose
+/// harmonics no settled transient has confirmed, with what is missing.
+#[cfg(feature = "veriloga-builtins-base")]
+const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[(
+    "bsimsoi__e2aff994",
+    "its harmonics have not been checked against a settled transient: on a common-source \
+     stage its transient is still drifting after 24 periods, and harmonic balance and a \
+     quasi-static sweep disagree on the fundamental by 12%",
+)];
+
 /// Harmonic balance refuses a generated compact model whose generator could
-/// not prove its residual `F(x) + dQ(x)/dt`, with the generator's reason.
+/// not prove its residual `F(x) + dQ(x)/dt`, with the generator's reason, or
+/// one whose harmonics have not been checked, with what is missing.
 fn hb_generated_refusal(
     circuit: &CircuitData,
     analysis: CapabilityAnalysis,
 ) -> Option<UnsupportedCapabilityError> {
     #[cfg(feature = "veriloga-builtins-base")]
     for device in circuit.generated_veriloga_devices().iter() {
-        let Some(reason) = device.harmonic_balance_refusal() else {
+        let Some(reason) = device.harmonic_balance_refusal().or_else(|| {
+            HB_UNVERIFIED_GENERATED_MODELS
+                .iter()
+                .find(|(model, _)| *model == device.model_name)
+                .map(|(_, reason)| *reason)
+        }) else {
             continue;
         };
         let instance = device.instance_name.clone();

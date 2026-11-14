@@ -248,6 +248,34 @@ fn generated_models_reach_the_settled_transients_steady_state() {
              XM d g 0 0 bsimcmg110\n",
             "d",
         ),
+        #[cfg(feature = "veriloga-model-bsimcmg108")]
+        (
+            "FinFET (BSIM-CMG 108)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+             XM d g 0 0 bsimcmg108\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+        (
+            "UTBB FD-SOI MOSFET (L-UTSOI)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+             XM d g 0 0 t l_utsoi__832ce87d\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+        (
+            "UTBB FD-SOI MOSFET, NQS build (L-UTSOI)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+             XM d g 0 0 t l_utsoi__485e0ac9\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-epfl-hemt-10a")]
+        (
+            "GaN HEMT (EPFL HEMT)",
+            "VDD vdd 0 10\nV1 in 0 SIN(-2 0.5 1meg)\nRG in g 1k\nRD vdd d 10\n\
+             XH d g 0 0 t EPFL_HEMT_10a\n",
+            "d",
+        ),
         #[cfg(feature = "veriloga-model-hisimsotb-va")]
         (
             "thin-BOX SOI MOSFET (HiSIM-SOTB)",
@@ -352,6 +380,13 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
             "it scales a `ddt` by a quantity that varies with bias, so its residual is not \
              F(x) + dQ(x)/dt",
         ),
+        #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
+        (
+            "XM d d 0 0 0 t bsimsoi__e2aff994",
+            "XM",
+            "bsimsoi__e2aff994",
+            "harmonic balance and a quasi-static sweep disagree on the fundamental by 12%",
+        ),
     ];
     for (card, instance, module, reason) in cases {
         let deck =
@@ -387,7 +422,7 @@ fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
         );
         assert!(
             detail.contains("harmonic-balance analysis") && detail.ends_with(reason),
-            "{module}: the refusal must name the analysis and the generator's reason: {detail}"
+            "{module}: the refusal must name the analysis and its reason: {detail}"
         );
     }
 }
