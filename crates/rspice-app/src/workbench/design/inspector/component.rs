@@ -9,7 +9,7 @@
 use super::*;
 use crate::workbench::framework::command_registry::ids;
 
-pub(super) fn component_panel(
+pub(crate) fn component_panel(
     ui: &mut Ui,
     cx: &mut Cx<'_, DesignFeature>,
     id: u64,
@@ -91,7 +91,7 @@ pub(super) fn instance_view(component: &Component) -> Option<&str> {
         .filter(|view| !view.is_empty())
 }
 
-pub(super) fn identity_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, component: &Component) {
+pub(crate) fn identity_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, component: &Component) {
     let editable = !cx.model.schematic_edit_read_only();
     let properties = section_header_action(ui, "Identity", "Properties…", editable);
     if properties.clicked() {
@@ -380,7 +380,7 @@ fn level_supported_instance_parameters(
 }
 
 /// The model cards the project's libraries state for `module`, by name.
-pub(super) fn model_cards_of_module(model: &Model, module: &str) -> Vec<String> {
+pub(crate) fn model_cards_of_module(model: &Model, module: &str) -> Vec<String> {
     let mut cards = model
         .model_library_manager
         .libraries_sorted()
@@ -400,7 +400,7 @@ pub(super) fn model_cards_of_module(model: &Model, module: &str) -> Vec<String> 
     cards
 }
 
-pub(super) fn bound_model_choices(
+pub(crate) fn bound_model_choices(
     model: &Model,
     component: &Component,
     current: &str,
@@ -639,7 +639,7 @@ pub(crate) fn apply_bound_model_choice(
     Ok(changed)
 }
 
-pub(super) fn apply_bound_model_section(
+pub(crate) fn apply_bound_model_section(
     cx: &mut Cx<'_, DesignFeature>,
     component_id: u64,
     selected_section: &str,
@@ -683,7 +683,7 @@ pub(super) fn apply_bound_model_section(
     }
 }
 
-pub(super) fn parameters_section(
+pub(crate) fn parameters_section(
     ui: &mut Ui,
     cx: &mut Cx<'_, DesignFeature>,
     component: &Component,
@@ -942,11 +942,11 @@ pub(super) fn parameters_section(
 }
 
 /// What an undeclared parameter's row says after its value.
-pub(super) const UNDECLARED_PARAMETER_NOTE: &str = "not in module";
+pub(crate) const UNDECLARED_PARAMETER_NOTE: &str = "not in module";
 /// What the row of a value says when the instance's model card owns it.
-pub(super) const MODEL_CARD_PARAMETER_NOTE: &str = "model only";
+pub(crate) const MODEL_CARD_PARAMETER_NOTE: &str = "model only";
 /// The action that takes an undeclared parameter's value off the instance.
-pub(super) const REMOVE_UNDECLARED_PARAMETER: &str = "Remove";
+pub(crate) const REMOVE_UNDECLARED_PARAMETER: &str = "Remove";
 
 /// Whether `component` takes the SPICE instance temperature `temp`.
 ///
@@ -971,7 +971,7 @@ pub(super) fn supports_instance_temperature(model: &Model, component: &Component
 
 /// `true` while one of the identity group's editable fields holds the open
 /// inline-edit session.
-pub(super) fn editing_identity_field(wb: &WorkbenchSession, component: u64) -> bool {
+pub(crate) fn editing_identity_field(wb: &WorkbenchSession, component: u64) -> bool {
     matches!(
         wb.inline_edit.editing_field(component),
         Some(InlineEditField::Instance | InlineEditField::Value)
@@ -981,7 +981,7 @@ pub(super) fn editing_identity_field(wb: &WorkbenchSession, component: u64) -> b
 /// `true` while one of the parameter group's editable fields — the instance
 /// temperature, a typed parameter, or the raw override string — holds the
 /// open inline-edit session.
-pub(super) fn editing_parameter_field(wb: &WorkbenchSession, component: u64) -> bool {
+pub(crate) fn editing_parameter_field(wb: &WorkbenchSession, component: u64) -> bool {
     matches!(
         wb.inline_edit.editing_field(component),
         Some(InlineEditField::Parameters | InlineEditField::Parameter(_))
@@ -989,25 +989,25 @@ pub(super) fn editing_parameter_field(wb: &WorkbenchSession, component: u64) -> 
 }
 
 /// SPICE instance-temperature parameter.
-pub(super) const TEMPERATURE_PARAM: &str = "temp";
+pub(crate) const TEMPERATURE_PARAM: &str = "temp";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct InlineParameterContract {
-    pub(super) key: String,
-    pub(super) label: String,
-    pub(super) hint: String,
-    pub(super) editable: bool,
+pub(crate) struct InlineParameterContract {
+    pub(crate) key: String,
+    pub(crate) label: String,
+    pub(crate) hint: String,
+    pub(crate) editable: bool,
     /// The unit the sheet states the value in.
-    pub(super) unit: Option<String>,
+    pub(crate) unit: Option<String>,
     /// What the sheet says the parameter is, shown on the label's hover.
-    pub(super) description: Option<String>,
+    pub(crate) description: Option<String>,
     /// A value the instance sets for a parameter its compiled module no
     /// longer declares: shown, flagged, and offered for removal, because the
     /// netlister refuses it rather than emitting or dropping it.
-    pub(super) undeclared: bool,
+    pub(crate) undeclared: bool,
 }
 
-pub(super) fn inline_parameter_contract(
+pub(crate) fn inline_parameter_contract(
     design: &DesignState,
     model: &Model,
     component: &Component,
@@ -1213,7 +1213,7 @@ pub(super) fn terminal_row(ui: &mut Ui, pin: &str, net: Option<&str>) -> TreeRow
     .inner
 }
 
-pub(super) fn terminals_section(
+pub(crate) fn terminals_section(
     ui: &mut Ui,
     cx: &mut Cx<'_, DesignFeature>,
     component: &Component,
@@ -1411,7 +1411,7 @@ pub(super) fn operating_point(ui: &mut Ui, cx: &Cx<'_, DesignFeature>, component
 /// and its stress against the safe operating area when a run measured it.
 /// With neither, the section is absent: a clean or unchecked instance is the
 /// normal state, and the sheet's Checks section owns the check itself.
-pub(super) fn component_checks(ui: &mut Ui, cx: &Cx<'_, DesignFeature>, component: &Component) {
+pub(crate) fn component_checks(ui: &mut Ui, cx: &Cx<'_, DesignFeature>, component: &Component) {
     let findings = current_findings(cx.model, |violation| {
         violation_targets_component(violation, component)
     });

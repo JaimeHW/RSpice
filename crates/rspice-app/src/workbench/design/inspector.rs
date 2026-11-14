@@ -6,13 +6,13 @@
 //! itself. Every row is backed by live document state; no panel narrates a
 //! fact the open design cannot supply.
 
-mod component;
-mod model_evidence;
+pub(crate) mod component;
+pub(crate) mod model_evidence;
 /// Visible to the workbench so the library browser's own gate can render this
 /// pane beside it: the two panels state the same counts about the same design,
 /// and a review that only ever opened one of them would not see them disagree.
 pub(crate) mod stimulus;
-pub(in crate::workbench) mod symbol;
+pub(crate) mod symbol;
 
 pub(crate) use component::bind_component_model_from_catalog;
 
@@ -365,7 +365,7 @@ impl Request for CommitSheetSection {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
-pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     cx.state.inspector_yields_to_sheet = false;
     // prepare() ended a stale edit with nothing typed; one with a draft
     // says so and offers to discard it.
@@ -416,15 +416,15 @@ pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
 /// Connectivity for the open sheet as the configured design resolves it: its
 /// nets, and every instance's declared terminals paired with the net each one
 /// binds.
-struct SheetConnectivity {
-    nets: std::sync::Arc<Vec<DesignNet>>,
+pub(crate) struct SheetConnectivity {
+    pub(crate) nets: std::sync::Arc<Vec<DesignNet>>,
     /// Instance ID → declared terminals in symbol order, each with the net
     /// it binds or `None` when the pin is open.
-    terminals: HashMap<u64, Vec<(String, Option<String>)>>,
+    pub(crate) terminals: HashMap<u64, Vec<(String, Option<String>)>>,
     /// Why the design projection could not be built, when it could not.
     /// Present means the two collections above are empty by refusal rather
     /// than because the sheet has nothing on it.
-    unresolved: Option<String>,
+    pub(crate) unresolved: Option<String>,
 }
 
 /// Resolve the open sheet's connectivity from the design projection.
@@ -435,7 +435,7 @@ struct SheetConnectivity {
 /// emits. A version-keyed cache here would be wrong anyway: net identity
 /// depends on instance values and port parameters, which do not advance the
 /// schematic topology version.
-fn sheet_connectivity(model: &Model) -> SheetConnectivity {
+pub(crate) fn sheet_connectivity(model: &Model) -> SheetConnectivity {
     let projection = match model.workspace.design_projection(
         &model.library_manager,
         &model.workspace.content.active_view,
@@ -623,7 +623,7 @@ fn sheet_row(ui: &mut Ui, model: &Model, object_id: u64) {
 
 // =============================================================================
 // Inline instance editing lives in `design/inline_instance.rs`.
-mod inline_instance;
+pub(crate) mod inline_instance;
 use inline_instance::*;
 
 // The sheet inspector, shown with nothing selected, is the sheets feature's;
@@ -746,7 +746,7 @@ fn shape_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
     sheet_row(ui, cx.model, id);
 }
 
-fn probe_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
+pub(crate) fn probe_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
     let Some(probe) = cx
         .model
         .schematic

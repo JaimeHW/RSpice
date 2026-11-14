@@ -12,7 +12,7 @@ use rspice_schematic_editor::symbol_editor::inspector::{self, SymbolInspectorReq
 use rspice_schematic_editor::symbol_editor::interaction::SymbolEditCapabilities;
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 
-pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let ports = active_symbol_ports(cx.model);
     let Ok(document) = cx.model.load_active_symbol_document() else {
         muted_inspector_copy(
@@ -42,7 +42,7 @@ pub(in crate::workbench) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     apply_request(cx, request);
 }
 
-fn apply_request(cx: &mut Cx<'_, DesignFeature>, mut request: SymbolInspectorRequest) {
+pub(crate) fn apply_request(cx: &mut Cx<'_, DesignFeature>, mut request: SymbolInspectorRequest) {
     if request.source != symbol_editor_request_source(cx.model, cx.wb)
         || request.expected_selection != cx.state.symbol.editor.effective_selection()
         || cx.application_modal_open()
@@ -84,4 +84,4 @@ fn apply_request(cx: &mut Cx<'_, DesignFeature>, mut request: SymbolInspectorReq
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

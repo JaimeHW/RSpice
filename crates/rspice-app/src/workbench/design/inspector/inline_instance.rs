@@ -13,9 +13,9 @@ use rspice_design::schematic::bom::BomField;
 use rspice_vocabulary::property::{deck_number_spelling, list_elements};
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
-pub(super) fn field_value(component: &Component, field: &InlineEditField) -> String {
+pub(crate) fn field_value(component: &Component, field: &InlineEditField) -> String {
     match field {
         InlineEditField::Instance => component.name.clone(),
         InlineEditField::Value => component.value.clone(),
@@ -326,7 +326,7 @@ fn edited_component(
     Ok(component)
 }
 /// Finish the previous field before opening a draft against the live component.
-pub(super) fn begin_edit(
+pub(crate) fn begin_edit(
     cx: &mut Cx<'_, DesignFeature>,
     component_id: u64,
     field: InlineEditField,
@@ -365,7 +365,7 @@ pub(super) fn begin_edit(
     true
 }
 
-pub(super) fn update_edit(cx: &mut Cx<'_, DesignFeature>, text: String) {
+pub(crate) fn update_edit(cx: &mut Cx<'_, DesignFeature>, text: String) {
     let Some(session) = cx.wb.inline_edit.session() else {
         return;
     };
@@ -400,7 +400,7 @@ pub(super) fn edit_description(field: &InlineEditField) -> String {
     }
 }
 
-pub(super) fn component_tuning_action_block_reason(
+pub(crate) fn component_tuning_action_block_reason(
     cx: &Cx<'_, DesignFeature>,
     component: &Component,
 ) -> Option<String> {
@@ -734,7 +734,7 @@ pub(super) fn off_sheet_declaration(model: &Model, name: &str) -> Option<OffShee
     })
 }
 
-pub(super) fn net_panel(
+pub(crate) fn net_panel(
     ui: &mut Ui,
     cx: &mut Cx<'_, DesignFeature>,
     name: &str,

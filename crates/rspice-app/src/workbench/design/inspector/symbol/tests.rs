@@ -9,14 +9,14 @@ use crate::workbench::RSpiceApp;
 use rspice_ui_kit::panels::panel_body;
 use std::collections::HashMap;
 
-struct Editor {
+pub(crate) struct Editor {
     ctx: egui::Context,
-    app: RSpiceApp,
+    pub(crate) app: RSpiceApp,
     controls: HashMap<String, egui::Rect>,
 }
 
 impl Editor {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -56,7 +56,7 @@ impl Editor {
         }
     }
 
-    fn frame(&mut self, events: Vec<egui::Event>) -> SymbolInspectorRequest {
+    pub(crate) fn frame(&mut self, events: Vec<egui::Event>) -> SymbolInspectorRequest {
         let source = crate::workbench::app::symbol_editor_request_source(
             &self.app.state.model,
             &self.app.state.workbench,
@@ -431,46 +431,4 @@ fn unfinished_symbol_field_does_not_follow_a_different_selection_or_view() {
             .unwrap(),
         after
     );
-}
-
-#[test]
-fn queued_symbol_inspector_edits_revalidate_source_selection_and_authority() {
-    let mut editor = Editor::new();
-    let before = editor
-        .app
-        .state
-        .model
-        .load_active_symbol_document()
-        .unwrap();
-    for changed in 0..4 {
-        editor.app.state.design.symbol.editor.select_shape(0);
-        let mut request = editor.frame(Vec::new());
-        request.undo_before.push(before.clone());
-        request.document.origin = Point::new(20, 30);
-        request.changed = true;
-        match changed {
-            0 => editor.app.state.design.symbol.editor.select_shape(1),
-            1 => editor.app.state.model.active_schematic_epoch += 1,
-            2 => {
-                editor
-                    .app
-                    .state
-                    .model
-                    .library_manager
-                    .add_library(Library::new("other"));
-            }
-            _ => editor.app.state.model.schematic.session.read_only = true,
-        }
-        apply_request(&mut editor.app.design_cx(), request);
-        assert_eq!(
-            editor
-                .app
-                .state
-                .model
-                .load_active_symbol_document()
-                .unwrap(),
-            before
-        );
-        assert!(!editor.app.state.can_undo_active_symbol_document());
-    }
 }

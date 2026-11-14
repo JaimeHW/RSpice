@@ -26,7 +26,7 @@ pub(crate) use symbol::{
 };
 pub(crate) mod veriloga_placement;
 pub(crate) mod veriloga_symbol;
-pub(in crate::workbench) mod workspace;
+pub(crate) mod workspace;
 
 use egui::{Context, Popup};
 

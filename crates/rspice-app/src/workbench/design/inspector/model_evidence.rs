@@ -9,12 +9,12 @@ use crate::workbench::app_state::Model;
 /// The model an instance runs, and what is wrong with that binding when
 /// something is. A binding that resolves says nothing beyond the model's name.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ComponentModelEvidence {
+pub(crate) struct ComponentModelEvidence {
     /// The model card or module the deck gives the instance. `None` for a
     /// device that takes no model, or whose model the netlister writes itself.
-    pub(super) model: Option<String>,
+    pub(crate) model: Option<String>,
     /// The binding's problem, worded as the problem.
-    pub(super) problem: Option<(Problem, String)>,
+    pub(crate) problem: Option<(Problem, String)>,
 }
 
 impl ComponentModelEvidence {
@@ -74,7 +74,7 @@ fn project_module_evidence(
     })
 }
 
-pub(super) fn component_model_evidence(
+pub(crate) fn component_model_evidence(
     model: &Model,
     component: &Component,
 ) -> ComponentModelEvidence {

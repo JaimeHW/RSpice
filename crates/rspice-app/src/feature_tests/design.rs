@@ -2,8 +2,12 @@
 //! draws, opened as its command opens it and drawn by the real frame through
 //! the feature's own context.
 
+mod inline_instance;
+mod inspector;
+mod inspector_veriloga_modules;
 mod stimulus_browser;
 mod stimulus_surface;
+mod symbol_inspector;
 
 use egui::accesskit::{Node, Role};
 use egui::{Context, Rect, pos2, vec2};
