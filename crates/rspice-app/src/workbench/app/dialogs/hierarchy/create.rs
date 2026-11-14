@@ -347,7 +347,7 @@ fn validate_draft(
     Ok(plan)
 }
 
-pub(in crate::workbench) fn commit_create_hierarchy(
+pub(crate) fn commit_create_hierarchy(
     dialog: &mut CreateHierarchyDialogState,
     symbol: &mut SymbolUiState,
     model: &mut Model,

@@ -180,7 +180,7 @@ pub(crate) enum DescendHierarchy {
 
 /// Check the draft against the model as it stands: the choice to carry out,
 /// or why it is refused.
-fn descend_request(
+pub(crate) fn descend_request(
     draft: &DescendHierarchyDialogState,
     model: &Model,
 ) -> Result<DescendHierarchy, String> {
