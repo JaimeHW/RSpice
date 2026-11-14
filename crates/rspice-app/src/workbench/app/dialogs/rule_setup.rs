@@ -42,7 +42,7 @@ const NEVER_BLOCKS: &str = "This rule is about the project's libraries and never
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RuleSetupDialogState {
     pub(crate) open: bool,
-    draft: DesignRuleDeck,
+    pub(crate) draft: DesignRuleDeck,
     refusal: Option<String>,
 }
 
@@ -64,7 +64,7 @@ pub(crate) fn open_rule_setup(
 }
 
 /// The issue that keeps the whole stored deck from being read, if any.
-fn unread_issue(deck: &DesignRuleDeck) -> Option<DeckIssue> {
+pub(crate) fn unread_issue(deck: &DesignRuleDeck) -> Option<DeckIssue> {
     deck.issues().into_iter().find(|issue| {
         matches!(
             issue,
@@ -133,7 +133,7 @@ pub(crate) fn render_rule_setup_dialog(
 /// Make the draft the project's deck. The reports produced under the old one
 /// go stale through their digests, and preflight authority is dropped,
 /// because what blocks a run has changed.
-fn apply_rule_setup(
+pub(crate) fn apply_rule_setup(
     rule_setup: &mut RuleSetupDialogState,
     review_markers: SchematicReviewMarkerVisibility,
     model: &mut Model,
@@ -302,62 +302,6 @@ fn refused_options(rule: DrcViolationType) -> Vec<(usize, &'static str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::app::RSpiceApp;
-    use crate::workbench::app_state::AppState;
-
-    /// Apply the draft as the dialog's Apply does, over the whole state.
-    fn apply_rule_setup(state: &mut AppState) {
-        let review_markers = state.design.schematic_visibility.review_markers;
-        super::apply_rule_setup(
-            &mut state.design.rule_setup,
-            review_markers,
-            &mut state.model,
-            &mut state.runs,
-        );
-    }
-
-    #[test]
-    fn the_dialog_opens_on_the_projects_deck_and_applies_its_draft() {
-        let mut app = RSpiceApp::test_instance();
-        app.state
-            .model
-            .workspace
-            .content
-            .design_rules
-            .set_severity(DrcViolationType::DanglingWire, DrcSeverity::Error)
-            .expect("a dangling wire may be promoted");
-        open_rule_setup(
-            &mut app.state.design.rule_setup,
-            &app.state.model,
-            &mut app.state.workbench,
-            &app.state.platform,
-        );
-        assert!(app.state.design.rule_setup.open);
-        assert_eq!(
-            app.state.design.rule_setup.draft,
-            *app.state.model.workspace.content.design_rules
-        );
-
-        app.state
-            .design
-            .rule_setup
-            .draft
-            .set_severity(DrcViolationType::FloatingNode, DrcSeverity::Info)
-            .expect("a floating node may be demoted");
-        app.state.model.workspace.content.project_metadata_dirty = false;
-        apply_rule_setup(&mut app.state);
-        assert!(!app.state.design.rule_setup.open);
-        assert!(app.state.model.workspace.content.project_metadata_dirty);
-        assert_eq!(
-            app.state
-                .model
-                .workspace
-                .content
-                .design_rules
-                .severity(DrcViolationType::FloatingNode),
-            Some(DrcSeverity::Info)
-        );
-    }
 
     /// A severity below a rule's floor is offered, so the reader sees the
     /// whole range, but cannot be picked, and says why.
@@ -387,22 +331,5 @@ mod tests {
             "Info \u{00b7} Error if unwritten"
         );
         assert_eq!(floor_cell(DrcViolationType::DuplicateName), "Error");
-    }
-
-    #[test]
-    fn a_deck_this_build_cannot_read_opens_for_inspection_only() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.model.workspace.content.design_rules =
-            serde_json::from_str(r#"{"schema_version":9}"#).expect("a stored deck always reads");
-        open_rule_setup(
-            &mut app.state.design.rule_setup,
-            &app.state.model,
-            &mut app.state.workbench,
-            &app.state.platform,
-        );
-        assert!(matches!(
-            unread_issue(&app.state.design.rule_setup.draft),
-            Some(DeckIssue::UnsupportedSchema { version: 9 })
-        ));
     }
 }

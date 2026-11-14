@@ -3,14 +3,20 @@
 //! the feature's own context.
 
 mod bulk_edit;
+mod bus_tap_placement_drawn;
 mod canvas;
 mod context_menu;
+mod design_note_placement_drawn;
 mod design_review_comments;
 mod design_surface_drawn;
 mod drag_work;
+mod engineering_table_drawn;
 mod find_replace;
 mod gestures;
 mod gestures_drawn;
+mod grid_snap_routing_drawn;
+mod hierarchy_create_drawn;
+mod hierarchy_descend_drawn;
 mod import_workflow;
 mod inline_instance;
 mod inline_instance_drawn;
@@ -26,14 +32,19 @@ mod navigator_drawn;
 mod navigator_rails;
 mod navigator_shelf;
 mod navigator_shelf_search;
+mod net_label_placement_drawn;
 mod netlist_first;
 mod netlist_first_drawn;
+mod object_properties_drawn;
 mod raster_review;
 mod rename;
 mod rename_transactions;
+mod replace_instance_drawn;
 mod rule_setup;
+mod rule_setup_drawn;
 mod scene;
 mod selection_drag;
+mod selection_rename_drawn;
 mod sheet_membership;
 mod shelf;
 mod stimulus_browser;
@@ -47,6 +58,7 @@ mod symbol_in_place;
 mod symbol_inspector;
 mod symbol_inspector_drawn;
 mod touch_flow;
+mod visibility_options_drawn;
 mod wiring;
 
 use egui::accesskit::{Node, Role};

@@ -28,18 +28,18 @@ pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_presets
 pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_preview;
 #[cfg(test)]
 pub(crate) use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_support;
-pub(in crate::workbench) mod engineering_table;
+pub(crate) mod engineering_table;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::fact_grid;
 pub(crate) mod find_replace;
-pub(in crate::workbench) mod grid_snap_routing;
+pub(crate) mod grid_snap_routing;
 pub(crate) use rspice_app_hardcopy::workbench::app::dialogs::hardcopy;
 pub(in crate::workbench) mod help;
-pub(in crate::workbench) mod hierarchy;
+pub(crate) mod hierarchy;
 pub(crate) mod library;
 #[cfg(test)]
 pub(crate) use rspice_app_cloud::workbench::app::dialogs::license;
-pub(in crate::workbench) mod object_properties;
-pub(in crate::workbench) mod placement;
+pub(crate) mod object_properties;
+pub(crate) mod placement;
 pub(crate) use rspice_app_project::workbench::app::dialogs::project;
 #[cfg(test)]
 pub(crate) use rspice_app_settings::workbench::app::dialogs::preferences;
@@ -48,7 +48,7 @@ pub(in crate::workbench) use rspice_app_simulate::workbench::app::dialogs::plan_
 pub(in crate::workbench) mod property_dialog;
 #[cfg(test)]
 pub(crate) use rspice_app_cloud::workbench::app::dialogs::publish_web;
-pub(in crate::workbench) mod replace_instance;
+pub(crate) mod replace_instance;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::review_primitives;
 pub(crate) mod rule_setup;
 pub(crate) mod selection;
@@ -60,5 +60,5 @@ pub(in crate::workbench) mod state;
 pub(in crate::workbench) mod stimulus_link;
 pub(crate) mod symbol_definition;
 pub(in crate::workbench) use rspice_app_code::workbench::app::dialogs::veriloga_build_settings;
-pub(in crate::workbench) mod visibility_options;
+pub(crate) mod visibility_options;
 pub(crate) use rspice_app_workbench::workbench::app::dialogs::window_session;
