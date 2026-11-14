@@ -373,30 +373,32 @@ fn apply_commit(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::workbench::app::RSpiceApp;
-    use crate::workbench::app_state::AppState;
 
     /// Draw the entry as its dialog step does.
-    pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
-        render_net_label_dialog(
-            &mut app.state.design.net_label_placement,
-            &mut app.state.model,
-            &mut app.state.workbench,
-            ctx,
-        );
+    pub(crate) fn render(
+        dialog: &mut NetLabelPlacementDialogState,
+        model: &mut Model,
+        workbench: &mut WorkbenchSession,
+        ctx: &Context,
+    ) {
+        render_net_label_dialog(dialog, model, workbench, ctx);
     }
 
     /// The draft's validation, over what the entry reads.
-    pub(crate) fn validate_draft(state: &AppState) -> DraftValidation {
-        super::validate_draft(&state.design.net_label_placement, &state.model)
+    pub(crate) fn validate_draft(
+        dialog: &NetLabelPlacementDialogState,
+        model: &Model,
+    ) -> DraftValidation {
+        super::validate_draft(dialog, model)
     }
 
     /// The entry's publication, over what it writes.
     pub(crate) fn apply_commit(
-        state: &mut AppState,
+        model: &mut Model,
+        workbench: &mut WorkbenchSession,
         commit: NetLabelPlacementCommit,
     ) -> Result<u64, String> {
-        super::apply_commit(&mut state.model, &mut state.workbench, commit)
+        super::apply_commit(model, workbench, commit)
     }
 
     pub(crate) fn key_event(key: egui::Key) -> egui::Event {

@@ -6,14 +6,33 @@ use crate::state::NetLabelKind;
 use crate::state::Point;
 use crate::state::Tool;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::placement::net_label::tests::{
-    apply_commit, key_event, render, validate_draft,
-};
+use crate::workbench::app::dialogs::placement::net_label::tests::{self as entry, key_event};
 use crate::workbench::app::dialogs::placement::net_label::*;
 use crate::workbench::app::open_net_label_placement_in;
 use crate::workbench::app::place_sequenced_net_label_in;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+
+/// Draw the entry as its dialog step does.
+fn render(app: &mut RSpiceApp, ctx: &Context) {
+    let state = &mut app.state;
+    entry::render(
+        &mut state.design.net_label_placement,
+        &mut state.model,
+        &mut state.workbench,
+        ctx,
+    );
+}
+
+/// The draft's validation, over what the entry reads.
+fn validate_draft(state: &AppState) -> DraftValidation {
+    entry::validate_draft(&state.design.net_label_placement, &state.model)
+}
+
+/// The entry's publication, over what it writes.
+fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result<u64, String> {
+    entry::apply_commit(&mut state.model, &mut state.workbench, commit)
+}
 
 fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
     egui::RawInput {
