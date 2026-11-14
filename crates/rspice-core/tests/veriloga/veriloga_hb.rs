@@ -224,53 +224,64 @@ endmodule
 
 /// Every operator harmonic balance cannot carry is refused before solving,
 /// by its own name, with the instance and module.
+/// Each operator harmonic balance cannot carry is refused by name, with the
+/// line the module wrote it on when the compiler located it: the analog body
+/// is the sixth line of each module file.
 #[test]
 fn harmonic_balance_refuses_each_operator_family_by_name() {
-    for (operator, body) in [
+    for (operator, body, located) in [
         (
             "transition",
             "I(out) <+ 1.0e-3 * transition(V(in) > 0.5 ? 1.0 : 0.0, 0, 1n);",
+            true,
         ),
-        ("slew", "I(out) <+ 1.0e-3 * slew(V(in), 1.0e9);"),
+        ("slew", "I(out) <+ 1.0e-3 * slew(V(in), 1.0e9);", true),
         (
             "cross",
             "I(out) <+ V(out) / 1.0e3; @(cross(V(in) - 0.5, 1)) $discontinuity(0);",
+            true,
         ),
         (
             "above",
             "I(out) <+ V(out) / 1.0e3; @(above(V(in) - 0.5)) $discontinuity(0);",
+            true,
         ),
         (
             "timer",
             "I(out) <+ V(out) / 1.0e3; @(timer(0, 1u)) $discontinuity(0);",
+            true,
         ),
         (
             "last_crossing",
             "I(out) <+ 1.0e3 * last_crossing(V(in) - 0.5, 1);",
+            false,
         ),
-        ("idtmod", "I(out) <+ 1.0e-3 * idtmod(V(in), 0, 1.0);"),
+        ("idtmod", "I(out) <+ 1.0e-3 * idtmod(V(in), 0, 1.0);", true),
         (
-            "zi_*",
+            "zi_nd",
             "I(out) <+ 1.0e-3 * zi_nd(V(in), '{1.0}, '{1.0, -0.5}, 1u);",
+            true,
         ),
-        ("idt", "I(out) <+ 1.0e-3 * idt(V(in), 0);"),
+        // Nothing fixes the DC term of a filter with a pole at the origin.
         (
-            "laplace_*",
-            "I(out) <+ 1.0e-3 * laplace_nd(V(in), '{1.0}, '{1.0, 1.0e-6});",
+            "laplace_nd",
+            "I(out) <+ 1.0e-3 * laplace_nd(V(in), '{1.0}, '{0.0, 1.0e-6});",
+            true,
         ),
-        ("absdelay", "I(out) <+ 1.0e-3 * absdelay(V(in), 1n);"),
         (
             "$abstime",
             "I(out) <+ 1.0e-3 * sin(6.283185307e6 * $abstime);",
+            false,
         ),
-        ("ddt", "I(out) <+ 1.0e-21 * ddt(ddt(V(in)));"),
+        ("ddt", "I(out) <+ 1.0e-21 * ddt(ddt(V(in)));", false),
     ] {
         let module = "va_hb_refused";
+        let name = format!(
+            "refused_{}",
+            operator.trim_matches(|c: char| !c.is_alphanumeric())
+        );
         let model = write_model(
-            &format!(
-                "refused_{}",
-                operator.trim_matches(|c: char| !c.is_alphanumeric())
-            ),
+            &name,
             &format!(
                 "`include \"disciplines.vams\"\n\
                  module {module}(in, out);\n\
@@ -295,7 +306,7 @@ fn harmonic_balance_refuses_each_operator_family_by_name() {
             .run_hb(&netlist, HbConfig::new(F0).with_harmonics(2))
             .map(drop)
             .expect_err("HB must refuse the operator");
-        let _ = std::fs::remove_file(model);
+        let _ = std::fs::remove_file(&model);
         let SimulationError::UnsupportedCapability(refusal) = &error else {
             panic!("{operator}: expected a capability refusal, got {error}");
         };
@@ -323,6 +334,234 @@ fn harmonic_balance_refuses_each_operator_family_by_name() {
                 && detail.contains(&format!("`{operator}`")),
             "{operator}: the refusal must name the analysis and the operator: {detail}"
         );
+        if located {
+            let file = model.rsplit('/').next().expect("file name");
+            assert!(
+                detail.contains(&format!("`{operator}` at {file}:6")),
+                "{operator}: the refusal must name the source line: {detail}"
+            );
+        }
+    }
+}
+
+/// A module with one operator site between `in` and `out`, loaded by a
+/// 1 kΩ resistor: the module drives `-1 mA` per unit of `expression`, so
+/// `V(out)` is the expression.
+fn operator_deck(test: &str, drive: &str, expression: &str) -> (String, String) {
+    let module = format!("va_hb_{test}");
+    let model = write_model(
+        test,
+        &format!(
+            "`include \"disciplines.vams\"\n\
+             module {module}(in, out);\n\
+             inout in, out;\n\
+             electrical in, out;\n\
+             analog I(out) <+ -1.0e-3 * {expression};\n\
+             endmodule\n"
+        ),
+    );
+    let deck = format!(
+        "* harmonic balance carries {test}\n\
+         V1 in 0 DC 0 {drive}\n\
+         R1 out 0 1k\n\
+         XVA in out {module}\n\
+         .va \"{model}\" {module}\n\
+         .end\n"
+    );
+    (model, deck)
+}
+
+/// Each harmonic of `V(out)` against its closed form, to 1e-9 of the
+/// largest expected coefficient (a missing entry is zero).
+fn assert_spectrum(case: &str, actual: &[Complex64], expected: &[Complex64]) {
+    let scale = expected
+        .iter()
+        .map(|value| value.norm())
+        .fold(0.0, f64::max);
+    for (k, value) in actual.iter().enumerate() {
+        let want = expected.get(k).copied().unwrap_or_default();
+        assert!(
+            (value - want).norm() <= 1.0e-9 * scale,
+            "{case}: harmonic {k} is {value}, closed form {want}"
+        );
+    }
+}
+
+/// `idt(V(in), ic)` of `sin(ωt)` is `-cos(ωt)/ω` at the fundamental, with
+/// its initial condition as the DC term, to 1e-9.
+#[test]
+fn an_idt_with_an_initial_condition_integrates_one_tone() {
+    let (model, deck) = operator_deck("integrator", "SIN(0 1 1meg)", "1.0e6 * idt(V(in), 2.5e-7)");
+    let result = run_hb(&deck, 4);
+    let _ = std::fs::remove_file(model);
+    assert!(result.converged);
+    let omega = std::f64::consts::TAU * F0;
+    assert_spectrum(
+        "idt",
+        &node(&result, "out"),
+        &[
+            Complex64::new(0.25, 0.0),
+            Complex64::new(-1.0e6 / omega, 0.0),
+        ],
+    );
+}
+
+/// The transfer of a rational `laplace_nd`, as its coefficients give it.
+fn rational(numerator: &[f64], denominator: &[f64], omega: f64) -> Complex64 {
+    let s = Complex64::new(0.0, omega);
+    let polynomial = |coefficients: &[f64]| {
+        coefficients
+            .iter()
+            .rev()
+            .fold(Complex64::default(), |sum, &c| sum * s + c)
+    };
+    polynomial(numerator) / polynomial(denominator)
+}
+
+fn literal(coefficients: &[f64]) -> String {
+    let terms = coefficients
+        .iter()
+        .map(|c| format!("{c:e}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("'{{{terms}}}")
+}
+
+/// A first-order `laplace_nd` low-pass of one tone, and a second-order
+/// band-pass of `V(in)²` (DC and the second harmonic), give H(jkω) times
+/// each harmonic of their input, to 1e-9.
+#[test]
+fn rational_laplace_filters_match_their_transfer_at_each_harmonic() {
+    let omega = std::f64::consts::TAU * F0;
+    let (numerator, denominator) = ([1.0], [1.0, 1.0e-7]);
+    let (model, deck) = operator_deck(
+        "laplace_low_pass",
+        "SIN(0 1 1meg)",
+        &format!(
+            "laplace_nd(V(in), {}, {})",
+            literal(&numerator),
+            literal(&denominator)
+        ),
+    );
+    let result = run_hb(&deck, 4);
+    let _ = std::fs::remove_file(model);
+    assert!(result.converged);
+    assert_spectrum(
+        "low-pass",
+        &node(&result, "out"),
+        &[
+            Complex64::default(),
+            rational(&numerator, &denominator, omega) * Complex64::new(0.0, -1.0),
+        ],
+    );
+
+    // ω0 = 2π·1.5 MHz, Q = 2, normalized: H(s) = (s/(ω0·Q)) / (1 + s/(ω0·Q) + s²/ω0²).
+    let w0 = std::f64::consts::TAU * 1.5e6;
+    let (numerator, denominator) = (
+        [0.0, 1.0 / (w0 * 2.0)],
+        [1.0, 1.0 / (w0 * 2.0), 1.0 / (w0 * w0)],
+    );
+    let (model, deck) = operator_deck(
+        "laplace_band_pass",
+        "SIN(0 1 1meg)",
+        &format!(
+            "laplace_nd(V(in) * V(in), {}, {})",
+            literal(&numerator),
+            literal(&denominator)
+        ),
+    );
+    let result = run_hb(&deck, 4);
+    let _ = std::fs::remove_file(model);
+    assert!(result.converged);
+    // sin²(ωt) = 1/2 - cos(2ωt)/2.
+    assert_spectrum(
+        "band-pass",
+        &node(&result, "out"),
+        &[
+            rational(&numerator, &denominator, 0.0) * 0.5,
+            Complex64::default(),
+            rational(&numerator, &denominator, 2.0 * omega) * -0.5,
+        ],
+    );
+}
+
+/// `absdelay` by τ multiplies harmonic k of its input by e^{-jkωτ}: the input
+/// `V(in) + V(in)²` carries DC, the fundamental and the second harmonic.
+#[test]
+fn an_absdelay_delays_each_harmonic_by_its_phase() {
+    let tau = 2.0e-7;
+    let (model, deck) = operator_deck(
+        "delay",
+        "SIN(0 1 1meg)",
+        &format!("absdelay(V(in) + V(in) * V(in), {tau:e})"),
+    );
+    let result = run_hb(&deck, 4);
+    let _ = std::fs::remove_file(model);
+    assert!(result.converged);
+    let omega = std::f64::consts::TAU * F0;
+    let delayed = |k: f64, x: Complex64| x * Complex64::from_polar(1.0, -k * omega * tau);
+    assert_spectrum(
+        "absdelay",
+        &node(&result, "out"),
+        &[
+            delayed(0.0, Complex64::new(0.5, 0.0)),
+            delayed(1.0, Complex64::new(0.0, -1.0)),
+            delayed(2.0, Complex64::new(-0.5, 0.0)),
+        ],
+    );
+}
+
+/// A `laplace_nd` low-pass behind a diode clipper gives the harmonics of its
+/// native twin, a buffered RC with the same time constant, at every node: the
+/// clipped waveform puts every harmonic through the filter. The native path
+/// is the reference, to 1e-6 of the largest coefficient as for the device
+/// twins.
+#[test]
+fn a_veriloga_laplace_low_pass_gives_its_native_rc_twins_harmonics() {
+    let module = "va_hb_laplace_twin";
+    let model = write_model(
+        "laplace_twin",
+        &format!(
+            "`include \"disciplines.vams\"\n\
+             module {module}(in, out);\n\
+             inout in, out;\n\
+             electrical in, out;\n\
+             analog I(out) <+ -1.0e-3 * laplace_nd(V(in), '{{1.0}}, '{{1.0, 1.0e-7}});\n\
+             endmodule\n"
+        ),
+    );
+    let deck = |filter: &str| {
+        format!(
+            "* clipped tone through a low-pass\n\
+             V1 in 0 DC 0.3 SIN(0.3 0.8 1meg)\n\
+             R1 in a 1k\n\
+             D1 a 0 dmod\n\
+             {filter}\n\
+             .model dmod D IS=1e-14 N=1\n\
+             .va \"{model}\" {module}\n\
+             .end\n"
+        )
+    };
+    let reference = run_hb(&deck("E1 b 0 a 0 1\nR2 b out 1k\nC2 out 0 100p"), 12);
+    let twin = run_hb(&deck(&format!("XVA a out {module}\nR2 out 0 1k")), 12);
+    let _ = std::fs::remove_file(&model);
+    assert!(reference.converged && twin.converged);
+    let scale = ["in", "a", "out"]
+        .iter()
+        .flat_map(|name| node(&reference, name))
+        .map(|value| value.norm())
+        .fold(0.0, f64::max);
+    for name in ["a", "out"] {
+        for (k, (twin_value, native_value)) in node(&twin, name)
+            .iter()
+            .zip(node(&reference, name))
+            .enumerate()
+        {
+            assert!(
+                (twin_value - native_value).norm() <= 1.0e-6 * scale,
+                "V({name}) harmonic {k}: {twin_value} against native {native_value}"
+            );
+        }
     }
 }
 

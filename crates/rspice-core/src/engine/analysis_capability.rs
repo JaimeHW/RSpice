@@ -372,15 +372,20 @@ const HB_VERILOGA_EVIDENCE: &[&str] = &[
     "tests/veriloga/veriloga_hb.rs::a_veriloga_rc_low_pass_matches_its_transfer_function",
     "tests/veriloga/veriloga_hb.rs::a_veriloga_varactor_draws_its_closed_form_harmonics",
     "tests/veriloga/veriloga_hb.rs::harmonic_balance_refuses_each_operator_family_by_name",
+    "tests/veriloga/veriloga_hb.rs::an_idt_with_an_initial_condition_integrates_one_tone",
+    "tests/veriloga/veriloga_hb.rs::rational_laplace_filters_match_their_transfer_at_each_harmonic",
+    "tests/veriloga/veriloga_hb.rs::an_absdelay_delays_each_harmonic_by_its_phase",
+    "tests/veriloga/veriloga_hb.rs::a_veriloga_laplace_low_pass_gives_its_native_rc_twins_harmonics",
 ];
 
 /// Harmonic balance takes a runtime Verilog-A instance whose residual is
-/// memoryless equations plus the derivative of a charge it contributes.
+/// memoryless equations plus the derivative of a charge it contributes, and
+/// whose other operators with state have an exact transfer at each harmonic.
 const fn hb_admissible_veriloga() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::HbAdmissibleVerilogA,
         token: HB_VERILOGA_OPERATOR,
-        condition: "every Verilog-A module whose analog body is memoryless equations and `ddt` of the charges it contributes, F(x) + dQ(x)/dt, with no transition, slew, cross, above, timer, last_crossing, idtmod, zi_*, idt, laplace_*, absdelay, $abstime or variable kept between time points",
+        condition: "every Verilog-A module whose analog body is memoryless equations, `ddt` of the charges it contributes (F(x) + dQ(x)/dt), `idt` with an initial condition, which fixes its DC output, rational `laplace_*` filters with no pole at the origin, and `absdelay` by a fixed delay, with no transition, slew, cross, above, timer, last_crossing, idtmod, zi_*, $abstime or variable kept between time points",
         evidence: HB_VERILOGA_EVIDENCE,
     }
 }
@@ -691,7 +696,9 @@ fn rational_descriptor_refusal(
 #[cfg(feature = "veriloga")]
 fn hb_operator_reason(operator: &str) -> Option<&'static str> {
     Some(match operator {
-        "ddt" => return None,
+        // `ddt` becomes jω; `idt`, `laplace_*` and `absdelay` become
+        // unknowns of their own tied by 1/(jω), H(jω) and e^(-jωτ).
+        "ddt" | "idt" | "laplace_*" | "absdelay" => return None,
         "transition" | "slew" | "cross" | "last_crossing" | "above" | "timer" => {
             "which schedules events in time that a harmonic-balance spectrum does not carry; \
              transient analysis runs it"
@@ -710,8 +717,52 @@ fn hb_operator_reason(operator: &str) -> Option<&'static str> {
     })
 }
 
+/// An operator as a refusal names it: what the module wrote and where, when
+/// the compiler located it.
+#[cfg(feature = "veriloga")]
+fn written_origin(origin: &rspice_veriloga::codegen::AnalogOperatorOrigin) -> String {
+    match origin.location() {
+        Some(location) => format!("`{}` at {location}", origin.operator),
+        None => format!("`{}`", origin.operator),
+    }
+}
+
+/// The first written site of an operator from the inventory, or its
+/// inventory name when no site was located.
+#[cfg(feature = "veriloga")]
+fn written_operator(device: &crate::device::veriloga::VerilogADevice, operator: &str) -> String {
+    let family = operator.strip_suffix("_*").unwrap_or(operator);
+    device
+        .analog_operator_origins()
+        .iter()
+        .find(|origin| origin.family == family)
+        .map_or_else(|| format!("`{operator}`"), written_origin)
+}
+
+/// The first `laplace_*` site whose filter has a pole at the origin, as a
+/// refusal names it.
+#[cfg(feature = "veriloga")]
+fn laplace_pole_at_origin(device: &crate::device::veriloga::VerilogADevice) -> Option<String> {
+    use rspice_veriloga::vm::PeriodicOperatorKind;
+    let site = device
+        .periodic_operator_sites()
+        .into_iter()
+        .filter(|site| site.kind == PeriodicOperatorKind::Laplace)
+        .find(|site| {
+            device
+                .laplace_filter(site.slot)
+                .is_some_and(|filter| filter.transfer_at(0.0).is_err())
+        })?;
+    Some(
+        device
+            .analog_operator_origin("laplace", site.slot)
+            .map_or_else(|| "`laplace_*`".to_owned(), written_origin),
+    )
+}
+
 /// Harmonic balance refuses a runtime Verilog-A instance it cannot evaluate
-/// as `F(x) + dQ(x)/dt`, naming the first operator in the way.
+/// as `F(x) + dQ(x)/dt` plus operators with an exact harmonic transfer,
+/// naming the first operator in the way and where the module wrote it.
 ///
 /// The residual is sampled through the module's own static and companion
 /// stamps, so it needs every `ddt` to be the derivative of a charge the
@@ -748,7 +799,12 @@ fn hb_veriloga_operator_refusal(
             .iter()
             .find_map(|&operator| hb_operator_reason(operator).map(|why| (operator, why)))
         {
-            format!("it uses `{operator}`, {why}")
+            format!("it uses {}, {why}", written_operator(device, operator))
+        } else if let Some(written) = laplace_pole_at_origin(device) {
+            format!(
+                "it uses {written}, whose transfer has a pole at the origin, so its DC output \
+                 is undefined"
+            )
         } else if inventory.contains(&"ddt") && !device.one_step_dae_split_safe() {
             "it uses `ddt` on something other than a charge it contributes (a nested \
              derivative, or one scaled by a varying quantity), so its residual is not \

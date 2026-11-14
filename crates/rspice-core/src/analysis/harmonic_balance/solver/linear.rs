@@ -209,6 +209,29 @@ impl ExactPeriodicNetwork {
                     }
                 }
             }
+            #[cfg(feature = "veriloga")]
+            Self::VerilogAOperator {
+                name,
+                input,
+                output,
+                transfer,
+            } => {
+                if name.trim().is_empty() || input == output {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "periodic Verilog-A operator '{name}' has a malformed coordinate pair"
+                    )));
+                }
+                add(*output, *output, Complex64::new(constant, 0.0))?;
+                if let Some(coefficient) = operator_coefficient(transfer, omega, difference)
+                    .map_err(|reason| {
+                        HbError::InvalidCircuit(format!(
+                            "periodic Verilog-A operator '{name}' {reason}"
+                        ))
+                    })?
+                {
+                    add(*output, *input, -coefficient)?;
+                }
+            }
             Self::LosslessCpl {
                 name,
                 near_nodes,
@@ -332,6 +355,39 @@ fn complex_exprel(z: Complex64) -> Complex64 {
         z.re.exp() * z.im.sin(),
     );
     expm1 / z
+}
+
+/// The transfer `T(jω)` of a Verilog-A operator, or its divided difference
+/// `(T(j(ω + δ)) - T(jω)) / (jδ)`; `None` where it couples nothing, which is
+/// an `idt` at DC, whose output its initial condition fixes instead.
+#[cfg(feature = "veriloga")]
+fn operator_coefficient(
+    transfer: &super::veriloga::HbOperatorTransfer,
+    omega: Value,
+    difference: Option<Value>,
+) -> Result<Option<Complex64>, String> {
+    use super::veriloga::HbOperatorTransfer as Transfer;
+    let complex = |(re, im): (Value, Value)| Complex64::new(re, im);
+    Ok(Some(match transfer {
+        Transfer::Integral => match difference {
+            None if omega == 0.0 => return Ok(None),
+            None => Complex64::new(0.0, -omega.recip()),
+            Some(delta) => {
+                let other = omega + delta;
+                if omega == 0.0 || other == 0.0 || omega.signum() != other.signum() {
+                    return Err("cannot take a frequency difference across its DC row".into());
+                }
+                Complex64::new((omega * other).recip(), 0.0)
+            }
+        },
+        Transfer::Laplace(filter) => match difference {
+            None => filter.transfer_at(omega),
+            Some(delta) => filter.transfer_divided_difference(omega, omega + delta),
+        }
+        .map(complex)
+        .map_err(|error| format!("has no transfer at omega={omega}: {error}"))?,
+        Transfer::Delay(delay) => wave_coefficient(omega, *delay, difference),
+    }))
 }
 
 fn wave_coefficient(omega: Value, delay: Value, difference: Option<Value>) -> Complex64 {

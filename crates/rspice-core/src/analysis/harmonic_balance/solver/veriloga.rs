@@ -26,13 +26,36 @@
 //! solver asks. `h = 1/ω₀` keeps `(Q - Q_ref)/h` on the scale of the
 //! fundamental's displacement current, so the subtraction loses nothing the
 //! residual tolerance can see.
+//!
+//! # Operators with state
+//!
+//! An `idt`, `laplace_*` or `absdelay` site keeps state outside `F + dQ/dt`.
+//! Each becomes two periodic unknowns of its own, its input `u` and its
+//! output `y`. The module's residual is sampled with every output held at
+//! the solver's `y` (see [`rspice_veriloga::vm::PeriodicOperatorRecord`]), the
+//! input row holds `u - x(v, y) = 0` for the input `x` the module computes,
+//! and a [`super::ExactPeriodicNetwork::VerilogAOperator`] holds
+//! `Y - T(jω) U = 0` at every harmonic: `1/(jω)` for `idt`, whose DC output
+//! its initial condition fixes instead, `H(jω)` for a Laplace filter and
+//! `e^{-jωτ}` for a delay.
+//!
+//! The Jacobian stays exact. One evaluation with every output tangent zero
+//! gives the partials with the outputs held, and the difference of an
+//! evaluation seeding one output's tangent from it gives the partials with
+//! respect to that output, on the residual and on every site's input; the
+//! derivative programs are linear in their tangents, so the difference is
+//! algebraically exact.
 
+use super::HbSolverState;
 use super::native_bjt::NativeStamp;
 use crate::Value;
 use crate::analysis::harmonic_balance::HbError;
 use crate::device::MatrixStamper;
 use crate::device::veriloga::{VerilogADevice, VerilogAEvaluationMode};
-use rspice_veriloga::vm::IntegrationCoefficients;
+use rspice_veriloga::vm::{
+    IntegrationCoefficients, PeriodicOperatorKind, PeriodicOperatorRecord, PeriodicOperatorSite,
+};
+use std::collections::BTreeMap;
 
 /// The transient analysis code: `analysis("tran")` reads the same in both
 /// probes, so the charge difference never sees an analysis predicate change.
@@ -41,6 +64,40 @@ const TRANSIENT_ANALYSIS: u8 = 2;
 /// One stamp's residual `F` over the augmented unknowns, and its Jacobian
 /// entries `(row, column, dF/dx)`.
 type Probe = (Vec<Value>, Vec<(usize, usize, Value)>);
+
+/// The transfer an operator site applies at each harmonic.
+#[derive(Debug, Clone)]
+pub(crate) enum HbOperatorTransfer {
+    /// `idt`: `1/(jω)`, its DC output fixed by its initial condition.
+    Integral,
+    /// A rational `laplace_*` filter: `H(jω)`.
+    Laplace(Box<rspice_veriloga::laplace::StateSpaceFilter>),
+    /// `absdelay` by a fixed delay `τ`: `e^{-jωτ}`.
+    Delay(Value),
+}
+
+/// One operator site's unknowns and what fixes them.
+#[derive(Debug, Clone)]
+struct HbOperatorPorts {
+    site: PeriodicOperatorSite,
+    /// Zero-based augmented row of the input `u`.
+    input: usize,
+    /// Zero-based augmented row of the output `y`.
+    output: usize,
+    /// An `idt`'s initial condition, or an `absdelay`'s delay.
+    parameter: Option<Value>,
+    /// The operator as a message names it.
+    label: String,
+}
+
+/// One operator site the solver registers: its unknowns' rows, as a network
+/// names them, and its transfer.
+pub(super) struct HbOperatorNetwork {
+    pub(super) name: String,
+    pub(super) input: usize,
+    pub(super) output: usize,
+    pub(super) transfer: HbOperatorTransfer,
+}
 
 #[derive(Debug, Clone)]
 pub(super) struct HbVerilogADevice {
@@ -53,17 +110,37 @@ pub(super) struct HbVerilogADevice {
     interval: Value,
     /// Zero-based augmented MNA rows the instance stamps.
     rows: Vec<usize>,
+    /// The rows of the module's own equations, without its operator rows.
+    equation_rows: Vec<usize>,
+    /// Operator sites carried as unknowns of their own, in frame order.
+    operators: Vec<HbOperatorPorts>,
+}
+
+/// A probe's Jacobian entries: zero-based row, column and value.
+type ProbeJacobian = [(usize, usize, Value)];
+
+/// Sum a probe's Jacobian entries by location.
+fn summed(entries: &ProbeJacobian) -> BTreeMap<(usize, usize), Value> {
+    let mut sums = BTreeMap::new();
+    for &(row, col, value) in entries {
+        *sums.entry((row, col)).or_insert(0.0) += value;
+    }
+    sums
 }
 
 impl HbVerilogADevice {
     /// Take an instance into the sampler: begin a transient analysis on two
     /// private copies and accept one point of the charge probe at the zero
     /// state, which becomes the reference charge.
+    /// `ports` gives each of `device.periodic_operator_sites()`, in order, the
+    /// zero-based rows of its input and output unknowns. Returns the device
+    /// and the network each site needs.
     pub(super) fn try_new(
         device: VerilogADevice,
         fundamental_hz: Value,
         unknowns: usize,
-    ) -> Result<Self, HbError> {
+        ports: &[(usize, usize)],
+    ) -> Result<(Self, Vec<HbOperatorNetwork>), HbError> {
         let interval = (std::f64::consts::TAU * fundamental_hz).recip();
         let name = device.name.to_string();
         let failure = |phase: &str, error: &dyn std::fmt::Display| {
@@ -73,6 +150,21 @@ impl HbVerilogADevice {
         };
         let companion = IntegrationCoefficients::backward_euler(interval)
             .map_err(|error| failure("charge-probe setup", &error))?;
+        let sites = device.periodic_operator_sites();
+        if sites.len() != ports.len() {
+            return Err(HbError::InvalidCircuit(format!(
+                "Verilog-A device '{name}' has {} operator sites and {} periodic port pairs",
+                sites.len(),
+                ports.len()
+            )));
+        }
+        let mut device = device;
+        if !sites.is_empty() {
+            device
+                .try_install_periodic_operator_frame(&sites)
+                .map_err(|error| failure("operator-state setup", &error))?;
+            device.set_periodic_operator_outputs(&vec![0.0; sites.len()], None);
+        }
         let mut static_probe = device.clone();
         static_probe
             .try_begin_analysis(TRANSIENT_ANALYSIS)
@@ -115,6 +207,10 @@ impl HbVerilogADevice {
         );
         rows.sort_unstable();
         rows.dedup();
+        let equation_rows = rows.clone();
+        rows.extend(ports.iter().flat_map(|&(input, output)| [input, output]));
+        rows.sort_unstable();
+        rows.dedup();
         if let Some(&row) = rows.last()
             && row >= unknowns
         {
@@ -122,12 +218,162 @@ impl HbVerilogADevice {
                 "Verilog-A device '{name}' stamps MNA row {row}, outside the {unknowns}-unknown periodic state"
             )));
         }
-        Ok(Self {
+        let mut device = Self {
             static_probe,
             charge_probe,
             interval,
             rows,
-        })
+            equation_rows,
+            operators: Vec::new(),
+        };
+        let networks = device.try_bind_operators(&sites, ports, unknowns)?;
+        Ok((device, networks))
+    }
+
+    /// Read each operator site's parameters off one evaluation at the zero
+    /// state, and build its ports and network.
+    fn try_bind_operators(
+        &mut self,
+        sites: &[PeriodicOperatorSite],
+        ports: &[(usize, usize)],
+        unknowns: usize,
+    ) -> Result<Vec<HbOperatorNetwork>, HbError> {
+        if sites.is_empty() {
+            return Ok(Vec::new());
+        }
+        let name = self.name().to_owned();
+        Self::probe(&mut self.static_probe, &vec![0.0; unknowns])?;
+        let record = self.record()?;
+        let mut networks = Vec::with_capacity(sites.len());
+        for (index, (&site, &(input, output))) in sites.iter().zip(ports).enumerate() {
+            let (family, written) = match site.kind {
+                PeriodicOperatorKind::Integral => ("idt", "idt"),
+                PeriodicOperatorKind::Laplace => ("laplace", "laplace_*"),
+                PeriodicOperatorKind::Delay => ("absdelay", "absdelay"),
+            };
+            let origin = self.static_probe.analog_operator_origin(family, site.slot);
+            let label = match origin {
+                Some(origin) => match origin.location() {
+                    Some(location) => format!("`{}` at {location}", origin.operator),
+                    None => format!("`{}`", origin.operator),
+                },
+                None => format!("`{written}`"),
+            };
+            let refuse = |reason: &str| {
+                HbError::InvalidCircuit(format!(
+                    "harmonic balance cannot carry {label} of Verilog-A device '{name}': {reason}"
+                ))
+            };
+            if record.dependent_parameters[index] {
+                return Err(refuse(match site.kind {
+                    PeriodicOperatorKind::Delay => {
+                        "its delay depends on the circuit's unknowns, so no fixed e^(-jwt) carries it"
+                    }
+                    _ => {
+                        "its initial condition depends on the circuit's unknowns, so it fixes no DC value"
+                    }
+                }));
+            }
+            let (parameter, transfer) = match site.kind {
+                PeriodicOperatorKind::Integral => {
+                    let ic = record.initial_conditions[index]
+                        .filter(|ic| ic.is_finite())
+                        .ok_or_else(|| refuse("its initial condition was not evaluated"))?;
+                    (Some(ic), HbOperatorTransfer::Integral)
+                }
+                PeriodicOperatorKind::Laplace => {
+                    let filter = self
+                        .static_probe
+                        .laplace_filter(site.slot)
+                        .cloned()
+                        .ok_or_else(|| refuse("its filter is missing"))?;
+                    filter.transfer_at(0.0).map_err(|_| {
+                        refuse(
+                            "its transfer has a pole at the origin, so its DC output is undefined",
+                        )
+                    })?;
+                    (None, HbOperatorTransfer::Laplace(Box::new(filter)))
+                }
+                PeriodicOperatorKind::Delay => {
+                    let delay = record.delays[index]
+                        .filter(|delay| delay.is_finite() && *delay >= 0.0)
+                        .ok_or_else(|| refuse("its delay is not a finite nonnegative time"))?;
+                    (Some(delay), HbOperatorTransfer::Delay(delay))
+                }
+            };
+            networks.push(HbOperatorNetwork {
+                name: format!("{name}:{family}{}", site.slot),
+                input,
+                output,
+                transfer,
+            });
+            self.operators.push(HbOperatorPorts {
+                site,
+                input,
+                output,
+                parameter,
+                label,
+            });
+        }
+        Ok(networks)
+    }
+
+    /// Refuse an orbit in which an `idt` input has a mean over the period.
+    ///
+    /// Its initial condition fixes the output's DC term, so the input's own
+    /// DC term is free in the harmonic-balance system; a nonzero one is a
+    /// ramp no periodic output carries, which transient analysis would show
+    /// as the integral running away.
+    pub(super) fn check_periodic_integrals(
+        &self,
+        state: &HbSolverState,
+        num_nodes: usize,
+        reltol: Value,
+        abstol: Value,
+    ) -> Result<(), HbError> {
+        for ports in &self.operators {
+            if ports.site.kind != PeriodicOperatorKind::Integral {
+                continue;
+            }
+            let Some(spectrum) = ports
+                .input
+                .checked_sub(num_nodes)
+                .and_then(|branch| state.mna_branch_currents.get(branch))
+            else {
+                continue;
+            };
+            let Some((mean, harmonics)) = spectrum.split_first() else {
+                continue;
+            };
+            let scale = harmonics
+                .iter()
+                .map(|value| value.norm())
+                .fold(0.0, Value::max);
+            if mean.norm() > reltol * scale + abstol {
+                return Err(HbError::InvalidCircuit(format!(
+                    "harmonic balance cannot carry {} of Verilog-A device '{}': its input has \
+                     mean {:e} over the period, so its output ramps and has no periodic \
+                     steady state",
+                    ports.label,
+                    self.name(),
+                    mean.re
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// What the static probe's last evaluation saw.
+    fn record(&self) -> Result<PeriodicOperatorRecord, HbError> {
+        self.static_probe
+            .periodic_operator_record()
+            .cloned()
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(format!(
+                    "Verilog-A device '{}' lost its operator-state frame",
+                    self.name()
+                ))
+            })
     }
 
     pub(super) fn name(&self) -> &str {
@@ -176,6 +422,17 @@ impl HbVerilogADevice {
         f: &mut NativeStamp,
         q: &mut NativeStamp,
     ) -> Result<(), HbError> {
+        let outputs: Vec<Value> = self
+            .operators
+            .iter()
+            .map(|ports| solution[ports.output])
+            .collect();
+        if !outputs.is_empty() {
+            self.static_probe
+                .set_periodic_operator_outputs(&outputs, None);
+            self.charge_probe
+                .set_periodic_operator_outputs(&outputs, None);
+        }
         let (static_residual, static_jacobian) = Self::probe(&mut self.static_probe, solution)?;
         let (companion_residual, companion_jacobian) =
             Self::probe(&mut self.charge_probe, solution)?;
@@ -192,6 +449,137 @@ impl HbVerilogADevice {
         for &(row, col, value) in &companion_jacobian {
             q.stamp(row + 1, col + 1, h * value);
         }
+        if self.operators.is_empty() {
+            return Ok(());
+        }
+        let record = self.record()?;
+        self.stamp_operator_rows(
+            solution,
+            &outputs,
+            &record,
+            (&static_jacobian, &companion_jacobian),
+            f,
+            q,
+        )
+    }
+
+    /// Stamp each operator's input row `u - x(v, y)`, an `idt`'s output row's
+    /// initial condition, and the partials of the module's equations and of
+    /// every input with respect to each output.
+    fn stamp_operator_rows(
+        &mut self,
+        solution: &[Value],
+        outputs: &[Value],
+        record: &PeriodicOperatorRecord,
+        (static_jacobian, companion_jacobian): (&ProbeJacobian, &ProbeJacobian),
+        f: &mut NativeStamp,
+        q: &mut NativeStamp,
+    ) -> Result<(), HbError> {
+        let name = self.name().to_owned();
+        let h = self.interval;
+        let fail = |label: &str, reason: &str| {
+            HbError::InvalidCircuit(format!(
+                "harmonic balance cannot carry {label} of Verilog-A device '{name}': {reason}"
+            ))
+        };
+        // Each site's input partials along circuit columns, and the first
+        // column a seeded tangent can be read back at.
+        let mut columns: Vec<Vec<(rspice_veriloga::vm::PeriodicOperatorAxis, usize, Value)>> =
+            vec![Vec::new(); self.operators.len()];
+        for (&(site, axis), &value) in &record.input_partials {
+            if let Some(column) = self.static_probe.periodic_operator_axis_index(axis) {
+                columns[site].push((axis, column, value));
+            }
+        }
+        for (index, ports) in self.operators.iter().enumerate() {
+            if record.dependent_parameters[index] {
+                return Err(fail(
+                    &ports.label,
+                    "its initial condition or delay changes over the period",
+                ));
+            }
+            let input = record.inputs[index]
+                .ok_or_else(|| fail(&ports.label, "its input was not evaluated"))?;
+            match ports.site.kind {
+                PeriodicOperatorKind::Integral => {
+                    let ic = record.initial_conditions[index];
+                    if ic != ports.parameter {
+                        return Err(fail(
+                            &ports.label,
+                            "its initial condition changes over the period",
+                        ));
+                    }
+                    f.stamp_rhs(ports.output + 1, ports.parameter.unwrap_or(0.0));
+                }
+                PeriodicOperatorKind::Delay => {
+                    if record.delays[index] != ports.parameter {
+                        return Err(fail(&ports.label, "its delay changes over the period"));
+                    }
+                }
+                PeriodicOperatorKind::Laplace => {}
+            }
+            f.stamp_rhs(ports.input + 1, input - solution[ports.input]);
+            f.stamp(ports.input + 1, ports.input + 1, 1.0);
+            for &(_, column, value) in &columns[index] {
+                f.stamp(ports.input + 1, column + 1, -value);
+            }
+        }
+        let static_held = summed(static_jacobian);
+        let companion_held = summed(companion_jacobian);
+        for seed in 0..self.operators.len() {
+            let Some(&(_, column, _)) = columns[seed].first() else {
+                return Err(fail(
+                    &self.operators[seed].label,
+                    "its input does not depend on any of the circuit's unknowns",
+                ));
+            };
+            // Every model column the seeded site's derivative ran along adds
+            // its tangent to the solver column it maps to.
+            let multiplicity = columns[seed]
+                .iter()
+                .filter(|&&(_, other, _)| other == column)
+                .count() as Value;
+            self.static_probe
+                .set_periodic_operator_outputs(outputs, Some(seed));
+            self.charge_probe
+                .set_periodic_operator_outputs(outputs, Some(seed));
+            let (_, static_seeded) = Self::probe(&mut self.static_probe, solution)?;
+            let (_, companion_seeded) = Self::probe(&mut self.charge_probe, solution)?;
+            let seeded_record = self.record()?;
+            let static_seeded = summed(&static_seeded);
+            let companion_seeded = summed(&companion_seeded);
+            let output = self.operators[seed].output;
+            let difference = |seeded: &BTreeMap<(usize, usize), Value>,
+                              held: &BTreeMap<(usize, usize), Value>,
+                              row: usize| {
+                (seeded.get(&(row, column)).copied().unwrap_or(0.0)
+                    - held.get(&(row, column)).copied().unwrap_or(0.0))
+                    / multiplicity
+            };
+            for &row in &self.equation_rows {
+                let conduction = difference(&static_seeded, &static_held, row);
+                let companion = difference(&companion_seeded, &companion_held, row);
+                f.stamp(row + 1, output + 1, conduction);
+                q.stamp(row + 1, output + 1, h * (companion - conduction));
+            }
+            // A site's input reads this output along a model column both
+            // inputs' derivatives ran along.
+            for (index, ports) in self.operators.iter().enumerate() {
+                let along = columns[index]
+                    .iter()
+                    .find(|(axis, _, _)| columns[seed].iter().any(|(other, _, _)| other == axis))
+                    .map(|&(axis, _, held)| (axis, held));
+                if let Some((axis, held)) = along
+                    && let Some(&seeded) = seeded_record.input_partials.get(&(index, axis))
+                {
+                    f.stamp(ports.input + 1, output + 1, -(seeded - held));
+                }
+            }
+        }
+        self.static_probe
+            .set_periodic_operator_outputs(outputs, None);
+        self.charge_probe
+            .set_periodic_operator_outputs(outputs, None);
         Ok(())
     }
 }

@@ -1181,6 +1181,24 @@ impl Engine {
                     .count(),
             )
             .saturating_mul(3)
+            .saturating_add(Self::hb_veriloga_operator_auxiliary_count(circuit))
+    }
+
+    /// Each Verilog-A operator site with state carries its input and its
+    /// output as periodic unknowns of its own.
+    #[cfg(feature = "veriloga")]
+    fn hb_veriloga_operator_auxiliary_count(circuit: &CircuitData) -> usize {
+        circuit
+            .veriloga_devices()
+            .iter()
+            .map(|device| device.periodic_operator_sites().len())
+            .fold(0usize, usize::saturating_add)
+            .saturating_mul(2)
+    }
+
+    #[cfg(not(feature = "veriloga"))]
+    fn hb_veriloga_operator_auxiliary_count(_circuit: &CircuitData) -> usize {
+        0
     }
 
     #[inline]

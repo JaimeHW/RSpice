@@ -127,9 +127,33 @@ impl HbSolver {
                 self.non_electrical_nodes.insert(index, node - 1);
             }
         }
+        // Each operator site with state carries its input and its output as
+        // unknowns of its own; a network ties them at every harmonic.
+        let mut ports = Vec::new();
+        for site in device.periodic_operator_sites() {
+            let mut rows = [0; 2];
+            for (row, role) in rows.iter_mut().zip(["input", "output"]) {
+                let branch_ordinal = self.exact_mna_branches().len() + 1;
+                *row = self.num_nodes + self.exact_mna_branches().len();
+                self.try_push_periodic_mna_branch(
+                    ExactMnaBranch::AuxiliaryState { branch_ordinal },
+                    &format!("{}:{:?}{}:{role}", device.name, site.kind, site.slot),
+                )?;
+            }
+            ports.push((rows[0], rows[1]));
+        }
         let unknowns = self.num_nodes + self.exact_mna_branches().len();
-        let device = HbVerilogADevice::try_new(device, self.config.fundamental_freq, unknowns)?;
+        let (device, networks) =
+            HbVerilogADevice::try_new(device, self.config.fundamental_freq, unknowns, &ports)?;
         self.veriloga_nonlinear_devices.push(device);
+        for network in networks {
+            self.try_add_exact_periodic_network(ExactPeriodicNetwork::VerilogAOperator {
+                name: network.name,
+                input: network.input,
+                output: network.output,
+                transfer: network.transfer,
+            })?;
+        }
         Ok(())
     }
 

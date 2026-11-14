@@ -893,6 +893,16 @@ pub(crate) enum ExactPeriodicNetwork {
         total_capacitance: Value,
         total_resistance: Value,
     },
+    /// A Verilog-A operator with state carried as two unknowns of its own:
+    /// the output row holds `y - T(jω) u = 0`, where `u` is the operator's
+    /// input, which the module's sampler constrains, and `T` its transfer.
+    #[cfg(feature = "veriloga")]
+    VerilogAOperator {
+        name: String,
+        input: usize,
+        output: usize,
+        transfer: veriloga::HbOperatorTransfer,
+    },
     LosslessCpl {
         name: String,
         near_nodes: Vec<usize>,

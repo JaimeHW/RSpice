@@ -869,6 +869,27 @@ impl HbSolver {
         abort: &dyn AbortSignal,
         dc_seed_policy: HbDcSeedPolicy,
     ) -> Result<(), HbError> {
+        self.solve_newton_orbit(state, abort, dc_seed_policy)?;
+        #[cfg(feature = "veriloga")]
+        if state.converged {
+            for device in &self.veriloga_nonlinear_devices {
+                device.check_periodic_integrals(
+                    state,
+                    self.num_nodes,
+                    self.config.tolerance,
+                    self.voltage_abstol,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn solve_newton_orbit(
+        &mut self,
+        state: &mut HbSolverState,
+        abort: &dyn AbortSignal,
+        dc_seed_policy: HbDcSeedPolicy,
+    ) -> Result<(), HbError> {
         self.validate_configuration()?;
         if abort.is_aborted() {
             return Err(HbError::Aborted);
