@@ -15,7 +15,7 @@
 use rspice_core::config::{HdlOrigin, HdlPoint, HdlSeverity};
 use rspice_core::netlist::{AssertAnalysis, AssertLevel};
 use rspice_core::{ModelFinish, ModelFinishPoint, ModelFinishTask};
-use rspice_results::analysis_result::{HdlDiagnostic, RunChecks};
+use rspice_results::analysis_result::{HdlDiagnostic, RunChecks, samples_after_stop};
 
 use crate::quantity::engineering::{EngineeringPrecision, format_engineering_display_with};
 use crate::state::{PreflightRemediation, ProjectSourceOwner};
@@ -38,6 +38,7 @@ pub const HDL_FATAL_CODE: &str = "HDL-FATAL";
 pub const HDL_STOP_CODE: &str = "HDL-STOP";
 pub const ASSERT_VIOLATED_CODE: &str = "ASSERT-VIOLATED";
 pub const ASSERT_UNEVALUATED_CODE: &str = "ASSERT-NOT-EVALUATED";
+pub const ASSERT_AFTER_STOP_CODE: &str = "ASSERT-AFTER-STOP";
 
 /// One row a run's checks give, before its identity is minted.
 struct CheckRow {
@@ -172,6 +173,9 @@ impl Model {
             let violated = !report.violations.is_empty();
             let (level, code) = match (&report.error, report.level, violated) {
                 (Some(_), _, _) => (DiagnosticLevel::Error, ASSERT_UNEVALUATED_CODE),
+                (None, _, false) if samples_after_stop(report).is_some() => {
+                    (DiagnosticLevel::Warning, ASSERT_AFTER_STOP_CODE)
+                }
                 (None, _, false) => return None,
                 (None, AssertLevel::Error, true) => (DiagnosticLevel::Error, ASSERT_VIOLATED_CODE),
                 (None, AssertLevel::Warning, true) => {
@@ -401,6 +405,11 @@ fn finish_point(point: ModelFinishPoint) -> String {
 fn assertion_message(report: &rspice_core::analysis::AssertionReport) -> String {
     if let Some(error) = &report.error {
         return format!("Not evaluated: {error}");
+    }
+    if report.violations.is_empty() {
+        // The vector file's samples after the stop time, which the
+        // evaluator counts in words of its own.
+        return report.message.clone().unwrap_or_default();
     }
     let analysis = report.analysis;
     let coordinate = |value: f64| match analysis {

@@ -14,7 +14,7 @@
 use super::cursor::EdgeStep;
 use super::plan::TimeMapping;
 use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
-use rspice_results::analysis_result::{HdlDiagnostic, RunChecks};
+use rspice_results::analysis_result::{HdlDiagnostic, RunChecks, samples_after_stop};
 use rspice_results::engine_evidence::{
     AssertLevel, AssertionReport, HdlPoint, HdlSeverity, ModelFinish, ModelFinishPoint,
     ModelFinishTask,
@@ -323,19 +323,6 @@ impl StopMark {
         }
         text
     }
-}
-
-/// How many expected outputs a vector file's report says were due after the
-/// stop time: the one warning the evaluator gives them, which carries no
-/// violation and states the count first.
-fn samples_after_stop(report: &AssertionReport) -> Option<usize> {
-    if !report.violations.is_empty() || report.error.is_some() {
-        return None;
-    }
-    let (count, rest) = report.message.as_deref()?.split_once(' ')?;
-    (rest.starts_with("expected-output sample") && rest.contains("after the transient's stop time"))
-        .then(|| count.parse().ok())
-        .flatten()
 }
 
 /// Everything a run's checks put on its strip's time axis.

@@ -209,3 +209,75 @@ fn corpus_c12_fail_files_one_row_per_testbench_error_as_the_cli_prints_them() {
         );
     }
 }
+
+/// A vector file whose expected outputs run past the transient's stop time:
+/// the evaluator counts the two late samples in one warning, and the run
+/// files it as one Warning row in the evaluator's words, at the first late
+/// row of the file, and warns rather than passes.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn samples_after_the_stop_time_are_one_warning_row_and_warn_the_run() {
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel;
+    let folder = std::env::temp_dir().join(format!("rspice-after-stop-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).expect("make the scratch folder");
+    std::fs::write(
+        folder.join("late.vec"),
+        "radix 1 1\nvname a y\nio i o\ntunit ns\nvih 1.8\nvil 0\ntrise 1\n\
+         0 0 0\n10 1 X\n15 1 1\n25 1 1\n30 1 0\n",
+    )
+    .expect("write the vector file");
+    let path = folder.join("late.cir");
+    let export_io = MockExportWorkflowIo::default();
+    let mut state = RunTestHost::default();
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(
+        "* vec late\nr1 a y 1\nr2 y 0 1meg\n.vec 'late.vec'\n.tran 0.1n 20n\n.end\n".to_owned(),
+    );
+    state.model.workspace.content.netlist_source_path = Some(path);
+    let mut controller = SimulationController::new();
+    controller
+        .validate_manual_deck_document(&state)
+        .expect("the deck prepares");
+    state.model.simulation.execution.trigger_simulation = true;
+    controller.update(&mut state, &export_io);
+    let run_sequence = controller.current_run_id.expect("the batch has a run");
+    while controller.has_active_batch() {
+        test_execution::wait_until_finished_unpolled(&controller.runner);
+        controller.poll_completion(&mut state, &export_io);
+    }
+
+    let run = state
+        .model
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+        .expect("the run is retained");
+    assert_eq!(
+        run.lifecycle,
+        crate::state::SimulationRunLifecycle::Completed
+    );
+    assert_eq!(
+        run.check_verdict(),
+        Some(rspice_results::analysis_result::CheckVerdict::Warned)
+    );
+    let rows: Vec<_> = state
+        .model
+        .diagnostics
+        .published_run_records(run_sequence)
+        .into_iter()
+        .filter(|record| record.canonical.code.starts_with("ASSERT-"))
+        .collect();
+    assert_eq!(rows.len(), 1, "{rows:#?}");
+    let row = rows[0];
+    assert_eq!(row.canonical.code.as_ref(), "ASSERT-AFTER-STOP");
+    assert_eq!(row.level, DiagnosticLevel::Warning);
+    assert!(
+        row.message
+            .starts_with("2 expected-output samples after the transient's stop time 2e-8 s"),
+        "{}",
+        row.message
+    );
+    let line = row.subject.source_line.as_deref().unwrap_or_default();
+    assert!(line.ends_with("late.vec:11"), "{line}");
+    assert_eq!(row.route, None, "the vector file is not the deck");
+}

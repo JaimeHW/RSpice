@@ -44,13 +44,27 @@ pub struct RunChecks {
     pub finish: Option<rspice_core::ModelFinish>,
 }
 
+/// How many expected outputs a vector file's report says were due after the
+/// stop time: the one warning the evaluator gives them, which carries no
+/// violation and states the count first. `None` for every other report.
+pub fn samples_after_stop(report: &rspice_core::analysis::AssertionReport) -> Option<usize> {
+    if !report.violations.is_empty() || report.error.is_some() {
+        return None;
+    }
+    let (count, rest) = report.message.as_deref()?.split_once(' ')?;
+    (rest.starts_with("expected-output sample") && rest.contains("after the transient's stop time"))
+        .then(|| count.parse().ok())
+        .flatten()
+}
+
 /// What a run's checks say of it, worst first in [`RunChecks::verdict`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CheckVerdict {
     /// Nothing failed and nothing warned.
     Passed,
     /// Nothing failed, and a `$warning` or a warning-level `.ASSERT`
-    /// violation was reported.
+    /// violation was reported, or a vector file's expected outputs fell
+    /// after the stop time and were not checked.
     Warned,
     /// A `$error` or `$fatal` was reported, a `$fatal` ended the run, an
     /// error-level `.ASSERT` was violated, or an assertion could not be
@@ -77,6 +91,9 @@ impl RunChecks {
         let assertions = self.assertions.iter().map(|report| {
             if report.error.is_some() {
                 return CheckVerdict::Failed;
+            }
+            if samples_after_stop(report).is_some() {
+                return CheckVerdict::Warned;
             }
             match (report.level, report.violations.is_empty()) {
                 (_, true) | (AssertLevel::Notice, false) => CheckVerdict::Passed,
@@ -652,5 +669,37 @@ mod verdict_tests {
             let expected = expected.max(CheckVerdict::Warned);
             assert_eq!(verdict(checks), expected, "{task:?}");
         }
+    }
+
+    /// The vector file's one warning for expected outputs after the stop
+    /// time is counted and warns; a passing card that carries a message of
+    /// its own is no such warning.
+    #[test]
+    fn samples_after_the_stop_time_are_counted_and_warn() {
+        let late = AssertionReport {
+            level: AssertLevel::Warning,
+            message: Some(
+                "2 expected-output samples after the transient's stop time 2e-8 s are not \
+                 checked; the first is on the row at late.vec:11"
+                    .into(),
+            ),
+            ..report(AssertLevel::Warning, false)
+        };
+        assert_eq!(super::samples_after_stop(&late), Some(2));
+        let checks = RunChecks {
+            assertions: vec![late],
+            ..RunChecks::default()
+        };
+        assert_eq!(checks.verdict(), CheckVerdict::Warned);
+        let noted = AssertionReport {
+            message: Some("p must stay low".into()),
+            ..report(AssertLevel::Warning, false)
+        };
+        assert_eq!(super::samples_after_stop(&noted), None);
+        let checks = RunChecks {
+            assertions: vec![noted],
+            ..RunChecks::default()
+        };
+        assert_eq!(checks.verdict(), CheckVerdict::Passed);
     }
 }
