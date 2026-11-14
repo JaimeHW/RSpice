@@ -12,7 +12,7 @@ use crate::simulation::status::{EngineAvailability, preflight_status, simulation
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::diagnostic_store::listing::listing_in_pass;
 use crate::workbench::chrome::status_bar::design::{
-    design_engineering_context, selection_summary, zoom_factor,
+    design_engineering_context, selection_summary, symbol_tool_hint, zoom_factor,
 };
 use crate::workbench::chrome::status_bar::results::{format_plot_zoom, results_view_summary};
 use crate::workbench::chrome::status_bar::sheets::sheet_position_summary;
@@ -73,6 +73,14 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
         order: 0,
         workspace: None,
         content: prompt_cell,
+        activate: None,
+    },
+    StatusCell {
+        key: StatusKey::Prompt,
+        zone: StatusZone::Leading,
+        order: 0,
+        workspace: Some(Workspace::Design),
+        content: symbol_tool_hint_cell,
         activate: None,
     },
     StatusCell {
@@ -177,6 +185,16 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
 
 fn prompt_cell<'a>(_: &RSpiceApp, readings: &'a StatusReadings) -> Option<StatusText<'a>> {
     readings.prompt.as_deref().map(StatusText::label)
+}
+
+/// With no prompt showing, the armed symbol drawing tool's next step.
+fn symbol_tool_hint_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
+    symbol_tool_hint(
+        &app.state.design.symbol,
+        &app.state.model,
+        &app.state.workbench,
+    )
+    .map(StatusText::label)
 }
 
 /// The bar reads the checks list once per pass, for both the text and the

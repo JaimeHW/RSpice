@@ -136,3 +136,17 @@ pub(in crate::workbench) fn zoom_factor(
         model.schematic.session.editor.zoom
     }
 }
+
+/// What the armed symbol drawing tool takes next, while an editable symbol is
+/// the document in front: "Line: click the next point, Enter to finish".
+pub(crate) fn symbol_tool_hint(
+    symbol: &SymbolUiState,
+    model: &Model,
+    wb: &WorkbenchSession,
+) -> Option<&'static str> {
+    (wb.workspace == Workspace::Design
+        && model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
+        && !model.active_view_read_only())
+    .then(|| symbol.editor.next_step())
+    .flatten()
+}
