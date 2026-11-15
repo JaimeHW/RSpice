@@ -374,9 +374,10 @@ const RUNTIME_VERILOGA_NOISE: &str = "every `white_noise` and `flicker_noise` pr
 /// The condition behind a generated model's periodic noise, decided as for a
 /// runtime module.
 const GENERATED_VERILOGA_NOISE: &str = "every `white_noise` and `flicker_noise` process of a model built with its noise \
-     schedules, grouped into processes and sampled over the orbit, that reaches one pair of \
-     node rows through a real, frequency-independent gain, in a model with no operator \
-     harmonic balance carries as an unknown; no noise table";
+     schedules, grouped into processes and sampled over the orbit at the orbit's value of \
+     every operator harmonic balance carries as an unknown, that reaches one pair of node \
+     rows through a real, frequency-independent gain, in a model whose carried operators' \
+     noise has been checked; no noise table";
 /// The condition behind a generated compact model's harmonic-balance
 /// residual, which its generator decides once per model.
 const GENERATED_VERILOGA_HB_RESIDUAL: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \
@@ -1757,13 +1758,102 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
     gaps
 }
 
+/// Generated compact models, named in any case as SPICE names are, with an
+/// operator site harmonic balance carries as an unknown of its own, whose
+/// periodic noise reads the orbit's value of every carried site and has been
+/// checked on both carriers: in a pumped stage shooting's and harmonic
+/// balance's agree, and driven gently both give the model's own `.noise`.
+#[cfg(feature = "veriloga-builtins-base")]
+const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[&str] = &[
+    "bjt504va",
+    "bjt505_va",
+    "bjt505t_va",
+    "bjtd504va",
+    "bjtd505_va",
+    "bjtd505t_va",
+    "bsimcmg111",
+    "bsimcmg_va",
+    "ekv3_rf",
+    "ekv_va",
+    "hicumL2va",
+    "hisimsoi_va__242bc21d",
+    "hisimsoi_va__38074d06",
+    "hisimsoi_va__5be18005",
+    "mvsg_cmc",
+    "PSPNQS102BVA",
+    "PSPNQS102EVA",
+    "PSPNQS102VA",
+    "PSPNQS103VA",
+    "PSPNQS104VA",
+];
+
+/// Why periodic noise refuses a model with a carried operator site whose
+/// noise trains, in a pumped stage, reach more than one pair of rows.
+#[cfg(feature = "veriloga-builtins-base")]
+const CARRIED_SITE_NOISE_ACROSS_ROWS: &str = "noise beside an operator harmonic balance carries as an unknown, unchecked for \
+     this model: in a pumped stage one of its noise trains reaches more than one pair of \
+     circuit rows, which periodic noise cannot fold";
+
+/// Why periodic noise refuses Mextram 504 with self-heating.
+#[cfg(feature = "veriloga-builtins-base")]
+const CARRIED_SITE_NOISE_504T: &str = "noise beside an operator harmonic balance carries as an unknown, unchecked for \
+     this model: in a pumped stage, at any drive and on either carrier, its periodic noise \
+     adjoint converges (normwise residual 1e-12) but fails its componentwise certificate \
+     (backward error 1)";
+
+/// The generated compact models with a carried operator site whose periodic
+/// noise could not be checked, each with what the check met.
+#[cfg(feature = "veriloga-builtins-base")]
+const PNOISE_UNCHECKED_CARRIED_SITE_MODELS: &[(&str, &str)] = &[
+    ("angelov_gan", CARRIED_SITE_NOISE_ACROSS_ROWS),
+    ("asmesd", CARRIED_SITE_NOISE_ACROSS_ROWS),
+    ("asmesd_dio", CARRIED_SITE_NOISE_ACROSS_ROWS),
+    (
+        "asmhemt",
+        "noise beside an operator harmonic balance carries as an unknown, unchecked for this \
+         model: in a pumped stage, at any drive and on either carrier, its periodic noise \
+         adjoint's iterative solve stalls at a normwise residual of 0.2",
+    ),
+    ("bjt504tva", CARRIED_SITE_NOISE_504T),
+    ("bjtd504tva", CARRIED_SITE_NOISE_504T),
+    ("bsimsoi__18c250bc", CARRIED_SITE_NOISE_ACROSS_ROWS),
+    ("hisimhv_n4_va", CARRIED_SITE_NOISE_ACROSS_ROWS),
+    ("hisimhv_n5_va", CARRIED_SITE_NOISE_ACROSS_ROWS),
+    ("hisimhv_va", CARRIED_SITE_NOISE_ACROSS_ROWS),
+];
+
+/// Why periodic noise refuses a generated model with a carried operator
+/// site, or `None` for one [`PNOISE_CHECKED_CARRIED_SITE_MODELS`] names: one
+/// [`PNOISE_UNCHECKED_CARRIED_SITE_MODELS`] names by what its check met, and
+/// a model the generator newly gives a carried site until it is checked.
+#[cfg(feature = "veriloga-builtins-base")]
+fn carried_site_noise_refusal(model: &str) -> Option<&'static str> {
+    if PNOISE_CHECKED_CARRIED_SITE_MODELS
+        .iter()
+        .any(|checked| checked.eq_ignore_ascii_case(model))
+    {
+        return None;
+    }
+    Some(
+        PNOISE_UNCHECKED_CARRIED_SITE_MODELS
+            .iter()
+            .find(|(unchecked, _)| unchecked.eq_ignore_ascii_case(model))
+            .map_or(
+                "noise beside an operator harmonic balance carries as an unknown, which no \
+                 reference has checked for this model",
+                |&(_, reason)| reason,
+            ),
+    )
+}
+
 /// The Verilog-A instances whose noise the periodic folding cannot sample,
 /// before it evaluates any: a runtime artifact compiled before noise calls
 /// were grouped into processes, a generated catalog built without its noise
-/// schedules or without processes, and a noisy module with an operator
+/// schedules or without processes, a noisy runtime module with an operator
 /// harmonic balance carries as an unknown of its own (its noise evaluation
-/// does not see that unknown) or, at runtime, one that reads `$abstime`
-/// (its noise evaluation does not set each sample's instant).
+/// does not see that unknown) or that reads `$abstime` (its noise evaluation
+/// does not set each sample's instant), and a noisy generated model with a
+/// carried operator that no reference has checked.
 fn veriloga_noise_gaps(circuit: &CircuitData, gaps: &mut Vec<CapabilityGap>) {
     #[cfg(feature = "veriloga")]
     for device in circuit.veriloga_devices().iter() {
@@ -1796,7 +1886,7 @@ fn veriloga_noise_gaps(circuit: &CircuitData, gaps: &mut Vec<CapabilityGap>) {
             (!device.noise_descriptors().is_empty())
                 .then_some("noise sources not grouped into processes")
         } else if !device.harmonic_balance_periodic_sites().is_empty() {
-            Some("noise in a model with an operator harmonic balance carries as an unknown")
+            carried_site_noise_refusal(device.model_name)
         } else {
             None
         };
@@ -1816,6 +1906,21 @@ fn veriloga_noise_gaps(circuit: &CircuitData, gaps: &mut Vec<CapabilityGap>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn periodic_noise_refuses_a_carried_operator_no_reference_has_checked() {
+        assert_eq!(carried_site_noise_refusal("PSPNQS102VA"), None);
+        assert_eq!(carried_site_noise_refusal("pspnqs102va"), None);
+        assert_eq!(
+            carried_site_noise_refusal("HISIMHV_VA"),
+            Some(CARRIED_SITE_NOISE_ACROSS_ROWS)
+        );
+        assert!(
+            carried_site_noise_refusal("a_model_newly_given_a_carried_site")
+                .is_some_and(|reason| reason.ends_with("no reference has checked for this model"))
+        );
+    }
 
     #[test]
     fn bjt_shooting_admission_keeps_unqualified_state_families_gated() {

@@ -557,7 +557,8 @@ const PNOISE_VERILOGA_EVIDENCE: &[&str] = &[
 
 const PNOISE_GENERATED_EVIDENCE: &[&str] = &[
     "tests/generated/generated_hb.rs::a_generated_resistors_noise_folds_as_its_native_twins",
-    "tests/generated/generated_hb.rs::periodic_noise_refuses_a_generated_models_noise_beside_its_carried_integrals_by_name",
+    "tests/generated/generated_hb.rs::periodic_noise_reads_a_generated_models_carried_integrals_on_either_carrier",
+    "tests/generated/generated_hb.rs::every_shipped_model_reaches_its_fixture_or_names_its_refusal",
 ];
 
 const PAC_GENERATED_EVIDENCE: &[&str] = &[
@@ -602,7 +603,7 @@ const fn carrier_admits_veriloga_noise(generated: bool) -> CellSupport {
         gate: InstanceGate::CarrierAdmitsVerilogA,
         token: PERIODIC_VERILOGA,
         condition: if generated {
-            "every generated compact model periodic AC admits on the same carrier, its white_noise and flicker_noise processes sampled over the orbit"
+            "every generated compact model periodic AC admits on the same carrier, its white_noise and flicker_noise processes sampled over the orbit at the orbit's value of every operator it carries as an unknown, for a model whose noise beside those operators was checked against shooting and its own .noise"
         } else {
             "every Verilog-A module periodic AC admits on the same carrier, its white_noise and flicker_noise processes sampled over the orbit"
         },

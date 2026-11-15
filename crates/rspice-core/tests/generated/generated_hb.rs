@@ -8,7 +8,9 @@
 use num_complex::Complex64;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::harmonic_balance::HbConfig;
-use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig, TransientStartupMode};
+use rspice_core::engine::{
+    Engine, HbAnalysisResult, PssOperatingPoint, SimulationConfig, TransientStartupMode,
+};
 use rspice_core::netlist::Netlist;
 use std::f64::consts::TAU;
 
@@ -788,6 +790,328 @@ fn check_pstb(family: &str, circuit: &str, failures: &mut Vec<String>) {
     }
 }
 
+/// The offsets [`check_pnoise`] reads noise at, in hertz.
+const PNOISE_OFFSETS: [f64; 2] = [0.13 * F0, 0.37 * F0];
+
+/// The drive [`check_pnoise`] scales a fixture's to for its near-linear
+/// reference.
+const GENTLE_DRIVE: f64 = 1e-3;
+
+/// `netlist`'s shooting orbit, the carrier [`check_pnoise`] reads beside
+/// harmonic balance's.
+fn pnoise_shooting_orbit(netlist: &Netlist) -> Result<PssOperatingPoint, String> {
+    engine()
+        .run_pss_operating_point_with_abort(
+            netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(512)
+                .with_tolerance(1e-9),
+            &rspice_core::NoAbort,
+        )
+        .map_err(|error| format!("shooting must solve: {error}"))
+}
+
+/// `netlist`'s two periodic-noise carriers: its harmonic-balance orbit at
+/// `harmonics` and its shooting orbit.
+fn pnoise_carriers(
+    netlist: &Netlist,
+    harmonics: usize,
+) -> Result<(HbAnalysisResult, PssOperatingPoint), String> {
+    let hb = engine()
+        .run_hb(
+            netlist,
+            HbConfig::new(F0)
+                .with_harmonics(harmonics)
+                .with_tolerance(1e-9),
+        )
+        .map_err(|error| format!("harmonic balance must run: {error}"))?;
+    Ok((hb, pnoise_shooting_orbit(netlist)?))
+}
+
+/// The periodic noise of V(`node`) at output sideband `output` and
+/// [`PNOISE_OFFSETS`], with input sideband 0 and sidebands up to 4 folded.
+fn pnoise_request(node: &str, output: i32) -> rspice_core::engine::PeriodicNoiseRequest<'_> {
+    rspice_core::engine::PeriodicNoiseRequest {
+        sampling: None,
+        offsets: &PNOISE_OFFSETS,
+        output_node: node,
+        output_ref: None,
+        input_source: None,
+        max_sideband: 4,
+        sidebands: rspice_core::engine::PeriodicNoiseSidebands { input: 0, output },
+    }
+}
+
+/// Periodic noise of V(`node`) at output sideband `output` and
+/// [`PNOISE_OFFSETS`] on each of `carriers`, harmonic balance's and then
+/// shooting's.
+fn pnoise_on(
+    netlist: &Netlist,
+    node: &str,
+    output: i32,
+    (hb, point): &(HbAnalysisResult, PssOperatingPoint),
+) -> [Result<Vec<f64>, String>; 2] {
+    use rspice_core::NoAbort;
+    let request = pnoise_request(node, output);
+    [
+        engine()
+            .run_pnoise_from_hb_request_with_abort(netlist, &request, &hb.operating_point, &NoAbort)
+            .map(|result| result.output_noise)
+            .map_err(|error| format!("pnoise must run on harmonic balance's carrier: {error}")),
+        engine()
+            .run_pnoise_from_pss_request_with_abort(netlist, &request, point, &NoAbort)
+            .map(|result| result.output_noise)
+            .map_err(|error| format!("pnoise must run on shooting's carrier: {error}")),
+    ]
+}
+
+/// Periodic noise of V(`node`) at output sidebands `outputs` and
+/// [`PNOISE_OFFSETS`], on `deck`'s harmonic-balance carrier at `harmonics`
+/// and on its shooting carrier, per sideband in that order.
+fn pnoise_on_both_carriers(
+    deck: &str,
+    node: &str,
+    outputs: &[i32],
+    harmonics: usize,
+) -> Result<Vec<[Vec<f64>; 2]>, String> {
+    let netlist = Netlist::parse(deck).expect("parse");
+    let carriers = pnoise_carriers(&netlist, harmonics)?;
+    outputs
+        .iter()
+        .map(|&output| {
+            let [balanced, shot] = pnoise_on(&netlist, node, output, &carriers);
+            Ok([balanced?, shot?])
+        })
+        .collect()
+}
+
+/// `circuit` with the amplitude of its `V1 ... SIN(offset amplitude f)`
+/// drive scaled by `scale`.
+fn with_drive_scaled(circuit: &str, scale: f64) -> Option<String> {
+    let start = circuit.find("V1 in 0 SIN(")? + "V1 in 0 SIN(".len();
+    let end = start + circuit[start..].find(')')?;
+    let mut words = circuit[start..end].split_whitespace();
+    let (offset, amplitude, frequency) = (words.next()?, words.next()?, words.next()?);
+    let amplitude: f64 = amplitude.parse().ok()?;
+    Some(format!(
+        "{}{offset} {:e} {frequency}{}",
+        &circuit[..start],
+        amplitude * scale,
+        &circuit[end..]
+    ))
+}
+
+/// How [`check_pnoise`] reads one model's periodic noise: the harmonics of
+/// its harmonic-balance carrier, and the scale of its gentle drive.
+#[derive(Clone, Copy)]
+struct PnoiseCheck {
+    harmonics: usize,
+    gentle: f64,
+}
+
+/// The check most models take: the walk's harmonics, and [`GENTLE_DRIVE`].
+const PNOISE_CHECK: PnoiseCheck = PnoiseCheck {
+    harmonics: HARMONICS,
+    gentle: GENTLE_DRIVE,
+};
+
+/// The shipped models with an operator harmonic balance carries as an
+/// unknown of its own whose periodic noise the walk checks (see
+/// [`check_pnoise`]), each with its check. MVSG's harmonic-balance carrier
+/// takes 16 harmonics: at 8 its sideband-0 noise sat 2.2e-3 from shooting's,
+/// at 16 2.0e-4 and at 24 2.2e-4, shooting's unmoved from 512 to 1024
+/// points. EKV3 RF's gentle drive is 1e-2 of the fixture's: at 1e-3 and
+/// 1e-4 the noise adjoint stops short of its certificate (backward error
+/// 3.6e-11 after 8 iterations), while at 1e-2 both carriers give `.noise`
+/// within 2.9e-7.
+const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[(&str, PnoiseCheck)] = &[
+    ("bjt504va", PNOISE_CHECK),
+    ("bjt505_va", PNOISE_CHECK),
+    ("bjt505t_va", PNOISE_CHECK),
+    ("bjtd504va", PNOISE_CHECK),
+    ("bjtd505_va", PNOISE_CHECK),
+    ("bjtd505t_va", PNOISE_CHECK),
+    ("bsimcmg111", PNOISE_CHECK),
+    ("bsimcmg_va", PNOISE_CHECK),
+    (
+        "ekv3_rf",
+        PnoiseCheck {
+            harmonics: HARMONICS,
+            gentle: 1e-2,
+        },
+    ),
+    ("ekv_va", PNOISE_CHECK),
+    ("hicumL2va", PNOISE_CHECK),
+    ("hisimsoi_va__242bc21d", PNOISE_CHECK),
+    ("hisimsoi_va__38074d06", PNOISE_CHECK),
+    ("hisimsoi_va__5be18005", PNOISE_CHECK),
+    (
+        "mvsg_cmc",
+        PnoiseCheck {
+            harmonics: 16,
+            gentle: GENTLE_DRIVE,
+        },
+    ),
+    ("PSPNQS102BVA", PNOISE_CHECK),
+    ("PSPNQS102EVA", PNOISE_CHECK),
+    ("PSPNQS102VA", PNOISE_CHECK),
+    ("PSPNQS103VA", PNOISE_CHECK),
+    ("PSPNQS104VA", PNOISE_CHECK),
+];
+
+/// The shipped models with a carried operator whose periodic noise could
+/// not be checked, each with the words of the reason periodic noise refuses
+/// it by on either carrier (see [`check_pnoise_refusal`]).
+const PNOISE_REFUSED_CARRIED_SITE_MODELS: &[(&str, &str)] = &[
+    ("angelov_gan", "more than one pair of circuit rows"),
+    ("asmesd", "more than one pair of circuit rows"),
+    ("asmesd_dio", "more than one pair of circuit rows"),
+    ("asmhemt", "stalls at a normwise residual of 0.2"),
+    ("bjt504tva", "fails its componentwise certificate"),
+    ("bjtd504tva", "fails its componentwise certificate"),
+    ("bsimsoi__18c250bc", "more than one pair of circuit rows"),
+    ("hisimhv_n4_va", "more than one pair of circuit rows"),
+    ("hisimhv_n5_va", "more than one pair of circuit rows"),
+    ("hisimhv_va", "more than one pair of circuit rows"),
+];
+
+/// Periodic noise of a fixture's V(`node`) on both carriers, checked two
+/// ways:
+///
+/// * driven as the fixture is, shooting's carrier must give at output
+///   sidebands 0 and 1 the noise harmonic balance's gives at
+///   `check.harmonics`, within 1e-3 of the larger at each offset: both fold
+///   the same model noise, each sampled at its own orbit's node voltages and
+///   carried operator outputs, which the fixtures hold to the settled
+///   transient within 1e-4 of the fundamental;
+/// * driven `check.gentle` as hard, near linear, both carriers must give at
+///   sideband 0 the model's own `.noise` at the fixture's bias, within 1e-4
+///   at each offset: the noise sources then move by about that fraction of
+///   their bias over the period, and the folding departs from `.noise` at
+///   second order in it (at most 7.5e-6 measured, MVSG's).
+fn check_pnoise(
+    family: &str,
+    circuit: &str,
+    node: &str,
+    check: PnoiseCheck,
+    failures: &mut Vec<String>,
+) {
+    let deck = format!("* {family} periodic noise\n{circuit}.end\n");
+    match pnoise_on_both_carriers(&deck, node, &[0, 1], check.harmonics) {
+        Ok(sidebands) => {
+            for (output, [balanced, shot]) in [0, 1].into_iter().zip(&sidebands) {
+                for (offset, (b, s)) in PNOISE_OFFSETS.iter().zip(balanced.iter().zip(shot)) {
+                    let gap = (b - s).abs() / b.abs().max(s.abs());
+                    eprintln!(
+                        "{family}: pnoise sideband {output} at {offset:e} Hz: harmonic balance \
+                         {b:e}, shooting {s:e}, gap {gap:.3e}"
+                    );
+                    if gap.is_nan() || gap > 1e-3 {
+                        failures.push(format!(
+                            "{family}: pnoise at sideband {output}, {offset:e} Hz: shooting {s:e} \
+                             against harmonic balance's {b:e}"
+                        ));
+                    }
+                }
+            }
+        }
+        Err(error) => {
+            failures.push(format!("{family}: {error}"));
+            return;
+        }
+    }
+    let Some(gentle) = with_drive_scaled(circuit, check.gentle) else {
+        failures.push(format!(
+            "{family}: the fixture has no V1 SIN drive to scale"
+        ));
+        return;
+    };
+    let deck = format!("* {family} near-linear periodic noise\n{gentle}.end\n");
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let reference = match engine().build_circuit(&netlist).and_then(|circuit| {
+        let output = circuit
+            .get_node_by_name(node)
+            .unwrap_or_else(|| panic!("node {node} present"));
+        engine().run_noise(&netlist, output, &PNOISE_OFFSETS, 300.15)
+    }) {
+        Ok(points) => points
+            .iter()
+            .map(|point| point.output_noise_density)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            failures.push(format!("{family}: .noise must run: {error}"));
+            return;
+        }
+    };
+    let [balanced, shot] = match pnoise_on_both_carriers(&deck, node, &[0], check.harmonics) {
+        Ok(mut sidebands) => sidebands.remove(0),
+        Err(error) => {
+            failures.push(format!("{family}, driven gently: {error}"));
+            return;
+        }
+    };
+    for (carrier, values) in [("harmonic balance", &balanced), ("shooting", &shot)] {
+        for ((offset, value), expected) in PNOISE_OFFSETS.iter().zip(values).zip(&reference) {
+            let gap = (value - expected).abs() / expected.abs();
+            eprintln!(
+                "{family}: near-linear pnoise at {offset:e} Hz on {carrier}'s carrier \
+                 {value:e}, .noise {expected:e}, gap {gap:.3e}"
+            );
+            if gap.is_nan() || gap > 1e-4 {
+                failures.push(format!(
+                    "{family}: near-linear pnoise at {offset:e} Hz on {carrier}'s carrier \
+                     {value:e} against the model's .noise {expected:e}"
+                ));
+            }
+        }
+    }
+}
+
+/// Periodic noise of a fixture's V(`node`) must refuse its model on both
+/// carriers as colored noise, by a reason containing `reason`. Harmonic
+/// balance's refuses before it solves an orbit, so it is asked without one;
+/// shooting's is asked of its orbit.
+fn check_pnoise_refusal(
+    family: &str,
+    circuit: &str,
+    node: &str,
+    reason: &str,
+    failures: &mut Vec<String>,
+) {
+    use rspice_core::NoAbort;
+    let netlist =
+        Netlist::parse(&format!("* {family} periodic noise\n{circuit}.end\n")).expect("parse");
+    let balanced = engine()
+        .run_pnoise_with_abort(&netlist, F0, &PNOISE_OFFSETS, node, None, None, 4, &NoAbort)
+        .map(drop)
+        .map_err(|error| error.to_string());
+    let shot = pnoise_shooting_orbit(&netlist).and_then(|point| {
+        engine()
+            .run_pnoise_from_pss_request_with_abort(
+                &netlist,
+                &pnoise_request(node, 0),
+                &point,
+                &NoAbort,
+            )
+            .map(drop)
+            .map_err(|error| error.to_string())
+    });
+    for (carrier, outcome) in [("harmonic balance", balanced), ("shooting", shot)] {
+        match outcome {
+            Err(error)
+                if error.contains("[analysis.pnoise.colored_noise]") && error.contains(reason) => {}
+            Err(error) => failures.push(format!(
+                "{family}: periodic noise on {carrier}'s carrier must refuse it for '{reason}': \
+                 {error}"
+            )),
+            Ok(()) => failures.push(format!(
+                "{family}: periodic noise on {carrier}'s carrier ran, but must refuse it for \
+                 '{reason}'"
+            )),
+        }
+    }
+}
+
 /// Compare `periodic`, a steady-state spectrum of V(`node`), with the
 /// spectrum of RSpice's own transient of `netlist` once it has settled, under
 /// the allowance [`generated_models_reach_the_settled_transients_steady_state`]
@@ -1134,11 +1458,13 @@ fn check_refusal(card: &str, instance: &str, module: &str, reason: &str) -> Opti
 /// Every shipped model this build compiles, walked by name: an admitted one
 /// must reach its fixture's settled transient, or shooting's orbit where no
 /// transient settles, PSTB must read a fixture's shooting orbit (see
-/// [`check_pstb`]), a refused one must give its
-/// named reason, and one with neither a fixture nor a named refusal fails,
-/// so a model the generator newly admits cannot go unchecked. A fixture or
-/// refusal names its model as a word of its deck. It needs every model
-/// feature, which only the nightly builds, so ordinary runs skip it.
+/// [`check_pstb`]), periodic noise must meet its references on a fixture of
+/// a model with a carried operator, or refuse it by name (see
+/// [`check_pnoise`] and [`check_pnoise_refusal`]), a refused one must give
+/// its named reason, and one with neither a fixture nor a named refusal
+/// fails, so a model the generator newly admits cannot go unchecked. A
+/// fixture or refusal names its model as a word of its deck. It needs every
+/// model feature, which only the nightly builds, so ordinary runs skip it.
 #[test]
 #[ignore = "nightly: needs every model feature"]
 fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
@@ -1151,6 +1477,15 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
     let oracle_fixtures = shooting_oracle_fixtures();
     let refused = refused_models();
     let mut failures = Vec::new();
+    let mut pnoise_unread: Vec<&str> = PNOISE_CHECKED_CARRIED_SITE_MODELS
+        .iter()
+        .map(|&(model, _)| model)
+        .chain(
+            PNOISE_REFUSED_CARRIED_SITE_MODELS
+                .iter()
+                .map(|&(model, _)| model),
+        )
+        .collect();
     for &name in builtins::builtin_names() {
         if let Some(&(card, instance, module, reason)) =
             refused.iter().find(|(card, ..)| names_model(card, name))
@@ -1162,6 +1497,18 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
         {
             check_fixture(family, circuit, node, &mut failures);
             check_pstb(family, circuit, &mut failures);
+            pnoise_unread.retain(|model| !model.eq_ignore_ascii_case(name));
+            if let Some(&(_, check)) = PNOISE_CHECKED_CARRIED_SITE_MODELS
+                .iter()
+                .find(|(model, _)| model.eq_ignore_ascii_case(name))
+            {
+                check_pnoise(family, circuit, node, check, &mut failures);
+            } else if let Some(&(_, reason)) = PNOISE_REFUSED_CARRIED_SITE_MODELS
+                .iter()
+                .find(|(model, _)| model.eq_ignore_ascii_case(name))
+            {
+                check_pnoise_refusal(family, circuit, node, reason, &mut failures);
+            }
         } else if let Some(&(family, circuit, node)) = oracle_fixtures
             .iter()
             .find(|(_, circuit, _)| names_model(circuit, name))
@@ -1173,6 +1520,9 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
             ));
         }
     }
+    failures.extend(pnoise_unread.into_iter().map(|model| {
+        format!("{model}: its periodic noise is checked on a settled-transient fixture it lacks")
+    }));
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -1568,67 +1918,29 @@ fn periodic_small_signal_reads_a_generated_models_carried_integrals_on_either_ca
     }
 }
 
-/// Periodic noise refuses PSP's non-quasi-static stage by instance, model
-/// and reason on either carrier: its noise evaluation does not see the
-/// charges harmonic balance carries as unknowns of their own, as for every
-/// generated model with a carried operator site.
+/// Periodic noise reads PSP's non-quasi-static charges, each an `idt`
+/// carried as an unknown of its own, on either carrier: in a pumped stage
+/// shooting's carrier gives the noise harmonic balance's gives, and driven
+/// gently both give the model's own `.noise` (see [`check_pnoise`]). Both
+/// carriers refused the stage by name before, its noise evaluation reading
+/// no carried output.
 #[cfg(feature = "veriloga-model-pspnqs102va")]
 #[test]
-fn periodic_noise_refuses_a_generated_models_noise_beside_its_carried_integrals_by_name() {
-    use rspice_core::NoAbort;
-    use rspice_core::SimulationError;
-    use rspice_core::engine::{PeriodicNoiseRequest, PeriodicNoiseSidebands};
+fn periodic_noise_reads_a_generated_models_carried_integrals_on_either_carrier() {
     let deck = pumped_non_quasi_static_stage("PSPNQS102VA", 3);
-    let netlist = Netlist::parse(&deck).expect("parse");
-    let hb = run_hb(&deck);
-    let point = engine()
-        .run_pss_operating_point_with_abort(&netlist, PssConfig::new(F0), &NoAbort)
-        .unwrap_or_else(|error| panic!("shooting must carry the integrals: {error}"));
-    let request = PeriodicNoiseRequest {
-        sampling: None,
-        offsets: &[0.13 * F0],
-        output_node: "a",
-        output_ref: None,
-        input_source: None,
-        max_sideband: 2,
-        sidebands: PeriodicNoiseSidebands {
-            input: 0,
-            output: 0,
-        },
-    };
-    let refusals = [
-        (
-            "harmonic balance",
-            engine()
-                .run_pnoise_from_hb_request_with_abort(
-                    &netlist,
-                    &request,
-                    &hb.operating_point,
-                    &NoAbort,
-                )
-                .map(drop),
-        ),
-        (
-            "shooting",
-            engine()
-                .run_pnoise_from_pss_request_with_abort(&netlist, &request, &point, &NoAbort)
-                .map(drop),
-        ),
-    ];
-    for (carrier, outcome) in refusals {
-        let error = outcome.expect_err("the noise must be refused");
-        let SimulationError::UnsupportedCapability(refusal) = &error else {
-            panic!("{carrier}: expected a capability refusal, got {error}");
-        };
-        assert!(
-            refusal.capability == "analysis.pnoise.colored_noise"
-                && refusal.detail.ends_with(
-                    "generated Verilog-A instance 'M1' (model 'PSPNQS102VA'): noise in a model \
-                     with an operator harmonic balance carries as an unknown"
-                ),
-            "{carrier}: the refusal must name the instance, model and reason: {error}"
-        );
-    }
+    let circuit = deck
+        .strip_prefix("* pumped non-quasi-static stage\n")
+        .and_then(|body| body.strip_suffix(".end\n"))
+        .expect("the stage's body");
+    let mut failures = Vec::new();
+    check_pnoise(
+        "PSP 102 non-quasi-static",
+        circuit,
+        "a",
+        PNOISE_CHECK,
+        &mut failures,
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Periodic AC and periodic transfer functions on a shooting orbit read a
