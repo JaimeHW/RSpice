@@ -281,7 +281,11 @@ pub fn handle_viewport_navigation(
     {
         apply_pan_delta(pan, touch.translation_delta);
         if (touch.zoom_delta - 1.0).abs() > f32::EPSILON {
-            let focus = response.hover_pos().unwrap_or(touch.start_pos);
+            // About the point between the fingers, so what lies under each
+            // finger stays under it. The pointer follows the first finger
+            // only, and zooming about it slides the drawing toward the
+            // other.
+            let focus = touch.center_pos;
             apply_zoom_about(
                 zoom,
                 pan,

@@ -286,6 +286,13 @@ impl Finger {
         self.viewport().world_to_screen(at)
     }
 
+    /// The symbol point under the screen point `at`, unrounded.
+    fn world(&self, at: Pos2) -> (f32, f32) {
+        let viewport = self.viewport();
+        let rel = at - viewport.rect.center() - viewport.pan;
+        (rel.x / viewport.zoom, rel.y / viewport.zoom)
+    }
+
     fn pan(&self) -> (f32, f32) {
         self.app.state.design.symbol.editor.pan
     }
@@ -544,4 +551,29 @@ fn a_pinch_on_the_symbol_canvas_draws_and_moves_nothing() {
         (edge - egui::vec2(30.0, 0.0), edge + egui::vec2(150.0, 0.0)),
     );
     assert_eq!(finger.document().body, vec![square()], "the square stayed");
+}
+
+/// What lies between the fingers stays between them as they spread.
+#[test]
+fn a_pinch_zooms_the_symbol_about_the_point_between_the_fingers() {
+    let mut finger = Finger::with_body(vec![square()]);
+    let centre = finger.canvas().center() + egui::vec2(-60.0, 30.0);
+    let under = finger.world(centre);
+    finger.pinch(
+        (
+            centre - egui::vec2(40.0, 0.0),
+            centre + egui::vec2(40.0, 0.0),
+        ),
+        (
+            centre - egui::vec2(120.0, 0.0),
+            centre + egui::vec2(120.0, 0.0),
+        ),
+    );
+    let zoom = finger.app.state.design.symbol.editor.zoom;
+    assert!((zoom - 6.0).abs() < 0.01, "three times as close: {zoom}");
+    let after = finger.world(centre);
+    assert!(
+        (after.0 - under.0).abs() < 0.5 && (after.1 - under.1).abs() < 0.5,
+        "{under:?} stayed between the fingers, not {after:?}"
+    );
 }
