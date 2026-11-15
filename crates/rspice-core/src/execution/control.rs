@@ -101,6 +101,16 @@ enum Op {
     Strcmp {
         arguments: String,
     },
+    /// ngspice `label name`: a statement that does nothing, which a `goto`
+    /// names (frontend/control.c:533 CO_LABEL).
+    Label {
+        name: String,
+    },
+    /// ngspice `goto name`, its word substituted when it runs
+    /// (frontend/control.c:526 CO_GOTO).
+    Goto {
+        label: String,
+    },
     Command {
         name: String,
         arguments: String,
@@ -111,6 +121,11 @@ enum Op {
 struct Instruction {
     line: usize,
     op: Op,
+    /// The statement list holding this instruction, by the instruction that
+    /// opens it: an `if` for its first branch, its `else` for the second, a
+    /// loop for its body, and `None` for the top level. The opening `if`,
+    /// loop or `else` itself is held by the list around its block.
+    list: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -198,10 +213,14 @@ impl ControlProgram {
                         name: name.to_ascii_lowercase(),
                         arguments: rest.to_owned(),
                     },
+                    list: None,
                 });
                 continue;
             }
             let pc = program.instructions.len();
+            let mut list = blocks
+                .last()
+                .map(|(opening, alternative)| alternative.unwrap_or(*opening));
             // ngspice's built-in aliases (frontend/cpitf.c:191): `begin` is
             // `if 1`, and each `end<block>` is `end`.
             let (head, rest) = match head.to_ascii_lowercase().as_str() {
@@ -251,18 +270,16 @@ impl ControlProgram {
                     let Some((opening, alternative)) = blocks.last_mut() else {
                         return Err(syntax(line, "else without if"));
                     };
-                    if alternative.is_some()
-                        || !matches!(
-                            program
-                                .instructions
-                                .get(*opening)
-                                .map(|instruction| &instruction.op),
-                            Some(Op::If { .. })
-                        )
-                    {
-                        return Err(syntax(line, "else requires an unmatched if"));
-                    }
+                    let around = match program.instructions.get(*opening) {
+                        Some(Instruction {
+                            op: Op::If { .. },
+                            list,
+                            ..
+                        }) if alternative.is_none() => *list,
+                        _ => return Err(syntax(line, "else requires an unmatched if")),
+                    };
                     *alternative = Some(pc);
+                    list = around;
                     Op::Else { end: 0 }
                 }
                 "end" => {
@@ -270,15 +287,15 @@ impl ControlProgram {
                     let (opening, alternative_pc) = blocks
                         .pop()
                         .ok_or_else(|| syntax(line, "end without a block"))?;
-                    match program
-                        .instructions
-                        .get_mut(opening)
-                        .map(|instruction| &mut instruction.op)
-                    {
-                        Some(Op::Loop { end, .. }) => *end = pc,
-                        Some(Op::If {
+                    let Some(instruction) = program.instructions.get_mut(opening) else {
+                        return Err(syntax(line, "invalid block opening"));
+                    };
+                    list = instruction.list;
+                    match &mut instruction.op {
+                        Op::Loop { end, .. } => *end = pc,
+                        Op::If {
                             alternative, end, ..
-                        }) => {
+                        } => {
                             *alternative = alternative_pc.unwrap_or(pc);
                             *end = pc;
                         }
@@ -340,6 +357,20 @@ impl ControlProgram {
                 "strcmp" => Op::Strcmp {
                     arguments: rest.to_owned(),
                 },
+                "label" => match rest.split_whitespace().collect::<Vec<_>>().as_slice() {
+                    [name] => Op::Label {
+                        name: (*name).to_owned(),
+                    },
+                    _ => return Err(syntax(line, "label requires one name")),
+                },
+                "goto" => {
+                    if rest.is_empty() {
+                        return Err(syntax(line, "goto requires a label"));
+                    }
+                    Op::Goto {
+                        label: rest.to_owned(),
+                    }
+                }
                 _ => Op::Command {
                     name: head.to_ascii_lowercase(),
                     arguments: rest.to_owned(),
@@ -354,7 +385,7 @@ impl ControlProgram {
                 )?;
                 blocks.push((pc, None));
             }
-            program.instructions.push(Instruction { line, op });
+            program.instructions.push(Instruction { line, op, list });
         }
         if in_control {
             return Err(syntax(source.lines().count(), "missing .endc"));
@@ -388,6 +419,9 @@ impl ControlProgram {
                     }
                     Op::End { opening } => *opening += shift,
                     _ => {}
+                }
+                if let Some(list) = &mut instruction.list {
+                    *list += shift;
                 }
             }
             early.append(&mut program.instructions);
@@ -423,6 +457,41 @@ impl ControlProgram {
                 None
             }
         })
+    }
+
+    /// The label a `goto` at `from` jumps to, found as ngspice finds it
+    /// (frontend/control.c:66 findlabel): the first label of that name in the
+    /// goto's own statement list, else in each list around it in turn, so a
+    /// goto never enters a block. A label at the top level counts only before
+    /// the top-level statement running the goto, the statements ngspice has
+    /// read so far (control.c:888).
+    fn label_target(&self, from: usize, name: &str) -> Option<usize> {
+        let labelled = |list: Option<usize>| {
+            move |(_, instruction): &(usize, &Instruction)| {
+                instruction.list == list
+                    && matches!(&instruction.op, Op::Label { name: label } if label == name)
+            }
+        };
+        let list_of = |index: usize| {
+            self.instructions
+                .get(index)
+                .and_then(|instruction| instruction.list)
+        };
+        let mut statement = from;
+        let mut list = list_of(from);
+        while let Some(opening) = list {
+            if let Some((target, _)) = self.instructions.iter().enumerate().find(labelled(list)) {
+                return Some(target);
+            }
+            statement = opening;
+            list = list_of(opening);
+        }
+        self.instructions
+            .iter()
+            .enumerate()
+            .take(statement)
+            .find(labelled(None))
+            .map(|(target, _)| target)
     }
 
     pub fn start(&self, variables: ParamContext) -> ControlSession<'_> {
@@ -751,6 +820,29 @@ impl ControlSession<'_> {
                     // call a deck's .func; a later definition replaces it.
                     self.variables.define_function(name, arguments, body);
                     self.pc += 1;
+                }
+                Op::Label { .. } => self.pc += 1,
+                Op::Goto { label } => {
+                    let label = self.substitute(label, line, evaluator, abort)?;
+                    let words = shell::words(&label);
+                    let [label] = words.as_slice() else {
+                        return Err(syntax(line, "goto requires one label"));
+                    };
+                    let target = self
+                        .program
+                        .label_target(self.pc, &label.text)
+                        .ok_or_else(|| syntax(line, format!("label {} not found", label.text)))?;
+                    // Leaving a loop for a label outside it ends that loop,
+                    // as doblock() does when its body returns a label it
+                    // does not hold (frontend/control.c:329).
+                    while self
+                        .loops
+                        .last()
+                        .is_some_and(|frame| !(frame.opening < target && target < frame.end))
+                    {
+                        self.loops.pop();
+                    }
+                    self.pc = target;
                 }
                 Op::Strcmp { arguments } => {
                     let arguments = self.substitute(arguments, line, evaluator, abort)?;
