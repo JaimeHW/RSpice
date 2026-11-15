@@ -3,7 +3,7 @@
 use crate::library::{Cell, LibraryCatalog, View, ViewType};
 use crate::resolved_symbol::ResolvedCellSymbol;
 use crate::schematic::{component::LibraryCellInstance, document::SchematicDocument};
-use crate::symbol::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, generated};
+use crate::symbol::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolShape, generated};
 use rspice_design_model::{
     cell_view::CellViewRef,
     port::{PinRole, PortSpec},
@@ -115,6 +115,10 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
         match authored_document(symbol_view) {
             AuthoredDocument::Loaded(document) => {
                 let ports = ports.unwrap_or_default();
+                let document = match cell {
+                    Some(cell) => with_current_label_defaults(document, cell, symbol_view),
+                    None => document,
+                };
                 return Some(ResolvedCellSymbol::from_authored_document(document, &ports));
             }
             AuthoredDocument::Invalid => {
@@ -270,6 +274,36 @@ fn legacy_ports_from_view(view: &View) -> Option<Vec<PortSpec>> {
     view.metadata
         .get(generated::GENERATED_PORTS_KEY)
         .map(|encoded| generated::decode_ports(encoded))
+}
+
+/// `document` with each label lettering the default its parameter has in
+/// `cell` now, read as the symbol editor offers it; a label whose parameter
+/// the cell declares no default for keeps the default it stored.
+fn with_current_label_defaults(
+    mut document: SymbolDocument,
+    cell: &Cell,
+    symbol_view: Option<&View>,
+) -> SymbolDocument {
+    if !document
+        .body
+        .iter()
+        .any(|shape| matches!(shape, SymbolShape::Label { .. }))
+    {
+        return document;
+    }
+    let defaults = crate::library::metadata::label_parameter_defaults(cell, symbol_view);
+    for shape in &mut document.body {
+        if let SymbolShape::Label {
+            parameter, default, ..
+        } = shape
+            && let Some((_, current)) = defaults
+                .iter()
+                .find(|(name, current)| name.eq_ignore_ascii_case(parameter) && !current.is_empty())
+        {
+            default.clone_from(current);
+        }
+    }
+    document
 }
 
 #[cfg(test)]

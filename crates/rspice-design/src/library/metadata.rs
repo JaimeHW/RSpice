@@ -472,6 +472,45 @@ pub fn cell_parameter_contract(
     )
 }
 
+/// The parameters a label on `cell`'s symbol view `symbol_view` can letter,
+/// each with what it defaults to now: the fields of the parameter form a
+/// model binds the view to, else what the cell declares to its instances,
+/// through its compiled module, its schematic or the symbol view itself. A
+/// parameter declared with no default defaults to nothing.
+///
+/// The symbol editor offers these to a new label, and resolving the symbol
+/// letters every label's default from them, so a default changed in the
+/// form changes every label that shows it.
+pub fn label_parameter_defaults(cell: &Cell, symbol_view: Option<&View>) -> Vec<(String, String)> {
+    if let Some(definition) = symbol_view.and_then(|view| {
+        crate::model_bound_symbol::load_model_bound_symbol(view)
+            .ok()
+            .flatten()
+    }) {
+        return definition
+            .parameter_form
+            .fields()
+            .map(|field| (field.key.clone(), field.default.display_string()))
+            .collect();
+    }
+    [
+        module_interface_view(cell),
+        cell.get_view("schematic"),
+        symbol_view,
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|view| {
+        cell_parameter_contract(cell, Some(view))
+            .ok()
+            .filter(|parameters| !parameters.is_empty())
+    })
+    .unwrap_or_default()
+    .into_iter()
+    .map(|parameter| (parameter.name, parameter.default_value.unwrap_or_default()))
+    .collect()
+}
+
 /// Whether `cell` or `view` states a parameter contract at all. One that
 /// states an empty contract accepts no parameter; one that states none passes
 /// its instances' parameters through unchecked.

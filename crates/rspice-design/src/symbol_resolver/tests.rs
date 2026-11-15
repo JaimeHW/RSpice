@@ -440,3 +440,54 @@ fn every_catalog_part_connects_where_it_is_drawn() {
         assert_eq!(drawn, extracted, "{cell}");
     }
 }
+
+/// A label letters the default its cell declares now, so a default changed
+/// in the form changes every label that shows it; a parameter the cell does
+/// not declare keeps the default the label stored.
+#[test]
+fn a_label_letters_the_default_its_cell_declares_now() {
+    use crate::symbol::{SymbolTextAlign, SymbolTextRotation, SymbolTextSize};
+    let label = |parameter: &str, default: &str| SymbolShape::Label {
+        anchor: Point::origin(),
+        parameter: parameter.to_owned(),
+        default: default.to_owned(),
+        size: SymbolTextSize::Normal,
+        align: SymbolTextAlign::Left,
+        rotation: SymbolTextRotation::R0,
+        shown: true,
+    };
+    let mut cell = Cell::new("res");
+    cell.metadata.insert(
+        "cdf.parameter_contract".to_owned(),
+        r#"[{"name":"r","default":"2k"}]"#.to_owned(),
+    );
+    let mut symbol_view = View::new("symbol", ViewType::Symbol);
+    SymbolDocument {
+        body: vec![label("R", "1k"), label("TC", "0")],
+        ..SymbolDocument::default()
+    }
+    .store_in_view(&mut symbol_view)
+    .expect("symbol stores");
+    cell.add_view(symbol_view);
+    let mut library = Library::new("work");
+    library.add_cell(cell);
+    let mut libraries = LibraryCatalog::default();
+    libraries.add_library(library);
+    let buffers = HashMap::<String, SchematicDocument>::new();
+
+    let resolved = SymbolResolver::new(&libraries, &buffers)
+        .resolve_reference(&CellViewRef::new("work", "res", "symbol"))
+        .expect("the symbol resolves");
+    let lettered = resolved
+        .document()
+        .body
+        .iter()
+        .filter_map(|shape| match shape {
+            SymbolShape::Label {
+                parameter, default, ..
+            } => Some((parameter.as_str(), default.as_str())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(lettered, [("R", "2k"), ("TC", "0")]);
+}
