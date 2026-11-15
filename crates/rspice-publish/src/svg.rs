@@ -78,6 +78,16 @@ fn rgba_attributes(property: &str, [r, g, b, a]: [u8; 4]) -> String {
     markup
 }
 
+/// The `*-opacity` attribute a role's tint is laid down at: the page's
+/// palette gives the role its colour through the class, and this share of
+/// it is what shows over the ground beneath.
+fn tint_opacity(property: &str, alpha: u8) -> String {
+    format!(
+        " {property}-opacity=\"{}\"",
+        fmt_f64(f64::from(alpha) / 255.0)
+    )
+}
+
 /// Accumulates one element's class list and explicit presentation
 /// attributes, guaranteeing a single well-formed `class` attribute.
 #[derive(Default)]
@@ -91,6 +101,10 @@ impl Presentation {
         match stroke.paint {
             Paint::Role(role) => self.classes.push(format!("s-{}", role_token(role))),
             Paint::Rgba(color) => self.attributes.push_str(&rgba_attributes("stroke", color)),
+            Paint::Tint { role, alpha } => {
+                self.classes.push(format!("s-{}", role_token(role)));
+                self.attributes.push_str(&tint_opacity("stroke", alpha));
+            }
         }
         let _ = write!(
             self.attributes,
@@ -137,6 +151,10 @@ impl Presentation {
             None => self.attributes.push_str(" fill=\"none\""),
             Some(Paint::Role(role)) => self.classes.push(format!("f-{}", role_token(*role))),
             Some(Paint::Rgba(color)) => self.attributes.push_str(&rgba_attributes("fill", *color)),
+            Some(Paint::Tint { role, alpha }) => {
+                self.classes.push(format!("f-{}", role_token(*role)));
+                self.attributes.push_str(&tint_opacity("fill", *alpha));
+            }
         }
     }
 
@@ -144,6 +162,10 @@ impl Presentation {
         match paint {
             Paint::Role(role) => self.classes.push(format!("t-{}", role_token(role))),
             Paint::Rgba(color) => self.attributes.push_str(&rgba_attributes("fill", color)),
+            Paint::Tint { role, alpha } => {
+                self.classes.push(format!("t-{}", role_token(role)));
+                self.attributes.push_str(&tint_opacity("fill", alpha));
+            }
         }
     }
 
@@ -395,6 +417,58 @@ mod tests {
         let mut text = Presentation::default();
         text.text_paint(Paint::Rgba([0, 9, 255, 0]));
         assert_eq!(text.markup(), " fill=\"#0009ff\" fill-opacity=\"0\"");
+    }
+
+    /// A shaded body in a theme ink takes its colour from the page's palette,
+    /// light or dark, and shows only its share of it.
+    #[test]
+    fn a_tint_of_a_theme_ink_takes_the_palette_colour_at_its_share() {
+        let body = PathPrimitive {
+            segments: vec![
+                PathSegment::MoveTo {
+                    to: Point { x_um: 0, y_um: 0 },
+                },
+                PathSegment::LineTo {
+                    to: Point {
+                        x_um: 1_000,
+                        y_um: 0,
+                    },
+                },
+                PathSegment::LineTo {
+                    to: Point {
+                        x_um: 1_000,
+                        y_um: 1_000,
+                    },
+                },
+                PathSegment::Close,
+            ],
+            stroke: Some(Stroke {
+                width_um: 254,
+                paint: Paint::Role(PaintRole::Foreground),
+                pattern: StrokePattern::Solid,
+                dash_um: None,
+            }),
+            fill: Some(Paint::Tint {
+                role: PaintRole::Foreground,
+                alpha: 38,
+            }),
+        };
+        assert_eq!(
+            path_markup(&body),
+            format!(
+                "<path d=\"M 0 0 L 1000 0 L 1000 1000 Z\" class=\"s-foreground f-foreground\" stroke-width=\"254\" fill-opacity=\"{}\"/>",
+                38.0 / 255.0
+            )
+        );
+        let mut text = Presentation::default();
+        text.text_paint(Paint::Tint {
+            role: PaintRole::TraceSeries(9),
+            alpha: 128,
+        });
+        assert_eq!(
+            text.markup(),
+            format!(" class=\"t-trace-1\" fill-opacity=\"{}\"", 128.0 / 255.0)
+        );
     }
 
     /// An outline that carries the pattern its author drew is written in

@@ -851,18 +851,19 @@ fn fill(value: &SceneFill) -> Option<Paint> {
         // Cross-hatch is a print-redundancy affordance; the color page
         // carries the same information as a solid fill of the mapped color.
         SceneFill::CrossHatch { color, .. } => Some(paint(*color)),
-        // A shaded body is its exact ink, a light share of it laid over
-        // whatever page the viewer shows. A role's ink is the viewer's own
-        // to choose, so it has no share to lay down and stays bare.
-        SceneFill::Tint { color } => match color {
-            SemanticColor::Exact(rgb) => {
-                let share = (f32::from(u8::MAX)
-                    * rspice_design::schematic::drawing_metrics::SYMBOL_BACKGROUND_TINT)
-                    .round() as u8;
-                Some(Paint::Rgba([rgb.red, rgb.green, rgb.blue, share]))
-            }
-            _ => None,
-        },
+        // A shaded body is a light share of its ink laid over whatever page
+        // the viewer shows, as the print lays it over the paper. An exact
+        // ink goes verbatim; a theme ink goes as its role, which each of the
+        // page's palettes resolves before it tints.
+        SceneFill::Tint { color } => {
+            let share = (f32::from(u8::MAX)
+                * rspice_design::schematic::drawing_metrics::SYMBOL_BACKGROUND_TINT)
+                .round() as u8;
+            Some(match paint(*color) {
+                Paint::Rgba([red, green, blue, _]) => Paint::Rgba([red, green, blue, share]),
+                Paint::Role(role) | Paint::Tint { role, .. } => Paint::Tint { role, alpha: share },
+            })
+        }
     }
 }
 
@@ -1561,6 +1562,32 @@ mod tests {
         assert!(dash > 1 && gap > 1, "{dash} {gap}");
         let [dot, _] = published[2].1.dash_um.expect("a dotted line keeps its dot");
         assert_eq!(dot, 1, "a dot is a round-capped dash of next to nothing");
+    }
+
+    /// A shaded body drawn in a theme's ink publishes as a light tint of
+    /// that ink's role, which each of the page's palettes resolves, not
+    /// bare; an exact ink keeps its colour at the same share.
+    #[test]
+    fn a_published_background_fill_tints_its_theme_ink() {
+        let share = (255.0 * rspice_design::schematic::drawing_metrics::SYMBOL_BACKGROUND_TINT)
+            .round() as u8;
+        for (ink, role) in [
+            (SemanticColor::Foreground, PaintRole::Foreground),
+            (SemanticColor::Secondary, PaintRole::Secondary),
+            (SemanticColor::Accent, PaintRole::Accent),
+            (SemanticColor::Trace(3), PaintRole::TraceSeries(3)),
+        ] {
+            assert_eq!(
+                fill(&SceneFill::Tint { color: ink }),
+                Some(Paint::Tint { role, alpha: share }),
+                "{ink:?}"
+            );
+        }
+        let exact = SemanticColor::Exact(rspice_hardcopy::render::Rgb8::new(200, 40, 10));
+        assert_eq!(
+            fill(&SceneFill::Tint { color: exact }),
+            Some(Paint::Rgba([200, 40, 10, share]))
+        );
     }
 
     #[test]

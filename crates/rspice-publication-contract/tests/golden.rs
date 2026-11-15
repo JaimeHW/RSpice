@@ -134,7 +134,11 @@ fn rc_lowpass_sheet() -> Scene {
                             PathSegment::Close,
                         ],
                         stroke: stroke(381, PaintRole::Foreground),
-                        fill: None,
+                        // A shaded body: a light tint of its theme ink.
+                        fill: Some(Paint::Tint {
+                            role: PaintRole::Foreground,
+                            alpha: 38,
+                        }),
                     }),
                     label(
                         95_250,

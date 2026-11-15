@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Exact schema version a conforming publication snapshot must declare.
-pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 6;
+pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 7;
 /// Exact schema version a conforming figure manifest must declare.
 pub const FIGURE_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// Hard upper bound on canonical snapshot bytes, matching the hardcopy
@@ -549,6 +549,14 @@ pub enum PaintRole {
 pub enum Paint {
     Role(PaintRole),
     Rgba([u8; 4]),
+    /// A role's ink at `alpha` of its full strength (out of 255, as in
+    /// [`Paint::Rgba`]), laid over whatever the page shows beneath it: a
+    /// shaded symbol body is a light tint of its outline's ink, which each
+    /// palette resolves before it tints. Schema v7 and later only.
+    Tint {
+        role: PaintRole,
+        alpha: u8,
+    },
 }
 
 /// Stroke pattern vocabulary. Dash geometry is a renderer decision keyed off

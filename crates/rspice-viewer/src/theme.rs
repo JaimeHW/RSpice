@@ -79,22 +79,30 @@ impl Palette {
         if dark { DARK } else { LIGHT }
     }
 
-    /// Resolve a contract paint selection to a concrete color.
+    /// Resolve a contract paint selection to a concrete color. A tint is its
+    /// role's colour in this palette at the tint's share, so it shows over
+    /// the ground beneath as the page's static figure shows it.
     #[must_use]
     pub fn resolve(&self, paint: Paint) -> Color32 {
         match paint {
             Paint::Rgba([r, g, b, a]) => Color32::from_rgba_unmultiplied(r, g, b, a),
-            Paint::Role(role) => match role {
-                PaintRole::Foreground => self.foreground,
-                PaintRole::Secondary => self.secondary,
-                PaintRole::Grid => self.grid,
-                PaintRole::Accent => self.accent,
-                PaintRole::Warning => self.warning,
-                PaintRole::Success => self.success,
-                PaintRole::TraceSeries(index) => {
-                    self.traces[usize::from(index) % TRACE_PALETTE_SIZE]
-                }
-            },
+            Paint::Role(role) => self.role(role),
+            Paint::Tint { role, alpha } => {
+                let [r, g, b, _] = self.role(role).to_srgba_unmultiplied();
+                Color32::from_rgba_unmultiplied(r, g, b, alpha)
+            }
+        }
+    }
+
+    fn role(&self, role: PaintRole) -> Color32 {
+        match role {
+            PaintRole::Foreground => self.foreground,
+            PaintRole::Secondary => self.secondary,
+            PaintRole::Grid => self.grid,
+            PaintRole::Accent => self.accent,
+            PaintRole::Warning => self.warning,
+            PaintRole::Success => self.success,
+            PaintRole::TraceSeries(index) => self.traces[usize::from(index) % TRACE_PALETTE_SIZE],
         }
     }
 }
@@ -185,5 +193,23 @@ mod tests {
     fn trace_series_indices_wrap_the_shared_palette() {
         let wrapped = LIGHT.resolve(Paint::Role(PaintRole::TraceSeries(8)));
         assert_eq!(wrapped, LIGHT.traces[0]);
+    }
+
+    /// A shaded body in a theme ink is that ink in each theme's palette at
+    /// the tint's share, never bare and never one theme's colour in both.
+    #[test]
+    fn a_tint_is_its_role_colour_at_its_share_in_each_theme() {
+        let tint = Paint::Tint {
+            role: PaintRole::Foreground,
+            alpha: 38,
+        };
+        for palette in [LIGHT, DARK] {
+            let [r, g, b, _] = palette.foreground.to_srgba_unmultiplied();
+            assert_eq!(
+                palette.resolve(tint),
+                Color32::from_rgba_unmultiplied(r, g, b, 38)
+            );
+        }
+        assert_ne!(LIGHT.resolve(tint), DARK.resolve(tint));
     }
 }

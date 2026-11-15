@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "metadata": {
     "title": "RC low-pass step response",
     "description": "First-order RC low-pass driven by a 1 V pulse.\nDemonstrates the 1 ms time constant against the published rise-time spec.",
@@ -192,7 +192,12 @@
                       },
                       "pattern": "solid"
                     },
-                    "fill": null
+                    "fill": {
+                      "tint": {
+                        "role": "foreground",
+                        "alpha": 38
+                      }
+                    }
                   }
                 },
                 {
