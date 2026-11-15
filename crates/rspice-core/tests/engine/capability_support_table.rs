@@ -107,6 +107,9 @@ fn the_readme_support_table_is_the_capability_matrix() {
     if std::env::var_os("RSPICE_WRITE_SUPPORT_TABLE").is_some() {
         let rewritten = format!("{}{written}{}", &readme[..start], &readme[end..]);
         std::fs::write(README, rewritten).expect("write README.md");
+        eprintln!(
+            "RSPICE_WRITE_SUPPORT_TABLE is set: rewrote README.md's support table instead of checking it"
+        );
         return;
     }
     assert!(
