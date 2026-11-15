@@ -1128,8 +1128,14 @@ impl PssOperatingPointIdentity {
 /// analyses. This is deliberately distinct from a display waveform: the
 /// reactive shooting state and monodromy matrix are part of the contract and
 /// must survive task and worker boundaries without being recomputed.
+///
+/// Every point is built by one validating constructor, deserialization
+/// included, which checks the parts and binds or verifies the retained-state
+/// digest once. The fields are private and no method takes `&mut self`, so a
+/// point's state is the state its digest was taken from for as long as the
+/// point lives.
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize))]
 pub struct PssOperatingPoint {
     config: PssConfig,
     analysis: PssAnalysisResult,
@@ -1143,6 +1149,49 @@ pub struct PssOperatingPoint {
     /// solves must reject.
     #[cfg_attr(feature = "veriloga", serde(default))]
     producer_identity: Option<PssOperatingPointIdentity>,
+}
+
+/// A [`PssOperatingPoint`]'s serialized fields, read before its
+/// constructor checks them.
+#[cfg(feature = "veriloga")]
+#[derive(serde::Deserialize)]
+struct PssOperatingPointParts {
+    config: PssConfig,
+    analysis: PssAnalysisResult,
+    #[serde(default)]
+    shooting_state_basis: Vec<String>,
+    shooting_state: Vec<Value>,
+    #[serde(default)]
+    producer_identity: Option<PssOperatingPointIdentity>,
+}
+
+#[cfg(feature = "veriloga")]
+impl<'de> serde::Deserialize<'de> for PssOperatingPoint {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let parts = <PssOperatingPointParts as serde::Deserialize>::deserialize(deserializer)?;
+        let identity = match parts.producer_identity {
+            Some(identity) => RetainedIdentity::Claimed(identity),
+            None => RetainedIdentity::Absent,
+        };
+        Self::try_from_parts_internal(
+            parts.config,
+            parts.analysis,
+            parts.shooting_state_basis,
+            parts.shooting_state,
+            identity,
+        )
+        .map_err(serde::de::Error::custom)
+    }
+}
+
+/// Where a retained point's producer identity comes from.
+enum RetainedIdentity {
+    /// A legacy identityless artifact.
+    Absent,
+    /// A transported identity, whose digest must match the parts.
+    Claimed(PssOperatingPointIdentity),
+    /// The producer of parts the solver just converged, bound to them here.
+    Produced(PssOperatingPointProducerInputs),
 }
 
 impl PssOperatingPoint {
@@ -1207,7 +1256,13 @@ impl PssOperatingPoint {
         analysis: PssAnalysisResult,
         shooting_state: Vec<Value>,
     ) -> Result<Self, SimulationError> {
-        Self::try_from_parts_internal(config, analysis, Vec::new(), shooting_state, None)
+        Self::try_from_parts_internal(
+            config,
+            analysis,
+            Vec::new(),
+            shooting_state,
+            RetainedIdentity::Absent,
+        )
     }
 
     /// Reconstruct an authenticated transported PSS operating point.
@@ -1228,7 +1283,25 @@ impl PssOperatingPoint {
             analysis,
             shooting_state_basis,
             shooting_state,
-            Some(producer_identity),
+            RetainedIdentity::Claimed(producer_identity),
+        )
+    }
+
+    /// The state a solve just converged, bound to its producer: its
+    /// retained-state digest is taken once, from the parts the point keeps.
+    fn produced(
+        producer: PssOperatingPointProducerInputs,
+        config: PssConfig,
+        analysis: PssAnalysisResult,
+        shooting_state_basis: Vec<String>,
+        shooting_state: Vec<Value>,
+    ) -> Result<Self, SimulationError> {
+        Self::try_from_parts_internal(
+            config,
+            analysis,
+            shooting_state_basis,
+            shooting_state,
+            RetainedIdentity::Produced(producer),
         )
     }
 
@@ -1237,36 +1310,50 @@ impl PssOperatingPoint {
         analysis: PssAnalysisResult,
         shooting_state_basis: Vec<String>,
         shooting_state: Vec<Value>,
-        producer_identity: Option<PssOperatingPointIdentity>,
+        identity: RetainedIdentity,
     ) -> Result<Self, SimulationError> {
         config.validate().map_err(PssError::InvalidConfig)?;
         Self::validate_parts(&config, &analysis, &shooting_state)?;
-        if let Some(identity) = producer_identity.as_ref() {
-            identity.validate()?;
-            Self::validate_shooting_state_basis(&shooting_state_basis, shooting_state.len())?;
-        }
-        let point = Self {
+        let producer_identity = match identity {
+            RetainedIdentity::Absent => None,
+            RetainedIdentity::Claimed(identity) => {
+                identity.validate()?;
+                Self::validate_shooting_state_basis(&shooting_state_basis, shooting_state.len())?;
+                if identity.retained_state_identity
+                    != pss_retained_state_identity(
+                        &config,
+                        &analysis,
+                        &shooting_state_basis,
+                        &shooting_state,
+                    )
+                {
+                    return Err(SimulationError::Circuit(
+                        "retained PSS numerical payload does not match its authenticated producer identity"
+                            .to_owned(),
+                    ));
+                }
+                Some(identity)
+            }
+            RetainedIdentity::Produced(producer) => {
+                Self::validate_shooting_state_basis(&shooting_state_basis, shooting_state.len())?;
+                let identity = PssOperatingPointIdentity::bind(
+                    producer,
+                    &config,
+                    &analysis,
+                    &shooting_state_basis,
+                    &shooting_state,
+                );
+                identity.validate()?;
+                Some(identity)
+            }
+        };
+        Ok(Self {
             config,
             analysis,
             shooting_state_basis,
             shooting_state,
             producer_identity,
-        };
-        if let Some(identity) = point.producer_identity.as_ref()
-            && identity.retained_state_identity
-                != pss_retained_state_identity(
-                    &point.config,
-                    &point.analysis,
-                    &point.shooting_state_basis,
-                    &point.shooting_state,
-                )
-        {
-            return Err(SimulationError::Circuit(
-                "retained PSS numerical payload does not match its authenticated producer identity"
-                    .to_owned(),
-            ));
-        }
-        Ok(point)
+        })
     }
 
     fn validate_shooting_state_basis(
@@ -1564,21 +1651,8 @@ impl PssOperatingPoint {
                     .to_owned(),
             )
         })?;
-        retained.validate()?;
-        Self::validate_shooting_state_basis(&self.shooting_state_basis, self.shooting_state.len())?;
-        if retained.retained_state_identity
-            != pss_retained_state_identity(
-                &self.config,
-                &self.analysis,
-                &self.shooting_state_basis,
-                &self.shooting_state,
-            )
-        {
-            return Err(SimulationError::Circuit(
-                "retained PSS numerical payload does not match its authenticated producer identity"
-                    .to_owned(),
-            ));
-        }
+        // The point's constructor validated this identity and the basis, and
+        // matched the digest to the state the point still holds.
         let current = PssOperatingPointIdentity::capture(netlist, simulation_config, pss_config)?;
         if retained.semantic_netlist_identity != current.semantic_netlist_identity {
             return Err(SimulationError::Circuit(
@@ -1918,15 +1992,8 @@ impl Engine {
             ));
         }
         let shooting_state_basis = circuit.state_basis_names();
-        let identity = PssOperatingPointIdentity::bind(
+        PssOperatingPoint::produced(
             producer,
-            &retained_config,
-            &analysis,
-            &shooting_state_basis,
-            &shooting_state,
-        );
-        PssOperatingPoint::try_from_authenticated_parts(
-            identity,
             retained_config,
             analysis,
             shooting_state_basis,
@@ -1979,15 +2046,8 @@ impl Engine {
             ));
         }
         let shooting_state_basis = circuit.state_basis_names();
-        let identity = PssOperatingPointIdentity::bind(
+        PssOperatingPoint::produced(
             producer,
-            &retained_config,
-            &analysis,
-            &shooting_state_basis,
-            &shooting_state,
-        );
-        PssOperatingPoint::try_from_authenticated_parts(
-            identity,
             retained_config,
             analysis,
             shooting_state_basis,
@@ -2287,20 +2347,7 @@ impl Engine {
                 "PSS semantic producer inputs changed during the periodic solve".to_owned(),
             ));
         }
-        let identity = PssOperatingPointIdentity::bind(
-            producer,
-            &config,
-            &event.analysis,
-            &event.basis,
-            &event.state,
-        );
-        PssOperatingPoint::try_from_authenticated_parts(
-            identity,
-            config,
-            event.analysis,
-            event.basis,
-            event.state,
-        )
+        PssOperatingPoint::produced(producer, config, event.analysis, event.basis, event.state)
     }
 
     /// Refuse any orbit whose state the shooting period map cannot carry.
