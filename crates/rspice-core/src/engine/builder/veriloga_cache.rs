@@ -3464,8 +3464,8 @@ pub struct ProjectVerilogAConnectionLibraryRegistration {
 pub enum ProjectVerilogASourceRegistration {
     Runtime(ProjectVerilogARuntimeRegistration),
     /// A runtime and the fingerprint its artifact was sealed with
-    /// ([`sealed_veriloga_artifact_fingerprint`]), which the install takes
-    /// instead of serializing the model to compute it.
+    /// ([`super::SealedVerilogAArtifact::fingerprint`]), which the install
+    /// takes instead of encoding the model to compute it.
     Sealed {
         runtime: ProjectVerilogARuntimeRegistration,
         artifact_fingerprint: [u8; 32],
@@ -3500,48 +3500,17 @@ impl PreparedProjectVerilogARegistration {
     }
 }
 
+/// What installed artifacts are compared by: the hash of the model and
+/// canonical IR in the record encoding, written straight into the hasher. A
+/// sealer takes it once ([`super::seal_veriloga_artifact`]) and carries it with
+/// the artifact.
 #[cfg(feature = "veriloga")]
-#[derive(Default)]
-struct ArtifactFingerprintWriter(blake3::Hasher);
-
-#[cfg(feature = "veriloga")]
-impl std::io::Write for ArtifactFingerprintWriter {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.update(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-#[cfg(feature = "veriloga")]
-fn runtime_artifact_fingerprint(
+pub(super) fn runtime_artifact_fingerprint(
     model: &rspice_veriloga::CompiledModel,
     canonical_ir: Option<&rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
 ) -> Result<[u8; 32], String> {
-    let mut writer = ArtifactFingerprintWriter::default();
-    serde_json::to_writer(&mut writer, &(model, canonical_ir))
-        .map_err(|error| format!("failed to fingerprint Verilog-A runtime artifact: {error}"))?;
-    Ok(*writer.0.finalize().as_bytes())
-}
-
-/// The fingerprint an install compares a sealed runtime's artifact by, taken
-/// from the text it was sealed as: `model_json` and `canonical_ir_json`, the
-/// model and canonical IR as `serde_json` writes them. They are hashed as the
-/// one JSON array the fingerprint serializes, so this is the fingerprint the
-/// parsed artifact gets, without parsing or writing it again. A sealer takes
-/// it once and carries it with the artifact.
-#[cfg(feature = "veriloga")]
-pub fn sealed_veriloga_artifact_fingerprint(model_json: &str, canonical_ir_json: &str) -> [u8; 32] {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"[");
-    hasher.update(model_json.as_bytes());
-    hasher.update(b",");
-    hasher.update(canonical_ir_json.as_bytes());
-    hasher.update(b"]");
-    *hasher.finalize().as_bytes()
+    veriloga_record::fingerprint(&(model, canonical_ir))
+        .map_err(|error| format!("failed to fingerprint Verilog-A runtime artifact: {error}"))
 }
 
 #[cfg(feature = "veriloga")]
@@ -4403,9 +4372,9 @@ endmodule
         }
     }
 
-    /// The fingerprint taken from the sealed text is the one the parsed
-    /// artifact has, and an install of the runtime under it lets a later run
-    /// hold the same artifact by its identity alone, without its payload.
+    /// The fingerprint a seal carries is the one the opened artifact has, and
+    /// an install of the runtime under it lets a later run hold the same
+    /// artifact by its identity alone, without its payload.
     #[test]
     fn a_runtime_installed_with_its_sealed_fingerprint_is_held_again_by_identity() {
         let key = PathBuf::from(
@@ -4415,14 +4384,15 @@ endmodule
             "__rspice_project__/00000000-0000-0000-0000-0000000000b2/digest/sealed.va",
         );
         let registration = project_registration(&key, "sealed_conductance", &[]);
-        let model_json = serde_json::to_string(&registration.model).unwrap();
-        let canonical_ir_json = serde_json::to_string(&registration.canonical_ir).unwrap();
-        let fingerprint = sealed_veriloga_artifact_fingerprint(&model_json, &canonical_ir_json);
+        let fingerprint =
+            super::super::seal_veriloga_artifact(&registration.model, &registration.canonical_ir)
+                .unwrap()
+                .fingerprint;
         assert_eq!(
             fingerprint,
             runtime_artifact_fingerprint(&registration.model, Some(&registration.canonical_ir))
                 .unwrap(),
-            "the sealed text hashes as the artifact serializes"
+            "the seal carries the fingerprint the artifact has"
         );
         fn identity(
             source_key: &Path,

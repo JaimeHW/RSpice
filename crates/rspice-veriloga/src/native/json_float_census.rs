@@ -1,10 +1,10 @@
-//! Whether every shipped model survives the JSON the browser worker is handed.
+//! Whether every shipped model survives being written as JSON.
 //!
-//! A project or PDK Verilog-A runtime reaches the browser as
-//! `PreparedVerilogARuntime`, which is two `serde_json` strings: the
-//! [`CompiledModel`](crate::CompiledModel) and the
-//! [`CanonicalIrArtifact`](crate::canonical_ir::CanonicalIrArtifact). JSON has
-//! no spelling for an infinity or a NaN, so before
+//! A project or PDK Verilog-A runtime reached the browser as two `serde_json`
+//! strings, the [`CompiledModel`](crate::CompiledModel) and the
+//! [`CanonicalIrArtifact`](crate::canonical_ir::CanonicalIrArtifact), until it
+//! was sealed as a binary record; JSON is still how a tool or a person reads
+//! one. JSON has no spelling for an infinity or a NaN, so before
 //! [`crate::json_float`] existed a model carrying one either refused to decode
 //! or came back with a bound silently deleted — see that module for the two
 //! failure modes and why they are not hypothetical.
@@ -14,12 +14,11 @@
 //!
 //! 1. what bare non-finite float would a JSON serializer still lose, and where
 //!    (the census table, printed whether or not the answer is empty); and
-//! 2. does the exact seal the runtime performs — `to_string`, `from_str` —
-//!    reproduce the payload byte for byte?
+//! 2. does `to_string` then `from_str` reproduce the payload byte for byte?
 //!
 //! The second is the strong one: re-serializing what came back and comparing
 //! bytes catches every value that did not survive, not only the non-finite
-//! ones, and it is the same encode/decode pair `PreparedVerilogARuntime` runs.
+//! ones.
 //!
 //! # What it found, and why it still runs
 //!

@@ -487,12 +487,13 @@ endmodule
         );
         compile_installed(&runtime)
             .expect("a module with an infinite default qualifies for the browser JIT");
-        let ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact = serde_json::from_str(
-            serde_json::to_value(&runtime).unwrap()["canonical_ir_json"]
-                .as_str()
-                .unwrap(),
-        )
-        .expect("sealed IR payload parses");
+        let installed = crate::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
+            .unwrap()
+            .install()
+            .unwrap();
+        let (_, ir) = installed
+            .runtime_artifact(std::path::Path::new(runtime.source_key()))
+            .expect("the install holds the sealed artifact");
         assert_eq!(
             ir.hir
                 .parameters
@@ -549,8 +550,12 @@ endmodule
             crate::veriloga::PreparedVerilogARuntimeSet::try_new(vec![altered]).unwrap(),
         )
         .unwrap();
-        let model_json = &mut set["runtimes"][0]["model_json"];
-        *model_json = serde_json::Value::String(format!("{} ", model_json.as_str().unwrap()));
+        // Another base64 letter first: still an artifact's spelling, but not
+        // the bytes the digest covers.
+        let artifact = &mut set["runtimes"][0]["artifact"];
+        let spelled = artifact.as_str().unwrap();
+        let first = if spelled.starts_with('A') { 'B' } else { 'A' };
+        *artifact = serde_json::Value::String(format!("{first}{}", &spelled[1..]));
         let set: crate::veriloga::PreparedVerilogARuntimeSet = serde_json::from_value(set).unwrap();
         let refused = set
             .install()

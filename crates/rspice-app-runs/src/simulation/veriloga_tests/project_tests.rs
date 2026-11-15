@@ -36,13 +36,15 @@ endmodule
     runtime.validate().unwrap();
     assert_eq!(runtime.source_digest(), package.archive_digest());
     assert_eq!(runtime.terminal_names().unwrap(), ["p", "n"]);
-    let canonical: rspice_veriloga::canonical_ir::CanonicalIrArtifact = serde_json::from_str(
-        serde_json::to_value(&runtime).unwrap()["canonical_ir_json"]
-            .as_str()
-            .unwrap(),
-    )
-    .unwrap();
+    let installed = PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
+        .unwrap()
+        .install()
+        .unwrap();
+    let (_, canonical) = installed
+        .runtime_artifact(std::path::Path::new(runtime.source_key()))
+        .unwrap();
     assert!(!canonical.digital.processes.is_empty());
+    drop(installed);
     assert_controlled_conductance(&runtime, 250.0);
 
     let mut tampered = sealed.as_parts().veriloga_artifacts.clone();

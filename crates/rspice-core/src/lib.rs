@@ -165,10 +165,11 @@ pub use engine::{
 pub use engine::{
     HeldVerilogASources, InstalledProjectVerilogARuntime,
     ProjectVerilogAConnectionLibraryRegistration, ProjectVerilogARuntimeRegistration,
-    ProjectVerilogASourceRegistration, VerilogACacheTelemetry,
+    ProjectVerilogASourceRegistration, SealedVerilogAArtifact, VerilogACacheTelemetry,
     hold_installed_project_veriloga_runtimes, hold_project_veriloga_sources_for_session,
-    register_precompiled_veriloga_model, register_precompiled_veriloga_model_with_dependencies,
-    register_precompiled_veriloga_runtime_with_dependencies, sealed_veriloga_artifact_fingerprint,
+    open_sealed_veriloga_artifact, register_precompiled_veriloga_model,
+    register_precompiled_veriloga_model_with_dependencies,
+    register_precompiled_veriloga_runtime_with_dependencies, seal_veriloga_artifact,
     veriloga_cache_telemetry,
 };
 pub use netlist::Netlist;

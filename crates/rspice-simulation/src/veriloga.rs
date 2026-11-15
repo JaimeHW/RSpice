@@ -9,28 +9,11 @@ pub use connections::PreparedVerilogAConnectionLibrary;
 #[cfg(test)]
 pub(crate) mod tests;
 
-/// Why a prepared Verilog-A runtime could not be built.
-///
-/// Every construction path in this module used to answer `String`, which put
-/// one failure a caller can act on — a payload carrying a float JSON cannot
-/// encode — in the same shape as every failure it cannot. The variants are the
-/// kinds this module already distinguished in prose; the sentences they carry
-/// are the ones it already wrote, unchanged, because the UI shows them and
-/// tests pin the text.
-///
-/// [`Self::NonFinite`] is the reason the enum exists. It keeps
-/// [`rspice_veriloga::json_float::NonFiniteFloatError`] typed all the way to
-/// the caller, which can then tell "this artifact cannot be written as JSON"
-/// from "this source is wrong" without reading a message.
+/// Why a prepared Verilog-A runtime could not be built. The variants are the
+/// kinds this module distinguishes in prose; the sentences they carry are the
+/// ones the UI shows.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PreparedRuntimeError {
-    /// A sealed payload carries a non-finite float no annotation encodes. The
-    /// artifact is well formed; JSON is what cannot carry it.
-    NonFinite {
-        /// What was being sealed, for the message.
-        description: &'static str,
-        source: rspice_veriloga::json_float::NonFiniteFloatError,
-    },
     /// The source identity offered is not the one the caller asked to seal.
     SourceIdentity(String),
     /// The source closure could not be assembled into a compilable bundle.
@@ -44,10 +27,6 @@ pub enum PreparedRuntimeError {
 impl std::fmt::Display for PreparedRuntimeError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NonFinite {
-                description,
-                source,
-            } => write!(formatter, "Could not seal {description}: {source}"),
             Self::SourceIdentity(message)
             | Self::SourceBundle(message)
             | Self::Compile(message)
@@ -78,13 +57,16 @@ pub struct PreparedVerilogARuntime {
     artifact_digest: rspice_vocabulary::product::ContentDigest,
     module_name: String,
     netlist_alias: String,
-    model_json: String,
-    canonical_ir_json: String,
+    /// The compiled model and its canonical IR, sealed as one compact record
+    /// ([`rspice_core::seal_veriloga_artifact`]): the same bytes on every
+    /// architecture, so a runtime sealed natively has the digest the browser
+    /// worker would seal it under.
+    artifact: SealedArtifactBytes,
     /// The fingerprint the engine compares installed artifacts by
-    /// ([`rspice_core::sealed_veriloga_artifact_fingerprint`]), taken from the
-    /// two payloads once when they are sealed and covered by the digest. An
-    /// install takes it rather than computing it, and holds an artifact the
-    /// engine already has under it without reading either payload.
+    /// ([`rspice_core::SealedVerilogAArtifact::fingerprint`]), taken once when
+    /// the artifact is sealed and covered by the digest. An install takes it
+    /// rather than computing it, and holds an artifact the engine already has
+    /// under it without reading the payload.
     artifact_fingerprint: rspice_vocabulary::product::ContentDigest,
     /// The cell table the artifact was compiled against, when its design
     /// instantiates SPICE cells as leaves: part of its identity, and of the
@@ -103,6 +85,51 @@ pub struct PreparedVerilogARuntime {
 
 fn is_typical(delay_select: &DigitalDelaySelect) -> bool {
     *delay_select == DigitalDelaySelect::Typ
+}
+
+/// A sealed artifact's bytes, shared by every clone of the runtime that holds
+/// them: a request, its snapshot and its dispatch all carry the same set.
+///
+/// They travel as one base64 string, the form both of a runtime's transports
+/// carry compactly: the JSON wire a host writes to the worker, and the object
+/// a page hands it (`serde_wasm_bindgen`), which would otherwise spell each
+/// byte as a number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SealedArtifactBytes(std::sync::Arc<[u8]>);
+
+impl SealedArtifactBytes {
+    fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl serde::Serialize for SealedArtifactBytes {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use base64::Engine as _;
+        serializer.serialize_str(&base64::engine::general_purpose::STANDARD.encode(&self.0))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SealedArtifactBytes {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Base64;
+        impl serde::de::Visitor<'_> for Base64 {
+            type Value = SealedArtifactBytes;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a sealed Verilog-A artifact as base64")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Self::Value, E> {
+                use base64::Engine as _;
+                base64::engine::general_purpose::STANDARD
+                    .decode(text)
+                    .map(|bytes| SealedArtifactBytes(bytes.into()))
+                    .map_err(E::custom)
+            }
+        }
+        deserializer.deserialize_str(Base64)
+    }
 }
 
 impl PreparedVerilogARuntime {
@@ -222,11 +249,11 @@ impl PreparedVerilogARuntime {
         cells: Option<&[rspice_veriloga::ExternalCell]>,
         delay_select: DigitalDelaySelect,
     ) -> Result<Self, PreparedRuntimeError> {
-        let model_json = seal_compiled_model(&report.model)?;
-        let canonical_ir_json = seal_canonical_ir(&report.canonical_ir)?;
-        let artifact_fingerprint = rspice_vocabulary::product::ContentDigest::from_bytes(
-            rspice_core::sealed_veriloga_artifact_fingerprint(&model_json, &canonical_ir_json),
-        );
+        let sealed = rspice_core::seal_veriloga_artifact(&report.model, &report.canonical_ir)
+            .map_err(PreparedRuntimeError::Integrity)?;
+        let artifact_fingerprint =
+            rspice_vocabulary::product::ContentDigest::from_bytes(sealed.fingerprint);
+        let artifact = SealedArtifactBytes(sealed.bytes.into());
         let external_cells = cells
             .filter(|_| !report.canonical_ir.hir.external_leaves.is_empty())
             .map(<[_]>::to_vec);
@@ -235,8 +262,7 @@ impl PreparedVerilogARuntime {
             source_digest,
             module_name,
             &netlist_alias,
-            &model_json,
-            &canonical_ir_json,
+            artifact.as_bytes(),
             artifact_fingerprint,
             external_cells.as_deref(),
             delay_select,
@@ -247,8 +273,7 @@ impl PreparedVerilogARuntime {
             artifact_digest,
             module_name: module_name.to_owned(),
             netlist_alias,
-            model_json,
-            canonical_ir_json,
+            artifact,
             artifact_fingerprint,
             external_cells,
             delay_select,
@@ -292,9 +317,9 @@ impl PreparedVerilogARuntime {
         })
     }
 
-    /// The registration an install hands the engine: the payloads checked
-    /// against the digest and parsed once each, with the fingerprint they were
-    /// sealed with.
+    /// The registration an install hands the engine: the payload checked
+    /// against the digest and opened once, with the fingerprint it was sealed
+    /// with.
     fn sealed_registration(
         &self,
     ) -> Result<rspice_core::ProjectVerilogASourceRegistration, String> {
@@ -319,8 +344,8 @@ impl PreparedVerilogARuntime {
         self.parsed().map(|_| ())
     }
 
-    /// The source key, module and alias are well formed: the checks that need
-    /// neither payload.
+    /// The source key, module and alias are well formed: the checks that do
+    /// not need the payload.
     fn check_identity(&self) -> Result<(), String> {
         if !valid_sealed_source_key(&self.source_key) {
             return Err("Verilog-A runtime has an invalid sealed virtual source key".to_owned());
@@ -334,7 +359,7 @@ impl PreparedVerilogARuntime {
         Ok(())
     }
 
-    /// The identity checks and the payload digest, without parsing either
+    /// The identity checks and the payload digest, without opening the
     /// payload.
     fn verify_payload_digest(&self) -> Result<(), String> {
         self.check_identity()?;
@@ -343,8 +368,7 @@ impl PreparedVerilogARuntime {
             self.source_digest,
             &self.module_name,
             &self.netlist_alias,
-            &self.model_json,
-            &self.canonical_ir_json,
+            self.artifact.as_bytes(),
             self.artifact_fingerprint,
             self.external_cells.as_deref(),
             self.delay_select,
@@ -355,8 +379,8 @@ impl PreparedVerilogARuntime {
         Ok(())
     }
 
-    /// Both payloads, checked against the digest and against each other, each
-    /// parsed once.
+    /// The model and canonical IR, checked against the digest and against
+    /// each other, opened once.
     fn parsed(
         &self,
     ) -> Result<
@@ -367,11 +391,8 @@ impl PreparedVerilogARuntime {
         String,
     > {
         self.verify_payload_digest()?;
-        let model: rspice_veriloga::CompiledModel = serde_json::from_str(&self.model_json)
-            .map_err(|error| format!("Compiled Verilog-A model payload is invalid: {error}"))?;
-        let canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
-            serde_json::from_str(&self.canonical_ir_json)
-                .map_err(|error| format!("Canonical Verilog-A IR payload is invalid: {error}"))?;
+        let (model, canonical_ir) =
+            rspice_core::open_sealed_veriloga_artifact(self.artifact.as_bytes())?;
         if model.name.as_str() != self.module_name {
             return Err(format!(
                 "Verilog-A runtime module '{}' does not match compiled model '{}'",
@@ -938,56 +959,6 @@ fn model_library_virtual_path(path: &std::path::Path) -> Result<String, Prepared
     Ok(logical)
 }
 
-/// Seal the compiled model as the JSON string the runtime carries.
-fn seal_compiled_model(
-    model: &rspice_veriloga::CompiledModel,
-) -> Result<String, PreparedRuntimeError> {
-    seal_payload_json("model", "compiled Verilog-A model", model)
-}
-
-/// Seal the canonical IR the same way. It is a separate string with a separate
-/// parse, and the browser JIT lowers this one.
-fn seal_canonical_ir(
-    canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
-) -> Result<String, PreparedRuntimeError> {
-    seal_payload_json("canonical_ir", "canonical Verilog-A IR", canonical_ir)
-}
-
-/// Write one payload as JSON, refusing first anything JSON cannot carry.
-///
-/// The scan runs before the write rather than after, because after the write
-/// there is nothing left to see: `serde_json` spells a non-finite float
-/// `null`, a bare `f64` then refuses to decode, and an `Option<f64>` decodes
-/// it as `None` — a bound silently deleted, with the artifact digest over the
-/// JSON text agreeing that nothing is wrong. Every field that can legitimately
-/// hold a non-finite float encodes it as a string through
-/// `rspice_veriloga::json_float`, so a path this names is a field that
-/// acquired one without being annotated, and the seal refuses rather than
-/// shipping a model the browser worker would build different physics from.
-///
-/// The refusal keeps its cause typed: `NonFiniteFloatError` reaches the caller
-/// as [`PreparedRuntimeError::NonFinite`] rather than as a sentence, so a
-/// caller can tell an unencodable artifact from a bad source without parsing
-/// the message it renders.
-fn seal_payload_json<T>(
-    path_root: &str,
-    description: &'static str,
-    value: &T,
-) -> Result<String, PreparedRuntimeError>
-where
-    T: serde::Serialize,
-{
-    rspice_veriloga::json_float::refuse_non_finite_floats(path_root, value).map_err(|source| {
-        PreparedRuntimeError::NonFinite {
-            description,
-            source,
-        }
-    })?;
-    serde_json::to_string(value).map_err(|error| {
-        PreparedRuntimeError::Integrity(format!("Could not serialize {description}: {error}"))
-    })
-}
-
 #[expect(
     clippy::too_many_arguments,
     reason = "each argument is one field of the artifact's identity, hashed in this order"
@@ -997,14 +968,13 @@ fn runtime_artifact_digest(
     source_digest: rspice_vocabulary::product::ContentDigest,
     module_name: &str,
     netlist_alias: &str,
-    model_json: &str,
-    canonical_ir_json: &str,
+    artifact: &[u8],
     artifact_fingerprint: rspice_vocabulary::product::ContentDigest,
     external_cells: Option<&[rspice_veriloga::ExternalCell]>,
     delay_select: DigitalDelaySelect,
 ) -> rspice_vocabulary::product::ContentDigest {
     let mut hasher = Sha256::new();
-    hasher.update(b"rspice.project-veriloga-runtime/v3\0");
+    hasher.update(b"rspice.project-veriloga-runtime/v4\0");
     let mut field = |bytes: &[u8]| {
         hasher.update((bytes.len() as u64).to_le_bytes());
         hasher.update(bytes);
@@ -1014,8 +984,7 @@ fn runtime_artifact_digest(
         source_digest.as_bytes(),
         module_name.as_bytes(),
         netlist_alias.as_bytes(),
-        model_json.as_bytes(),
-        canonical_ir_json.as_bytes(),
+        artifact,
         artifact_fingerprint.as_bytes(),
     ] {
         field(bytes);

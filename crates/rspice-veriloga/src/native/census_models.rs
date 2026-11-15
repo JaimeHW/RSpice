@@ -61,8 +61,8 @@
 //! this cache hands back artifacts that are not what the compiler produced and
 //! the censuses fail on the first cache hit. The feature pulls in no crate and
 //! does not move `Cargo.lock`. It is not this module's alone: the same inexact
-//! parse reached production through `PreparedVerilogARuntime`, which is why the
-//! feature sits on the workspace entry rather than on one crate's tests.
+//! parse would reach anything that reads a model back from JSON, which is why
+//! the feature sits on the workspace entry rather than on one crate's tests.
 //! `finite_floats_survive_the_encoding_the_cache_uses` fails without it, so it
 //! cannot be dropped as unused silently.
 

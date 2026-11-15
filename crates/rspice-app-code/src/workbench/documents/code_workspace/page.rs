@@ -982,9 +982,12 @@ mod tests {
         // Tamper through the serialized form rather than the field. The
         // payload is private to `rspice_simulation::veriloga` now, and a persisted
         // artifact edited on disk is the case that actually matters.
+        // Another base64 letter first: still an artifact's spelling, but not
+        // the bytes the digest covers.
         let mut document: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
-        let model_json = document["model_json"].as_str().unwrap().to_owned();
-        document["model_json"] = serde_json::Value::String(format!("{model_json} "));
+        let artifact = document["artifact"].as_str().unwrap().to_owned();
+        let first = if artifact.starts_with('A') { 'B' } else { 'A' };
+        document["artifact"] = serde_json::Value::String(format!("{first}{}", &artifact[1..]));
         let tampered: PreparedVerilogARuntime = serde_json::from_value(document).unwrap();
         assert!(tampered.validate().is_err());
     }

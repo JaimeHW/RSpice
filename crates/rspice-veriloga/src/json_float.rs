@@ -1,9 +1,10 @@
 //! JSON-safe encoding for the floats a compiled artifact carries.
 //!
 //! A [`CompiledModel`](crate::CompiledModel) and a
-//! [`CanonicalIrArtifact`](crate::canonical_ir::CanonicalIrArtifact) travel as
-//! JSON: `rspice-core` caches them that way, and the browser worker is handed
-//! nothing else — `PreparedVerilogARuntime` seals both as JSON strings.
+//! [`CanonicalIrArtifact`](crate::canonical_ir::CanonicalIrArtifact) are
+//! written as JSON wherever a person or a tool reads them, and the binary
+//! records `rspice-core` caches and seals them in read either spelling of a
+//! float back.
 //!
 //! JSON has no spelling for an infinity or a NaN. `serde_json` writes one as
 //! `null`, and what happens next depends only on the field's type:
@@ -23,10 +24,8 @@
 //! writes without this module, so no artifact digest moves for a model that
 //! has no non-finite float to encode.
 //!
-//! [`refuse_non_finite_floats`] is the guard against the class returning: it
-//! names the exact field path of any bare non-finite float still reachable in
-//! a value about to be written, so a field that acquires one and is never
-//! annotated fails loudly at the seal instead of quietly on arrival.
+//! [`non_finite_floats`] names the exact field path of any bare non-finite
+//! float still reachable in a value about to be written as JSON.
 
 use std::fmt;
 
@@ -299,48 +298,6 @@ impl serde::ser::Error for ScanError {
     }
 }
 
-/// Why a value cannot be sealed as JSON.
-#[derive(Debug, Clone, PartialEq)]
-pub enum NonFiniteFloatError {
-    /// The value could not be walked, so nothing was proven either way.
-    Scan(ScanError),
-    /// Bare non-finite floats that JSON would lose, in the order found.
-    Unencodable(Vec<NonFiniteFloat>),
-}
-
-/// How many paths a refusal names before it stops listing them.
-const REFUSAL_PATH_LIMIT: usize = 8;
-
-impl fmt::Display for NonFiniteFloatError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Scan(error) => write!(formatter, "the payload could not be scanned: {error}"),
-            Self::Unencodable(found) => {
-                write!(
-                    formatter,
-                    "{} non-finite float{} JSON cannot encode: ",
-                    found.len(),
-                    if found.len() == 1 { "" } else { "s" }
-                )?;
-                for (position, entry) in found.iter().take(REFUSAL_PATH_LIMIT).enumerate() {
-                    if position > 0 {
-                        formatter.write_str(", ")?;
-                    }
-                    write!(formatter, "{entry}")?;
-                }
-                if let Some(remaining) = found.len().checked_sub(REFUSAL_PATH_LIMIT)
-                    && remaining > 0
-                {
-                    write!(formatter, ", and {remaining} more")?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-impl std::error::Error for NonFiniteFloatError {}
-
 /// Every bare non-finite float `value` would hand a JSON serializer, with the
 /// field path of each.
 ///
@@ -363,31 +320,12 @@ where
     Ok(scan.found)
 }
 
-/// Refuse `value` if any bare non-finite float would be lost by writing it as
-/// JSON.
-///
-/// This is the guard the seal runs before it writes. Every field that can
-/// legitimately carry a non-finite float is annotated
-/// `#[serde(with = "crate::json_float")]`, so anything this finds is a field
-/// that acquired one without being annotated — a defect, and one that is
-/// otherwise silent on an `Option<f64>`.
-pub fn refuse_non_finite_floats<T>(root: &str, value: &T) -> Result<(), NonFiniteFloatError>
-where
-    T: ?Sized + Serialize,
-{
-    match non_finite_floats(root, value) {
-        Ok(found) if found.is_empty() => Ok(()),
-        Ok(found) => Err(NonFiniteFloatError::Unencodable(found)),
-        Err(error) => Err(NonFiniteFloatError::Scan(error)),
-    }
-}
-
 /// One step of a field path.
 ///
 /// Only the root and a map key are owned. Struct field names and variant names
 /// arrive from `serde` as `&'static str`, and a scan of a compiled model walks
 /// millions of them — allocating one `String` per field would cost more than
-/// the seal it guards.
+/// the walk itself.
 enum Segment {
     Root(String),
     Field(&'static str),
@@ -901,16 +839,14 @@ mod tests {
             exclude: vec![1.0, f64::INFINITY],
         };
         assert_eq!(non_finite_floats("model", &excluding).unwrap(), Vec::new());
-        assert_eq!(refuse_non_finite_floats("model", &excluding), Ok(()));
 
         let plain = PlainExcluding {
             exclude: vec![1.0, f64::INFINITY],
         };
-        let error = refuse_non_finite_floats("model", &plain)
-            .expect_err("a bare non-finite element must be refused");
+        let found = non_finite_floats("model", &plain).unwrap();
         assert_eq!(
-            error.to_string(),
-            "1 non-finite float JSON cannot encode: model.exclude[1] = inf"
+            found.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            ["model.exclude[1] = inf"]
         );
     }
 
@@ -1057,30 +993,6 @@ mod tests {
             max: None,
         };
         assert_eq!(non_finite_floats("model", &bounded).unwrap(), Vec::new());
-        assert_eq!(refuse_non_finite_floats("model", &bounded), Ok(()));
-    }
-
-    #[test]
-    fn the_refusal_names_the_field_it_refuses_for() {
-        let plain = Plain {
-            default: f64::INFINITY,
-            min: Some(f64::NEG_INFINITY),
-            max: None,
-        };
-        let error = refuse_non_finite_floats("model", &plain)
-            .expect_err("a bare non-finite float must be refused");
-        assert_eq!(
-            error.to_string(),
-            "2 non-finite floats JSON cannot encode: model.default = inf, model.min = -inf"
-        );
-    }
-
-    #[test]
-    fn a_long_refusal_stops_listing_and_says_how_many_it_left_out() {
-        let value: Vec<f64> = std::iter::repeat_n(f64::INFINITY, REFUSAL_PATH_LIMIT + 3).collect();
-        let error =
-            refuse_non_finite_floats("ir", &value).expect_err("bare non-finite floats are refused");
-        assert!(error.to_string().ends_with(", and 3 more"), "{error}");
     }
 
     /// The digital half's constants are the one part of a sealed artifact that
@@ -1193,7 +1105,7 @@ endmodule
             "a folded infinity would need annotating, found {constants:?}"
         );
 
-        // And the whole artifact, which is the question the seal asks.
+        // And the whole artifact.
         assert_eq!(
             non_finite_floats("canonical_ir", &report.canonical_ir).unwrap(),
             Vec::new()

@@ -88,11 +88,40 @@ impl de::Error for RecordCodecError {
 type Result<T> = std::result::Result<T, RecordCodecError>;
 
 /// Encode `value`.
-#[cfg(any(test, feature = "veriloga-native"))]
 pub(super) fn encode<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
     let mut encoder = Encoder::new(Vec::new());
     value.serialize(&mut encoder)?;
     Ok(encoder.out)
+}
+
+/// Encode `value` with each struct field at one of the `omitted` paths
+/// written as an empty sequence. A path names struct fields from the value's
+/// own fields inward, and only a sequence field can be omitted: it decodes as
+/// an empty one, for the reader to restore.
+pub(super) fn encode_omitting<T: Serialize + ?Sized>(
+    value: &T,
+    omitted: &[&'static [&'static str]],
+) -> Result<Vec<u8>> {
+    let mut encoder = Encoder::new(Vec::new());
+    encoder.omit = Some(Box::new(Omit {
+        fields: omitted.to_vec(),
+        path: Vec::new(),
+    }));
+    value.serialize(&mut encoder)?;
+    Ok(encoder.out)
+}
+
+/// The BLAKE3 hash of the bytes [`encode`] writes for `value`, without
+/// building them.
+pub(super) fn fingerprint<T: Serialize + ?Sized>(value: &T) -> Result<[u8; 32]> {
+    let mut encoder = Encoder::new(Hashing {
+        hasher: blake3::Hasher::new(),
+        buffer: Vec::with_capacity(HASHING_BUFFER),
+    });
+    value.serialize(&mut encoder)?;
+    let Hashing { mut hasher, buffer } = encoder.out;
+    hasher.update(&buffer);
+    Ok(*hasher.finalize().as_bytes())
 }
 
 /// The length [`encode`] would return, without building the encoding.
@@ -170,6 +199,36 @@ impl Sink for Vec<u8> {
     }
 }
 
+/// Bytes a [`Hashing`] sink gathers before it hashes them.
+const HASHING_BUFFER: usize = 1 << 16;
+
+/// A sink that hashes what it is given, a buffer at a time.
+struct Hashing {
+    hasher: blake3::Hasher,
+    buffer: Vec<u8>,
+}
+
+impl Hashing {
+    fn flush_if_full(&mut self) {
+        if self.buffer.len() >= HASHING_BUFFER {
+            self.hasher.update(&self.buffer);
+            self.buffer.clear();
+        }
+    }
+}
+
+impl Sink for Hashing {
+    fn push(&mut self, byte: u8) {
+        self.buffer.push(byte);
+        self.flush_if_full();
+    }
+
+    fn extend_from_slice(&mut self, bytes: &[u8]) {
+        self.buffer.extend_from_slice(bytes);
+        self.flush_if_full();
+    }
+}
+
 struct Count(usize);
 
 impl Sink for Count {
@@ -187,6 +246,14 @@ struct Encoder<S> {
     /// Each field name written so far, by its table index.
     names: HashMap<&'static str, u64>,
     detach: Option<Box<Detach>>,
+    omit: Option<Box<Omit>>,
+}
+
+/// Which struct fields [`encode_omitting`] writes empty, and the struct fields
+/// the encoder is inside of, outermost first.
+struct Omit {
+    fields: Vec<&'static [&'static str]>,
+    path: Vec<&'static str>,
 }
 
 /// Which sequences [`encode_detached`] sets apart, and those it has.
@@ -205,12 +272,27 @@ impl<S: Sink> Encoder<S> {
             out,
             names: HashMap::new(),
             detach: None,
+            omit: None,
         }
     }
 
     /// Encode one struct field's value, setting it apart when it is one of
     /// the detached sequences.
     fn field<T: Serialize + ?Sized>(&mut self, key: &'static str, value: &T) -> Result<()> {
+        if let Some(omit) = self.omit.as_mut() {
+            omit.path.push(key);
+            let omitted = omit.fields.contains(&omit.path.as_slice());
+            let encoded = if omitted {
+                self.tagged_len(SEQ, 0);
+                Ok(())
+            } else {
+                value.serialize(&mut *self)
+            };
+            if let Some(omit) = self.omit.as_mut() {
+                omit.path.pop();
+            }
+            return encoded;
+        }
         let Some(detach) = self.detach.as_mut() else {
             return value.serialize(self);
         };

@@ -61,10 +61,11 @@ pub(crate) fn standalone_connection_fixture() -> (super::PreparedVerilogARuntime
     (sources, deck)
 }
 
-/// Constants whose shortest decimal form `serde_json` does *not* parse back
-/// exactly unless the `float_roundtrip` feature is on. `1.3806505e-23` is
-/// Boltzmann's constant verbatim from shipped Verilog-A models; without the
-/// feature it reads back as `1.3806504999999999e-23`.
+/// Constants whose shortest decimal form a text encoding parses back
+/// exactly only with care (`serde_json` needs its `float_roundtrip`
+/// feature). `1.3806505e-23` is Boltzmann's constant verbatim from shipped
+/// Verilog-A models; without that care it reads back as
+/// `1.3806504999999999e-23`.
 const LOSSY_MODEL_CONSTANTS: [(&str, f64); 3] = [
     ("kb", 1.380_650_5e-23),
     ("q", 1.602_176_634e-19),
@@ -109,6 +110,16 @@ fn seal_runtime(file: &str, module: &str, source: &str) -> PreparedVerilogARunti
     .expect("fixture compilation seals into a prepared runtime")
 }
 
+/// The model and canonical IR a sealed runtime opens to.
+fn opened(
+    runtime: &PreparedVerilogARuntime,
+) -> (
+    rspice_veriloga::CompiledModel,
+    rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+) {
+    runtime.parsed().expect("the sealed artifact opens")
+}
+
 fn seal_probe_runtime() -> PreparedVerilogARuntime {
     seal_runtime(
         "probe.va",
@@ -117,20 +128,18 @@ fn seal_probe_runtime() -> PreparedVerilogARuntime {
     )
 }
 
-/// A sealed runtime stores its `CompiledModel` as JSON and every consumer —
-/// `registration`, `terminal_names`, `validate`, and the browser worker's
-/// `compile_wasm_jit_artifact` — parses that string back. The parse has to
+/// A sealed runtime carries its `CompiledModel` in its sealed record and
+/// every consumer — `registration`, `terminal_names`, `validate`, and the
+/// browser worker's `compile_wasm_jit_artifact` — opens it. The open has to
 /// be bit exact, or a device built through the browser WASM JIT is built
 /// from constants one unit in the last place away from the ones the native
 /// path uses, for the same source and the same `artifact_digest`. The
-/// digest cannot catch that: the JSON text is intact and only the parse is
-/// lossy. Workspace `serde_json` carries `float_roundtrip` for this reason;
-/// removing it fails here rather than silently perturbing device physics.
+/// digest cannot catch that: the bytes are intact and only the reading is
+/// lossy.
 #[test]
-fn sealed_model_constants_survive_the_json_the_runtime_ships() {
+fn sealed_model_constants_survive_the_seal() {
     let runtime = seal_probe_runtime();
-    let decoded: rspice_veriloga::CompiledModel =
-        serde_json::from_str(runtime.model_json.as_str()).expect("sealed model payload parses");
+    let (decoded, _) = opened(&runtime);
 
     for (name, expected) in LOSSY_MODEL_CONSTANTS {
         let parameter = decoded
@@ -148,14 +157,11 @@ fn sealed_model_constants_survive_the_json_the_runtime_ships() {
 }
 
 /// The same guarantee for the canonical IR, which is what the browser JIT
-/// lowers. Both payloads travel together, but they are separate strings
-/// with separate parses.
+/// lowers.
 #[test]
-fn sealed_canonical_ir_constants_survive_the_json_the_runtime_ships() {
+fn sealed_canonical_ir_constants_survive_the_seal() {
     let runtime = seal_probe_runtime();
-    let decoded: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
-        serde_json::from_str(runtime.canonical_ir_json.as_str())
-            .expect("sealed canonical IR payload parses");
+    let (_, decoded) = opened(&runtime);
 
     for (name, expected) in LOSSY_MODEL_CONSTANTS {
         let default = decoded
@@ -177,20 +183,17 @@ fn sealed_canonical_ir_constants_survive_the_json_the_runtime_ships() {
 /// `$bound_step` caps the next transient step. It lowers to a hidden task
 /// variable reset to `+inf` at the top of every evaluation, so *every*
 /// module that calls it carries an infinity in its compiled bytecode.
-/// JSON has no spelling for one, so before `rspice_veriloga::json_float`
-/// this module could not be sealed at all — `serde_json` wrote the reset
-/// as `null` and the sealed payload then refused to decode, which took the
-/// whole browser path away from every `$bound_step` model.
+/// When runtimes were sealed as JSON, which has no spelling for one, this
+/// module could not be sealed at all until `rspice_veriloga::json_float`.
 const BOUND_STEP_SOURCE: &str = include_str!("../../tests/fixtures/bound_step.va");
 
 /// The declaration-side spellings, and the silent ones. Both are folded
 /// constants, so neither is announced by anything in the source text.
 ///
 /// `folded` divides by a literal zero. The fold yields `+inf`, which lands
-/// in `CompiledParameter.default` — a bare `f64` the sealed payload then
-/// refused to decode — and in `HirParameter.default`, an `Option<f64>` that
-/// decoded `null` back as `None`, the default simply gone with the artifact
-/// digest over the JSON text agreeing nothing had happened.
+/// in `CompiledParameter.default`, a bare `f64`, and in
+/// `HirParameter.default`, an `Option<f64>` that a JSON seal once decoded
+/// back as `None`: the default silently gone.
 ///
 /// `unbounded` reaches a *range*. The grammar's `inf` shortcut is not the
 /// only way `inf` can appear in a bound: written as part of an expression it
@@ -265,19 +268,20 @@ fn non_finite_constants(
     found
 }
 
-/// The seal is `serde_json::to_string`; decoding it is `from_str`. A
-/// payload that is a fixed point of that pair lost nothing at all — not
-/// only the non-finite values this change is about.
-fn assert_payload_is_its_own_fixed_point<T>(what: &str, sealed: &str)
-where
-    T: serde::Serialize + serde::de::DeserializeOwned,
-{
-    let decoded: T = serde_json::from_str(sealed)
-        .unwrap_or_else(|error| panic!("sealed {what} payload decodes: {error}"));
-    let resealed = serde_json::to_string(&decoded).expect("decoded payload re-seals");
+/// A sealed artifact that opens to a pair sealing back to the same bytes and
+/// fingerprint lost nothing at all — not only the non-finite values these
+/// fixtures are about.
+fn assert_seal_is_its_own_fixed_point(runtime: &PreparedVerilogARuntime) {
+    let (model, canonical_ir) = opened(runtime);
+    let resealed = rspice_core::seal_veriloga_artifact(&model, &canonical_ir)
+        .expect("the opened artifact seals again");
+    assert!(
+        resealed.bytes.as_slice() == runtime.artifact.as_bytes(),
+        "the sealed artifact is not a fixed point of its own encoding"
+    );
     assert_eq!(
-        resealed, sealed,
-        "the sealed {what} payload is not a fixed point of its own encoding"
+        resealed.fingerprint,
+        *runtime.artifact_fingerprint.as_bytes()
     );
 }
 
@@ -288,17 +292,9 @@ fn a_bound_step_module_seals_with_its_infinite_step_sentinel_intact() {
         "rspice_bound_step_probe",
         BOUND_STEP_SOURCE,
     );
-    assert_payload_is_its_own_fixed_point::<rspice_veriloga::CompiledModel>(
-        "model",
-        &runtime.model_json,
-    );
-    assert_payload_is_its_own_fixed_point::<rspice_veriloga::canonical_ir::CanonicalIrArtifact>(
-        "canonical IR",
-        &runtime.canonical_ir_json,
-    );
+    assert_seal_is_its_own_fixed_point(&runtime);
 
-    let decoded: rspice_veriloga::CompiledModel =
-        serde_json::from_str(&runtime.model_json).expect("sealed model payload parses");
+    let (decoded, _) = opened(&runtime);
     let found = non_finite_constants(&decoded.assignment_steps);
     assert_eq!(
         found.len(),
@@ -319,10 +315,8 @@ fn a_bound_step_module_seals_with_its_infinite_step_sentinel_intact() {
     );
 
     // The canonical IR carries the same sentinel as an expression literal,
-    // and it is the payload the browser JIT lowers. Asserted separately
-    // because the two payloads are separate strings with separate parses.
-    let ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
-        serde_json::from_str(&runtime.canonical_ir_json).expect("sealed IR payload parses");
+    // and it is what the browser JIT lowers.
+    let (_, ir) = opened(&runtime);
     let sentinels: Vec<f64> = ir
         .hir
         .expressions
@@ -355,17 +349,9 @@ fn an_infinite_folded_constant_survives_the_seal_in_both_payloads() {
         "rspice_infinite_constant_probe",
         INFINITE_CONSTANT_SOURCE,
     );
-    assert_payload_is_its_own_fixed_point::<rspice_veriloga::CompiledModel>(
-        "model",
-        &runtime.model_json,
-    );
-    assert_payload_is_its_own_fixed_point::<rspice_veriloga::canonical_ir::CanonicalIrArtifact>(
-        "canonical IR",
-        &runtime.canonical_ir_json,
-    );
+    assert_seal_is_its_own_fixed_point(&runtime);
 
-    let decoded: rspice_veriloga::CompiledModel =
-        serde_json::from_str(&runtime.model_json).expect("sealed model payload parses");
+    let (decoded, _) = opened(&runtime);
     let folded = decoded
         .parameters
         .iter()
@@ -378,8 +364,7 @@ fn an_infinite_folded_constant_survives_the_seal_in_both_payloads() {
         folded.default
     );
 
-    let ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
-        serde_json::from_str(&runtime.canonical_ir_json).expect("sealed IR payload parses");
+    let (_, ir) = opened(&runtime);
     let folded = ir
         .hir
         .parameters
@@ -421,10 +406,8 @@ fn an_infinite_folded_constant_survives_the_seal_in_both_payloads() {
 }
 
 /// The third range field, and the one whose loss was *loud*: `exclude` is
-/// a `Vec<f64>` of bare elements, so before it was annotated `serde_json`
-/// wrote the infinity as `null` and the whole payload then refused to
-/// decode. The seal caught that and refused a legal declaration by field
-/// path; now it encodes it instead.
+/// a `Vec<f64>` of bare elements, which a JSON seal once wrote as `null`
+/// and then refused to decode.
 #[test]
 fn an_excluded_value_that_folds_to_an_infinity_survives_the_seal() {
     let runtime = seal_runtime(
@@ -433,8 +416,7 @@ fn an_excluded_value_that_folds_to_an_infinity_survives_the_seal() {
         INFINITE_CONSTANT_SOURCE,
     );
 
-    let decoded: rspice_veriloga::CompiledModel =
-        serde_json::from_str(&runtime.model_json).expect("sealed model payload parses");
+    let (decoded, _) = opened(&runtime);
     let excluded = decoded
         .parameters
         .iter()
@@ -451,8 +433,7 @@ fn an_excluded_value_that_folds_to_an_infinity_survives_the_seal() {
         excluded.exclude
     );
 
-    let ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
-        serde_json::from_str(&runtime.canonical_ir_json).expect("sealed IR payload parses");
+    let (_, ir) = opened(&runtime);
     let range = ir
         .hir
         .parameters
@@ -472,21 +453,6 @@ fn an_excluded_value_that_folds_to_an_infinity_survives_the_seal() {
         "the IR excluded value arrived as {:?}",
         range.exclude
     );
-
-    // The seal already ran its guard — `seal_runtime` would have panicked
-    // otherwise — but assert the guard's own answer too, so a regression
-    // that puts `exclude` back in a refusal is named here rather than
-    // showing up as an opaque panic.
-    assert_eq!(
-        rspice_veriloga::json_float::non_finite_floats("model", &decoded).unwrap(),
-        Vec::new(),
-        "no bare non-finite float may remain in the compiled model"
-    );
-    assert_eq!(
-        rspice_veriloga::json_float::non_finite_floats("canonical_ir", &ir).unwrap(),
-        Vec::new(),
-        "no bare non-finite float may remain in the canonical IR"
-    );
 }
 
 /// The control, and the correction of a premise worth not rediscovering:
@@ -501,8 +467,7 @@ fn an_open_range_bound_is_an_absence_rather_than_an_infinity() {
         "rspice_infinite_constant_probe",
         INFINITE_CONSTANT_SOURCE,
     );
-    let decoded: rspice_veriloga::CompiledModel =
-        serde_json::from_str(&runtime.model_json).expect("sealed model payload parses");
+    let (decoded, _) = opened(&runtime);
     let conductance = decoded
         .parameters
         .iter()
@@ -511,8 +476,7 @@ fn an_open_range_bound_is_an_absence_rather_than_an_infinity() {
     assert_eq!(conductance.min.map(f64::to_bits), Some(0.0_f64.to_bits()));
     assert_eq!(conductance.max, None, "`inf` in a range bound is no bound");
 
-    let ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
-        serde_json::from_str(&runtime.canonical_ir_json).expect("sealed IR payload parses");
+    let (_, ir) = opened(&runtime);
     let range = ir
         .hir
         .parameters
@@ -524,52 +488,6 @@ fn an_open_range_bound_is_an_absence_rather_than_an_infinity() {
         .expect("the parameter declares a range");
     assert_eq!(range.min.map(f64::to_bits), Some(0.0_f64.to_bits()));
     assert_eq!(range.max, None);
-}
-
-/// The guard the seal runs before it writes. Nothing in a compiled
-/// artifact can reach it today — every field that carries a non-finite
-/// float is annotated — so it is exercised on a value that stands in for
-/// a field that acquired one without being annotated, which is the
-/// regression it exists to catch.
-///
-/// The refusal is a variant a caller can match on, and it still renders
-/// the exact sentence it rendered when it was only a `String`.
-#[test]
-fn the_seal_refuses_a_payload_carrying_a_float_json_cannot_encode() {
-    let error = super::seal_payload_json(
-        "model",
-        "compiled Verilog-A model",
-        &vec![1.0_f64, f64::INFINITY],
-    )
-    .expect_err("a bare non-finite float must stop the seal");
-    let super::PreparedRuntimeError::NonFinite {
-        description,
-        source,
-    } = &error
-    else {
-        panic!("an unencodable float must not be flattened into a sentence: {error:?}");
-    };
-    assert_eq!(*description, "compiled Verilog-A model");
-    assert_eq!(
-        *source,
-        rspice_veriloga::json_float::NonFiniteFloatError::Unencodable(vec![
-            rspice_veriloga::json_float::NonFiniteFloat {
-                path: "model[1]".to_owned(),
-                value: f64::INFINITY,
-            }
-        ])
-    );
-    assert_eq!(
-        error.to_string(),
-        "Could not seal compiled Verilog-A model: 1 non-finite float JSON cannot encode: \
-             model[1] = inf"
-    );
-    assert_eq!(
-        String::from(error),
-        "Could not seal compiled Verilog-A model: 1 non-finite float JSON cannot encode: \
-             model[1] = inf",
-        "the `String` conversion every existing caller relies on is the same sentence"
-    );
 }
 
 /// Installing a project's runtimes never moves a deck off the runtime it
@@ -618,12 +536,12 @@ fn installing_an_edited_module_leaves_each_deck_the_runtime_it_names() {
 }
 
 /// A session runs one project again and again, and each run installs its
-/// runtimes. The first install checks and parses the payloads; a later one
-/// reads neither, holding the artifact the first one parsed by the key and
-/// the fingerprint the runtime was sealed with, so a request whose payloads
-/// were emptied in transit runs that same artifact.
+/// runtimes. The first install checks and opens the payload; a later one
+/// does not read it, holding the artifact the first one opened by the key and
+/// the fingerprint the runtime was sealed with, so a request whose payload
+/// was emptied in transit runs that same artifact.
 #[test]
-fn a_second_install_holds_the_installed_artifact_without_reading_its_payloads() {
+fn a_second_install_holds_the_installed_artifact_without_reading_its_payload() {
     let runtime = seal_runtime(
         "installed-twice.va",
         "installed_twice",
@@ -633,15 +551,12 @@ fn a_second_install_holds_the_installed_artifact_without_reading_its_payloads() 
     let key = std::path::Path::new(runtime.source_key());
     let set = super::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
         .expect("one runtime is a set");
-    let first = set
-        .install()
-        .expect("the first install parses the payloads");
+    let first = set.install().expect("the first install opens the payload");
     let (model, _) = first.runtime_artifact(key).expect("the install holds it");
     drop(first);
 
     let mut emptied = serde_json::to_value(&set).expect("encode the set");
-    emptied["runtimes"][0]["model_json"] = serde_json::Value::String(String::new());
-    emptied["runtimes"][0]["canonical_ir_json"] = serde_json::Value::String(String::new());
+    emptied["runtimes"][0]["artifact"] = serde_json::Value::String(String::new());
     let emptied: super::PreparedVerilogARuntimeSet =
         serde_json::from_value(emptied).expect("decode the emptied set");
     let second = emptied
@@ -657,7 +572,7 @@ fn a_second_install_holds_the_installed_artifact_without_reading_its_payloads() 
 }
 
 /// The digest of an artifact that names no min:typ:max selection:
-/// `rspice.project-veriloga-runtime/v3` over its seven fields, each
+/// `rspice.project-veriloga-runtime/v4` over its six fields, each
 /// length-prefixed, and nothing after them.
 fn digest_without_a_selection(
     runtime: &PreparedVerilogARuntime,
@@ -665,14 +580,13 @@ fn digest_without_a_selection(
     use sha2::{Digest as _, Sha256};
     assert!(runtime.external_cells.is_none(), "a fixture without leaves");
     let mut hasher = Sha256::new();
-    hasher.update(b"rspice.project-veriloga-runtime/v3\0");
+    hasher.update(b"rspice.project-veriloga-runtime/v4\0");
     for bytes in [
         runtime.source_key.as_bytes(),
         runtime.source_digest.as_bytes(),
         runtime.module_name.as_bytes(),
         runtime.netlist_alias.as_bytes(),
-        runtime.model_json.as_bytes(),
-        runtime.canonical_ir_json.as_bytes(),
+        runtime.artifact.as_bytes(),
         runtime.artifact_fingerprint.as_bytes(),
     ] {
         hasher.update((bytes.len() as u64).to_le_bytes());
@@ -726,15 +640,14 @@ fn a_typical_artifact_names_no_selection() {
         rspice_vocabulary::product::ContentDigest::from_bytes([0x5a; 32]),
         "held",
         "HELD",
-        "{\"model\":1}",
-        "{\"ir\":1}",
+        b"artifact",
         rspice_vocabulary::product::ContentDigest::from_bytes([0xa5; 32]),
         None,
         DigitalDelaySelect::Typ,
     );
     assert_eq!(
         pinned.to_string(),
-        "fda865b4be20bedcb2c3c518d137b3d8ff7d9b715a765d434e3bf1c79b8e75a1"
+        "98b453fae098038cc578df0b587280644694547bdbcda64426cdb8ebe5433863"
     );
 
     let typical = seal_held(DigitalDelaySelect::Typ);
@@ -767,8 +680,7 @@ fn each_selection_seals_an_artifact_of_its_own() {
             rspice_vocabulary::product::ContentDigest::from_bytes([0x5a; 32]),
             "held",
             "HELD",
-            "{\"model\":1}",
-            "{\"ir\":1}",
+            b"artifact",
             rspice_vocabulary::product::ContentDigest::from_bytes([0xa5; 32]),
             None,
             delay_select,
@@ -824,11 +736,12 @@ endmodule
 "#;
 
 /// A runtime is sealed on one machine and read on another: the browser
-/// worker that reads it is 32-bit. So neither payload may hold an integer a
-/// 32-bit `usize` cannot: ground, the node index the compiler writes for
-/// "no node", is 4294967295 on every target, and a natively sealed model
-/// decodes in the worker to the values (and digest) it would seal itself.
-/// Ground was `usize::MAX`, which this host wrote 18446744073709551615.
+/// worker that reads it is 32-bit. So neither the model nor the IR may hold
+/// an integer a 32-bit `usize` cannot: ground, the node index the compiler
+/// writes for "no node", is 4294967295 on every target, and a natively
+/// sealed model decodes in the worker to the values (and digest) it would
+/// seal itself. Ground was `usize::MAX`, which this host wrote
+/// 18446744073709551615.
 #[test]
 fn a_sealed_runtime_holds_no_index_wider_than_the_worker_reads() {
     fn widest(value: &serde_json::Value) -> u64 {
@@ -840,11 +753,13 @@ fn a_sealed_runtime_holds_no_index_wider_than_the_worker_reads() {
         }
     }
     let runtime = seal_runtime("ground.va", "ground_refs", GROUND_REFERENCE_SOURCE);
-    for (what, payload) in [
-        ("model", runtime.model_json.as_str()),
-        ("canonical IR", runtime.canonical_ir_json.as_str()),
+    let (model, canonical_ir) = opened(&runtime);
+    let model_json = serde_json::to_string(&model).expect("the model writes as JSON");
+    for (what, value) in [
+        ("model", serde_json::to_value(&model)),
+        ("canonical IR", serde_json::to_value(&canonical_ir)),
     ] {
-        let value: serde_json::Value = serde_json::from_str(payload).expect("payload parses");
+        let value = value.expect("the artifact writes as JSON");
         assert!(
             widest(&value) <= u64::from(u32::MAX),
             "the sealed {what} holds {}, wider than a 32-bit index",
@@ -853,10 +768,8 @@ fn a_sealed_runtime_holds_no_index_wider_than_the_worker_reads() {
     }
     let ground = u32::MAX.to_string();
     assert!(
-        runtime
-            .model_json
-            .contains(&format!("\"PushVoltage\":[0,{ground}]")),
+        model_json.contains(&format!("\"PushVoltage\":[0,{ground}]")),
         "ground is written as {ground}: {}",
-        runtime.model_json
+        model_json
     );
 }

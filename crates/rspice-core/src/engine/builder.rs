@@ -80,6 +80,8 @@ mod veriloga_cache;
 #[cfg(feature = "veriloga")]
 mod veriloga_record;
 #[cfg(feature = "veriloga")]
+mod veriloga_seal;
+#[cfg(feature = "veriloga")]
 use veriloga_cache::normalize_model_key;
 #[cfg(feature = "veriloga")]
 pub use veriloga_cache::{
@@ -88,8 +90,11 @@ pub use veriloga_cache::{
     ProjectVerilogASourceRegistration, VerilogACacheTelemetry,
     hold_installed_project_veriloga_runtimes, hold_project_veriloga_sources_for_session,
     register_precompiled_veriloga_model, register_precompiled_veriloga_model_with_dependencies,
-    register_precompiled_veriloga_runtime_with_dependencies, sealed_veriloga_artifact_fingerprint,
-    veriloga_cache_telemetry,
+    register_precompiled_veriloga_runtime_with_dependencies, veriloga_cache_telemetry,
+};
+#[cfg(feature = "veriloga")]
+pub use veriloga_seal::{
+    SealedVerilogAArtifact, open_sealed_veriloga_artifact, seal_veriloga_artifact,
 };
 #[cfg(feature = "veriloga")]
 mod hdl_library_map;
