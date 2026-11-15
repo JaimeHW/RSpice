@@ -11,15 +11,15 @@ pulse	tran	worker	pass	filter (O6) [11] |a−e|=3.463e-6 allowed 5.000e-5 (a=5.6
 mx	pss	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pss	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pss	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
-pulse	pss	interp	pass	held (O6) [0] |a−e|=1.860e-7 allowed 5.000e-5 (a=6.999919e-1, e=6.999921e-1)
-pulse	pss	native	pass	held (O6) [0] |a−e|=1.860e-7 allowed 5.000e-5 (a=6.999919e-1, e=6.999921e-1)
-pulse	pss	worker	pass	held (O6) [0] |a−e|=1.860e-7 allowed 5.000e-5 (a=6.999919e-1, e=6.999921e-1)
+pulse	pss	interp	pass	held (O6) [0] |a−e|=1.844e-7 allowed 5.000e-5 (a=6.999919e-1, e=6.999921e-1)
+pulse	pss	native	pass	held (O6) [0] |a−e|=1.844e-7 allowed 5.000e-5 (a=6.999919e-1, e=6.999921e-1)
+pulse	pss	worker	pass	held (O6) [0] |a−e|=1.844e-7 allowed 5.000e-5 (a=6.999919e-1, e=6.999921e-1)
 mx	pac	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pac	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pac	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
-pulse	pac	interp	pass	pac_lsb (O6) [0] Δ=-2.411e-4 dB, 3.225e-1° allowed 4.33e-2 dB, 5e-1°
-pulse	pac	native	pass	pac_lsb (O6) [0] Δ=-2.411e-4 dB, 3.225e-1° allowed 4.33e-2 dB, 5e-1°
-pulse	pac	worker	pass	pac_lsb (O6) [0] Δ=-2.411e-4 dB, 3.225e-1° allowed 4.33e-2 dB, 5e-1°
+pulse	pac	interp	pass	pac_lsb (O6) [0] Δ=-2.411e-4 dB, 3.227e-1° allowed 4.33e-2 dB, 5e-1°
+pulse	pac	native	pass	pac_lsb (O6) [0] Δ=-2.411e-4 dB, 3.227e-1° allowed 4.33e-2 dB, 5e-1°
+pulse	pac	worker	pass	pac_lsb (O6) [0] Δ=-2.411e-4 dB, 3.227e-1° allowed 4.33e-2 dB, 5e-1°
 mx	pnoise	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pnoise	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
 mx	pnoise	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured

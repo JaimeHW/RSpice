@@ -8,17 +8,17 @@ vams	tran	worker	pass	ilmean (O6) [0] |a−e|=2.151e-3 allowed 3.000e-3 (a=9.025
 p3	tran	interp	pass	vss_step (O6) [0] |a−e|=8.167e-4 allowed 6.000e-3 (a=1.801598e0, e=1.800781e0)
 p3	tran	native	pass	vss_step (O6) [0] |a−e|=8.167e-4 allowed 6.000e-3 (a=1.801598e0, e=1.800781e0)
 p3	tran	worker	pass	vss_step (O6) [0] |a−e|=1.256e-3 allowed 6.000e-3 (a=1.802037e0, e=1.800781e0)
-vsup	tran	interp	pass	vss (O6) [0] |a−e|=1.027e-3 allowed 6.000e-3 (a=1.801808e0, e=1.800781e0)
-vsup	tran	native	pass	vss (O6) [0] |a−e|=1.027e-3 allowed 6.000e-3 (a=1.801808e0, e=1.800781e0)
+vsup	tran	interp	pass	vss (O6) [0] |a−e|=9.399e-4 allowed 6.000e-3 (a=1.801721e0, e=1.800781e0)
+vsup	tran	native	pass	vss (O6) [0] |a−e|=9.399e-4 allowed 6.000e-3 (a=1.801721e0, e=1.800781e0)
 vsup	tran	worker	pass	vss (O6) [0] |a−e|=9.399e-4 allowed 6.000e-3 (a=1.801721e0, e=1.800781e0)
-vdig	ckpt	interp	pass	resume (O7) resumed@4e-4: identical; 281244 of 281244 accepted times shared, 4 nets
-vdig	ckpt	native	pass	resume (O7) resumed@4e-4: identical; 281244 of 281244 accepted times shared, 4 nets
+vdig	ckpt	interp	pass	resume (O7) resumed@4e-4: identical; 157136 of 157136 accepted times shared, 2 nets
+vdig	ckpt	native	pass	resume (O7) resumed@4e-4: identical; 157136 of 157136 accepted times shared, 2 nets
 vdig	ckpt	worker	pass	resume (O7) resumed@4e-4: identical; 157136 of 157136 accepted times shared, 2 nets
 vams	ckpt	interp	pass	resume (O7) resumed@4e-4: identical; 157159 of 157159 accepted times shared, 2 nets
 vams	ckpt	native	pass	resume (O7) resumed@4e-4: identical; 157159 of 157159 accepted times shared, 2 nets
 vams	ckpt	worker	pass	resume (O7) resumed@4e-4: identical; 157159 of 157159 accepted times shared, 2 nets
-vsup	ckpt	interp	pass	resume (O7) resumed@4e-4: identical; 2311173 of 2311173 accepted times shared, 2 nets
-vsup	ckpt	native	pass	resume (O7) resumed@4e-4: identical; 2311173 of 2311173 accepted times shared, 2 nets
+vsup	ckpt	interp	pass	resume (O7) resumed@4e-4: identical; 2655072 of 2655072 accepted times shared, 2 nets
+vsup	ckpt	native	pass	resume (O7) resumed@4e-4: identical; 2655072 of 2655072 accepted times shared, 2 nets
 vsup	ckpt	worker	pass	resume (O7) resumed@4e-4: identical; 2655072 of 2655072 accepted times shared, 2 nets
 vdig	mc-tran	interp	pass	ripple (O6) trial 0: [0] |a−e|=1.949e-3 allowed 4.512e-3 (a=1.308696e-1, e=1.289207e-1)
 vdig	mc-tran	native	pass	ripple (O6) trial 0: [0] |a−e|=1.949e-3 allowed 4.512e-3 (a=1.308696e-1, e=1.289207e-1)

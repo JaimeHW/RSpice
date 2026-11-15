@@ -1,7 +1,7 @@
 # variant	analysis	route	outcome	detail
-base	step-tran	interp	pass	ivp (O6) trial 0: [0] |a−e|=1.000e-15 allowed 1.000e-9 (a=-2.000000e-3, e=-2.000000e-3)
-base	step-tran	native	pass	ivp (O6) trial 0: [0] |a−e|=1.000e-15 allowed 1.000e-9 (a=-2.000000e-3, e=-2.000000e-3)
+base	step-tran	interp	pass	rise (O6) trial 0: [0] |a−e|=0.000e0 allowed 1.000e-12 (a=3.000000e-8, e=3.000000e-8)
+base	step-tran	native	pass	rise (O6) trial 0: [0] |a−e|=0.000e0 allowed 1.000e-12 (a=3.000000e-8, e=3.000000e-8)
 base	step-tran	worker	pass	rise (O6) trial 0: [0] |a−e|=0.000e0 allowed 1.000e-12 (a=3.000000e-8, e=3.000000e-8)
-base	mc-tran	interp	pass	ivp (O6) trial 0: [0] |a−e|=1.000e-15 allowed 1.000e-9 (a=-2.072789e-3, e=-2.072789e-3)
-base	mc-tran	native	pass	ivp (O6) trial 0: [0] |a−e|=1.000e-15 allowed 1.000e-9 (a=-2.072789e-3, e=-2.072789e-3)
+base	mc-tran	interp	pass	rise (O6) trial 0: [0] |a−e|=0.000e0 allowed 1.000e-12 (a=3.000000e-8, e=3.000000e-8)
+base	mc-tran	native	pass	rise (O6) trial 0: [0] |a−e|=0.000e0 allowed 1.000e-12 (a=3.000000e-8, e=3.000000e-8)
 base	mc-tran	worker	pass	rise (O6) trial 0: [0] |a−e|=0.000e0 allowed 1.000e-12 (a=3.000000e-8, e=3.000000e-8)
