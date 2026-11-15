@@ -88,6 +88,9 @@ const LAYERS: &[(&str, u32)] = &[
     ("time_compat", 0),
     ("resource", 0),
     ("abort_signal", 0),
+    // Where an analysis writes its accepted points. The sink trait and its row types name
+    // nothing in the crate: every analysis writes through it, and a store crate implements it.
+    ("result_sink", 0),
     ("builtin_lib", 0),
     // Names of the XSPICE code models compiled in. A catalogue of names is
     // data: the parser classifies against it while reading an `A` card and

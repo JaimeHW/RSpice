@@ -69,6 +69,10 @@ pub mod resource;
 /// `execution::result_document` of `rspice-core`.
 #[doc(hidden)]
 pub mod result_scalar;
+/// Where an analysis writes the points it accepts: the sink trait, its typed stop, and the
+/// in-memory sink every in-memory result is rebuilt from. A leaf, so an analysis at any rank
+/// writes through it and a store crate implements it without reaching above it.
+pub mod result_sink;
 /// Physical units carried by result schemas and control-expression vectors.
 #[doc(hidden)]
 pub mod signal_unit;

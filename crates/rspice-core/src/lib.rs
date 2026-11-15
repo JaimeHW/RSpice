@@ -145,6 +145,8 @@ pub mod xspice;
 /// Abort signal for cancelling long-running simulations
 pub use rspice_core_base::abort_signal;
 pub use rspice_core_base::resource;
+/// Where an analysis writes the points it accepts
+pub use rspice_core_base::result_sink;
 
 // Re-export primary types for convenience
 pub use abort_signal::{
