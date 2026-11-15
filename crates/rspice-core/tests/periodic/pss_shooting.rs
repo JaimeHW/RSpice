@@ -3809,3 +3809,63 @@ fn native_vbic_hb_xyce11_matches_electrical_oracle() {
         VBIC_THREE_TERMINAL_REFERENCE,
     );
 }
+
+/// PSTB reads an orbit event shooting solved: a switched RL, whose inductor
+/// discharges through RF = 10 Ω while S1 is open and through RF ∥ RON = 5 Ω
+/// while S1 holds it to the supply. S1 follows its clock, closed from the
+/// rising edge's 0.5 V crossing (td + tr/2) to the falling edge's
+/// (td + tr + pw + tf/2), 500 ns of the 1 µs period, so the period maps a
+/// current deviation by λ = exp(−(500 ns·5 Ω + 500 ns·10 Ω)/10 µH) =
+/// exp(−0.75), the orbit's one remembered coordinate; every node voltage
+/// and source current is algebraic, mapped to zero, and not reported.
+#[test]
+fn pstb_reads_a_switched_rl_orbit_event_shooting_solved() {
+    let deck = "switched rl
+vdd in 0 dc 1
+vclk clk 0 pulse(0 1 0 1n 1n 499n 1u)
+s1 in x clk 0 sw1
+rf x 0 10
+l1 x 0 10u
+.model sw1 sw vt=0.5 vh=0 ron=10 roff=1e12
+.end
+";
+    let netlist = Netlist::parse(deck).expect("the switched RL parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let point = engine
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::new(F0).with_tstab(20.0e-6),
+            &NoAbort,
+        )
+        .expect("event shooting solves the switched RL");
+    assert!(
+        point
+            .shooting_state_basis()
+            .first()
+            .is_some_and(|name| name.starts_with("event:"))
+    );
+    let card = rspice_core::netlist::PstbCard {
+        probe_instance: "l1".to_owned(),
+        max_harmonics: 4,
+        stability_threshold: 1.0 + 1e-6,
+        detect_subharmonics: true,
+    };
+    let stability = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
+        .expect("PSTB reads the event orbit's monodromy");
+    let expected = (-0.75_f64).exp();
+    let multipliers: Vec<_> = stability
+        .result
+        .multipliers
+        .iter()
+        .map(|mode| mode.value)
+        .collect();
+    eprintln!("switched RL: multipliers {multipliers:?} against exp(-0.75) = {expected}");
+    assert_eq!(multipliers.len(), 1, "{multipliers:?}");
+    assert!(
+        (multipliers[0].re / expected - 1.0).abs() < 1.0e-3 && multipliers[0].im.abs() < 1e-9,
+        "{multipliers:?} against {expected}"
+    );
+    assert_eq!(stability.probe_instance.to_ascii_lowercase(), "l1");
+    assert_eq!(stability.probe_participation, [1.0]);
+}

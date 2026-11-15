@@ -1,6 +1,11 @@
 //! Authored `.PSTB` runs: Floquet stability of a retained periodic orbit,
 //! read at one loop probe.
 //!
+//! An orbit event shooting solved carries the whole solution as its
+//! coordinates, and a generated model's coordinates on native shooting may
+//! include a node its own branches tie to another; the spectrum is read
+//! over the coordinates the period remembers, the probe's first.
+//!
 //! There is no harmonic-balance sibling to the entry below.
 //! [`PssAnalysisResult::monodromy`](super::PssAnalysisResult) is the only
 //! monodromy matrix the engine produces; [`HbOperatingPoint`](super::
@@ -137,11 +142,32 @@ impl Engine {
             .with_eigenvectors(true)
             .with_stability_threshold(card.stability_threshold)
             .with_subharmonic_detection(card.detect_subharmonics);
-        let result = PstbAnalyzer::new(config).analyze_monodromy_with_abort(
+        // An event orbit's coordinates are the whole solution, and a
+        // generated model's are the nodes its charges read, one of which its
+        // own branches may tie to another: the monodromy maps such a
+        // coordinate to zero or to a combination of the others, and the
+        // spectrum is read over the coordinates the period remembers.
+        let reduced;
+        let (monodromy, probe) = match remembered_coordinates(
             &pss.monodromy,
-            pss.period,
-            abort,
-        )?;
+            operating_point.shooting_state_basis(),
+            &probe,
+            operating_point.is_event_orbit(),
+        )? {
+            Some((matrix, projection)) => {
+                reduced = matrix;
+                (
+                    reduced.as_slice(),
+                    ResolvedPstbProbe {
+                        canonical_name: probe.canonical_name,
+                        projection,
+                    },
+                )
+            }
+            None => (pss.monodromy.as_slice(), probe),
+        };
+        let result =
+            PstbAnalyzer::new(config).analyze_monodromy_with_abort(monodromy, pss.period, abort)?;
 
         let mut probe_participation = Vec::with_capacity(result.multipliers.len());
         for (index, multiplier) in result.multipliers.iter().enumerate() {
@@ -206,6 +232,26 @@ impl Engine {
             crate::identity::AnalysisKind::Pstb,
         )?;
 
+        if operating_point.is_event_orbit() {
+            // Every inductor current is a coordinate of an event orbit.
+            let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+            let inductor = circuit
+                .inductor_probe_names()
+                .into_iter()
+                .find(|name| name.eq_ignore_ascii_case(probe_name));
+            let coordinate = format!("{}I({probe_name})", super::pss_event::EVENT_BASIS_PREFIX);
+            if let Some(canonical_name) = inductor
+                && let Some(index) = basis
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(&coordinate))
+            {
+                return Ok(ResolvedPstbProbe {
+                    canonical_name,
+                    projection: vec![(index, 1.0)],
+                });
+            }
+            return Err(Self::pstb_probe_diagnostic(&circuit, basis, probe_name));
+        }
         for (index, coordinate) in basis.iter().enumerate() {
             poll_periodically(abort, index)?;
             if let Some(name) = coordinate.strip_prefix("L:")
@@ -287,6 +333,153 @@ impl Engine {
             )),
         }
     }
+}
+
+/// A coordinate whose column the period maps below this fraction of the
+/// largest, each in its unit's scale, is one the orbit does not remember;
+/// a column within it of the span of those before it is not independent.
+/// The fraction is the accuracy of a differenced monodromy, whose columns
+/// for an algebraic coordinate are its traversals' Newton tolerance.
+const REMEMBERED: Value = 1.0e-6;
+
+/// The monodromy over the coordinates the period remembers, the probe's
+/// first, with the probe's projection there. An event orbit always takes the
+/// reduction; a native orbit takes it only where its map is singular by
+/// structure (a coordinate's row or column exactly zero, which the analyzer
+/// refuses), and with a probe that is one coordinate the period remembers,
+/// and keeps its own map otherwise (`None`).
+///
+/// `Φ` maps a coordinate no charge reads to zero, so its columns are those
+/// of the independent coordinates `S` and combinations `Φe_d = Σ a_ds·Φe_s`
+/// of them. Then `Φ = Φ_{:,S}·L` with `(Lz)_s = z_s + Σ_d a_ds·z_d`, and the
+/// nonzero spectrum of `Φ` is that of `L·Φ_{:,S} = Φ_{S,S} + Aᵀ·Φ_{D,S}`, an
+/// operator on `S` whose eigenvectors carry the probe's own coordinate.
+fn remembered_coordinates(
+    monodromy: &[Vec<Value>],
+    basis: &[String],
+    probe: &ResolvedPstbProbe,
+    event_orbit: bool,
+) -> Result<Option<(Vec<Vec<Value>>, Vec<(usize, Value)>)>, SimulationError> {
+    let n = monodromy.len();
+    let structurally_singular = (0..n).any(|k| {
+        monodromy[k].iter().all(|value| *value == 0.0) || monodromy.iter().all(|row| row[k] == 0.0)
+    });
+    if !event_orbit && !structurally_singular {
+        return Ok(None);
+    }
+    let &[(probe_index, _)] = probe.projection.as_slice() else {
+        if !event_orbit {
+            return Ok(None);
+        }
+        return Err(SimulationError::Circuit(format!(
+            "PSTB probe '{}' is not one coordinate of the event orbit",
+            probe.canonical_name
+        )));
+    };
+    // Each coordinate's unit, so columns of volts and amperes compare.
+    let scale: Vec<Value> = basis
+        .iter()
+        .map(|name| {
+            let name = name.trim_start_matches(super::pss_event::EVENT_BASIS_PREFIX);
+            if name.starts_with("I(") || name.starts_with("L:") {
+                1.0e-3
+            } else {
+                1.0
+            }
+        })
+        .collect();
+    let column = |col: usize| -> Vec<Value> {
+        (0..n)
+            .map(|row| monodromy[row][col] * scale[col] / scale[row])
+            .collect()
+    };
+    let norm = |vector: &[Value]| {
+        vector
+            .iter()
+            .map(|value| value * value)
+            .sum::<Value>()
+            .sqrt()
+    };
+    let largest = (0..n).map(|col| norm(&column(col))).fold(0.0, Value::max);
+    let remembered: Vec<usize> = (0..n)
+        .filter(|&col| norm(&column(col)) > REMEMBERED * largest)
+        .collect();
+    if !remembered.contains(&probe_index) {
+        if !event_orbit {
+            return Ok(None);
+        }
+        return Err(SimulationError::Circuit(format!(
+            "PSTB probe '{}' carries no state the period remembers: its current is fixed by \
+             the circuit around it",
+            probe.canonical_name
+        )));
+    }
+    let order = std::iter::once(probe_index)
+        .chain(remembered.iter().copied().filter(|&col| col != probe_index));
+    // Modified Gram-Schmidt, twice, with each kept column's `R`.
+    let mut basis_vectors: Vec<Vec<Value>> = Vec::new();
+    let mut r_columns: Vec<Vec<Value>> = Vec::new();
+    let mut kept = Vec::new();
+    let mut dropped = Vec::new();
+    for col in order {
+        let original = column(col);
+        let size = norm(&original);
+        let mut residual = original;
+        let mut coefficients = vec![0.0; basis_vectors.len()];
+        for _ in 0..2 {
+            for (q, coefficient) in basis_vectors.iter().zip(&mut coefficients) {
+                let dot: Value = q.iter().zip(&residual).map(|(a, b)| a * b).sum();
+                *coefficient += dot;
+                residual.iter_mut().zip(q).for_each(|(r, q)| *r -= dot * q);
+            }
+        }
+        let left = norm(&residual);
+        if left > REMEMBERED * size {
+            residual.iter_mut().for_each(|r| *r /= left);
+            coefficients.push(left);
+            basis_vectors.push(residual);
+            r_columns.push(coefficients);
+            kept.push(col);
+        } else {
+            dropped.push((col, coefficients));
+        }
+    }
+    let r = kept.len();
+    if r == n && !event_orbit {
+        return Ok(None);
+    }
+    // `a_d = R⁻¹·Qᵀ·Φe_d`, by back substitution on the kept columns' `R`.
+    let combinations: Vec<(usize, Vec<Value>)> = dropped
+        .into_iter()
+        .map(|(col, mut q_coefficients)| {
+            q_coefficients.resize(r, 0.0);
+            for i in (0..r).rev() {
+                let mut value = q_coefficients[i];
+                for j in i + 1..r {
+                    value -= r_columns[j][i] * q_coefficients[j];
+                }
+                q_coefficients[i] = value / r_columns[i][i];
+            }
+            (col, q_coefficients)
+        })
+        .collect();
+    // Formed in the units' scale and returned in the coordinates' own units.
+    let scaled = |row: usize, col: usize| monodromy[row][col] * scale[col] / scale[row];
+    let reduced = (0..r)
+        .map(|i| {
+            (0..r)
+                .map(|j| {
+                    let entry = scaled(kept[i], kept[j])
+                        + combinations
+                            .iter()
+                            .map(|(d, a)| a[i] * scaled(*d, kept[j]))
+                            .sum::<Value>();
+                    entry * scale[kept[i]] / scale[kept[j]]
+                })
+                .collect()
+        })
+        .collect();
+    Ok(Some((reduced, vec![(0, 1.0)])))
 }
 
 /// Canonical probe identity and its physical-current projection.

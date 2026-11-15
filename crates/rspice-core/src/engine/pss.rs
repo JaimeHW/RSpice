@@ -1468,7 +1468,8 @@ impl PssOperatingPoint {
 
     /// Authenticate a native-shooting orbit for `analysis` to consume; an
     /// orbit event shooting solved is refused by name, with the instance that
-    /// put the circuit on the event carrier.
+    /// put the circuit on the event carrier, except to PSTB, which reads only
+    /// its monodromy.
     pub(in crate::engine) fn authenticate_for_reuse(
         &self,
         netlist: &Netlist,
@@ -1477,8 +1478,12 @@ impl PssOperatingPoint {
         analysis: AnalysisKind,
     ) -> Result<(), SimulationError> {
         if self.is_event_orbit() {
+            // The Floquet analysis reads the orbit's monodromy, which event
+            // shooting builds as native shooting does.
+            if analysis == AnalysisKind::Pstb {
+                return self.authenticate_producer(netlist, simulation_config, pss_config);
+            }
             let name = match analysis {
-                AnalysisKind::Pstb => "PSTB",
                 AnalysisKind::PNoise => "oscillator PNOISE",
                 AnalysisKind::Pxf => "PXF",
                 AnalysisKind::Psp => "PSP",
@@ -1487,8 +1492,8 @@ impl PssOperatingPoint {
             let refusal = UnsupportedCapabilityError::new(
                 super::pss_event::EVENT_CARRIER,
                 format!(
-                    "the periodic steady state was solved by event shooting; PAC, PXF and \
-                     driven PNOISE run on its orbit, and {name} linearizes only an orbit native \
+                    "the periodic steady state was solved by event shooting; PAC, PXF, driven \
+                     PNOISE and PSTB run on its orbit, and {name} linearizes only an orbit native \
                      shooting solved"
                 ),
             )
