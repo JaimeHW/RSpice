@@ -69,6 +69,41 @@ pub struct SymbolViewport {
     pub zoom: f32,
     pub pan: Vec2,
     pub placement: SymbolPlacement,
+    /// What presses the canvas, which decides how far from an object a
+    /// press still takes it.
+    pub pointer: SymbolPointer,
+}
+
+/// What presses the symbol canvas: a mouse, which is precise, or a finger,
+/// which is not.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SymbolPointer {
+    #[default]
+    Mouse,
+    Finger,
+}
+
+impl SymbolPointer {
+    /// The pointer driving the canvas this frame, by the schematic canvas's
+    /// own reading of touch input.
+    pub fn of(ctx: &egui::Context) -> Self {
+        if crate::view::pointer_target::canvas_touch_mode(ctx) {
+            Self::Finger
+        } else {
+            Self::Mouse
+        }
+    }
+
+    /// How much further than a mouse a press reaches for what is under it,
+    /// in points: as much further as a finger reaches for a wire on a
+    /// schematic.
+    fn extra_reach(self) -> f32 {
+        use crate::view::pointer_target::{MOUSE_PICK_SLOP, TOUCH_PICK_SLOP};
+        match self {
+            Self::Mouse => 0.0,
+            Self::Finger => TOUCH_PICK_SLOP - MOUSE_PICK_SLOP,
+        }
+    }
 }
 
 impl SymbolViewport {
@@ -79,6 +114,7 @@ impl SymbolViewport {
             zoom,
             pan,
             placement: SymbolPlacement::default(),
+            pointer: SymbolPointer::Mouse,
         }
     }
 
@@ -93,7 +129,19 @@ impl SymbolViewport {
             zoom: viewport.zoom,
             pan: rect.min + viewport.offset.to_vec2() - rect.center(),
             placement,
+            pointer: SymbolPointer::Mouse,
         }
+    }
+
+    /// This view, pressed by `pointer`.
+    pub fn pressed_by(self, pointer: SymbolPointer) -> Self {
+        Self { pointer, ..self }
+    }
+
+    /// How far outside its ink an object a mouse takes within `mouse`
+    /// points is still taken by this view's pointer.
+    fn reach(self, mouse: f32) -> f32 {
+        mouse + self.pointer.extra_reach()
     }
 
     pub fn world_to_screen(self, point: Point) -> Pos2 {
@@ -1311,7 +1359,7 @@ pub fn hit_pin(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2) -
         .pins
         .iter()
         .filter_map(|pin| Some((pin.name.clone(), viewport.world_to_screen(pin.position?))))
-        .find(|(_, pin_pos)| pin_pos.distance(pos) <= PIN_HIT_RADIUS)
+        .find(|(_, pin_pos)| pin_pos.distance(pos) <= viewport.reach(PIN_HIT_RADIUS))
         .map(|(name, _)| name)
 }
 
@@ -1329,8 +1377,12 @@ pub fn hit_label(
         .iter()
         .rev()
         .find(|attribute| {
-            attribute_lettering(document, attribute, session, viewport)
-                .is_some_and(|lettering| lettering.rect().expand(LABEL_HIT_SLOP).contains(pos))
+            attribute_lettering(document, attribute, session, viewport).is_some_and(|lettering| {
+                lettering
+                    .rect()
+                    .expand(viewport.reach(LABEL_HIT_SLOP))
+                    .contains(pos)
+            })
         })
         .map(|attribute| attribute.kind)
 }
@@ -1342,8 +1394,11 @@ const LABEL_HIT_SLOP: f32 = 4.0;
 /// refdes and value positions, and every renderer outside the editor still
 /// reads them. Moving an attribute has to move both or the two disagree.
 pub fn hit_origin(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2) -> bool {
-    viewport.world_to_screen(document.origin).distance(pos) <= 10.0
+    viewport.world_to_screen(document.origin).distance(pos) <= viewport.reach(ORIGIN_HIT_RADIUS)
 }
+
+/// How far from the origin's cross a mouse still takes it, in points.
+const ORIGIN_HIT_RADIUS: f32 = 10.0;
 
 /// The handle of a selected shape nearest `pos`, within the reach the
 /// schematic's own grips are taken from.
@@ -1353,7 +1408,7 @@ pub fn hit_handle(
     viewport: SymbolViewport,
     pos: Pos2,
 ) -> Option<handles::SymbolHandleRef> {
-    let reach = crate::view::snap_resolution::TARGET_ACQUISITION_RADIUS_POINTS;
+    let reach = viewport.reach(crate::view::snap_resolution::TARGET_ACQUISITION_RADIUS_POINTS);
     selection
         .shapes
         .iter()
@@ -1382,8 +1437,13 @@ pub fn hit_shape(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2)
         .map(|(index, _)| index)
 }
 
+/// How far from a shape's outline a mouse still takes it, in points.
+const SHAPE_HIT_PX: f32 = 7.0;
+/// How far from an arrow's tip a mouse still takes it, in points.
+const ARROW_HIT_RADIUS: f32 = 18.0;
+
 fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
-    const HIT_PX: f32 = 7.0;
+    let hit_px = viewport.reach(SHAPE_HIT_PX);
     // A filled shape is ink all the way across, so it is picked anywhere
     // inside, as a text run is, and not only on its edge.
     if shape.is_filled() && inside_filled_shape(shape, viewport, pos) {
@@ -1396,7 +1456,7 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
                     pos,
                     viewport.world_to_screen(pair[0]),
                     viewport.world_to_screen(pair[1]),
-                ) <= HIT_PX
+                ) <= hit_px
             }) || (*closed
                 && points.len() > 2
                 && points
@@ -1407,7 +1467,7 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
                             pos,
                             viewport.world_to_screen(*last),
                             viewport.world_to_screen(*first),
-                        ) <= HIT_PX
+                        ) <= hit_px
                     }))
         }
         SymbolShape::Rectangle { min, max, .. } => {
@@ -1418,13 +1478,13 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
                     pos,
                     corners[index],
                     corners[(index + 1) % corners.len()],
-                ) <= HIT_PX
+                ) <= hit_px
             })
         }
         SymbolShape::Circle { center, radius, .. } => {
             let center = viewport.world_to_screen(*center);
             let radius = *radius as f32 * viewport.zoom;
-            (center.distance(pos) - radius).abs() <= HIT_PX
+            (center.distance(pos) - radius).abs() <= hit_px
         }
         SymbolShape::Arc {
             center,
@@ -1436,13 +1496,15 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
             &SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees),
             viewport,
             pos,
-            HIT_PX,
+            hit_px,
         ),
-        SymbolShape::Curve { curve, .. } => curve_hit(curve, viewport, pos, HIT_PX),
-        SymbolShape::Arrow { tip, .. } => viewport.world_to_screen(*tip).distance(pos) <= 18.0,
+        SymbolShape::Curve { curve, .. } => curve_hit(curve, viewport, pos, hit_px),
+        SymbolShape::Arrow { tip, .. } => {
+            viewport.world_to_screen(*tip).distance(pos) <= viewport.reach(ARROW_HIT_RADIUS)
+        }
         SymbolShape::Dot { center, radius } => {
             viewport.world_to_screen(*center).distance(pos)
-                <= (*radius as f32 * viewport.zoom + HIT_PX)
+                <= (*radius as f32 * viewport.zoom + hit_px)
         }
         // Text is picked anywhere on the run, not on an outline it has none
         // of, so a short label is as easy to grab as a long one.
@@ -1456,7 +1518,7 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
             let (min, max) =
                 rspice_design::symbol::symbol_text_bounds(*anchor, text, *size, *align, *rotation);
             Rect::from_two_pos(viewport.world_to_screen(min), viewport.world_to_screen(max))
-                .expand(HIT_PX)
+                .expand(hit_px)
                 .contains(pos)
         }
         // A label is picked anywhere on the text the canvas letters for it.
@@ -1477,7 +1539,7 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
                 *rotation,
             );
             Rect::from_two_pos(viewport.world_to_screen(min), viewport.world_to_screen(max))
-                .expand(HIT_PX)
+                .expand(hit_px)
                 .contains(pos)
         }
     }

@@ -19,7 +19,8 @@ use rspice_schematic_editor::symbol_editor::surface::{
     self, SymbolSurfaceAction, SymbolSurfaceRequest,
 };
 use rspice_schematic_editor::symbol_editor::{
-    draw_canvas, draw_preview_column, paint_zoom_box, preview_column_width, update_viewport,
+    SymbolPointer, draw_canvas, draw_preview_column, paint_zoom_box, preview_column_width,
+    update_viewport,
 };
 
 pub(crate) fn symbol_canvas_accessibility_label(
@@ -145,7 +146,8 @@ pub fn show(
                     &response,
                     navigation,
                 ),
-            };
+            }
+            .pressed_by(SymbolPointer::of(ui.ctx()));
             if !navigating {
                 interaction::handle_canvas(
                     &mut canvas.parts(),

@@ -199,6 +199,28 @@ impl Finger {
         self.tap(at);
     }
 
+    /// One finger from `from` to `to` in four steps, held there until it has
+    /// no speed left to fling with, then lifted.
+    fn drag(&mut self, from: Pos2, to: Pos2) {
+        self.settle();
+        self.down(from);
+        for step in 1..=4 {
+            let at = from + (to - from) * (step as f32 / 4.0);
+            self.frame(vec![
+                Self::touch(TouchPhase::Move, at),
+                Event::PointerMoved(at),
+            ]);
+        }
+        for _ in 0..3 {
+            self.frame_after(
+                0.1,
+                vec![Self::touch(TouchPhase::Move, to), Event::PointerMoved(to)],
+            );
+        }
+        self.up(to);
+        self.frame(Vec::new());
+    }
+
     /// A touch that lands and lifts with no tap: the shell and the canvas
     /// are in touch mode and nothing is clicked.
     fn wake(&mut self) {
@@ -245,6 +267,15 @@ impl Finger {
     fn arm(&mut self, tool: SymbolTool) {
         self.app.state.design.symbol.editor.tool = tool;
         self.settle();
+    }
+}
+
+/// A 40-unit square about the origin.
+fn square() -> SymbolShape {
+    SymbolShape::Rectangle {
+        min: Point::new(-20, -20),
+        max: Point::new(20, 20),
+        style: Default::default(),
     }
 }
 
@@ -305,5 +336,36 @@ fn the_touch_strip_keeps_off_the_placed_preview() {
     assert!(
         canvas.contains_rect(strip),
         "the strip {strip:?} stands on the drawing {canvas:?}"
+    );
+}
+
+/// A finger takes what lies within its reach of the ink, as it takes a wire
+/// on a schematic: well past where a mouse would miss.
+#[test]
+fn a_finger_takes_symbol_objects_and_handles_within_its_reach() {
+    let mut finger = Finger::with_body(vec![square()]);
+    // 12 points outside the square's right edge.
+    let beside = finger.screen(Point::new(20, 0)) + egui::vec2(12.0, 0.0);
+    finger.tap(beside);
+    assert_eq!(finger.selection(), SymbolSelection::single_shape(0));
+
+    // 12 points beside its top-right corner, the corner's handle follows
+    // the finger.
+    let corner = finger.screen(Point::new(20, -20)) + egui::vec2(9.0, -8.0);
+    finger.drag(corner, corner + egui::vec2(20.0, 0.0));
+    let SymbolShape::Rectangle { min, max, .. } = finger.document().body[0].clone() else {
+        panic!("the square is still a rectangle");
+    };
+    assert!(
+        min.x == -20 && max.y == 20 && max.x > 20,
+        "the top right corner went right with the finger and the bottom left \
+         stayed: {min:?}..{max:?}"
+    );
+
+    // 16 points from the IN pin's tip.
+    finger.tap(finger.screen(Point::new(-40, 10)) + egui::vec2(-16.0, 0.0));
+    assert_eq!(
+        finger.selection(),
+        SymbolSelection::single_pin("IN".to_owned())
     );
 }
