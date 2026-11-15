@@ -559,17 +559,16 @@ pub(crate) fn apply_commit(model: &mut Model, commit: RenameCommit) -> Result<bo
 pub(crate) mod tests {
     use super::*;
     use crate::state::{Bus, Point};
-    use crate::workbench::app::RSpiceApp;
     use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the dialog as its dialog step does.
-    pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
-        render_rename_selection_dialog(
-            &mut app.state.design.rename_selection,
-            &mut app.state.model,
-            &mut app.state.workbench,
-            ctx,
-        );
+    pub(crate) fn render(
+        dialog: &mut RenameSelectionDialogState,
+        model: &mut Model,
+        workbench: &mut WorkbenchSession,
+        ctx: &Context,
+    ) {
+        render_rename_selection_dialog(dialog, model, workbench, ctx);
     }
 
     /// The commit, over the model it edits.

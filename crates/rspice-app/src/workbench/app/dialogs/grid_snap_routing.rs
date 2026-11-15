@@ -341,7 +341,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::state::write_policy::LocalSafeModeOptions;
     use crate::state::{SchematicGridPitch, SchematicWireRoutingStyle, Tool};
-    use crate::workbench::app::RSpiceApp;
     use crate::workbench::design::test_host::DesignTestHost;
 
     /// Apply, over the slot, the model and the session.
@@ -351,14 +350,6 @@ pub(crate) mod tests {
         state
             .design
             .commit_grid_snap_routing(&mut state.model, &mut state.workbench)
-    }
-
-    /// Draw the dialog as its dialog step does.
-    pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
-        let state = &mut app.state;
-        state
-            .design
-            .render_grid_snap_routing_dialog(&mut state.model, &mut state.workbench, ctx);
     }
 
     #[test]

@@ -1,9 +1,14 @@
 //! Placing a design note, drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::placement::design_note::tests::render;
+use crate::workbench::app::dialogs::placement::design_note::tests as dialog;
 use crate::workbench::app::schematic_editor_request_source;
 use egui::Context;
+
+/// Draw the dialog as its dialog step does.
+fn render(app: &mut RSpiceApp, ctx: &Context) {
+    dialog::render(&mut app.state.design.design_note, &mut app.state.model, ctx);
+}
 
 #[test]
 fn opening_input_reaches_design_note_text() {

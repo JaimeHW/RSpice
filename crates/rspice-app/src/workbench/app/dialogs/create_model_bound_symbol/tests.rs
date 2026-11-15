@@ -5,16 +5,17 @@ use egui::Context;
 use super::controller::{inferred_model_pins, parse_target};
 use super::state::*;
 use crate::state::model_library::ModelType;
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::Model;
+use crate::workbench::state::WorkbenchSession;
 
-pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
-    let state = &mut app.state;
-    super::render::render_create_model_bound_symbol_dialog(
-        &mut state.design.create_model_bound_symbol,
-        &mut state.model,
-        &mut state.workbench,
-        ctx,
-    );
+/// Draw the dialog as its dialog step does.
+pub(crate) fn render(
+    draft: &mut CreateModelBoundSymbolDialogState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    ctx: &Context,
+) {
+    super::render::render_create_model_bound_symbol_dialog(draft, model, workbench, ctx);
 }
 
 pub(crate) fn node_bounds(

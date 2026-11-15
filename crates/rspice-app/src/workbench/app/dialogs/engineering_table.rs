@@ -2054,20 +2054,24 @@ fn list_cell(ui: &mut Ui, width: f32, text: RichText) {
 pub(crate) mod tests {
     use super::*;
     use crate::state::{ComponentType, Point};
-    use crate::workbench::app::RSpiceApp;
     use crate::workbench::design::test_host::DesignTestHost;
 
-    /// The engineering table over the application's parts, as its dialog
-    /// step lends them.
-    pub(crate) fn table(app: &mut RSpiceApp) -> EngineeringTable<'_> {
-        let state = &mut app.state;
+    /// The engineering table over its parts, as its dialog step lends them.
+    pub(crate) fn table<'a>(
+        dialog: &'a mut EngineeringTableDialogState,
+        views: &'a mut EngineeringTableViewStore,
+        model: &'a mut Model,
+        symbol: &'a mut crate::workbench::app::actions::workspace::symbol_document::SymbolUiState,
+        platform: &'a mut PlatformState,
+        workbench: &'a mut WorkbenchSession,
+    ) -> EngineeringTable<'a> {
         EngineeringTable {
-            dialog: &mut state.design.engineering_table,
-            views: &mut state.design.engineering_table_views,
-            model: &mut state.model,
-            symbol: &mut state.design.symbol,
-            platform: &mut state.platform,
-            workbench: &mut state.workbench,
+            dialog,
+            views,
+            model,
+            symbol,
+            platform,
+            workbench,
         }
     }
 

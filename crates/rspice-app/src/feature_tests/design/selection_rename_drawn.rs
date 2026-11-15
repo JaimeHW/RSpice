@@ -4,9 +4,20 @@ use crate::feature_tests::design::rename::{apply_commit, component_app};
 use crate::state::Component;
 use crate::state::{ComponentType, NetLabel, Point, Wire};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::selection::rename::tests::{key_event, render};
+use crate::workbench::app::dialogs::selection::rename::tests::{self as dialog, key_event};
 use crate::workbench::app::dialogs::selection::rename::*;
 use egui::Context;
+
+/// Draw the dialog as its dialog step does.
+fn render(app: &mut RSpiceApp, ctx: &Context) {
+    let state = &mut app.state;
+    dialog::render(
+        &mut state.design.rename_selection,
+        &mut state.model,
+        &mut state.workbench,
+        ctx,
+    );
+}
 
 fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
     egui::RawInput {

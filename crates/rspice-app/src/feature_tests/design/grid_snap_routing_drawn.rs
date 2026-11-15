@@ -1,9 +1,16 @@
 //! The grid, snap and routing dialog drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::grid_snap_routing::tests::render;
 use crate::workbench::app::dialogs::grid_snap_routing::*;
 use egui::Context;
+
+/// Draw the dialog as its dialog step does.
+fn render(app: &mut RSpiceApp, ctx: &Context) {
+    let state = &mut app.state;
+    state
+        .design
+        .render_grid_snap_routing_dialog(&mut state.model, &mut state.workbench, ctx);
+}
 
 /// Grid, snap and wire routing is a command form: four rows whose
 /// controls share one column, not a 760 pt card of tinted rows each

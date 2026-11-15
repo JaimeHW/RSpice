@@ -146,12 +146,11 @@ pub(crate) fn placement_source<'a>(
 pub(crate) mod tests {
     use super::*;
     use crate::state::BusTapOrientation;
-    use crate::workbench::app::RSpiceApp;
     use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the form as its dialog step does.
-    pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
-        render_bus_tap_dialog(&mut app.state.design.bus_tap, &mut app.state.model, ctx);
+    pub(crate) fn render(dialog: &mut BusTapDialogState, model: &mut Model, ctx: &Context) {
+        render_bus_tap_dialog(dialog, model, ctx);
     }
 
     fn test_source() -> EditorRequestSource {

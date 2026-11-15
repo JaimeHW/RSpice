@@ -143,12 +143,11 @@ fn validate_draft(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::workbench::app::RSpiceApp;
     use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the dialog as its dialog step does.
-    pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
-        render_design_note_dialog(&mut app.state.design.design_note, &mut app.state.model, ctx);
+    pub(crate) fn render(dialog: &mut DesignNoteDialogState, model: &mut Model, ctx: &Context) {
+        render_design_note_dialog(dialog, model, ctx);
     }
 
     /// The draft's validation, over what the form reads.

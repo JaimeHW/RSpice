@@ -2,10 +2,17 @@
 
 use crate::state::SchematicParameterLabelVisibility;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::visibility_options::tests::render;
 use crate::workbench::app::dialogs::visibility_options::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+
+/// Draw the dialog as its dialog step does.
+fn render(app: &mut RSpiceApp, ctx: &Context) {
+    let state = &mut app.state;
+    state
+        .design
+        .render_schematic_visibility_dialog(&mut state.model, &mut state.workbench, ctx);
+}
 
 fn apply_display_options(state: &mut AppState) {
     state

@@ -283,18 +283,7 @@ const fn review_marker_label(value: SchematicReviewMarkerVisibility) -> &'static
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::workbench::app::RSpiceApp;
     use crate::workbench::design::test_host::DesignTestHost;
-
-    /// Draw the dialog as its dialog step does.
-    pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
-        let state = &mut app.state;
-        state.design.render_schematic_visibility_dialog(
-            &mut state.model,
-            &mut state.workbench,
-            ctx,
-        );
-    }
 
     fn capture_visibility_recovery(state: &DesignTestHost) -> SchematicVisibilityRecovery {
         state.design.capture_visibility_recovery(&state.model)

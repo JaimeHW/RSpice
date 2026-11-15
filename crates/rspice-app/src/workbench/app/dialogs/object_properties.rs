@@ -1064,17 +1064,16 @@ fn bus_choices(
 pub(crate) mod tests {
     use super::*;
     use crate::state::{BusParseError, BusTargetKind, NetLabel, Point, Wire};
-    use crate::workbench::app::RSpiceApp;
     use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the dialog as its dialog step does.
-    pub(crate) fn render(app: &mut RSpiceApp, ctx: &Context) {
-        render_object_properties_dialog(
-            &mut app.state.design.object_properties,
-            &mut app.state.model,
-            &mut app.state.workbench,
-            ctx,
-        );
+    pub(crate) fn render(
+        dialog: &mut ObjectPropertiesDialogState,
+        model: &mut Model,
+        workbench: &mut WorkbenchSession,
+        ctx: &Context,
+    ) {
+        render_object_properties_dialog(dialog, model, workbench, ctx);
     }
 
     /// What a repaint's cached resolution is keyed by, over the model it reads.

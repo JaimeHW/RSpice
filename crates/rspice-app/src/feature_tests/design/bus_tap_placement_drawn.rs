@@ -3,10 +3,15 @@
 use crate::state::Tool;
 use crate::state::{Bus, BusDeclaration, Point};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::placement::bus_tap::tests::{key_event, render};
+use crate::workbench::app::dialogs::placement::bus_tap::tests::{self as form, key_event};
 use crate::workbench::app::dialogs::placement::bus_tap::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+
+/// Draw the form as its dialog step does.
+fn render(app: &mut RSpiceApp, ctx: &Context) {
+    form::render(&mut app.state.design.bus_tap, &mut app.state.model, ctx);
+}
 
 fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
     egui::RawInput {

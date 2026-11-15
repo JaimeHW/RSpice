@@ -5,8 +5,22 @@ use crate::state::EngineeringViewScope;
 use crate::state::engineering_table::active_schematic_dataset;
 use crate::state::{ComponentType, Point};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::engineering_table::tests::table;
+use crate::workbench::app::dialogs::engineering_table::tests as dialog;
 use crate::workbench::app::dialogs::engineering_table::*;
+
+/// The engineering table over a whole application's parts, as its dialog
+/// step lends them.
+fn table(app: &mut RSpiceApp) -> EngineeringTable<'_> {
+    let state = &mut app.state;
+    dialog::table(
+        &mut state.design.engineering_table,
+        &mut state.design.engineering_table_views,
+        &mut state.model,
+        &mut state.design.symbol,
+        &mut state.platform,
+        &mut state.workbench,
+    )
+}
 
 /// The pages that ask before they act are command forms: a card of the
 /// form's width, every label on one edge and every control on one grid.

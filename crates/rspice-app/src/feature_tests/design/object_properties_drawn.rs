@@ -6,11 +6,24 @@ use crate::state::DesignNote;
 use crate::state::DesignNoteKind;
 use crate::state::Point;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::object_properties::tests::{declared_bus, key_event, render};
+use crate::workbench::app::dialogs::object_properties::tests::{
+    self as dialog, declared_bus, key_event,
+};
 use crate::workbench::app::dialogs::object_properties::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
 use rspice_schematic_editor::object_properties::ObjectPropertiesDraft;
+
+/// Draw the dialog as its dialog step does.
+fn render(app: &mut RSpiceApp, ctx: &Context) {
+    let state = &mut app.state;
+    dialog::render(
+        &mut state.design.object_properties,
+        &mut state.model,
+        &mut state.workbench,
+        ctx,
+    );
+}
 
 /// Why the open edit can no longer apply, over what the form reads.
 fn object_property_session_error(state: &AppState) -> Option<String> {

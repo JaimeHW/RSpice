@@ -5,8 +5,21 @@ use crate::feature_tests::design::create_model_bound_symbol::{
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::create_model_bound_symbol::state::*;
-use crate::workbench::app::dialogs::create_model_bound_symbol::tests::{node_bounds, render};
+use crate::workbench::app::dialogs::create_model_bound_symbol::tests::{
+    self as dialog, node_bounds,
+};
 use egui::{Context, Rect, vec2};
+
+/// Draw the dialog as its dialog step does.
+fn render(app: &mut RSpiceApp, ctx: &Context) {
+    let state = &mut app.state;
+    dialog::render(
+        &mut state.design.create_model_bound_symbol,
+        &mut state.model,
+        &mut state.workbench,
+        ctx,
+    );
+}
 
 fn render_accessibility_frame(
     app: &mut RSpiceApp,
