@@ -105,6 +105,8 @@ enum CommandKind {
     Unlet,
     /// `reset`: reload the deck.
     Reset,
+    /// `remcirc`: remove the circuit; its plots stay.
+    RemoveCircuit,
     Alter,
     /// `altermod`: set a parameter of a model card.
     AlterModel,
@@ -176,6 +178,22 @@ impl CommandKind {
         )
     }
 
+    /// The commands that act on the circuit, which `remcirc` removes.
+    fn needs_circuit(&self) -> bool {
+        matches!(
+            self,
+            Self::Options
+                | Self::Save
+                | Self::Reset
+                | Self::Alter
+                | Self::AlterModel
+                | Self::AlterParam
+                | Self::Analysis
+                | Self::Run
+                | Self::Listing
+        )
+    }
+
     fn parse(command: &ControlCommand) -> Result<Self, ControlError> {
         Ok(match command.name.as_str() {
             "option" | "options" => Self::Options,
@@ -185,6 +203,7 @@ impl CommandKind {
             "destroy" => Self::Destroy,
             "unlet" => Self::Unlet,
             "reset" => Self::Reset,
+            "remcirc" => Self::RemoveCircuit,
             "alter" => Self::Alter,
             "altermod" => Self::AlterModel,
             "alterparam" => Self::AlterParam,
@@ -275,6 +294,9 @@ pub struct ControlCircuit {
     /// (`wr_singlescale`, `wr_vecnames`, `wr_onespace`, `appendwrite`,
     /// `numdgt`).
     shell: BTreeMap<String, crate::engine::control::shell::ShellValue>,
+    /// Whether `remcirc` removed the circuit: the plots stay readable, and
+    /// a command that needs the circuit is refused.
+    removed: bool,
 }
 
 impl ControlCircuit {
@@ -301,6 +323,7 @@ impl ControlCircuit {
             input_directory: None,
             directory: None,
             shell: BTreeMap::new(),
+            removed: false,
         })
     }
 
@@ -392,6 +415,12 @@ impl ControlCircuit {
             .into());
         }
         let kind = CommandKind::parse(command)?;
+        if self.removed && kind.needs_circuit() {
+            // ngspice refuses these once `remcirc` has removed the only
+            // circuit (frontend/runcoms.c:246 dosim, com_option.c:22,
+            // device.c:1260 com_alter_common).
+            return Err(command_error(line, format!("{}: no circuit loaded", command.name)).into());
+        }
         if command.arguments.contains('@')
             && !matches!(
                 kind,
@@ -541,6 +570,26 @@ impl ControlCircuit {
                         "Reset re-loads circuit {}\n",
                         self.title()
                     )),
+                ))
+            }
+            // ngspice `remcirc` (frontend/runcoms2.c:191) frees the circuit
+            // and its options and breakpoints; the plots stay. With no
+            // circuit left it warns and does nothing (runcoms2.c:200).
+            CommandKind::RemoveCircuit => {
+                if self.removed {
+                    return Ok(Self::batch_output(
+                        command,
+                        ControlPresentationKind::Ignored(
+                            "there is no circuit loaded; remcirc is ignored".to_string(),
+                        ),
+                    ));
+                }
+                self.removed = true;
+                self.device_state = None;
+                self.instance_quantities.clear();
+                self.runtime_options = crate::netlist::SimulationOptions::default();
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
                 ))
             }
             CommandKind::Unlet => {
