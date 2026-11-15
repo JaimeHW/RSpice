@@ -677,6 +677,77 @@ fn check_fixture(family: &str, circuit: &str, node: &str, failures: &mut Vec<Str
     compare_with_settled_transient(&netlist, family, node, "harmonic balance", &hb, failures);
 }
 
+/// PSTB on a fixture's shooting orbit, read at a probe loop beside it, an RL
+/// whose period maps a current deviation by exp(−T·R/L) = exp(−1): PSTB
+/// must run where shooting solves, read that multiplier, and find every
+/// multiplier inside the unit circle, the fixture's settled transient being
+/// stable. A model shooting refuses before solving is its own refusal.
+fn check_pstb(family: &str, circuit: &str, failures: &mut Vec<String>) {
+    let deck = format!(
+        "* {family} periodic stability\n{circuit}VPSTB pstb 0 SIN(0 1 1meg)\n\
+         RPSTB pstb qpstb 100\nLPSTB qpstb 0 100u\n.end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let point = match engine().run_pss_operating_point_with_abort(
+        &netlist,
+        PssConfig::new(F0)
+            .with_points_per_period(512)
+            .with_tolerance(1e-9),
+        &rspice_core::NoAbort,
+    ) {
+        Ok(point) => point,
+        Err(rspice_core::SimulationError::UnsupportedCapability(refusal))
+            if refusal.detail.ends_with(CARRIED_SITE) =>
+        {
+            return;
+        }
+        Err(error) => {
+            failures.push(format!(
+                "{family}: PSTB's shooting orbit must solve: {error}"
+            ));
+            return;
+        }
+    };
+    let card = rspice_core::netlist::PstbCard {
+        probe_instance: "LPSTB".to_owned(),
+        max_harmonics: 4,
+        stability_threshold: 1.0 + 1e-6,
+        detect_subharmonics: true,
+    };
+    let multipliers: Vec<Complex64> = match engine().run_pstb_card_from_pss_with_abort(
+        &netlist,
+        &card,
+        &point,
+        &rspice_core::NoAbort,
+    ) {
+        Ok(stability) => stability
+            .result
+            .multipliers
+            .iter()
+            .map(|mode| mode.value)
+            .collect(),
+        Err(error) => {
+            failures.push(format!("{family}: PSTB must run: {error}"));
+            return;
+        }
+    };
+    let probe = (-1.0_f64).exp();
+    if !multipliers
+        .iter()
+        .any(|value| (value - probe).norm() <= 1.0e-3 * probe)
+    {
+        failures.push(format!(
+            "{family}: PSTB must read the probe loop's exp(-1): {multipliers:?}"
+        ));
+    }
+    if let Some(unstable) = multipliers.iter().find(|value| value.norm() >= 1.0) {
+        failures.push(format!(
+            "{family}: PSTB finds {unstable} outside the unit circle of a settled orbit: \
+             {multipliers:?}"
+        ));
+    }
+}
+
 /// Compare `periodic`, a steady-state spectrum of V(`node`), with the
 /// spectrum of RSpice's own transient of `netlist` once it has settled, under
 /// the allowance [`generated_models_reach_the_settled_transients_steady_state`]
@@ -981,7 +1052,8 @@ fn check_refusal(card: &str, instance: &str, module: &str, reason: &str) -> Opti
 
 /// Every shipped model this build compiles, walked by name: an admitted one
 /// must reach its fixture's settled transient, or shooting's orbit where no
-/// transient settles, a refused one must give its
+/// transient settles, PSTB must read a fixture's shooting orbit (see
+/// [`check_pstb`]), a refused one must give its
 /// named reason, and one with neither a fixture nor a named refusal fails,
 /// so a model the generator newly admits cannot go unchecked. A fixture or
 /// refusal names its model as a word of its deck. It needs every model
@@ -1008,6 +1080,7 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
             .find(|(_, circuit, _)| names_model(circuit, name))
         {
             check_fixture(family, circuit, node, &mut failures);
+            check_pstb(family, circuit, &mut failures);
         } else if let Some(&(family, circuit, node)) = oracle_fixtures
             .iter()
             .find(|(_, circuit, _)| names_model(circuit, name))
