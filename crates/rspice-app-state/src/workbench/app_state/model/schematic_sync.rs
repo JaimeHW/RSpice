@@ -6,8 +6,12 @@
 
 use super::Model;
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::{CellViewRef, View, ViewType};
+use crate::state::{CellViewRef, SchematicSnapshot, SymbolDocument, View, ViewType};
 use crate::workbench::app_state::design_history::DesignManagementHistoryEntry;
+use rspice_design::schematic::document::SchematicDocument;
+use rspice_design::symbol::edit::{
+    places_symbol, resolve_symbol_instance_wiring, symbol_pin_position_remaps,
+};
 use rspice_design::symbol::generated::{
     GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
 };
@@ -257,12 +261,15 @@ impl Model {
             return;
         }
 
+        let key = reference.key();
         let symbol_error = match existing_symbol {
             Some(mut view) if is_generated_symbol(&view) => {
                 let before = view.metadata.clone();
+                let drawn = SymbolDocument::load_from_view(&view).ok();
                 match store_generated_symbol(&mut view, &ports, |_| None) {
                     Err(error) => Some(format!("Generated symbol could not be refreshed: {error}")),
                     Ok(()) => {
+                        let redrawn = SymbolDocument::load_from_view(&view).ok();
                         if view.metadata != before
                             && let Some(mut library) =
                                 self.library_manager.edit_library(&reference.library)
@@ -272,6 +279,25 @@ impl Model {
                                 GENERATED_SYMBOL_VIEW,
                                 view.metadata,
                             );
+                            drop(library);
+                            let named = named_ports(self.schematic.document());
+                            let renames = self
+                                .generated_symbol_ports
+                                .get(&key)
+                                .map(|drawn_for| renamed_ports(drawn_for, &named))
+                                .unwrap_or_default();
+                            self.generated_symbol_ports.insert(key, named);
+                            if let (Some(drawn), Some(redrawn)) = (drawn, redrawn) {
+                                let symbol = CellViewRef::new(
+                                    &reference.library,
+                                    &reference.cell,
+                                    GENERATED_SYMBOL_VIEW,
+                                );
+                                self.carry_placed_instances(&symbol, &drawn, &redrawn, &renames);
+                            }
+                        } else if !self.generated_symbol_ports.contains_key(&key) {
+                            let named = named_ports(self.schematic.document());
+                            self.generated_symbol_ports.insert(key, named);
                         }
                         None
                     }
@@ -288,6 +314,8 @@ impl Model {
                         {
                             library.add_view(&reference.cell, view);
                         }
+                        let named = named_ports(self.schematic.document());
+                        self.generated_symbol_ports.insert(key, named);
                         None
                     }
                 }
@@ -301,6 +329,100 @@ impl Model {
             self.record(LogSeverity::Warning, LogSource::Studio, error);
         }
     }
+
+    /// Carry every placed instance of `symbol` from `drawn` to `redrawn`:
+    /// each wire end a terminal held follows it to where the redrawn symbol
+    /// puts it, and a terminal whose port was renamed takes the new name, so
+    /// its wire stays on the pin. A pin that went holds its wire nowhere: the
+    /// wire is left where it was, for the checks to report. Each sheet that
+    /// changes records the change as one step of its own.
+    fn carry_placed_instances(
+        &mut self,
+        symbol: &CellViewRef,
+        drawn: &SymbolDocument,
+        redrawn: &SymbolDocument,
+        renames: &BTreeMap<String, String>,
+    ) {
+        const STEP: &str = "move wires with symbol pins";
+        let remaps = symbol_pin_position_remaps(drawn, redrawn, renames);
+        let renamed: BTreeMap<String, String> = renames
+            .iter()
+            .map(|(from, to)| (from.to_ascii_lowercase(), to.clone()))
+            .collect();
+        if remaps.is_empty() && renamed.is_empty() {
+            return;
+        }
+        // The open schematic is the cell's own, which places no instance of
+        // the cell it draws.
+        let active = self.workspace.content.active_schematic_reference().key();
+        let content = &self.workspace.content;
+        let held = content
+            .schematic_buffers
+            .iter()
+            .filter(|(key, design)| **key != active && places_symbol(design.document(), symbol))
+            .map(|(key, design)| {
+                let catalog = content.design_management.sheet_catalog(key);
+                let sheet_of = |id: u64| {
+                    catalog.and_then(|catalog| {
+                        catalog
+                            .sheet_for_object(id)
+                            .or_else(|| catalog.active_sheet_id())
+                    })
+                };
+                let wiring = resolve_symbol_instance_wiring(
+                    design.document(),
+                    symbol,
+                    drawn,
+                    |part, wire| sheet_of(part) == sheet_of(wire),
+                );
+                (
+                    key.clone(),
+                    wiring,
+                    SchematicSnapshot::capture(design.document()),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (key, wiring, before) in held {
+            let mut before = Some(before);
+            self.workspace
+                .for_each_schematic_editor_mut(|buffer, schematic| {
+                    if buffer != key {
+                        return;
+                    }
+                    let moved = schematic.apply_symbol_instance_wiring(&wiring, &remaps);
+                    let relabelled = schematic.rename_instance_terminals(symbol, &renamed) > 0;
+                    if (moved || relabelled)
+                        && let Some(before) = before.take()
+                    {
+                        schematic.commit_undo_from(before, STEP);
+                    }
+                });
+        }
+    }
+}
+
+/// The named ports of `document`, each by the object that declares it.
+fn named_ports(document: &SchematicDocument) -> Vec<(u64, String)> {
+    document
+        .components
+        .iter()
+        .filter_map(|component| component.port_spec().map(|port| (component.id, port.name)))
+        .collect()
+}
+
+/// The ports renamed between `drawn_for` and `named`, old name to new: the
+/// same port object, under another name. A port added or deleted renames
+/// nothing, so a wire on a port that went is never handed to one that came.
+fn renamed_ports(drawn_for: &[(u64, String)], named: &[(u64, String)]) -> BTreeMap<String, String> {
+    drawn_for
+        .iter()
+        .filter_map(|(id, old)| {
+            named
+                .iter()
+                .find(|(other, new)| other == id && !new.eq_ignore_ascii_case(old))
+                .map(|(_, new)| (old.clone(), new.clone()))
+        })
+        .collect()
 }
 
 #[cfg(test)]

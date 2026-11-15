@@ -60,9 +60,11 @@ impl AppState {
         self.model.design_checks.drc_results = None;
         self.model.design_checks.drc_checked_version = 0;
         self.model.clear_all_design_checks();
-        // The renames a revert would take back belong to the design being
-        // replaced, whose symbols the next one does not hold.
+        // The renames a revert would take back, and the ports each generated
+        // symbol was drawn for, belong to the design being replaced, whose
+        // symbols the next one does not hold.
         self.model.unsaved_pin_renames.clear();
+        self.model.generated_symbol_ports.clear();
         // Problems and debugger evidence are project-scoped under the
         // source-workspace contract. Clear them in the same transaction as
         // documents and results so a replacement can never render one frame

@@ -134,6 +134,11 @@ pub struct Model {
     /// Runtime only: a save of the symbol, or another project replacing this
     /// one, forgets them.
     pub unsaved_pin_renames: rspice_design::symbol::edit::UnsavedPinRenames,
+    /// The ports each generated symbol was last drawn for, by cellview key,
+    /// each by the object that declares it: a port the next drawing finds
+    /// under another name was renamed, and its placed terminals follow it.
+    /// Runtime only: another project replacing this one forgets them.
+    pub generated_symbol_ports: std::collections::BTreeMap<String, Vec<(u64, String)>>,
     /// Pinned-versus-present model source drift, as of the last event-driven
     /// scan. Runtime only: a saved verdict about bytes is a verdict about a
     /// moment that has passed.
