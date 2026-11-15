@@ -22,7 +22,7 @@ use std::f64::consts::PI;
 mod neutral_phase;
 mod noise_correlation;
 use neutral_phase::{
-    NeutralPhaseOperator, NoiseAdjointOperator, NoisePreconditioner, refine_noise_adjoint,
+    NeutralPhaseOperator, NoiseAdjointOperator, NoisePreconditioner, refine_krylov_candidate,
 };
 pub(crate) use noise_correlation::{PeriodicNoiseOutput, PeriodicNoiseProjection};
 
@@ -79,6 +79,89 @@ fn periodic_sideband_geometry(
         ))
     })?;
     Ok((sidebands, unknowns, span))
+}
+
+/// Which unknowns of a sideband system reference which, over whole unknowns
+/// (every sideband of one), for finding the coordinates no stimulus reaches.
+///
+/// Unknowns whose equations reference only one another, with no right-hand
+/// side among them, solve to exactly zero: the system is block triangular
+/// with them as a diagonal block, which is nonsingular wherever the system
+/// is. PSP's noise nodes are such a block in periodic AC, which drives the
+/// circuit at its input alone. A Krylov candidate carries rounding remnants
+/// there (1e-33 beside unit-scale unknowns), each a componentwise error of
+/// one however small, which no correction removes; the structure proves the
+/// zero, so the remnants are set to it before the independent certificate
+/// reads the candidate. Reading whole unknowns can only prove fewer zeros.
+struct SidebandReach {
+    sidebands: usize,
+    /// For each unknown, the unknowns whose equations reference it.
+    referenced_by: Vec<Vec<usize>>,
+}
+
+impl SidebandReach {
+    /// The reach of the `dimension`-coordinate system whose entries `visit`
+    /// gives as `(row, column)`; `transposed` reads each as equation
+    /// `column`'s coefficient of unknown `row`.
+    fn new(
+        dimension: usize,
+        sidebands: usize,
+        transposed: bool,
+        visit: impl FnOnce(&mut dyn FnMut(usize, usize, Complex64)),
+    ) -> Self {
+        let sidebands = sidebands.max(1);
+        let mut referenced_by: Vec<Vec<usize>> = vec![Vec::new(); dimension.div_ceil(sidebands)];
+        visit(&mut |row, column, value| {
+            if value == Complex64::ZERO {
+                return;
+            }
+            let (equation, unknown) = if transposed {
+                (column, row)
+            } else {
+                (row, column)
+            };
+            let (equation, unknown) = (equation / sidebands, unknown / sidebands);
+            if equation == unknown {
+                return;
+            }
+            if let Some(list) = referenced_by.get_mut(unknown)
+                && let Err(position) = list.binary_search(&equation)
+            {
+                list.insert(position, equation);
+            }
+        });
+        Self {
+            sidebands,
+            referenced_by,
+        }
+    }
+
+    /// Set each coordinate of `solution` that no nonzero of `rhs` reaches to
+    /// the exact zero the structure proves.
+    fn zero_unreached(&self, rhs: &[Complex64], solution: &mut [Complex64]) {
+        let mut reached = vec![false; self.referenced_by.len()];
+        let mut pending = Vec::new();
+        for (coordinate, value) in rhs.iter().enumerate() {
+            let unknown = coordinate / self.sidebands;
+            if *value != Complex64::ZERO && !reached[unknown] {
+                reached[unknown] = true;
+                pending.push(unknown);
+            }
+        }
+        while let Some(unknown) = pending.pop() {
+            for &equation in &self.referenced_by[unknown] {
+                if !reached[equation] {
+                    reached[equation] = true;
+                    pending.push(equation);
+                }
+            }
+        }
+        for (coordinate, value) in solution.iter_mut().enumerate() {
+            if !reached[coordinate / self.sidebands] {
+                *value = Complex64::ZERO;
+            }
+        }
+    }
 }
 
 fn validate_periodic_state(
@@ -1582,6 +1665,8 @@ impl HbSolver {
         } else {
             None
         };
+        let reach = try_krylov
+            .then(|| SidebandReach::new(size, s, false, |visitor| operator.visit_entries(visitor)));
 
         for (excitation_index, excitation) in excitations.iter().enumerate() {
             let mut rhs = try_zeroed_complex_values(
@@ -1658,6 +1743,18 @@ impl HbSolver {
                     restart,
                     6,
                 );
+                let outcome = refine_krylov_candidate(
+                    &|input| operator.apply(input),
+                    &|visitor| {
+                        operator.visit_entries(|row, column, value| visitor(column, row, value));
+                    },
+                    preconditioner,
+                    &rhs,
+                    reach.as_ref(),
+                    outcome,
+                    restart,
+                    &crate::abort_signal::NoAbort,
+                )?;
                 self.qualify_periodic_ac_solution(&operator, &rhs, outcome)?
             } else {
                 let matrix = dense.as_ref().ok_or_else(|| {
@@ -1908,23 +2005,22 @@ impl HbSolver {
         outcome: super::krylov::GmresOutcome,
     ) -> Result<Vec<Complex64>, HbError> {
         let size = rhs.len();
-        let qualification = if outcome.converged {
-            rspice_matrix::certify_complex_transpose_solution_by_entry_visitor(
-                size,
-                size,
-                &outcome.solution,
-                rhs,
-                |visitor| {
-                    operator.visit_entries(|row, column, value| {
-                        visitor(column, row, value);
-                    });
-                },
-            )
-        } else {
-            Err(rspice_matrix::SolverError::ConvergenceFailed(
-                outcome.iterations,
-            ))
-        };
+        // The independent certificate, not GMRES's normwise flag, decides. A
+        // carried integral's input rows can hold terms 3e7 times a unit
+        // stimulus (PSP 102's non-quasi-static charge rates), so rounding
+        // alone holds the residual at 1.2e-9 of the stimulus, above GMRES's
+        // tolerance, where every equation holds to rounding at its own scale.
+        let qualification = rspice_matrix::certify_complex_transpose_solution_by_entry_visitor(
+            size,
+            size,
+            &outcome.solution,
+            rhs,
+            |visitor| {
+                operator.visit_entries(|row, column, value| {
+                    visitor(column, row, value);
+                });
+            },
+        );
 
         match qualification {
             Ok(()) => {
@@ -3362,6 +3458,130 @@ mod matrix_free_tests {
         assert!(message.contains("PAC forward 256x256"), "{message}");
         assert!(message.contains("after 1 iterations"), "{message}");
         assert!(message.contains("backward-error"), "{message}");
+    }
+
+    /// A Krylov candidate that GMRES stopped on its normwise flag is still
+    /// published when every equation holds at its own scale: the
+    /// independent certificate decides, at any size.
+    #[test]
+    fn pac_forward_publishes_a_stalled_candidate_the_certificate_accepts() {
+        let dimension = super::super::krylov::KRYLOV_AUTO_THRESHOLD;
+        let g = (0..dimension)
+            .map(|index| (index, index, 2.0))
+            .collect::<Vec<_>>();
+        let operator = PeriodicConversionOperator {
+            num_nodes: dimension,
+            num_sidebands: 1,
+            sideband_min: 0,
+            offset_hz: 1.0,
+            fundamental_hz: 1.0,
+            g_matrix: &g,
+            c_matrix: &[],
+            l_matrix: &[],
+            mna_branches: &[],
+            mna_static_entries: &[],
+            mna_inductance_entries: &[],
+            periodic_networks: &[],
+            g_spectra: &[],
+            c_spectra: &[],
+        };
+        let solver = HbSolver::new(HbConfig::new(1.0).with_harmonics(1), dimension);
+        let rhs = vec![Complex64::new(1.0, 0.0); dimension];
+        let stalled = super::super::krylov::GmresOutcome {
+            solution: vec![Complex64::new(0.5, 0.0); dimension],
+            iterations: 3,
+            relative_residual: 1.2e-9,
+            converged: false,
+        };
+        let solution = solver
+            .qualify_periodic_ac_solution(&operator, &rhs, stalled)
+            .expect("a certified candidate is published whatever GMRES's normwise flag says");
+        assert!(
+            solution
+                .iter()
+                .all(|&value| value == Complex64::new(0.5, 0.0))
+        );
+    }
+
+    /// GMRES leaves rounding remnants in a block no stimulus reaches (PSP's
+    /// noise nodes in periodic AC), each a componentwise error of one
+    /// however small. The block's equations reference only one another, so
+    /// the structure proves its zero and the refined candidate certifies;
+    /// an unknown whose equation references a driven one is solved, not
+    /// zeroed, and so is a driven unknown that references the block.
+    #[test]
+    fn a_krylov_candidate_takes_the_zero_of_a_block_no_stimulus_reaches() {
+        // x0 = 1 (sideband 0); x1 = 0.5 x0 - 0.3 x2; {x2, x3} reference
+        // only each other: 2 x2 + x3 = 0, x3 - 0.25 x2 = 0; x4 = x0.
+        let g = [
+            (0, 0, 1.0),
+            (1, 1, 1.0),
+            (1, 0, -0.5),
+            (1, 2, 0.3),
+            (2, 2, 2.0),
+            (2, 3, 1.0),
+            (3, 3, 1.0),
+            (3, 2, -0.25),
+            (4, 4, 1.0),
+            (4, 0, -1.0),
+        ];
+        let operator = PeriodicConversionOperator {
+            num_nodes: 5,
+            num_sidebands: 2,
+            sideband_min: 0,
+            offset_hz: 1.0,
+            fundamental_hz: 1.0,
+            g_matrix: &g,
+            c_matrix: &[],
+            l_matrix: &[],
+            mna_branches: &[],
+            mna_static_entries: &[],
+            mna_inductance_entries: &[],
+            periodic_networks: &[],
+            g_spectra: &[],
+            c_spectra: &[],
+        };
+        let size = 10;
+        let mut rhs = vec![Complex64::ZERO; size];
+        rhs[0] = Complex64::new(1.0, 0.0);
+        let mut solution = vec![Complex64::ZERO; size];
+        solution[0] = Complex64::new(1.0, 0.0);
+        solution[2] = Complex64::new(0.5, 0.0);
+        solution[8] = Complex64::new(1.0, 0.0);
+        let mut remnant = solution.clone();
+        remnant[4] = Complex64::new(1.0e-33, 0.0);
+        remnant[7] = Complex64::new(0.0, -3.0e-34);
+        let visit = |visitor: &mut dyn FnMut(usize, usize, Complex64)| {
+            operator.visit_entries(|row, column, value| visitor(column, row, value));
+        };
+        assert!(matches!(
+            rspice_matrix::certify_complex_transpose_solution_by_entry_visitor(
+                size, size, &remnant, &rhs, visit
+            ),
+            Err(rspice_matrix::SolverError::InaccurateSolution(error)) if error >= 0.5
+        ));
+        let reach = SidebandReach::new(size, 2, false, |visitor| operator.visit_entries(visitor));
+        let refined = refine_krylov_candidate(
+            &|input| operator.apply(input),
+            &visit,
+            &IdentityPreconditioner,
+            &rhs,
+            Some(&reach),
+            super::super::krylov::GmresOutcome {
+                solution: remnant,
+                iterations: 4,
+                relative_residual: 1.0e-33,
+                converged: true,
+            },
+            4,
+            &NoAbort,
+        )
+        .expect("the remnants are zeroed and the candidate refined");
+        assert_eq!(refined.solution, solution);
+        let solver = HbSolver::new(HbConfig::new(1.0).with_harmonics(1), 5);
+        solver
+            .qualify_periodic_ac_solution(&operator, &rhs, refined)
+            .expect("the projected candidate certifies");
     }
 
     #[test]

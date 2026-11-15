@@ -380,6 +380,11 @@ impl HbSolver {
         } else {
             Some(noise_operator.noise_dense_transpose())
         };
+        let reach = try_krylov.then(|| {
+            SidebandReach::new(solve_size, s, true, |visitor| {
+                noise_operator.visit_noise_entries(visitor);
+            })
+        });
         for (channel, output) in outputs.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
@@ -417,10 +422,12 @@ impl HbSolver {
                     restart,
                     6,
                 );
-                let outcome = refine_noise_adjoint(
-                    noise_operator,
+                let outcome = refine_krylov_candidate(
+                    &|input| noise_operator.apply_noise_transpose(input),
+                    &|visitor| noise_operator.visit_noise_entries(visitor),
                     preconditioner,
                     &rhs,
+                    reach.as_ref(),
                     outcome,
                     restart,
                     abort,

@@ -2013,3 +2013,146 @@ fn pstb_reads_a_veriloga_oscillators_orbit_with_its_phase_multiplier() {
         assert!((a - b).norm() <= 1.0e-9, "Verilog-A {a} against native {b}");
     }
 }
+
+/// Periodic AC, periodic transfer functions and periodic noise read an
+/// `idt` carried as unknowns of its own at every sideband: a
+/// non-quasi-static charge relaxing to `cV` in `τ`, `q = idt((cV − q)/τ, cV)`,
+/// is `cV/(1 + jωτ)`, so behind `R` the stage passes
+/// `V(a)/V(rf) = 1/(1 + jωRc/(1 + jωτ))` at sideband 0, nothing at the
+/// others, and `R`'s thermal noise reaches `V(a)` as `4kTR|H|²`. Beside it a
+/// pumped branch the stimulus never reaches, and a pair of the module's
+/// nodes whose equations read only each other while its current and the
+/// charge's rate read them (PSP's noise nodes), solve to exactly zero.
+/// Forty-one sidebands, on a carrier of the forty harmonics they span, put
+/// the sideband systems on the Krylov route, where GMRES left rounding
+/// remnants on that pair and periodic AC failed its componentwise
+/// certificate at 1.0. Allowance: 1e-9 of the transfer, 1e-6 of the noise.
+#[test]
+fn a_carried_non_quasi_static_charge_gives_its_closed_form_in_periodic_small_signal() {
+    use rspice_core::NoAbort;
+    use rspice_core::analysis::pac::{PacConfig, PacSweepType};
+    use rspice_core::constants::K_BOLTZMANN;
+    use rspice_core::engine::{PeriodicNoiseRequest, PeriodicNoiseSidebands};
+    use rspice_core::netlist::{FreqVariation, PeriodicSourceSelector, PeriodicSweep, PxfCard};
+    const MAX_SIDEBAND: i32 = 20;
+    let (resistance, capacitance, tau) = (1.0e3, 1.0e-9, 2.0e-7);
+    let (_, card) = two_terminal(
+        "pac_idt",
+        (
+            "va_nqs_charge",
+            "electrical q, noi, noi2;\n\
+             analog begin\n\
+             V(q) <+ idt((1.0e-9 * V(p, n) - V(q)) / 2.0e-7 + 1.0e6 * V(noi2), 1.0e-9 * V(p, n));\n\
+             I(p, n) <+ ddt(V(q));\n\
+             I(noi2) <+ V(noi2);\n\
+             I(noi) <+ 1.0e-3 * V(noi) - 1.0e3 * V(noi2);\n\
+             I(p, n) <+ 1.0e-3 * V(noi2) + ddt(1.0e-12 * V(noi));\n\
+             end",
+        ),
+    );
+    let deck = format!(
+        "* carried non-quasi-static charge\nVRF rf 0 DC 0\nR1 rf a 1k\nXQ a 0 va_nqs_charge\n\
+         VP p 0 SIN(0 1 1meg)\nRP p 0 1k\n{card}\n.end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let hb = engine
+        .run_hb(
+            &netlist,
+            HbConfig::new(F0).with_harmonics(2 * MAX_SIDEBAND as usize),
+        )
+        .unwrap_or_else(|error| panic!("HB must run: {error}\n{deck}"));
+    let offsets = [0.13 * F0, 0.37 * F0];
+    let transfer = |offset: f64| {
+        let omega = std::f64::consts::TAU * offset;
+        let charge = Complex64::new(capacitance, 0.0) / Complex64::new(1.0, omega * tau);
+        Complex64::new(1.0, 0.0) / (1.0 + Complex64::new(0.0, omega * resistance) * charge)
+    };
+    let pac = engine
+        .run_pac_from_hb_with_abort(
+            &netlist,
+            PacConfig::new()
+                .with_fundamental(F0)
+                .with_sweep(offsets[0], offsets[1], 2)
+                .with_sweep_type(PacSweepType::Linear)
+                .with_sidebands(-MAX_SIDEBAND, MAX_SIDEBAND)
+                .with_input_source("vrf")
+                .with_output_node("a"),
+            &hb.operating_point,
+            &NoAbort,
+        )
+        .unwrap_or_else(|error| panic!("PAC must run: {error}\n{deck}"));
+    let pxf = engine
+        .run_pxf_card_from_hb_with_abort(
+            &netlist,
+            &PxfCard {
+                sweep: PeriodicSweep {
+                    variation: FreqVariation::Lin,
+                    points: 2,
+                    start_freq: offsets[0],
+                    stop_freq: offsets[1],
+                },
+                input_source: "vrf".into(),
+                input_sideband: 0,
+                output_node: "a".into(),
+                output_ref: None,
+                output_sideband: 0,
+                max_sideband: MAX_SIDEBAND,
+                reltol: 1e-9,
+                abstol: 1e-15,
+                source: PeriodicSourceSelector::Preceding,
+            },
+            &hb.operating_point,
+            &NoAbort,
+        )
+        .unwrap_or_else(|error| panic!("PXF must run: {error}\n{deck}"));
+    let noise = engine
+        .run_pnoise_from_hb_request_with_abort(
+            &netlist,
+            &PeriodicNoiseRequest {
+                sampling: None,
+                offsets: &offsets,
+                output_node: "a",
+                output_ref: None,
+                input_source: None,
+                max_sideband: MAX_SIDEBAND,
+                sidebands: PeriodicNoiseSidebands {
+                    input: 0,
+                    output: 0,
+                },
+            },
+            &hb.operating_point,
+            &NoAbort,
+        )
+        .unwrap_or_else(|error| panic!("pnoise must run: {error}\n{deck}"));
+    for (index, &offset) in offsets.iter().enumerate() {
+        let expected = transfer(offset);
+        for sideband in -MAX_SIDEBAND..=MAX_SIDEBAND {
+            let actual = pac
+                .result
+                .conversion_matrix
+                .get(index, sideband, 0)
+                .expect("sideband present");
+            let reference = if sideband == 0 {
+                expected
+            } else {
+                Complex64::new(0.0, 0.0)
+            };
+            assert!(
+                (actual - reference).norm() <= 1e-9 * expected.norm(),
+                "PAC at {offset} Hz, sideband {sideband}: {actual} against {reference}"
+            );
+        }
+        let point = pxf.points[index].transfer;
+        assert!(
+            (point - expected).norm() <= 1e-9 * expected.norm(),
+            "PXF at {offset} Hz: {point} against {expected}"
+        );
+        let thermal = 4.0 * K_BOLTZMANN * 300.15 * resistance * expected.norm_sqr();
+        assert!(
+            (noise.output_noise[index] - thermal).abs() <= 1e-6 * thermal,
+            "pnoise at {offset} Hz: {} against {thermal}",
+            noise.output_noise[index]
+        );
+    }
+}

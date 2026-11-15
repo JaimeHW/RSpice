@@ -335,17 +335,31 @@ impl KrylovPreconditioner for NoisePreconditioner {
     }
 }
 
+/// The entries of a system a certificate reads, each given to the visitor.
+pub(super) type EntryVisit<'a> = dyn Fn(&mut dyn FnMut(usize, usize, Complex64)) + 'a;
+
 /// Refine a Krylov candidate when the stricter componentwise
 /// certificate needs another correction. Storage stays linear and the final
 /// publication gate is unchanged; structural failures are never retried.
-pub(super) fn refine_noise_adjoint(
-    operator: &dyn NoiseAdjointOperator,
+///
+/// `apply` is the solved system's product and `visit` its transpose's
+/// entries, the form the certificate reads. Each candidate's coordinates
+/// that `reach` proves zero are set to that zero before it is read, since
+/// a correction can leave rounding remnants there as GMRES can.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn refine_krylov_candidate(
+    apply: &dyn Fn(&[Complex64]) -> Vec<Complex64>,
+    visit: &EntryVisit<'_>,
     preconditioner: &dyn KrylovPreconditioner,
     rhs: &[Complex64],
+    reach: Option<&SidebandReach>,
     mut outcome: crate::numerics::krylov::GmresOutcome,
     restart: usize,
     abort: &dyn AbortSignal,
 ) -> Result<crate::numerics::krylov::GmresOutcome, HbError> {
+    if let Some(reach) = reach {
+        reach.zero_unreached(rhs, &mut outcome.solution);
+    }
     for _ in 0..2 {
         if abort.is_aborted() {
             return Err(HbError::Aborted);
@@ -355,7 +369,7 @@ pub(super) fn refine_noise_adjoint(
             rhs.len(),
             &outcome.solution,
             rhs,
-            |visitor| operator.visit_noise_entries(visitor),
+            visit,
         );
         match certificate {
             Ok(()) => {
@@ -367,11 +381,11 @@ pub(super) fn refine_noise_adjoint(
         }
         let residual = rhs
             .iter()
-            .zip(operator.apply_noise_transpose(&outcome.solution))
+            .zip(apply(&outcome.solution))
             .map(|(&expected, actual)| expected - actual)
             .collect::<Vec<_>>();
         let correction = crate::numerics::krylov::gmres(
-            &|input| operator.apply_noise_transpose(input),
+            &|input| apply(input),
             preconditioner,
             &residual,
             restart,
@@ -391,10 +405,13 @@ pub(super) fn refine_noise_adjoint(
         for (value, correction) in outcome.solution.iter_mut().zip(correction.solution) {
             *value += correction;
         }
+        if let Some(reach) = reach {
+            reach.zero_unreached(rhs, &mut outcome.solution);
+        }
         outcome.iterations += correction.iterations;
         let residual_norm = rhs
             .iter()
-            .zip(operator.apply_noise_transpose(&outcome.solution))
+            .zip(apply(&outcome.solution))
             .map(|(&expected, actual)| (expected - actual).norm())
             .fold(0.0, Value::max);
         let rhs_norm = rhs.iter().map(|value| value.norm()).fold(0.0, Value::max);
