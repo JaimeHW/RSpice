@@ -396,6 +396,12 @@ const SYMBOL_POLYGON: &[ShortcutBinding] = &[primary(
 )];
 const SYMBOL_TEXT: &[ShortcutBinding] =
     &[primary(chord(Key::T, false, false, false, "T"), EVERYWHERE)];
+// Virtuoso's Edit In Place key: X, with Shift as the schematic's other
+// hierarchy keys (Shift+E descends, Shift+H returns) take it.
+const EDIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
+    chord(Key::X, false, false, true, "Shift+X"),
+    EVERYWHERE,
+)];
 // Return leaves an in-place symbol edit, as Esc does once nothing is in flight.
 const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
     chord(Key::Enter, false, false, false, "Enter"),
@@ -1047,7 +1053,13 @@ impl DesignCommand {
             Self::SymbolPlacedPreview => {
                 ("Preview as placed", "View", palette, symbol_canvas, NONE)
             }
-            Self::EditSymbolInPlace => ("Edit symbol in place", "Design", palette, design, NONE),
+            Self::EditSymbolInPlace => (
+                "Edit symbol in place",
+                "Design",
+                palette,
+                design,
+                EDIT_SYMBOL_IN_PLACE,
+            ),
             Self::ExitSymbolInPlace => (
                 "Return to parent schematic",
                 "Design",

@@ -327,7 +327,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "Descend | descend-selected-instance | Shift+E | off: select one hierarchical or Verilog-A instance",
             "Descend with options… | descend-hierarchy | H | off: select one hierarchical instance",
             "Return to parent | ascend-hierarchy | Shift+H | off: already at top hierarchy",
-            "Edit symbol in place | edit-symbol-in-place |  | off: select one instance",
+            "Edit symbol in place | edit-symbol-in-place | Shift+X | off: select one instance",
             "Create hierarchy… | create-hierarchy |  | off: select an editable object",
             "Create symbol from schematic… | create-symbol-from-schematic |  | on",
             "---",

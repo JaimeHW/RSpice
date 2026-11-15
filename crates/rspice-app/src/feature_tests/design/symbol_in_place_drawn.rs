@@ -333,6 +333,39 @@ fn the_placed_preview_is_not_offered_in_place() {
     );
 }
 
+/// Shift+X, Virtuoso's Edit In Place key, edits the symbol of the instance
+/// the pointer selected in place, as the command does.
+#[test]
+fn shift_x_edits_the_selected_instance_in_place() {
+    let mut fixture = InPlace::new();
+    let output = fixture.replay.frame(vec![]);
+    // The sheet's camera is at 200%, panned (60, 40): the instance's body
+    // centre (100, 80) is at canvas (260, 200).
+    let body = canvas_rect(&output).min + egui::vec2(260.0, 200.0);
+    click_at(&mut fixture.replay, body);
+    assert_eq!(
+        fixture
+            .replay
+            .app
+            .state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .single_component(),
+        Some(fixture.instance),
+        "the click selected the instance"
+    );
+    fixture.replay.key(egui::Key::X, egui::Modifiers::SHIFT);
+    let state = &fixture.replay.app.state;
+    assert_eq!(state.model.workspace.content.active_view, fixture.symbol);
+    let session =
+        crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
+            .expect("Shift+X edits the symbol in place");
+    assert_eq!(session.instance_id, fixture.instance);
+}
+
 /// Return to parent, the hierarchy's way up, leaves a symbol edited in place
 /// as Return does, by its shortcut: the symbol is a level below its sheet.
 #[test]
