@@ -1339,6 +1339,16 @@ fn adopt_successful_save(
 ) {
     let state = &mut host.lifecycle_parts();
     rebase_pending_operation_dirty_state(state, &candidate, scope);
+    // The save wrote each symbol it covers with its pins named as they are
+    // now, so those names are the ones Revert to saved returns to.
+    match scope {
+        SaveScope::AllDocuments => state.model.unsaved_pin_renames.clear(),
+        SaveScope::ActiveDocument => {
+            if let ProjectDocumentId::CellView(reference) = active_document(state) {
+                state.model.unsaved_pin_renames.forget(&reference.key());
+            }
+        }
+    }
     #[cfg(not(target_arch = "wasm32"))]
     let native_receipt = binding.native_receipt(&candidate.file.workspace.project.id().to_string());
     #[cfg(target_arch = "wasm32")]

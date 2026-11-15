@@ -129,6 +129,11 @@ pub struct Model {
     /// The sheet-membership and generated-symbol failures the drawing sync
     /// last recorded. Runtime only.
     pub recorded_sync_failures: schematic_sync::SyncFailures,
+    /// The pin renames each symbol's placed instances have taken since the
+    /// symbol was last saved, which Revert to saved on the symbol takes back.
+    /// Runtime only: a save of the symbol, or another project replacing this
+    /// one, forgets them.
+    pub unsaved_pin_renames: rspice_design::symbol::edit::UnsavedPinRenames,
     /// Pinned-versus-present model source drift, as of the last event-driven
     /// scan. Runtime only: a saved verdict about bytes is a verdict about a
     /// moment that has passed.

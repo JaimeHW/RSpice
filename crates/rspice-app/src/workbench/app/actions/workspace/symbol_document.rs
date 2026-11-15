@@ -522,19 +522,42 @@ pub(crate) fn store_active_symbol_document(
 }
 
 /// Put the active symbol back as `restore` writes it, the way Revert to
-/// saved does: the wires each placed instance holds follow the restored pins,
-/// and the symbol is left with no steps to undo or redo, since none of them
-/// leads from the restored drawing.
-pub(crate) fn revert_active_symbol_with<R>(
+/// saved does: every placed instance takes back the pin names it took since
+/// the save, the wires it holds follow the restored pins, and the symbol is
+/// left with no steps to undo or redo, since none of them leads from the
+/// restored drawing.
+pub(crate) fn revert_active_symbol_with<T, E>(
     symbol: &mut SymbolUiState,
     model: &mut Model,
-    restore: impl FnOnce(&mut Model) -> R,
-) -> R {
+    restore: impl FnOnce(&mut Model) -> Result<T, E>,
+) -> Result<T, E> {
     let key = model.workspace.content.active_key();
+    let reference = model.workspace.content.active_view.clone();
     begin_symbol_parent_edit(symbol, model);
     let restored = restore(model);
-    if let Ok(document) = model.load_active_symbol_document() {
-        apply_symbol_parent_edit(symbol, model, &document, &BTreeMap::new());
+    if restored.is_ok() {
+        let saved_names = model.unsaved_pin_renames.take(&reference.key());
+        if let Ok(document) = model.load_active_symbol_document() {
+            // The instances' wires are held by the names the pins had before
+            // the revert; each renamed one follows its pin to its saved name.
+            let renames = symbol
+                .history
+                .parent_edit(&key)
+                .map(|edit| {
+                    edit.base
+                        .pins
+                        .iter()
+                        .filter_map(|pin| {
+                            saved_names
+                                .get(&pin.name.to_ascii_lowercase())
+                                .map(|saved| (pin.name.clone(), saved.clone()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            apply_symbol_parent_edit(symbol, model, &document, &renames);
+            rename_placed_terminals(model, &reference, &saved_names);
+        }
     }
     finish_symbol_parent_edit(symbol, model);
     symbol.history.forget(&key);
@@ -743,7 +766,8 @@ fn publish_active_symbol_edit(
     Ok(())
 }
 
-/// Carry a pin rename to every placement of the cellview.
+/// Carry a pin rename to every placement of the cellview, and keep it
+/// among the renames Revert to saved takes back.
 ///
 /// An instance wires to a pin by name, in `WireConnection::terminal_name`
 /// and in the binding's `terminal_order`. Leaving either behind after a
@@ -751,6 +775,19 @@ fn publish_active_symbol_edit(
 /// the netlist emits the instance with a terminal nothing drives.
 /// Returns how many terminal names were rewritten.
 fn apply_symbol_pin_renames(
+    model: &mut Model,
+    reference: &CellViewRef,
+    renames: &BTreeMap<String, String>,
+) -> usize {
+    model
+        .unsaved_pin_renames
+        .record(&reference.key(), renames);
+    rename_placed_terminals(model, reference, renames)
+}
+
+/// Rewrite the terminal names `renames` (old name to new) gives every
+/// placement of the cellview. Returns how many were rewritten.
+fn rename_placed_terminals(
     model: &mut Model,
     reference: &CellViewRef,
     renames: &BTreeMap<String, String>,

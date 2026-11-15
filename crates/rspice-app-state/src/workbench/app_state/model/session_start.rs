@@ -68,6 +68,7 @@ impl Model {
             safe_mode: crate::state::write_policy::LocalSafeModeState::default(),
             live_write_locks: crate::state::write_policy::LiveWriteLocks::default(),
             recorded_sync_failures: Default::default(),
+            unsaved_pin_renames: Default::default(),
             source_drift: Default::default(),
         };
         let startup_errors = pdk_load_error

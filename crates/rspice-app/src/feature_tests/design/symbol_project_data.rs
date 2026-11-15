@@ -156,6 +156,109 @@ impl Fixture {
             .expect("the edit stores");
     }
 
+    /// Rename the pin `from` to `to`, as one edit of the symbol in front,
+    /// committed as the inspector's name field commits it.
+    fn rename_pin(&mut self, from: &str, to: &str) {
+        let before = self.document();
+        let metadata = self.metadata();
+        let mut edited = before.clone();
+        edited
+            .pins
+            .iter_mut()
+            .find(|pin| pin.name == from)
+            .expect("the pin is drawn")
+            .name = to.to_owned();
+        crate::workbench::app::record_symbol_edit(
+            &mut self.app.state.design.symbol,
+            &self.app.state.model,
+            &before,
+            "Rename pin",
+        );
+        crate::workbench::app::actions::workspace::symbol_document::commit_active_symbol_edit(
+            &mut self.app.state.design.symbol,
+            &mut self.app.state.model,
+            &mut self.app.state.workbench,
+            &edited,
+            &metadata,
+            &crate::workbench::SymbolCommitIntent {
+                renames: std::collections::BTreeMap::from([(from.to_owned(), to.to_owned())]),
+            },
+        )
+        .expect("the rename commits");
+    }
+
+    /// Place an instance of the symbol on the sheet `user/top/schematic`,
+    /// unturned at the origin, with a wire held at its pin `pin`.
+    fn place_instance_wired_at(&mut self, pin: &str) -> CellViewRef {
+        use crate::state::{Component, LibraryCellInstance, Wire, WireConnection};
+
+        let document = self.document();
+        let parent = CellViewRef::new("user", "top", "schematic");
+        let mut sheet = SchematicState::default();
+        let mut binding = LibraryCellInstance::new("user", "amp", "schematic");
+        binding.bind_interface(&self.app.state.model.symbol_ports(&self.symbol));
+        let terminal = document
+            .pin(pin)
+            .and_then(|pin| pin.position)
+            .expect("the pin is placed")
+            - document.origin;
+        sheet.document_mut_for_test().components.push(
+            Component::new(900, ComponentType::CellInstance, Point::new(0, 0))
+                .with_library_cell(binding),
+        );
+        sheet.document_mut_for_test().wires.push(Wire::segment(
+            950,
+            terminal,
+            terminal + Point::new(40, 0),
+        ));
+        sheet
+            .document_mut_for_test()
+            .connections
+            .push(WireConnection {
+                wire_id: 950,
+                point_index: 0,
+                component_id: 900,
+                terminal_name: pin.to_owned(),
+            });
+        self.app
+            .state
+            .model
+            .workspace
+            .insert_schematic_editor(parent.key(), sheet);
+        parent
+    }
+
+    /// The instance's terminal names on `parent`, in its netlist order, and
+    /// the terminal its wire is held by.
+    fn instance_terminals(&self, parent: &CellViewRef) -> (Vec<String>, String) {
+        let sheet = self
+            .app
+            .state
+            .model
+            .workspace
+            .content
+            .schematic_buffers
+            .get(&parent.key())
+            .expect("the parent sheet is held")
+            .document();
+        let order = sheet.components[0]
+            .library_cell
+            .as_ref()
+            .expect("the instance is bound")
+            .terminal_order
+            .clone();
+        (order, sheet.connections[0].terminal_name.clone())
+    }
+
+    fn revert(&mut self) {
+        let token =
+            crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
+                &self.app.state,
+            )
+            .expect("the revert is reviewed");
+        assert!(self.app.state.confirm_revert_active_document(&token));
+    }
+
     fn pin(&self, name: &str) -> Option<Point> {
         self.document().pin(name).and_then(|pin| pin.position)
     }
@@ -484,5 +587,48 @@ fn reverting_the_symbol_restores_it_and_its_placed_instances() {
             .command_availability(Command::RevertActiveDocument.key())
             .is_available(),
         "the symbol is as saved again"
+    );
+}
+
+/// A pin rename reaches every placed instance when it is made, and Revert to
+/// saved takes it back from them too: the instance answers to the saved
+/// symbol's pin names again, by the same wire. A rename that was saved is
+/// the saved name, and stays.
+#[test]
+fn reverting_a_renamed_pin_puts_the_instances_terminal_names_back() {
+    let mut fixture = Fixture::new("revert-rename", Some(&["IN", "OUT"]), &["IN", "OUT"]);
+    let saved = fixture.document();
+    let parent = fixture.place_instance_wired_at("OUT");
+    let wired = (
+        vec!["IN".to_owned(), "OUT".to_owned()],
+        "OUT".to_owned(),
+    );
+    assert_eq!(fixture.instance_terminals(&parent), wired);
+
+    fixture.rename_pin("OUT", "VOUT");
+    fixture.rename_pin("VOUT", "Y");
+    assert_eq!(
+        fixture.instance_terminals(&parent),
+        (vec!["IN".to_owned(), "Y".to_owned()], "Y".to_owned()),
+        "each rename reached the instance"
+    );
+
+    fixture.revert();
+
+    assert_eq!(fixture.document(), saved, "the symbol is as last saved");
+    assert_eq!(
+        fixture.instance_terminals(&parent),
+        wired,
+        "the instance answers to the saved pin names, by the same wire"
+    );
+
+    fixture.rename_pin("OUT", "VOUT");
+    fixture.save();
+    fixture.move_pin("IN", Point::new(0, -20));
+    fixture.revert();
+    assert_eq!(
+        fixture.instance_terminals(&parent),
+        (vec!["IN".to_owned(), "VOUT".to_owned()], "VOUT".to_owned()),
+        "a saved rename is the saved name"
     );
 }

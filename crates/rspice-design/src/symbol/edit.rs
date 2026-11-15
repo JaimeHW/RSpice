@@ -23,6 +23,70 @@ pub struct SymbolCommitIntent {
     pub renames: std::collections::BTreeMap<String, String>,
 }
 
+/// The pin renames each symbol's placed instances have taken since that
+/// symbol was last saved: for each renamed pin, what it is called now and
+/// what the save called it.
+///
+/// A rename reaches every placed instance when it is made, because a symbol
+/// is project working data and the instances wire to its pins by name. So
+/// putting the symbol back to its last save has to put those terminal names
+/// back too, and only the renames say which names they were: the saved
+/// symbol and the current one differ by a pin gone and a pin added, which is
+/// what a delete and an add look like as well.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UnsavedPinRenames {
+    /// By symbol cellview key: the name now, lowercased, to the name saved.
+    by_symbol: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+impl UnsavedPinRenames {
+    /// Note that the instances of the symbol `key` took `renames` (old name
+    /// to new name). A pin renamed back to its saved name is no longer
+    /// renamed.
+    pub fn record(&mut self, key: &str, renames: &BTreeMap<String, String>) {
+        if renames.is_empty() {
+            return;
+        }
+        let held = self.by_symbol.entry(key.to_owned()).or_default();
+        // Every old name is looked up before any new one is written, so two
+        // pins that swap names each keep their own saved name.
+        let carried: Vec<(String, String)> = renames
+            .iter()
+            .map(|(old, new)| {
+                let saved = held
+                    .remove(&old.to_ascii_lowercase())
+                    .unwrap_or_else(|| old.clone());
+                (new.clone(), saved)
+            })
+            .collect();
+        for (new, saved) in carried {
+            if !new.eq_ignore_ascii_case(&saved) {
+                held.insert(new.to_ascii_lowercase(), saved);
+            }
+        }
+        if held.is_empty() {
+            self.by_symbol.remove(key);
+        }
+    }
+
+    /// The renames that take the symbol `key`'s instances back to the names
+    /// its last save gave them, name now (lowercased) to name saved, and
+    /// forget them.
+    pub fn take(&mut self, key: &str) -> BTreeMap<String, String> {
+        self.by_symbol.remove(key).unwrap_or_default()
+    }
+
+    /// The symbol `key` was saved: its names now are its saved names.
+    pub fn forget(&mut self, key: &str) {
+        self.by_symbol.remove(key);
+    }
+
+    /// Every symbol was saved, or the project they belong to was replaced.
+    pub fn clear(&mut self) {
+        self.by_symbol.clear();
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolDocumentSnapshot {
     pub document: SymbolDocument,
@@ -692,5 +756,42 @@ mod tests {
         let redone = history.pop_redo(&key).expect("the step");
         history.finish_redo(key.clone(), redone);
         assert!(history.undo_sequence(&key).expect("the redo is stamped") > redoable);
+    }
+
+    fn renames(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(from, to)| ((*from).to_owned(), (*to).to_owned()))
+            .collect()
+    }
+
+    /// A chain of renames since the save reads as one, back to the saved
+    /// name; a rename back to it, and two pins swapping names, are told apart.
+    #[test]
+    fn unsaved_pin_renames_lead_back_to_the_saved_names() {
+        let mut unsaved = UnsavedPinRenames::default();
+        unsaved.record("lib/amp/symbol", &renames(&[("IN", "INP")]));
+        unsaved.record("lib/amp/symbol", &renames(&[("INP", "IN_P")]));
+        unsaved.record("lib/amp/symbol", &renames(&[("OUT", "Y"), ("VDD", "VCC")]));
+        unsaved.record("lib/amp/symbol", &renames(&[("VCC", "VDD")]));
+        unsaved.record("lib/other/symbol", &renames(&[("A", "B")]));
+
+        assert_eq!(
+            unsaved.take("lib/amp/symbol"),
+            renames(&[("in_p", "IN"), ("y", "OUT")])
+        );
+        assert!(
+            unsaved.take("lib/amp/symbol").is_empty(),
+            "taken once, they are forgotten"
+        );
+
+        unsaved.record("lib/amp/symbol", &renames(&[("A", "B"), ("B", "A")]));
+        assert_eq!(
+            unsaved.take("lib/amp/symbol"),
+            renames(&[("a", "B"), ("b", "A")])
+        );
+
+        unsaved.forget("lib/other/symbol");
+        assert_eq!(unsaved, UnsavedPinRenames::default());
     }
 }
