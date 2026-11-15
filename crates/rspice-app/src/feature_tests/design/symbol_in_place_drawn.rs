@@ -450,6 +450,104 @@ fn a_deleted_pin_leaves_its_wire_open_and_says_so() {
     assert_eq!(parent.document().wires[0].points, wire, "the wire stayed");
 }
 
+/// A project file path of its own for one case, and what saving it leaves
+/// beside it, removed when the case ends.
+struct ProjectPath(std::path::PathBuf);
+
+impl ProjectPath {
+    fn new(label: &str) -> Self {
+        Self(std::env::temp_dir().join(format!(
+            "rspice-in-place-{label}-{}-{}.rspiceproj",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        )))
+    }
+}
+
+impl Drop for ProjectPath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(self.0.with_extension("rspiceproj.bak"));
+        let mut lock = self.0.as_os_str().to_os_string();
+        lock.push(".rspice.lock");
+        let _ = std::fs::remove_file(std::path::PathBuf::from(lock));
+    }
+}
+
+impl InPlace {
+    /// A wire held at the instance's pin A, which the unturned instance at
+    /// (100, 80) puts at (60, 70), running left to (0, 70).
+    fn wire_pin_a(&mut self) {
+        let schematic = &mut self.replay.app.state.model.schematic;
+        schematic.document_mut_for_test().wires = vec![crate::state::Wire::new(
+            5,
+            vec![Point::new(60, 70), Point::new(0, 70)],
+        )];
+        schematic.recalculate_runtime_state();
+        self.replay.app.state.sync_active_schematic_to_workspace();
+    }
+
+    /// Where a sheet point stands on screen, through the in-place view.
+    fn screen(&mut self, point: Point) -> egui::Pos2 {
+        let output = self.replay.frame(vec![]);
+        let canvas = canvas_rect(&output);
+        let session = crate::workbench::app::in_place_session(
+            &self.replay.app.state.design.symbol.in_place,
+            &self.replay.app.state.model,
+        )
+        .expect("the symbol is edited in place");
+        egui::pos2(
+            canvas.min.x + (session.pan.0 + f64::from(point.x) * session.zoom) as f32,
+            canvas.min.y + (session.pan.1 + f64::from(point.y) * session.zoom) as f32,
+        )
+    }
+
+    /// Drag on the in-place canvas from one sheet point to another.
+    fn drag(&mut self, from: Point, to: Point) {
+        let (from, to) = (self.screen(from), self.screen(to));
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        self.replay
+            .frame(vec![egui::Event::PointerMoved(from), button(from, true)]);
+        self.replay
+            .frame(vec![egui::Event::PointerMoved(from + egui::vec2(8.0, 0.0))]);
+        self.replay.frame(vec![egui::Event::PointerMoved(to)]);
+        self.replay.frame(vec![button(to, false)]);
+        self.replay.frames(vec![]);
+    }
+
+    fn pin_a(&self) -> Option<Point> {
+        self.replay
+            .app
+            .state
+            .model
+            .load_symbol_document(&self.symbol)
+            .unwrap()
+            .pin("A")
+            .and_then(|pin| pin.position)
+    }
+
+    /// The first point of the parent's first wire, as the parent holds it.
+    fn wire_end(&self) -> Point {
+        self.replay
+            .app
+            .state
+            .model
+            .workspace
+            .content
+            .schematic_buffers
+            .get(&self.parent.key())
+            .unwrap()
+            .document()
+            .wires[0]
+            .points[0]
+    }
+}
+
 /// Leaving the edit by another way than its own exit, here the sheet's tab,
 /// ends the session as its exit does: the symbol tab it opened goes, and the
 /// sheet is as it was, with the instance selected.
@@ -474,4 +572,238 @@ fn leaving_by_the_sheet_tab_closes_the_tab_the_session_opened() {
     let editor = &state.model.schematic.session.editor;
     assert_eq!((editor.zoom, editor.pan), (2.0, (60.0, 40.0)));
     assert_eq!(editor.selection.single_component(), Some(fixture.instance));
+}
+
+/// Revert to saved, in place, puts the symbol back as the project last saved
+/// it and the instance's wire back on its pin, and the session goes on.
+#[test]
+fn reverting_in_place_brings_the_instance_and_its_wire_back() {
+    let mut fixture = InPlace::new();
+    fixture.wire_pin_a();
+    let path = ProjectPath::new("revert");
+    assert!(fixture.replay.app.state.save_project_to_path(&path.0));
+    fixture.enter();
+    fixture.drag(Point::new(60, 70), Point::new(60, 100));
+    assert_eq!(fixture.pin_a(), Some(Point::new(-40, 20)));
+    assert_eq!(fixture.wire_end(), Point::new(60, 100));
+
+    let token = crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
+        &fixture.replay.app.state,
+    )
+    .expect("the revert is reviewed");
+    assert!(
+        fixture
+            .replay
+            .app
+            .state
+            .confirm_revert_active_document(&token)
+    );
+    fixture.replay.frames(vec![]);
+    assert_eq!(fixture.pin_a(), Some(Point::new(-40, -10)), "the saved pin");
+    assert_eq!(fixture.wire_end(), Point::new(60, 70), "the wire came back");
+    assert!(
+        crate::workbench::app::in_place_session(
+            &fixture.replay.app.state.design.symbol.in_place,
+            &fixture.replay.app.state.model,
+        )
+        .is_some(),
+        "the session goes on"
+    );
+}
+
+/// Saving while editing in place saves the symbol, the document in front, as
+/// Save does in its own view; the sheet whose wire followed the moved pin
+/// stays unsaved work the close review lists, and Save All writes it too.
+/// The project reopens with the edit in both and no half-open session.
+#[test]
+fn saving_in_place_writes_the_edit_and_reopens_without_the_session() {
+    use crate::workbench::lifecycle::project_lifecycle::{ProjectDocumentId, dirty_documents};
+    use crate::workbench::project::commands::ProjectCommand;
+
+    let mut fixture = InPlace::new();
+    fixture.wire_pin_a();
+    let path = ProjectPath::new("save");
+    assert!(fixture.replay.app.state.save_project_to_path(&path.0));
+    fixture.enter();
+    fixture.drag(Point::new(60, 70), Point::new(60, 100));
+    assert_eq!(fixture.wire_end(), Point::new(60, 100));
+    fixture
+        .replay
+        .app
+        .execute_command_key(ProjectCommand::Save.key());
+    fixture.replay.frames(vec![]);
+    assert!(
+        crate::workbench::app::in_place_session(
+            &fixture.replay.app.state.design.symbol.in_place,
+            &fixture.replay.app.state.model,
+        )
+        .is_some(),
+        "saving keeps the session"
+    );
+    let unsaved = dirty_documents(&fixture.replay.app.state);
+    assert!(
+        unsaved.contains(&ProjectDocumentId::CellView(fixture.parent.clone()))
+            && !unsaved.contains(&ProjectDocumentId::CellView(fixture.symbol.clone())),
+        "the symbol is saved and the sheet is still unsaved work: {unsaved:?}"
+    );
+    fixture
+        .replay
+        .app
+        .execute_command_key(ProjectCommand::SaveAll.key());
+    fixture.replay.frames(vec![]);
+    assert_eq!(dirty_documents(&fixture.replay.app.state), Vec::new());
+
+    let mut reopened = Replay::new();
+    assert!(reopened.app.state.load_project_from_path(&path.0));
+    reopened.frames(vec![]);
+    let state = &reopened.app.state;
+    assert_eq!(
+        state
+            .model
+            .load_symbol_document(&fixture.symbol)
+            .unwrap()
+            .pin("A")
+            .and_then(|pin| pin.position),
+        Some(Point::new(-40, 20)),
+        "the symbol holds the edit"
+    );
+    let sheet = state
+        .model
+        .workspace
+        .content
+        .schematic_buffers
+        .get(&fixture.parent.key())
+        .filter(|_| state.model.workspace.content.active_view != fixture.parent)
+        .map_or_else(
+            || state.model.schematic.document().clone(),
+            |buffer| buffer.document().clone(),
+        );
+    assert_eq!(
+        sheet.wires[0].points[0],
+        Point::new(60, 100),
+        "the sheet holds the wire where the pin put it"
+    );
+    assert!(
+        state.design.symbol.in_place.is_none(),
+        "no session survives the reopen"
+    );
+}
+
+/// Drawing in place draws in the symbol's own coordinates, read back through
+/// the instance: a rectangle dragged on the sheet lands where it was drawn,
+/// and the shape's context menu works there as in the symbol's own view,
+/// its Rotate one step that Undo takes back.
+#[test]
+fn a_shape_drawn_in_place_lands_where_it_was_drawn_and_its_menu_works() {
+    let mut fixture = InPlace::new();
+    let entered = fixture.enter();
+    click_at(&mut fixture.replay, canvas_centre(&entered));
+    fixture.replay.key(egui::Key::R, egui::Modifiers::NONE);
+    // The unturned instance stands at (100, 80): symbol (60, 40) to
+    // (100, 60), clear of the body and the pins, is sheet (160, 120) to
+    // (200, 140).
+    fixture.drag(Point::new(160, 120), Point::new(200, 140));
+    let body = |fixture: &InPlace| {
+        fixture
+            .replay
+            .app
+            .state
+            .model
+            .load_symbol_document(&fixture.symbol)
+            .unwrap()
+            .body
+    };
+    let drawn = crate::state::SymbolShape::Rectangle {
+        min: Point::new(60, 40),
+        max: Point::new(100, 60),
+        style: Default::default(),
+    };
+    assert_eq!(body(&fixture).last(), Some(&drawn));
+    fixture.replay.key(egui::Key::Escape, egui::Modifiers::NONE);
+
+    // The rectangle's lower edge, at symbol (80, 60).
+    let edge = fixture.screen(Point::new(180, 140));
+    let button = |pressed| egui::Event::PointerButton {
+        pos: edge,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    fixture.replay.frame(vec![egui::Event::PointerMoved(edge)]);
+    fixture.replay.frame(vec![button(true)]);
+    fixture.replay.frame(vec![button(false)]);
+    fixture.replay.frames(vec![]);
+    let menu = fixture.replay.frames(vec![]);
+    let rotate = menu
+        .iter()
+        .find(|control| control.label == "Rotate 90\u{b0}")
+        .unwrap_or_else(|| {
+            panic!(
+                "the shape's menu offers Rotate: {:?}",
+                menu.iter()
+                    .map(|control| &control.label)
+                    .collect::<Vec<_>>()
+            )
+        })
+        .center;
+    click_at(&mut fixture.replay, rotate);
+    assert_eq!(
+        body(&fixture).last(),
+        Some(&crate::state::SymbolShape::Rectangle {
+            min: Point::new(70, 30),
+            max: Point::new(90, 70),
+            style: Default::default(),
+        }),
+        "turned about its middle"
+    );
+    Command::Undo.execute(&mut fixture.replay.app);
+    fixture.replay.frames(vec![]);
+    assert_eq!(
+        body(&fixture).last(),
+        Some(&drawn),
+        "Undo took the turn back"
+    );
+}
+
+/// The instance's own context menu edits its symbol in place: a right-click
+/// on the part selects it, and the menu's row lands in the same session the
+/// command does, on that instance, at the sheet's own view.
+#[test]
+fn the_instance_menu_edits_its_symbol_in_place() {
+    let mut fixture = InPlace::new();
+    let output = fixture.replay.frame(vec![]);
+    let canvas = canvas_rect(&output);
+    // The sheet's camera is at 200%, panned (60, 40): the instance's body
+    // centre (100, 80) is at canvas (260, 200).
+    let body = canvas.min + egui::vec2(260.0, 200.0);
+    let button = |pressed| egui::Event::PointerButton {
+        pos: body,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    fixture.replay.frame(vec![egui::Event::PointerMoved(body)]);
+    fixture.replay.frame(vec![button(true)]);
+    fixture.replay.frame(vec![button(false)]);
+    let menu = fixture.replay.frames(vec![]);
+    let row = menu
+        .iter()
+        .find(|control| control.label == "Edit symbol in place")
+        .unwrap_or_else(|| {
+            panic!(
+                "the instance's menu offers it: {:?}",
+                menu.iter()
+                    .map(|control| &control.label)
+                    .collect::<Vec<_>>()
+            )
+        })
+        .center;
+    click_at(&mut fixture.replay, row);
+    let state = &fixture.replay.app.state;
+    assert_eq!(state.model.workspace.content.active_view, fixture.symbol);
+    let session =
+        crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
+            .expect("the menu edits the symbol in place");
+    assert_eq!(session.instance_id, fixture.instance);
+    assert_eq!((session.zoom, session.pan), (2.0, (60.0, 40.0)));
 }
