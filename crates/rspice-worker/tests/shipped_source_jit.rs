@@ -46,6 +46,12 @@ enum Outcome {
     Refuse,
     /// The worker traps compiling it. Such a source is not walked, since a
     /// trap leaves the module's stack and heap unusable for the next one.
+    ///
+    /// The three HiSIM-HV forms trap on memory, not on an instruction the JIT
+    /// emitted: their compiled model holds about a million assignment steps,
+    /// and compiling them takes more than the 4 GiB a wasm32 module can
+    /// address (natively the compile's footprint peaks near 10 GB), so an
+    /// allocation fails and Rust aborts through `unreachable`.
     Trap,
 }
 
@@ -58,25 +64,25 @@ const SOURCES: &[(&str, &str, &str, Outcome)] = &[
         "BSIM-BULK",
         "bsimbulk",
         "cmc/BSIM-BULK107.2.1_02112025/code/bsimbulk.va",
-        Refuse,
+        Emit,
     ),
     (
         "PSP",
         "PSP104VA",
         "cmc/PSP104.1.0_vacode/vacode/psp104.va",
-        Refuse,
+        Emit,
     ),
     (
         "PSP NQS",
         "PSPNQS104VA",
         "cmc/PSP104.1.0_vacode/vacode/psp104_nqs.va",
-        Refuse,
+        Emit,
     ),
     (
         "PSP self-heating",
         "PSP104TVA",
         "cmc/PSP104.1.0_vacode/vacode/psp104t.va",
-        Refuse,
+        Emit,
     ),
     (
         "PSP 103",
@@ -88,7 +94,7 @@ const SOURCES: &[(&str, &str, &str, Outcome)] = &[
         "PSP 103 NQS",
         "PSPNQS103VA",
         "cmc/PSP103p4_vacode/vacode/psp103_nqs.va",
-        Refuse,
+        Emit,
     ),
     (
         "PSP 103 self-heating",
@@ -101,7 +107,7 @@ const SOURCES: &[(&str, &str, &str, Outcome)] = &[
         "PSP 102 NQS",
         "PSPNQS102VA",
         "cmc/vacode_102.5.0/psp102_nqs.va",
-        Refuse,
+        Emit,
     ),
     (
         "PSP 102 binned",
@@ -113,7 +119,7 @@ const SOURCES: &[(&str, &str, &str, Outcome)] = &[
         "PSP 102 binned NQS",
         "PSPNQS102BVA",
         "cmc/vacode_102.5.0/psp102b_nqs.va",
-        Refuse,
+        Emit,
     ),
     (
         "PSP 102 local",
@@ -125,7 +131,7 @@ const SOURCES: &[(&str, &str, &str, Outcome)] = &[
         "PSP 102 local NQS",
         "PSPNQS102EVA",
         "cmc/vacode_102.5.0/psp102e_nqs.va",
-        Refuse,
+        Emit,
     ),
     (
         "EKV 2.6",
@@ -138,13 +144,13 @@ const SOURCES: &[(&str, &str, &str, Outcome)] = &[
         "BSIM-CMG",
         "bsimcmg_va",
         "cmc/BSIM-CMG_112.1.0_04282026/code/bsimcmg.va",
-        Refuse,
+        Emit,
     ),
     (
         "BSIM-CMG 111",
         "bsimcmg_va",
         "cmc/BSIM-CMG_111.2.1_06062022/code/bsimcmg.va",
-        Refuse,
+        Emit,
     ),
     (
         "BSIM-CMG 110",
@@ -156,7 +162,7 @@ const SOURCES: &[(&str, &str, &str, Outcome)] = &[
         "BSIM-CMG 108",
         "bsimcmg",
         "cmc/BSIMCMG108.0.0_20140822/code/bsimcmg.va",
-        Refuse,
+        Emit,
     ),
     (
         "BSIM-CMG 107",
@@ -174,55 +180,55 @@ const SOURCES: &[(&str, &str, &str, Outcome)] = &[
         "BSIM-SOI 4.6",
         "bsimsoi_va",
         "bsimsoi_4.6.1/vacode/bsimsoi.va",
-        Refuse,
+        Emit,
     ),
     (
         "BSIM-SOI 4.7",
         "bsimsoi",
         "cmc/BSIM-SOI_4.7.0_05192025/code/bsimsoi.va",
-        Refuse,
+        Emit,
     ),
     (
         "BSIM-SOI 100",
         "bsimsoi",
         "cmc/BSIM_SOI_100.1.1_09152025/code/bsimsoi.va",
-        Refuse,
+        Emit,
     ),
     (
         "HiSIM-SOI",
         "hisimsoi_va",
         "cmc/HiSIM_SOI_1.5.0_Release_20211008/HiSIM_SOI_1.5.0_VA-Code/hisimsoi_va/hisimsoi.va",
-        Refuse,
+        Emit,
     ),
     (
         "HiSIM-SOI n4",
         "hisimsoi_va",
         "cmc/HiSIM_SOI_1.5.0_Release_20211008/HiSIM_SOI_1.5.0_VA-Code/hisimsoi_va/hisimsoi_n4.va",
-        Refuse,
+        Emit,
     ),
     (
         "HiSIM-SOI n5",
         "hisimsoi_va",
         "cmc/HiSIM_SOI_1.5.0_Release_20211008/HiSIM_SOI_1.5.0_VA-Code/hisimsoi_va/hisimsoi_n5.va",
-        Refuse,
+        Emit,
     ),
     (
         "HiSIM-SOTB",
         "hisimsotb_va",
         "cmc/HiSIM_SOTB_1.3.0_Release_20211116/HiSIM_SOTB_1.3.0_VA-Code/hisimsotb_va/hisimsotb.va",
-        Refuse,
+        Emit,
     ),
     (
         "L-UTSOI",
         "l_utsoi",
         "cmc/L_UTSOI_102.9.0_code_package/vacode/L_UTSOI_102.va",
-        Refuse,
+        Emit,
     ),
     (
         "L-UTSOI NQS",
         "l_utsoi",
         "cmc/L_UTSOI_102.9.0_code_package/vacode/L_UTSOI_102_nqs.va",
-        Refuse,
+        Emit,
     ),
     (
         "HiSIM-HV",
@@ -325,7 +331,7 @@ const SOURCES: &[(&str, &str, &str, Outcome)] = &[
         "ASM-HEMT",
         "asmhemt",
         "cmc/ASM-HEMT101.6.0_05132026/vacode/asmhemt.va",
-        Refuse,
+        Emit,
     ),
     (
         "MVSG",
