@@ -11,7 +11,11 @@
 //!
 //! A durability flush writes the open chunk (and open event buffers) as provisional frames at the
 //! tail without advancing it; the next real frame overwrites them and the file is truncated to the
-//! real tail, so the final bytes do not depend on when, or whether, flushes happened.
+//! real tail, so the final bytes do not depend on when, or whether, flushes happened. A flush is a
+//! plain write handed to the operating system, which survives the process dying; the device is
+//! synced only at `END` and when the writer stops on an error. After a power loss the superblock
+//! may name an index that never reached the disk: the reader finds that by its CRC and scans
+//! forward instead.
 
 use crate::digest::{Digest, LogicalDigest};
 use crate::events::{EventBuffer, EventChange, EventKind, EventScratch};
@@ -383,8 +387,12 @@ impl<I: SegmentIo> Encoder<I> {
         encoder.frame.begin(FrameKind::RunMeta, 0);
         encoder.frame.put(&meta_bytes);
         encoder.emit_real()?;
-        encoder.io.flush()?;
         Ok(encoder)
+    }
+
+    /// After an error stopped the writer: sync what was written, if the device still lets us.
+    pub(crate) fn sync_after_stop(&mut self) {
+        let _ = self.io.flush();
     }
 
     pub(crate) fn layout(&self) -> &Layout {
@@ -621,8 +629,7 @@ impl<I: SegmentIo> Encoder<I> {
         self.chunks_since_index = 0;
         self.index_first_row = self.rows;
         self.last_index = Some(offset);
-        self.io.flush()?;
-        self.write_pointers(0)
+        Ok(())
     }
 
     /// Take changes in arrival order; a signal's buffer that reaches 4,096 changes is written at
@@ -664,7 +671,8 @@ impl<I: SegmentIo> Encoder<I> {
         Ok(())
     }
 
-    /// Write the open chunk as provisional frames at the tail, durably, without advancing the tail.
+    /// Write the open chunk as provisional frames at the tail, without advancing the tail, and point
+    /// the superblock at the last index. Nothing is synced: the operating system has the bytes.
     pub(crate) fn write_provisional(&mut self, batch: &Batch) -> Result<(), StoreError> {
         let mut at = self.tail;
         for position in 0..self.events.len() {
@@ -689,8 +697,7 @@ impl<I: SegmentIo> Encoder<I> {
             self.io.truncate(at)?;
         }
         self.file_end = at;
-        self.io.flush()?;
-        Ok(())
+        self.write_pointers(0)
     }
 
     /// Write the last frames and `END`; returns the receipt and the segment's I/O.
@@ -803,6 +810,7 @@ impl<I: SegmentIo> SegmentWriter<I> {
     fn guard<T>(&mut self, result: Result<T, StoreError>) -> Result<T, StoreError> {
         if result.is_err() {
             self.stopped = true;
+            self.encoder.sync_after_stop();
         }
         result
     }

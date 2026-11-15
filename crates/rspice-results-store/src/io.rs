@@ -14,7 +14,9 @@ pub trait SegmentIo {
     fn write_at(&mut self, offset: u64, data: &[u8]) -> io::Result<()>;
     /// Set the segment's length to `len`.
     fn truncate(&mut self, len: u64) -> io::Result<()>;
-    /// Make every completed write durable.
+    /// Make every completed write durable on the storage device (a full sync). The writer calls it
+    /// only when a run ends, at `END` or when it stops on an error; while a run goes, its writes
+    /// are left to the operating system, which keeps them when the process dies.
     fn flush(&mut self) -> io::Result<()>;
     /// The segment's current length in bytes.
     fn size(&self) -> io::Result<u64>;
@@ -203,7 +205,7 @@ impl SegmentIo for FileIo {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.file.sync_data()
+        self.file.sync_all()
     }
 
     fn size(&self) -> io::Result<u64> {

@@ -7,8 +7,9 @@
 //! so the bytes are those [`SegmentWriter`] writes for the same pushes.
 //!
 //! About once a second of wall clock the writer thread asks for a durability flush; the next push
-//! copies the open chunk into a third buffer and the writer writes it provisionally. Flushes never
-//! change the final bytes.
+//! copies the open chunk into a third buffer and the writer writes it provisionally: a plain write
+//! the operating system keeps if the process dies, with no device sync. Flushes never change the
+//! final bytes.
 //!
 //! wasm32 has no threads: there the same API encodes inline, and the caller flushes with
 //! [`RunWriter::sync`].
@@ -138,6 +139,25 @@ mod threaded {
 
     impl<I: SegmentIo> Thread<I> {
         fn run(mut self) -> Outcome<I> {
+            match self.serve() {
+                Ok((batch, status)) => match self.encoder.write_batch(&batch) {
+                    Ok(()) => self.encoder.finish(&status),
+                    Err(error) => {
+                        self.encoder.sync_after_stop();
+                        Err(error)
+                    }
+                },
+                // Abandoned: the solve thread dropped the writer without finishing.
+                Err(StoreError::WriterStopped) => Err(StoreError::WriterStopped),
+                Err(error) => {
+                    self.encoder.sync_after_stop();
+                    Err(error)
+                }
+            }
+        }
+
+        /// Apply messages in order until the last chunk arrives with the run's status.
+        fn serve(&mut self) -> Result<(Batch, RunStatus), StoreError> {
             let mut last_sync = Instant::now();
             loop {
                 let message = if self.sync_due.load(Ordering::Relaxed) {
@@ -161,10 +181,7 @@ mod threaded {
                         self.sync_due.store(false, Ordering::Relaxed);
                         last_sync = Instant::now();
                     }
-                    Ok(Message::Finish(batch, status)) => {
-                        self.encoder.write_batch(&batch)?;
-                        return self.encoder.finish(&status);
-                    }
+                    Ok(Message::Finish(batch, status)) => return Ok((batch, status)),
                     Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => return Err(StoreError::WriterStopped),
                 }

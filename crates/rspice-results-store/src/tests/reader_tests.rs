@@ -2,8 +2,8 @@
 
 use std::io;
 
-use super::support::{meta, mixed_schema, rows};
-use crate::format::POINTERS_AT;
+use super::support::{meta, mixed_schema, rows, u64_at, walk};
+use crate::format::{FrameKind, POINTERS_AT};
 use crate::{
     MemoryIo, RunStatus, SegmentIo, SegmentReader, SegmentState, SegmentWriter, StopReason,
 };
@@ -186,6 +186,65 @@ fn a_crash_at_any_write_including_during_syncs_reads_as_a_prefix() {
         readable_prefix(writer.io().bytes(), &x, &values, slots),
         Some(100)
     );
+}
+
+#[test]
+fn the_superblock_names_an_index_only_once_a_flush_made_it_durable() {
+    let schema = mixed_schema();
+    let slots = schema.slots();
+    let (x, values) = rows(64 * 70, slots, 6);
+    let mut writer = SegmentWriter::with_chunk_rows(MemoryIo::new(), &schema, &meta(), 64).unwrap();
+    // 70 chunks: an index after the 64th.
+    writer.push_rows(&x, &values).unwrap();
+    let index = walk(writer.io().bytes())
+        .iter()
+        .find(|frame| frame.kind == FrameKind::Index)
+        .map(|frame| frame.offset)
+        .unwrap();
+    let pointer = |bytes: &[u8]| {
+        (
+            u64_at(bytes, POINTERS_AT as usize),
+            u64_at(bytes, POINTERS_AT as usize + 8),
+        )
+    };
+    assert_eq!(pointer(writer.io().bytes()), (0, 0));
+    writer.sync().unwrap();
+    assert_eq!(pointer(writer.io().bytes()), (index, 64 * 64));
+    assert_eq!(
+        readable_prefix(writer.io().bytes(), &x, &values, slots),
+        Some(64 * 70)
+    );
+}
+
+#[test]
+fn a_superblock_naming_lost_or_garbage_bytes_opens_as_the_longest_prefix() {
+    let schema = mixed_schema();
+    let slots = schema.slots();
+    let (x, values) = rows(64 * 70, slots, 8);
+    let mut writer = SegmentWriter::with_chunk_rows(MemoryIo::new(), &schema, &meta(), 64).unwrap();
+    writer.push_rows(&x, &values).unwrap();
+    writer.sync().unwrap();
+    let bytes = writer.io().bytes().to_vec();
+    let index = walk(&bytes)
+        .iter()
+        .find(|frame| frame.kind == FrameKind::Index)
+        .map(|frame| frame.offset as usize)
+        .unwrap();
+    assert_eq!(u64_at(&bytes, POINTERS_AT as usize), index as u64);
+    // A power loss kept the superblock but not the index it names, nor anything after it.
+    assert_eq!(
+        readable_prefix(&bytes[..index], &x, &values, slots),
+        Some(64 * 64)
+    );
+    // The index reached the disk as garbage, while later frames survived: the scan stops there.
+    let mut garbage = bytes.clone();
+    garbage[index + 16..index + 64].fill(0xa5);
+    assert_eq!(readable_prefix(&garbage, &x, &values, slots), Some(64 * 64));
+    // The superblock names a point past the end of the file.
+    let mut past = bytes.clone();
+    let at = POINTERS_AT as usize;
+    past[at..at + 8].copy_from_slice(&(bytes.len() as u64 + 4096).to_le_bytes());
+    assert_eq!(readable_prefix(&past, &x, &values, slots), Some(64 * 70));
 }
 
 #[test]
