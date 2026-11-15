@@ -52,6 +52,15 @@ pub enum QuasiPeriodicError {
         "Quasi-periodic Newton solve failed after {iterations} updates (normalized residual {merit:e})"
     )]
     ConvergenceFailed { iterations: usize, merit: f64 },
+    /// Working storage the analysis needs could not be reserved. Its size
+    /// came from the circuit and the phase grid; the allocator refused it.
+    #[error("Unable to allocate {object}: {bytes} bytes were needed: {source}")]
+    Allocation {
+        object: &'static str,
+        bytes: usize,
+        #[source]
+        source: std::collections::TryReserveError,
+    },
 }
 
 fn check_abort(abort: &dyn AbortSignal) -> Result<(), QuasiPeriodicError> {
@@ -68,9 +77,13 @@ fn finite(value: Complex64) -> bool {
 
 fn zero_buffer(size: usize) -> Result<Vec<Complex64>, QuasiPeriodicError> {
     let mut result = Vec::new();
-    result.try_reserve_exact(size).map_err(|error| {
-        QuasiPeriodicError::Numerical(format!("Fourier buffer allocation failed: {error}"))
-    })?;
+    result
+        .try_reserve_exact(size)
+        .map_err(|source| QuasiPeriodicError::Allocation {
+            object: "quasi-periodic Fourier buffer",
+            bytes: size.saturating_mul(std::mem::size_of::<Complex64>()),
+            source,
+        })?;
     result.resize(size, Complex64::ZERO);
     Ok(result)
 }

@@ -182,6 +182,13 @@ pub enum HbError {
     NonFiniteSample(String),
     /// Invalid numerical solver configuration.
     InvalidConfig(HbConfigError),
+    /// Working storage the solve needs could not be reserved. The size came
+    /// from the configuration; the allocator, not a policy, refused it.
+    Allocation {
+        object: &'static str,
+        bytes: usize,
+        source: std::collections::TryReserveError,
+    },
 }
 
 impl std::fmt::Display for HbError {
@@ -204,6 +211,14 @@ impl std::fmt::Display for HbError {
             Self::InvalidCircuit(msg) => write!(f, "Invalid circuit: {}", msg),
             Self::NonFiniteSample(msg) => write!(f, "Non-finite device sample: {msg}"),
             Self::InvalidConfig(error) => write!(f, "Invalid HB config: {error}"),
+            Self::Allocation {
+                object,
+                bytes,
+                source,
+            } => write!(
+                f,
+                "Unable to allocate {object}: {bytes} bytes were needed: {source}"
+            ),
         }
     }
 }

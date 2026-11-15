@@ -1137,6 +1137,30 @@ impl std::fmt::Display for HbError {
 
 impl std::error::Error for HbError {}
 
+/// A harmonic-balance kernel failure as the engine reports it. Cancellation
+/// and an allocator refusal keep their own types; anything else is a circuit
+/// failure in `context`.
+pub(super) fn hb_kernel_failure(context: &str, error: crate::analysis::HbError) -> SimulationError {
+    match error {
+        crate::analysis::HbError::Aborted => SimulationError::Aborted,
+        crate::analysis::HbError::Allocation { object, source, .. } => {
+            SimulationError::Allocation { object, source }
+        }
+        other => SimulationError::Circuit(format!("{context}: {other}")),
+    }
+}
+
+/// A collocation grid the engine builds outside the solver: a malformed size
+/// stays a configuration error, an unholdable one an allocation failure.
+pub(super) fn hb_grid_failure(error: crate::analysis::HbError) -> SimulationError {
+    match error {
+        crate::analysis::HbError::InvalidConfig(error) => {
+            HbError::InvalidConfig(error.to_string()).into()
+        }
+        other => hb_kernel_failure("HB collocation grid", other),
+    }
+}
+
 impl From<HbError> for SimulationError {
     fn from(e: HbError) -> Self {
         match e {
@@ -1644,9 +1668,7 @@ impl Engine {
     ) -> Result<HbSolver, SimulationError> {
         HbSolver::try_new(config, num_nodes)
             .and_then(|solver| solver.with_voltage_abstol(self.voltage_abstol()))
-            .map_err(|error| {
-                SimulationError::Circuit(format!("HB solver construction failed: {error}"))
-            })
+            .map_err(|error| hb_kernel_failure("HB solver construction failed", error))
     }
 
     /// Apply analysis-local options authored for Xyce's HB packages.
@@ -1973,6 +1995,8 @@ impl Engine {
         }) {
             return Ok(TransientAssistedSeed::Unrepresentable(branch.clone()));
         }
+        let mut fft = HbFft::try_with_size(config.num_harmonics, collocation_points)
+            .map_err(hb_grid_failure)?;
         let hb_period = config.fundamental_freq.recip();
         let sample_times = (0..collocation_points)
             .map(|sample| {
@@ -1980,8 +2004,6 @@ impl Engine {
                     .rem_euclid(transient_period)
             })
             .collect::<Vec<_>>();
-        let mut fft = HbFft::try_with_size(config.num_harmonics, collocation_points)
-            .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
 
         for (node_index, node_name) in node_names.iter().enumerate() {
             let source_index = transient
@@ -2314,7 +2336,6 @@ impl Engine {
             solver
                 .solve_newton_with_abort_seed_policy(&mut state, abort, dc_seed_policy)
                 .map_err(|e| match e {
-                    crate::analysis::HbError::Aborted => SimulationError::Aborted,
                     crate::analysis::HbError::ConvergenceFailed {
                         iterations,
                         residual,
@@ -2323,9 +2344,7 @@ impl Engine {
                         residual,
                     }
                     .into(),
-                    other => {
-                        SimulationError::Circuit(format!("HB nonlinear solve failed: {}", other))
-                    }
+                    other => hb_kernel_failure("HB nonlinear solve failed", other),
                 })?;
         } else {
             if abort.is_aborted() {
@@ -2335,7 +2354,6 @@ impl Engine {
             solver
                 .solve_linear(&mut state)
                 .map_err(|error| match error {
-                    crate::analysis::HbError::Aborted => SimulationError::Aborted,
                     crate::analysis::HbError::ConvergenceFailed {
                         iterations,
                         residual,
@@ -2345,7 +2363,7 @@ impl Engine {
                     }
                     .into(),
                     crate::analysis::HbError::SingularMatrix => HbError::SingularMatrix.into(),
-                    other => SimulationError::Circuit(format!("HB linear solve failed: {other}")),
+                    other => hb_kernel_failure("HB linear solve failed", other),
                 })?;
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);

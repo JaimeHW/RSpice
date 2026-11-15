@@ -7,7 +7,8 @@ use num_complex::Complex64;
 use rustfft::{Fft, FftDirection, FftPlanner};
 use std::sync::Arc;
 
-use super::config::{HbConfigError, MAX_HB_COLLOCATION_POINTS};
+use super::HbError;
+use super::config::HbConfigError;
 use crate::Value;
 
 /// FFT/IFFT processor for Harmonic Balance
@@ -40,6 +41,19 @@ impl std::fmt::Debug for HbFft {
     }
 }
 
+/// Reserve room for `values` grid samples in `buffer`, refusing a grid the
+/// allocator cannot back as a typed failure.
+fn reserve_grid_values(buffer: &mut Vec<Complex64>, values: usize) -> Result<(), HbError> {
+    let additional = values.saturating_sub(buffer.len());
+    buffer
+        .try_reserve_exact(additional)
+        .map_err(|source| HbError::Allocation {
+            object: "harmonic-balance collocation grid",
+            bytes: values.saturating_mul(std::mem::size_of::<Complex64>()),
+            source,
+        })
+}
+
 impl HbFft {
     /// Create an FFT processor after checked grid arithmetic.
     ///
@@ -48,12 +62,9 @@ impl HbFft {
     /// * `oversample` - Oversampling factor (typically 2 or 4), at least two;
     ///   below that the top harmonics collide with the conjugate half of the
     ///   spectrum.
-    pub fn try_new(num_harmonics: usize, oversample: usize) -> Result<Self, HbConfigError> {
+    pub fn try_new(num_harmonics: usize, oversample: usize) -> Result<Self, HbError> {
         if oversample < 2 {
-            return Err(HbConfigError::new(
-                "oversample_factor",
-                "must be at least two",
-            ));
+            return Err(HbConfigError::new("oversample_factor", "must be at least two").into());
         }
         let min_size = num_harmonics
             .checked_add(1)
@@ -75,9 +86,14 @@ impl HbFft {
     }
 
     /// Create a processor with an exact, checked collocation-grid size.
-    pub fn try_with_size(num_harmonics: usize, fft_size: usize) -> Result<Self, HbConfigError> {
+    ///
+    /// The grid's size is the configuration's; nothing caps it. Its working
+    /// buffer is reserved before the transform is planned, so a grid this
+    /// machine cannot hold is a typed [`HbError::Allocation`] rather than an
+    /// abort inside the planner.
+    pub fn try_with_size(num_harmonics: usize, fft_size: usize) -> Result<Self, HbError> {
         if num_harmonics == 0 {
-            return Err(HbConfigError::new("num_harmonics", "must be at least one"));
+            return Err(HbConfigError::new("num_harmonics", "must be at least one").into());
         }
         let minimum_size = num_harmonics
             .checked_mul(2)
@@ -92,40 +108,50 @@ impl HbFft {
             return Err(HbConfigError::new(
                 "collocation_points",
                 format!("collocation grid must contain at least {minimum_size} points"),
-            ));
+            )
+            .into());
         }
-        if fft_size > MAX_HB_COLLOCATION_POINTS {
-            return Err(HbConfigError::new(
-                "collocation_points",
-                format!(
-                    "requires {fft_size} points, above the supported limit {MAX_HB_COLLOCATION_POINTS}"
-                ),
-            ));
-        }
-
-        Ok(Self::from_valid_size(num_harmonics, fft_size))
-    }
-
-    fn from_valid_size(num_harmonics: usize, fft_size: usize) -> Self {
-        let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft(fft_size, FftDirection::Forward);
-        let ifft = planner.plan_fft(fft_size, FftDirection::Inverse);
-
+        // Hold one grid of samples while the planner builds its tables, which
+        // are the same order of size; every transform works in such a grid.
+        let mut grid = Vec::new();
+        reserve_grid_values(&mut grid, fft_size)?;
+        let (fft, ifft) = Self::plan(fft_size);
+        drop(grid);
         let scratch_len = fft
             .get_inplace_scratch_len()
             .max(ifft.get_inplace_scratch_len());
-
-        Self {
+        let mut scratch = Vec::new();
+        reserve_grid_values(&mut scratch, scratch_len)?;
+        scratch.resize(scratch_len, Complex64::new(0.0, 0.0));
+        Ok(Self {
             fft_size,
             num_harmonics,
             fft,
             ifft,
-            scratch: vec![Complex64::new(0.0, 0.0); scratch_len],
-        }
+            scratch,
+        })
+    }
+
+    fn plan(fft_size: usize) -> (Arc<dyn Fft<f64>>, Arc<dyn Fft<f64>>) {
+        let mut planner = FftPlanner::new();
+        (
+            planner.plan_fft(fft_size, FftDirection::Forward),
+            planner.plan_fft(fft_size, FftDirection::Inverse),
+        )
     }
 
     pub(crate) fn minimal() -> Self {
-        Self::from_valid_size(1, 4)
+        let (fft, ifft) = Self::plan(4);
+        let scratch_len = fft
+            .get_inplace_scratch_len()
+            .max(ifft.get_inplace_scratch_len());
+        Self {
+            fft_size: 4,
+            num_harmonics: 1,
+            fft,
+            ifft,
+            scratch: vec![Complex64::new(0.0, 0.0); scratch_len],
+        }
     }
 
     #[inline]
@@ -285,8 +311,15 @@ impl HbFft {
 }
 
 impl Clone for HbFft {
+    /// Plans are immutable and shared; only the scratch buffer is per copy.
     fn clone(&self) -> Self {
-        Self::from_valid_size(self.num_harmonics, self.fft_size)
+        Self {
+            fft_size: self.fft_size,
+            num_harmonics: self.num_harmonics,
+            fft: Arc::clone(&self.fft),
+            ifft: Arc::clone(&self.ifft),
+            scratch: self.scratch.clone(),
+        }
     }
 }
 

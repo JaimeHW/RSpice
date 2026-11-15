@@ -3,10 +3,6 @@ use super::{QuasiPeriodicError as Error, check_abort, finite};
 use crate::abort_signal::AbortSignal;
 use crate::{Complex64, ResourceKind, ResourceLimitError, ResourceLimits, Value};
 
-// Bound one non-interruptible FFT plan/transform, including callers whose
-// ordinary resource limits are unlimited, as the periodic HB kernel does.
-const MAX_COLLOCATION_POINTS: usize = 2_000_000;
-
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(
     deny_unknown_fields,
@@ -191,17 +187,6 @@ impl QuasiPeriodicGrid {
             QuasiPeriodicSampling::Oversample(values) => (values, false),
             QuasiPeriodicSampling::Exact(values) => (values, true),
         };
-        let too_many = |count: usize| {
-            Error::InvalidConfig(format!(
-                "the phase grid requires {count} collocation points, above the supported limit {MAX_COLLOCATION_POINTS}"
-            ))
-        };
-        let minimal_grid = 3usize
-            .checked_pow(u32::try_from(tones).unwrap_or(u32::MAX))
-            .unwrap_or(usize::MAX);
-        if minimal_grid > MAX_COLLOCATION_POINTS {
-            return Err(too_many(minimal_grid));
-        }
         let mut dimensions = Vec::with_capacity(tones);
         let mut strides = Vec::with_capacity(tones);
         let mut sample_count = 1usize;
@@ -223,10 +208,9 @@ impl QuasiPeriodicGrid {
                 return Err(invalid("each phase grid must have at least 2H+1 points"));
             }
             strides.push(sample_count);
-            sample_count = sample_count.saturating_mul(size);
-            if sample_count > MAX_COLLOCATION_POINTS {
-                return Err(too_many(sample_count));
-            }
+            sample_count = sample_count
+                .checked_mul(size)
+                .ok_or_else(|| invalid("the phase grid overflows the addressable sample count"))?;
             dimensions.push(size);
         }
         // FFT workspace, input/output and scratch are accounted for before any

@@ -23,6 +23,9 @@ impl QuasiPeriodicTransform {
         abort: &dyn AbortSignal,
     ) -> Result<Self, Error> {
         check_abort(abort)?;
+        // The longest axis line is reserved before any plan: a plan's tables
+        // are the size of its axis, and no size here is capped.
+        let line = zero_buffer(grid.dimensions().iter().copied().max().unwrap_or(1))?;
         let mut planner = FftPlanner::new();
         let mut forward = Vec::new();
         let mut inverse = Vec::new();
@@ -37,7 +40,6 @@ impl QuasiPeriodicTransform {
             forward.push(fft);
             inverse.push(ifft);
         }
-        let line = zero_buffer(*grid.dimensions().iter().max().unwrap())?;
         let scratch = zero_buffer(scratch)?;
         check_abort(abort)?;
         Ok(Self {

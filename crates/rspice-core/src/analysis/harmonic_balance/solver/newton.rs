@@ -1171,7 +1171,7 @@ impl HbSolver {
         // schedule. Only the final physical zero-GMIN solve can be accepted.
         let mut ptran = PseudoTransient::new();
         let ptran_start = state.total_iterations;
-        let max_ptran_iter = self.config.max_iterations * 5;
+        let max_ptran_iter = self.config.max_iterations.saturating_mul(5);
 
         while !ptran.is_complete() && state.total_iterations - ptran_start < max_ptran_iter {
             let remaining = max_ptran_iter - (state.total_iterations - ptran_start);
@@ -1234,7 +1234,7 @@ impl HbSolver {
     ) -> Result<bool, HbError> {
         let mut stepper = SourceStepper::new();
         let iteration_start = state.total_iterations;
-        let max_iterations = self.config.max_iterations * 20;
+        let max_iterations = self.config.max_iterations.saturating_mul(20);
         for spectrum in state.x.iter_mut().chain(&mut state.mna_branch_currents) {
             spectrum.fill(Complex64::ZERO);
         }

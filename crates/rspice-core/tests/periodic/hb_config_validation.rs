@@ -53,7 +53,7 @@ fn overflow_and_extreme_budgets_fail_before_allocation() {
     assert_engine_rejects_without_panicking(oversample, "oversample_factor");
 
     let mut iterations = HbConfig::new(1.0e6);
-    iterations.max_iterations = usize::MAX;
+    iterations.max_iterations = 0;
     assert_engine_rejects_without_panicking(iterations, "max_iterations");
 
     let mut restart = HbConfig::new(1.0e6);
@@ -61,8 +61,81 @@ fn overflow_and_extreme_budgets_fail_before_allocation() {
     assert_engine_rejects_without_panicking(restart, "gmres_restart");
 
     let mut mixing = HbConfig::new(1.0e6);
-    mixing.max_mixing_order = usize::MAX;
+    mixing.max_mixing_order = 0;
     assert_engine_rejects_without_panicking(mixing, "max_mixing_order");
+}
+
+/// An iteration limit and a mixing order are the user's own numbers. A
+/// limit no solve reaches and an order a single tone never mixes to are
+/// valid and change nothing; neither sizes any storage.
+#[test]
+fn an_unreachable_iteration_limit_and_mixing_order_are_accepted() {
+    let mut config = HbConfig::new(1.0e6);
+    config.max_iterations = usize::MAX;
+    config.max_mixing_order = usize::MAX;
+    let result = Engine::default()
+        .run_hb(&fixture(), config)
+        .expect("a linear divider converges long before any iteration limit");
+    let dc = result.result.spectral_voltages[0].coefficients[0].re;
+    assert!((dc - 1.0).abs() < 1.0e-12, "V(out) = {dc}");
+}
+
+/// A collocation grid takes its size from the configuration, as Xyce's
+/// `NUMFREQ` and Spectre's `harms`/`oversample` do: neither tool caps it.
+/// Over 2.1 million points (the old ceiling was 2 million), the transform
+/// returns the closed-form spectrum of the square-law response
+/// `cos(wt) - 0.1 cos(wt)^2 = -0.05 + cos(wt) - 0.05 cos(2wt)`.
+#[test]
+fn a_collocation_grid_above_two_million_points_transforms_to_the_closed_form() {
+    let points = 3usize.pow(3) * 5usize.pow(7);
+    assert!(points > 2_000_000 && points % 2 == 1);
+    let mut fft = HbFft::try_with_size(4, points).expect("a grid this machine can hold plans");
+    let waveform = (0..points)
+        .map(|sample| {
+            let phase = std::f64::consts::TAU * sample as f64 / points as f64;
+            phase.cos() - 0.1 * phase.cos().powi(2)
+        })
+        .collect::<Vec<_>>();
+    let spectrum = fft.to_frequency_domain(&waveform);
+    let peak = |harmonic: usize| {
+        if harmonic == 0 {
+            spectrum[0]
+        } else {
+            spectrum[harmonic] * 2.0
+        }
+    };
+    let expected = [-0.05, 1.0, -0.05, 0.0, 0.0];
+    for (harmonic, want) in expected.into_iter().enumerate() {
+        let got = peak(harmonic);
+        assert!(
+            (got - Complex64::new(want, 0.0)).norm() < 1.0e-9,
+            "harmonic {harmonic}: {got} against {want}"
+        );
+    }
+}
+
+/// A grid no machine can hold is refused by the allocator, as a typed
+/// failure, before any sample is stored or any transform planned.
+#[test]
+fn a_collocation_grid_no_machine_can_hold_is_a_typed_allocation_failure() {
+    let points = (1usize << 61) + 1;
+    let error = Engine::default()
+        .run_hb(
+            &fixture(),
+            HbConfig::new(1.0e6)
+                .with_harmonics(3)
+                .with_collocation_points(points),
+        )
+        .expect_err("2^61 complex samples exceed every address space");
+    assert!(
+        matches!(error, rspice_core::SimulationError::Allocation { .. }),
+        "an unholdable grid is an allocation failure, not an abort: {error:?}"
+    );
+    assert!(
+        HbFft::try_with_size(3, points)
+            .is_err_and(|error| matches!(error, HbError::Allocation { .. })),
+        "the transform's own constructor refuses the same grid"
+    );
 }
 
 #[test]

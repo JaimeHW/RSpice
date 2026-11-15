@@ -933,6 +933,8 @@ impl Engine {
         let collocation_points = config
             .checked_fft_size()
             .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
+        let mut fft = HbFft::try_with_size(config.num_harmonics, collocation_points)
+            .map_err(super::hb_grid_failure)?;
         let hb_period = config.fundamental_freq.recip();
         let collocation_step = hb_period / collocation_points as Value;
         let samples = (0..collocation_points)
@@ -946,8 +948,6 @@ impl Engine {
                 )
             })
             .collect::<Vec<_>>();
-        let mut fft = HbFft::try_with_size(config.num_harmonics, collocation_points)
-            .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
         let coefficients = fft.to_frequency_domain(&samples);
         let dc = coefficients[0].re;
         let harmonics = coefficients

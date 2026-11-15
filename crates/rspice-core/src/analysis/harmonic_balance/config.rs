@@ -5,21 +5,6 @@
 
 use crate::Value;
 
-/// Maximum collocation-grid size accepted by the standalone HB numerical
-/// kernel.
-///
-/// Engine clients can impose a smaller resource limit.  This hard ceiling is
-/// also enforced by the public solver constructor so an unauthenticated
-/// configuration cannot ask `rustfft` to allocate an effectively unbounded
-/// plan before the caller has a chance to receive an error.
-pub(crate) const MAX_HB_COLLOCATION_POINTS: usize = 2_000_000;
-
-/// Maximum requested Newton iterations accepted by one HB analysis.
-pub(crate) const MAX_HB_ITERATIONS: usize = 1_000_000;
-
-/// Maximum authored intermodulation order.
-pub(crate) const MAX_HB_MIXING_ORDER: usize = 4096;
-
 /// Maximum useful GMRES restart.  The shared Krylov implementation retains at
 /// most this many Arnoldi vectors.
 pub(crate) const MAX_HB_GMRES_RESTART: usize = 64;
@@ -252,8 +237,7 @@ impl HbConfig {
                 tone_harmonic.saturating_mul(t.num_harmonics.max(1))
             })
             .max()
-            .unwrap_or(9)
-            .min(4096);
+            .unwrap_or(9);
 
         Self {
             fundamental_freq: basis,
@@ -633,20 +617,12 @@ impl HbConfig {
         if self.num_harmonics == 0 {
             return Err(HbConfigError::new("num_harmonics", "must be at least one"));
         }
-        let minimum_points = self.minimum_collocation_points().ok_or_else(|| {
+        self.minimum_collocation_points().ok_or_else(|| {
             HbConfigError::new(
                 "num_harmonics",
                 "overflows the addressable collocation grid",
             )
         })?;
-        if minimum_points > MAX_HB_COLLOCATION_POINTS {
-            return Err(HbConfigError::new(
-                "num_harmonics",
-                format!(
-                    "requires {minimum_points} collocation points, above the supported limit {MAX_HB_COLLOCATION_POINTS}"
-                ),
-            ));
-        }
         let highest_frequency = self.fundamental_freq * self.num_harmonics as Value;
         if !highest_frequency.is_finite()
             || !(std::f64::consts::TAU * highest_frequency).is_finite()
@@ -665,11 +641,8 @@ impl HbConfig {
                 ));
             }
         }
-        if self.max_iterations == 0 || self.max_iterations > MAX_HB_ITERATIONS {
-            return Err(HbConfigError::new(
-                "max_iterations",
-                format!("must be in 1..={MAX_HB_ITERATIONS}"),
-            ));
+        if self.max_iterations == 0 {
+            return Err(HbConfigError::new("max_iterations", "must be at least one"));
         }
         if !self.damping.is_finite() || self.damping <= 0.0 || self.damping > 1.0 {
             return Err(HbConfigError::new(
@@ -692,10 +665,10 @@ impl HbConfig {
                 "must be at least two",
             ));
         }
-        if self.max_mixing_order == 0 || self.max_mixing_order > MAX_HB_MIXING_ORDER {
+        if self.max_mixing_order == 0 {
             return Err(HbConfigError::new(
                 "max_mixing_order",
-                format!("must be in 1..={MAX_HB_MIXING_ORDER}"),
+                "must be at least one",
             ));
         }
         if self.gmres_restart == 0 || self.gmres_restart > MAX_HB_GMRES_RESTART {
@@ -833,18 +806,6 @@ impl HbConfig {
                     )
                 })?
         };
-        if fft_size > MAX_HB_COLLOCATION_POINTS {
-            return Err(HbConfigError::new(
-                if self.collocation_points.is_some() {
-                    "collocation_points"
-                } else {
-                    "oversample_factor"
-                },
-                format!(
-                    "requires {fft_size} points, above the supported limit {MAX_HB_COLLOCATION_POINTS}"
-                ),
-            ));
-        }
         Ok(fft_size)
     }
 
@@ -1220,17 +1181,21 @@ mod tests {
     /// Two tones that share no low-order basis are refused by name rather
     /// than placed on a basis the spectrum cannot reach.
     #[test]
-    fn incommensurate_tones_are_refused_by_name() {
-        let error = HbConfig::from_hb_card(
+    fn a_close_tone_pair_keeps_every_common_basis_harmonic() {
+        // 1 GHz and 1.0001 GHz share a 100 kHz basis, on which the second
+        // tone's ninth harmonic is basis harmonic 90009. The basis takes
+        // that size instead of being clamped to 4096 harmonics and refused.
+        let config = HbConfig::from_hb_card(
             &tones_only(&[1.0e9, 1.0001e9]),
             &SimulationOptions::default(),
         )
-        .expect_err("an incommensurate tone pair cannot be placed");
-        assert_eq!(error.field(), "tones");
-        assert_eq!(
-            error.to_string(),
-            "tones tone 0 requires common-basis harmonic 90000, beyond num_harmonics 4096"
+        .expect("a commensurate close tone pair is placed");
+        assert!(
+            (config.fundamental_freq - 1.0e5).abs() < 1.0e-3,
+            "basis {}",
+            config.fundamental_freq
         );
+        assert_eq!(config.num_harmonics, 90_009);
     }
 
     #[test]
