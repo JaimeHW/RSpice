@@ -279,7 +279,6 @@ impl Model {
                                 GENERATED_SYMBOL_VIEW,
                                 view.metadata,
                             );
-                            drop(library);
                             let named = named_ports(self.schematic.document());
                             let renames = self
                                 .generated_symbol_ports
