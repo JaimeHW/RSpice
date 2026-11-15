@@ -969,6 +969,106 @@ fn exact_hb_certificate(
     Ok((report, relative_residual))
 }
 
+/// Streamed entries up to which an exact realified Jacobian above the Krylov
+/// threshold is factored directly (at most 24 MiB of triplets). Harmonic
+/// balance couples every harmonic of a nonlinear device's terminals, so the
+/// nonzeros come in dense blocks that a supernodal sparse LU factors in a
+/// fraction of the work a restarted GMRES spends on them; past the budget the
+/// matrix-free route keeps memory proportional to the stamps.
+const EXACT_DIRECT_ENTRY_LIMIT: usize = 1 << 20;
+
+/// The sparse matrix of the last direct exact Newton correction. A later
+/// correction whose entries all fall on its pattern refills its values, so it
+/// keeps the symbolic analysis and pivot sequence, and the simplified
+/// correction against the same Jacobian reuses the factors outright.
+pub(super) struct ExactDirectMatrix {
+    size: usize,
+    matrix: crate::solver::StaticMatrix,
+}
+
+impl std::fmt::Debug for ExactDirectMatrix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExactDirectMatrix")
+            .field("size", &self.size)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Refill `cached` from the streamed operator entries; `false` when an entry
+/// falls off its pattern or does not stay finite.
+fn refill_exact_direct_matrix(
+    cached: &mut ExactDirectMatrix,
+    operator: &ExactHbOperator<'_>,
+) -> bool {
+    cached.matrix.clear_values();
+    let mut fits = true;
+    operator.visit_entries(|row, column, value| {
+        fits = fits && cached.matrix.try_add(row, column, value).is_ok();
+    });
+    fits
+}
+
+/// Factor a fresh matrix from the streamed operator entries, or `None` when
+/// the stream exceeds the entry budget or cannot be stored.
+fn build_exact_direct_matrix(
+    operator: &ExactHbOperator<'_>,
+    size: usize,
+) -> Option<ExactDirectMatrix> {
+    let mut triplets: Vec<(usize, usize, Value)> = Vec::new();
+    let mut stored = true;
+    operator.visit_entries(|row, column, value| {
+        if !stored {
+            return;
+        }
+        if triplets.len() < EXACT_DIRECT_ENTRY_LIMIT && triplets.try_reserve(1).is_ok() {
+            triplets.push((row, column, value));
+        } else {
+            stored = false;
+        }
+    });
+    // Every unknown keeps a structural diagonal for the pivot search.
+    if !stored || triplets.try_reserve_exact(size).is_err() {
+        return None;
+    }
+    triplets.extend((0..size).map(|index| (index, index, 0.0)));
+    let matrix = crate::solver::StaticMatrix::from_triplets(size, size, &triplets).ok()?;
+    Some(ExactDirectMatrix { size, matrix })
+}
+
+/// The exact Newton correction by sparse LU on the streamed operator entries,
+/// accepted only when it passes the same componentwise backward-error
+/// certificate as a matrix-free candidate. `None` leaves the step to GMRES:
+/// the stream exceeds the entry budget or cannot be stored, or the
+/// factorization fails or does not certify.
+fn exact_hb_direct_correction(
+    cache: &mut Option<ExactDirectMatrix>,
+    operator: &ExactHbOperator<'_>,
+    homogeneous: &ExactHomogeneousRows,
+    rhs: &[Complex64],
+) -> Option<Vec<Complex64>> {
+    let size = rhs.len();
+    let refilled = cache
+        .as_mut()
+        .is_some_and(|cached| cached.size == size && refill_exact_direct_matrix(cached, operator));
+    if !refilled {
+        *cache = build_exact_direct_matrix(operator, size);
+    }
+    let real_rhs = rhs.iter().map(|value| value.re).collect::<Vec<_>>();
+    let solution = match cache.as_mut()?.matrix.solve(&real_rhs) {
+        Ok(solution) => solution,
+        Err(_) => {
+            *cache = None;
+            return None;
+        }
+    };
+    let mut candidate = solution
+        .into_iter()
+        .map(|value| Complex64::new(value, 0.0))
+        .collect::<Vec<_>>();
+    let (report, _) = exact_hb_candidate_report(operator, homogeneous, &mut candidate, rhs).ok()?;
+    report.is_accepted().then_some(candidate)
+}
+
 impl HbSolver {
     /// Full nonlinear HB solve with cooperative cancellation.
     pub fn solve_newton_with_abort(
@@ -2318,6 +2418,37 @@ impl HbSolver {
             }
         };
         let im_idx = |entity: usize, k: usize| -> usize { entity * w + 2 * k };
+        let exact_step = |solution: &[Complex64]| {
+            let mut node_voltages = vec![vec![Complex64::new(0.0, 0.0); h]; n];
+            for (node, harmonics) in node_voltages.iter_mut().enumerate().take(n) {
+                for (k, phasor) in harmonics.iter_mut().enumerate().take(h) {
+                    let re = solution[re_idx(node, k)].re;
+                    let im = if k > 0 {
+                        solution[im_idx(node, k)].re
+                    } else {
+                        0.0
+                    };
+                    *phasor = Complex64::new(re, im);
+                }
+            }
+            let mut branch_currents = vec![vec![Complex64::new(0.0, 0.0); h]; branch_count];
+            for (branch, spectrum) in branch_currents.iter_mut().enumerate() {
+                let entity = n + branch;
+                for (k, coefficient) in spectrum.iter_mut().enumerate() {
+                    let re = solution[re_idx(entity, k)].re;
+                    let im = if k > 0 {
+                        solution[im_idx(entity, k)].re
+                    } else {
+                        0.0
+                    };
+                    *coefficient = Complex64::new(re, im);
+                }
+            }
+            HbNewtonStep {
+                node_voltages,
+                branch_currents,
+            }
+        };
 
         // Realified RHS: -residual, DC keeps only its real equation.
         let mut rhs = vec![0.0; size];
@@ -2341,12 +2472,15 @@ impl HbSolver {
             }
         }
 
-        // Large exact systems take the branch-aware matrix-free route. A
-        // candidate is accepted only after the matrix package independently
-        // certifies its componentwise backward error from the streamed
-        // operator entries. Numerical failure may recover through dense
-        // elimination only below the automatic Krylov threshold; structural,
-        // non-finite, allocation, and large-system failures are fail-closed.
+        // Large exact systems are factored from the streamed operator entries
+        // while those fit the direct budget, and otherwise take the
+        // branch-aware matrix-free route; an explicit Krylov request goes
+        // straight to it. A candidate is accepted only after the matrix
+        // package independently certifies its componentwise backward error
+        // from the streamed operator entries. Numerical failure may recover
+        // through dense elimination only below the automatic Krylov
+        // threshold; structural, non-finite, allocation, and large-system
+        // failures are fail-closed.
         let try_krylov = self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
         if try_krylov && entity_count > 0 {
             let extended = self.num_harmonics.checked_mul(2).ok_or_else(|| {
@@ -2366,6 +2500,9 @@ impl HbSolver {
             };
             unfold_collocation_spectra(&mut g_spectra, self.fft.size(), extended);
             unfold_collocation_spectra(&mut c_spectra, self.fft.size(), extended);
+            // Held outside the solver while the operator borrows it; a
+            // certified direct correction puts it back.
+            let mut direct_matrix = self.exact_direct_matrix.take();
             let operator = ExactHbOperator {
                 non_electrical_nodes: &self.non_electrical_nodes,
                 num_nodes: n,
@@ -2385,15 +2522,37 @@ impl HbSolver {
             };
             operator.validate()?;
             let homogeneous = operator.homogeneous_rows();
+            let rhs_complex = rhs
+                .iter()
+                .map(|&value| Complex64::new(value, 0.0))
+                .collect::<Vec<_>>();
+            if !self.config.use_krylov
+                && let Some(solution) = exact_hb_direct_correction(
+                    &mut direct_matrix,
+                    &operator,
+                    &homogeneous,
+                    &rhs_complex,
+                )
+            {
+                self.exact_direct_matrix = direct_matrix;
+                if abort.is_aborted() {
+                    return Err(HbError::Aborted);
+                }
+                if self.config.verbose {
+                    log::debug!(
+                        "HB exact {size}x{size} sparse direct solve: componentwise certified"
+                    );
+                }
+                return Ok(exact_step(&solution));
+            }
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
             let couplings = CollocationCouplings::sample(
                 &operator,
                 HbFft::try_with_size(self.fft.num_harmonics(), self.fft.size())?,
             );
             let preconditioner = ExactHbPreconditioner::build(&operator);
-            let rhs_complex = rhs
-                .iter()
-                .map(|&value| Complex64::new(value, 0.0))
-                .collect::<Vec<_>>();
             let restart = super::krylov::bounded_gmres_restart(self.config.gmres_restart, size);
             let mut outcome = super::krylov::gmres_with_abort(
                 &|input| couplings.apply(&operator, input),
@@ -2608,35 +2767,7 @@ impl HbSolver {
                             outcome.relative_residual
                         );
                     }
-                    let mut node_voltages = vec![vec![Complex64::new(0.0, 0.0); h]; n];
-                    for (node, harmonics) in node_voltages.iter_mut().enumerate().take(n) {
-                        for (k, phasor) in harmonics.iter_mut().enumerate().take(h) {
-                            let re = outcome.solution[re_idx(node, k)].re;
-                            let im = if k > 0 {
-                                outcome.solution[im_idx(node, k)].re
-                            } else {
-                                0.0
-                            };
-                            *phasor = Complex64::new(re, im);
-                        }
-                    }
-                    let mut branch_currents = vec![vec![Complex64::new(0.0, 0.0); h]; branch_count];
-                    for (branch, spectrum) in branch_currents.iter_mut().enumerate() {
-                        let entity = n + branch;
-                        for (k, coefficient) in spectrum.iter_mut().enumerate() {
-                            let re = outcome.solution[re_idx(entity, k)].re;
-                            let im = if k > 0 {
-                                outcome.solution[im_idx(entity, k)].re
-                            } else {
-                                0.0
-                            };
-                            *coefficient = Complex64::new(re, im);
-                        }
-                    }
-                    return Ok(HbNewtonStep {
-                        node_voltages,
-                        branch_currents,
-                    });
+                    return Ok(exact_step(&outcome.solution));
                 }
                 Err(error) if exact_krylov_dense_recovery_allowed(size, &error) => {
                     log::debug!(

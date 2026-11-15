@@ -1100,6 +1100,9 @@ pub struct HbSolver {
     /// Exact arbitrary-frequency distributed-network operators.
     exact_periodic_networks: Vec<ExactPeriodicNetwork>,
 
+    /// The last direct exact Newton matrix, refilled while its pattern holds.
+    exact_direct_matrix: Option<newton::ExactDirectMatrix>,
+
     /// Node names
     node_names: Vec<String>,
 
