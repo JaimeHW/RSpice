@@ -1,24 +1,18 @@
 //! The command catalogue as rows: everything a registered command declares
 //! about itself, and what it answers in three canonical application states.
 //!
-//! A replacement for the closed `ShellCommand` enum must reproduce these rows
-//! exactly — identity, label, group, every flag, shortcut context, default
-//! bindings, registry order, availability and check state. The comparison is
-//! a live equality between two builders, never a recorded file, so the rows
-//! stay true to whatever the catalogue is today.
+//! Every row is read the way the product reads it: through the registry and
+//! the dispatcher by key, the shell's commands and the features' alike —
+//! identity, label, group, every flag, shortcut context, default bindings,
+//! registry order, availability and check state.
 
 use std::collections::{BTreeSet, HashSet};
 use std::time::Duration;
 
 use super::*;
 use crate::workbench::commands::vocabulary::{CommandRegistry, ShellCommand, command_registry};
-use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
-use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
-use rspice_app_models::workbench::models::commands::ModelsCommand;
-use rspice_app_project::workbench::project::commands::ProjectCommand;
-use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutKind,
 };
@@ -48,8 +42,8 @@ pub(crate) const LEGACY_ALIASES: &[(&str, &str)] = &[
     ("run-checks", "check-cellview"),
 ];
 
-/// A command's answer to [`ShellCommand::availability`], in a form that does not
-/// name the type that produced it.
+/// A command's answer to [`RSpiceApp::command_availability`], in a form that
+/// does not name the type that produced it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AvailabilityRow {
     Available,
@@ -110,164 +104,33 @@ pub(crate) struct CommandRow {
     pub(crate) results_retained: StateRow,
 }
 
-/// One row per command the registry orders, in order: a shell command read
-/// from its [`ShellCommand`] value, a feature's from what its command set
-/// declares.
-pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
-    let no_project = no_project_app();
-    let project_open = project_open_app();
-    let results_retained = results_retained_app();
-    let apps = [&no_project, &project_open, &results_retained];
-    command_registry()
-        .order()
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(index, key)| {
-            let Some(command) = ShellCommand::from_key(key) else {
-                let spec = WorkbenchCommand::from_key(key)
-                    .map(WorkbenchCommand::declared_spec)
-                    .or_else(|| {
-                        SheetsCommand::ALL
-                            .into_iter()
-                            .find(|command| command.key() == key)
-                            .map(SheetsCommand::declared_spec)
-                    })
-                    .or_else(|| {
-                        SettingsCommand::ALL
-                            .into_iter()
-                            .find(|command| command.key() == key)
-                            .map(SettingsCommand::declared_spec)
-                    })
-                    .or_else(|| HardcopyCommand::from_key(key).map(HardcopyCommand::declared_spec))
-                    .or_else(|| ResultsCommand::from_key(key).map(ResultsCommand::declared_spec))
-                    .or_else(|| {
-                        CloudCommand::ALL
-                            .into_iter()
-                            .find(|command| command.key() == key)
-                            .map(CloudCommand::declared_spec)
-                    })
-                    .or_else(|| ModelsCommand::from_key(key).map(ModelsCommand::declared_spec))
-                    .or_else(|| SimulateCommand::from_key(key).map(SimulateCommand::declared_spec))
-                    .or_else(|| ProjectCommand::from_key(key).map(ProjectCommand::declared_spec))
-                    .or_else(|| CodeCommand::from_key(key).map(CodeCommand::declared_spec))
-                    .or_else(|| {
-                        DesignCommand::ALL
-                            .into_iter()
-                            .find(|command| command.key() == key)
-                            .map(DesignCommand::declared_spec)
-                    })
-                    .unwrap_or_else(|| panic!("{key:?} is ordered but nothing declares it"));
-                return feature_row(index, &spec, apps);
-            };
-            let spec = command.spec();
-            let context = command.shortcut_context();
-            CommandRow {
-                index,
-                id: command.stable_id(),
-                label: spec.label,
-                group: spec.group,
-                requires_open_project: command.requires_open_project(),
-                blocked_by_project_operation: command.blocked_by_project_operation(),
-                mutates_window_session: command.mutates_window_session(),
-                palette_visible: command.palette_visible(),
-                source_editor_only: false,
-                navigates_source_language: false,
-                repeatable: false,
-                commits_inspector_edit: command.commits_inspector_edit(),
-                edits_active_document: false,
-                source_editor_request: None,
-                context: context.label(),
-                context_suppressed_by_text_focus: context.suppressed_by_text_focus(),
-                bindings: command
-                    .shortcut_bindings()
-                    .iter()
-                    .map(binding_row)
-                    .collect(),
-                primary_reserved_on: CommandPlatform::ALL
-                    .into_iter()
-                    .filter(|platform| command.primary_is_reserved_on(*platform))
-                    .map(CommandPlatform::label)
-                    .collect(),
-                no_project: state_row(command, &no_project),
-                project_open: state_row(command, &project_open),
-                results_retained: state_row(command, &results_retained),
-            }
-        })
-        .collect()
-}
-
-/// One row per command the registry orders, read through the registry: the
-/// order, the id, the label, the group, the palette listing, the shortcut
-/// context, the bindings and the reserved chords come from its specs and its
-/// catalog, and the rest from the command its key resolves to.
-// Refactor scaffolding: deleted when the split completes.
-fn registry_command_rows() -> Vec<CommandRow> {
+/// One row per command the registry orders, in order, read through the
+/// registry and the dispatcher by key.
+pub(crate) fn command_rows() -> Vec<CommandRow> {
     let no_project = no_project_app();
     let project_open = project_open_app();
     let results_retained = results_retained_app();
     let apps = [&no_project, &project_open, &results_retained];
     let registry = command_registry();
-    let catalog = CommandRegistry;
-    catalog
-        .commands()
+    registry
+        .order()
         .iter()
         .copied()
         .enumerate()
         .map(|(index, key)| {
-            let id = key.as_str();
             let spec = registry
                 .spec(key)
-                .unwrap_or_else(|| panic!("{id} is ordered but has no spec"));
-            let Some(command) = ShellCommand::from_stable_id(id) else {
-                return feature_row(index, spec, apps);
-            };
-            let context = catalog
-                .context(key)
-                .unwrap_or_else(|| panic!("{id} has no shortcut context"));
-            let state = |app: &RSpiceApp| StateRow {
-                context_live: context.matches(&app.state.workbench, &app.state.model),
-                ..state_row(command, app)
-            };
-            CommandRow {
-                index,
-                id: spec.key.as_str(),
-                label: spec.label,
-                group: spec.group,
-                requires_open_project: command.requires_open_project(),
-                blocked_by_project_operation: command.blocked_by_project_operation(),
-                mutates_window_session: command.mutates_window_session(),
-                palette_visible: spec.flags.contains(CommandFlags::PALETTE_VISIBLE),
-                source_editor_only: false,
-                navigates_source_language: false,
-                repeatable: false,
-                commits_inspector_edit: command.commits_inspector_edit(),
-                edits_active_document: false,
-                source_editor_request: None,
-                context: context.label(),
-                context_suppressed_by_text_focus: context.suppressed_by_text_focus(),
-                bindings: catalog
-                    .default_bindings(key)
-                    .iter()
-                    .map(binding_row)
-                    .collect(),
-                primary_reserved_on: CommandPlatform::ALL
-                    .into_iter()
-                    .filter(|platform| catalog.primary_is_reserved_on(key, *platform))
-                    .map(CommandPlatform::label)
-                    .collect(),
-                no_project: state(&no_project),
-                project_open: state(&project_open),
-                results_retained: state(&results_retained),
-            }
+                .unwrap_or_else(|| panic!("{} is ordered but has no spec", key.as_str()));
+            command_row(index, spec, apps)
         })
         .collect()
 }
 
-/// The row of a command a feature declares as `spec`, its answers read from
-/// the dispatcher by key in each of `apps`. A feature's command declares no
-/// window, source-editor or repeat facts.
-fn feature_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> CommandRow {
+/// The row of the command `spec` declares, its answers read from the
+/// dispatcher by key in each of `apps`. Only a shell command changes the
+/// window session, only a code command belongs to a source editor alone,
+/// and only a code or routed command asks a source editor for something.
+fn command_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> CommandRow {
     let state = |app: &RSpiceApp| StateRow {
         availability: app.command_availability(spec.key).into(),
         enabled: app.command_key_enabled(spec.key),
@@ -284,7 +147,8 @@ fn feature_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> Comma
         blocked_by_project_operation: spec
             .flags
             .contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION),
-        mutates_window_session: false,
+        mutates_window_session: ShellCommand::from_key(spec.key)
+            .is_some_and(ShellCommand::mutates_window_session),
         palette_visible: spec.flags.contains(CommandFlags::PALETTE_VISIBLE),
         source_editor_only: code.is_some_and(CodeCommand::source_editor_only),
         navigates_source_language: code.is_some_and(CodeCommand::navigates_source_language),
@@ -314,17 +178,6 @@ fn feature_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> Comma
         no_project: state(apps[0]),
         project_open: state(apps[1]),
         results_retained: state(apps[2]),
-    }
-}
-
-fn state_row(command: ShellCommand, app: &RSpiceApp) -> StateRow {
-    StateRow {
-        availability: command.availability(app).into(),
-        enabled: command.is_enabled(app),
-        checked: command.checked(app),
-        context_live: command
-            .shortcut_context()
-            .matches(&app.state.workbench, &app.state.model),
     }
 }
 
@@ -397,8 +250,8 @@ fn aliases_answered_by_from_stable_id() -> BTreeSet<&'static str> {
 }
 
 #[test]
-fn legacy_rows_cover_the_registry_in_order() {
-    let rows = legacy_command_rows();
+fn rows_cover_the_registry_in_order() {
+    let rows = command_rows();
     let order = command_registry().order();
     assert_eq!(rows.len(), order.len());
     for (index, (row, key)) in rows.iter().zip(order).enumerate() {
@@ -415,7 +268,7 @@ fn legacy_rows_cover_the_registry_in_order() {
 }
 
 #[test]
-fn legacy_row_ids_are_unique_and_resolve_to_their_command() {
+fn shell_command_ids_are_unique_and_resolve_to_their_command() {
     let mut ids = HashSet::new();
     for command in ShellCommand::ALL.iter().copied() {
         let id = command.stable_id();
@@ -454,19 +307,8 @@ fn every_legacy_alias_resolves_to_a_registered_command_and_shadows_no_live_id() 
 }
 
 #[test]
-fn legacy_rows_are_deterministic() {
-    assert_eq!(legacy_command_rows(), legacy_command_rows());
-}
-
-// Refactor scaffolding: deleted when the split completes.
-#[test]
-fn registry_rows_equal_legacy_rows() {
-    let registry = registry_command_rows();
-    let legacy = legacy_command_rows();
-    assert_eq!(registry.len(), legacy.len());
-    for (registry, legacy) in registry.iter().zip(&legacy) {
-        assert_eq!(registry, legacy, "row {} ({})", legacy.index, legacy.id);
-    }
+fn rows_are_deterministic() {
+    assert_eq!(command_rows(), command_rows());
 }
 
 #[test]

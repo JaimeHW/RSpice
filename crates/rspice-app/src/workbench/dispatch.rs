@@ -732,8 +732,8 @@ mod tests {
     use rspice_app_state::state::command_catalog::CommandCatalog;
 
     /// Create pins and the seven kinds the registry lists are the design
-    /// feature's, each under its own id; the id the legacy table answered for
-    /// a kind it did not list names nothing.
+    /// feature's, each under its own id, and none is a shell command; the id
+    /// the shell once answered for a kind it did not list names nothing.
     #[test]
     fn the_listed_placements_are_the_design_features_and_place_component_names_nothing() {
         for command in [
