@@ -1207,16 +1207,15 @@ const PSS_GENERATED_FLUX: &str = "a voltage contribution takes the time derivati
      branch current (an inductance), and the shooting state fixes node voltages, not branch \
      currents";
 
-/// Why shooting refuses a generated model with an `idt` site harmonic
-/// balance carries as an unknown of its own: the period map starts from node
-/// voltages and the charges they fix, and an integral's value is a state of
-/// its own that none of them fixes. A `ddt` site's operand is a function of
-/// those voltages, so shooting integrates it as a charge; settled transients
-/// confirm it on every shipped model with one.
+/// Why shooting refuses a generated model that carries both a `ddt` and an
+/// `idt` as unknowns of their own: a period starts with every carried
+/// integral held at its coordinate, and the hold that does so also holds a
+/// carried `ddt` at zero, so its charge would not be seeded. No shipped model
+/// carries both.
 #[cfg(feature = "veriloga-builtins-base")]
-const PSS_GENERATED_CARRIED_SITE: &str = "its residual is not F(x) + dQ(x)/dt: harmonic balance \
-     carries an `idt` of it as an unknown of its own, and the shooting state fixes node \
-     voltages and charges, not an integral's value";
+const PSS_GENERATED_CARRIED_SITE: &str = "harmonic balance carries both a `ddt` and an `idt` of \
+     it as unknowns of their own, and a shooting period starts its integrals from a hold that \
+     would not seed the `ddt`'s charge";
 
 /// Harmonic balance refuses a generated compact model whose generator could
 /// not prove its residual `F(x) + dQ(x)/dt`, with the generator's reason, or
@@ -1241,12 +1240,9 @@ fn hb_generated_refusal<const PROBE_DEVICES: bool>(
             })
             .or_else(|| {
                 (matches!(analysis, CapabilityAnalysis::Pss)
-                    && device.harmonic_balance_periodic_sites().iter().any(|kind| {
-                        matches!(
-                            kind,
-                            rspice_veriloga_runtime::GeneratedPeriodicKind::Integral
-                        )
-                    }))
+                    && device.periodic_integral_count() > 0
+                    && device.periodic_integral_count()
+                        < device.harmonic_balance_periodic_sites().len())
                 .then_some(PSS_GENERATED_CARRIED_SITE)
             })
             .or_else(|| {

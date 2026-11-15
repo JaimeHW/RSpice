@@ -1397,12 +1397,9 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
                     #[cfg(feature = "veriloga-builtins-base")]
                     if circuit.generated_veriloga_devices.iter().any(|device| {
                         device.harmonic_balance_refusal().is_some()
-                            || device.harmonic_balance_periodic_sites().iter().any(|kind| {
-                                matches!(
-                                    kind,
-                                    rspice_veriloga_runtime::GeneratedPeriodicKind::Integral
-                                )
-                            })
+                            || (device.periodic_integral_count() > 0
+                                && device.periodic_integral_count()
+                                    < device.harmonic_balance_periodic_sites().len())
                     }) {
                         gaps.push(CapabilityGap::new(
                             family,

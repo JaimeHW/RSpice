@@ -884,6 +884,20 @@ fn generated_models_whose_transient_cannot_settle_reach_shootings_orbit() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// Shooting carries each of PSP's non-quasi-static `idt` charges as a
+/// coordinate of its own, harmonic balance as an unknown of its own; both
+/// reach one orbit, under the shooting oracle's allowance.
+#[test]
+fn shooting_and_harmonic_balance_agree_on_a_generated_models_integrals() {
+    let mut failures = Vec::new();
+    for (family, circuit, node) in settled_fixtures() {
+        if family.starts_with("non-quasi-static MOSFET (PSP") {
+            check_against_shooting(family, circuit, node, &mut failures);
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// Run one shooting-oracle fixture through harmonic balance and shooting and
 /// compare their spectra under the allowance [`shooting_oracle_fixtures`]
 /// states.
@@ -946,19 +960,19 @@ fn check_against_shooting(family: &str, circuit: &str, node: &str, failures: &mu
 const FLUX: &str = "a voltage contribution takes the time derivative of its branch current (an \
                     inductance), and the shooting state fixes node voltages, not branch currents";
 
-/// Why shooting refuses a generated model with an `idt` site harmonic
-/// balance carries as an unknown of its own.
-const CARRIED_SITE: &str = "its residual is not F(x) + dQ(x)/dt: harmonic balance carries an \
-                            `idt` of it as an unknown of its own, and the shooting state fixes \
-                            node voltages and charges, not an integral's value";
+/// Why shooting refuses a generated model that carries both a `ddt` and an
+/// `idt` as unknowns of their own.
+const CARRIED_SITE: &str = "harmonic balance carries both a `ddt` and an `idt` of it as \
+                            unknowns of their own, and a shooting period starts its integrals \
+                            from a hold that would not seed the `ddt`'s charge";
 
 /// Shooting reaches the same settled transient for every fixture harmonic
 /// balance does, under the same allowance, or refuses before solving a model
-/// with an `idt` site harmonic balance carries as an unknown of its own, or
-/// one whose source branch stores flux: the period map integrates each
-/// generated model's charges, its `ddt` operands among them, from the state
-/// the period starts at, with the nodes its own source branches tie taken as
-/// one.
+/// whose source branch stores flux: the period map integrates each generated
+/// model's charges, its `ddt` operands among them, from the state the period
+/// starts at, with the nodes its own source branches tie taken as one, and
+/// carries each `idt` as a coordinate of its own (PSP's non-quasi-static
+/// charges).
 #[test]
 fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
     let mut failures = Vec::new();
@@ -1167,8 +1181,6 @@ fn shooting_refuses_a_generated_model_by_its_reason() {
     use rspice_core::identity::AnalysisKind;
     use rspice_core::{SimulationError, UnsupportedCapabilityError};
     let cases: Vec<(&str, &str, &str, &str)> = vec![
-        #[cfg(feature = "veriloga-model-pspnqs102va")]
-        ("XN d d 0 0 pspnqs102va", "XN", "pspnqs102va", CARRIED_SITE),
         // A 1 mH drain inductance, whose current the period map would miss:
         // admitted, shooting stops short of the settled transient.
         #[cfg(feature = "veriloga-model-angelov")]

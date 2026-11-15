@@ -3626,6 +3626,15 @@ impl Engine {
         }
         let size = circuit.matrix_size();
         let mut initial = circuit.clone();
+        // A carried integral holds the value its coordinate gave it: the
+        // consistency solve reads each `idt`'s output there, not at its
+        // initial condition.
+        if initial.generated_integrals.dimension() > 0 {
+            let integrals = initial.generated_integrals.extract(&initial.circuit);
+            initial
+                .generated_integrals
+                .hold(&mut initial.circuit, &integrals);
+        }
         initial.add_initial_constraints(abort)?;
         self.ensure_matrix_unknowns(initial.matrix_size())?;
         let mut extra = initial.initial_extra_pattern();

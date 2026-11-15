@@ -605,6 +605,12 @@ impl BuiltinVerilogADevices {
         self.devices.get().iter()
     }
 
+    #[inline]
+    #[doc(hidden)]
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut BuiltinVerilogAInstance> {
+        self.devices.get_mut().iter_mut()
+    }
+
     /// Whether a second Newton load of every instance at the same candidate
     /// assembles exactly the first: no instance limits its iterates through
     /// an active `$limit`, which anchors each load at the one before, and
@@ -1195,6 +1201,123 @@ impl BuiltinVerilogAInstance {
         &mut self,
     ) -> Option<&mut rspice_veriloga_runtime::GeneratedPeriodicFrame> {
         self.periodic_frame.as_deref_mut()
+    }
+
+    /// How many `idt` sites this model carries as states of their own: its
+    /// carried sites after the `ddt` ones, one per `idt` slot in slot order.
+    pub fn periodic_integral_count(&self) -> usize {
+        self.harmonic_balance_periodic_sites()
+            .iter()
+            .filter(|kind| {
+                matches!(
+                    kind,
+                    rspice_veriloga_runtime::GeneratedPeriodicKind::Integral
+                )
+            })
+            .count()
+    }
+
+    /// The site of the `index`-th carried `idt`, in the frame's site order.
+    fn periodic_integral_site(&self, index: usize) -> usize {
+        self.harmonic_balance_periodic_sites().len() - self.periodic_integral_count() + index
+    }
+
+    /// Hold each carried `idt`'s output at `values`, one per integral in slot
+    /// order, through the evaluations that follow, each recording the
+    /// integrand it saw; a carried `ddt` evaluates to zero, as with inactive
+    /// coefficients. `seed` gives one integral's output a unit tangent along
+    /// one derivative lane, so a seeded stamp differs from a held one, in that
+    /// lane's column, by the partials with respect to that output. A shooting
+    /// period starts from integrals held so; [`Self::start_held_integrals`]
+    /// or [`Self::release_held_integrals`] ends the hold.
+    pub fn hold_integrals(&mut self, values: &[Value], seed: Option<(usize, u32)>) {
+        let sites = self.harmonic_balance_periodic_sites().len();
+        let first = sites - self.periodic_integral_count();
+        let mut outputs = vec![0.0; sites];
+        let mut seeds = vec![None; sites];
+        for (index, &value) in values.iter().enumerate() {
+            if let Some(output) = outputs.get_mut(first + index) {
+                *output = value;
+            }
+        }
+        if let Some((index, lane)) = seed
+            && let Some(slot) = seeds.get_mut(first + index)
+        {
+            *slot = Some(lane);
+        }
+        self.periodic_frame
+            .get_or_insert_with(|| {
+                Box::new(rspice_veriloga_runtime::GeneratedPeriodicFrame::new(sites))
+            })
+            .prepare(&outputs, &seeds);
+    }
+
+    /// The integrand the `index`-th held integral saw at the last held
+    /// evaluation, `NaN` when the model did not evaluate it or nothing holds
+    /// it.
+    pub fn held_integrand(&self, index: usize) -> Value {
+        let site = self.periodic_integral_site(index);
+        self.periodic_frame
+            .as_deref()
+            .map_or(Value::NAN, |frame| frame.input(site))
+    }
+
+    /// The `index`-th held integral's integrand partial along `lane` at the
+    /// last held evaluation, `None` where none was taken.
+    pub fn held_integrand_partial(&self, index: usize, lane: u32) -> Option<Value> {
+        let site = self.periodic_integral_site(index);
+        self.periodic_frame.as_deref()?.input_partial(site, lane)
+    }
+
+    /// Every lane the `index`-th held integral's integrand was differentiated
+    /// along at the last held evaluation.
+    pub fn held_integrand_lanes(&self, index: usize, lanes: &mut Vec<u32>) {
+        lanes.clear();
+        let site = self.periodic_integral_site(index);
+        if let Some(frame) = self.periodic_frame.as_deref() {
+            frame.input_lanes(site, lanes);
+        }
+    }
+
+    /// End a hold without touching accepted state.
+    pub fn release_held_integrals(&mut self) {
+        self.periodic_frame = None;
+    }
+
+    /// End the hold and start each `idt`'s accepted history at `values`, the
+    /// value it was held at, with the integrand the last held evaluation
+    /// recorded as its previous input, as a transient's first point starts
+    /// one at its initial condition. An integral the model did not evaluate
+    /// keeps the input it had.
+    pub fn start_held_integrals(&mut self, values: &[Value]) -> Result<(), String> {
+        let mut state = self.kind.capture_persistent_state();
+        if values.len() != state.idt_previous.len()
+            || values.len() != self.periodic_integral_count()
+        {
+            self.periodic_frame = None;
+            return Err(format!(
+                "generated Verilog-A device '{}' carries {} integrals, not {}",
+                self.instance_name,
+                state.idt_previous.len(),
+                values.len()
+            ));
+        }
+        for (slot, &value) in values.iter().enumerate() {
+            let input = self.held_integrand(slot);
+            state.idt_previous[slot] = value;
+            state.idt_older[slot] = value;
+            if input.is_finite() {
+                state.idt_input_previous[slot] = input;
+            }
+            state.idt_initialized[slot] = true;
+        }
+        self.periodic_frame = None;
+        self.kind.restore_persistent_state(&state)
+    }
+
+    /// Each `idt`'s accepted integral, in slot order.
+    pub fn accepted_integrals(&self) -> Vec<Value> {
+        self.kind.capture_persistent_state().idt_previous
     }
 
     /// The zero-based circuit unknown a derivative lane (a model unknown:
@@ -2713,7 +2836,9 @@ impl BuiltinVerilogAInstance {
             self.analysis_final_step,
             simparams,
         )
-        .with_analysis_phase(self.analysis_phase);
+        .with_analysis_phase(self.analysis_phase)
+        // A shooting recurrence holds its carried integrals here.
+        .with_periodic_frame(self.periodic_frame.as_deref());
         if !self
             .static_stamp_cache
             .axis_indices_match(&self.nodes, &self.branches, num_nodes)
@@ -2775,7 +2900,9 @@ impl BuiltinVerilogAInstance {
             self.analysis_final_step,
             simparams,
         )
-        .with_analysis_phase(self.analysis_phase);
+        .with_analysis_phase(self.analysis_phase)
+        // A shooting recurrence holds its carried integrals here.
+        .with_periodic_frame(self.periodic_frame.as_deref());
         if !self
             .static_stamp_cache
             .axis_indices_match(&self.nodes, &self.branches, num_nodes)

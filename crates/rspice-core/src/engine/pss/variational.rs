@@ -31,10 +31,12 @@
 //! BSIM/EKV/SOI/VDMOS model, a magnetic core, a memristor, an XSPICE model),
 //! an inductor, a capacitor expression, a switch, a line, a
 //! behavioral source or a runtime Verilog-A module, or a basis with a winding
-//! current, an integral, a delayed wave, a descriptor or amplifier
+//! current, an expression integral, a delayed wave, a descriptor or amplifier
 //! constraints, keeps the central-difference columns, as does one whose
 //! recurrence a seeded direction of the map does not confirm or whose step
-//! matrix does not factor.
+//! matrix does not factor. A generated model's `idt`, carried as a
+//! coordinate of its own, enters the recurrence as one more stored quantity
+//! (see `integral`).
 
 use super::{PssCircuit, PssJacobianProbe, PssStateTrace, PssTraversal};
 use crate::abort_signal::AbortSignal;
@@ -44,6 +46,8 @@ use crate::solver::{
     ComplexMatrix, FactorizationRequest, NumericFactorizationPolicy, StaticMatrix,
 };
 use crate::{CircuitData, Value};
+
+mod integral;
 
 /// How many columns go through the steps together.
 const COLUMNS_PER_BLOCK: usize = 32;
@@ -142,9 +146,17 @@ impl Engine {
         linearized.link_indices(&structure);
         let mut operator = ComplexMatrix::from_real_structure(&structure);
         let mut parts = Vec::with_capacity(trace.solutions.len());
-        for solution in &trace.solutions {
+        let physical = readout.len();
+        for (solution, state) in trace.solutions.iter().zip(&trace.states) {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
+            }
+            // Each carried integral holds its value at this point, so the
+            // operator is the model's partials with every integral held.
+            if let Some(integrals) = state.get(physical..)
+                && !integrals.is_empty()
+            {
+                circuit.generated_integrals.hold(&mut linearized, integrals);
             }
             Self::prepare_small_signal_state(&mut linearized, solution)?;
             Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
@@ -182,6 +194,17 @@ impl Engine {
         if !template.stored_positions().eq(positions.iter().copied()) {
             return Ok(None);
         }
+        let carried = circuit.generated_integrals.dimension();
+        if carried > 0 {
+            return self.pss_integral_monodromy(
+                circuit,
+                x0,
+                probe,
+                (&trace, &parts, &positions, options),
+                &readout,
+                abort,
+            );
+        }
         let mut steps = Vec::with_capacity(trace.steps.len());
         for (&(h, coefficients), (g, c)) in trace.steps.iter().zip(&parts[1..]) {
             if !h.is_finite() || h <= 0.0 {
@@ -214,7 +237,7 @@ impl Engine {
             .into_iter()
             .map(|start| start[1..].iter().copied().take(n).collect())
             .collect();
-        let Some(images) = propagate(n, &positions, &parts[0].1, &starts, &mut steps, abort)?
+        let Some(images) = propagate(n, &positions, &parts[0].1, &starts, &[], &mut steps, abort)?
         else {
             return Ok(None);
         };
@@ -305,6 +328,7 @@ fn propagate(
     positions: &[(usize, usize)],
     c0: &[Value],
     starts: &[Vec<Value>],
+    start_rates: &[Vec<Value>],
     steps: &mut [Step],
     abort: &dyn AbortSignal,
 ) -> Result<Option<Vec<Vec<Value>>>, SimulationError> {
@@ -324,6 +348,12 @@ fn propagate(
         earlier.clone_from(&charge);
         rate.clear();
         rate.resize(n * count, 0.0);
+        if !start_rates.is_empty() {
+            let first = images.len();
+            for (j, start) in start_rates[first..first + count].iter().enumerate() {
+                rate[j * n..(j + 1) * n].copy_from_slice(start);
+            }
+        }
         solved.clear();
         solved.resize(n * count, 0.0);
         if steps.is_empty() {

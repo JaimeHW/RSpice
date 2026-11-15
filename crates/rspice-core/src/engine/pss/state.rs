@@ -15,6 +15,8 @@ use voltage::{
 };
 mod forcing;
 use forcing::BehavioralForcing;
+mod integral;
+pub(super) use integral::PssGeneratedIntegrals;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ConstraintSource {
@@ -778,6 +780,9 @@ pub(in crate::engine) struct PssCircuit {
     /// Solution rows of the electrical nodes generated models reach, whose
     /// Newton steps are limited as the transient limits them.
     pub(super) generated_step_rows: Vec<usize>,
+    /// The `idt` sites generated models carry, the coordinates after the
+    /// expression integrals.
+    pub(super) generated_integrals: PssGeneratedIntegrals,
 }
 
 /// See [`PssCircuit::generated_step_rows`]: every node a generated model
@@ -897,10 +902,12 @@ impl PssCircuit {
         );
         let bsim3_history = Engine::initialize_bsim3_history(&circuit, &solution_scratch[1..]);
         let bsim4_history = Engine::initialize_bsim4_history(&circuit, &solution_scratch[1..]);
+        let generated_integrals = PssGeneratedIntegrals::new(&circuit);
         let integral_probe_scales = vec![
             1.0;
             circuit.behavioral_sources.integral_count()
                 + circuit.capacitors.integral_count()
+                + generated_integrals.dimension()
         ];
         let generated_step_rows = generated_step_rows(&circuit);
         Ok(Self {
@@ -932,6 +939,7 @@ impl PssCircuit {
             charge_source_offsets,
             current_source_times: [0.0; 2],
             generated_step_rows,
+            generated_integrals,
         })
     }
 
@@ -946,6 +954,7 @@ impl PssCircuit {
         self.physical_state_dimension()
             + self.behavioral_sources.integral_count()
             + self.capacitors.integral_count()
+            + self.generated_integrals.dimension()
             + self.delay_basis.dimension()
     }
 
@@ -959,15 +968,18 @@ impl PssCircuit {
     /// period start's charge-holding nodes from them: each coordinate's
     /// perturbation of the start's solution (rows counted from one, ground
     /// at zero) and the pair of rows whose difference it reads at the end.
-    /// `None` for any other basis: one with winding currents, integrals,
-    /// delayed waves, a descriptor or amplifier constraints, or a coordinate
+    /// A generated model's carried integrals may follow those coordinates;
+    /// the maps cover only the voltages. `None` for any other basis: one with
+    /// winding currents, expression integrals, delayed waves, a descriptor or
+    /// amplifier constraints, or a coordinate
     /// a device's own charge history holds.
     pub(super) fn charge_coordinate_maps(&self) -> Option<ChargeCoordinateMaps> {
         let basis = &self.basis;
         if basis.descriptor.is_some()
             || basis.voltage_constraints.is_some()
             || !basis.currents.representatives.is_empty()
-            || self.state_dimension() != basis.charge_branches.len()
+            || self.state_dimension()
+                != basis.charge_branches.len() + self.generated_integrals.dimension()
         {
             return None;
         }
@@ -1006,6 +1018,7 @@ impl PssCircuit {
             .into_iter()
             .chain(self.behavioral_sources.integral_names())
             .chain(self.capacitors.integral_names())
+            .chain(self.generated_integrals.names(&self.circuit))
             .chain(self.delay_basis.names(&self.circuit))
             .collect()
     }
@@ -1036,11 +1049,13 @@ impl PssCircuit {
 
     pub(super) fn record_integral_scales(&mut self) {
         if self.observing_integral_scales {
+            let generated = self.generated_integrals.extract(&self.circuit);
             for (scale, value) in self.integral_probe_scales.iter_mut().zip(
                 self.circuit
                     .behavioral_sources
                     .accepted_integrals()
-                    .chain(self.circuit.capacitors.accepted_integrals()),
+                    .chain(self.circuit.capacitors.accepted_integrals())
+                    .chain(generated),
             ) {
                 *scale = scale.max(value.abs());
             }
@@ -1133,6 +1148,7 @@ impl PssCircuit {
                 self.project_physical_coordinates(solution, None)
                     .chain(self.behavioral_sources.accepted_integrals())
                     .chain(self.capacitors.accepted_integrals())
+                    .chain(self.generated_integrals.extract(&self.circuit))
                     .chain(self.delay_basis.extract(&self.circuit)),
             )
             .enumerate()
@@ -1183,6 +1199,7 @@ impl PssCircuit {
             )
             .chain(self.behavioral_sources.accepted_integrals())
             .chain(self.capacitors.accepted_integrals())
+            .chain(self.generated_integrals.extract(&self.circuit))
             .chain(self.delay_basis.extract(&self.circuit))
             .collect()
     }
@@ -1197,8 +1214,9 @@ impl PssCircuit {
         let physical_count = self.physical_state_dimension();
         let behavioral_end = physical_count + self.behavioral_sources.integral_count();
         let integral_end = behavioral_end + self.capacitors.integral_count();
+        let generated_end = integral_end + self.generated_integrals.dimension();
         self.delay_basis
-            .set(&mut self.circuit, &state[integral_end..])?;
+            .set(&mut self.circuit, &state[generated_end..])?;
         self.circuit
             .behavioral_sources
             .reset_integrals(&state[physical_count..behavioral_end])
@@ -1330,10 +1348,11 @@ impl PssCircuit {
         }
         self.bsim3_history = Engine::initialize_bsim3_history(circuit, &self.solution_scratch[1..]);
         self.bsim4_history = Engine::initialize_bsim4_history(circuit, &self.solution_scratch[1..]);
-        #[cfg(feature = "veriloga-builtins-base")]
-        circuit
-            .seed_generated_veriloga_bias(&self.solution_scratch[1..])
-            .map_err(SimulationError::Circuit)?;
+        self.generated_integrals.seed(
+            circuit,
+            &self.solution_scratch[1..],
+            &state[integral_end..generated_end],
+        )?;
         #[cfg(feature = "veriloga")]
         circuit
             .seed_runtime_veriloga_bias(&self.solution_scratch[1..])
@@ -1381,10 +1400,9 @@ impl PssCircuit {
         }
         self.bsim3_history = Engine::initialize_bsim3_history(&self.circuit, solution);
         self.bsim4_history = Engine::initialize_bsim4_history(&self.circuit, solution);
-        #[cfg(feature = "veriloga-builtins-base")]
-        self.circuit
-            .seed_generated_veriloga_bias(solution)
-            .map_err(SimulationError::Circuit)?;
+        let integrals = self.generated_integrals.extract(&self.circuit);
+        self.generated_integrals
+            .seed(&mut self.circuit, solution, &integrals)?;
         #[cfg(feature = "veriloga")]
         self.circuit
             .seed_runtime_veriloga_bias(solution)

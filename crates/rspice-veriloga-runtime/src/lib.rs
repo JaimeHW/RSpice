@@ -2405,6 +2405,12 @@ impl<'a> GeneratedReactiveStamper<'a> {
         if ctx.evaluation_failed() {
             return None;
         }
+        // An installed frame holds every carried `idt` output at a supplied
+        // value: its transfer reaches the circuit through the solver's own
+        // unknown for it, so the operator has no `1/(jω)` term of it.
+        if idt > 0 && ctx.periodic_frame().is_some() {
+            return None;
+        }
         let error = if !self.omega.is_finite() || self.omega < 0.0 {
             Some("angular frequency must be finite and nonnegative")
         } else if self.omega == 0.0 && idt > 0 {
