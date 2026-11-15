@@ -1187,9 +1187,10 @@ fn a_symbol_whose_origin_moved_prints_the_same_drawing() {
 }
 
 /// A shape's style reaches the page: its weight scales the body's stroke, a
-/// broken outline prints broken in symbol units, and only a shape with an
-/// inside prints filled, in its outline's ink. The SVG export draws what the
-/// scene says.
+/// broken outline prints broken in symbol units, each dash set short by the
+/// width its round caps add and each dot a dash of next to nothing, and only
+/// a shape with an inside prints filled, in its outline's ink. The SVG export
+/// draws what the scene says.
 #[test]
 fn a_styled_shape_prints_its_weight_dash_and_fill() {
     use rspice_design::symbol::{SymbolFill, SymbolStroke};
@@ -1291,11 +1292,12 @@ fn a_styled_shape_prints_its_weight_dash_and_fill() {
     let (triangle, triangle_fill) = printed[0];
     assert_eq!(triangle.width.micrometres(), body_width * 2);
     assert_eq!(triangle.pattern, StrokePattern::Dashed);
+    let width = triangle.width.micrometres();
     assert_eq!(
         triangle.exact_dash,
         Some((
-            Length::from_micrometres(6 * unit),
-            Length::from_micrometres(4 * unit)
+            Length::from_micrometres(6 * unit - width),
+            Length::from_micrometres(4 * unit + width)
         ))
     );
     assert_eq!(
@@ -1313,8 +1315,11 @@ fn a_styled_shape_prints_its_weight_dash_and_fill() {
     assert_eq!(circle.width.micrometres(), body_width / 2);
     assert_eq!(circle.pattern, StrokePattern::Dotted);
     assert_eq!(
-        circle.exact_dot_spacing,
-        Some(Length::from_micrometres(3 * unit))
+        circle.exact_dash,
+        Some((
+            Length::from_micrometres(1),
+            Length::from_micrometres(4 * unit - 1)
+        ))
     );
     assert!(circle_fill.is_some());
 
@@ -1323,6 +1328,113 @@ fn a_styled_shape_prints_its_weight_dash_and_fill() {
     assert_eq!(arc.width.micrometres(), body_width * 2);
 
     assert!(svg.contains("stroke-dasharray"), "{svg}");
+}
+
+/// A broken outline prints the pattern the canvas draws, at every weight: a
+/// dash and a gap of six and four symbol units, and round dots as wide as the
+/// line, four units apart. Paper caps each dash round, lengthening it by the
+/// line's width; the pattern allows for that. The lines stand twenty units
+/// apart, which measures a unit on the page.
+#[test]
+fn a_broken_outline_prints_the_pattern_the_canvas_draws() {
+    use rspice_design::symbol::{SymbolFill, SymbolStroke};
+
+    let line = |y: i32, stroke, dash| SymbolShape::Polyline {
+        points: vec![SchematicPoint::new(0, y), SchematicPoint::new(200, y)],
+        closed: false,
+        style: SymbolStyle {
+            stroke,
+            dash,
+            fill: SymbolFill::None,
+        },
+    };
+    let lines = [
+        (SymbolStroke::Normal, SymbolDash::Dashed, 1.0),
+        (SymbolStroke::Heavy, SymbolDash::Dashed, 2.0),
+        (SymbolStroke::Normal, SymbolDash::Dotted, 1.0),
+        (SymbolStroke::Heavy, SymbolDash::Dotted, 2.0),
+    ];
+    let source = resolved_symbol_with_body(
+        lines
+            .iter()
+            .enumerate()
+            .map(|(index, (stroke, dash, _))| line(index as i32 * 20, *stroke, *dash))
+            .collect(),
+    );
+    let plan = HardcopyPlan::compile_with_id(
+        HardcopyPlanId::try_from_uuid(Uuid::from_u128(78)).unwrap(),
+        source.authority().clone(),
+        setup_with_watermark(OutputFormat::Png { dpi: 150 }, false, Watermark::None),
+        source.content_extent(),
+    )
+    .unwrap();
+    let page =
+        HardcopyRenderer::render_preview_page_resolved(&plan, &source, resolved_metadata(), 0, 150)
+            .unwrap();
+    let (width, height) = (page.width() as usize, page.height() as usize);
+    let inked = |x: usize, y: usize| {
+        let pixel = &page.rgba()[(y * width + x) * 4..][..3];
+        pixel.iter().map(|channel| u32::from(*channel)).sum::<u32>() < 3 * 128
+    };
+    // Each line is a band of inked rows; its middle row crosses every dash
+    // and every dot through its centre.
+    let rows = (0..height)
+        .map(|y| (0..width).any(|x| inked(x, y)))
+        .collect::<Vec<_>>();
+    let mut bands = Vec::new();
+    let mut start = None;
+    for (y, inked_row) in rows.iter().copied().chain([false]).enumerate() {
+        match (inked_row, start) {
+            (true, None) => start = Some(y),
+            (false, Some(first)) => {
+                bands.push((first + y - 1) / 2);
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    // The four lines are the run of bands spaced evenly apart; the page's
+    // own lettering stands clear of them.
+    let line_rows = bands
+        .windows(lines.len())
+        .find(|window| {
+            let steps = window.windows(2).map(|pair| pair[1] - pair[0]);
+            steps.clone().max().unwrap() - steps.min().unwrap() <= 2
+        })
+        .unwrap_or_else(|| panic!("four evenly spaced lines: {bands:?}"));
+    let unit = (line_rows[line_rows.len() - 1] - line_rows[0]) as f64
+        / (20.0 * (line_rows.len() - 1) as f64);
+    for ((stroke, dash, weight), row) in lines.iter().zip(line_rows.iter().copied()) {
+        // Ink and paper runs along the row, the partial ones at each end of
+        // the line left out.
+        let mut runs: Vec<(bool, usize)> = Vec::new();
+        for x in 0..width {
+            match runs.last_mut() {
+                Some((ink, length)) if *ink == inked(x, row) => *length += 1,
+                _ => runs.push((inked(x, row), 1)),
+            }
+        }
+        let runs = &runs[2..runs.len() - 2];
+        let mean = |ink: bool| {
+            let lengths = runs
+                .iter()
+                .filter(|(is_ink, _)| *is_ink == ink)
+                .map(|(_, length)| *length as f64)
+                .collect::<Vec<_>>();
+            lengths.iter().sum::<f64>() / lengths.len() as f64
+        };
+        let (drawn, skipped) = (mean(true), mean(false));
+        let (want_drawn, want_skipped) = match dash {
+            SymbolDash::Dashed => (6.0, 4.0),
+            _ => (*weight, 4.0 - weight),
+        };
+        assert!(
+            (drawn / unit - want_drawn).abs() < 0.5 && (skipped / unit - want_skipped).abs() < 0.5,
+            "a {stroke:?} {dash:?} line prints {:.2} units drawn and {:.2} skipped; the canvas draws {want_drawn} and {want_skipped}",
+            drawn / unit,
+            skipped / unit,
+        );
+    }
 }
 
 /// A run turned to read upward prints turned, set from the end of it its

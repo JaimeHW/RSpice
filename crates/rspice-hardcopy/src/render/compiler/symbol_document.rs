@@ -393,27 +393,34 @@ fn placed_run(
 /// pattern the print mapping gave the body's layer; a broken one is broken
 /// in symbol units, so the pattern keeps its proportion against the body on
 /// every page size, as it does on screen.
+///
+/// Paper caps every dash round, half the line's width past each end, where
+/// the canvas ends a dash square and draws a dot one width across. A dash is
+/// set short by the width and a dot is a dash of next to nothing, so the
+/// page shows the canvas's pattern at every weight.
 fn styled_print_stroke(stroke: StrokeStyle, style: SymbolStyle) -> StrokeStyle {
+    /// The dash a round cap turns into a dot one line width across.
+    const DOT_UM: f64 = 1.0;
     let scaled = (stroke.width.micrometres() as f64 * f64::from(style.stroke.scale())).round();
     let width = Length::from_micrometres((scaled as u64).max(1));
-    let units = |value: f32| {
-        Length::from_micrometres((f64::from(value) * SCHEMATIC_UNIT_UM as f64).round() as u64)
+    let Some((drawn, skipped)) = style.dash.pattern() else {
+        return StrokeStyle { width, ..stroke };
     };
-    match (style.dash, style.dash.pattern()) {
-        (SymbolDash::Dotted, Some((_, skipped))) => StrokeStyle {
-            width,
-            pattern: StrokePattern::Dotted,
-            exact_dash: None,
-            exact_dot_spacing: Some(units(skipped)),
-            ..stroke
-        },
-        (_, Some((drawn, skipped))) => StrokeStyle {
-            width,
-            pattern: StrokePattern::Dashed,
-            exact_dash: Some((units(drawn), units(skipped))),
-            exact_dot_spacing: None,
-            ..stroke
-        },
-        (_, None) => StrokeStyle { width, ..stroke },
+    let units = |value: f32| f64::from(value) * SCHEMATIC_UNIT_UM as f64;
+    let step = units(drawn + skipped);
+    let (pattern, dash) = match style.dash {
+        SymbolDash::Dotted => (StrokePattern::Dotted, DOT_UM),
+        _ => (
+            StrokePattern::Dashed,
+            (units(drawn) - width.micrometres() as f64).max(DOT_UM),
+        ),
+    };
+    let length = |value: f64| Length::from_micrometres(value.round() as u64);
+    StrokeStyle {
+        width,
+        pattern,
+        exact_dash: Some((length(dash), length(step - dash))),
+        exact_dot_spacing: None,
+        ..stroke
     }
 }
