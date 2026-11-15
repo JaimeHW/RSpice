@@ -287,39 +287,3 @@ fn copied_pss_identity_cannot_authenticate_payload_or_basis_tamper() {
         "PSS configuration",
     );
 }
-
-#[cfg(feature = "veriloga")]
-#[test]
-fn a_deserialized_pss_state_is_verified_when_it_is_read() {
-    let (engine, netlist, point) = produced();
-    let encoded = serde_json::to_value(&point).expect("retained PSS state serializes");
-    let decoded: PssOperatingPoint =
-        serde_json::from_value(encoded.clone()).expect("an untouched retained PSS state reads");
-    assert_eq!(decoded, point);
-    engine
-        .run_pac_from_pss_with_abort(&netlist, pac_config(), &decoded, &NoAbort)
-        .expect("PAC accepts the state read back");
-
-    let mut tampered = encoded.clone();
-    let state = tampered["shooting_state"][0]
-        .as_f64()
-        .expect("the shooting state is numeric");
-    tampered["shooting_state"][0] = serde_json::json!(state + 0.125);
-    let error = serde_json::from_value::<PssOperatingPoint>(tampered)
-        .expect_err("a tampered retained PSS state must not read");
-    assert!(
-        error
-            .to_string()
-            .contains("numerical payload does not match"),
-        "the read should name the payload mismatch: {error}"
-    );
-
-    let mut legacy = encoded;
-    legacy
-        .as_object_mut()
-        .expect("the retained PSS state is an object")
-        .remove("producer_identity");
-    let legacy: PssOperatingPoint =
-        serde_json::from_value(legacy).expect("an identityless artifact still reads");
-    assert!(legacy.producer_identity().is_none());
-}

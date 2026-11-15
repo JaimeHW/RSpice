@@ -7067,4 +7067,54 @@ mod tests {
         assert!(message.contains("changed during the test traversal"));
         assert!(message.contains("external-file content"));
     }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn a_deserialized_pss_state_is_verified_when_it_is_read() {
+        let netlist = Netlist::parse(
+            "retained PSS read\nV1 in 0 DC 1\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 1p\n.end\n",
+        )
+        .unwrap();
+        let engine = Engine::new(SimulationConfig::default());
+        let config = PssConfig::new(1.0e6)
+            .with_harmonics(4)
+            .with_points_per_period(32)
+            .with_tstab_periods(0)
+            .with_tolerance(1.0e-7);
+        let point = engine
+            .run_pss_operating_point_with_abort(&netlist, config, &NoAbort)
+            .unwrap();
+        // The producer's identity binds the configuration resolved for the deck.
+        let resolved = engine.resolved_for_netlist(&netlist);
+        let encoded = serde_json::to_value(&point).unwrap();
+        let decoded: PssOperatingPoint = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(decoded, point);
+        decoded
+            .authenticate_producer(&netlist, &resolved.config, decoded.config())
+            .unwrap();
+
+        let mut tampered = encoded.clone();
+        let state = tampered["shooting_state"][0].as_f64().unwrap();
+        tampered["shooting_state"][0] = serde_json::json!(state + 0.125);
+        let error = serde_json::from_value::<PssOperatingPoint>(tampered)
+            .expect_err("a tampered retained PSS state must not read");
+        assert!(
+            error
+                .to_string()
+                .contains("numerical payload does not match"),
+            "{error}"
+        );
+
+        let mut legacy = encoded;
+        legacy.as_object_mut().unwrap().remove("producer_identity");
+        let legacy: PssOperatingPoint = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.producer_identity().is_none());
+        assert!(
+            legacy
+                .authenticate_producer(&netlist, &resolved.config, legacy.config())
+                .unwrap_err()
+                .to_string()
+                .contains("legacy identityless artifact")
+        );
+    }
 }
