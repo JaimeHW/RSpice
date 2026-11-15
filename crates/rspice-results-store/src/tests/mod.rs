@@ -2,4 +2,5 @@
 
 mod reader_tests;
 mod support;
+mod tile_tests;
 mod writer_tests;

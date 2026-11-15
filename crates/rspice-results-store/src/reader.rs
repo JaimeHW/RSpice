@@ -11,7 +11,7 @@ use crate::codec::{self, Codec};
 use crate::digest::{Digest, LogicalDigest};
 use crate::format::{
     Cursor, FORMAT_VERSION, FRAME_HEADER_LEN, FrameHeader, FrameKind, LEVEL1_ROWS, POINTERS_AT,
-    SEGMENT_MAGIC, SUPERBLOCK_LEN, fold_max, fold_min, frame_crc,
+    SEGMENT_MAGIC, SUPERBLOCK_LEN, bucket_rows, fold_max, fold_min, frame_crc, summary_frame_rows,
 };
 use crate::writer::{AnalogColumn, INDEX_ENTRY_LEN, RunStatus};
 use crate::{RunMeta, Schema, SegmentIo, StoreError};
@@ -41,10 +41,23 @@ impl ChunkRef {
     }
 }
 
+/// Where one `SUMMARY` frame is and what it covers.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SummaryRef {
+    pub(crate) offset: u64,
+    pub(crate) first_row: u64,
+    pub(crate) rows: u64,
+    pub(crate) buckets: u32,
+    pub(crate) x_min: f64,
+    pub(crate) x_max: f64,
+}
+
 /// Every frame the reader found, in stream order.
 #[derive(Default)]
 struct Catalogue {
     chunks: Vec<ChunkRef>,
+    /// `summaries[0]` is level 2.
+    summaries: Vec<Vec<SummaryRef>>,
     rows: u64,
     last_index: Option<u64>,
     /// A provisional frame was accepted: only provisional frames may follow it.
@@ -60,6 +73,33 @@ impl Catalogue {
         self.rows = chunk.end_row();
         self.chunks.push(chunk);
         true
+    }
+
+    /// Accept a summary frame only when it is the next of its level, follows a complete frame,
+    /// and covers rows already read.
+    fn summary(&mut self, level: u8, summary: SummaryRef) -> bool {
+        if level < 2 {
+            return false;
+        }
+        let index = usize::from(level - 2);
+        if index > self.summaries.len() {
+            return false;
+        }
+        if index == self.summaries.len() {
+            self.summaries.push(Vec::new());
+        }
+        let frames = &mut self.summaries[index];
+        let frame_rows = summary_frame_rows(level);
+        let fits = summary.first_row == frames.len() as u64 * frame_rows
+            && summary.rows > 0
+            && summary.rows <= frame_rows
+            && summary.first_row + summary.rows <= self.rows
+            && u64::from(summary.buckets) == summary.rows.div_ceil(bucket_rows(level))
+            && frames.last().is_none_or(|last| last.rows == frame_rows);
+        if fits {
+            frames.push(summary);
+        }
+        fits
     }
 }
 
@@ -324,7 +364,7 @@ impl<I: SegmentIo> SegmentReader<I> {
         for _ in 0..count {
             let kind = FrameKind::from_u8(cursor.u8()?)
                 .ok_or_else(|| cursor.error("unknown frame kind"))?;
-            let _level = cursor.u8()?;
+            let level = cursor.u8()?;
             cursor.u16()?;
             let _signal = cursor.u32()?;
             let frame = cursor.u64()?;
@@ -332,6 +372,20 @@ impl<I: SegmentIo> SegmentReader<I> {
             let count = cursor.u64()?;
             let x_min = cursor.f64()?;
             let x_max = cursor.f64()?;
+            if kind == FrameKind::Summary {
+                let buckets = count.div_ceil(bucket_rows(level.max(2))) as u32;
+                let summary = SummaryRef {
+                    offset: frame,
+                    first_row: first,
+                    rows: count,
+                    buckets,
+                    x_min,
+                    x_max,
+                };
+                if frame >= offset || !catalogue.summary(level, summary) {
+                    return Err(cursor.error("an index lists a summary out of order"));
+                }
+            }
             if kind == FrameKind::Chunk {
                 let rows = u32::try_from(count)
                     .map_err(|_| cursor.error("a chunk of more than 2^32 rows"))?;
@@ -382,6 +436,9 @@ impl<I: SegmentIo> SegmentReader<I> {
             }
             let accepted = match header.kind {
                 FrameKind::Chunk => self.scan_chunk(catalogue, at, &payload).unwrap_or(false),
+                FrameKind::Summary if !header.partial() => {
+                    self.scan_summary(catalogue, at, &payload).unwrap_or(false)
+                }
                 FrameKind::Index if !header.partial() => {
                     let fits = payload.len() >= 24
                         && u64_at(&payload, 0) == catalogue.last_index.unwrap_or(u64::MAX)
@@ -437,6 +494,83 @@ impl<I: SegmentIo> SegmentReader<I> {
                 x_max,
             },
         ))
+    }
+
+    fn scan_summary(
+        &self,
+        catalogue: &mut Catalogue,
+        offset: u64,
+        payload: &[u8],
+    ) -> Result<bool, StoreError> {
+        let mut cursor = Cursor::new(payload, offset + FRAME_HEADER_LEN as u64);
+        let level = cursor.u8()?;
+        cursor.take(3)?;
+        let buckets = cursor.u32()?;
+        let _ordinal = cursor.u64()?;
+        let first_row = cursor.u64()?;
+        let rows = cursor.u64()?;
+        if payload.len() != 32 + 16 * buckets as usize * (1 + self.analog.len()) {
+            return Ok(false);
+        }
+        let (mut x_min, mut x_max) = (f64::NAN, f64::NAN);
+        for _ in 0..buckets {
+            x_min = fold_min(x_min, cursor.f64()?);
+            x_max = fold_max(x_max, cursor.f64()?);
+        }
+        let summary = SummaryRef {
+            offset,
+            first_row,
+            rows,
+            buckets,
+            x_min,
+            x_max,
+        };
+        Ok(catalogue.summary(level, summary))
+    }
+
+    pub(crate) fn chunks(&self) -> &[ChunkRef] {
+        &self.catalogue.chunks
+    }
+
+    /// The `SUMMARY` frames of `level` (2 and up), in row order.
+    pub(crate) fn summaries(&self, level: u8) -> &[SummaryRef] {
+        self.catalogue
+            .summaries
+            .get(usize::from(level).wrapping_sub(2))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The highest summary level with frames, or 1 (the chunks' own) when there are none.
+    pub(crate) fn top_level(&self) -> u8 {
+        self.catalogue.summaries.len() as u8 + 1
+    }
+
+    pub(crate) fn analog(&self) -> &[AnalogColumn] {
+        &self.analog
+    }
+
+    /// Read `count` little-endian f64 at `at`.
+    pub(crate) fn read_f64s(
+        &self,
+        at: u64,
+        count: usize,
+        out: &mut Vec<f64>,
+    ) -> Result<(), StoreError> {
+        let mut bytes = vec![0u8; count * 8];
+        if at + bytes.len() as u64 > self.size {
+            return Err(StoreError::corrupt(
+                at,
+                "a summary runs past the end of the segment",
+            ));
+        }
+        self.io.read_at(at, &mut bytes)?;
+        out.clear();
+        out.extend(
+            bytes
+                .chunks_exact(8)
+                .map(|b| f64::from_le_bytes(b.try_into().unwrap_or_default())),
+        );
+        Ok(())
     }
 
     /// Decode block `block` (0 is x, `1 + slot` a value slot) of `chunk` into `out`.

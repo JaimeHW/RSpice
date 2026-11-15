@@ -17,6 +17,8 @@ mod format;
 mod io;
 mod reader;
 mod schema;
+mod summary;
+mod tile;
 mod writer;
 
 #[cfg(test)]
@@ -29,4 +31,5 @@ pub use io::FileIo;
 pub use io::{MemoryIo, SegmentIo};
 pub use reader::{SegmentReader, SegmentState};
 pub use schema::{Axis, RunMeta, Schema, Signal, SignalKind};
+pub use tile::{Tile, pixel_of};
 pub use writer::{RunStatus, SegmentWriter, StopReason, StoreReceipt};

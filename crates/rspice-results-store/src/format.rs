@@ -52,11 +52,25 @@ impl FrameKind {
 
 /// Rows per level-1 summary bucket; level-1 summaries live in each `CHUNK`.
 pub(crate) const LEVEL1_ROWS: usize = 64;
+/// Each summary level's bucket spans this many buckets of the level below.
+pub(crate) const SUMMARY_FANOUT: u64 = 16;
+/// Buckets per `SUMMARY` frame.
+pub(crate) const SUMMARY_FRAME_BUCKETS: usize = 64;
 /// An `INDEX` frame is written after this many chunks ...
 pub(crate) const INDEX_CHUNKS: usize = 64;
 /// ... or as soon as this many frames wait for one, so the writer's index memory stays bounded when
 /// event frames outnumber chunks.
 pub(crate) const INDEX_ENTRY_LIMIT: usize = 4096;
+
+/// Rows in one bucket of summary `level` (level 1 is 64 rows; each level above is 16 times wider).
+pub(crate) fn bucket_rows(level: u8) -> u64 {
+    LEVEL1_ROWS as u64 * SUMMARY_FANOUT.pow(u32::from(level.saturating_sub(1)))
+}
+
+/// Rows one `SUMMARY` frame of `level` covers when it is complete.
+pub(crate) fn summary_frame_rows(level: u8) -> u64 {
+    bucket_rows(level) * SUMMARY_FRAME_BUCKETS as u64
+}
 
 /// Rows per chunk: `clamp(floor_pow2(1 Mi / slots), 256, 4096)`.
 ///

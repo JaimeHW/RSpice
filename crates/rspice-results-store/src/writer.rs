@@ -16,9 +16,10 @@
 use crate::digest::{Digest, LogicalDigest};
 use crate::format::{
     FLAG_PARTIAL, FORMAT_VERSION, FrameBuf, FrameKind, INDEX_CHUNKS, INDEX_ENTRY_LIMIT,
-    LEVEL1_ROWS, POINTERS_AT, POINTERS_LEN, SEGMENT_MAGIC, SUPERBLOCK_LEN, canonical, chunk_rows,
-    fold_max, fold_min,
+    LEVEL1_ROWS, POINTERS_AT, POINTERS_LEN, SEGMENT_MAGIC, SUPERBLOCK_LEN, bucket_rows, canonical,
+    chunk_rows, fold_max, fold_min, summary_frame_rows,
 };
+use crate::summary::{Pyramid, SummaryDirEntry};
 use crate::{RunMeta, Schema, SegmentIo, StoreError, codec};
 
 /// Why a run stopped before completing.
@@ -254,6 +255,8 @@ pub(crate) struct Encoder<I: SegmentIo> {
     index_first_row: u64,
     last_index: Option<u64>,
     index_dir: Vec<IndexDirEntry>,
+    pyramid: Pyramid,
+    summary_dir: Vec<SummaryDirEntry>,
     digest: LogicalDigest,
 }
 
@@ -288,6 +291,8 @@ impl<I: SegmentIo> Encoder<I> {
             index_first_row: 0,
             last_index: None,
             index_dir: Vec::new(),
+            pyramid: Pyramid::new(layout.analog.len()),
+            summary_dir: Vec::new(),
             digest: LogicalDigest::new(std::iter::empty()),
             layout,
             io: {
@@ -448,11 +453,68 @@ impl<I: SegmentIo> Encoder<I> {
             .rows(&batch.x, &batch.values, self.layout.slots, batch.rows);
         self.next_chunk += 1;
         self.rows += batch.rows as u64;
+        self.fold_level1();
+        for index in 0..self.pyramid.levels() {
+            if self.pyramid.is_full(index) {
+                self.write_summary(index)?;
+            }
+        }
         self.chunks_since_index += 1;
         if self.chunks_since_index >= INDEX_CHUNKS || self.entries.len() >= INDEX_ENTRY_LIMIT {
             self.write_index()?;
         }
         self.settle()
+    }
+
+    /// Fold the last chunk's level-1 buckets into the pyramid.
+    fn fold_level1(&mut self) {
+        let buckets = self.level1_x.len() / 2;
+        for bucket in 0..buckets {
+            let child = self.pyramid.child_mut();
+            for (column, pair) in child.chunks_exact_mut(2).enumerate() {
+                let at = column * 2 * buckets + 2 * bucket;
+                pair.copy_from_slice(&self.level1[at..at + 2]);
+            }
+            self.pyramid
+                .push_level1(self.level1_x[2 * bucket], self.level1_x[2 * bucket + 1]);
+        }
+    }
+
+    /// Write level `index`'s open `SUMMARY` frame.
+    fn write_summary(&mut self, index: usize) -> Result<(), StoreError> {
+        let level = index as u8 + 2;
+        let first_row = self.pyramid.frames(index) * summary_frame_rows(level);
+        let rows = (self.rows - first_row).min(summary_frame_rows(level));
+        debug_assert!(rows.div_ceil(bucket_rows(level)) <= 64);
+        let mut entry = self.pyramid.encode(index, first_row, rows, &mut self.frame);
+        entry.offset = self.emit_real()?;
+        self.entries.push(IndexEntry {
+            kind: FrameKind::Summary,
+            level,
+            signal: 0,
+            offset: entry.offset,
+            first: first_row,
+            count: rows,
+            x_min: entry.x_min,
+            x_max: entry.x_max,
+        });
+        self.summary_dir.push(entry);
+        Ok(())
+    }
+
+    /// At the end, every level writes what it holds, up to the first level that fits in one frame.
+    fn write_final_summaries(&mut self) -> Result<(), StoreError> {
+        let mut index = 0;
+        while index < self.pyramid.levels() {
+            if self.pyramid.close(index) {
+                self.write_summary(index)?;
+            }
+            if self.pyramid.frames(index) <= 1 {
+                break;
+            }
+            index += 1;
+        }
+        Ok(())
     }
 
     fn write_index(&mut self) -> Result<(), StoreError> {
@@ -507,6 +569,7 @@ impl<I: SegmentIo> Encoder<I> {
 
     /// Write the last frames and `END`; returns the receipt and the segment's I/O.
     pub(crate) fn finish(mut self, status: &RunStatus) -> Result<(StoreReceipt, I), StoreError> {
+        self.write_final_summaries()?;
         if !self.entries.is_empty() || self.last_index.is_none() {
             self.write_index()?;
         }
@@ -523,8 +586,7 @@ impl<I: SegmentIo> Encoder<I> {
         self.frame.put_u64(self.next_chunk);
         self.frame.put_u64(self.last_index.unwrap_or(u64::MAX));
         self.frame.put(&digest.0);
-        // Event totals and the summary directory follow; both are empty without event signals or
-        // summary frames.
+        // Event totals: none without event signals.
         self.frame.put_u32(0);
         self.frame.put_u32(self.index_dir.len() as u32);
         for entry in &self.index_dir {
@@ -535,7 +597,10 @@ impl<I: SegmentIo> Encoder<I> {
             self.frame.put_f64(entry.x_max);
             self.frame.put_u32(entry.entries);
         }
-        self.frame.put_u32(0);
+        self.frame.put_u32(self.summary_dir.len() as u32);
+        for entry in &self.summary_dir {
+            entry.put(&mut self.frame);
+        }
         let end = self.emit_real()?;
         self.settle()?;
         self.io.flush()?;
