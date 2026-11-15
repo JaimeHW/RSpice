@@ -7,24 +7,24 @@ use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::shortcuts::artifacts::DecodedShortcutArtifact;
-use crate::workbench::shortcuts::artifacts::DetectedShortcutArtifact;
-use crate::workbench::shortcuts::artifacts::ImportBindingClass;
-use crate::workbench::shortcuts::artifacts::ShortcutArtifactFormat;
-use crate::workbench::shortcuts::artifacts::ShortcutConflictPolicy;
-use crate::workbench::shortcuts::artifacts::ShortcutExportRequest;
-use crate::workbench::shortcuts::artifacts::ShortcutExportScope;
-use crate::workbench::shortcuts::artifacts::ShortcutImportOptions;
-use crate::workbench::shortcuts::artifacts::ShortcutImportPlan;
-use crate::workbench::shortcuts::artifacts::ShortcutMergePolicy;
-use crate::workbench::shortcuts::artifacts::build_shortcut_reference_model;
-use crate::workbench::shortcuts::artifacts::plan_shortcut_import;
-use crate::workbench::shortcuts::artifacts::{
+use egui::Context;
+use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
+use rspice_app_settings::workbench::shortcuts::artifacts::DecodedShortcutArtifact;
+use rspice_app_settings::workbench::shortcuts::artifacts::DetectedShortcutArtifact;
+use rspice_app_settings::workbench::shortcuts::artifacts::ImportBindingClass;
+use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutArtifactFormat;
+use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutConflictPolicy;
+use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutExportRequest;
+use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutExportScope;
+use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutImportOptions;
+use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutImportPlan;
+use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutMergePolicy;
+use rspice_app_settings::workbench::shortcuts::artifacts::build_shortcut_reference_model;
+use rspice_app_settings::workbench::shortcuts::artifacts::plan_shortcut_import;
+use rspice_app_settings::workbench::shortcuts::artifacts::{
     apply_shortcut_import, decode_shortcut_artifact_json, detect_shortcut_artifact,
     serialize_shortcut_reference_json,
 };
-use egui::Context;
-use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
 
 pub(crate) fn exported_artifact(profile: &ShortcutPreferences) -> DecodedShortcutArtifact {
     let model = build_shortcut_reference_model(
@@ -60,7 +60,7 @@ pub(crate) fn detected(profile: &ShortcutPreferences) -> DetectedShortcutArtifac
     detect_shortcut_artifact(
         "rspice-shortcuts.json",
         json.as_bytes(),
-        crate::workbench::shortcuts::artifacts::VscodeHostPlatform::Windows,
+        rspice_app_settings::workbench::shortcuts::artifacts::VscodeHostPlatform::Windows,
         command_registry(),
     )
     .unwrap()

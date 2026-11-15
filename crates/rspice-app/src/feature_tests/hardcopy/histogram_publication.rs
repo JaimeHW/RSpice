@@ -4,7 +4,7 @@
 use crate::feature_tests::hardcopy::source_reads;
 use crate::feature_tests::results::histogram_publication::{distribution, setup};
 use crate::workbench::ResultViewer;
-use crate::workbench::hardcopy_adapters::sources::{
+use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, PreparedRetainedHardcopyResolution, SemanticAxisKind,
     prepare_retained_hardcopy_resolution,
 };
@@ -65,8 +65,10 @@ fn histogram_publication_renders_every_mode_after_worker_transfer() {
             )
             .unwrap();
             let mut metadata =
-                crate::workbench::hardcopy_adapters::tests::source_metadata(&source, "RSpice")
-                    .unwrap();
+                rspice_app_hardcopy::workbench::hardcopy_adapters::tests::source_metadata(
+                    &source, "RSpice",
+                )
+                .unwrap();
             metadata.set_publication_timestamp(
                 HardcopyPublicationTimestamp::from_unix_seconds(1_788_761_600).unwrap(),
             );

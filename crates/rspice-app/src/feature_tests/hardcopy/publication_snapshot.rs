@@ -7,7 +7,7 @@ use crate::state::AnalysisType;
 use crate::state::RetainedTrace;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::feature::PublicationDraft;
-use crate::workbench::hardcopy_adapters::publication_snapshot::*;
+use rspice_app_hardcopy::workbench::hardcopy_adapters::publication_snapshot::*;
 use rspice_publication_contract::AnalysisRecord;
 use rspice_publication_contract::Dataset;
 use rspice_publication_contract::PublicationSection;

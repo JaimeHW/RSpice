@@ -1,7 +1,7 @@
 //! Staging a shortcut profile import against the product's own commands.
 
 use crate::state::shortcuts::MAX_SHORTCUT_SEQUENCE_STROKES;
-use crate::workbench::shortcuts::profile_workflow::*;
+use rspice_app_settings::workbench::shortcuts::profile_workflow::*;
 
 const VALID_SOURCE: &str = r#"{
     "format": "rspice.shortcuts/1",

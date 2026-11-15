@@ -31,8 +31,6 @@
 //!
 //! Its interior layering is ordered and ratcheted by
 //! `tests/module_layering.rs`, not by this file.
-#[cfg(test)]
-pub(crate) use rspice_app_cloud::workbench::account_organization;
 pub(crate) mod app;
 pub(crate) mod app_state;
 pub(crate) mod browser {
@@ -103,22 +101,12 @@ pub(crate) mod diagnostic_routes;
 pub(crate) use rspice_ui_kit::panels as design_system;
 mod dispatch;
 pub(crate) mod docks {
-    #[cfg(test)]
-    pub(crate) use inspector::run_details::RunDetailsDialogState;
     pub(crate) use navigator::stimulus_browser_state::StimulusBrowserState;
     pub use rspice_app_workbench::workbench::docks::*;
     pub(crate) mod inspector {
-        #[cfg(test)]
-        pub(crate) use rspice_app_project::workbench::docks::inspector::project;
-        #[cfg(test)]
-        pub(crate) use rspice_app_results::workbench::docks::inspector::results;
-        #[cfg(test)]
-        pub(crate) use rspice_app_results::workbench::docks::inspector::run_details;
         pub use rspice_app_workbench::workbench::docks::inspector::*;
     }
     pub(crate) mod navigator {
-        #[cfg(test)]
-        pub(crate) use rspice_app_simulate::workbench::docks::navigator::simulate;
         pub use rspice_app_workbench::workbench::docks::navigator::*;
         pub(crate) mod stimulus_browser_state;
         pub(in crate::workbench) use rspice_app_simulate::workbench::docks::navigator::verify;
@@ -128,12 +116,8 @@ pub(crate) mod documents {
     pub(crate) use rspice_app_code::workbench::documents::code_workspace;
     pub(crate) use rspice_app_code::workbench::documents::editor_font;
     pub(crate) use rspice_app_code::workbench::documents::netlist_document;
-    #[cfg(test)]
-    pub(crate) use rspice_app_code::workbench::documents::text_editor_commands;
     #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) use rspice_app_code::workbench::documents::virtual_text_editor;
-    #[cfg(test)]
-    pub(crate) use rspice_app_models::workbench::documents::model_correlation;
     pub(crate) use rspice_app_models::workbench::documents::model_editor;
     pub(crate) use rspice_app_results::workbench::documents::result_document;
     #[cfg(test)]
@@ -156,8 +140,6 @@ pub(crate) mod features;
 pub(crate) mod frame;
 pub(crate) mod system_contrast;
 pub(crate) use rspice_app_hardcopy::workbench::hardcopy;
-#[cfg(test)]
-pub(crate) use rspice_app_hardcopy::workbench::hardcopy_adapters;
 pub(crate) use rspice_app_workbench::workbench::framework;
 pub(crate) use rspice_app_workbench::workbench::layout;
 pub(crate) mod lifecycle {
@@ -170,8 +152,6 @@ pub(crate) mod lifecycle {
     //! views, selection, symbol editor, window bounds — none of which the project
     //! file itself persists.
 
-    #[cfg(test)]
-    pub(crate) use rspice_app_services::workbench::lifecycle::project_checkpoint;
     pub(crate) use rspice_app_services::workbench::lifecycle::project_lifecycle;
     pub(crate) use rspice_app_services::workbench::lifecycle::recovery;
     #[cfg(not(target_arch = "wasm32"))]
@@ -198,8 +178,6 @@ pub(crate) mod session {
 pub(crate) use rspice_app_settings::workbench::settings;
 pub(crate) use rspice_app_sheets::workbench::sheets;
 pub(crate) mod shell_host;
-#[cfg(test)]
-pub(crate) use rspice_app_settings::workbench::shortcuts;
 pub(crate) use rspice_app_simulate::workbench::simulate;
 pub(crate) mod slots;
 pub(crate) mod state;

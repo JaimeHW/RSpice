@@ -3,7 +3,7 @@
 
 use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::shortcuts::library_persistence::*;
+use rspice_app_settings::workbench::shortcuts::library_persistence::*;
 
 #[test]
 fn protected_override_acknowledgements_round_trip_in_device_local_store() {

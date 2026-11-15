@@ -649,7 +649,7 @@ fn the_netlist_first_overview_names_the_deck() {
 /// whatever the machine's recovery directory happens to hold.
 #[cfg(not(target_arch = "wasm32"))]
 fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSpiceApp {
-    use crate::workbench::lifecycle::project_checkpoint::{
+    use rspice_app_services::workbench::lifecycle::project_checkpoint::{
         ProjectCheckpointReason, fixture_quarantine, fixture_summary,
     };
 

@@ -6,8 +6,8 @@ use egui::os::OperatingSystem;
 
 use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
 use crate::state::shortcuts::ShortcutPreferences;
-use crate::workbench::shortcuts::artifacts::io::*;
-use crate::workbench::shortcuts::artifacts::projection::{
+use rspice_app_settings::workbench::shortcuts::artifacts::io::*;
+use rspice_app_settings::workbench::shortcuts::artifacts::projection::{
     ShortcutExportRequest, ShortcutExportScope, ShortcutReferenceModel,
     build_shortcut_reference_model, serialize_shortcut_reference_json,
 };

@@ -282,7 +282,7 @@ fn format_in_a_veriloga_cell_view_formats_that_views_document() {
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
 
-    crate::workbench::documents::text_editor_commands::queue_format_document(
+    rspice_app_code::workbench::documents::text_editor_commands::queue_format_document(
         &ctx,
         editor_id(bundle_id, "model.va"),
     );
@@ -319,7 +319,7 @@ fn two_cell_views_sharing_a_logical_path_keep_separate_carets() {
     // The editor's own caret request, applied by the editor on its next frame
     // and reported back the way a click would be.
     let place_caret = |ctx: &egui::Context, bundle_id: ProjectSourceId, index: usize| {
-        crate::workbench::documents::text_editor_commands::queue_caret_char_index(
+        rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index(
             ctx,
             editor_id(bundle_id, "model.va"),
             index,

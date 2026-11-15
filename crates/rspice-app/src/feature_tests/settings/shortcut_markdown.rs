@@ -4,8 +4,8 @@ use egui::os::OperatingSystem;
 
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::ShortcutPreferences;
-use crate::workbench::shortcuts::artifacts::markdown::*;
-use crate::workbench::shortcuts::artifacts::projection::{
+use rspice_app_settings::workbench::shortcuts::artifacts::markdown::*;
+use rspice_app_settings::workbench::shortcuts::artifacts::projection::{
     ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
 };
 

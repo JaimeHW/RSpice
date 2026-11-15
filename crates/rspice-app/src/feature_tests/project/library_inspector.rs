@@ -6,9 +6,9 @@ use rspice_app_state::veriloga_library::{BUILTIN_VERILOGA_MODELS, BuiltinVerilog
 
 use crate::state::ViewType;
 use crate::workbench::app_state::{AppState, SlotFacts};
-use crate::workbench::docks::inspector::project::{ProjectInspector, project_library};
 use crate::workbench::lifecycle::project_lifecycle::LifecycleView;
 use crate::workbench::project::workspace_state::ProjectPage;
+use rspice_app_project::workbench::docks::inspector::project::{ProjectInspector, project_library};
 
 /// Everything the Library page's inspector announces for `state`.
 fn announced(

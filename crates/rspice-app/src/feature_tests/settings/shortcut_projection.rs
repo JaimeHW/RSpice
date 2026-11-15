@@ -10,9 +10,9 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::shortcuts::artifacts::projection::*;
-use crate::workbench::shortcuts::artifacts::schema::ShortcutArtifactScope as ShortcutExportScope;
 use egui::os::OperatingSystem;
+use rspice_app_settings::workbench::shortcuts::artifacts::projection::*;
+use rspice_app_settings::workbench::shortcuts::artifacts::schema::ShortcutArtifactScope as ShortcutExportScope;
 use serde_json::Value;
 
 #[test]

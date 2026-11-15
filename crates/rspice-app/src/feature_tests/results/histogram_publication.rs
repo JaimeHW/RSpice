@@ -7,10 +7,10 @@ use crate::state::{
 };
 use crate::workbench::ResultViewer;
 use crate::workbench::app_state::AppState;
-use crate::workbench::hardcopy_adapters::sources::{
+use crate::workbench::state::WorkspaceDocumentId;
+use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, prepare_retained_hardcopy_resolution,
 };
-use crate::workbench::state::WorkspaceDocumentId;
 use rspice_hardcopy_contract::{
     BackgroundMode, ColorMapping, FontPolicy, HardcopyScope, HardcopySetup, OutputFormat,
     RenderSetup, RenderTarget,

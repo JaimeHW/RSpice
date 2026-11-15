@@ -4,10 +4,10 @@
 use crate::feature_tests::hardcopy::{resolve_retained_hardcopy_source, source_reads};
 use crate::state::{Point, Wire};
 use crate::workbench::AppState;
-use crate::workbench::hardcopy_adapters::sources::{
+use crate::workbench::state::WorkspaceDocumentId;
+use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::{
     PreparedRetainedHardcopyResolution, prepare_retained_hardcopy_resolution,
 };
-use crate::workbench::state::WorkspaceDocumentId;
 use rspice_formats::zip::deterministic_stored_zip;
 use rspice_hardcopy::render::{HardcopyPreviewPage, RenderedHardcopyPublication};
 use rspice_hardcopy::render::{HardcopyRenderer, HardcopySceneMetadata};
@@ -167,8 +167,11 @@ fn fixture_plan(source: &ResolvedHardcopyDocument, setup: HardcopySetup) -> Hard
 }
 
 fn fixture_metadata(source: &ResolvedHardcopyDocument) -> HardcopySceneMetadata {
-    crate::workbench::hardcopy_adapters::tests::source_metadata(source, "RSpice worker tests")
-        .expect("fixture metadata is valid")
+    rspice_app_hardcopy::workbench::hardcopy_adapters::tests::source_metadata(
+        source,
+        "RSpice worker tests",
+    )
+    .expect("fixture metadata is valid")
 }
 
 fn request(

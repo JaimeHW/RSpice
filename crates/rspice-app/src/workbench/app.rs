@@ -112,11 +112,6 @@ pub(crate) use dialogs::selection::bulk_edit::SelectionBulkEditDialogState;
 
 pub(crate) use dialogs::design_review_comments::DesignReviewCommentsDialogState;
 
-#[cfg(test)]
-pub(crate) use dialogs::veriloga_build_settings::{
-    VerilogABuildSettingsDraft, save_veriloga_build_settings,
-};
-
 pub(crate) use dialogs::create_model_bound_symbol::{
     CreateModelBoundSymbolDialogState, open_create_model_bound_symbol_dialog,
     open_create_subcircuit_bound_symbol_dialog,

@@ -8,7 +8,7 @@ use crate::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use crate::workbench::app::dialogs::hardcopy::publish::active_retained_source_selection;
 use crate::workbench::app::dialogs::hardcopy::publish::*;
 use crate::workbench::app::dialogs::hardcopy::render_hardcopy_dialog;
-use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
+use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
 use rspice_hardcopy::render::HardcopyRenderer;
 use rspice_hardcopy::render::HardcopySceneMetadata;
 use rspice_hardcopy_contract::DuplexMode;
@@ -214,8 +214,9 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
         .expect("one requested preview page"),
     ));
     app.state.hardcopy.hardcopy.source_resolution_generation = 19;
-    app.state.hardcopy.hardcopy.printer_report =
-        Some(crate::workbench::hardcopy_adapters::print::PrinterDiscoveryReport::default());
+    app.state.hardcopy.hardcopy.printer_report = Some(
+        rspice_app_hardcopy::workbench::hardcopy_adapters::print::PrinterDiscoveryReport::default(),
+    );
     app.state.hardcopy.hardcopy.printer_job = Some(
         PrinterJobSettings::try_new(
             ContentDigest::from_bytes([0x50; 32]),

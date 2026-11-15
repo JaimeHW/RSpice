@@ -2,8 +2,8 @@
 
 use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
 use crate::state::shortcuts::ShortcutPreferences;
-use crate::workbench::shortcuts::artifacts::projection::*;
 use egui::os::OperatingSystem;
+use rspice_app_settings::workbench::shortcuts::artifacts::projection::*;
 
 #[test]
 fn resolved_export_materializes_defaults_and_current_workspace_filters_contexts() {

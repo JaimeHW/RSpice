@@ -186,9 +186,10 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .unwrap();
-    let generated = crate::workbench::menu_bar::build_menu_netlist_in(&state.model)
-        .unwrap()
-        .source;
+    let generated =
+        rspice_app_code::workbench::menu_bar::netlist_export::build_menu_netlist_in(&state.model)
+            .unwrap()
+            .source;
     let inspection =
         SimulationController::prepare_design_netlist_for_inspection(&state.model).unwrap();
     assert_ne!(

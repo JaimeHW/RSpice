@@ -1,8 +1,8 @@
 //! Importing VS Code keybindings against the product's own commands.
 
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::shortcuts::artifacts::sha256;
-use crate::workbench::shortcuts::artifacts::vscode::*;
+use rspice_app_settings::workbench::shortcuts::artifacts::sha256;
+use rspice_app_settings::workbench::shortcuts::artifacts::vscode::*;
 use std::collections::BTreeSet;
 
 pub(crate) fn vscode(source: &str, platform: VscodeHostPlatform) -> VscodeShortcutAdaptation {

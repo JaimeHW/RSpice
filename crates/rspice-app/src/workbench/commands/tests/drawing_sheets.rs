@@ -58,7 +58,7 @@ fn sheet_properties_never_fall_back_to_symbol_hardcopy_media() {
         ));
     assert!(active_symbol_editor(&app));
     assert!(
-        crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(
+        rspice_app_hardcopy::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(
             &app.state.hardcopy.report_authoring,
             &app.state.model,
             &app.state.workbench,

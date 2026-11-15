@@ -18,9 +18,9 @@ use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::results::commands::ResultsCommand;
-use crate::workbench::shortcuts::artifacts::merge::*;
 use egui::Key;
 use egui::os::OperatingSystem;
+use rspice_app_settings::workbench::shortcuts::artifacts::merge::*;
 use std::collections::BTreeSet;
 
 fn set_sequence(

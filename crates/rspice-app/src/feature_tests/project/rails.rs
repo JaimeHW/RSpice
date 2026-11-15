@@ -22,7 +22,7 @@ fn project_app(page: ProjectPage) -> RSpiceApp {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn seed_recovery_catalog(state: &mut crate::workbench::app_state::AppState) {
-    use crate::workbench::lifecycle::project_checkpoint::{
+    use rspice_app_services::workbench::lifecycle::project_checkpoint::{
         ProjectCheckpointReason, fixture_summary,
     };
 

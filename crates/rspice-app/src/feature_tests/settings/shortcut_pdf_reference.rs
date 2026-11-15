@@ -5,8 +5,8 @@ use lopdf::{Document as ParsedPdf, Object};
 
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::ShortcutPreferences;
-use crate::workbench::shortcuts::artifacts::pdf::*;
-use crate::workbench::shortcuts::artifacts::projection::{
+use rspice_app_settings::workbench::shortcuts::artifacts::pdf::*;
+use rspice_app_settings::workbench::shortcuts::artifacts::projection::{
     ShortcutExportRequest, ShortcutExportScope, ShortcutReferenceModel,
     build_shortcut_reference_model,
 };

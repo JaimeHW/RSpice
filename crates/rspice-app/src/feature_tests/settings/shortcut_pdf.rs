@@ -5,12 +5,12 @@ use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::ShortcutPreferences;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::shortcuts::artifacts::pdf::*;
-use crate::workbench::shortcuts::artifacts::projection::ShortcutExportRequest;
-use crate::workbench::shortcuts::artifacts::projection::ShortcutExportScope;
-use crate::workbench::shortcuts::artifacts::projection::build_shortcut_reference_model;
 use egui::os::OperatingSystem;
 use lopdf::Document as ParsedPdf;
+use rspice_app_settings::workbench::shortcuts::artifacts::pdf::*;
+use rspice_app_settings::workbench::shortcuts::artifacts::projection::ShortcutExportRequest;
+use rspice_app_settings::workbench::shortcuts::artifacts::projection::ShortcutExportScope;
+use rspice_app_settings::workbench::shortcuts::artifacts::projection::build_shortcut_reference_model;
 
 #[test]
 fn pdf_excludes_private_profile_state_and_filesystem_paths() {

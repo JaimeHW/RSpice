@@ -15,14 +15,14 @@ use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::shortcuts::artifacts::merge::*;
-use crate::workbench::shortcuts::artifacts::schema::DecodedShortcutArtifact;
-use crate::workbench::shortcuts::artifacts::{
+use egui::Key;
+use egui::os::OperatingSystem;
+use rspice_app_settings::workbench::shortcuts::artifacts::merge::*;
+use rspice_app_settings::workbench::shortcuts::artifacts::schema::DecodedShortcutArtifact;
+use rspice_app_settings::workbench::shortcuts::artifacts::{
     ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     decode_shortcut_artifact_json, serialize_shortcut_reference_json,
 };
-use egui::Key;
-use egui::os::OperatingSystem;
 use serde_json::Value;
 
 pub(crate) fn artifact_from(profile: &ShortcutPreferences) -> DecodedShortcutArtifact {

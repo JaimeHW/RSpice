@@ -1,7 +1,7 @@
 //! Importing a legacy shortcut profile, in the case that binds the product's
 //! own commands.
 
-use crate::workbench::shortcuts::profile_workflow::*;
+use rspice_app_settings::workbench::shortcuts::profile_workflow::*;
 
 #[test]
 fn legacy_import_never_trusts_transferred_protected_acknowledgements() {

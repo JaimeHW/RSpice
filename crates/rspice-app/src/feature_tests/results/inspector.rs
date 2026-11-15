@@ -4,14 +4,14 @@
 use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
 use crate::workbench::ResultViewer;
-use crate::workbench::docks::inspector::results::*;
-use crate::workbench::docks::inspector::run_details;
 use crate::workbench::docks::inspector::show;
 use crate::workbench::state::Workspace;
 use egui::Color32;
 use egui::Pos2;
 use egui::Rect;
 use egui::Vec2;
+use rspice_app_results::workbench::docks::inspector::results::*;
+use rspice_app_results::workbench::docks::inspector::run_details;
 use rspice_results_ui::session::PaneAxis;
 
 #[test]

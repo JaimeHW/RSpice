@@ -10,8 +10,6 @@ mod file_menu;
 use rspice_app_results::workbench::menu_bar::waveform_export;
 
 pub(crate) use file_menu::{FileMenuAction, dispatch_file_menu_action};
-#[cfg(test)]
-pub(crate) use rspice_app_code::workbench::menu_bar::netlist_export::build_menu_netlist_in;
 pub(crate) use waveform_export::action_export_result_selection_with_io;
 #[cfg(test)]
 pub(crate) use waveform_export::{

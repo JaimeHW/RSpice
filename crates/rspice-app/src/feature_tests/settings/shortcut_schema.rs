@@ -2,7 +2,7 @@
 //! product's own commands.
 
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::shortcuts::artifacts::schema::*;
+use rspice_app_settings::workbench::shortcuts::artifacts::schema::*;
 
 #[test]
 fn imported_acknowledgements_and_source_paths_are_stripped() {

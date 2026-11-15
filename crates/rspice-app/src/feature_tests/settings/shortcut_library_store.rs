@@ -1,8 +1,10 @@
 //! The device-local shortcut library store over the product's own commands.
 
 use crate::state::shortcuts::ShortcutProfileLibrary;
-use crate::workbench::shortcuts::artifacts::{canonical_json_bytes, hex_digest, sha256};
-use crate::workbench::shortcuts::library_persistence::*;
+use rspice_app_settings::workbench::shortcuts::artifacts::{
+    canonical_json_bytes, hex_digest, sha256,
+};
+use rspice_app_settings::workbench::shortcuts::library_persistence::*;
 use serde_json::Value;
 use std::cell::RefCell;
 

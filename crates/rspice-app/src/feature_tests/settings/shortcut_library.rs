@@ -8,8 +8,8 @@ use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::requests::ResetShortcutResolver;
-use crate::workbench::shortcuts::library_persistence::PersistedShortcutProfileLibrary;
 use rspice_app_settings::workbench::app_state::session::shortcut_library::*;
+use rspice_app_settings::workbench::shortcuts::library_persistence::PersistedShortcutProfileLibrary;
 
 #[test]
 fn unacknowledged_completion_blocks_reentrant_publication() {
@@ -204,7 +204,7 @@ fn a_library_put_in_use_resets_the_resolver_before_the_next_shortcut() {
         restored
             .shortcut_library_parts()
             .install_shortcut_library_startup(NativeOrBrowserStartup::Native(
-                crate::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Ready {
+                rspice_app_settings::workbench::shortcuts::library_persistence::ShortcutProfileLibraryStartup::Ready {
                     persisted: Box::new(PersistedShortcutProfileLibrary::test_snapshot(
                         library, 2,
                     )),

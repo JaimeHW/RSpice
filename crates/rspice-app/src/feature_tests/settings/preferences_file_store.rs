@@ -186,7 +186,8 @@ fn settings_round_trip_with_unknown_keys_and_domains_kept() {
     file[THEME]["future-accent"] = json!("teal");
     file[PREFERENCES]["choices"]["future-density"] = json!(3);
     file[PREFERENCES]["future-domain"] = json!({"rows": [1, 2]});
-    let newer = crate::workbench::shortcuts::artifacts::canonical_json_bytes(file).unwrap();
+    let newer =
+        rspice_app_settings::workbench::shortcuts::artifacts::canonical_json_bytes(file).unwrap();
     std::fs::write(&path, &newer).unwrap();
 
     let mut second = bound(&store);

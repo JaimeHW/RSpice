@@ -11,12 +11,12 @@ use crate::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use crate::workbench::app::dialogs::hardcopy::publish::{
     active_retained_source_selection, apply_open_resolved, current_metadata, current_plan,
 };
-use crate::workbench::hardcopy_adapters::print::{
+use crate::workbench::state::WorkspaceDocumentId;
+use rspice_app_hardcopy::workbench::hardcopy_adapters::print::{
     PrinterCapabilityDescriptor, PrinterCapabilitySnapshot, PrinterPaperCapability,
     PrinterResolutionCapability, PrinterTrayCapability,
 };
-use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
-use crate::workbench::state::WorkspaceDocumentId;
+use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
 use rspice_hardcopy::render::{
     HardcopyRenderError, HardcopyRenderer, HardcopySceneMetadata, RenderedPrinterPages,
 };

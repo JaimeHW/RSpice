@@ -3,7 +3,6 @@
 //! console paints.
 
 use crate::services::license::LicenseInfo;
-use crate::workbench::account_organization::*;
 use crate::workbench::{
     AppState, BrowserHistoryEffect, RSpiceApp, RouteTransitionSource, SurfaceId, SurfaceRoute,
 };
@@ -11,6 +10,7 @@ use rspice_app_cloud::services::cloud_account::{
     CloudAccountAvailability, CloudSessionPhase, CloudSessionSnapshot, EntitlementSummary,
     LeaseSummary, NativeLicenseSummary, PrincipalSummary,
 };
+use rspice_app_cloud::workbench::account_organization::*;
 
 /// The console's parts in `app`.
 fn console_parts(app: &mut RSpiceApp) -> AccountConsoleParts<'_> {
@@ -26,7 +26,9 @@ fn console_parts(app: &mut RSpiceApp) -> AccountConsoleParts<'_> {
 /// Draw the console over `app`'s parts and run the command the reader
 /// asked of it, as the cloud feature's dialog step does.
 fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if let Some(key) = crate::workbench::account_organization::show(ctx, &mut console_parts(app)) {
+    if let Some(key) =
+        rspice_app_cloud::workbench::account_organization::show(ctx, &mut console_parts(app))
+    {
         app.execute_command_key(key);
     }
 }
@@ -34,9 +36,10 @@ fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
 /// Carry out `action` over `app`'s parts and run the command it asks
 /// for, as the cloud feature's dialog step does.
 fn execute_action(app: &mut RSpiceApp, action: AccountAction) {
-    if let Some(key) =
-        crate::workbench::account_organization::execute_action(&mut console_parts(app), action)
-    {
+    if let Some(key) = rspice_app_cloud::workbench::account_organization::execute_action(
+        &mut console_parts(app),
+        action,
+    ) {
         app.execute_command_key(key);
     }
 }

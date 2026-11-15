@@ -3,8 +3,10 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::cell::Cell;
 
-use crate::workbench::shortcuts::artifacts::import_io::*;
-use crate::workbench::shortcuts::artifacts::{DetectedShortcutArtifact, VscodeHostPlatform};
+use rspice_app_settings::workbench::shortcuts::artifacts::import_io::*;
+use rspice_app_settings::workbench::shortcuts::artifacts::{
+    DetectedShortcutArtifact, VscodeHostPlatform,
+};
 use std::path::{Path, PathBuf};
 
 const NATIVE_JSONC: &[u8] = br#"{
@@ -109,7 +111,7 @@ fn native_jsonc_retains_exact_bytes_digest_and_stable_filename() {
     assert_eq!(source.source_bytes(), NATIVE_JSONC);
     assert_eq!(
         source.source_digest(),
-        crate::workbench::shortcuts::artifacts::sha256(NATIVE_JSONC)
+        rspice_app_settings::workbench::shortcuts::artifacts::sha256(NATIVE_JSONC)
     );
     let DetectedShortcutArtifact::RSpice(artifact) = source.detected() else {
         panic!("native object must remain a native RSpice artifact")

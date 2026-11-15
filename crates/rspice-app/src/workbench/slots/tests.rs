@@ -14,10 +14,10 @@ use crate::workbench::app::dialogs::selection::commands::floating::{
     FloatingPaste, FloatingPasteOrigin,
 };
 use crate::workbench::app::dialogs::window_session::WindowSessionPage;
-use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::menu_bar::DatasetExportPicker;
 use crate::workbench::project::workspace_state::LibraryDeletionTarget;
+use rspice_app_results::workbench::docks::inspector::run_details::RunDetailsDialogState;
 use rspice_app_simulate::workbench::app::dialogs::plan_removal::PlanRemovalTarget;
 use rspice_schematic_editor::object_properties::ObjectPropertiesDraft;
 
@@ -192,7 +192,7 @@ fn open_veriloga_build_settings_alone(dialogs: &mut AppState) {
     let mut app = open_project_app();
     let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
-    crate::workbench::app::dialogs::veriloga_build_settings::open_veriloga_build_settings(
+    rspice_app_code::workbench::app::dialogs::veriloga_build_settings::open_veriloga_build_settings(
         &app.state.model,
         &mut app.state.code.veriloga_build_settings,
     )
