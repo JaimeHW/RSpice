@@ -21,6 +21,46 @@ pub enum SymbolTransform {
     MirrorVertical,
 }
 
+/// How a quarter turn or a mirror names itself and moves a selection about a
+/// pivot: its points, each pin's side, and each shape.
+struct SelectionMotion {
+    verb: &'static str,
+    point: fn(Point, Point) -> Point,
+    side: fn(SymbolPinSide) -> SymbolPinSide,
+    shape: fn(&mut SymbolShape, Point),
+}
+
+impl SymbolTransform {
+    fn motion(self) -> SelectionMotion {
+        match self {
+            Self::Rotate => SelectionMotion {
+                verb: "Rotate",
+                point: rotate_point_cw_about,
+                side: SymbolPinSide::turned_clockwise,
+                shape: rotate_shape_cw_about,
+            },
+            Self::RotateCounterClockwise => SelectionMotion {
+                verb: "Rotate",
+                point: rotate_point_ccw_about,
+                side: SymbolPinSide::turned_counter_clockwise,
+                shape: rotate_shape_ccw_about,
+            },
+            Self::MirrorHorizontal => SelectionMotion {
+                verb: "Mirror",
+                point: mirror_point_h_about,
+                side: SymbolPinSide::mirrored_horizontally,
+                shape: mirror_shape_h_about,
+            },
+            Self::MirrorVertical => SelectionMotion {
+                verb: "Mirror",
+                point: mirror_point_v_about,
+                side: SymbolPinSide::mirrored_vertically,
+                shape: mirror_shape_v_about,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SymbolEditAction {
     Paste {
@@ -101,48 +141,13 @@ pub fn apply_edit(
         }
         SymbolEditAction::Transform(transform) => {
             if let Some(metadata) = metadata {
-                match transform {
-                    SymbolTransform::Rotate => transform_selection(
-                        document,
-                        metadata,
-                        &selection,
-                        "Rotate",
-                        rotate_point_cw_about,
-                        SymbolPinSide::turned_clockwise,
-                        rotate_shape_cw_about,
-                        &mut outcome,
-                    ),
-                    SymbolTransform::RotateCounterClockwise => transform_selection(
-                        document,
-                        metadata,
-                        &selection,
-                        "Rotate",
-                        rotate_point_ccw_about,
-                        SymbolPinSide::turned_counter_clockwise,
-                        rotate_shape_ccw_about,
-                        &mut outcome,
-                    ),
-                    SymbolTransform::MirrorHorizontal => transform_selection(
-                        document,
-                        metadata,
-                        &selection,
-                        "Mirror",
-                        mirror_point_h_about,
-                        SymbolPinSide::mirrored_horizontally,
-                        mirror_shape_h_about,
-                        &mut outcome,
-                    ),
-                    SymbolTransform::MirrorVertical => transform_selection(
-                        document,
-                        metadata,
-                        &selection,
-                        "Mirror",
-                        mirror_point_v_about,
-                        SymbolPinSide::mirrored_vertically,
-                        mirror_shape_v_about,
-                        &mut outcome,
-                    ),
-                }
+                transform_selection(
+                    document,
+                    metadata,
+                    &selection,
+                    &transform.motion(),
+                    &mut outcome,
+                );
             }
         }
         SymbolEditAction::RenamePlacedPin { pin, name } => {
@@ -367,10 +372,7 @@ fn transform_selection(
     document: &mut SymbolDocument,
     metadata: &mut SymbolEditorMetadata,
     selection: &SymbolSelection,
-    verb: &str,
-    pin_transform: impl Fn(Point, Point) -> Point,
-    side_transform: impl Fn(SymbolPinSide) -> SymbolPinSide,
-    shape_transform: impl Fn(&mut SymbolShape, Point),
+    motion: &SelectionMotion,
     outcome: &mut SymbolEditOutcome,
 ) {
     let before = document.clone();
@@ -378,7 +380,7 @@ fn transform_selection(
     let mut changed = false;
     for index in selection.shapes.iter().copied() {
         if let Some(shape) = document.body.get_mut(index) {
-            shape_transform(shape, origin);
+            (motion.shape)(shape, origin);
             changed = true;
         }
     }
@@ -388,14 +390,14 @@ fn transform_selection(
         {
             // The pin turns with the selection: its lead still runs toward
             // the body that turned with it.
-            pin.position = Some(pin_transform(position, origin));
-            pin.side = side_transform(pin.side);
+            pin.position = Some((motion.point)(position, origin));
+            pin.side = (motion.side)(pin.side);
             changed = true;
         }
     }
     for kind in &selection.attributes {
         if let Some(attribute) = metadata.attribute_mut(*kind) {
-            attribute.position = pin_transform(attribute.position, origin);
+            attribute.position = (motion.point)(attribute.position, origin);
             match kind {
                 SymbolAttributeKind::Reference => {
                     document.name_anchor = attribute.position;
@@ -409,7 +411,7 @@ fn transform_selection(
         }
     }
     if changed {
-        outcome.step = format!("{verb} {}", selection_subject(&before, selection));
+        outcome.step = format!("{} {}", motion.verb, selection_subject(&before, selection));
         outcome.undo_before = Some(Box::new(before));
     }
     outcome.changed = changed;
