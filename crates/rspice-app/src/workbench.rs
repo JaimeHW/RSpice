@@ -46,11 +46,8 @@ pub(crate) mod browser {
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) use rspice_app_services::workbench::browser::accessibility;
-    pub(crate) use rspice_app_services::workbench::browser::background_alerts;
     #[cfg(any(test, target_arch = "wasm32"))]
     pub(crate) use rspice_app_services::workbench::browser::file_import;
-    #[cfg(all(target_arch = "wasm32", feature = "browser-qualification"))]
-    pub(crate) use rspice_app_services::workbench::browser::qualification;
 }
 pub(crate) mod chrome {
     pub(crate) use rspice_app_sheets::workbench::chrome::sheet_strip;
@@ -132,9 +129,6 @@ pub(crate) mod lifecycle {
     //! file itself persists.
 
     pub(crate) use rspice_app_services::workbench::lifecycle::project_lifecycle;
-    pub(crate) use rspice_app_services::workbench::lifecycle::recovery;
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) use rspice_app_services::workbench::lifecycle::recovery_checkpoint;
     pub(crate) mod session;
     pub(crate) use rspice_app_workbench::workbench::lifecycle::window_session;
 }

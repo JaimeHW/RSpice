@@ -503,7 +503,7 @@ const DIALOG_GATE: &[DialogRow] = &[
 /// found beside the file being opened.
 #[cfg(not(target_arch = "wasm32"))]
 const NATIVE_DIALOG_GATE: &[DialogRow] = &[("pending_autosave_restore", |dialogs| {
-    use crate::workbench::lifecycle::recovery_checkpoint::{
+    use rspice_app_services::workbench::lifecycle::recovery_checkpoint::{
         AutosaveRestoreCandidate, CheckpointBinding, CheckpointIdentity, CheckpointOwnership,
     };
     dialogs.platform.pending_autosave_restore = Some(AutosaveRestoreCandidate {

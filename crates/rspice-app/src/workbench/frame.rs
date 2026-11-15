@@ -481,14 +481,17 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     // reader is at it.
     let focused = ctx
         .input(|input| input.viewport().focused)
-        .or_else(crate::workbench::browser::background_alerts::reader_present);
+        .or_else(rspice_app_services::workbench::browser::background_alerts::reader_present);
     let mut request = None;
     for notice in notices {
         let wanted = attention_request(focused, notice.elapsed_seconds, notice.kind, attention);
         if wanted.is_some() {
             // A tab has no taskbar to mark. Its own notification says it,
             // where the reader turned those on.
-            crate::workbench::browser::background_alerts::alert(&notice.title, &notice.detail);
+            rspice_app_services::workbench::browser::background_alerts::alert(
+                &notice.title,
+                &notice.detail,
+            );
         }
         request = match (request, wanted) {
             (Some(egui::UserAttentionType::Critical), _)
@@ -549,7 +552,7 @@ fn attention_request(
     attention: BackgroundTaskAttention,
 ) -> Option<egui::UserAttentionType> {
     use crate::ui::widgets::ToastKind;
-    use crate::workbench::browser::background_alerts::AWAY_AFTER_SECONDS;
+    use rspice_app_services::workbench::browser::background_alerts::AWAY_AFTER_SECONDS;
 
     if window_focused != Some(false)
         || elapsed_seconds.is_nan()

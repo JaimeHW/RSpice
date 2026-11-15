@@ -39,7 +39,6 @@ mod technology_demand_tests;
 mod transaction;
 pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
-use crate::services::recent_files::RecentKind;
 use crate::state::notices::NoticeKind;
 use crate::state::{RunEvent, RunEventSink};
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
@@ -47,6 +46,7 @@ use crate::workbench::slots::{
     CloudState, CodeState, DesignState, HardcopyState, ModelsState, ProjectState, ResultsState,
     RunsState, SettingsState, SheetsState, ShellState, SimulateState,
 };
+use rspice_app_services::services::recent_files::RecentKind;
 use rspice_app_services::workbench::slots::platform::remember_recent_file;
 #[cfg(test)]
 use rspice_app_services::workbench::slots::platform::trim_recent_files;

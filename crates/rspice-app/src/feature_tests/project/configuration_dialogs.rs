@@ -2,7 +2,6 @@
 //! Delete ask and announce, and what leaving the project asks about edits
 //! that were not applied.
 
-use crate::services::recent_files::RecentKind;
 use crate::state::ConfigurationSetId;
 use crate::ui::widgets::DialogChoice;
 use crate::workbench::app::project_transactions::hold_for_configuration_edits;
@@ -16,6 +15,7 @@ use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs:
     ConfigurationDialog, ConfigurationDialogParts, ConfigurationDialogRequest, Leaving,
     LeavingAnswer, answer_leaving, open_configuration_dialog, render_configuration_dialog,
 };
+use rspice_app_services::services::recent_files::RecentKind;
 
 /// The configuration dialogs' parts over `app`, as the project feature's
 /// context lends them.

@@ -969,7 +969,10 @@ impl WorkbenchHost for RSpiceApp {
         self.state.open_workspace_view(reference);
     }
 
-    fn open_recent_file(&mut self, recent: crate::services::recent_files::RecentFile) {
+    fn open_recent_file(
+        &mut self,
+        recent: rspice_app_services::services::recent_files::RecentFile,
+    ) {
         RSpiceApp::open_recent_file(self, recent);
     }
 

@@ -82,7 +82,7 @@ fn operating_system() -> String {
 fn session_log_file() -> Option<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        use crate::workbench::lifecycle::recovery;
+        use rspice_app_services::workbench::lifecycle::recovery;
         if recovery::diagnostics_folder_supported() {
             return recovery::diagnostics_directory().map(|directory| {
                 directory
@@ -153,10 +153,12 @@ impl RSpiceApp {
         self.state.shell.help_center.disclosure_reviewed = reviewed;
         if open_folder {
             #[cfg(not(target_arch = "wasm32"))]
-            if let Err(error) = crate::workbench::lifecycle::recovery::open_diagnostics_folder(
-                &self.state.model,
-                &self.state.platform,
-            ) {
+            if let Err(error) =
+                rspice_app_services::workbench::lifecycle::recovery::open_diagnostics_folder(
+                    &self.state.model,
+                    &self.state.platform,
+                )
+            {
                 self.state.prompt(format!(
                     "The session log folder could not be opened: {error}"
                 ));

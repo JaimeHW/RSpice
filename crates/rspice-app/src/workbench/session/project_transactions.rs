@@ -49,12 +49,12 @@ use rspice_project::ProjectIoError;
 #[cfg(target_arch = "wasm32")]
 use rspice_project::lifecycle::SaveContinuationEvent;
 
-use crate::services::recent_files::RecentKind;
 use crate::workbench::app::ConfirmationAction;
 use crate::workbench::app::actions::workspace::symbol_document::run_active_symbol_pin_checks;
 use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::{
     Leaving, show_configuration_page_in,
 };
+use rspice_app_services::services::recent_files::RecentKind;
 
 pub(crate) mod check_and_save;
 
@@ -193,7 +193,7 @@ impl AppState {
         // saved source. Legacy or changed-source checkpoints only interrupt this
         // open when they are strictly newer; stale evidence remains in Recovery.
         #[cfg(not(target_arch = "wasm32"))]
-        match crate::workbench::lifecycle::recovery_checkpoint::autosave_restore_candidate(path) {
+        match rspice_app_services::workbench::lifecycle::recovery_checkpoint::autosave_restore_candidate(path) {
             Ok(Some(candidate)) => {
                 self.platform.pending_autosave_restore = Some(candidate);
                 return true;
@@ -421,7 +421,7 @@ impl AppState {
                     #[cfg(not(target_arch = "wasm32"))]
                     {
                         if let Err(error) =
-                            crate::workbench::lifecycle::recovery_checkpoint::cleanup_checkpoint(
+                            rspice_app_services::workbench::lifecycle::recovery_checkpoint::cleanup_checkpoint(
                                 path,
                             )
                         {
@@ -440,7 +440,7 @@ impl AppState {
                 self.sync_active_schematic_to_workspace();
                 if saved_path_is_reopenable {
                     self.remember_recent_file(
-                        crate::services::recent_files::RecentKind::Schematic,
+                        rspice_app_services::services::recent_files::RecentKind::Schematic,
                         path,
                     );
                     self.record(
@@ -1409,7 +1409,7 @@ pub(crate) fn start_local_safe_mode(
     state: &mut crate::workbench::app_state::AppState,
     options: LocalSafeModeOptions,
 ) -> Result<(), String> {
-    use crate::workbench::lifecycle::recovery as services;
+    use rspice_app_services::workbench::lifecycle::recovery as services;
 
     services::check_safe_mode_start(&state.model, options)?;
 

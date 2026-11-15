@@ -11,7 +11,7 @@ use rspice_app_project::workbench::surfaces::project::landing::{LandingAction, l
 /// The landing, drawn in the project feature's context, with what the reader
 /// asked of it carried out by the shell as soon as it has drawn.
 pub(crate) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    crate::workbench::lifecycle::recovery::refresh_catalog_if_requested(
+    rspice_app_services::workbench::lifecycle::recovery::refresh_catalog_if_requested(
         &mut app.state.platform,
         &app.state.model,
         app.file_workflow_io.as_ref(),

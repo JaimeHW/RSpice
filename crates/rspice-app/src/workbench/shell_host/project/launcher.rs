@@ -6,9 +6,6 @@ use std::path::Path;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::services_access::open_comparison;
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::lifecycle::recovery::{
-    open_diagnostics_folder, refresh_catalog_if_requested,
-};
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectLauncherPage;
 use crate::workbench::session::project_transactions::start_local_safe_mode;
@@ -17,6 +14,9 @@ use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::tools::project_launcher::{
     LAUNCHER_TOUCH_MAX_WIDTH, LauncherAction, LauncherControlHeightOverride, LauncherPass,
     launcher, restore_launcher_focus, show_discard_confirmation,
+};
+use rspice_app_services::workbench::lifecycle::recovery::{
+    open_diagnostics_folder, refresh_catalog_if_requested,
 };
 
 fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {

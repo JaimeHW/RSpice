@@ -1593,7 +1593,7 @@ fn exit_ends_the_file_menu_on_windows_and_linux_but_not_macos() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn open_recent_lists_the_recent_files_newest_first_then_all_projects() {
-    use crate::services::recent_files::{RecentFile, RecentKind};
+    use rspice_app_services::services::recent_files::{RecentFile, RecentKind};
     let recent = |kind, path: &str| RecentFile {
         kind,
         path: std::path::PathBuf::from(path),

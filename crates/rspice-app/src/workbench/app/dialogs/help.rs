@@ -961,11 +961,12 @@ mod tests {
             }
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let log = crate::workbench::lifecycle::recovery::diagnostics_directory()
-                    .expect("the test host has an application-data directory")
-                    .join("current-session.log")
-                    .display()
-                    .to_string();
+                let log =
+                    rspice_app_services::workbench::lifecycle::recovery::diagnostics_directory()
+                        .expect("the test host has an application-data directory")
+                        .join("current-session.log")
+                        .display()
+                        .to_string();
                 assert!(
                     shown.contains(&log),
                     "{command:?} names the session log file {log}"
