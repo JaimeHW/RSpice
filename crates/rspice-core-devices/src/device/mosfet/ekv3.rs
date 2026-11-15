@@ -727,7 +727,85 @@ fn ekv3_rf_eval(
     values: [Value; NODE_COUNT],
     temperature_kelvin: Value,
 ) -> Ekv3Eval {
-    let currents = ekv3_rf_terminal_currents(spec, values, temperature_kelvin);
+    let channel_id = ekv3_rf_current(spec, values, temperature_kelvin);
+    let internal = ekv3_rf_internal(spec, values, channel_id);
+    let orientation = ekv3_rf_orientation(spec, internal);
+    let intrinsic = ekv3_intrinsic_currents(spec, internal, temperature_kelvin);
+    let terminal_currents = ekv3_rf_currents(spec, channel_id, intrinsic, orientation);
+    let (terminal_derivatives, channel_derivatives) =
+        ekv3_rf_loop_derivatives(spec, internal, orientation, temperature_kelvin)
+            .unwrap_or_else(|| ekv3_rf_difference_derivatives(spec, values, temperature_kelvin));
+    Ekv3Eval {
+        channel_id,
+        terminal_currents,
+        terminal_derivatives,
+        channel_derivatives,
+    }
+}
+
+/// The Jacobian of the solved series loop from the intrinsic device's own
+/// derivatives at the internal bias, by the implicit function theorem. With
+/// `g(I, V) = Ich(V + I r u) - I`, where `u` lowers the drain by `I r` and
+/// raises the source by as much, `dI/dV_k = a_k / (1 - r (a_s - a_d))` for
+/// `a = dIch/dx`, and each gate current follows the internal bias through
+/// `dx/dV_k = e_k + r u dI/dV_k`. One loop solve and eight intrinsic
+/// evaluations replace a loop solve per differenced bias. `None` when a
+/// derivative is not finite or the loop gain is not positive, so that the
+/// loop has no unique root to differentiate.
+fn ekv3_rf_loop_derivatives(
+    spec: &'static Ekv3ModelSpec,
+    internal: [Value; NODE_COUNT],
+    orientation: (Value, Value),
+    temperature_kelvin: Value,
+) -> Option<([[Value; NODE_COUNT]; NODE_COUNT], [Value; NODE_COUNT])> {
+    let mut channel = [0.0; NODE_COUNT];
+    let mut gate = [[0.0; NODE_COUNT]; NODE_COUNT];
+    for col in 0..NODE_COUNT {
+        let step = 1.0e-5 * internal[col].abs().max(1.0);
+        let mut plus = internal;
+        let mut minus = internal;
+        plus[col] += step;
+        minus[col] -= step;
+        let hi = ekv3_intrinsic_currents(spec, plus, temperature_kelvin);
+        let lo = ekv3_intrinsic_currents(spec, minus, temperature_kelvin);
+        channel[col] = (hi.channel_id - lo.channel_id) / (2.0 * step);
+        let gate_hi = ekv3_rf_currents(spec, 0.0, hi, orientation);
+        let gate_lo = ekv3_rf_currents(spec, 0.0, lo, orientation);
+        for ((partials, high), low) in gate.iter_mut().zip(gate_hi).zip(gate_lo) {
+            partials[col] = (high - low) / (2.0 * step);
+        }
+    }
+    let resistance = ekv3_rf_series_resistance(spec);
+    let loop_gain = 1.0 - resistance * (channel[SOURCE_IDX] - channel[DRAIN_IDX]);
+    let channel_derivatives = channel.map(|partial| partial / loop_gain);
+    let channel_weights = [1.0, 0.0, -1.0, 0.0];
+    let mut terminal_derivatives = [[0.0; NODE_COUNT]; NODE_COUNT];
+    for ((derivatives, partials), weight) in terminal_derivatives
+        .iter_mut()
+        .zip(gate)
+        .zip(channel_weights)
+    {
+        let loop_weight = weight + resistance * (partials[SOURCE_IDX] - partials[DRAIN_IDX]);
+        for ((derivative, partial), channel_derivative) in derivatives
+            .iter_mut()
+            .zip(partials)
+            .zip(channel_derivatives)
+        {
+            *derivative = partial + loop_weight * channel_derivative;
+        }
+    }
+    let finite = channel_derivatives
+        .iter()
+        .chain(terminal_derivatives.iter().flatten())
+        .all(|value| value.is_finite());
+    (loop_gain > 0.0 && finite).then_some((terminal_derivatives, channel_derivatives))
+}
+
+fn ekv3_rf_difference_derivatives(
+    spec: &'static Ekv3ModelSpec,
+    values: [Value; NODE_COUNT],
+    temperature_kelvin: Value,
+) -> ([[Value; NODE_COUNT]; NODE_COUNT], [Value; NODE_COUNT]) {
     let mut terminal_derivatives = [[0.0; NODE_COUNT]; NODE_COUNT];
     let mut channel_derivatives = [0.0; NODE_COUNT];
     for col in 0..NODE_COUNT {
@@ -748,12 +826,7 @@ fn ekv3_rf_eval(
             derivatives[col] = (high - low) / (2.0 * step);
         }
     }
-    Ekv3Eval {
-        channel_id: currents.channel_id,
-        terminal_currents: currents.terminal_currents,
-        terminal_derivatives,
-        channel_derivatives,
-    }
+    (terminal_derivatives, channel_derivatives)
 }
 
 fn ekv3_rf_terminal_currents(
@@ -762,23 +835,49 @@ fn ekv3_rf_terminal_currents(
     temperature_kelvin: Value,
 ) -> Ekv3RfCurrents {
     let channel_id = ekv3_rf_current(spec, values, temperature_kelvin);
+    let internal = ekv3_rf_internal(spec, values, channel_id);
+    let intrinsic = ekv3_intrinsic_currents(spec, internal, temperature_kelvin);
+    let orientation = ekv3_rf_orientation(spec, internal);
+    Ekv3RfCurrents {
+        channel_id,
+        terminal_currents: ekv3_rf_currents(spec, channel_id, intrinsic, orientation),
+    }
+}
+
+/// The intrinsic device's bias once `channel_id` drops across the drain and
+/// source series resistances.
+fn ekv3_rf_internal(
+    spec: &Ekv3ModelSpec,
+    values: [Value; NODE_COUNT],
+    channel_id: Value,
+) -> [Value; NODE_COUNT] {
     let rd = ekv3_rf_series_resistance(spec);
     let rs = rd;
     let mut internal = values;
     internal[DRAIN_IDX] -= channel_id * rd;
     internal[SOURCE_IDX] += channel_id * rs;
+    internal
+}
 
-    let intrinsic = ekv3_intrinsic_currents(spec, internal, temperature_kelvin);
-    let (d_gt_s, s_gt_d) = {
-        let vd_ext = internal[DRAIN_IDX] - internal[BULK_IDX];
-        let vs_ext = internal[SOURCE_IDX] - internal[BULK_IDX];
-        if spec.sign * vd_ext >= spec.sign * vs_ext {
-            (1.0, 0.0)
-        } else {
-            (0.0, 1.0)
-        }
-    };
+/// `(1, 0)` when the internal drain sits above the internal source in the
+/// device's polarity, `(0, 1)` otherwise: which gate current each terminal
+/// carries.
+fn ekv3_rf_orientation(spec: &Ekv3ModelSpec, internal: [Value; NODE_COUNT]) -> (Value, Value) {
+    let vd_ext = internal[DRAIN_IDX] - internal[BULK_IDX];
+    let vs_ext = internal[SOURCE_IDX] - internal[BULK_IDX];
+    if spec.sign * vd_ext >= spec.sign * vs_ext {
+        (1.0, 0.0)
+    } else {
+        (0.0, 1.0)
+    }
+}
 
+fn ekv3_rf_currents(
+    spec: &Ekv3ModelSpec,
+    channel_id: Value,
+    intrinsic: Ekv3IntrinsicCurrents,
+    (d_gt_s, s_gt_d): (Value, Value),
+) -> [Value; NODE_COUNT] {
     let mut terminal_currents = [0.0; NODE_COUNT];
     terminal_currents[DRAIN_IDX] += channel_id;
     terminal_currents[SOURCE_IDX] -= channel_id;
@@ -801,11 +900,7 @@ fn ekv3_rf_terminal_currents(
     terminal_currents[GATE_IDX] -= source_gate_current;
     terminal_currents[BULK_IDX] += bulk_gate_current;
     terminal_currents[GATE_IDX] -= bulk_gate_current;
-
-    Ekv3RfCurrents {
-        channel_id,
-        terminal_currents,
-    }
+    terminal_currents
 }
 
 fn ekv3_rf_current(
@@ -872,23 +967,85 @@ fn ekv3_rf_current(
         return current;
     }
 
+    ekv3_rf_bracketed_root(f_at, lo, f_lo, hi, f_hi)
+}
+
+/// Brent's method on the sign-changing bracket `[a, b]`: inverse quadratic or
+/// secant steps while they stay inside the bracket and keep halving it at
+/// least every other step, bisection otherwise. It stops at the first iterate
+/// whose residual meets the loop tolerance, the same test bisection applied
+/// to each midpoint, or where the bracket reaches the resolution of `Value`.
+fn ekv3_rf_bracketed_root(
+    f_at: impl Fn(Value) -> Value,
+    mut a: Value,
+    mut fa: Value,
+    mut b: Value,
+    mut fb: Value,
+) -> Value {
+    let (mut c, mut fc) = (a, fa);
+    let mut step = b - a;
+    let mut previous_step = step;
     for _ in 0..100 {
-        let mid = 0.5 * (lo + hi);
-        let f_mid = f_at(mid);
-        if !f_mid.is_finite() {
-            break;
+        if (fb > 0.0) == (fc > 0.0) {
+            (c, fc) = (a, fa);
+            step = b - a;
+            previous_step = step;
         }
-        if f_mid.abs() <= 1.0e-15_f64.max(1.0e-9 * mid.abs()) {
-            return mid;
+        if fc.abs() < fb.abs() {
+            (a, fa) = (b, fb);
+            (b, fb) = (c, fc);
+            (c, fc) = (a, fa);
         }
-        if f_lo * f_mid <= 0.0 {
-            hi = mid;
+        if fb.abs() <= 1.0e-15_f64.max(1.0e-9 * b.abs()) {
+            return b;
+        }
+        let resolution = 2.0 * Value::EPSILON * b.abs() + Value::MIN_POSITIVE;
+        let half = 0.5 * (c - b);
+        if half.abs() <= resolution {
+            return b;
+        }
+        if previous_step.abs() < resolution || fa.abs() <= fb.abs() {
+            step = half;
+            previous_step = half;
         } else {
-            lo = mid;
-            f_lo = f_mid;
+            let s = fb / fa;
+            let (mut p, mut q) = if a == c {
+                (2.0 * half * s, 1.0 - s)
+            } else {
+                let qa = fa / fc;
+                let r = fb / fc;
+                (
+                    s * (2.0 * half * qa * (qa - r) - (b - a) * (r - 1.0)),
+                    (qa - 1.0) * (r - 1.0) * (s - 1.0),
+                )
+            };
+            if p > 0.0 {
+                q = -q;
+            } else {
+                p = -p;
+            }
+            if 2.0 * p < 3.0 * half * q - (resolution * q).abs()
+                && p < (0.5 * previous_step * q).abs()
+            {
+                previous_step = step;
+                step = p / q;
+            } else {
+                step = half;
+                previous_step = half;
+            }
+        }
+        (a, fa) = (b, fb);
+        b += if step.abs() > resolution {
+            step
+        } else {
+            resolution.copysign(half)
+        };
+        fb = f_at(b);
+        if !fb.is_finite() {
+            return 0.5 * (a + c);
         }
     }
-    0.5 * (lo + hi)
+    b
 }
 
 fn ekv3_rf_series_resistance(spec: &Ekv3ModelSpec) -> Value {
