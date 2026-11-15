@@ -64,6 +64,22 @@ impl Bug981Role {
 }
 
 impl XyceTestRunner {
+    /// The one diagnostic the BUG_981/BUG_986 decks earn: `VEXP`'s EXP card
+    /// leaves TAU2 out, simulators disagree on its default, and the parser
+    /// notes which default the run takes. Anything else is an envelope change.
+    pub(super) fn bug98x_diagnostics_are_the_vexp_tau2_note(
+        diagnostics: &[rspice_core::netlist::ParseDiagnostic],
+    ) -> bool {
+        matches!(diagnostics, [note]
+            if note.code == "omitted-source-default"
+                && note.severity == rspice_core::netlist::DiagnosticSeverity::Note
+                && note
+                    .message
+                    .get(..5)
+                    .is_some_and(|name| name.eq_ignore_ascii_case("VEXP "))
+                && note.message.contains("TAU2"))
+    }
+
     fn validate_bug981_worker(
         &self,
         role: Bug981Role,
@@ -117,7 +133,7 @@ impl XyceTestRunner {
             || netlist.output_requests.len() != 1
             || !netlist.models.is_empty()
             || !netlist.subcircuits.is_empty()
-            || !netlist.diagnostics.is_empty()
+            || !Self::bug98x_diagnostics_are_the_vexp_tau2_note(&netlist.diagnostics)
             || !netlist.data_tables.is_empty()
             || !netlist.measurements.is_empty()
             || !netlist.initial_conditions.is_empty()

@@ -176,7 +176,7 @@ impl XyceTestRunner {
             || netlist.output_requests.len() != 1
             || !netlist.models.is_empty()
             || !netlist.subcircuits.is_empty()
-            || !netlist.diagnostics.is_empty()
+            || !Self::bug98x_diagnostics_are_the_vexp_tau2_note(&netlist.diagnostics)
             || !netlist.data_tables.is_empty()
             || !netlist.measurements.is_empty()
             || !netlist.initial_conditions.is_empty()
