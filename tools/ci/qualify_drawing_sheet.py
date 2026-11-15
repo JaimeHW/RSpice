@@ -48,7 +48,7 @@ SHEET_SOURCE_SCOPES = (
     "crates/rspice-design-model/src/design_management/drawing_sheet",
     "crates/rspice-design-model/src/sheet_authoring.rs",
     "crates/rspice-design-model/src/sheet_package.rs",
-    "crates/rspice-app/src/schematic/view/drawing_sheet.rs",
+    "crates/rspice-app-design/src/schematic/view/drawing_sheet.rs",
     "crates/rspice-app-sheets/src/workbench/app/drawing_sheet_edit.rs",
     "crates/rspice-app-sheets/src/workbench/app/drawing_sheet_edit",
     "crates/rspice-app-sheets/src/workbench/docks/inspector/design/sheet.rs",
@@ -69,6 +69,7 @@ QUALIFICATION_INPUTS = (
     "crates/rspice-core/Cargo.toml",
     "crates/rspice-core/tests/engine/save_directives.rs",
     "crates/rspice-app/Cargo.toml",
+    "crates/rspice-app-design/Cargo.toml",
     "crates/rspice-app-sheets/Cargo.toml",
     "crates/rspice-app-hardcopy/Cargo.toml",
     "crates/rspice-app-state/Cargo.toml",
@@ -384,6 +385,10 @@ def command_gates(jobs: int, targets: Sequence[str]) -> list[Gate]:
                 "--locked",
                 "-p",
                 "rspice-app",
+                # The canvas's drawing-sheet view and its cases are the design
+                # feature's.
+                "-p",
+                "rspice-app-design",
                 # The sheet draft's and the custom sizes' own cases are the
                 # sheets feature's.
                 "-p",
