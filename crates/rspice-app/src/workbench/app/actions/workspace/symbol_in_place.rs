@@ -32,9 +32,12 @@ pub struct SymbolInPlace {
     /// it for the whole session, so dragging the origin cannot move the frame
     /// the pointer is read in.
     pub origin: crate::state::Point,
-    /// The parent canvas's pan and zoom: carried in, and handed back on exit.
+    /// The in-place view's pan and zoom, which start at the parent canvas's.
     pub pan: (f64, f64),
     pub zoom: f64,
+    /// The parent canvas's zoom and pan when the session began, given back
+    /// to it on exit however the in-place view moved meanwhile.
+    pub sheet_view: (f64, (f64, f64)),
     /// A zoom a command asked for, carried out on the canvas's next frame.
     pub zoom_request: Option<rspice_schematic_editor::view::navigation::ZoomRequest>,
     /// The views the session showed before this one, for Zoom previous.
@@ -343,6 +346,7 @@ impl NavigationParts<'_> {
             instance_name: instance_name.clone(),
             pan,
             zoom,
+            sheet_view: (zoom, pan),
             zoom_request: None,
             view_history: Default::default(),
             symbol_was_open,
@@ -366,7 +370,8 @@ impl NavigationParts<'_> {
     }
 
     /// End the session and land where `exit` says, the parent reopening with
-    /// the instance selected and its canvas where the session left it.
+    /// the instance selected and its canvas where it stood when the session
+    /// began.
     pub(crate) fn finish_symbol_in_place(&mut self, exit: SymbolInPlaceExit) {
         let Some(session) = self.restore.symbol.in_place.take() else {
             return;
@@ -380,8 +385,7 @@ impl NavigationParts<'_> {
             self.model.workspace.content.close_view(&session.symbol);
         }
         let editor = &mut self.model.schematic.session.editor;
-        editor.pan = session.pan;
-        editor.zoom = session.zoom;
+        (editor.zoom, editor.pan) = session.sheet_view;
         editor.selection.select_only_component(session.instance_id);
         match exit {
             SymbolInPlaceExit::Level(level)

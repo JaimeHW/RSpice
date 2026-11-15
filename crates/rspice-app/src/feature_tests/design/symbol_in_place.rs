@@ -287,6 +287,58 @@ fn leaving_in_place_asks_nothing_and_keeps_every_edit() {
     );
 }
 
+/// Zooming and panning while editing in place moves the in-place view only:
+/// leaving gives the sheet back the zoom and pan it had when the session
+/// began, with the instance selected, by Escape and by the exit command alike.
+#[test]
+fn leaving_in_place_gives_the_sheet_back_its_own_view() {
+    let position = Point::new(100, 80);
+    let mut fixture = Fixture::new(&[(position, Rotation::R0, false)]);
+    let camera = |fixture: &Fixture| {
+        let editor = &fixture.app.state.model.schematic.session.editor;
+        (editor.zoom, editor.pan)
+    };
+    for leave in ["escape", "command"] {
+        fixture.enter(0);
+        Command::ZoomIn.execute(&mut fixture.app);
+        fixture.frame(vec![]);
+        let session = crate::workbench::app::in_place_session(
+            &fixture.app.state.design.symbol.in_place,
+            &fixture.app.state.model,
+        )
+        .unwrap();
+        assert_ne!(
+            (session.zoom, session.pan),
+            (ZOOM, PAN),
+            "the in-place view zoomed"
+        );
+        match leave {
+            "escape" => fixture.key(egui::Key::Escape),
+            _ => {
+                fixture
+                    .app
+                    .execute_command_key(DesignCommand::ExitSymbolInPlace.key());
+                fixture.frame(vec![]);
+            }
+        }
+        assert!(fixture.on_parent(), "{leave} leaves");
+        assert_eq!(camera(&fixture), (ZOOM, PAN), "{leave}: the sheet's view");
+        assert_eq!(
+            fixture
+                .app
+                .state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_component(),
+            Some(fixture.instances[0]),
+            "{leave}: the instance is selected, as it was"
+        );
+    }
+}
+
 /// Zoom previous follows the canvas in front. A symbol still edited in place
 /// keeps its session when another workspace comes forward, but its canvas is
 /// not shown there, so Zoom previous is not offered; back in Design it steps
