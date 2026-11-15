@@ -1,9 +1,9 @@
 //! The Libraries page's folder lists over a whole application.
 
 use crate::feature_tests::settings::preferences_dialogs;
-use crate::workbench::app::dialogs::preferences::preference_pages::libraries::*;
 use crate::workbench::app_state::AppState;
 use egui::vec2;
+use rspice_app_settings::workbench::app::dialogs::preferences::preference_pages::libraries::*;
 
 type Nodes = Vec<(egui::accesskit::NodeId, egui::accesskit::Node)>;
 

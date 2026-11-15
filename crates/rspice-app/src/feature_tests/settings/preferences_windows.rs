@@ -5,12 +5,12 @@ use crate::workbench::RouteTransitionSource;
 use crate::workbench::SurfaceId;
 use crate::workbench::SurfaceRoute;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
-use crate::workbench::app::dialogs::preferences::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::preferences_file::SETTINGS_FILE;
 use crate::workbench::{BrowserHistoryEffect, ChoicePreference, TogglePreference};
 use egui::Context;
+use rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
+use rspice_app_settings::workbench::app::dialogs::preferences::*;
 
 pub(crate) fn preferences_route() -> SurfaceRoute {
     SurfaceRoute::surface(SurfaceId::Preferences)

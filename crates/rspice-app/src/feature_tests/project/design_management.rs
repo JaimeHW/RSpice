@@ -10,15 +10,15 @@ use crate::state::{
     VariantQualificationPlan,
 };
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::design_management::operations::variant_connectivity_difference_count;
-use crate::workbench::app::dialogs::design_management::render_design_management_dialog;
-use crate::workbench::app::dialogs::design_management::widgets;
-use crate::workbench::app::dialogs::design_management::{
+use crate::workbench::app_state::AppState;
+use crate::workbench::project::commands::ProjectRequest;
+use rspice_app_project::workbench::app::dialogs::design_management::operations::variant_connectivity_difference_count;
+use rspice_app_project::workbench::app::dialogs::design_management::render_design_management_dialog;
+use rspice_app_project::workbench::app::dialogs::design_management::widgets;
+use rspice_app_project::workbench::app::dialogs::design_management::{
     DesignManagementPage, DesignManagementParts, DesignManagementTab, MANAGER_PRIMARY,
     open_design_management_dialog, open_design_management_on,
 };
-use crate::workbench::app_state::AppState;
-use crate::workbench::project::commands::ProjectRequest;
 
 /// Design management's parts over `app`, as the project feature's context
 /// lends them.

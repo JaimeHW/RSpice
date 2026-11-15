@@ -8,10 +8,10 @@ use crate::state::shortcuts::ProtectedShortcutPolicy;
 use crate::state::shortcuts::ShortcutBindingSlot;
 use crate::state::shortcuts::ShortcutPreferences;
 use crate::state::shortcuts::ShortcutProfileLibrary;
-use crate::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::shortcuts::artifacts::ShortcutConflictPolicy;
+use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
 
 #[test]
 fn protected_binding_requires_fresh_explicit_confirmation() {

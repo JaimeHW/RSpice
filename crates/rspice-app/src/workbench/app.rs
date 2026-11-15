@@ -1975,10 +1975,10 @@ mod tests {
 
     #[test]
     fn design_management_close_restores_design_with_canonical_history_effects() {
-        use crate::workbench::app::dialogs::design_management::close_design_management_dialog_route;
         use crate::workbench::{
             BrowserHistoryEffect, RouteTransitionSource, SurfaceId, SurfaceRoute,
         };
+        use rspice_app_project::workbench::app::dialogs::design_management::close_design_management_dialog_route;
 
         let mut state = AppState::default();
         let design = SurfaceRoute::surface(SurfaceId::Design);

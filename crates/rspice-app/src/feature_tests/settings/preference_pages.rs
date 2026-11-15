@@ -6,9 +6,9 @@ use crate::feature_tests::settings::preferences_dialogs;
 use crate::workbench::ChoicePreference;
 use crate::workbench::RSpiceApp;
 use crate::workbench::TogglePreference;
-use crate::workbench::app::dialogs::preferences::PreferencePageActions;
-use crate::workbench::app::dialogs::preferences::preference_pages::*;
-use crate::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
+use rspice_app_settings::workbench::app::dialogs::preferences::PreferencePageActions;
+use rspice_app_settings::workbench::app::dialogs::preferences::preference_pages::*;
+use rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
 
 /// Shortcuts restore to the shipped bindings and policies, and only by
 /// saving that profile first: the reset hands the page a candidate and

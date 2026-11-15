@@ -36,9 +36,9 @@ mod shortcut_schema;
 mod shortcut_vscode;
 mod shortcut_vscode_import;
 
-use crate::workbench::app::dialogs::preferences::PreferencesDialogs;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::command_registry;
+use rspice_app_settings::workbench::app::dialogs::preferences::PreferencesDialogs;
 
 /// Preferences and the windows it opens, over the application state's
 /// parts, for a test that draws them without the feature's context.

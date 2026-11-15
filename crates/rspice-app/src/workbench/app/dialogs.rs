@@ -12,8 +12,6 @@ pub(crate) use rspice_app_workbench::workbench::app::dialogs::confirmation;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::confirmation_state;
 pub(crate) mod connectivity_manager;
 pub(crate) mod create_model_bound_symbol;
-#[cfg(test)]
-pub(crate) use rspice_app_project::workbench::app::dialogs::design_management;
 pub(crate) mod design_request;
 pub(crate) mod design_review_comments;
 pub(crate) mod engineering_table;
@@ -27,8 +25,6 @@ pub(crate) use rspice_app_code::workbench::app::dialogs::library;
 pub(crate) mod object_properties;
 pub(crate) mod placement;
 pub(crate) use rspice_app_project::workbench::app::dialogs::project;
-#[cfg(test)]
-pub(crate) use rspice_app_settings::workbench::app::dialogs::preferences;
 #[cfg(test)]
 pub(in crate::workbench) use rspice_app_simulate::workbench::app::dialogs::plan_removal;
 pub(crate) mod property_dialog;

@@ -11,8 +11,6 @@ use crate::state::shortcuts::ShortcutProfileIssueCode;
 use crate::state::shortcuts::ShortcutProfileIssueSeverity;
 use crate::state::shortcuts::ShortcutSequence;
 use crate::state::shortcuts::ShortcutStroke;
-use crate::workbench::app::dialogs::preferences::shortcut_preferences::capture::*;
-use crate::workbench::app::dialogs::preferences::shortcut_preferences::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::CommandRegistry;
@@ -21,6 +19,8 @@ use crate::workbench::framework::command_registry::ids;
 use egui::Context;
 use egui::Key;
 use egui::Modifiers;
+use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_preferences::capture::*;
+use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_preferences::*;
 
 #[test]
 fn capture_platforms_preserve_defaults_and_protected_alternates() {

@@ -3,13 +3,13 @@
 use crate::feature_tests::settings::preferences_dialogs;
 use crate::state::shortcuts::ChordTimeoutPolicy;
 use crate::state::shortcuts::ShortcutPreferences;
-use crate::workbench::app::dialogs::preferences::PreferencePageActions;
-use crate::workbench::app::dialogs::preferences::shortcut_preferences::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
 use egui::Context;
 use egui::Modifiers;
+use rspice_app_settings::workbench::app::dialogs::preferences::PreferencePageActions;
+use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_preferences::*;
 
 pub(crate) fn input(width: f32, height: f32) -> egui::RawInput {
     egui::RawInput {
@@ -157,8 +157,8 @@ fn incompatible_profile_repair_is_draft_only_and_emits_a_receipt() {
 #[test]
 fn shortcuts_category_is_exposed_after_review_workflows_land() {
     assert!(
-        crate::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory::ALL
-            .contains(&crate::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory::Shortcuts)
+        rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory::ALL
+            .contains(&rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory::Shortcuts)
     );
 }
 

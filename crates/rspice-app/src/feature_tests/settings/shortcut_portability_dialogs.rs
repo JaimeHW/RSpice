@@ -5,7 +5,6 @@ use crate::state::command_catalog::ShortcutContext;
 use crate::state::shortcuts::ShortcutPreferences;
 use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
-use crate::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::shortcuts::artifacts::DecodedShortcutArtifact;
@@ -25,6 +24,7 @@ use crate::workbench::shortcuts::artifacts::{
     serialize_shortcut_reference_json,
 };
 use egui::Context;
+use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
 
 pub(crate) fn exported_artifact(profile: &ShortcutPreferences) -> DecodedShortcutArtifact {
     let model = build_shortcut_reference_model(

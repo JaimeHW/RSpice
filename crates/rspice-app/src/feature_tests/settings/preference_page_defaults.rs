@@ -7,10 +7,10 @@ use crate::workbench::FolderListPreference;
 use crate::workbench::RSpiceApp;
 use crate::workbench::ScalarPreference;
 use crate::workbench::TogglePreference;
-use crate::workbench::app::dialogs::preferences::PreferencePageActions;
-use crate::workbench::app::dialogs::preferences::preference_pages::*;
-use crate::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
 use crate::workbench::app_state::AppState;
+use rspice_app_settings::workbench::app::dialogs::preferences::PreferencePageActions;
+use rspice_app_settings::workbench::app::dialogs::preferences::preference_pages::*;
+use rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
 
 /// The page source, with each file's test module cut off its end.
 ///
@@ -168,7 +168,7 @@ fn restoring_a_page_clears_every_override_behind_it() {
 /// into the search field.
 #[cfg(not(target_arch = "wasm32"))]
 fn labels_found_by(query: &str) -> Vec<String> {
-    use crate::workbench::app::dialogs::preferences::preferences_shell::{
+    use rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::{
         set_filter_for_review, show,
     };
 

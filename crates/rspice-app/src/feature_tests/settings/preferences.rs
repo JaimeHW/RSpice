@@ -4,9 +4,9 @@
 use crate::feature_tests::settings::preferences_dialogs;
 use crate::feature_tests::settings::preferences_windows::{preferences_route, test_app};
 use crate::workbench::RouteTransitionSource;
-use crate::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
-use crate::workbench::app::dialogs::preferences::*;
 use egui::Context;
+use rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
+use rspice_app_settings::workbench::app::dialogs::preferences::*;
 
 /// Restoring Results and precision starts the open waveform view from
 /// the restored defaults in the frame the reader confirms it, as a new
