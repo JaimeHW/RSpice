@@ -2,9 +2,9 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::surfaces::netlist::fixtures::retain_generated;
-use crate::workbench::surfaces::netlist::toolbar::{CodeToolbarLayout, code_toolbar};
 use egui::vec2;
+use rspice_app_code::workbench::surfaces::netlist::fixtures::retain_generated;
+use rspice_app_code::workbench::surfaces::netlist::toolbar::{CodeToolbarLayout, code_toolbar};
 
 /// A netlist-first project: an owned deck and no generated primary. This is
 /// the shape whose action set is widest, because the third full-set button

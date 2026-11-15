@@ -7,10 +7,10 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
 };
-use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::code_workspace::{self, CodeWorkspacePage};
 use crate::workbench::state::Workspace;
+use rspice_app_code::workbench::code::commands::CodeCommand;
 
 const FIRST_LINE: &str = "// Behavioral conductance.";
 

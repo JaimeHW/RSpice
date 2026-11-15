@@ -17,7 +17,6 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::cloud::CloudFeature;
-use crate::workbench::code::CodeFeature;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::design::DesignFeature;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
@@ -33,6 +32,7 @@ use crate::workbench::results::ResultsFeature;
 use crate::workbench::settings::SettingsFeature;
 use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::simulate::SimulateFeature;
+use rspice_app_code::workbench::code::CodeFeature;
 
 /// A feature the shell registers: its registry, and its contexts borrowed
 /// from the application.
@@ -716,7 +716,7 @@ mod tests {
                 + crate::workbench::simulate::commands::SimulateCommand::ALL.len()
                 + crate::workbench::project::commands::ProjectCommand::ALL.len()
                 + crate::workbench::design::commands::DesignCommand::ALL.len()
-                + crate::workbench::code::commands::CodeCommand::ALL.len()
+                + rspice_app_code::workbench::code::commands::CodeCommand::ALL.len()
         );
     }
 
@@ -749,7 +749,7 @@ mod tests {
     /// as the dispatcher gives it.
     #[test]
     fn a_plain_lend_takes_three_answers_and_a_menu_lend_eleven() {
-        use crate::workbench::code::CodeFeature;
+        use rspice_app_code::workbench::code::CodeFeature;
 
         let mut app = RSpiceApp::test_instance();
         let menu_answers: Vec<_> = CodeFeature::MENU_AVAILABILITY
@@ -779,8 +779,8 @@ mod tests {
     /// the window session or runs only in a source editor does.
     #[test]
     fn a_command_a_feature_reads_runs_exactly_when_it_is_available() {
-        use crate::workbench::code::commands::CodeCommand;
         use crate::workbench::commands::vocabulary::legacy_command;
+        use rspice_app_code::workbench::code::commands::CodeCommand;
 
         for (slot, keys) in foreign_availability() {
             for key in keys {

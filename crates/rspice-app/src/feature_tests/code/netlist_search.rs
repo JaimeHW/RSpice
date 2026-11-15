@@ -1,7 +1,7 @@
 //! The Netlist page's find bar drawn through the application's context.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::netlist::search::find_replace_window;
+use rspice_app_code::workbench::surfaces::netlist::search::find_replace_window;
 
 /// What the find dialog names, by accessible label or value, after a few
 /// frames over `app`.

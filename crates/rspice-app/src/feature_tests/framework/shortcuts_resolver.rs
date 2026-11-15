@@ -15,12 +15,12 @@ use crate::state::shortcuts::{
 };
 use crate::workbench::app_state::session::shortcuts::ShortcutInputSnapshot;
 use crate::workbench::app_state::session::shortcuts::resolver::*;
-use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_code::workbench::code::commands::CodeCommand;
 
 fn primary() -> Modifiers {
     Modifiers {

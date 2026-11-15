@@ -6,7 +6,7 @@ use crate::state::{
 };
 use crate::workbench::AppState;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::library::new_veriloga_device::{
+use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::{
     Draft, Line, cell_line, draft_in, open_new_veriloga_device_form_in, ports_line,
 };
 use rspice_design::library::metadata::decode_source_view_ports;

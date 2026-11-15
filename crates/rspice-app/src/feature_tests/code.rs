@@ -4,8 +4,8 @@
 // them under app/ or in the module they tested: the interface tests'
 // editing helper, the dialogs module, the source navigation and the New
 // Verilog-A device form's renderer.
-use crate::workbench::app::dialogs::library::new_veriloga_device::render_new_veriloga_device_form;
 use crate::workbench::app::{dialogs, veriloga_interface_tests};
+use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::render_new_veriloga_device_form;
 use rspice_app_code::workbench::app::dialogs::source_language_tools::navigate_source_bundle;
 
 #[cfg(not(target_arch = "wasm32"))]

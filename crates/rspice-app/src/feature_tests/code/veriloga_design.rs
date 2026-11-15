@@ -14,11 +14,11 @@ use crate::workbench::app::veriloga_design_tests::{
     themed_context,
 };
 use crate::workbench::app_state::AppState;
-use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACompileOutcome,
 };
 use crate::workbench::state::Workspace;
+use rspice_app_code::workbench::code::commands::CodeCommand;
 
 fn editor_id(bundle_id: ProjectSourceId, logical_path: &str) -> egui::Id {
     code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, logical_path)

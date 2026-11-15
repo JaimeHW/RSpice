@@ -2,8 +2,8 @@
 
 use super::netlist_first::netlist_first_app;
 use crate::workbench::RSpiceApp;
-use crate::workbench::code::netlist_first::deck_facts;
 use crate::workbench::documents::netlist_document::root_deck_source_index;
+use rspice_app_code::workbench::code::netlist_first::deck_facts;
 
 #[test]
 fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {

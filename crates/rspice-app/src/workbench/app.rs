@@ -445,7 +445,9 @@ impl RSpiceApp {
             cc.egui_ctx.add_plugin(
                 rspice_app_workbench::workbench::browser::accessible_mirror::AccessibleMirror::default(),
             );
-            crate::workbench::documents::virtual_text_editor::speak_caret_lines(&cc.egui_ctx);
+            rspice_app_code::workbench::documents::virtual_text_editor::speak_caret_lines(
+                &cc.egui_ctx,
+            );
         }
         cc.egui_ctx.set_zoom_factor(1.0);
 
@@ -576,10 +578,12 @@ impl RSpiceApp {
         if (ctx.zoom_factor() - desired_zoom).abs() > f32::EPSILON {
             ctx.set_zoom_factor(desired_zoom);
         }
-        if let Some(step) = crate::workbench::documents::editor_font::take_zoom_request(ctx) {
+        if let Some(step) =
+            rspice_app_code::workbench::documents::editor_font::take_zoom_request(ctx)
+        {
             self.state.model.preferences.step_editor_font_size(step);
         }
-        crate::workbench::documents::editor_font::publish(
+        rspice_app_code::workbench::documents::editor_font::publish(
             ctx,
             self.state.model.preferences.editor_font_size(),
         );

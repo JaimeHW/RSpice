@@ -14,12 +14,12 @@ use egui::{CentralPanel, Context, Frame};
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::tokens::Tokens;
 use crate::workbench::cloud::CloudFeature;
-use crate::workbench::code::CodeFeature;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::session::project_transactions::{open_confirmed, request_example};
+use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_workbench::workbench::state::pane_focus::Pane;
 use rspice_app_workbench::workbench::{docks, surfaces};
 
@@ -2337,8 +2337,8 @@ mod tests {
     #[test]
     fn the_run_history_primary_runs_the_netlist_deck_on_the_netlist_workspace() {
         use crate::state::SimulationRunIntent;
-        use crate::workbench::code::netlist_validation::validate_visible_netlist_source;
         use crate::workbench::features::cx;
+        use rspice_app_code::workbench::code::netlist_validation::validate_visible_netlist_source;
 
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);

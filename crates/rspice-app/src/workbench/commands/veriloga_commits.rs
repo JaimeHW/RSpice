@@ -12,8 +12,8 @@
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::CellViewRef;
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::dialogs::library::{new_veriloga_device, veriloga_import};
 use crate::workbench::state::Workspace;
+use rspice_app_code::workbench::app::dialogs::library::{new_veriloga_device, veriloga_import};
 
 impl RSpiceApp {
     /// Create the import form's cells and open the first in Design.

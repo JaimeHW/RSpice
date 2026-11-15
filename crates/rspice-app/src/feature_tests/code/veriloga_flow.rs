@@ -14,8 +14,8 @@ use crate::workbench::app::veriloga_flow_tests::{
     CELL, MODULE, PORTS, User, assert_five_volts, compile, new_device, new_project, run_plan,
     run_plan_of_instance, wired_device,
 };
-use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_code::workbench::code::commands::CodeCommand;
 
 /// A device bound to a card of the project's model library runs with the
 /// card's parameters: the output follows the card's gain of 2, not the

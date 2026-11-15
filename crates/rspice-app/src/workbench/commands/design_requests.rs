@@ -14,10 +14,10 @@ use crate::workbench::app::dialogs::connectivity_manager::{
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app::dialogs::hierarchy::create::commit_create_hierarchy;
 use crate::workbench::app::dialogs::hierarchy::descend::answer_descend_hierarchy;
-use crate::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
 use crate::workbench::app::open_create_model_bound_symbol_dialog;
 use crate::workbench::documents::result_document::open_specification_editor;
 use crate::workbench::{AppState, RSpiceApp, ResultViewer};
+use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
 
 /// Carry out what the design surface asked of another feature's workspace,
 /// as the surface once did in place.

@@ -788,7 +788,7 @@ fn root_text(app: &RSpiceApp, reference: &CellViewRef) -> String {
 /// every byte, before the commit and after it.
 #[test]
 fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone() {
-    use crate::workbench::code::commands::CodeCommand;
+    use rspice_app_code::workbench::code::commands::CodeCommand;
 
     let mut app = open_project_app();
     let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
@@ -889,7 +889,7 @@ const REPLACEMENT: &str = "module gain(p, n);\n  inout p, n;\n  electrical p, n;
 /// `model.va`, through the picker, to the confirmation it opens.
 fn pick_replacement(ctx: &egui::Context, app: &mut RSpiceApp) {
     app.execute_command_key(
-        crate::workbench::code::commands::CodeCommand::ManageSourceDocument.key(),
+        rspice_app_code::workbench::code::commands::CodeCommand::ManageSourceDocument.key(),
     );
     let mut output = frame(ctx, app, DESKTOP);
     for _ in 0..12 {

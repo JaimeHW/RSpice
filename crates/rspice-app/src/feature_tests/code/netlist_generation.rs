@@ -3,7 +3,7 @@
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{ComponentType, LibraryCellInstance, Point};
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::netlist::generation::refresh_generated_artifact;
+use rspice_app_code::workbench::surfaces::netlist::generation::refresh_generated_artifact;
 
 /// A deck that cannot be written is built once per set of inputs, its
 /// failure is recorded once, and the page states the generator's own

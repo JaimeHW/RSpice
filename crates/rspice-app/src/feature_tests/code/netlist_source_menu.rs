@@ -2,7 +2,6 @@
 //! code feature reads, and the rows a page's context reads once it has drawn.
 
 use crate::state::command_catalog::CommandPlatform;
-use crate::workbench::code::CodeFeature;
 use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 use crate::workbench::documents::netlist_document::{
     ActiveNetlistDocument, open_run_deck_snapshot_in,
@@ -11,11 +10,12 @@ use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::feature::Feature;
 use crate::workbench::framework::host::Host;
 use crate::workbench::state::Workspace;
-use crate::workbench::surfaces::netlist::fixtures::seal_manual_run;
-use crate::workbench::surfaces::netlist::source_menu::SourceMenuLookup;
-use crate::workbench::surfaces::netlist::{prepare_workspace, show_prepared};
 use crate::workbench::{RSpiceApp, features};
 use egui::os::OperatingSystem;
+use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_code::workbench::surfaces::netlist::fixtures::seal_manual_run;
+use rspice_app_code::workbench::surfaces::netlist::source_menu::SourceMenuLookup;
+use rspice_app_code::workbench::surfaces::netlist::{prepare_workspace, show_prepared};
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{
     menu_keys, resolve_menu_rows,
 };
@@ -111,7 +111,7 @@ fn toolbar_answers(app: &RSpiceApp) -> Vec<CommandAvailability> {
 /// leaves the toolbar's answers as they were without it.
 #[test]
 fn the_pages_context_reads_the_rows_the_host_reads_once_the_page_has_drawn() {
-    let entries = crate::workbench::code::SOURCE_EDITOR_MENU;
+    let entries = rspice_app_code::workbench::code::SOURCE_EDITOR_MENU;
     let places = [
         (CommandPlatform::Desktop, OperatingSystem::Windows),
         (CommandPlatform::Desktop, OperatingSystem::Mac),
@@ -182,7 +182,7 @@ fn draw_automation(app: &mut RSpiceApp) {
     crate::ui::Theme::default().apply(&ctx);
     let _ = ctx.run_ui(Default::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
-            crate::workbench::surfaces::automation::show(
+            rspice_app_code::workbench::surfaces::automation::show(
                 ui,
                 &mut features::cx_with_menu_answers(app, |_| false),
             );
@@ -198,7 +198,7 @@ fn draw_automation(app: &mut RSpiceApp) {
 /// draws, and leaves the toolbar's answers as they were without it.
 #[test]
 fn the_automation_pages_context_reads_the_rows_the_host_reads_once_the_page_has_drawn() {
-    let entries = crate::workbench::code::SOURCE_EDITOR_MENU;
+    let entries = rspice_app_code::workbench::code::SOURCE_EDITOR_MENU;
     let places = [
         (CommandPlatform::Desktop, OperatingSystem::Windows),
         (CommandPlatform::Desktop, OperatingSystem::Mac),
@@ -215,7 +215,7 @@ fn the_automation_pages_context_reads_the_rows_the_host_reads_once_the_page_has_
         // The surfaces leave no editor in front before the page.
         app.state.workbench.active_source_editor = None;
         let toolbar = toolbar_answers(&app);
-        crate::workbench::surfaces::automation::prepare(&mut features::cx(&mut app));
+        rspice_app_code::workbench::surfaces::automation::prepare(&mut features::cx(&mut app));
         let prepared = app.state.workbench.active_source_editor;
         assert_eq!(
             prepared.map(|editor| (editor.editable, editor.navigable)),

@@ -3,7 +3,6 @@
 
 use crate::state::command_catalog::CommandKey;
 use crate::ui::icons::Icon;
-use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
@@ -11,6 +10,7 @@ use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
+use rspice_app_code::workbench::code::commands::CodeCommand;
 
 /// The glyph the palette gives `command`; `None` for a command that wears its
 /// scope's.

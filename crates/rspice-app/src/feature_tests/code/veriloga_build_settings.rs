@@ -11,13 +11,13 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame_with, open_in_design, open_project_app, themed_context,
 };
-use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::code_workspace;
 use crate::workbench::{MessageId, UiTextLocale};
 use rspice_app_code::workbench::app::dialogs::veriloga_build_settings::{
     VerilogABuildSettingsDraft, save_veriloga_build_settings,
 };
+use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_simulation::project_veriloga::build_profile::{
     VerilogAFallbackPolicy, resolve_veriloga_build_profile,
 };

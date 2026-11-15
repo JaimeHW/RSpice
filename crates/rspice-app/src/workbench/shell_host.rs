@@ -28,7 +28,6 @@ use crate::workbench::app::ConfirmationResponse;
 use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::cloud::CloudFeature;
-use crate::workbench::code::{CodeFeature, SOURCE_EDITOR_MENU};
 use crate::workbench::commands::vocabulary::{
     Command, CommandRegistry, command_registry, legacy_command,
 };
@@ -55,6 +54,7 @@ use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 use menus::{APPLICATION_MENU, COMPACT_MENU, application_menu_entries};
+use rspice_app_code::workbench::code::{CodeFeature, SOURCE_EDITOR_MENU};
 use rspice_app_workbench::workbench::app::dialogs::confirmation::ConfirmationHost;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
     self, ApplicationMenu,
@@ -86,9 +86,9 @@ impl Host for RSpiceApp {
                 use crate::workbench::documents::code_workspace::sync_automation_debugger;
                 use crate::workbench::project::workspace_state::LibraryCellviewPage;
                 use crate::workbench::surfaces::{
-                    automation, library_cellview_manager, netlist, project, simulate, stimulus,
-                    verify, veriloga,
+                    library_cellview_manager, project, simulate, stimulus, verify,
                 };
+                use rspice_app_code::workbench::surfaces::{automation, netlist, veriloga};
 
                 if app.state.workbench.current_route().surface_id()
                     == super::SurfaceId::ReportAuthoring
@@ -416,10 +416,12 @@ impl Host for RSpiceApp {
                     simulation_tools, verification_tools,
                 };
                 use crate::workbench::chrome::toolbar::{context_separator, toolbar_icon_command};
-                use crate::workbench::code::toolbar::{NETLIST_TOOLBAR, VERILOGA_TOOLBAR};
                 use crate::workbench::design::DesignFeature;
                 use crate::workbench::design::toolbar::{
                     SCHEMATIC_TOOLBAR, STIMULUS_TOOLBAR, SYMBOL_TOOLBAR,
+                };
+                use rspice_app_code::workbench::code::toolbar::{
+                    NETLIST_TOOLBAR, VERILOGA_TOOLBAR,
                 };
 
                 match scope {
@@ -648,8 +650,8 @@ impl Host for RSpiceApp {
     }
 
     fn title_cell(&self, workspace: Workspace) -> String {
-        use crate::workbench::chrome::title_bar::code::code_title_cell;
         use crate::workbench::chrome::title_bar::design::design_title_cell;
+        use rspice_app_code::workbench::chrome::title_bar::code::code_title_cell;
 
         let app = self;
         match workspace {
@@ -1052,7 +1054,6 @@ impl DocumentHost for AppState {
     type Document = WorkspaceDocument;
 
     fn workspace_documents(&self, workspace: Workspace) -> Vec<WorkspaceDocument> {
-        use crate::workbench::chrome::document_bar::code::netlist_workspace_documents;
         use crate::workbench::chrome::document_bar::design::design_documents;
         use crate::workbench::chrome::document_bar::models::models_documents;
         use crate::workbench::chrome::document_bar::project::project_documents;
@@ -1060,6 +1061,7 @@ impl DocumentHost for AppState {
         use crate::workbench::chrome::document_bar::simulate::{
             simulation_plan_documents, verification_documents,
         };
+        use rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents;
 
         let state = self;
         match workspace {
@@ -1084,7 +1086,7 @@ impl DocumentHost for AppState {
     }
 
     fn page_document(&self, workspace: Workspace) -> Option<WorkspaceDocumentId> {
-        use crate::workbench::chrome::document_bar::code::active_netlist_document_id;
+        use rspice_app_code::workbench::chrome::document_bar::code::active_netlist_document_id;
 
         match workspace {
             Workspace::Netlist => active_netlist_document_id(
@@ -1097,13 +1099,13 @@ impl DocumentHost for AppState {
     }
 
     fn activate_owned_document(&mut self, document: &WorkspaceDocumentId) -> bool {
-        use crate::workbench::chrome::document_bar::code::{
-            activate_generated_netlist, activate_netlist_comparison, activate_netlist_dependency,
-            activate_netlist_run_snapshot, activate_owned_netlist,
-        };
         use crate::workbench::chrome::document_bar::design::activate_cell_view;
         use crate::workbench::chrome::document_bar::results::{
             activate_result_dataset, activate_visualization_document,
+        };
+        use rspice_app_code::workbench::chrome::document_bar::code::{
+            activate_generated_netlist, activate_netlist_comparison, activate_netlist_dependency,
+            activate_netlist_run_snapshot, activate_owned_netlist,
         };
 
         let state = self;
@@ -1166,7 +1168,7 @@ impl DocumentHost for AppState {
                 ) && state.close_active_document(),
             ),
             WorkspaceDocumentId::NetlistDependency { .. } => {
-                crate::workbench::chrome::document_bar::code::close_netlist_dependency(
+                rspice_app_code::workbench::chrome::document_bar::code::close_netlist_dependency(
                     &mut state.code.netlist_open_documents,
                     document,
                 );

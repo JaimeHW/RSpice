@@ -18,7 +18,6 @@ pub(crate) mod grid_snap_routing;
 pub(crate) use rspice_app_hardcopy::workbench::app::dialogs::hardcopy;
 pub(in crate::workbench) mod help;
 pub(crate) mod hierarchy;
-pub(crate) use rspice_app_code::workbench::app::dialogs::library;
 pub(crate) mod object_properties;
 pub(crate) mod placement;
 pub(crate) use rspice_app_project::workbench::app::dialogs::project;

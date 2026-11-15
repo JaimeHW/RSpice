@@ -5,7 +5,6 @@
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::workbench::AppState;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::code::commands::LifecycleAction;
 use crate::workbench::documents::code_workspace::{CodeSourceFileAction, CodeWorkspacePage};
 use egui::Context;
 use rspice_app_code::workbench::app::dialogs::source_document::fixtures::facts_of;
@@ -13,6 +12,7 @@ use rspice_app_code::workbench::app::dialogs::source_document::{
     apply_lifecycle_action, begin_new_top_deck_in, netlist_lifecycle_facts,
     open_source_document_dialog_in, source_document_dialog_is_available,
 };
+use rspice_app_code::workbench::code::commands::LifecycleAction;
 
 /// Bring the lifecycle dialog up for the page that is showing, as Manage
 /// source document does.

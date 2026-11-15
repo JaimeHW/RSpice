@@ -380,11 +380,11 @@ mod tests {
     use crate::state::VerificationPage;
     use crate::state::command_catalog::{CommandCatalog, CommandKey};
     use crate::workbench::ResultViewer;
-    use crate::workbench::code::commands::CodeCommand;
     use crate::workbench::design::commands::DesignCommand;
     use crate::workbench::framework::command_registry::CommandFlags;
     use crate::workbench::results::commands::ResultsCommand;
     use crate::workbench::simulate::commands::SimulateCommand;
+    use rspice_app_code::workbench::code::commands::CodeCommand;
 
     fn binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<Command> {
         crate::workbench::commands::vocabulary::COMMAND_REGISTRY

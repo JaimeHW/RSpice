@@ -7,7 +7,7 @@
 //! page that would report it.
 
 use super::*;
-use crate::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::code::commands::CodeCommand;
 
 /// Every one of these opens a window drawn only by the netlist page. Offered
 /// from a sibling page they set a dialog open with nothing on screen, and it

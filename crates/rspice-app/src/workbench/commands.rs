@@ -5,11 +5,11 @@
 //! UI does not advertise speculative or placeholder capability.
 
 use crate::workbench::app::actions::workspace::HistoryDirection;
-use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
 use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_workbench::workbench::app::dialogs::window_session::{
     WindowSessionPage, WindowWorkflow, open_window_workflow,
 };

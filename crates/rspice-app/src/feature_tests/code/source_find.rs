@@ -26,7 +26,7 @@ fn initial_focus_accepts_source_search_typing() {
             );
         }
         app.execute_command_key(
-            crate::workbench::code::commands::CodeCommand::FindCodeDocument.key(),
+            rspice_app_code::workbench::code::commands::CodeCommand::FindCodeDocument.key(),
         );
         let sources = app.state.model.workspace.content.project_sources.clone();
         let mut render = |events| {

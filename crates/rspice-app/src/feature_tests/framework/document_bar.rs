@@ -11,12 +11,12 @@ use crate::state::{
 use crate::ui::panels::{WorkbenchIcon, elide_text};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens;
-use crate::workbench::chrome::document_bar::code::netlist_workspace_documents;
 use crate::workbench::chrome::document_bar::design::icon_for_view;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents;
 use rspice_app_workbench::workbench::chrome::document_bar::*;
 
 fn multi_document_netlist_state() -> AppState {

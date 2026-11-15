@@ -2,12 +2,12 @@
 //! about the deck that owns the project and what its two actions run.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::code::CodeFeature;
-use crate::workbench::code::netlist_first::*;
 use crate::workbench::documents::netlist_document::root_deck_source_index;
 use crate::workbench::features::{self, Registered};
 use crate::workbench::state::Workspace;
 use egui::{Rect, Ui, Vec2, pos2, vec2};
+use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_code::workbench::code::netlist_first::*;
 
 const DECK: &str = "Precision front-end bench\n\
     * differential input stage\n\

@@ -2,13 +2,13 @@
 //! step that goes to its finding, and the run strip at every phase.
 
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::surfaces::netlist::fixtures::seal_manual_run;
-use crate::workbench::surfaces::netlist::{
+use crate::workbench::{RSpiceApp, features};
+use egui::vec2;
+use rspice_app_code::workbench::surfaces::netlist::fixtures::seal_manual_run;
+use rspice_app_code::workbench::surfaces::netlist::{
     RUN_STRIP_HEIGHT, RunStripPhase, reveal_in_netlist, run_strip_projection, show_prepared,
     step_netlist_problem, toolbar,
 };
-use crate::workbench::{RSpiceApp, features};
-use egui::vec2;
 
 /// F8 in the netlist editor goes to the deck's next finding, on its
 /// column, and Shift+F8 back; each says which finding it reached. A

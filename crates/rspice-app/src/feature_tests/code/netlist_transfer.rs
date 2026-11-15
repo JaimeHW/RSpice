@@ -1,6 +1,6 @@
 //! The netlist transfer forms drawn through the application's context.
 
-use crate::workbench::surfaces::netlist::transfer::export_generated_dialog_window;
+use rspice_app_code::workbench::surfaces::netlist::transfer::export_generated_dialog_window;
 
 /// Export is a command form: the dialect, what goes with the deck, and
 /// Export…; a refusal is its status. It used to open on a boxed paragraph

@@ -12,16 +12,16 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::documents::netlist_document::NetlistImportOperation;
 use crate::workbench::lifecycle::project_lifecycle;
 #[cfg(test)]
-use crate::workbench::workflows::netlist_workflow::sha256;
+use rspice_app_code::workbench::workflows::netlist_workflow::sha256;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::workflows::netlist_workflow::show_open_netlist_dialog;
-use crate::workbench::workflows::netlist_workflow::{
+use rspice_app_code::workbench::workflows::netlist_workflow::show_open_netlist_dialog;
+use rspice_app_code::workbench::workflows::netlist_workflow::{
     self, ImportFailure, NetlistImportMetadata, NetlistImportMode, canonical_import_document,
     imported_deck_refusal, install_imported_deck, netlist_import_start_block_reason,
     record_import_failure, route_started_netlist_import, stage_validated_netlist_import,
 };
 #[cfg(target_arch = "wasm32")]
-use crate::workbench::workflows::netlist_workflow::{
+use rspice_app_code::workbench::workflows::netlist_workflow::{
     BrowserNetlistImportResult, pick_browser_netlist, take_browser_netlist_completion,
 };
 

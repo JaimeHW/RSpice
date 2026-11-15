@@ -3,9 +3,9 @@
 //! netlist-first projects, and imported decks applied to the open one.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::workflows::netlist_workflow::bundle::parse_generated_netlist_bundle;
-use crate::workbench::workflows::netlist_workflow::fixtures::generated_bundle_fixture;
-use crate::workbench::workflows::netlist_workflow::{
+use rspice_app_code::workbench::workflows::netlist_workflow::bundle::parse_generated_netlist_bundle;
+use rspice_app_code::workbench::workflows::netlist_workflow::fixtures::generated_bundle_fixture;
+use rspice_app_code::workbench::workflows::netlist_workflow::{
     NetlistImportMetadata, NetlistImportMode, cancel_staged_netlist_import,
     save_owned_netlist_source, sha256,
 };

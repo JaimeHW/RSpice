@@ -8,7 +8,6 @@ use super::veriloga_interface::{compile_and_publish, press_strip_button};
 use crate::state::VerilogAPlacementHandoff;
 use crate::state::{Cell, CellViewRef, ComponentType, Library, Tool, View, ViewType};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
 use crate::workbench::app::veriloga_design_tests::{
     open_in_design, open_project_app, themed_context,
 };
@@ -16,10 +15,11 @@ use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::app_state::prompt_text;
 use crate::workbench::features;
 use crate::workbench::state::Workspace;
-use crate::workbench::surfaces::veriloga;
 use rspice_app_code::workbench::app::actions::veriloga_placement::{
     offered_veriloga_placement, veriloga_placement_target,
 };
+use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
+use rspice_app_code::workbench::surfaces::veriloga;
 
 const LIBRARY: &str = "behavioral";
 

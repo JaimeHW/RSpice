@@ -69,7 +69,7 @@ fn the_keys_are_the_menus_while_it_is_open() {
 #[cfg(windows)]
 #[test]
 fn a_held_key_is_one_press() {
-    use crate::workbench::documents::virtual_text_editor::press_begins;
+    use rspice_app_code::workbench::documents::virtual_text_editor::press_begins;
     let ctx = egui::Context::default();
     let id = egui::Id::new("key");
     let presses = [false, true, true, false, true].map(|down| press_begins(&ctx, id, down));

@@ -12,13 +12,13 @@ use crate::state::shortcuts::ShortcutProfileIssueSeverity;
 use crate::state::shortcuts::ShortcutSequence;
 use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::app_state::AppState;
-use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::ids;
 use egui::Context;
 use egui::Key;
 use egui::Modifiers;
+use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_preferences::capture::*;
 use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_preferences::*;
 

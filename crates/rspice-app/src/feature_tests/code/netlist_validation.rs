@@ -4,14 +4,16 @@
 //! external change.
 
 use crate::workbench::FolderListPreference;
-use crate::workbench::code::netlist_validation::validate_visible_netlist_source;
 use crate::workbench::features::cx;
-use crate::workbench::workflows::netlist_workflow::fixtures::seed_owned_strategy;
-use crate::workbench::workflows::netlist_workflow::fixtures::vendor_profiles::{cases, source};
-use crate::workbench::workflows::netlist_workflow::{
+use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_code::workbench::code::netlist_validation::validate_visible_netlist_source;
+use rspice_app_code::workbench::workflows::netlist_workflow::fixtures::seed_owned_strategy;
+use rspice_app_code::workbench::workflows::netlist_workflow::fixtures::vendor_profiles::{
+    cases, source,
+};
+use rspice_app_code::workbench::workflows::netlist_workflow::{
     apply_staged_external_netlist_change, save_owned_netlist_source,
 };
-use crate::workbench::{AppState, RSpiceApp};
 
 #[test]
 fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding() {
@@ -456,8 +458,8 @@ fn vendor_admitted_decks_have_explicit_preparation_outcomes() {
 /// nothing validated.
 #[test]
 fn the_validate_command_validates_the_deck_the_netlist_page_shows() {
-    use crate::workbench::code::commands::CodeCommand;
     use crate::workbench::state::Workspace;
+    use rspice_app_code::workbench::code::commands::CodeCommand;
 
     let mut app = crate::workbench::RSpiceApp::test_instance();
     app.state

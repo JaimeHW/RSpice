@@ -264,7 +264,7 @@ fn refused_source_write(language: ProjectSourceLanguage) {
 
     render_page(&ctx, &mut app, Vec::new());
     assert_eq!(
-        crate::workbench::documents::virtual_text_editor::shown_source(&ctx, editor_id),
+        rspice_app_code::workbench::documents::virtual_text_editor::shown_source(&ctx, editor_id),
         Some(typed.clone()),
         "{language:?}: the next frame draws the stored source"
     );

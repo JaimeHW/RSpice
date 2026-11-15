@@ -12,5 +12,4 @@ pub(crate) mod file_actions;
 pub(crate) use rspice_app_project::workbench::workflows::file_workflow;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod foreign_schematic_workflow;
-pub(crate) use rspice_app_code::workbench::workflows::netlist_workflow;
 pub(crate) use rspice_app_project::workbench::workflows::project_workflow;

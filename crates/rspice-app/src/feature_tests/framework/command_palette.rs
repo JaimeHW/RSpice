@@ -5,12 +5,12 @@ use egui::{Context, Id, Key, Modifiers, Order, Rect, pos2, vec2};
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
 use crate::workbench::RSpiceApp;
-use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::CommandSpec;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
+use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_workbench::workbench::app::command_palette::*;
 
 #[test]
