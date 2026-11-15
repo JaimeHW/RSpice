@@ -1335,6 +1335,11 @@ fn event_written_state_refusal(
         for device in circuit.veriloga_devices().iter() {
             let mut names: Vec<&str> = Vec::new();
             for (slot, (name, _)) in device.variables().enumerate() {
+                // `$discontinuity` is the runtime's flag to the time step
+                // control, not a value of the module's.
+                if name.starts_with('$') {
+                    continue;
+                }
                 let base = name.split_once('[').map_or(name, |(base, _)| base);
                 if device.discrete_state_value(slot).is_some() && !names.contains(&base) {
                     names.push(base);
@@ -1498,7 +1503,6 @@ impl Engine {
         carrier: Option<PeriodicCarrier>,
     ) -> Result<(), SimulationError> {
         if let Some(refusal) = retained_state_refusal(circuit, analysis)
-            .or_else(|| event_written_state_refusal(circuit, analysis))
             .or_else(|| non_rational_transfer_refusal(circuit, analysis))
         {
             return Err(refusal.into());
@@ -1582,6 +1586,11 @@ impl Engine {
                     return Err(refusal.into());
                 }
             }
+        }
+        // Asked after the operator gates, which name the event that writes
+        // the variable along with the variables they refuse.
+        if let Some(refusal) = event_written_state_refusal(circuit, analysis) {
+            return Err(refusal.into());
         }
         Ok(())
     }
