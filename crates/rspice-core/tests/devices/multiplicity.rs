@@ -206,6 +206,52 @@ d1b a 0 dmod
     );
 }
 
+/// A LEVEL=3 diode drawn with W/L and `M=2` is two parallel copies of the
+/// drawn junction, area and sidewall alike. The reference is the current
+/// ngspice-47 gives the two explicit M=1 copies of this deck (`ngspice_con -b`,
+/// `print i(v2)`): -1.187196291e-3 A. ngspice-47 itself gives -2.374392580e-3
+/// A for `M=2` (M applied twice) and ngspice pre-master-48, which carries the
+/// fix (commit 8533ad9fb), -1.187196290e-3 A. QSPICE scales W/L by M² too;
+/// LTspice 26.1.1 and Xyce 7.10 reject a LEVEL=3 diode.
+#[test]
+fn diode_level3_drawn_m_matches_explicit_parallel_copies() {
+    let deck = "\
+* diode LEVEL=3 W/L with M=2 against two M=1 copies, 0.6 V
+V1 a 0 0.6
+D1 a 0 dl3 W=10u L=10u M=2
+V2 b 0 0.6
+D2 b 0 dl3 W=10u L=10u
+D3 b 0 dl3 W=10u L=10u
+.model dl3 D(LEVEL=3 IS=1e-4 JSW=1e-9 CJ=1e-3 CJSW=1e-9)
+.op
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let op = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("operating point solves");
+    let current = |source: &str| {
+        let idx = op
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(source))
+            .unwrap_or_else(|| panic!("{source} missing from OP result"));
+        op.branch_currents[idx]
+    };
+    // The two sides converge independently, to the solver's current
+    // tolerance (5e-10 relative here, as in ngspice); M=1 vs M² is 2x.
+    let (with_m, copies) = (current("v1"), current("v2"));
+    assert!(
+        (with_m - copies).abs() <= 1e-8 * copies.abs(),
+        "M=2 must equal two parallel copies: {with_m:e} vs {copies:e}"
+    );
+    let reference = -1.187196291e-3;
+    assert!(
+        (with_m - reference).abs() <= 1e-6 * reference.abs(),
+        "M=2: ours {with_m:.9e} vs ngspice {reference:.9e}"
+    );
+}
+
 #[test]
 fn diode_area_scales_like_multiplicity_for_lumped_junction() {
     let with_area = "\
