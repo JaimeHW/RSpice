@@ -779,9 +779,7 @@ fn apply_symbol_pin_renames(
     reference: &CellViewRef,
     renames: &BTreeMap<String, String>,
 ) -> usize {
-    model
-        .unsaved_pin_renames
-        .record(&reference.key(), renames);
+    model.unsaved_pin_renames.record(&reference.key(), renames);
     rename_placed_terminals(model, reference, renames)
 }
 

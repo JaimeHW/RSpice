@@ -251,11 +251,10 @@ impl Fixture {
     }
 
     fn revert(&mut self) {
-        let token =
-            crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
-                &self.app.state,
-            )
-            .expect("the revert is reviewed");
+        let token = crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
+            &self.app.state,
+        )
+        .expect("the revert is reviewed");
         assert!(self.app.state.confirm_revert_active_document(&token));
     }
 
@@ -599,10 +598,7 @@ fn reverting_a_renamed_pin_puts_the_instances_terminal_names_back() {
     let mut fixture = Fixture::new("revert-rename", Some(&["IN", "OUT"]), &["IN", "OUT"]);
     let saved = fixture.document();
     let parent = fixture.place_instance_wired_at("OUT");
-    let wired = (
-        vec!["IN".to_owned(), "OUT".to_owned()],
-        "OUT".to_owned(),
-    );
+    let wired = (vec!["IN".to_owned(), "OUT".to_owned()], "OUT".to_owned());
     assert_eq!(fixture.instance_terminals(&parent), wired);
 
     fixture.rename_pin("OUT", "VOUT");
