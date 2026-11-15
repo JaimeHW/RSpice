@@ -2,6 +2,7 @@
 //! view, what is selected, and the canvas zoom behind the percentage chip.
 
 use crate::workbench::app::actions::workspace::symbol_document::SymbolUiState;
+use crate::workbench::app::in_place_session;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use rspice_schematic_editor::symbol_editor::session::{label_name, shape_kind};
@@ -148,16 +149,20 @@ fn symbol_selection_summary(symbol: &SymbolUiState, model: &Model) -> String {
     )
 }
 
-/// The canvas zoom behind the percentage chip. The Results workspace never
-/// reaches here — its chip reports plot magnification instead.
+/// The canvas zoom behind the percentage chip: a symbol edited in place
+/// reads the in-place view, which frames its parent sheet. The Results
+/// workspace never reaches here — its chip reports plot magnification
+/// instead.
 pub(in crate::workbench) fn zoom_factor(
     symbol: &SymbolUiState,
     model: &Model,
     wb: &WorkbenchSession,
 ) -> f64 {
-    if wb.workspace == Workspace::Design
-        && model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol)
-    {
+    let symbol_in_front = wb.workspace == Workspace::Design
+        && model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol);
+    if symbol_in_front && let Some(session) = in_place_session(&symbol.in_place, model) {
+        session.zoom
+    } else if symbol_in_front {
         f64::from(symbol.editor.zoom)
     } else {
         model.schematic.session.editor.zoom

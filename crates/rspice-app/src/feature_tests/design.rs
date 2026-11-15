@@ -85,6 +85,7 @@ mod symbol_definition;
 mod symbol_drawing_drawn;
 mod symbol_from_schematic;
 mod symbol_in_place;
+mod symbol_in_place_drawn;
 mod symbol_inspector;
 mod symbol_inspector_drawn;
 mod symbol_pin_checks;
