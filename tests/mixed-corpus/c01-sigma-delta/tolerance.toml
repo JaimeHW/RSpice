@@ -16,10 +16,42 @@ abs = 3.0
 rel = 0.0
 why = "first-order ΣΔ: ones-count error ≤ ±1 per window → ±2 codes (code = 2·ones); +1 for window alignment"
 
+# xs against ngspice-46. The clock's 2 ns ramp crosses adc_buff's 0.5 V
+# threshold 1 ns after its breakpoint. 734 of RSpice's 9,999 rising edges put
+# an accepted point exactly there: 0.5 V in exact arithmetic, and 0.5 V
+# +/- 2.5e-13 to 4.6e-11 V (2,245 to 4.2e5 ulps) once the time is rounded.
+# Both simulators test `in <= in_low` first (ngspice-46
+# icm/digital/adc_bridge/cfunc.mod:222, 237), so that rounding decides each of
+# these edges: 440 read low and fire on the next point, 0.5 ns later; 294 read
+# high and fire on the crossing. ngspice-46 never lands on the crossing. The
+# outcome is deterministic. One-ulp nudges of the clock's amplitude, delay,
+# edge time and frequency and of the input's amplitude change none of the
+# 8,404 dv events. It moves only when the engine's step arithmetic changes
+# (7950364593 flipped one decision). Moving the threshold by 1 nV decides
+# every tie low, or every tie high, and touches no other sample (the nearest
+# is 50 mV away). Between those two extremes the codes move by up to 2, one
+# decision. RSpice's deviation from ref over the 19 windows is 2 as run, 2
+# with every tie low and 1 with every tie high. ngspice-46 refined 10x
+# (0.1 ns ceiling) moves ref by 1. As the paranoia delta-sigma gates do, the
+# tolerance is twice the larger of the two.
 [[q]]
 id = "code"
 analysis = "tran"
-variants = ["xs", "vams"]
+variants = ["xs"]
+kind = "held_at"
+signal = "v(adaclout)"
+times = { start = 1.5e-4, step = 1e-4, count = 19 }
+scale = 1024.0
+oracle = "O1"
+ref = "ref/xs.tran.O1.out"
+abs = 4.0
+rel = 0.0
+why = "twice the larger of ngspice's own 10x movement (1 code) and RSpice's deviation over both tie outcomes (2 codes). Was 2.0, which the tie rounding alone reaches"
+
+[[q]]
+id = "code"
+analysis = "tran"
+variants = ["vams"]
 kind = "held_at"
 signal = "v(adaclout)"
 times = { start = 1.5e-4, step = 1e-4, count = 19 }
@@ -28,7 +60,7 @@ oracle = "O1"
 ref = "ref/xs.tran.O1.out"
 abs = 2.0
 rel = 0.0
-why = "one decision flip per window between simulators"
+why = "one decision flip per window between simulators (vams dates the clock at its crossing, so no edge waits on a tie)"
 
 [[q]]
 id = "code"
