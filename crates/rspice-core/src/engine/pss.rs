@@ -62,7 +62,7 @@ enum PssRoute {
     /// Event shooting, whose stabilization builds the transient's own circuit.
     Event,
     /// Native shooting, on the circuit the choice built.
-    Native(CircuitData),
+    Native(Box<CircuitData>),
 }
 
 struct PssGridSolution {
@@ -1801,7 +1801,7 @@ impl Engine {
                     .run_event_pss(netlist, &config, None, abort)
                     .map(|event| event.analysis);
             }
-            PssRoute::Native(circuit) => circuit,
+            PssRoute::Native(circuit) => *circuit,
         };
         engine
             .run_pss_with_state_and_frozen_sources_abort(
@@ -1836,7 +1836,7 @@ impl Engine {
                     .run_event_pss(netlist, &config, Some(dc_seed), abort)
                     .map(|event| event.analysis);
             }
-            PssRoute::Native(circuit) => circuit,
+            PssRoute::Native(circuit) => *circuit,
         };
         engine
             .run_pss_with_state_and_frozen_sources_abort(
@@ -1867,7 +1867,7 @@ impl Engine {
             PssRoute::Event => {
                 return engine.event_pss_operating_point(netlist, config, None, abort);
             }
-            PssRoute::Native(circuit) => circuit,
+            PssRoute::Native(circuit) => *circuit,
         };
         let (analysis, circuit, _, shooting_state) = engine
             .run_pss_with_state_and_frozen_sources_abort(
@@ -1922,7 +1922,7 @@ impl Engine {
             PssRoute::Event => {
                 return engine.event_pss_operating_point(netlist, config, Some(dc_seed), abort);
             }
-            PssRoute::Native(circuit) => circuit,
+            PssRoute::Native(circuit) => *circuit,
         };
         let (analysis, circuit, _, shooting_state) = engine
             .run_pss_with_state_and_frozen_sources_abort(
@@ -2219,7 +2219,7 @@ impl Engine {
     ) -> Result<PssRoute, SimulationError> {
         let circuit = self.build_circuit_with_abort(netlist, abort)?;
         if !super::pss_event::takes_event_shooting(&circuit) {
-            return Ok(PssRoute::Native(circuit));
+            return Ok(PssRoute::Native(Box::new(circuit)));
         }
         match super::pss_event::admission_refusal(&circuit, netlist, config) {
             Some(refusal) => Err(refusal),
@@ -2342,25 +2342,6 @@ impl Engine {
             }
         }
         Ok(())
-    }
-
-    /// `run_pss` plus the converged artifacts the oscillator phase-noise
-    /// machinery needs: the prepared circuit/matrix pair and the converged
-    /// shooting state x0.
-    pub(in crate::engine) fn run_pss_with_state_abort(
-        &self,
-        netlist: &Netlist,
-        config: PssConfig,
-        abort: &dyn AbortSignal,
-    ) -> Result<(PssAnalysisResult, PssCircuit, StaticMatrix, Vec<Value>), SimulationError> {
-        self.run_pss_with_state_and_frozen_sources_abort(
-            netlist,
-            config,
-            &std::collections::BTreeSet::new(),
-            None,
-            None,
-            abort,
-        )
     }
 
     /// Native shooting, on `built` when the caller has already built the
@@ -6674,7 +6655,14 @@ mod tests {
             .with_tstab_periods(0)
             .with_tolerance(1e-8);
         let (pss, mut circuit, mut matrix, x0) = engine
-            .run_pss_with_state_abort(&deck, config.clone(), &crate::NoAbort)
+            .run_pss_with_state_and_frozen_sources_abort(
+                &deck,
+                config.clone(),
+                &std::collections::BTreeSet::new(),
+                None,
+                None,
+                &crate::NoAbort,
+            )
             .unwrap();
         assert!(Engine::pss_period_map_is_affine(&circuit, &config));
         assert!(

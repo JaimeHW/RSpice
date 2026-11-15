@@ -489,15 +489,15 @@ impl Engine {
         let circuit = &prepared.image.circuit;
         #[cfg(feature = "veriloga")]
         if let Some(device) = circuit.veriloga_devices().iter().next() {
+            let instance = device.name.to_string();
             return Err(refusal(
                 EVENT_CARRIER,
                 format!(
                     "PNOISE on an event orbit linearizes switches and the native devices between \
-                     their changes; the operator of Verilog-A instance '{}' around its events is \
-                     not formed",
-                    device.name
+                     their changes; the operator of Verilog-A instance '{instance}' around its \
+                     events is not formed"
                 ),
-                Some(&device.name.to_string()),
+                Some(&instance),
             ));
         }
         let node_names = circuit.node_names_sorted();
