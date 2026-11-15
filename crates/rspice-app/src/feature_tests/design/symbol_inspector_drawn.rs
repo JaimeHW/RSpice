@@ -540,6 +540,9 @@ fn a_style_row_restyles_every_selected_shape_as_one_undo_step() {
     );
 
     // A background is the third way to fill: a light shade under a body.
+    // The undo lands between frames, as a command does; a frame shows the
+    // undone shapes before the pointer reaches the row, as the app repaints.
+    editor.pass(Vec::new());
     pick(&mut editor, "Fill", "background");
     assert!(
         styles(&editor)
