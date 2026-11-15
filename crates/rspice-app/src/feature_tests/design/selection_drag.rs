@@ -25,7 +25,7 @@ fn a_vertex_drag_over_a_lone_junction_follows_the_pointer_every_frame() {
     let symbols = crate::schematic::view::schematic_symbol_context(&state);
 
     dispatch(
-        &mut crate::schematic::view::canvas_parts(&mut state),
+        &mut state.canvas_parts(),
         &ctx,
         &symbols,
         SelectionDragAction::BeginWireVertex(junction),
@@ -40,7 +40,7 @@ fn a_vertex_drag_over_a_lone_junction_follows_the_pointer_every_frame() {
     for step in 1..=3 {
         let position = Point::new(junction.x, junction.y - step * 10);
         dispatch(
-            &mut crate::schematic::view::canvas_parts(&mut state),
+            &mut state.canvas_parts(),
             &ctx,
             &symbols,
             SelectionDragAction::MoveWireVertex {
@@ -73,7 +73,7 @@ fn drag(
     delta: Point,
 ) {
     dispatch(
-        &mut crate::schematic::view::canvas_parts(state),
+        &mut state.canvas_parts(),
         ctx,
         symbols,
         SelectionDragAction::BeginSelection {
@@ -88,7 +88,7 @@ fn drag(
         .expect("a gesture");
     let position = Point::new(from.x + delta.x, from.y + delta.y);
     dispatch(
-        &mut crate::schematic::view::canvas_parts(state),
+        &mut state.canvas_parts(),
         ctx,
         symbols,
         SelectionDragAction::MoveSelection {
@@ -99,7 +99,7 @@ fn drag(
         },
     );
     dispatch(
-        &mut crate::schematic::view::canvas_parts(state),
+        &mut state.canvas_parts(),
         ctx,
         symbols,
         SelectionDragAction::Finish { operation_id },
@@ -117,7 +117,7 @@ fn drag_through(
     steps: &[Point],
 ) {
     dispatch(
-        &mut crate::schematic::view::canvas_parts(state),
+        &mut state.canvas_parts(),
         ctx,
         symbols,
         SelectionDragAction::BeginSelection {
@@ -134,7 +134,7 @@ fn drag_through(
     for step in steps {
         let position = Point::new(from.x + step.x, from.y + step.y);
         dispatch(
-            &mut crate::schematic::view::canvas_parts(state),
+            &mut state.canvas_parts(),
             ctx,
             symbols,
             SelectionDragAction::MoveSelection {
@@ -147,7 +147,7 @@ fn drag_through(
         last = position;
     }
     dispatch(
-        &mut crate::schematic::view::canvas_parts(state),
+        &mut state.canvas_parts(),
         ctx,
         symbols,
         SelectionDragAction::Finish { operation_id },
@@ -494,7 +494,7 @@ fn queued_drag_requests_reject_changed_sources_and_replacement_transactions() {
             target: PointerTarget::Component(id),
             position: Point::new(100, 100),
         };
-        let request = capture(&crate::schematic::view::canvas_parts(&mut state), action);
+        let request = capture(&state.canvas_parts(), action);
         match change {
             0 => {
                 state.model.workspace.ascend_one().unwrap();
@@ -519,12 +519,7 @@ fn queued_drag_requests_reject_changed_sources_and_replacement_transactions() {
             _ => state.model.schematic.session.read_only = true,
         }
         let before = state.model.schematic.document().components.clone();
-        apply(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            &ctx,
-            &symbols,
-            request,
-        );
+        apply(&mut state.canvas_parts(), &ctx, &symbols, request);
         assert!(
             !state.model.schematic.has_pending_operation(),
             "change {change}"
@@ -533,12 +528,7 @@ fn queued_drag_requests_reject_changed_sources_and_replacement_transactions() {
         assert!(state.model.schematic.session.editor.selection.is_empty());
 
         state.model.schematic.session.read_only = false;
-        dispatch(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            &ctx,
-            &symbols,
-            action,
-        );
+        dispatch(&mut state.canvas_parts(), &ctx, &symbols, action);
         let operation_id = state
             .model
             .schematic
@@ -550,7 +540,7 @@ fn queued_drag_requests_reject_changed_sources_and_replacement_transactions() {
         assert_ne!(replacement, Some(operation_id));
         // Capture current source revisions to isolate the operation-token guard.
         dispatch(
-            &mut crate::schematic::view::canvas_parts(&mut state),
+            &mut state.canvas_parts(),
             &ctx,
             &symbols,
             SelectionDragAction::MoveSelection {
@@ -561,7 +551,7 @@ fn queued_drag_requests_reject_changed_sources_and_replacement_transactions() {
             },
         );
         dispatch(
-            &mut crate::schematic::view::canvas_parts(&mut state),
+            &mut state.canvas_parts(),
             &ctx,
             &symbols,
             SelectionDragAction::Finish { operation_id },

@@ -40,11 +40,7 @@ fn canvas_accessibility_uses_a_stable_node_and_concise_live_selection_status() {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    render_schematic_view(
-                        ui,
-                        &mut crate::schematic::view::canvas_frame(&mut state),
-                        None,
-                    )
+                    render_schematic_view(ui, &mut state.canvas_frame(), None)
                 });
         },
     );
@@ -109,7 +105,7 @@ fn rest_mouse(
             },
             |ui| {
                 canvas = ui.available_rect_before_wrap();
-                render_schematic_view(ui, &mut crate::schematic::view::canvas_frame(state), None);
+                render_schematic_view(ui, &mut state.canvas_frame(), None);
             },
         ));
     }
@@ -205,7 +201,7 @@ fn right_drag(state: &mut AppState, from: egui::Pos2, to: egui::Pos2) {
                 events: vec![event],
                 ..Default::default()
             },
-            |ui| render_schematic_view(ui, &mut crate::schematic::view::canvas_frame(state), None),
+            |ui| render_schematic_view(ui, &mut state.canvas_frame(), None),
         );
     }
 }

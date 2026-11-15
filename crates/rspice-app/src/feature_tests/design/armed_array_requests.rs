@@ -51,7 +51,7 @@ fn array_requests_recheck_the_source_draft_and_operation_without_cancelling_a_re
         let mut next = expected.clone();
         next.preview_delta = Point::new(100, 0);
         let request = capture(
-            &crate::schematic::view::canvas_parts(&mut state),
+            &state.canvas_parts(),
             TransformInputTransition {
                 expected,
                 next,
@@ -96,11 +96,7 @@ fn array_requests_recheck_the_source_draft_and_operation_without_cancelling_a_re
         }
         let canvas = state.design.array_selection.canvas.clone();
         let symbols = schematic_symbol_context(&state);
-        apply(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            &symbols,
-            request,
-        );
+        apply(&mut state.canvas_parts(), &symbols, request);
         if change == "none" {
             assert_eq!(state.model.schematic.document().components.len(), 8);
             assert_eq!(

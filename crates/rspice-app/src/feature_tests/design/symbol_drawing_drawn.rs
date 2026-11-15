@@ -91,11 +91,7 @@ impl Canvas {
                     egui::vec2(editor.pan.0, editor.pan.1),
                 );
                 app.handle_shortcuts(ui.ctx());
-                crate::schematic::symbol_editor::show(
-                    ui,
-                    &mut crate::schematic::view::canvas_frame(&mut app.state),
-                    None,
-                );
+                crate::schematic::symbol_editor::show(ui, &mut app.state.canvas_frame(), None);
             },
         );
         // What a row raised runs once the surface has drawn, as in the

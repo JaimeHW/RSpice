@@ -31,7 +31,7 @@ fn apply(state: &mut AppState, request: SymbolCanvasRequest) {
     let mut metadata =
         crate::workbench::app::load_active_symbol_editor_metadata(&state.model, &document).unwrap();
     apply_canvas_request(
-        &mut crate::schematic::view::canvas_parts(state),
+        &mut state.canvas_parts(),
         &mut document,
         &mut metadata,
         request,
@@ -100,7 +100,7 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
             state.workbench.window_session.set_current(window).unwrap();
         }
         state.open_workspace_view(symbol);
-        bind_active_canvas(&mut crate::schematic::view::canvas_parts(&mut state));
+        bind_active_canvas(&mut state.canvas_parts());
         assert!(!state.design.symbol.editor.dragging_origin, "{change}");
         assert!(
             state.design.symbol.editor.marquee_start.is_none(),

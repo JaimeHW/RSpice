@@ -264,7 +264,7 @@ fn after_a_sheet_tab_the_canvas_still_takes_its_keys() {
                     egui::CentralPanel::default().show(ui, |ui| {
                         crate::schematic::view::render_schematic_view(
                             ui,
-                            &mut crate::schematic::view::canvas_frame(&mut app.state),
+                            &mut app.state.canvas_frame(),
                             None,
                         );
                     });

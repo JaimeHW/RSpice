@@ -41,10 +41,7 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
                     .set_active_read_only_reference(true);
             }
             assert!(
-                !apply_surface_request(
-                    &mut crate::schematic::view::canvas_frame(&mut state),
-                    request
-                ),
+                !apply_surface_request(&mut state.canvas_frame(), request),
                 "{action:?}, stale view: {stale_view}"
             );
             assert!(!state.project.copy_cell_dialog);
@@ -63,10 +60,7 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
                 ),
                 action: SymbolSurfaceAction::CopyToEditableLibrary,
             };
-            assert!(apply_surface_request(
-                &mut crate::schematic::view::canvas_frame(&mut state),
-                request
-            ));
+            assert!(apply_surface_request(&mut state.canvas_frame(), request));
             crate::workbench::commands::answer_surface_requests(&mut state);
             assert!(state.project.copy_cell_dialog);
             assert_eq!(state.project.copy_cell_source_library, "work");

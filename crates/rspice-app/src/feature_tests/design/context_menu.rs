@@ -3,7 +3,6 @@
 use crate::schematic::view::SchematicSymbolContext;
 use crate::schematic::view::context_menu::{ARRANGE_ENTRIES, ContextEntry};
 use crate::schematic::view::schematic_symbol_context;
-use crate::schematic::view::{canvas_facts, canvas_parts};
 use crate::state::Point;
 use crate::state::Tool;
 use crate::state::{
@@ -51,23 +50,23 @@ fn the_descend_shortcut_opens_a_veriloga_instances_view_as_its_row_does() {
 // the menu asked of another workspace as the shell does.
 
 fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'static str) {
-    crate::schematic::view::context_menu::action_availability(action, &canvas_facts(state))
+    crate::schematic::view::context_menu::action_availability(action, &state.canvas_facts())
 }
 
 fn menu_entries(state: &AppState, target: ContextTarget) -> Vec<ContextEntry> {
-    crate::schematic::view::context_menu::menu_entries(&canvas_facts(state), target)
+    crate::schematic::view::context_menu::menu_entries(&state.canvas_facts(), target)
 }
 
 fn selection_summary(state: &AppState, target: ContextTarget) -> String {
-    crate::schematic::view::context_menu::selection_summary(&canvas_facts(state), target)
+    crate::schematic::view::context_menu::selection_summary(&state.canvas_facts(), target)
 }
 
 fn context_menu_binding(state: &AppState) -> Option<ContextMenuBinding> {
-    crate::schematic::view::context_menu::context_menu_binding(&canvas_facts(state))
+    crate::schematic::view::context_menu::context_menu_binding(&state.canvas_facts())
 }
 
 fn context_menu_view(state: &AppState, ctx: &Context) -> Option<ContextMenuView> {
-    crate::schematic::view::context_menu::context_menu_view(&canvas_facts(state), ctx)
+    crate::schematic::view::context_menu::context_menu_view(&state.canvas_facts(), ctx)
 }
 
 fn execute_context_action(
@@ -78,7 +77,7 @@ fn execute_context_action(
 ) {
     crate::schematic::view::context_menu::execute_context_action(
         action,
-        &mut canvas_parts(state),
+        &mut state.canvas_parts(),
         click_pos,
         symbol_context,
     );
@@ -91,7 +90,7 @@ fn apply_context_request(
     symbol_context: &SchematicSymbolContext,
 ) {
     crate::schematic::view::context_menu::apply_context_request(
-        &mut canvas_parts(state),
+        &mut state.canvas_parts(),
         request,
         symbol_context,
     );
@@ -99,12 +98,12 @@ fn apply_context_request(
 }
 
 fn open_operating_point(state: &mut AppState) {
-    crate::schematic::view::context_menu::open_operating_point(&mut canvas_parts(state));
+    crate::schematic::view::context_menu::open_operating_point(&mut state.canvas_parts());
     answer_surface_requests(state);
 }
 
 fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) -> ContextTarget {
-    crate::schematic::view::context_menu::select_context_target(&mut canvas_parts(state), target)
+    crate::schematic::view::context_menu::select_context_target(&mut state.canvas_parts(), target)
 }
 
 fn context_key_input(key: Key) -> egui::RawInput {
@@ -275,19 +274,17 @@ fn new_veriloga_device_opens_the_form_from_the_canvas() {
 fn a_dialog_the_menu_asked_for_holds_the_canvas_modal_until_it_opens() {
     let mut state = AppState::default();
     let symbol_context = schematic_symbol_context(&state);
-    assert!(!canvas_parts(&mut state).application_modal_open());
+    assert!(!state.canvas_parts().application_modal_open());
     crate::schematic::view::context_menu::execute_context_action(
         ContextAction::NewVerilogADevice,
-        &mut canvas_parts(&mut state),
+        &mut state.canvas_parts(),
         Point::origin(),
         &symbol_context,
     );
     assert!(!state.code.new_veriloga_device.open);
     assert!(!state.application_modal_open());
-    assert!(crate::schematic::view::canvas_application_modal_open(
-        &state
-    ));
-    let parts = canvas_parts(&mut state);
+    assert!(state.canvas_application_modal_open());
+    let parts = state.canvas_parts();
     assert!(parts.application_modal_open());
     assert!(parts.dialog_modal_open());
 
@@ -1195,10 +1192,7 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
                 alt_held: false,
             },
         };
-        crate::schematic::view::requests::apply_editor_request(
-            &mut crate::schematic::view::canvas_parts(state),
-            request,
-        );
+        crate::schematic::view::requests::apply_editor_request(&mut state.canvas_parts(), request);
     }
 
     let reference = hierarchy_reference::build();

@@ -23,11 +23,7 @@ fn open_pin_marks(ctx: &egui::Context, state: &mut AppState) -> Vec<Point> {
         },
         |ui| {
             canvas = ui.available_rect_before_wrap();
-            crate::schematic::view::render_schematic_view(
-                ui,
-                &mut crate::schematic::view::canvas_frame(state),
-                None,
-            );
+            crate::schematic::view::render_schematic_view(ui, &mut state.canvas_frame(), None);
         },
     );
     let mut marks = output

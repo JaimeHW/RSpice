@@ -17,7 +17,7 @@ fn every_source_in_the_current_loop_is_marked() {
     state.open_project_session();
     let (top, _, sources) = draw_source_loop(&mut state);
     assert_eq!(
-        related_marks(&crate::schematic::view::canvas_facts(&state)),
+        related_marks(&state.canvas_facts()),
         None,
         "no finding is current"
     );
@@ -26,8 +26,8 @@ fn every_source_in_the_current_loop_is_marked() {
         .model
         .diagnostics
         .set_current_finding(Some(loop_finding(&state, &top)));
-    let (severity, mut marked) = related_marks(&crate::schematic::view::canvas_facts(&state))
-        .expect("the loop's sources are marked");
+    let (severity, mut marked) =
+        related_marks(&state.canvas_facts()).expect("the loop's sources are marked");
 
     let mut drawn: Vec<Point> = sources.iter().map(|source| source.position).collect();
     marked.sort_by_key(|point| (point.x, point.y));

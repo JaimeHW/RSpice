@@ -46,7 +46,7 @@ fn queued_shape_input_cannot_edit_a_replaced_gesture_or_changed_context() {
         next.keyboard_cursor = Some(Point::new(10, 0));
         next.keyboard_active = true;
         let request = capture_shape_input(
-            &crate::schematic::view::canvas_parts(&mut state),
+            &state.canvas_parts(),
             ShapeInputTransition {
                 expected,
                 next,
@@ -105,10 +105,7 @@ fn queued_shape_input_cannot_edit_a_replaced_gesture_or_changed_context() {
             .editor
             .pending_documentation_shape
             .clone();
-        apply_shape_input(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            request.clone(),
-        );
+        apply_shape_input(&mut state.canvas_parts(), request.clone());
         if change == "none" {
             assert_eq!(
                 state.model.schematic.document().documentation_shapes.len(),
@@ -169,7 +166,7 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
         );
     let ctx = egui::Context::default();
     assert!(activate_requirement_link(
-        &mut crate::schematic::view::canvas_parts(&mut state),
+        &mut state.canvas_parts(),
         32,
         &ctx
     ));
@@ -200,7 +197,7 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
         );
     let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
         assert!(activate_requirement_link(
-            &mut crate::schematic::view::canvas_parts(&mut state),
+            &mut state.canvas_parts(),
             33,
             ctx
         ));

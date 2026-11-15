@@ -40,7 +40,7 @@ fn transient_voltages_annotate_the_transient_at_cursor_a() {
     state.design.schematic_visibility.annotations =
         SchematicAnnotationVisibility::TransientVoltages;
     let read = |state: &AppState| {
-        operating_point_annotations(&crate::schematic::view::canvas_facts(state))
+        operating_point_annotations(&state.canvas_facts())
             .iter()
             .map(text)
             .collect::<Vec<_>>()

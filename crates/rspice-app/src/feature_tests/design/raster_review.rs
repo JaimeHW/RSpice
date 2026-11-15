@@ -498,7 +498,7 @@ pub(super) fn render_pointing(
                 .show(ui, |ui| {
                     crate::schematic::view::render_schematic_view(
                         ui,
-                        &mut crate::schematic::view::canvas_frame(state),
+                        &mut state.canvas_frame(),
                         symbols.as_ref(),
                     );
                 });

@@ -76,9 +76,7 @@ pub(crate) use self::parts::{
     CanvasFacts, CanvasFrame, CanvasParts, canvas_frame_in, canvas_parts_in, canvas_parts_lent,
 };
 #[cfg(test)]
-pub(crate) use self::parts::{
-    canvas_application_modal_open, canvas_facts, canvas_facts_lent, canvas_frame, canvas_parts,
-};
+pub(crate) use self::parts::{asked_dialog_waits, canvas_facts_lent, canvas_frame_lent};
 pub(crate) use self::requests::{DesignSurfaceRequest, SelectProbedTrace};
 pub(crate) use self::shelf_drag::{
     SchematicShelfDragPayload, handle_pre_render_placement_transform,

@@ -182,7 +182,7 @@ fn draw_schematic_canvas(state: &mut AppState, width: f32, height: f32) {
                 .show(ctx, |ui| {
                     crate::schematic::view::render_schematic_view(
                         ui,
-                        &mut crate::schematic::view::canvas_frame(state),
+                        &mut state.canvas_frame(),
                         None,
                     );
                 });
@@ -376,7 +376,7 @@ fn drive_schematic_canvas(state: &mut AppState, ctx: &egui::Context, events: Vec
                 .show(ctx, |ui| {
                     crate::schematic::view::render_schematic_view(
                         ui,
-                        &mut crate::schematic::view::canvas_frame(state),
+                        &mut state.canvas_frame(),
                         None,
                     );
                 });

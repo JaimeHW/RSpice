@@ -32,7 +32,7 @@ fn run_navigation_frame(
             let symbol_context = schematic_symbol_context(state);
             let handled = handle_keyboard_object_navigation(
                 &response,
-                &mut crate::schematic::view::canvas_parts(state),
+                &mut state.canvas_parts(),
                 &symbol_context,
             );
             let key_still_available = ui

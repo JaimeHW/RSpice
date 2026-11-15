@@ -28,8 +28,6 @@
 use crate::state::{
     BusDeclaration, BusParseError, CellViewRef, Point, SymbolDocument, SymbolEditorMetadata,
 };
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::{
     app::{
         SymbolInPlace, SymbolInPlaceRefusal, deny_read_only_edit, finish_symbol_parent_edit,
@@ -75,13 +73,6 @@ pub(crate) struct CanvasParts<'a> {
     pub(crate) commands: &'static Registry,
     application_modal: bool,
     dialog_modal: bool,
-}
-
-/// The canvas's parts of the application's state, as the shell's
-/// `AppState::canvas_parts` takes them, for the tests that name them here.
-#[cfg(test)]
-pub(crate) fn canvas_parts(state: &mut AppState) -> CanvasParts<'_> {
-    state.canvas_parts()
 }
 
 /// The canvas's parts of the design feature's context, with its modal facts
@@ -167,25 +158,6 @@ pub(crate) struct CanvasFrame<'a> {
     pub(crate) commands: &'static Registry,
     application_modal: bool,
     dialog_modal: bool,
-}
-
-/// The canvas frame over the application's state, with its modal facts as
-/// they stand now.
-#[cfg(test)]
-pub(crate) fn canvas_frame(state: &mut AppState) -> CanvasFrame<'_> {
-    let application_modal = state.application_modal_open();
-    let dialog_modal = state.dialog_modal_open();
-    CanvasFrame {
-        design: &mut state.design,
-        model: &mut state.model,
-        workbench: &mut state.workbench,
-        runs: &mut state.runs,
-        results: &*state.results,
-        code: &*state.code,
-        commands: crate::workbench::commands::vocabulary::command_registry(),
-        application_modal,
-        dialog_modal,
-    }
 }
 
 /// The canvas frame over the design feature's context, with its modal facts
@@ -289,17 +261,9 @@ impl CanvasFrame<'_> {
     }
 }
 
-/// Whether the design surface reads a modal dialog as open: one that is,
-/// or one it asked another workspace to open that waits for the shell.
-/// Every dialog the surface asks for counts for the dialog gate too.
-#[cfg(test)]
-pub(crate) fn canvas_application_modal_open(state: &AppState) -> bool {
-    state.application_modal_open() || asked_dialog_waits(&state.workbench)
-}
-
 /// Whether a dialog the design surface asked for waits in `workbench`'s
 /// outbox for the shell to open it.
-fn asked_dialog_waits(workbench: &WorkbenchSession) -> bool {
+pub(crate) fn asked_dialog_waits(workbench: &WorkbenchSession) -> bool {
     workbench
         .outbox
         .peek::<DesignSurfaceRequest>()
@@ -328,20 +292,6 @@ pub(crate) struct CanvasFacts<'a> {
     /// The application's commands, which shortcut labels read.
     pub(crate) commands: &'static Registry,
     probed_trace: Option<&'a SelectedResultTrace>,
-}
-
-/// The canvas's facts from the application's state.
-#[cfg(test)]
-pub(crate) fn canvas_facts(state: &AppState) -> CanvasFacts<'_> {
-    CanvasFacts {
-        design: &state.design,
-        model: &state.model,
-        runs: &state.runs,
-        results: &*state.results,
-        code: &*state.code,
-        commands: crate::workbench::commands::vocabulary::command_registry(),
-        probed_trace: probed_trace(&state.workbench),
-    }
 }
 
 /// The canvas's facts from the design feature's context.

@@ -142,7 +142,7 @@ impl Bench {
         let ctx = self.ctx.clone();
         let state = &mut self.app.state;
         state.model.schematic.arm_tool(crate::state::Tool::Wire);
-        crate::schematic::view::canvas_parts(state).start_canvas_wire(&ctx, *first);
+        state.canvas_parts().start_canvas_wire(&ctx, *first);
         for point in rest {
             state.model.schematic.extend_wire(*point);
         }

@@ -827,15 +827,11 @@ impl Fixture {
                 if app.state.model.workspace.content.active_view_type()
                     == Some(crate::state::ViewType::Symbol)
                 {
-                    crate::schematic::symbol_editor::show(
-                        ui,
-                        &mut crate::schematic::view::canvas_frame(&mut app.state),
-                        None,
-                    );
+                    crate::schematic::symbol_editor::show(ui, &mut app.state.canvas_frame(), None);
                 } else {
                     crate::schematic::view::render_schematic_view(
                         ui,
-                        &mut crate::schematic::view::canvas_frame(&mut app.state),
+                        &mut app.state.canvas_frame(),
                         None,
                     );
                 }

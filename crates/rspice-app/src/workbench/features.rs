@@ -584,6 +584,47 @@ impl AppState {
     }
 }
 
+/// The design canvas's frame and facts over the application's state, with
+/// its modal facts as they stand now, for the tests that draw or read the
+/// canvas through the whole application.
+#[cfg(test)]
+impl AppState {
+    pub(crate) fn canvas_frame(&mut self) -> crate::schematic::view::CanvasFrame<'_> {
+        let application_modal_open = self.application_modal_open();
+        let dialog_modal_open = self.dialog_modal_open();
+        crate::schematic::view::canvas_frame_lent(
+            &mut self.design,
+            &mut self.model,
+            &mut self.workbench,
+            &mut self.runs,
+            &*self.results,
+            &*self.code,
+            command_registry(),
+            application_modal_open,
+            dialog_modal_open,
+        )
+    }
+
+    pub(crate) fn canvas_facts(&self) -> crate::schematic::view::CanvasFacts<'_> {
+        crate::schematic::view::canvas_facts_lent(
+            &self.design,
+            &self.model,
+            &self.workbench,
+            &self.runs,
+            &*self.results,
+            &*self.code,
+            command_registry(),
+        )
+    }
+
+    /// Whether the design surface reads a modal dialog as open: one that is,
+    /// or one it asked another workspace to open that waits for the shell.
+    /// Every dialog the surface asks for counts for the dialog gate too.
+    pub(crate) fn canvas_application_modal_open(&self) -> bool {
+        self.application_modal_open() || crate::schematic::view::asked_dialog_waits(&self.workbench)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

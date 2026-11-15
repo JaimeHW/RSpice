@@ -1327,11 +1327,7 @@ fn app_frame(
             problems(ui, &mut app.state);
         });
         ui.scope_builder(egui::UiBuilder::new().max_rect(canvas), |ui| {
-            crate::schematic::view::render_schematic_view(
-                ui,
-                &mut crate::schematic::view::canvas_frame(&mut app.state),
-                None,
-            );
+            crate::schematic::view::render_schematic_view(ui, &mut app.state.canvas_frame(), None);
         });
         crate::workbench::diagnostic_routes::apply_pending(ui.ctx(), app);
     }))

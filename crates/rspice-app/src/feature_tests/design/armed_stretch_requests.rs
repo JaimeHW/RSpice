@@ -49,7 +49,7 @@ fn stretch_requests_recheck_source_target_and_policy_without_cancelling_a_replac
         let mut next = expected.clone();
         next.gesture.preview_delta = Point::new(0, 10);
         let request = capture(
-            &crate::schematic::view::canvas_parts(&mut state),
+            &state.canvas_parts(),
             TransformInputTransition {
                 expected,
                 next,
@@ -91,11 +91,7 @@ fn stretch_requests_recheck_source_target_and_policy_without_cancelling_a_replac
         }
         let canvas = state.design.stretch_selection.canvas.clone();
         let symbols = schematic_symbol_context(&state);
-        apply(
-            &mut crate::schematic::view::canvas_parts(&mut state),
-            &symbols,
-            request,
-        );
+        apply(&mut state.canvas_parts(), &symbols, request);
         if change == "none" {
             assert_eq!(
                 state.model.schematic.document().wires[0].points[1],

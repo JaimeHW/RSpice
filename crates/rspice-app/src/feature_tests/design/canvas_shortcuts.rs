@@ -3,9 +3,7 @@
 //! registry: the schematic canvas's and the symbol canvas's.
 
 use crate::schematic::symbol_editor::symbol_canvas_accessibility_label;
-use crate::schematic::view::{
-    canvas_accessibility_view, canvas_facts, schematic_accessibility_shortcuts,
-};
+use crate::schematic::view::{canvas_accessibility_view, schematic_accessibility_shortcuts};
 use crate::state::{
     Component, ComponentType, Point, PortDirection, SymbolDocument, SymbolPin, SymbolShape,
 };
@@ -67,7 +65,7 @@ fn accessibility_description_summarizes_scene_and_tool_without_selection_churn()
     state.model.schematic.session.editor.tool = crate::state::Tool::Wire;
 
     let description = canvas::accessibility_description(
-        &canvas_accessibility_view(&canvas_facts(&state)),
+        &canvas_accessibility_view(&state.canvas_facts()),
         &schematic_accessibility_shortcuts(
             &state.model,
             command_registry(),
@@ -92,13 +90,13 @@ fn accessibility_description_summarizes_scene_and_tool_without_selection_churn()
     assert!(description.contains("S: Stretch"));
     assert!(!description.contains("S: Stretch selection"));
     assert_eq!(
-        canvas::selection_accessibility_status(&canvas_accessibility_view(&canvas_facts(&state))),
+        canvas::selection_accessibility_status(&canvas_accessibility_view(&state.canvas_facts())),
         "Selected instance unnamed, Resistor."
     );
     state.model.schematic.session.editor.selection.clear();
     assert_eq!(
         canvas::accessibility_description(
-            &canvas_accessibility_view(&canvas_facts(&state)),
+            &canvas_accessibility_view(&state.canvas_facts()),
             &schematic_accessibility_shortcuts(
                 &state.model,
                 command_registry(),
@@ -109,7 +107,7 @@ fn accessibility_description_summarizes_scene_and_tool_without_selection_churn()
         description
     );
     assert_eq!(
-        canvas::selection_accessibility_status(&canvas_accessibility_view(&canvas_facts(&state))),
+        canvas::selection_accessibility_status(&canvas_accessibility_view(&state.canvas_facts())),
         "No schematic object selected."
     );
 }
@@ -135,7 +133,7 @@ fn symbol_canvas_accessibility_label_reports_editing_contract() {
 
     let label = symbol_canvas_accessibility_label(
         &document,
-        &canvas_facts(&state),
+        &state.canvas_facts(),
         false,
         crate::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,

@@ -38,7 +38,7 @@ fn canvas_frame(ctx: &egui::Context, state: &mut AppState, time: f64, events: Ve
                 handle_tool_interactions(
                     ui,
                     &response,
-                    &mut crate::schematic::view::canvas_parts(state),
+                    &mut state.canvas_parts(),
                     &viewport,
                     &symbols,
                 );

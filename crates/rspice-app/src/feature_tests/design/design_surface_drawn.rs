@@ -82,7 +82,7 @@ fn breadcrumb_segments_render_instance_and_master() {
         crate::ui::raster::render(RASTER_VIEWPORT, |ui, _| {
             breadcrumb(
                 ui.ctx(),
-                &mut crate::schematic::view::canvas_frame(&mut app.state),
+                &mut app.state.canvas_frame(),
                 Rect::from_min_size(egui::Pos2::ZERO, RASTER_VIEWPORT),
             );
         })

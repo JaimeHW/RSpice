@@ -1,7 +1,6 @@
 //! The mobile canvas controls drawn through a whole application.
 
 use super::mobile_controls::strip_cx;
-use crate::schematic::view::canvas_facts;
 use crate::schematic::view::mobile_controls::{operation_live, show};
 use crate::state::{ComponentType, Point, SchematicState};
 use crate::workbench::RSpiceApp;
@@ -92,7 +91,7 @@ impl Finger {
                 *canvas = ui.available_rect_before_wrap();
                 crate::schematic::view::render_schematic_view(
                     ui,
-                    &mut crate::schematic::view::canvas_frame(&mut app.state),
+                    &mut app.state.canvas_frame(),
                     None,
                 );
                 show(&ui.ctx().clone(), &mut strip_cx(app), *canvas);
@@ -340,7 +339,7 @@ fn the_strip_buttons_run_the_canvas_commands() {
 fn cancel_is_live_only_while_an_operation_is() {
     let mut finger = Finger::new(Vec2::new(1024.0, 768.0));
     finger.tap(finger.canvas.center());
-    assert!(!operation_live(&canvas_facts(&finger.app.state)));
+    assert!(!operation_live(&finger.app.state.canvas_facts()));
     finger
         .app
         .state
@@ -348,7 +347,7 @@ fn cancel_is_live_only_while_an_operation_is() {
         .schematic
         .arm_tool(crate::state::Tool::Wire);
     assert!(
-        operation_live(&canvas_facts(&finger.app.state)),
+        operation_live(&finger.app.state.canvas_facts()),
         "an armed drawing tool is live"
     );
     finger.frame(Vec::new());
@@ -358,7 +357,7 @@ fn cancel_is_live_only_while_an_operation_is() {
         crate::state::Tool::Select,
         "Cancel puts the wire tool down, as Esc does"
     );
-    assert!(!operation_live(&canvas_facts(&finger.app.state)));
+    assert!(!operation_live(&finger.app.state.canvas_facts()));
 }
 
 /// E-11, R-3: a finger dragged across a part that is not selected pans the

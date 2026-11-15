@@ -18,10 +18,7 @@ fn render(app: &mut RSpiceApp, size: Vec2) -> egui::FullOutput {
         },
         |context| {
             egui::CentralPanel::default().show(context, |ui| {
-                show(
-                    ui,
-                    &mut crate::schematic::view::canvas_frame(&mut app.state),
-                );
+                show(ui, &mut app.state.canvas_frame());
             });
         },
     )
@@ -72,10 +69,7 @@ fn the_cursor_over_the_canvas_reaches_the_status_bar() {
             },
             |context| {
                 egui::CentralPanel::default().show(context, |ui| {
-                    show(
-                        ui,
-                        &mut crate::schematic::view::canvas_frame(&mut app.state),
-                    );
+                    show(ui, &mut app.state.canvas_frame());
                 });
             },
         );
