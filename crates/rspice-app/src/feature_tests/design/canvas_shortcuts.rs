@@ -144,4 +144,8 @@ fn symbol_canvas_accessibility_label_reports_editing_contract() {
     ));
     assert!(label.contains("P: Place symbol pin"));
     assert!(label.contains("Escape: Cancel active command"));
+    assert!(
+        label.contains("F: Fit symbol;") && !label.contains("drawing sheet"),
+        "F fits the symbol: {label}"
+    );
 }

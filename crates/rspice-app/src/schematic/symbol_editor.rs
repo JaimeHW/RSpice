@@ -51,6 +51,12 @@ pub(crate) fn symbol_canvas_accessibility_label(
             ids::CANCEL,
         ],
     );
+    // On a symbol the fit fits the symbol, as the canvas menu's row names
+    // it, not the drawing sheet the command is named for on a schematic.
+    let sheet = state.commands.label(ids::ZOOM_FIT);
+    let shortcuts = [";", "."].iter().fold(shortcuts, |text, end| {
+        text.replace(&format!(": {sheet}{end}"), &format!(": Fit symbol{end}"))
+    });
     let in_place = state.symbol_in_place().map(|session| {
         format!(
             "in place on {} in {}",
