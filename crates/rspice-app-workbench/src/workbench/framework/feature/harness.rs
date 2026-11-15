@@ -89,6 +89,12 @@ impl DesignPort for NullPorts {
         SchematicReviewMarkerVisibility::default()
     }
 
+    fn parameter_labels(
+        &self,
+    ) -> rspice_schematic_editor::session::visibility::SchematicParameterLabelVisibility {
+        Default::default()
+    }
+
     /// A fresh session's pointer rests on no canvas.
     fn canvas_hover(&self) -> Option<(f64, f64)> {
         None

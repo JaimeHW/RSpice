@@ -73,10 +73,19 @@ impl SchematicText {
 /// An instance's name and value where the canvas letters them, upright for
 /// every turn and mirror: an authored cell's at its symbol's anchors, any
 /// other part's clear of its turned body. Ground has none, and a name or
-/// value the instance hides stays hidden.
-pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
+/// value the instance hides, or the canvas's label setting `labels` hides,
+/// stays hidden.
+pub fn instance_texts(
+    semantic: &SemanticComponent,
+    labels: SchematicParameterLabelVisibility,
+) -> Vec<SchematicText> {
     let component = &semantic.component;
     if component.kind == ComponentType::Ground {
+        return Vec::new();
+    }
+    // With its labels hidden the canvas letters nothing on a catalog part,
+    // whatever the part itself asks.
+    if semantic.resolved_symbol.is_none() && labels == SchematicParameterLabelVisibility::Hidden {
         return Vec::new();
     }
     let (name, value, value_text) = match &semantic.resolved_symbol {
@@ -98,7 +107,7 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
             )
         }
     };
-    let visibility = SchematicParameterLabelVisibility::NamesAndValues;
+    let visibility = labels;
     // The symbol can keep its name or its value off its instances.
     let (name_hidden, value_hidden) = semantic
         .resolved_symbol

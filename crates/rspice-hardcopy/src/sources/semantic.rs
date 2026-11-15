@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use rspice_design::schematic::component_display::SchematicParameterLabelVisibility;
 use rspice_design::schematic::{
     bus::{Bus, BusTap},
     component::Component,
@@ -171,6 +172,11 @@ pub struct SemanticSchematic {
     /// on screen.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub open_terminals: Vec<Point>,
+    /// What the canvas lettered on a part that inherits its labels when the
+    /// page was made: names and values, values alone, or neither. The page
+    /// keeps it, so it letters what the canvas showed.
+    #[serde(default, skip_serializing_if = "letters_names_and_values")]
+    pub parameter_labels: SchematicParameterLabelVisibility,
 }
 
 const fn default_schematic_grid_pitch_units() -> i32 {
@@ -966,4 +972,9 @@ pub(super) fn validate_worker_semantics(
         | HardcopySemanticDocument::ResultSummary(_) => {}
     }
     Ok(())
+}
+
+/// Whether `labels` is the setting a page letters by default.
+fn letters_names_and_values(labels: &SchematicParameterLabelVisibility) -> bool {
+    *labels == SchematicParameterLabelVisibility::NamesAndValues
 }

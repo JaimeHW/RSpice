@@ -43,6 +43,7 @@ pub(crate) fn resolve_blank_schematic_sheet_with_format(
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
         open_terminals: Vec::new(),
+        parameter_labels: Default::default(),
     };
     let digest = canonical_digest(b"rspice-hardcopy-blank-schematic-sheet-v1", &semantic)?;
     let bounds = drawing_sheet.map_or_else(

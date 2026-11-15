@@ -89,6 +89,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
     ));
     let topology = schematic.topology_version();
     let first = resolve_schematic_source(SchematicHardcopySource {
+        parameter_labels: Default::default(),
         identity: identity("schematic"),
         schematic: schematic.editor_ref().design,
         selection: None,
@@ -105,6 +106,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
     schematic.session.editor.zoom = 7.5;
     schematic.session.editor.pan = (123.0, -44.0);
     let second = resolve_schematic_source(SchematicHardcopySource {
+        parameter_labels: Default::default(),
         identity: HardcopySourceIdentity {
             document_id: first.authority().document_id(),
             ..identity("schematic")
@@ -127,6 +129,7 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
 
     schematic.document_mut_for_test().wires[0].points[1].x += 1;
     let third = resolve_schematic_source(SchematicHardcopySource {
+        parameter_labels: Default::default(),
         identity: HardcopySourceIdentity {
             document_id: first.authority().document_id(),
             ..identity("schematic")
@@ -218,6 +221,7 @@ fn schematic_selection_exports_only_selected_durable_objects() {
     for selection in [whole_wire, segment, vertex] {
         schematic.session.editor.selection = selection;
         let resolved = resolve_schematic_source(SchematicHardcopySource {
+            parameter_labels: Default::default(),
             identity: identity("schematic"),
             schematic: schematic.editor_ref().design,
             selection: SchematicHardcopySelection::capture(
@@ -263,6 +267,7 @@ fn selected_probe_is_rejected_explicitly_without_mutating_the_schematic() {
     let undo_before = schematic.can_undo();
 
     let error = resolve_schematic_source(SchematicHardcopySource {
+        parameter_labels: Default::default(),
         identity: identity("schematic"),
         schematic: schematic.editor_ref().design,
         selection: SchematicHardcopySelection::capture(

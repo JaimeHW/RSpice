@@ -128,6 +128,61 @@ fn a_placed_parts_labels_print_its_own_values() {
     );
 }
 
+/// A print letters what the canvas's label setting shows on every part
+/// that inherits it: names and values, values alone, or nothing at all, on
+/// a catalog part and an authored cell alike.
+#[test]
+fn a_print_letters_the_labels_the_canvas_shows() {
+    use rspice_design::schematic::component_display::SchematicParameterLabelVisibility;
+    use rspice_design::symbol::{SymbolTextAlign, SymbolTextRotation, SymbolTextSize};
+
+    let mut symbol = cell_symbol();
+    symbol.body.push(SymbolShape::Label {
+        anchor: SchematicPoint::new(-30, 50),
+        parameter: "W".to_owned(),
+        default: "1u".to_owned(),
+        size: SymbolTextSize::Normal,
+        align: SymbolTextAlign::Left,
+        rotation: SymbolTextRotation::R0,
+        shown: true,
+    });
+    let printed = |labels| {
+        let mut printed = sheet(Vec::new());
+        printed.parameter_labels = labels;
+        printed.components.push(SemanticComponent {
+            symbol_source: Some(SemanticSymbolSource::Authored),
+            component: part(1, ComponentType::CellInstance, (0, 0), "X1", "amp"),
+            resolved_symbol: Some(symbol.clone()),
+        });
+        printed.components.push(SemanticComponent {
+            symbol_source: None,
+            component: part(2, ComponentType::Resistor, (200, 0), "R1", "1k"),
+            resolved_symbol: None,
+        });
+        compile(&printed)
+            .texts()
+            .into_iter()
+            .map(|(text, ..)| text.to_owned())
+            .collect::<Vec<_>>()
+    };
+    let has = |texts: &[String], text: &str| texts.iter().any(|printed| printed == text);
+    let all = printed(SchematicParameterLabelVisibility::NamesAndValues);
+    for text in ["X1", "amp", "W=1u", "R1", "1k"] {
+        assert!(has(&all, text), "{text} missing from {all:?}");
+    }
+    let values = printed(SchematicParameterLabelVisibility::ValuesOnly);
+    for text in ["amp", "W=1u", "1k"] {
+        assert!(has(&values, text), "{text} missing from {values:?}");
+    }
+    for text in ["X1", "R1"] {
+        assert!(!has(&values, text), "{text} printed in {values:?}");
+    }
+    let none = printed(SchematicParameterLabelVisibility::Hidden);
+    for text in ["X1", "amp", "W=1u", "R1", "1k"] {
+        assert!(!has(&none, text), "{text} printed in {none:?}");
+    }
+}
+
 /// The symbol's own lettering hangs off its anchor as the canvas hangs it:
 /// centred across its reading, and hung below its anchor once a quarter turn
 /// carries a run that read across to read down.
@@ -290,6 +345,7 @@ fn sheet(components: Vec<Component>) -> SemanticSchematic {
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
         open_terminals: Vec::new(),
+        parameter_labels: Default::default(),
     }
 }
 

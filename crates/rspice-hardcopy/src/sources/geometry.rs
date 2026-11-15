@@ -163,7 +163,7 @@ pub fn schematic_bounds(
         }
         // A name or value stands outside the body, where the canvas's layout
         // puts it, and the page holds all of it.
-        for text in super::instance_texts(component) {
+        for text in super::instance_texts(component, schematic.parameter_labels) {
             bounds.include_layout_rect(text.bounds());
         }
     }
@@ -826,6 +826,7 @@ mod drawing_sheet_geometry_tests {
             design_notes: Vec::new(),
             documentation_shapes: vec![arc],
             open_terminals: Vec::new(),
+            parameter_labels: Default::default(),
         };
         let bounds = schematic_bounds(&schematic).unwrap();
         assert_eq!(

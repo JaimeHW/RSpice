@@ -41,6 +41,7 @@ fn blank_schematic_titled(
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
         open_terminals: Vec::new(),
+        parameter_labels: Default::default(),
     };
     let digest = rspice_hardcopy_contract::sources::canonical_digest(
         b"rspice-hardcopy-blank-schematic-sheet-v1",

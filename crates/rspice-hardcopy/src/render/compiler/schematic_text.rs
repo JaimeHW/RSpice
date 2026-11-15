@@ -8,6 +8,7 @@
 use super::*;
 use crate::sources::{SchematicText, SchematicTextClass, SemanticComponent, instance_texts};
 use rspice_design::resolved_symbol::ResolvedCellSymbol;
+use rspice_design::schematic::component_display::SchematicParameterLabelVisibility;
 use rspice_design::schematic::design_note::{DesignNote, NoteLettering};
 use rspice_design::schematic::label_layout::{self, LayoutPoint, PlacedText, TextEdge};
 use rspice_design::symbol_generation::fit_pin_name;
@@ -48,8 +49,9 @@ impl SemanticSceneCompiler<'_> {
     pub(super) fn instance_labels(
         &mut self,
         semantic: &SemanticComponent,
+        labels: SchematicParameterLabelVisibility,
     ) -> Result<(), HardcopyRenderError> {
-        for text in instance_texts(semantic) {
+        for text in instance_texts(semantic, labels) {
             self.schematic_text(&text)?;
         }
         Ok(())

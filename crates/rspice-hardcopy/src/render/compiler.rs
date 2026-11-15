@@ -7,6 +7,7 @@
 //! truncated value on a printed page is indistinguishable from a real one.
 
 use super::*;
+use rspice_design::schematic::component_display::SchematicParameterLabelVisibility;
 use rspice_design::schematic::{component_type::ComponentType, drawing_metrics};
 
 pub(super) struct SemanticSceneCompiler<'a> {
@@ -87,7 +88,9 @@ impl<'a> SemanticSceneCompiler<'a> {
     ) -> Result<(), HardcopyRenderError> {
         match document {
             HardcopySemanticDocument::Schematic(schematic) => self.schematic(schematic),
-            HardcopySemanticDocument::Symbol(symbol) => self.symbol_document(symbol, None),
+            HardcopySemanticDocument::Symbol(symbol) => {
+                self.symbol_document(symbol, None, SchematicParameterLabelVisibility::default())
+            }
             HardcopySemanticDocument::Plot(plot) => self.plot(plot),
             HardcopySemanticDocument::ResultSummary(summary) => self.result_summary(summary),
             HardcopySemanticDocument::Report(report) => self.report(report),
@@ -447,7 +450,11 @@ impl<'a> SemanticSceneCompiler<'a> {
             .map_err(|error| conversion_error(format!("embedded symbol library: {error}")))?;
         for semantic in &schematic.components {
             if let Some(symbol) = &semantic.resolved_symbol {
-                self.symbol_document(symbol, Some(&semantic.component))?;
+                self.symbol_document(
+                    symbol,
+                    Some(&semantic.component),
+                    schematic.parameter_labels,
+                )?;
             } else {
                 self.library_component(
                     &library,
@@ -459,7 +466,7 @@ impl<'a> SemanticSceneCompiler<'a> {
                     self.port_direction_marks(&library, &semantic.component, component_stroke)?;
                 }
             }
-            self.instance_labels(semantic)?;
+            self.instance_labels(semantic, schematic.parameter_labels)?;
         }
         // A pin nothing meets carries the canvas's hollow square, outlined in
         // the part's ink; a connected pin carries none.

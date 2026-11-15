@@ -760,7 +760,9 @@ pub fn scene_from_resolved(
     );
     match source.semantic_document() {
         HardcopySemanticDocument::Schematic(schematic) => compiler.schematic(schematic)?,
-        HardcopySemanticDocument::Symbol(symbol) => compiler.symbol_document(symbol, None)?,
+        HardcopySemanticDocument::Symbol(symbol) => {
+            compiler.symbol_document(symbol, None, Default::default())?
+        }
         HardcopySemanticDocument::Plot(plot) => compiler.plot(plot)?,
         HardcopySemanticDocument::ResultSummary(summary) => compiler.result_summary(summary)?,
         HardcopySemanticDocument::Report(report) => compiler.report(report)?,
@@ -814,7 +816,9 @@ fn scene_from_clipped_aggregate(
         match child.document.as_ref() {
             HardcopySemanticDocument::Schematic(schematic) => compiler
                 .schematic_with_page_label(schematic, child.publication_page_label.as_deref())?,
-            HardcopySemanticDocument::Symbol(symbol) => compiler.symbol_document(symbol, None)?,
+            HardcopySemanticDocument::Symbol(symbol) => {
+                compiler.symbol_document(symbol, None, Default::default())?
+            }
             HardcopySemanticDocument::Plot(plot) => compiler.plot(plot)?,
             HardcopySemanticDocument::ResultSummary(summary) => compiler.result_summary(summary)?,
             HardcopySemanticDocument::Report(report) => compiler.report(report)?,

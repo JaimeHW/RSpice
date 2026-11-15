@@ -68,6 +68,7 @@ fn named_print_set_projects_per_set_sheet_numbers_without_mutating_child_authori
         .into_iter()
         .map(|sheet_id| {
             resolve_schematic_source(SchematicHardcopySource {
+                parameter_labels: Default::default(),
                 identity: schematic_sheet_identity(&base_identity, catalog.find(sheet_id).unwrap())
                     .unwrap(),
                 schematic: schematic.editor_ref().design,
@@ -231,6 +232,7 @@ fn the_canvas_and_the_plot_letter_a_title_in_any_script_alike() {
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
         open_terminals: Vec::new(),
+        parameter_labels: Default::default(),
     };
     let digest =
         rspice_hardcopy_contract::sources::canonical_digest(b"rspice-title-scripts", &semantic)

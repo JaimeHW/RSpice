@@ -73,6 +73,7 @@ fn workflow_parts<'a>(cx: &'a mut Cx<'_, HardcopyFeature>) -> HardcopyParts<'a> 
         model: cx.model,
         workbench: cx.wb,
         results: cx.peers.results(),
+        parameter_labels: cx.peers.design().parameter_labels(),
         export_io: cx.handles.export_io,
     }
 }

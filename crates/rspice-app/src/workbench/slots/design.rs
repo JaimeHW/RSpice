@@ -696,6 +696,12 @@ impl DesignPort for DesignState {
         self.schematic_visibility.review_markers
     }
 
+    fn parameter_labels(
+        &self,
+    ) -> rspice_schematic_editor::session::visibility::SchematicParameterLabelVisibility {
+        self.schematic_visibility.parameter_labels
+    }
+
     fn canvas_hover(&self) -> Option<(f64, f64)> {
         self.canvas_hover
     }

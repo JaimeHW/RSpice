@@ -10,6 +10,7 @@
 #![allow(clippy::large_enum_variant)]
 
 use super::*;
+use rspice_design::schematic::component_display::SchematicParameterLabelVisibility;
 use rspice_design::schematic::{
     bus::{Bus, BusTap},
     design_note::DesignNote,
@@ -29,7 +30,7 @@ use rspice_vocabulary::product::{ObjectRevision, ProjectId};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
-const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 8;
+const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 9;
 
 #[cfg(test)]
 mod tests;
@@ -58,6 +59,7 @@ pub enum RetainedHardcopySourceInput {
             std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
         all_sheets: bool,
         scope: HardcopyScope,
+        parameter_labels: SchematicParameterLabelVisibility,
     },
     Symbol {
         project_id: ProjectId,
@@ -230,6 +232,7 @@ enum PreparedRetainedHardcopyWorkerPayload {
             std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
         all_sheets: bool,
         scope: HardcopyScope,
+        parameter_labels: SchematicParameterLabelVisibility,
     },
     Symbol {
         project_id: ProjectId,
@@ -586,6 +589,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 project_title_block_field_values,
                 all_sheets,
                 scope,
+                parameter_labels,
             } => {
                 let schematic = PreparedSchematicOwner::capture(schematic, selection);
                 let mut library_manager = library_manager;
@@ -623,6 +627,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     project_title_block_field_values,
                     all_sheets,
                     scope,
+                    parameter_labels,
                 }
             }
             RetainedHardcopySourceInput::Symbol {
@@ -720,6 +725,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 project_title_block_field_values,
                 all_sheets,
                 scope,
+                parameter_labels,
             } => {
                 let (schematic, selection) = schematic
                     .restore::<PreparedSchematicOwner>("prepared schematic")?
@@ -757,6 +763,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     project_title_block_field_values,
                     all_sheets,
                     scope,
+                    parameter_labels,
                 }
             }
             Self::Symbol {
@@ -1302,6 +1309,7 @@ impl PreparedRetainedHardcopyResolution {
                 project_title_block_field_values,
                 all_sheets,
                 scope,
+                parameter_labels,
             } => {
                 let resolver = rspice_design::symbol_resolver::SymbolResolver::new(
                     library_manager.catalog(),
@@ -1321,6 +1329,7 @@ impl PreparedRetainedHardcopyResolution {
                         sheet_catalog: catalog,
                         project_default_drawing_sheet: &project_default_drawing_sheet,
                         project_title_block_field_values: &project_title_block_field_values,
+                        parameter_labels,
                     });
                 }
                 resolve_schematic_source(SchematicHardcopySource {
@@ -1334,6 +1343,7 @@ impl PreparedRetainedHardcopyResolution {
                     project_default_drawing_sheet: Some(&project_default_drawing_sheet),
                     project_title_block_field_values: Some(&project_title_block_field_values),
                     scope,
+                    parameter_labels,
                 })
             }
             RetainedHardcopySourceInput::Symbol {

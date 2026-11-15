@@ -54,6 +54,7 @@ impl SemanticSceneCompiler<'_> {
         &mut self,
         symbol: &SymbolDocument,
         component: Option<&Component>,
+        labels: SchematicParameterLabelVisibility,
     ) -> Result<(), HardcopyRenderError> {
         let body_stable_id = if component.is_some() {
             "layer:schematic-components"
@@ -242,11 +243,8 @@ impl SemanticSceneCompiler<'_> {
                 } => {
                     // A part that hides its value hides the labels that
                     // letter its values, as the canvas hides them.
-                    let value_hidden = component.is_some_and(|component| {
-                        !component
-                            .display_mode
-                            .show_value(SchematicParameterLabelVisibility::NamesAndValues)
-                    });
+                    let value_hidden = component
+                        .is_some_and(|component| !component.display_mode.show_value(labels));
                     if !*shown || value_hidden {
                         continue;
                     }

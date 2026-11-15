@@ -40,14 +40,16 @@ pub use render::render_hardcopy_dialog;
 
 /// What the hardcopy workflow reads and writes, borrowed for one call: the
 /// dialog's draft, the report editor's selection, the model, the session,
-/// what the results workspace shows, and the export IO that asks where a
-/// file goes and writes it.
+/// what the results workspace shows, which part labels the canvas letters,
+/// and the export IO that asks where a file goes and writes it.
 pub struct HardcopyParts<'a> {
     pub dialog: &'a mut HardcopyDialogState,
     pub report_authoring: &'a rspice_results_ui::report::session::ReportAuthoringState,
     pub model: &'a mut crate::workbench::app_state::Model,
     pub workbench: &'a mut crate::workbench::state::WorkbenchSession,
     pub results: &'a dyn crate::workbench::framework::ports::ResultsPort,
+    pub parameter_labels:
+        rspice_design::schematic::component_display::SchematicParameterLabelVisibility,
     pub export_io: &'a dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo,
 }
 
@@ -61,6 +63,7 @@ impl HardcopyParts<'_> {
             workbench: self.workbench,
             report_authoring: self.report_authoring,
             results: self.results,
+            parameter_labels: self.parameter_labels,
         }
     }
 }

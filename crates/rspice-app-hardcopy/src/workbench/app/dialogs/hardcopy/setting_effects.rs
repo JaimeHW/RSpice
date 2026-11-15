@@ -85,6 +85,7 @@ fn sheet_with(
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
         open_terminals: Vec::new(),
+        parameter_labels: Default::default(),
     };
     let paper = authored_sheet_bounds(&format).unwrap();
     let bounds = schematic_bounds(&semantic).map_or(paper, |content| union_bounds(content, paper));

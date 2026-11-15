@@ -41,6 +41,9 @@ impl HardcopyPort for HardcopyState {
                 workbench,
                 report_authoring: &self.report_authoring,
                 results,
+                // A published design letters every part's name and value,
+                // whatever the author's canvas shows.
+                parameter_labels: Default::default(),
             },
             runs,
         };

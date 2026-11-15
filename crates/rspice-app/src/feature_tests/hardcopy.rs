@@ -36,6 +36,7 @@ pub(crate) fn source_reads(state: &AppState) -> SourceReads<'_> {
         workbench: &state.workbench,
         report_authoring: &state.hardcopy.report_authoring,
         results: &*state.results,
+        parameter_labels: state.design.schematic_visibility.parameter_labels,
     }
 }
 
@@ -66,6 +67,7 @@ pub(crate) fn hardcopy_parts(app: &mut RSpiceApp) -> HardcopyParts<'_> {
         model: &mut app.state.model,
         workbench: &mut app.state.workbench,
         results: &*app.state.results,
+        parameter_labels: app.state.design.schematic_visibility.parameter_labels,
         export_io: app.export_workflow_io.as_ref(),
     }
 }

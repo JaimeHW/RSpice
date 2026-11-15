@@ -25,7 +25,9 @@ use crate::workbench::localization::MessageId;
 use crate::workbench::state::workbench_session::WorkbenchSession;
 use rspice_app_runs::simulation::{NetlistShown, ProjectCompileReceipt};
 use rspice_app_runs::workbench::slots::runs::RunsState;
-use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
+use rspice_schematic_editor::session::visibility::{
+    SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility,
+};
 
 use super::command_registry::{CommandAvailability, CommandFlags, CommandSpec, Registry};
 use super::dialogs::DialogKey;
@@ -92,6 +94,10 @@ pub trait DesignPort {
     /// Which review markers the drawing shows, part of the view the drawing
     /// is read through.
     fn review_markers(&self) -> SchematicReviewMarkerVisibility;
+    /// What the drawing letters on a part that inherits its labels: names
+    /// and values, values alone, or neither. A print freezes it into its
+    /// page, so the page letters what the canvas shows.
+    fn parameter_labels(&self) -> SchematicParameterLabelVisibility;
     /// Where the pointer rests on the canvas, in the sheet's coordinates,
     /// while it rests there.
     fn canvas_hover(&self) -> Option<(f64, f64)>;

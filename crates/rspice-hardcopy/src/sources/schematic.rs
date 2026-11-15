@@ -4,6 +4,7 @@ use super::*;
 use rspice_design::resolved_symbol::{
     ResolvedCellSymbol, ResolvedSymbolIssueKind, ResolvedSymbolPin, ResolvedSymbolSource,
 };
+use rspice_design::schematic::component_display::SchematicParameterLabelVisibility;
 use rspice_design::schematic::{component_type::ComponentType, owned::Schematic};
 use rspice_design::symbol_resolver::SymbolResolver;
 use rspice_design_model::design_management::{
@@ -88,6 +89,9 @@ pub struct SchematicHardcopySource<'a> {
     pub project_title_block_field_values:
         Option<&'a std::collections::BTreeMap<DrawingSheetTitleFieldId, String>>,
     pub scope: HardcopyScope,
+    /// What the canvas letters on a part that inherits its labels, frozen
+    /// into the page.
+    pub parameter_labels: SchematicParameterLabelVisibility,
 }
 
 pub struct SchematicSheetSetHardcopySource<'a> {
@@ -99,6 +103,9 @@ pub struct SchematicSheetSetHardcopySource<'a> {
     pub project_default_drawing_sheet: &'a SchematicSheetFormat,
     pub project_title_block_field_values:
         &'a std::collections::BTreeMap<DrawingSheetTitleFieldId, String>,
+    /// What the canvas letters on a part that inherits its labels, frozen
+    /// into every page.
+    pub parameter_labels: SchematicParameterLabelVisibility,
 }
 
 /// Resolve every governed schematic sheet in exact catalog order. Each sheet
@@ -142,6 +149,7 @@ pub fn resolve_all_schematic_sheets(
             symbol_resolver: source.symbol_resolver,
             sheet_catalog: Some(source.sheet_catalog),
             sheet_id: Some(sheet.id()),
+            parameter_labels: source.parameter_labels,
             project_default_drawing_sheet: Some(source.project_default_drawing_sheet),
             project_title_block_field_values: Some(source.project_title_block_field_values),
             scope: HardcopyScope::CurrentSheet,
@@ -309,6 +317,7 @@ pub fn resolve_schematic_source(
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
         open_terminals: Vec::new(),
+        parameter_labels: source.parameter_labels,
     };
     let open_terminals = sheet_open_terminals(&source, &object_is_in_scope);
     for component in &source.schematic.document().components {

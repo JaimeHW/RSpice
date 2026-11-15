@@ -1968,6 +1968,13 @@ mod tests {
             SchematicReviewMarkerVisibility::default()
         }
 
+        fn parameter_labels(
+            &self,
+        ) -> rspice_schematic_editor::session::visibility::SchematicParameterLabelVisibility
+        {
+            Default::default()
+        }
+
         fn canvas_hover(&self) -> Option<(f64, f64)> {
             None
         }

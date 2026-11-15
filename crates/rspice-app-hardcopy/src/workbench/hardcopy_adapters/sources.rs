@@ -57,14 +57,16 @@ use rspice_hardcopy_contract::sources::{
 use rspice_results_ui::report::session::ReportAuthoringState;
 
 /// What a retained hardcopy source is enumerated and resolved from: the
-/// model, the session's open documents, the report editor's selection, and
-/// what the results workspace shows.
+/// model, the session's open documents, the report editor's selection, what
+/// the results workspace shows, and which part labels the canvas letters.
 #[derive(Clone, Copy)]
 pub struct SourceReads<'a> {
     pub model: &'a Model,
     pub workbench: &'a WorkbenchSession,
     pub report_authoring: &'a ReportAuthoringState,
     pub results: &'a dyn ResultsPort,
+    pub parameter_labels:
+        rspice_design::schematic::component_display::SchematicParameterLabelVisibility,
 }
 
 /// Cheap, semantic-free descriptor used by command enablement and the
@@ -698,6 +700,7 @@ fn prepare_schematic_resolution(
             .clone(),
         all_sheets,
         scope,
+        parameter_labels: reads.parameter_labels,
     })
 }
 

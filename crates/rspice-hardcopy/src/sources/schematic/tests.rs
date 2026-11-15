@@ -101,6 +101,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
         )
         .unwrap();
     let second = resolve_schematic_source(SchematicHardcopySource {
+        parameter_labels: Default::default(),
         identity: schematic_sheet_identity(&base_identity, catalog.find(second_id).unwrap())
             .unwrap(),
         schematic: &schematic,
@@ -169,6 +170,7 @@ fn governed_current_sheet_never_leaks_and_all_sheets_preserve_catalog_order() {
     );
 
     let all = resolve_all_schematic_sheets(SchematicSheetSetHardcopySource {
+        parameter_labels: Default::default(),
         identity: base_identity,
         schematic: &schematic,
         expected_topology_version: schematic.topology_version(),
@@ -329,6 +331,7 @@ fn authored_cell_symbol_is_frozen_into_the_semantic_source() {
     );
     let schematic = Schematic::from_document(schematic_document);
     let resolved = resolve_schematic_source(SchematicHardcopySource {
+        parameter_labels: Default::default(),
         identity: identity("schematic"),
         schematic: &schematic,
         selection: None,
@@ -377,6 +380,7 @@ fn a_printed_part_marks_the_pins_nothing_on_its_sheet_meets() {
     let print = |scope: HardcopyScope,
                  selection: &rspice_design::schematic::selection::Selection| {
         let resolved = resolve_schematic_source(SchematicHardcopySource {
+            parameter_labels: Default::default(),
             identity: identity("schematic"),
             schematic: &schematic,
             selection: SchematicHardcopySelection::capture(selection, &scope),
@@ -411,6 +415,7 @@ fn a_printed_part_marks_the_pins_nothing_on_its_sheet_meets() {
 fn stale_schematic_authority_is_rejected_before_digesting() {
     let schematic = Schematic::default();
     let error = resolve_schematic_source(SchematicHardcopySource {
+        parameter_labels: Default::default(),
         identity: identity("schematic"),
         schematic: &schematic,
         selection: None,
@@ -454,6 +459,7 @@ fn a_governed_selection_prints_only_the_active_sheet() {
     selection.wires.extend([11, 22]);
 
     let resolved = resolve_schematic_source(SchematicHardcopySource {
+        parameter_labels: Default::default(),
         identity: identity("governed-schematic"),
         schematic: &schematic,
         selection: SchematicHardcopySelection::capture(&selection, &HardcopyScope::Selection),
@@ -516,6 +522,7 @@ fn a_sheet_inserted_mid_catalog_prints_its_place_in_the_set() {
         rspice_design_model::design_management::DrawingSheetProjectSettings::default();
 
     let all = resolve_all_schematic_sheets(SchematicSheetSetHardcopySource {
+        parameter_labels: Default::default(),
         identity: identity("governed-schematic"),
         schematic: &schematic,
         expected_topology_version: schematic.topology_version(),

@@ -19,6 +19,7 @@ fn prepared_design_worker_fixture() -> (PreparedRetainedHardcopyResolution, Reso
     let project_settings =
         rspice_design_model::design_management::DrawingSheetProjectSettings::default();
     let expected = resolve_schematic_source(SchematicHardcopySource {
+        parameter_labels: SchematicParameterLabelVisibility::ValuesOnly,
         identity: identity.clone(),
         schematic: &schematic,
         selection: None,
@@ -33,6 +34,7 @@ fn prepared_design_worker_fixture() -> (PreparedRetainedHardcopyResolution, Reso
     .unwrap();
     let prepared =
         PreparedRetainedHardcopyResolution::try_capture(RetainedHardcopySourceInput::Schematic {
+            parameter_labels: SchematicParameterLabelVisibility::ValuesOnly,
             project_id,
             identity,
             schematic,
@@ -57,6 +59,14 @@ fn prepared_worker_snapshot_round_trips_exact_owner_before_resolution() {
     assert!(bytes.len() <= MAX_WORKER_SNAPSHOT_BYTES);
     let restored = PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&bytes).unwrap();
     assert_eq!(restored.resolve_owned().unwrap(), expected);
+    let HardcopySemanticDocument::Schematic(page) = expected.semantic_document() else {
+        panic!("expected a schematic page");
+    };
+    assert_eq!(
+        page.parameter_labels,
+        SchematicParameterLabelVisibility::ValuesOnly,
+        "the page letters what the canvas showed"
+    );
 }
 
 #[test]
