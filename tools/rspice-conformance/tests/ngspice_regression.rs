@@ -10,6 +10,7 @@
 use rspice_conformance::suites::ngspice::{
     TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics, decode_test_result,
 };
+use rspice_conformance::suites::perturb::{self, BlindCase};
 use rspice_core::netlist::Netlist;
 use std::{
     collections::{BTreeSet, HashMap},
@@ -763,6 +764,8 @@ fn test_full_ngspice_suite_summary() {
         expected_unsupported: 0,
         total_time_ms: 0,
     };
+    let perturbation = perturb::active();
+    let mut blind = Vec::new();
 
     for suite in &suites {
         if Instant::now() >= full_suite_deadline {
@@ -776,9 +779,24 @@ fn test_full_ngspice_suite_summary() {
             break;
         }
 
-        let runner = TestRunner::new(get_tests_dir(), suite_config(suite));
+        let config = suite_config(suite);
+        let tolerance = format!(
+            "rel {:e} abs {:e}",
+            config.relative_tolerance, config.absolute_tolerance
+        );
+        let runner = TestRunner::new(get_tests_dir(), config);
         let results = runner.run_suite_until(suite, Some(full_suite_deadline));
         let stats = TestRunner::statistics(&results);
+        if perturbation.is_some() {
+            // `statistics` counts a pass exactly this way: an expected
+            // unsupported deck also reports `passed`, with its reason.
+            blind.extend(
+                results
+                    .iter()
+                    .filter(|result| result.passed && result.error.is_none())
+                    .map(|result| BlindCase::new(format!("{suite}/{}", result.name), &tolerance)),
+            );
+        }
 
         total_stats.total += stats.total;
         total_stats.passed += stats.passed;
@@ -822,20 +840,27 @@ fn test_full_ngspice_suite_summary() {
         total_stats.total > 0,
         "Full ngspice suite discovered no tests; verify tests directory wiring."
     );
-    assert_eq!(
-        total_stats.failed,
-        0,
-        "Full ngspice suite has {} failing circuit(s): {} passed, {} skipped ({:.1}% pass rate).",
-        total_stats.failed,
-        total_stats.passed,
-        total_stats.skipped,
-        total_stats.pass_rate()
-    );
-    assert_eq!(
-        total_stats.skipped, 0,
-        "Full ngspice suite skipped {} circuit(s); all discovered decks must execute.",
-        total_stats.skipped
-    );
+    // A perturbed run answers one question instead of the census: did every
+    // deck that compares numbers fail once RSpice's values moved?
+    if let Some(perturbation) = perturbation {
+        let checked = total_stats.passed + total_stats.failed;
+        perturb::assert_no_blind_cases("ngspice", perturbation, checked, &blind);
+    } else {
+        assert_eq!(
+            total_stats.failed,
+            0,
+            "Full ngspice suite has {} failing circuit(s): {} passed, {} skipped ({:.1}% pass rate).",
+            total_stats.failed,
+            total_stats.passed,
+            total_stats.skipped,
+            total_stats.pass_rate()
+        );
+        assert_eq!(
+            total_stats.skipped, 0,
+            "Full ngspice suite skipped {} circuit(s); all discovered decks must execute.",
+            total_stats.skipped
+        );
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

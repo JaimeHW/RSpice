@@ -10,8 +10,9 @@
 //! — importantly — what it is not.
 
 use rspice_conformance::suites::gf180mcu::{
-    DeviceConfig, DeviceResult, DeviceRunner, DeviceStatistics,
+    DeviceConfig, DeviceContract, DeviceResult, DeviceRunner, DeviceStatistics,
 };
+use rspice_conformance::suites::perturb::{self, BlindCase};
 use std::path::PathBuf;
 
 #[test]
@@ -36,6 +37,40 @@ fn gf180mcu_devices_reproduce_their_reference_curves() {
     let stats = DeviceStatistics::collect(&results);
     report(&stats, &results);
 
+    // A perturbed run answers one question instead of the contract: did every
+    // case compared against its reference curve fail once RSpice's values
+    // moved?
+    if let Some(perturbation) = perturb::active() {
+        assert_no_blind_devices(perturbation, &results);
+    } else {
+        assert_every_contract_met(&stats, &results);
+    }
+}
+
+/// Every case compared against its reference curve failed under
+/// `perturbation`.
+fn assert_no_blind_devices(perturbation: perturb::Perturbation, results: &[DeviceResult]) {
+    let checked: Vec<&DeviceResult> = results
+        .iter()
+        .filter(|result| matches!(result.contract, DeviceContract::Ngspice))
+        .collect();
+    let blind: Vec<BlindCase> = checked
+        .iter()
+        .filter(|result| result.passed)
+        .map(|result| {
+            BlindCase::new(
+                &result.name,
+                format!(
+                    "worst {:.4}% within allowed {:.2}%",
+                    result.worst_error_pct, result.allowed_pct
+                ),
+            )
+        })
+        .collect();
+    perturb::assert_no_blind_cases("GF180MCU", perturbation, checked.len(), &blind);
+}
+
+fn assert_every_contract_met(stats: &DeviceStatistics, results: &[DeviceResult]) {
     let failures: Vec<&DeviceResult> = results.iter().filter(|result| !result.passed).collect();
     assert!(
         failures.is_empty(),

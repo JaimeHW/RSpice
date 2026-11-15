@@ -89,8 +89,53 @@ impl Verdict {
     }
 }
 
+/// RSpice's measure as a comparison should see it: unchanged, or moved by the
+/// run's [`perturb`](crate::suites::perturb) — values, roots and event times
+/// scaled, complex values scaled and rotated. Logic values are not numbers
+/// and stay exact.
+fn perturbed(actual: &Measured) -> Option<Measured> {
+    use crate::suites::perturb;
+    let perturbation = perturb::active()?;
+    let complex = |values: &[Complex64]| -> Vec<Complex64> {
+        values
+            .iter()
+            .map(|value| perturbation.complex(*value))
+            .collect()
+    };
+    Some(match actual {
+        Measured::Values(values) => Measured::Values(
+            values
+                .iter()
+                .map(|value| perturbation.real(*value))
+                .collect(),
+        ),
+        Measured::Complex(values) => Measured::Complex(complex(values)),
+        Measured::Roots { poles, zeros } => Measured::Roots {
+            poles: complex(poles),
+            zeros: complex(zeros),
+        },
+        Measured::Events(traces) => Measured::Events(perturbed_traces(traces)),
+    })
+}
+
+/// Event traces with every time moved by the run's perturbation.
+fn perturbed_traces(traces: &BTreeMap<String, Trace>) -> BTreeMap<String, Trace> {
+    traces
+        .iter()
+        .map(|(net, trace)| {
+            let moved = trace
+                .iter()
+                .map(|(time, value)| (crate::suites::perturb::actual(*time), value.clone()))
+                .collect();
+            (net.clone(), moved)
+        })
+        .collect()
+}
+
 /// Compare `actual` (RSpice) with `expected` under `tolerance`.
 pub fn compare(actual: &Measured, expected: &Expected, tolerance: Tolerance) -> Verdict {
+    let moved = perturbed(actual);
+    let actual = moved.as_ref().unwrap_or(actual);
     match (actual, expected) {
         (Measured::Values(actual), Expected::Measured(Measured::Values(expected))) => {
             scalars(actual, expected, tolerance)
@@ -256,14 +301,16 @@ pub fn root_response(
     band: Option<[f64; 2]>,
     tolerance: Tolerance,
 ) -> Verdict {
+    let moved = perturbed(actual);
     let (
         Measured::Roots { poles, zeros },
         Expected::Measured(Measured::Roots {
             poles: expected_poles,
             zeros: expected_zeros,
         }),
-    ) = (actual, expected)
+    ) = (moved.as_ref().unwrap_or(actual), expected)
     else {
+        // `compare` applies the perturbation itself.
         return compare(actual, expected, tolerance);
     };
     for (label, actual, expected) in [
@@ -458,6 +505,8 @@ fn events(
 
 /// Every edge of every net lies on `t0 + k·period` within `edge_abs`.
 pub fn lattice(traces: &BTreeMap<String, Trace>, t0: f64, period: f64, edge_abs: f64) -> Verdict {
+    let moved = crate::suites::perturb::active().map(|_| perturbed_traces(traces));
+    let traces = moved.as_ref().unwrap_or(traces);
     let mut worst = Verdict::pass(0.0, "every edge on the lattice".into());
     let mut edges = 0usize;
     for (net, trace) in traces {
@@ -537,7 +586,10 @@ pub fn identical(
                 continue;
             };
             shared += 1;
-            let (a, e) = (series[position], reference[index]);
+            let (a, e) = (
+                crate::suites::perturb::actual(series[position]),
+                reference[index],
+            );
             let diff = (a - e).abs();
             let allowed = tolerance.allowed(e);
             let severity = if allowed > 0.0 {
@@ -583,7 +635,7 @@ pub fn identical(
             if av != ev {
                 return Verdict::fail(format!("net {net}: {av} vs {ev} at {et:e}"));
             }
-            let diff = (at - et).abs();
+            let diff = (crate::suites::perturb::actual(*at) - et).abs();
             let severity = if tolerance.edge_abs > 0.0 {
                 diff / tolerance.edge_abs
             } else if diff == 0.0 {
@@ -631,6 +683,7 @@ fn changes(trace: &Trace, start: f64, stop: f64) -> Trace {
 
 /// A statistic against the oracle's own statistic, as a ratio interval.
 pub fn ratio(actual: f64, expected: f64, [low, high]: [f64; 2]) -> Verdict {
+    let actual = crate::suites::perturb::actual(actual);
     let value = actual / expected;
     let detail = format!("ratio {value:.4} (a={actual:.4e}, e={expected:.4e}) in [{low}, {high}]");
     if value.is_finite() && value >= low && value <= high {
@@ -911,5 +964,65 @@ mod tests {
         );
         assert!(ratio(1.0, 1.2, [0.48, 2.08]).pass);
         assert!(!ratio(1.0, 0.4, [0.48, 2.08]).pass);
+    }
+
+    /// Under a perturbation every shape of measure moves: an exact match then
+    /// fails a tolerance tighter than the move and passes a looser one.
+    #[test]
+    fn a_perturbed_measure_fails_a_tolerance_tighter_than_the_move() {
+        use crate::suites::perturb::{Perturbation, scoped};
+        let values = Measured::Values(vec![2.5, -0.3]);
+        let gain = Measured::Complex(vec![Complex64::from_polar(10.0, 0.5)]);
+        let roots = Measured::Roots {
+            poles: vec![Complex64::new(-1e6, 0.0)],
+            zeros: vec![Complex64::new(-2e3, 3e4), Complex64::new(-2e3, -3e4)],
+        };
+        let mut traces = BTreeMap::new();
+        traces.insert(
+            "q".to_owned(),
+            vec![(1e-6, "1".to_owned()), (3e-6, "0".to_owned())],
+        );
+        let events = Measured::Events(traces.clone());
+        for epsilon in [1e-3, 1e-2] {
+            let perturbation = Perturbation::new(epsilon).expect("valid perturbation");
+            let db = 20.0 * (1.0 + epsilon).log10();
+            let deg = epsilon.to_degrees();
+            let tight = Tolerance {
+                rel: 0.5 * epsilon,
+                abs_db: Some(0.5 * db),
+                abs_deg: Some(2.0 * deg),
+                edge_abs: 0.5e-6 * epsilon,
+                ..Tolerance::default()
+            };
+            let loose = Tolerance {
+                rel: 2.0 * epsilon,
+                abs_db: Some(2.0 * db),
+                abs_deg: Some(2.0 * deg),
+                edge_abs: 6e-6 * epsilon,
+                ..Tolerance::default()
+            };
+            let phase_only = Tolerance {
+                abs_db: Some(2.0 * db),
+                abs_deg: Some(0.5 * deg),
+                ..Tolerance::default()
+            };
+            scoped(Some(perturbation), || {
+                for measured in [&values, &gain, &roots, &events] {
+                    let expected = Expected::Measured(measured.clone());
+                    let caught = compare(measured, &expected, tight);
+                    assert!(!caught.pass, "{epsilon}: {}", caught.detail);
+                    let blind = compare(measured, &expected, loose);
+                    assert!(blind.pass, "{epsilon}: {}", blind.detail);
+                }
+                let expected = Expected::Measured(gain.clone());
+                assert!(!compare(&gain, &expected, phase_only).pass, "phase moves");
+                let expected = Expected::Measured(roots.clone());
+                let response = root_response(&roots, &expected, None, tight);
+                assert!(!response.pass, "{epsilon}: {}", response.detail);
+                assert!(!ratio(1.0, 1.0, [1.0 - 0.5 * epsilon, 1.0 + 0.5 * epsilon]).pass);
+                assert!(ratio(1.0, 1.0, [1.0 - 2.0 * epsilon, 1.0 + 2.0 * epsilon]).pass);
+                assert!(!lattice(&traces, 1e-6, 2e-6, 0.5e-6 * epsilon).pass);
+            });
+        }
     }
 }

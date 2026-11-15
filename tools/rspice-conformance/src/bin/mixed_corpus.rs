@@ -24,13 +24,19 @@
 //! `--shard K/N` runs the K-th of N disjoint sets of designs, balanced by
 //! their declared budgets; the N shards together run every selected design
 //! once, so one build can serve N machines.
+//!
+//! With `RSPICE_CONFORMANCE_PERTURB` set ([`perturb`]) a run classifies every
+//! cell with RSpice's values moved by that relative error and reports each
+//! cell that still passes as blind, in place of the ratchet; it refuses
+//! `--record`, which would write the perturbed outcomes as the baseline.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use rspice_conformance::suites::mixed::{Route, design::Design, dispatch, peer, runner};
+use rspice_conformance::suites::mixed::{Outcome, Route, design::Design, dispatch, peer, runner};
+use rspice_conformance::suites::perturb::{self, BlindCase};
 
 #[derive(Parser)]
 #[command(
@@ -289,6 +295,13 @@ fn options(route: Route) -> Result<runner::RunOptions, String> {
 
 /// Run `options`, then remove the case files unless the caller `keep`s them.
 fn run_corpus(options: runner::RunOptions, keep: bool) -> Result<ExitCode, String> {
+    let perturbation = perturb::active();
+    if perturbation.is_some() && options.record {
+        return Err(format!(
+            "{} is set: refusing --record, which would write perturbed outcomes as the baseline",
+            perturb::PERTURB_ENV
+        ));
+    }
     let started = std::time::Instant::now();
     let reports = runner::run(&options)?;
     if !keep {
@@ -323,9 +336,42 @@ fn run_corpus(options: runner::RunOptions, keep: bool) -> Result<ExitCode, Strin
             println!("  integrity: {finding}");
             failed = true;
         }
-        for drift in &report.drift {
-            println!("  {drift}");
-            failed = true;
+        // Under a perturbation every passing cell is meant to drift; the
+        // blind cells below are the finding instead.
+        if perturbation.is_none() {
+            for drift in &report.drift {
+                println!("  {drift}");
+                failed = true;
+            }
+        }
+    }
+    if let Some(perturbation) = perturbation {
+        let mut checked = 0usize;
+        let mut blind = Vec::new();
+        for report in &reports {
+            for cell in &report.cells {
+                match cell.row.outcome {
+                    Outcome::Pass => {
+                        checked += 1;
+                        blind.push(BlindCase::new(
+                            format!(
+                                "{} {} {} {}",
+                                report.design, cell.row.variant, cell.row.analysis, cell.row.route
+                            ),
+                            &cell.row.detail,
+                        ));
+                    }
+                    Outcome::Fail | Outcome::Wrong => checked += 1,
+                    Outcome::Unverified | Outcome::Refused => {}
+                }
+            }
+        }
+        match perturb::blind_verdict("mixed corpus", perturbation, checked, &blind) {
+            Ok(summary) => println!("{summary}"),
+            Err(report) => {
+                println!("{report}");
+                failed = true;
+            }
         }
     }
     Ok(if failed {

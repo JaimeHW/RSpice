@@ -289,6 +289,7 @@ impl TestRunner {
 
         let lo = prev.min(here).min(next);
         let hi = prev.max(here).max(next);
+        let actual = crate::suites::perturb::actual(actual);
         actual.is_finite() && actual >= lo - value_tolerance && actual <= hi + value_tolerance
     }
 
@@ -446,6 +447,7 @@ impl TestRunner {
         actual: f64,
         absolute_tolerance: f64,
     ) -> Option<f64> {
+        let actual = crate::suites::perturb::actual(actual);
         if expected.is_nan() || actual.is_nan() {
             return if expected.is_nan() && actual.is_nan() {
                 None
@@ -495,6 +497,7 @@ impl TestRunner {
             2.0 * std::f64::consts::PI
         };
         let half_turn = 0.5 * period;
+        let actual = crate::suites::perturb::actual(actual);
         let mut candidates = vec![actual, -actual];
         if allow_orientation_flip {
             candidates.extend_from_slice(&[
@@ -705,5 +708,70 @@ mod envelope_neighbor_tests {
         // a settled-level error there is a genuine accuracy failure.
         let reference = series(&[0.20, 0.50, 0.30, 0.30, 0.30]);
         assert!(!runner().matches_within_reference_envelope(&reference, 3, 0.32, 1e-12));
+    }
+}
+
+#[cfg(test)]
+mod perturbation_tests {
+    use crate::suites::ngspice::{TestRunner, TestRunnerConfig};
+    use crate::suites::perturb::{Perturbation, scoped};
+
+    fn runner(relative_tolerance: f64) -> TestRunner {
+        TestRunner::new(
+            std::env::temp_dir(),
+            TestRunnerConfig {
+                relative_tolerance,
+                absolute_tolerance: 1e-12,
+                ..TestRunnerConfig::default()
+            },
+        )
+    }
+
+    /// An exact match moved by `e` fails a relative tolerance below `e` and
+    /// passes one above it, in the value, phase and envelope comparisons.
+    #[test]
+    fn a_perturbed_value_fails_a_tighter_tolerance_and_passes_a_looser_one() {
+        for epsilon in [1e-3, 1e-2] {
+            let perturbation = Perturbation::new(epsilon).expect("valid perturbation");
+            let tight = runner(0.5 * epsilon);
+            let loose = runner(2.0 * epsilon);
+            scoped(Some(perturbation), || {
+                for value in [3.3, -1.2e-6] {
+                    assert!(tight.compare_values(value, value).is_some(), "{epsilon}");
+                    assert!(loose.compare_values(value, value).is_none(), "{epsilon}");
+                }
+                assert!(
+                    tight
+                        .compare_phase_values_with_abs_tol(45.0, 45.0, 1e-12, false, true)
+                        .is_some()
+                );
+                assert!(
+                    loose
+                        .compare_phase_values_with_abs_tol(45.0, 45.0, 1e-12, false, true)
+                        .is_none()
+                );
+            });
+            // Unperturbed, the same comparisons agree exactly.
+            scoped(None, || assert!(tight.compare_values(3.3, 3.3).is_none()));
+        }
+    }
+
+    #[test]
+    fn a_perturbation_at_or_under_the_absolute_floor_is_invisible() {
+        let perturbation = Perturbation::new(1e-2).expect("valid perturbation");
+        scoped(Some(perturbation), || {
+            let runner = runner(1e-6);
+            // A 1 pA current moved by 1% is 1e-14 A, below a 1e-12 floor.
+            assert!(
+                runner
+                    .compare_values_with_abs_tol(1e-12, 1e-12, 1e-12)
+                    .is_none()
+            );
+            assert!(
+                runner
+                    .compare_values_with_abs_tol(1.0, 1.0, 1e-12)
+                    .is_some()
+            );
+        });
     }
 }

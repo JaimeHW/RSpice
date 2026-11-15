@@ -755,7 +755,7 @@ impl XyceTestRunner {
         let mut mismatches = Vec::new();
         if let Some(stepnum_column) = layout.stepnum_column {
             let expected_stepnum = row[stepnum_column];
-            if let Some(relative_error) = self.value_mismatch(
+            if let Some(relative_error) = self.axis_mismatch(
                 expected_stepnum,
                 0.0,
                 self.default_comparison_tolerance("stepnum"),
@@ -771,7 +771,7 @@ impl XyceTestRunner {
         }
         if let Some(index_column) = layout.index_column {
             let expected_index = row[index_column];
-            if let Some(relative_error) = self.value_mismatch(
+            if let Some(relative_error) = self.axis_mismatch(
                 expected_index,
                 0.0,
                 self.default_comparison_tolerance("index"),
@@ -787,7 +787,7 @@ impl XyceTestRunner {
         }
 
         let expected_time = row[layout.time_column];
-        if let Some(relative_error) = self.value_mismatch(
+        if let Some(relative_error) = self.axis_mismatch(
             expected_time,
             0.0,
             self.default_comparison_tolerance("time"),
@@ -1587,7 +1587,7 @@ impl XyceTestRunner {
                         "Release 7.10 file_compare cannot serialize gold {probe} at row {row_index}: {error}"
                     )
                 })?;
-                let actual = Self::xyce_default_prn_roundtrip(test_value).map_err(|error| {
+                let actual = Self::xyce_default_prn_roundtrip(crate::suites::perturb::actual(test_value)).map_err(|error| {
                     format!(
                         "Release 7.10 file_compare cannot serialize test {probe} at row {row_index}: {error}"
                     )
@@ -2680,7 +2680,7 @@ impl XyceTestRunner {
         actual: Value,
         tolerance: XyceVerifyTransientTolerance,
     ) -> Value {
-        let difference = expected - actual;
+        let difference = expected - crate::suites::perturb::actual(actual);
         if difference.abs() < tolerance.absolute_difference {
             0.0
         } else {
@@ -3206,7 +3206,7 @@ impl XyceTestRunner {
             }
             for column_index in 1..expected.columns.len() {
                 let expected_value = expected_row[column_index];
-                let actual_value = actual_row[column_index];
+                let actual_value = crate::suites::perturb::actual(actual_row[column_index]);
                 let expected_text = Self::xyce_default_prn_text(expected_value).map_err(|err| {
                     format!(
                         "could not serialize baseline row {row_index} column '{}': {err}",
@@ -3337,6 +3337,16 @@ impl XyceTestRunner {
             for (column_index, (&expected_value, &actual_value)) in
                 expected_row.iter().zip(actual_row).enumerate()
             {
+                // The axis was compared bit for bit above; the perturbation
+                // moves only the values printed against it.
+                let column = &expected.columns[column_index];
+                let actual_value = if column.eq_ignore_ascii_case("Index")
+                    || column.eq_ignore_ascii_case(axis_name)
+                {
+                    actual_value
+                } else {
+                    crate::suites::perturb::actual(actual_value)
+                };
                 if !expected_value.is_finite() || !actual_value.is_finite() {
                     return Err(format!(
                         "exact relational row {row_index} column '{}' contains non-finite value(s): expected {expected_value}, actual {actual_value}",
@@ -4465,7 +4475,7 @@ impl XyceTestRunner {
                     });
                 }
             }
-            if let Some(relative_error) = self.value_mismatch(
+            if let Some(relative_error) = self.axis_mismatch(
                 row[frequency_column],
                 result.frequency,
                 XyceComparisonTolerance::from_config(&self.config),
@@ -4795,7 +4805,7 @@ impl XyceTestRunner {
             }
             let expected_frequency = row[frequency_column];
             if let Some(relative_error) =
-                self.value_mismatch(expected_frequency, result.frequency, frequency_tolerance)
+                self.axis_mismatch(expected_frequency, result.frequency, frequency_tolerance)
             {
                 mismatches.push(XyceValueMismatch {
                     row: row_index,
@@ -5022,7 +5032,7 @@ impl XyceTestRunner {
             }
 
             let expected_frequency = row[frequency_column];
-            if let Some(relative_error) = self.value_mismatch(
+            if let Some(relative_error) = self.axis_mismatch(
                 expected_frequency,
                 point.result.frequency,
                 frequency_tolerance,
@@ -5202,7 +5212,7 @@ impl XyceTestRunner {
 
             let expected_frequency = row[frequency_column];
             if let Some(relative_error) =
-                self.value_mismatch(expected_frequency, result.frequency, frequency_tolerance)
+                self.axis_mismatch(expected_frequency, result.frequency, frequency_tolerance)
             {
                 mismatches.push(XyceValueMismatch {
                     row: row_index,
@@ -5731,7 +5741,7 @@ impl XyceTestRunner {
                     })?;
                 let expected = expected_values[row_index];
                 let tolerance = XyceComparisonTolerance::from_config(&self.config);
-                if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                if let Some(relative_error) = self.axis_mismatch(expected, actual, tolerance) {
                     return Err(format!(
                         "{} line {line_number} STEP {} expected {:.8e}, actual {:.8e}, rel {:.3e}",
                         self.display_path(path),
@@ -5994,7 +6004,22 @@ impl XyceTestRunner {
         Ok(tolerance)
     }
 
+    /// The relative error by which RSpice's `actual` value misses `expected`
+    /// under `tolerance`, or `None` when it is within it. The value is the
+    /// one a perturbed run moves ([`crate::suites::perturb`]); a coordinate
+    /// RSpice was asked to land on goes through [`Self::axis_mismatch`].
     pub(super) fn value_mismatch(
+        &self,
+        expected: f64,
+        actual: f64,
+        tolerance: XyceComparisonTolerance,
+    ) -> Option<f64> {
+        self.axis_mismatch(expected, crate::suites::perturb::actual(actual), tolerance)
+    }
+
+    /// [`Self::value_mismatch`] for an axis coordinate (a time, frequency,
+    /// index, step number or step value), which no perturbation moves.
+    pub(super) fn axis_mismatch(
         &self,
         expected: f64,
         actual: f64,
@@ -6108,7 +6133,7 @@ impl XyceTestRunner {
             }
             for column in 2..gold.columns.len() {
                 let expected = gold_row[column];
-                let actual = test_row[column];
+                let actual = crate::suites::perturb::actual(test_row[column]);
                 if expected == actual
                     || (expected.abs() < zero_tolerance && actual.abs() < zero_tolerance)
                 {

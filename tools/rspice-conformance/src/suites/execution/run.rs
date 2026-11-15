@@ -171,8 +171,8 @@ impl ExecutionRunner {
             {
                 Ok(content) => content.flatten().map(|content| {
                     let config = TestRunnerConfig {
-                        relative_tolerance: 0.05,
-                        absolute_tolerance: 1.0e-6,
+                        relative_tolerance: ORACLE_RELATIVE_TOLERANCE,
+                        absolute_tolerance: ORACLE_ABSOLUTE_TOLERANCE,
                         max_mismatches: 10,
                         ..TestRunnerConfig::default()
                     };

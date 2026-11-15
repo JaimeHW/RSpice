@@ -6394,6 +6394,7 @@ impl XyceTestRunner {
         quantization: Option<Value>,
         tolerance: XyceFileCompareTolerance,
     ) -> bool {
+        let actual = crate::suites::perturb::actual(actual);
         if !expected.is_finite() || !actual.is_finite() {
             return false;
         }

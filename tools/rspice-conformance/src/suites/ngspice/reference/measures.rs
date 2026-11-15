@@ -185,7 +185,8 @@ impl TestRunner {
                 &reference_series.x,
                 &result.time,
                 &sim_y,
-            );
+            )
+            .map(crate::suites::perturb::actual);
 
             let (tol_abs, tol_rel) = match gate.kind {
                 MeasureKind::Cross { tol, .. } => (tol, 0.0),

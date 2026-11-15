@@ -8,6 +8,7 @@
 //! shipping crate depends on (enforced by `tools/ci/test_ci_configuration.py`),
 //! so the GPL-3 corpus never reaches a product binary.
 
+use rspice_conformance::suites::perturb::{self, BlindCase};
 use rspice_conformance::suites::xyce::{
     XyceDeck, XyceDeckSection, XyceRunnerConfig, XyceTestResult, XyceTestRunner,
     XyceTransientGridAlignment, XyceValueMismatch,
@@ -1380,7 +1381,48 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
         "Xyce transient grid alignment: {index_aligned} index-aligned, {interpolated} interpolated"
     );
 
-    let stats = XyceTestRunner::statistics(&results);
+    // A perturbed run answers one question instead of the census: did every
+    // deck that compares numbers fail once RSpice's values moved?
+    match perturb::active() {
+        Some(perturbation) => assert_no_blind_xyce_decks(perturbation, &config, &results),
+        None => assert_xyce_census(&root, &discovered, netlist_count, &results),
+    }
+}
+
+/// Every deck that compares numbers failed under `perturbation`.
+fn assert_no_blind_xyce_decks(
+    perturbation: perturb::Perturbation,
+    config: &XyceRunnerConfig,
+    results: &[XyceTestResult],
+) {
+    let checked: Vec<&XyceTestResult> = results
+        .iter()
+        .filter(|result| !result.expected_unsupported && !result.upstream_excluded)
+        .collect();
+    let blind: Vec<BlindCase> = checked
+        .iter()
+        .filter(|result| result.passed)
+        .map(|result| {
+            BlindCase::new(
+                &result.relative_path,
+                format!(
+                    "contract {}; runner rel {:e} abs {:e}",
+                    result.contract, config.relative_tolerance, config.absolute_tolerance
+                ),
+            )
+        })
+        .collect();
+    perturb::assert_no_blind_cases("Xyce", perturbation, checked.len(), &blind);
+}
+
+/// The unperturbed census: one result per deck, both manifests, no failure.
+fn assert_xyce_census(
+    root: &Path,
+    discovered: &[XyceDeck],
+    netlist_count: usize,
+    results: &[XyceTestResult],
+) {
+    let stats = XyceTestRunner::statistics(results);
 
     assert_eq!(
         stats.total,
@@ -1399,7 +1441,7 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
     // unrelated reason would take the pins offline with it. Contracts go first
     // because a moved contract is the usual reason a grid pin breaks.
     let contract_failures =
-        xyce_contract_manifest_failures(&results, &read_xyce_contract_manifest(&root));
+        xyce_contract_manifest_failures(results, &read_xyce_contract_manifest(root));
     assert!(
         contract_failures.is_empty(),
         "Xyce contract manifest disagrees with the suite in {} place(s):\n{}\n\n{XYCE_CONTRACT_REBASELINE}",
@@ -1407,7 +1449,7 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
         contract_failures.join("\n")
     );
     let grid_alignment_failures =
-        xyce_grid_alignment_failures(&results, &read_xyce_grid_alignment_manifest(&root));
+        xyce_grid_alignment_failures(results, &read_xyce_grid_alignment_manifest(root));
     assert!(
         grid_alignment_failures.is_empty(),
         "Xyce grid-alignment manifest disagrees with the suite in {} place(s):\n\n{}",

@@ -326,8 +326,8 @@ impl ExecutionRunner {
                             let runner = OracleRunner::new_checked_in_oracle(
                                 &self.root,
                                 TestRunnerConfig {
-                                    relative_tolerance: 0.05,
-                                    absolute_tolerance: 1e-6,
+                                    relative_tolerance: ORACLE_RELATIVE_TOLERANCE,
+                                    absolute_tolerance: ORACLE_ABSOLUTE_TOLERANCE,
                                     max_mismatches: 10,
                                     ..TestRunnerConfig::default()
                                 },

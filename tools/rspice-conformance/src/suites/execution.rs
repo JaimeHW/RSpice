@@ -55,6 +55,12 @@ mod oracle_bundle;
 mod run;
 
 pub use contract::ExecutionContract;
+
+/// Relative tolerance of a deck's comparison with its checked-in ngspice
+/// `.oracle.out` reference, shared by the analysis and `.control` paths.
+pub const ORACLE_RELATIVE_TOLERANCE: f64 = 0.05;
+/// Absolute tolerance of the same comparison.
+pub const ORACLE_ABSOLUTE_TOLERANCE: f64 = 1.0e-6;
 pub use corpus::ExecutionCorpus;
 pub use oracle::{OracleCaptureStatistics, capture_ngspice_oracles};
 

@@ -54,7 +54,7 @@ pub fn compare_series(
     let mut worst = None;
 
     for (index, &(x, expected)) in reference.iter().enumerate() {
-        let actual_value = actual[index];
+        let actual_value = crate::suites::perturb::actual(actual[index]);
         if !actual_value.is_finite() {
             return Err(format!("non-finite simulation value at bias {x}"));
         }
@@ -234,5 +234,23 @@ mod tests {
     fn non_finite_simulation_values_are_an_error() {
         let reference = vec![(0.0, 1.0)];
         assert!(compare_series(&reference, &[f64::NAN], 1e-6).is_err());
+    }
+
+    /// A perturbed run moves every compared point by `e`, so an exact curve
+    /// reports a worst deviation of `e` itself, which the suite's percentage
+    /// bound then judges.
+    #[test]
+    fn a_perturbation_moves_the_worst_deviation_by_its_size() {
+        use crate::suites::perturb::{Perturbation, scoped};
+        let reference: Vec<(f64, f64)> = vec![(0.0, 1e-3), (0.5, -2e-6), (1.0, 4.0)];
+        let actual: Vec<f64> = reference.iter().map(|(_, value)| value.abs()).collect();
+        for epsilon in [1e-3, 1e-2] {
+            let perturbation = Perturbation::new(epsilon).expect("valid perturbation");
+            let (worst_pct, mismatch) = scoped(Some(perturbation), || {
+                compare_series(&reference, &actual, 1e-9).expect("compares")
+            });
+            assert!((worst_pct - 100.0 * epsilon).abs() < 1e-9, "{worst_pct}");
+            assert!(mismatch.is_some());
+        }
     }
 }

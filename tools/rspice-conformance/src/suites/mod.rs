@@ -50,6 +50,12 @@ pub mod mixed;
 #[cfg(feature = "circuit-suites")]
 pub mod ngspice;
 
+/// Tolerance perturbation: every comparison primitive moves RSpice's value
+/// by a stated relative error, and a case that still passes is reported as
+/// blind to it. Ungated because the mixed corpus and the circuit suites both
+/// consult it.
+pub mod perturb;
+
 /// The corpus-wide panic gate: no vendored deck may make ingestion, planning,
 /// materialization, or output resolution panic.
 ///

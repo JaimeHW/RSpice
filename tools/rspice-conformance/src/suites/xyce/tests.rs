@@ -27470,3 +27470,42 @@ fn a_routed_but_unlinked_generated_model_is_expected_unsupported() {
         );
     }
 }
+
+/// The pointwise rule sees a perturbed value; an axis coordinate compared by
+/// [`XyceTestRunner::axis_mismatch`] does not move.
+#[test]
+fn test_xyce_perturbation_moves_values_and_leaves_axes() {
+    use crate::suites::perturb::{Perturbation, scoped};
+    for epsilon in [1e-3, 1e-2] {
+        let runner = XyceTestRunner::new(
+            std::env::temp_dir(),
+            XyceRunnerConfig {
+                relative_tolerance: 0.5 * epsilon,
+                ..XyceRunnerConfig::default()
+            },
+        );
+        let tight = XyceComparisonTolerance::from_config(&runner.config);
+        let loose = tight.with_relative(2.0 * epsilon);
+        scoped(
+            Some(Perturbation::new(epsilon).expect("valid perturbation")),
+            || {
+                assert!(
+                    runner.value_mismatch(2.5, 2.5, tight).is_some(),
+                    "{epsilon}"
+                );
+                assert!(
+                    runner.value_mismatch(2.5, 2.5, loose).is_none(),
+                    "{epsilon}"
+                );
+                assert!(runner.axis_mismatch(1.0e3, 1.0e3, tight).is_none());
+                let verify = XyceVerifyTransientTolerance {
+                    relative: 0.5 * epsilon,
+                    ..XyceVerifyTransientTolerance::release_7_10_default()
+                };
+                let normalized =
+                    XyceTestRunner::xyce_verify_normalized_error_with_tolerance(2.5, 2.5, verify);
+                assert!(normalized.abs() > 1.0, "{epsilon}: {normalized}");
+            },
+        );
+    }
+}

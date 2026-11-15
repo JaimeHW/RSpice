@@ -19,7 +19,9 @@
 
 use rspice_conformance::suites::execution::{
     ExecutionConfig, ExecutionCorpus, ExecutionResult, ExecutionRunner, ExecutionStatistics,
+    ORACLE_ABSOLUTE_TOLERANCE, ORACLE_RELATIVE_TOLERANCE,
 };
+use rspice_conformance::suites::perturb::{self, BlindCase};
 use std::path::PathBuf;
 
 #[test]
@@ -182,6 +184,55 @@ fn run_corpus(corpus: ExecutionCorpus) {
     let stats = ExecutionStatistics::collect(&results);
     report(corpus, &stats, &results, decks.len());
 
+    // A perturbed run answers one question instead of the contracts: did
+    // every deck compared with its ngspice oracle fail once RSpice's values
+    // moved? A deck without an oracle compares no number to move.
+    if let Some(perturbation) = perturb::active() {
+        assert_no_blind_decks(corpus, perturbation, &results);
+    } else {
+        assert_every_contract_met(corpus, &stats, &results);
+    }
+}
+
+/// Every deck compared with its oracle failed under `perturbation`.
+fn assert_no_blind_decks(
+    corpus: ExecutionCorpus,
+    perturbation: perturb::Perturbation,
+    results: &[ExecutionResult],
+) {
+    let checked: Vec<&ExecutionResult> = results
+        .iter()
+        .filter(|result| result.oracle_compared)
+        .collect();
+    if checked.is_empty() {
+        // ISCAS85's decks are all `!extended`, so a default run has none.
+        println!(
+            "{}: no deck compared with an oracle; nothing to perturb",
+            corpus.label()
+        );
+        return;
+    }
+    let blind: Vec<BlindCase> = checked
+        .iter()
+        .filter(|result| result.passed)
+        .map(|result| {
+            BlindCase::new(
+                &result.name,
+                format!(
+                    "{}; oracle rel {ORACLE_RELATIVE_TOLERANCE:e} abs {ORACLE_ABSOLUTE_TOLERANCE:e}, or its gates",
+                    result.contract.token()
+                ),
+            )
+        })
+        .collect();
+    perturb::assert_no_blind_cases(corpus.label(), perturbation, checked.len(), &blind);
+}
+
+fn assert_every_contract_met(
+    corpus: ExecutionCorpus,
+    stats: &ExecutionStatistics,
+    results: &[ExecutionResult],
+) {
     let failures: Vec<&ExecutionResult> = results.iter().filter(|result| !result.passed).collect();
     assert!(
         failures.is_empty(),
