@@ -1,0 +1,19 @@
+# DTEMP=150 variant of the VBIC base-resistance noise testbench (engine/noise.rs tests)
+# from ngspice pre-master-48 (branch tip f14a632a52, 2026-11-11, built from source),
+# which carries commit 5c4e9ab1d: RBP thermal noise across (bp, cx), and RS, Iccp and the
+# new Ibex shot source in the total density. ngspice -b, .noise ... 1 (pts_per_summary),
+# default root-spectral-density units.
+# Cross-check: ngspice-47 (ngspice_con -b) per-source table less its misplaced RBP term
+# gives these totals to 3e-7.
+# Columns: frequency_hz onoise_spectrum_v_per_sqrt_hz onoise_q1_rbp_v_per_sqrt_hz
+1.000000e+05 2.719934e-09 4.299505e-14
+1.584893e+05 2.717719e-09 6.808482e-14
+2.511886e+05 2.712182e-09 1.076783e-13
+3.981072e+05 2.698436e-09 1.697581e-13
+6.309573e+05 2.664895e-09 2.655645e-13
+1.000000e+06 2.586366e-09 4.079518e-13
+1.584893e+06 2.418665e-09 6.026669e-13
+2.511886e+06 2.119167e-09 8.302516e-13
+3.981072e+06 1.713755e-09 1.044498e-12
+6.309573e+06 1.316476e-09 1.222262e-12
+1.000000e+07 1.025501e-09 1.407099e-12

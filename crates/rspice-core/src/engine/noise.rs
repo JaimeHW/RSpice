@@ -5669,9 +5669,28 @@ r1 a 0 rmod
         assert!(error.contains("was not found"), "{error}");
     }
 
-    /// onoise_spectrum table of [`RB_NOISE_DECK`] from the official
-    /// ngspice-46 binary, in its default root-spectral-density units.
-    const RB_NOISE_ORACLE: &str = include_str!("../../tests/testdata/vbic_noise_rb_ngspice46.dat");
+    /// onoise_spectrum and onoise_q1_rbp tables of [`RB_NOISE_DECK`] from
+    /// ngspice pre-master-48 (built from the branch tip, f14a632a52), in its
+    /// default root-spectral-density units. That build carries ngspice
+    /// commit 5c4e9ab1d, which moved RBP's thermal noise from the RE nodes
+    /// (ei, e) onto RBP itself (bp, cx) and added RS, Iccp and a new Ibex
+    /// shot source to the total density; every other per-source density of
+    /// this deck is unchanged from ngspice-47 and ngspice-46. With the
+    /// parasitic PNP off, a source across RBP only reaches the output through
+    /// CJEP/CJCP, so RBP falls from 7.45e-10 to 1.9e-13..1.9e-11 V/sqrt(Hz)
+    /// and the total by 1.1e-4. ngspice-47's own per-source table, less its
+    /// misplaced RBP term, gives these totals to 1e-7, and LTspice 26.1.1
+    /// reads ngspice-47's misplaced 7.45e-10 for RBP.
+    const RB_NOISE_ORACLE: &str =
+        include_str!("../../tests/testdata/vbic_noise_rb_ngspice48pre.dat");
+
+    /// onoise table of [`RB_NOISE_DECK`] from Xyce 7.10 run as its 4-terminal
+    /// VBIC 1.3 (LEVEL=12), which carries RBP's thermal noise across RBP. The
+    /// deck's parameters mean the same in VBIC 1.3, and Xyce agrees with
+    /// ngspice pre-master-48's total to 5e-6, against 1.1e-4 for the
+    /// misplaced source. (QSPICE's VBIC has no noise sources at all.)
+    const RB_NOISE_XYCE_ORACLE: &str =
+        include_str!("../../tests/testdata/vbic_noise_rb_xyce710.dat");
 
     /// A low-impedance-driven CE stage with large RBX/RBI: the parasitic
     /// base-resistance thermal sources dominate the output noise, so this
@@ -6062,10 +6081,13 @@ Q1 C B 0 QN
         assert!((whole - parts).abs() <= 1.0e-14 * whole.max(parts));
     }
 
-    /// onoise tables of the DTEMP=150 variants of the VBIC rb deck and the
-    /// GP rc/re deck from the official ngspice-46 binary.
+    /// onoise table of the DTEMP=150 variant of the VBIC rb deck from
+    /// ngspice pre-master-48, with its onoise_q1_rbp column (see
+    /// [`RB_NOISE_ORACLE`]; ngspice-47's per-source table less its misplaced
+    /// RBP term gives these totals to 3e-7), and of the GP rc/re deck from
+    /// the official ngspice-46 binary.
     const VBIC_DTEMP_NOISE_ORACLE: &str =
-        include_str!("../../tests/testdata/vbic_dtemp_noise_ngspice46.dat");
+        include_str!("../../tests/testdata/vbic_dtemp_noise_ngspice48pre.dat");
     const GP_DTEMP_NOISE_ORACLE: &str =
         include_str!("../../tests/testdata/gp_dtemp_noise_ngspice46.dat");
 
@@ -6114,6 +6136,67 @@ Q1 C B 0 QN
         gate: f64,
         label: &str,
     ) {
+        let results = noise_sweep(deck, output_node, input_source, grid);
+        let oracle = oracle_column(oracle_table, 1);
+        assert_eq!(results.len(), oracle.len(), "{label}: grids must match");
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            assert_on_oracle_grid(result, *freq_ref, label);
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= gate,
+                "{label}: onoise at {:e} Hz: ours {:.6e} vs oracle {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
+
+    /// One device mechanism's output density against an oracle table column
+    /// (V/sqrt(Hz), as ngspice prints `onoise_<device>_<mechanism>`).
+    #[allow(clippy::too_many_arguments)]
+    fn assert_mechanism_onoise_matches(
+        deck: &str,
+        oracle_table: &str,
+        column: usize,
+        output_node: &str,
+        input_source: &str,
+        grid: NoiseSweepGrid,
+        probe: &str,
+        gate: f64,
+        label: &str,
+    ) {
+        let probe = crate::analysis::NoiseContributionProbe::parse(probe)
+            .expect("contribution probe parses");
+        let results = noise_sweep(deck, output_node, input_source, grid);
+        let oracle = oracle_column(oracle_table, column);
+        assert_eq!(results.len(), oracle.len(), "{label}: grids must match");
+        for (result, (freq_ref, density_ref)) in results.iter().zip(&oracle) {
+            assert_on_oracle_grid(result, *freq_ref, label);
+            let density = result
+                .contribution(&probe)
+                .expect("mechanism is valid")
+                .sqrt();
+            let relative = (density - density_ref).abs() / density_ref;
+            assert!(
+                relative <= gate,
+                "{label}: density at {:e} Hz: ours {:.6e} vs oracle {:.6e} (rel {:.3e})",
+                freq_ref,
+                density,
+                density_ref,
+                relative,
+            );
+        }
+    }
+
+    fn noise_sweep(
+        deck: &str,
+        output_node: &str,
+        input_source: &str,
+        grid: NoiseSweepGrid,
+    ) -> Vec<crate::analysis::NoiseResult> {
         let NoiseSweepGrid {
             points_per_decade,
             fstart,
@@ -6129,41 +6212,32 @@ Q1 C B 0 QN
             fstart,
             fstop,
         );
-        let results = engine
+        engine
             .run_noise_with_input_source(&netlist, output, None, input_source, &frequencies, 300.15)
-            .expect("noise analysis runs");
-        let oracle: Vec<(f64, f64)> = oracle_table
+            .expect("noise analysis runs")
+    }
+
+    /// `(frequency, column)` pairs of a whitespace-separated oracle table.
+    fn oracle_column(oracle_table: &str, column: usize) -> Vec<(f64, f64)> {
+        oracle_table
             .lines()
             .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
             .map(|line| {
-                let mut fields = line.split_whitespace();
-                (
-                    fields.next().unwrap().parse().unwrap(),
-                    fields.next().unwrap().parse().unwrap(),
-                )
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                (fields[0].parse().unwrap(), fields[column].parse().unwrap())
             })
-            .collect();
-        assert_eq!(results.len(), oracle.len(), "{label}: grids must match");
-        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
-            let tolerance = 1e-6 * freq_ref.abs().max(1.0);
-            assert!(
-                (result.frequency - freq_ref).abs() <= tolerance,
-                "{label}: frequency grid diverged from the oracle at {:e} Hz: ours {:.8e} vs oracle {:.8e}",
-                freq_ref,
-                result.frequency,
-                freq_ref,
-            );
-            let onoise = result.output_noise_rms();
-            let relative = (onoise - onoise_ref).abs() / onoise_ref;
-            assert!(
-                relative <= gate,
-                "{label}: onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
-                freq_ref,
-                onoise,
-                onoise_ref,
-                relative,
-            );
-        }
+            .collect()
+    }
+
+    fn assert_on_oracle_grid(result: &crate::analysis::NoiseResult, freq_ref: f64, label: &str) {
+        let tolerance = 1e-6 * freq_ref.abs().max(1.0);
+        assert!(
+            (result.frequency - freq_ref).abs() <= tolerance,
+            "{label}: frequency grid diverged from the oracle at {:e} Hz: ours {:.8e} vs oracle {:.8e}",
+            freq_ref,
+            result.frequency,
+            freq_ref,
+        );
     }
 
     const BSIM4_MODELS45: &str = crate::device::mosfet::oracle_cards::BSIM4V8_MODELS45;
@@ -6664,9 +6738,11 @@ Q1 C B 0 QN
 
     /// Instance DTEMP must heat the VBIC internal-resistance thermal model
     /// sources and reshape the operating point through the device
-    /// temperature scaling exactly as the official binary does.
+    /// temperature scaling exactly as ngspice does. Xyce's VBIC 1.3 is no
+    /// oracle here: its temperature mapping differs from older VBIC's and it
+    /// reads 2.5 percent above ngspice at DTEMP=150.
     #[test]
-    fn vbic_dtemp_noise_matches_the_ngspice46_oracle() {
+    fn vbic_dtemp_noise_matches_the_ngspice_pre48_oracle() {
         let deck = RB_NOISE_DECK.replace("Q1 C B 0 0 N1", "Q1 C B 0 0 N1 DTEMP=150");
         assert_ne!(deck, RB_NOISE_DECK);
         assert_onoise_matches(
@@ -6675,8 +6751,19 @@ Q1 C B 0 QN
             "c",
             "VIN",
             DEC5_100K_10MEG,
-            1e-2,
+            VBIC_RB_NGSPICE_GATE,
             "vbic-dtemp",
+        );
+        assert_mechanism_onoise_matches(
+            &deck,
+            VBIC_DTEMP_NOISE_ORACLE,
+            2,
+            "c",
+            "VIN",
+            DEC5_100K_10MEG,
+            "DNO(q1,rbp)",
+            VBIC_RB_NGSPICE_GATE,
+            "vbic-dtemp rbp",
         );
     }
 
@@ -7827,16 +7914,45 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
         }
     }
 
+    /// Gate on the VBIC rb decks against ngspice pre-master-48, total and
+    /// RBP's own density alike. RBP misplaced on the RE nodes moves the
+    /// totals by 1.1e-4 (rb) and 5.5e-4 (DTEMP), and RBP by four decades.
+    const VBIC_RB_NGSPICE_GATE: f64 = 1e-5;
+
+    /// Gate on the rb deck's total against Xyce's VBIC 1.3: 5e-6 apart with
+    /// RBP across RBP, 1.05e-4 with it on the RE nodes.
+    const VBIC_RB_XYCE_GATE: f64 = 2e-5;
+
     #[test]
-    fn vbic_parasitic_resistance_noise_matches_the_ngspice46_oracle() {
+    fn vbic_parasitic_resistance_noise_matches_xyce_and_ngspice_pre48() {
+        assert_onoise_matches(
+            RB_NOISE_DECK,
+            RB_NOISE_XYCE_ORACLE,
+            "c",
+            "VIN",
+            DEC5_100K_10MEG,
+            VBIC_RB_XYCE_GATE,
+            "VBIC parasitic resistance (Xyce 7.10)",
+        );
         assert_onoise_matches(
             RB_NOISE_DECK,
             RB_NOISE_ORACLE,
             "c",
             "VIN",
             DEC5_100K_10MEG,
-            5e-3,
+            VBIC_RB_NGSPICE_GATE,
             "VBIC parasitic resistance",
+        );
+        assert_mechanism_onoise_matches(
+            RB_NOISE_DECK,
+            RB_NOISE_ORACLE,
+            2,
+            "c",
+            "VIN",
+            DEC5_100K_10MEG,
+            "DNO(q1,rbp)",
+            VBIC_RB_NGSPICE_GATE,
+            "VBIC parasitic resistance rbp",
         );
     }
 
@@ -8011,5 +8127,94 @@ Q1 C B E 0 N1 M=3
         assert_eq!(flicker.node_neg, bjt.node_ei);
         assert_ne!(flicker.node_pos, bjt.node_base);
         assert_ne!(flicker.node_neg, bjt.node_emitter);
+    }
+
+    /// A self-heated LEVEL=4 VBIC runs its parasitic-resistance thermal
+    /// sources at the junction temperature, ambient plus the thermal node's
+    /// rise, as vbicnoise.c does since ngspice commit 5c4e9ab1d (ngspice-47
+    /// left the rise out, reading 3.832e-9 here with its mirrored AC heat
+    /// coupling). The reference is ngspice pre-master-48's `onoise_q1_rb` at
+    /// 1 kHz (V/sqrt(Hz)): the density without the rise scaled by
+    /// sqrt(1 + 4.2606/300.15), ngspice-47's thermal-node rise at this bias.
+    /// Leaving the rise out reads 0.7 percent low. LTspice 26.1.1 ignores
+    /// RTH, QSPICE's VBIC has no noise and Xyce runs only VBIC 1.3.
+    #[test]
+    fn vbic_self_heating_rise_heats_the_parasitic_thermal_noise() {
+        let deck = "* VBIC LEVEL=4 self-heating noise temperature\n\
+             Vcc vcc 0 6\nRc vcc c 50\nVb bb 0 DC 0.80 AC 1\nRb bb b 200\nQ1 c b 0 0 t qv\n\
+             .model qv NPN(LEVEL=4 IS=1e-16 IBEI=1e-18 NEI=1 IBCI=1e-17 NCI=1 RCX=1 RCI=1 \
+             RBX=100 RBI=10 RE=0.5 RBP=10 RS=0 ISP=0 IBEIP=0 CJE=0 CJC=0 KFN=0 RTH=300 \
+             CTH=1e-9 XIS=3 XRE=0 XRBX=0 XRBI=0 XRCX=0 XRCI=0)\n\
+             .noise v(c) Vb lin 1 1k 1k\n.end\n";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("c").expect("output node");
+        let result = engine
+            .run_noise_with_input_source(&netlist, output, None, "Vb", &[1.0e3], 300.15)
+            .expect("noise analysis runs")
+            .into_iter()
+            .next()
+            .expect("one noise point");
+        let probe =
+            crate::analysis::NoiseContributionProbe::parse("DNO(q1,rbx)").expect("probe parses");
+        let density = result
+            .contribution(&probe)
+            .expect("mechanism is valid")
+            .sqrt();
+        let reference = 5.327879e-9;
+        let relative = (density - reference).abs() / reference;
+        assert!(
+            relative < 1e-4,
+            "RBX: ours {density:.6e} vs ngspice pre-master-48 {reference:.6e} (rel {relative:.3e})"
+        );
+    }
+
+    /// RBP's thermal noise sits across RBP, branch (bp, cx), at every VBIC
+    /// level: vbic_1p3.va contributes it on `b_rbp`, and ngspice moved the
+    /// LEVEL=4/9 source there from the RE nodes (ei, e) in commit 5c4e9ab1d.
+    #[test]
+    fn vbic_rbp_thermal_noise_sits_across_rbp_at_every_level() {
+        for level in [4, 9, 13, 12] {
+            let deck = format!(
+                "VBIC RBP noise placement\n\
+                 Vcc vcc 0 5\n\
+                 Rc vcc c 2k\n\
+                 Vb b 0 0.78\n\
+                 Q1 c b 0 0 qv\n\
+                 .model qv NPN(LEVEL={level} IS=1e-16 IBEI=1e-18 IBCI=1e-17 RCX=10 RCI=10 \
+                 RBX=10 RBI=20 RE=5 RBP=100 RS=0 ISP=0 IBEIP=0)\n\
+                 .end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("deck parses");
+            let engine = Engine::default().resolved_for_netlist(&netlist);
+            let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+            let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+            circuit.link_indices(&matrix);
+            let solution = engine
+                .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+                .expect("operating point converges");
+            circuit.update_nonlinear(&solution);
+
+            let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
+            let rbp = sources
+                .iter()
+                .find(|source| {
+                    source.identity.device.eq_ignore_ascii_case("q1")
+                        && source
+                            .identity
+                            .mechanism
+                            .as_deref()
+                            .is_some_and(|mechanism| mechanism.eq_ignore_ascii_case("RBP"))
+                })
+                .unwrap_or_else(|| panic!("LEVEL={level}: Q1 exports an RBP thermal source"));
+            let bjt = &circuit.bjts.devices[0];
+            assert_ne!(bjt.node_bp, bjt.node_cx, "LEVEL={level}: RBP>0 keeps bp");
+            assert_eq!(
+                (rbp.node_pos, rbp.node_neg),
+                (bjt.node_bp, bjt.node_cx),
+                "LEVEL={level}: RBP noise belongs on (bp, cx)"
+            );
+        }
     }
 }

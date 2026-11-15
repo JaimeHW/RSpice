@@ -29,6 +29,10 @@ pub struct VbicNoiseOperatingModel {
     pub physical_constants: Option<crate::constants::NoisePhysicalConstants>,
     /// VBIC 1.3 evaluates thermal noise at the local operating temperature.
     pub absolute_temperature: Option<Value>,
+    /// Older VBIC: the self-heating rise the thermal sources add to the
+    /// instance offset (vbicnoise.c since ngspice commit 5c4e9ab1d). VBIC 1.3
+    /// carries its rise inside `absolute_temperature`.
+    pub thermal_temperature_rise: Value,
     /// `(mechanism, node+, node−, conductance)`; absent sources have zero strength.
     pub thermal: [(&'static str, NodeId, NodeId, Value); 7],
     /// `(mechanism, node+, node-, noise current)` including model multiplicity.
@@ -727,10 +731,14 @@ impl Bjt {
     }
 
     /// Noise sources at the accepted bias. VBIC 1.3 follows vbic_1p3.va;
-    /// older VBIC retains ngspice's emitter injection for RBP and its
-    /// omission of extrinsic B-E flicker. RS and Iccp count wherever the
-    /// substrate network exists, as LTspice and Xyce count them and ngspice
-    /// integrates them.
+    /// older VBIC retains ngspice's omission of extrinsic B-E flicker, and
+    /// runs its thermal sources at the instance temperature plus the
+    /// self-heating rise, as vbicnoise.c does since commit 5c4e9ab1d. RBP's
+    /// thermal noise sits across RBP itself, branch (bp, cx), in every VBIC:
+    /// that is where vbic_1p3.va puts it, and ngspice moved it there from
+    /// the RE nodes (ei, e) in commit 5c4e9ab1d. RS and Iccp count wherever
+    /// the substrate network exists, as LTspice and Xyce count them and
+    /// ngspice integrates them.
     #[doc(hidden)]
     pub fn vbic_noise_operating_model(&self) -> Option<VbicNoiseOperatingModel> {
         if !self.uses_vbic_dynamic_charges() || !self.mna_promoted() {
@@ -769,6 +777,11 @@ impl Bjt {
                 self.mapped_temperature(self.requested_temperature() + self.vrth)
                     .0
             }),
+            thermal_temperature_rise: if !self.vbic_13 && self.thermal_model_enabled() {
+                self.vrth
+            } else {
+                0.0
+            },
             thermal: [
                 (
                     "RCX",
@@ -803,16 +816,8 @@ impl Bjt {
                 ),
                 (
                     "RBP",
-                    if self.vbic_13 {
-                        self.node_bp
-                    } else {
-                        self.node_ei
-                    },
-                    if self.vbic_13 {
-                        self.node_cx
-                    } else {
-                        self.node_emitter
-                    },
+                    self.node_bp,
+                    self.node_cx,
                     -eval.irbp.d_internal[IDX_VCX],
                 ),
                 (

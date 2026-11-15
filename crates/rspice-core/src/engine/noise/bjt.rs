@@ -86,9 +86,10 @@ impl Engine {
                         absolute_temperatures.insert(source.identity.clone(), temperature);
                     } else {
                         // VBIC 1.3's absolute temperature already includes
-                        // TRISE and its thermal port. Only older models use
-                        // the ngspice analysis-temperature offset here.
-                        source.temperature_offset = bjt.noise_temperature_offset;
+                        // TRISE and its thermal port. Older models use the
+                        // instance offset here, plus their self-heating rise.
+                        source.temperature_offset =
+                            bjt.noise_temperature_offset + model.thermal_temperature_rise;
                     }
                     noise_sources.push(source);
                 }

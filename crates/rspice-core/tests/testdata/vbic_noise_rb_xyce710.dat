@@ -1,0 +1,17 @@
+# VBIC base-resistance noise testbench (RB_NOISE_DECK in engine/noise.rs tests) from
+# Xyce 7.10.0 (XyceNF release, Windows), `Xyce.exe deck.cir`, with the model card's
+# LEVEL=4 changed to LEVEL=12 (Xyce's 4-terminal VBIC 1.3) and `.print noise onoise`.
+# VBIC 1.3 puts RBP's thermal noise across RBP (bp, cx); the onoise column is the square
+# root of Xyce's ONOISE (V^2/Hz).
+# Columns: frequency_hz onoise_v_per_sqrt_hz
+1.000000e+05 5.02984149e-08
+1.584893e+05 5.02984101e-08
+2.511886e+05 5.02983979e-08
+3.981072e+05 5.02983673e-08
+6.309573e+05 5.02982902e-08
+1.000000e+06 5.02980969e-08
+1.584893e+06 5.02976111e-08
+2.511886e+06 5.02963910e-08
+3.981072e+06 5.02933267e-08
+6.309573e+06 5.02856318e-08
+1.000000e+07 5.02663185e-08

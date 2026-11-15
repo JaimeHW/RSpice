@@ -1221,11 +1221,18 @@ fn legacy_private_resistor_noise_matches_full_port_covariance() {
 /// VBIC's substrate resistance and parasitic transport current are noise
 /// sources wherever the substrate network exists. LTspice and Xyce count both
 /// in the spectrum and in its total; ngspice-46 integrates them too, though
-/// its printed density leaves them out. Over 1 kHz to 100 MHz on this deck
-/// ngspice-46 integrates 2.486000e-4 V of output noise. The input-referred
-/// total is the integral of the input-referred spectrum, 1.252399e-4 V in
-/// LTspice 26.1; ngspice-46 prints 1.292646e-4 V because it refers the lower
-/// end of each interval through the upper end's gain.
+/// its printed density leaves them out. RBP's own noise now sits across RBP,
+/// where it reaches the output through the parasitic transistor; ngspice-47
+/// and LTspice 26.1 misplace it on the RE nodes, so both totals are compared
+/// with RBP left out on both sides. Over 1 kHz to 100 MHz ngspice-47
+/// integrates 2.48600004e-4 V of output noise, 4.91001416e-7 V of it RBP's
+/// (`ngspice_con -b`, `.noise ... 1`, `onoise_total`, `onoise_total_q1_rbp`):
+/// 2.4859952e-4 V without it. The input-referred total is the integral of the
+/// input-referred spectrum, 1.25239891e-4 V in LTspice 26.1 (`.meas noise
+/// INTEG V(inoise)`), of which RBP's `v(Q1.rbp)/gain` integrates to
+/// 2.38446e-7 V: 1.2523966e-4 V without it. ngspice-46 prints 1.292646e-4 V
+/// because it refers the lower end of each interval through the upper end's
+/// gain.
 #[test]
 fn vbic_substrate_noise_reaches_the_integrated_totals() {
     let netlist = Netlist::parse(
@@ -1262,18 +1269,37 @@ R3 R3_P R3_N 500k
             &NoAbort,
         )
         .expect("noise analysis runs");
+    let is_rbp = |contribution: &rspice_core::analysis::NoiseContribution| {
+        contribution.identity.device.eq_ignore_ascii_case("q1")
+            && contribution
+                .identity
+                .mechanism
+                .as_deref()
+                .is_some_and(|mechanism| mechanism.eq_ignore_ascii_case("RBP"))
+    };
+    assert!(
+        results
+            .iter()
+            .all(|result| result.contributions.iter().any(is_rbp)),
+        "Q1 reports its RBP thermal noise at every frequency"
+    );
+    let mut without_rbp = results.clone();
+    for result in &mut without_rbp {
+        result.contributions.retain(|contribution| !is_rbp(contribution));
+    }
     let integrated = IntegratedNoise::new(results);
+    let without_rbp = IntegratedNoise::new(without_rbp);
     for (label, actual, reference, tolerance) in [
         (
-            "output",
-            integrated.total_output_noise(),
-            2.486000e-4,
+            "output without RBP",
+            without_rbp.total_output_noise(),
+            2.4859952e-4,
             1.0e-5,
         ),
         (
-            "input",
-            integrated.total_input_referred_noise(),
-            1.252399e-4,
+            "input without RBP",
+            without_rbp.total_input_referred_noise(),
+            1.2523966e-4,
             5.0e-4,
         ),
     ] {
