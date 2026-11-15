@@ -493,6 +493,7 @@ mod tests {
                 match entry {
                     ToolbarEntry::Icon(icon) => out.push(icon.icon),
                     ToolbarEntry::Tool(tool) => out.push(tool.icon),
+                    ToolbarEntry::Action(action) => out.push(action.icon),
                     ToolbarEntry::Only(_, nested) => icons(nested, out),
                     ToolbarEntry::Separator | ToolbarEntry::Control(_) => {}
                 }
