@@ -19,10 +19,10 @@ pub(super) struct ForwardParameters {
 /// parameter value, so every parse of one reading of the deck shares it.
 #[derive(Debug, Default)]
 pub(super) struct ForwardParameterNames {
-    declared: HashSet<String>,
+    declared: rustc_hash::FxHashSet<String>,
     /// Root URC model cards, which make a `U` card a distributed RC line
     /// wherever they sit.
-    urc_models: HashSet<String>,
+    urc_models: rustc_hash::FxHashSet<String>,
 }
 
 #[derive(Debug)]
@@ -55,8 +55,8 @@ impl ForwardParameterNames {
         xyce_syntax: bool,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
-        let mut declared = HashSet::new();
-        let mut urc_models = HashSet::new();
+        let mut declared = rustc_hash::FxHashSet::default();
+        let mut urc_models = rustc_hash::FxHashSet::default();
         let mut depth = 0usize;
         let mut card = String::new();
         let mut finish = |card: &mut String, depth: &mut usize| {
@@ -152,7 +152,11 @@ pub(super) fn postpone_forward_reference(
                     key.clear();
                     key.push_str(name);
                     key.make_ascii_uppercase();
-                    names.declared.contains(&key) && !state.params.has_any_parameter_binding(name)
+                    // An ASCII name's buffer is its uppercase already, which
+                    // the binding lookup then reads without spelling it again.
+                    let spelled = if name.is_ascii() { key.as_str() } else { name };
+                    names.declared.contains(&key)
+                        && !state.params.has_any_parameter_binding(spelled)
                 })
         });
     if names_unbound {
