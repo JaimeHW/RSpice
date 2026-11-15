@@ -186,7 +186,8 @@ pub enum DrcViolationType {
     //-------------------------------------------------------------------------
     /// Symbol pin required by the cell interface has no terminal location.
     SymbolUnplacedPin,
-    /// Symbol pin no longer exists in the paired schematic interface.
+    /// Symbol pin the cell's interface (its schematic, compiled module or
+    /// bound model) does not declare.
     SymbolOrphanedPin,
     /// Symbol pin terminal is not on the required terminal grid.
     SymbolPinOffGrid,
@@ -375,7 +376,7 @@ impl DrcViolationType {
             Self::UnknownComponent => "Component type is not recognized",
             Self::UnresolvedReference => "Instance reference names no single instance",
             Self::SymbolUnplacedPin => "Symbol pin is not placed",
-            Self::SymbolOrphanedPin => "Symbol pin is not in the schematic interface",
+            Self::SymbolOrphanedPin => "Symbol pin is not in the cell's interface",
             Self::SymbolPinOffGrid => "Symbol pin is off the terminal grid",
             Self::SymbolPinOrder => "Symbol pin order differs from the interface",
             Self::SymbolPinDirection => "Symbol pin direction differs from the interface",
@@ -445,7 +446,9 @@ impl DrcViolationType {
             Self::UnknownComponent => "Check the component type or define the model",
             Self::UnresolvedReference => "Name exactly one instance of this cellview",
             Self::SymbolUnplacedPin => "Place the symbol pin on the terminal grid",
-            Self::SymbolOrphanedPin => "Delete the orphaned pin or add the schematic port back",
+            Self::SymbolOrphanedPin => {
+                "Delete the pin, or declare it where the interface is read from"
+            }
             Self::SymbolPinOffGrid => "Move the symbol pin onto the terminal grid",
             Self::SymbolPinOrder => "Reorder the symbol pins to the interface's order",
             Self::SymbolPinDirection => "Set the pin's direction to the one the interface declares",

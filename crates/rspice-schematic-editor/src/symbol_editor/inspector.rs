@@ -96,9 +96,12 @@ pub struct SymbolInspectorRequest {
     pub open_parameter_form: bool,
 }
 
+/// The symbol inspector. `ports` is the interface the symbol answers to, and
+/// `interface_source` names what it is read from: the schematic, the compiled
+/// module or the bound model.
 #[expect(
     clippy::too_many_arguments,
-    reason = "The document, its interface, its parameters and the editor state are independent inputs."
+    reason = "the document and its metadata, the interface and what it is read from, its parameters, the session and what it may edit"
 )]
 pub fn show(
     ui: &mut Ui,
@@ -106,6 +109,7 @@ pub fn show(
     mut document: SymbolDocument,
     mut metadata: SymbolEditorMetadata,
     ports: &[PortSpec],
+    interface_source: &str,
     parameters: &[LabelParameter],
     editor: &SymbolEditorSession,
     capabilities: SymbolEditCapabilities,
@@ -142,7 +146,14 @@ pub fn show(
                 let shapes = selection.shapes.iter().copied().collect::<Vec<_>>();
                 changed |= style_rows(ui, &mut edit, &mut document, &shapes);
             } else if let Some(name) = selection.pins.iter().next() {
-                changed |= pin_section(ui, &mut edit, &mut document, &mut intent, ports, name);
+                changed |= pin_section(
+                    ui,
+                    &mut edit,
+                    &mut document,
+                    &mut intent,
+                    (ports, interface_source),
+                    name,
+                );
             } else if let Some(index) = selection.shapes.iter().next() {
                 changed |= shape_section(ui, &mut edit, &mut document, *index);
                 changed |= style_rows(ui, &mut edit, &mut document, &[*index]);
@@ -443,12 +454,14 @@ pub const fn lead_length_accepted(length: i32) -> bool {
     length >= 0
 }
 
+/// One pin's rows. `interface` is the ports the symbol answers to, with the
+/// word for what they are read from.
 fn pin_section(
     ui: &mut Ui,
     edit: &mut InspectorEdit,
     document: &mut SymbolDocument,
     intent: &mut SymbolCommitIntent,
-    ports: &[PortSpec],
+    (ports, interface_source): (&[PortSpec], &str),
     name: &str,
 ) -> bool {
     let Some(order) = document
@@ -609,7 +622,12 @@ fn pin_section(
         .any(|port| port.name.eq_ignore_ascii_case(&active_name))
         && !ports.is_empty()
     {
-        property_row_problem(ui, "Interface", "not in schematic", Some(Problem::Warning));
+        property_row_problem(
+            ui,
+            "Interface",
+            &format!("not in {interface_source}"),
+            Some(Problem::Warning),
+        );
     }
     let placed = document.pins[order].position.is_some();
     let on_grid = document.pins[order].terminal_on_grid();

@@ -894,11 +894,13 @@ pub(crate) fn run_active_symbol_pin_checks(model: &mut Model, facts: SlotFacts) 
             return;
         }
     };
+    let source = model.symbol_contract_source(&reference);
     let mut result = check_symbol_pins(
         &inputs.document,
         &inputs.interface,
         inputs.binding.as_ref(),
         &reference,
+        source,
     );
     // The symbol's own waivers, stored in the document the checks read.
     rspice_design::drc::CheckWaivers::for_subject(&inputs.document.waivers).apply(&mut result);
@@ -921,13 +923,7 @@ pub(crate) fn run_active_symbol_pin_checks(model: &mut Model, facts: SlotFacts) 
             SymbolInterface::SymbolDefined => {
                 "Symbol pin check: the symbol defines its own pins.".to_owned()
             }
-            SymbolInterface::Declared(_) if inputs.binding.is_some() => {
-                "Symbol pin check: pins match the model.".to_owned()
-            }
-            SymbolInterface::Declared(_) => format!(
-                "Symbol pin check: pins match the {}.",
-                model.symbol_contract_source(&reference)
-            ),
+            SymbolInterface::Declared(_) => format!("Symbol pin check: pins match the {source}."),
         }
     } else {
         format!(

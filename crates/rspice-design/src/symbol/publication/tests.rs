@@ -28,7 +28,7 @@ fn findings(
     interface: &SymbolInterface,
 ) -> Vec<(DrcViolationType, String)> {
     let reference = CellViewRef::new("work", "amp", "symbol");
-    check_symbol_pins(document, interface, None, &reference)
+    check_symbol_pins(document, interface, None, &reference, "schematic")
         .violations()
         .iter()
         .map(|finding| (finding.violation_type, finding.location.display()))
@@ -78,6 +78,28 @@ fn a_schematic_that_declares_no_pins_is_said_so() {
         symbol(Vec::new()).pin_summary(&empty).matches(),
         "an empty symbol and an empty schematic agree"
     );
+}
+
+/// A pin the interface does not declare is said not to be in whatever the
+/// interface is read from: a compiled module's symbol has no schematic for
+/// the pin to be missing from.
+#[test]
+fn a_stray_pin_finding_names_where_the_interface_is_read_from() {
+    let document = symbol(vec![
+        pin("IN", PortDirection::In, (-40, 0)),
+        pin("EN", PortDirection::In, (-40, 20)),
+    ]);
+    let interface = SymbolInterface::Declared(vec![port("IN", PortDirection::In)]);
+    let reference = CellViewRef::new("work", "ota", "symbol");
+
+    let result = check_symbol_pins(&document, &interface, None, &reference, "module");
+
+    let messages = result
+        .violations()
+        .iter()
+        .map(|finding| finding.message.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(messages, ["Symbol pin is not in the module: EN"]);
 }
 
 /// The counts the canvas states are exact: pins missing from the symbol,
@@ -166,7 +188,7 @@ fn the_interface_pins_in_another_order_are_an_order_finding() {
     ]);
 
     let reference = CellViewRef::new("work", "amp", "symbol");
-    let result = check_symbol_pins(&document, &interface, None, &reference);
+    let result = check_symbol_pins(&document, &interface, None, &reference, "schematic");
     let found = result.violations();
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].violation_type, DrcViolationType::SymbolPinOrder);
@@ -213,7 +235,7 @@ fn a_symbol_pin_waiver_travels_with_its_symbol() {
     };
     // Whether each finding is waived, and how many waivers cover nothing.
     let checked = |document: &SymbolDocument, reference: &CellViewRef| {
-        let mut result = check_symbol_pins(document, &interface, None, reference);
+        let mut result = check_symbol_pins(document, &interface, None, reference, "schematic");
         let waivers = CheckWaivers::for_subject(&document.waivers);
         waivers.apply(&mut result);
         let waived = result
@@ -225,7 +247,7 @@ fn a_symbol_pin_waiver_travels_with_its_symbol() {
     };
 
     // Recorded as the page records it, against the original's finding.
-    let found = check_symbol_pins(&drawn, &interface, None, &original);
+    let found = check_symbol_pins(&drawn, &interface, None, &original, "schematic");
     let object = crate::drc::waiver_site(&found.violations()[0].location).1;
     let document = waived(object);
     assert_eq!(checked(&document, &original), (vec![true], 0));

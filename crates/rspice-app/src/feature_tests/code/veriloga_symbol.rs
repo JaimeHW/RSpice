@@ -316,6 +316,131 @@ fn the_first_drag_on_a_compiled_symbol_lands_the_pin_where_it_is_dropped() {
     assert_eq!(terminal(&symbol(&app, &reference), "vdd"), drop_point);
 }
 
+/// The AccessKit labels and values (a plain label's text is its value) of
+/// the last of two whole-application frames.
+fn frame_labels(ctx: &egui::Context, app: &mut RSpiceApp) -> Vec<String> {
+    frame_with(ctx, app, DESKTOP, Vec::new());
+    frame_with(ctx, app, DESKTOP, Vec::new())
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| update.nodes.iter())
+        .flat_map(|(_, node)| [node.label(), node.value()])
+        .flatten()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// In the symbol editor the module's ports are the symbol's interface: a
+/// port the module gained is listed with no pin and counted on the canvas
+/// against the module, and Update pins from module adds it.
+#[test]
+fn the_symbol_editor_answers_a_compiled_symbol_to_its_module() {
+    let mut app = open_project_app();
+    let reference = compiled_amplifier(&mut app);
+    hand_draw(&mut app, &reference);
+    edit_source(&mut app, &amplifier(", en"));
+    compile_and_publish(&mut app);
+    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
+    let ctx = themed_context();
+
+    let labels = frame_labels(&ctx, &mut app);
+    assert!(
+        labels.iter().any(|label| label == "en, no pin, Warning"),
+        "{labels:?}"
+    );
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "1 module pin has no symbol pin"),
+        "{labels:?}"
+    );
+
+    press_strip_button(&ctx, &mut app, "Update pins from module");
+
+    assert!(
+        symbol(&app, &reference)
+            .pin("en")
+            .and_then(|pin| pin.position)
+            .is_some()
+    );
+    assert!(matches!(
+        symbol_standing(&app.state.model.library_manager, &reference),
+        Some(VerilogACellSymbol::InStep)
+    ));
+}
+
+/// A pin the module no longer declares is named against the module: in the
+/// pin list, on the canvas and in the finding the pin check publishes.
+#[test]
+fn a_pin_the_module_dropped_is_named_against_the_module() {
+    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+
+    let mut app = open_project_app();
+    let reference = add_module_cell(&mut app.state, "ota", "ota", &amplifier(", en"));
+    open_in_design(&mut app.state, &reference);
+    compile_and_publish(&mut app);
+    hand_draw(&mut app, &reference);
+    edit_source(&mut app, &amplifier(""));
+    compile_and_publish(&mut app);
+    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
+    let ctx = themed_context();
+
+    let labels = frame_labels(&ctx, &mut app);
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "6. en, not in module, Warning"),
+        "{labels:?}"
+    );
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "1 pin is not in the module"),
+        "{labels:?}"
+    );
+    app.state.design.symbol.editor.select_pin("en");
+    frame_with(&ctx, &mut app, DESKTOP, Vec::new());
+    let interface = frame_with(&ctx, &mut app, DESKTOP, Vec::new())
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| update.nodes.iter())
+        .find(|(_, node)| node.label() == Some("Interface"))
+        .and_then(|(_, node)| node.value().map(str::to_owned));
+    assert_eq!(
+        interface.as_deref(),
+        Some("not in module"),
+        "the inspector names the module"
+    );
+
+    app.state.run_active_symbol_pin_checks();
+    let subject = app.state.model.workspace.content.active_view.clone();
+    let message = app
+        .state
+        .model
+        .diagnostics
+        .batches()
+        .find(|batch| {
+            batch.inputs
+                == DiagnosticInputs::SymbolPins {
+                    subject: subject.clone(),
+                }
+        })
+        .and_then(|batch| {
+            batch
+                .records
+                .iter()
+                .find(|record| record.canonical.code.as_ref() == "SYMBOL-ORPHANED-PIN")
+        })
+        .map(|record| record.message.clone())
+        .expect("the stray pin is a finding");
+    assert!(
+        message.contains("module") && !message.contains("schematic"),
+        "{message}"
+    );
+}
+
 /// Pins no port declares are their author's to remove, so Update symbol is
 /// not offered for them alone.
 #[test]

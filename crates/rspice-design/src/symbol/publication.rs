@@ -66,13 +66,16 @@ impl EncodedSymbolEditorBundle {
 ///
 /// `binding` is the model the symbol is bound to, if any; its pins are then
 /// the interface, and their electrical types and the model's cell are checked
-/// too. Every finding is a statement on the Problems page: none of them stops
-/// the symbol being saved.
+/// too. `source` names what the interface is read from (the schematic, the
+/// compiled module, the model), in the words a finding about a pin it does
+/// not declare uses. Every finding is a statement on the Problems page: none
+/// of them stops the symbol being saved.
 pub fn check_symbol_pins(
     document: &SymbolDocument,
     interface: &SymbolInterface,
     binding: Option<&ModelBoundSymbolDefinition>,
     reference: &CellViewRef,
+    source: &str,
 ) -> DrcResult {
     let mut found: Vec<(DrcViolationType, String, DrcLocation)> = Vec::new();
     let pin_location = |pin_name: &str| DrcLocation::SymbolPin {
@@ -90,7 +93,14 @@ pub fn check_symbol_pins(
             PinFindingKind::OrphanedPin => DrcViolationType::SymbolOrphanedPin,
             PinFindingKind::PinOffGrid => DrcViolationType::SymbolPinOffGrid,
         };
-        let message = format!("{}: {}", violation_type.description(), finding.pin_name);
+        let message = match finding.kind {
+            PinFindingKind::OrphanedPin => {
+                format!("Symbol pin is not in the {source}: {}", finding.pin_name)
+            }
+            PinFindingKind::UnplacedPin | PinFindingKind::PinOffGrid => {
+                format!("{}: {}", violation_type.description(), finding.pin_name)
+            }
+        };
         found.push((violation_type, message, pin_location(&finding.pin_name)));
     }
 

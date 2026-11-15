@@ -35,6 +35,8 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         document,
         metadata,
         &ports,
+        cx.model
+            .symbol_contract_source(&cx.model.workspace.content.active_view),
         &parameters,
         &cx.state.symbol.editor,
         SymbolEditCapabilities {

@@ -126,8 +126,12 @@ impl Model {
     }
 
     /// What the interface of one cell's symbol is read from, in the words
-    /// the symbol editor's actions use for it.
+    /// the symbol editor's actions use for it: the model it is bound to, its
+    /// cell's compiled module, or its cell's schematic.
     pub fn symbol_contract_source(&self, reference: &CellViewRef) -> &'static str {
+        if self.symbol_model_binding(reference).is_some() {
+            return "model";
+        }
         let module_defined = self
             .library_manager
             .get_library(&reference.library)

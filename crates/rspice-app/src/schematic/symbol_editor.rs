@@ -214,15 +214,10 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
     // No breadcrumb overlay: the document tab and the inspector's eyebrow
     // both name the view this canvas is drawing.
     let reference = &canvas.model.workspace.content.active_view;
-    let interface_source = if canvas.model.symbol_model_binding(reference).is_some() {
-        "model"
-    } else {
-        canvas.model.symbol_contract_source(reference)
-    };
     surface::canvas_check_note(
         ui.ctx(),
         document.pin_summary(&canvas.model.symbol_interface(reference)),
-        interface_source,
+        canvas.model.symbol_contract_source(reference),
         stage,
     );
     // The way to a first drawing lies on the canvas until a shape is drawn

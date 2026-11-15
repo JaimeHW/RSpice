@@ -69,6 +69,9 @@ fn pins_section(
     let interface = cx
         .model
         .symbol_interface(&cx.model.workspace.content.active_view);
+    let source = cx
+        .model
+        .symbol_contract_source(&cx.model.workspace.content.active_view);
     let mismatched = !document.pin_summary(&interface).matches();
     let count = document.pins.len();
     section_header(
@@ -126,9 +129,6 @@ fn pins_section(
     let contract_command =
         crate::workbench::design::commands::DesignCommand::SymbolUpdatePinsFromContract;
     if own_command_available(cx, contract_command) {
-        let source = cx
-            .model
-            .symbol_contract_source(&cx.model.workspace.content.active_view);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
             let width = (ui.available_width() - 8.0).max(1.0);
@@ -177,7 +177,7 @@ fn pins_section(
     }
     let mut select: Option<String> = None;
     for (index, pin) in document.pins.iter().enumerate() {
-        let (meta, problem) = pin_meta(pin, ports);
+        let (meta, problem) = pin_meta(pin, ports, source);
         let label = format!("{}. {}", index + 1, pin.name);
         let row = TreeRow::new(&label)
             .mono()
@@ -222,20 +222,22 @@ fn ports_without_pins<'p>(document: &SymbolDocument, ports: &'p [PortSpec]) -> V
 }
 
 /// What one pin row says after its name, and whether that is a problem.
+/// `source` names what the interface is read from: the schematic, the
+/// compiled module or the bound model.
 ///
 /// A pin is normal when it is placed on the grid and the interface declares
 /// it. With no schematic, no Verilog-A module and no generated ports there
 /// is no interface for a pin to be missing from, so a hand-drawn symbol's
 /// pins are not all of them orphans — which is how every one of them used to
 /// read.
-fn pin_meta(pin: &SymbolPin, ports: &[PortSpec]) -> (String, Option<Problem>) {
+fn pin_meta(pin: &SymbolPin, ports: &[PortSpec], source: &str) -> (String, Option<Problem>) {
     let declared = ports.is_empty()
         || ports
             .iter()
             .any(|port| port.name.eq_ignore_ascii_case(&pin.name));
     match (pin.position.is_some(), declared) {
         (false, _) => ("unplaced".to_owned(), Some(Problem::Warning)),
-        (true, false) => ("not in schematic".to_owned(), Some(Problem::Warning)),
+        (true, false) => (format!("not in {source}"), Some(Problem::Warning)),
         (true, true) if !pin.terminal_on_grid() => ("off grid".to_owned(), Some(Problem::Warning)),
         (true, true) => (pin.direction.keyword().to_owned(), None),
     }
@@ -314,34 +316,58 @@ mod tests {
     fn a_symbol_with_no_interface_does_not_orphan_its_own_pins() {
         let on_grid = SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 0)));
 
-        assert_eq!(pin_meta(&on_grid, &[]), ("in".to_owned(), None));
+        assert_eq!(
+            pin_meta(&on_grid, &[], "schematic"),
+            ("in".to_owned(), None)
+        );
 
         let declared = [PortSpec {
             name: "in".to_owned(),
             direction: PortDirection::In,
         }];
-        assert_eq!(pin_meta(&on_grid, &declared), ("in".to_owned(), None));
+        assert_eq!(
+            pin_meta(&on_grid, &declared, "schematic"),
+            ("in".to_owned(), None)
+        );
 
         let other = [PortSpec {
             name: "OUT".to_owned(),
             direction: PortDirection::Out,
         }];
         assert_eq!(
-            pin_meta(&on_grid, &other),
+            pin_meta(&on_grid, &other, "schematic"),
             ("not in schematic".to_owned(), Some(Problem::Warning))
         );
 
         let unplaced = SymbolPin::new("IN", PortDirection::In, None);
         assert_eq!(
-            pin_meta(&unplaced, &[]),
+            pin_meta(&unplaced, &[], "schematic"),
             ("unplaced".to_owned(), Some(Problem::Warning))
         );
 
         let off_grid = SymbolPin::new("IN", PortDirection::In, Some(Point::new(-43, 0)));
         assert_eq!(
-            pin_meta(&off_grid, &[]),
+            pin_meta(&off_grid, &[], "schematic"),
             ("off grid".to_owned(), Some(Problem::Warning))
         );
+    }
+
+    /// A pin the interface does not declare is said not to be in whatever
+    /// the interface is read from: a compiled module's or a bound model's
+    /// symbol has no schematic for it to be missing from.
+    #[test]
+    fn a_stray_pin_is_named_against_the_interface_it_answers_to() {
+        let pin = SymbolPin::new("EN", PortDirection::In, Some(Point::new(-40, 0)));
+        let declared = [PortSpec {
+            name: "OUT".to_owned(),
+            direction: PortDirection::Out,
+        }];
+        for source in ["module", "model"] {
+            assert_eq!(
+                pin_meta(&pin, &declared, source),
+                (format!("not in {source}"), Some(Problem::Warning))
+            );
+        }
     }
 
     /// A port the interface declares and the symbol never placed is listed

@@ -775,6 +775,7 @@ impl Editor {
                             document,
                             metadata,
                             &[],
+                            "schematic",
                             &active_symbol_label_parameters(&self.app.state.model),
                             &self.app.state.design.symbol.editor,
                             SymbolEditCapabilities {
