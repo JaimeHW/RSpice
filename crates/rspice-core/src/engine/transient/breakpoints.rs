@@ -576,12 +576,19 @@ impl Engine {
                 }
                 let last_relevant_start = (tstop - minimum_offset).min(train_end);
                 let mut previous_cycle_start = None;
+                if per_valid && last_relevant_start.is_finite() {
+                    Self::check_periodic_source_schedule(
+                        (last_relevant_start - first_cycle_start) / per,
+                        edge_offsets.len(),
+                        max_points,
+                    )?;
+                }
 
                 // Test each computed cycle time directly instead of deriving
                 // a floating count. Decimal inputs can make
                 // floor((last-first)/PER) one too small even when the final
                 // fused cycle start is representably inside the interval.
-                for cycle in 0..=1_000_000_usize {
+                for cycle in 0usize.. {
                     if cycle % 1024 == 0 {
                         Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
                     }
@@ -597,12 +604,6 @@ impl Engine {
                     }
                     if !last_relevant_start.is_finite() || cycle_start > last_relevant_start {
                         break;
-                    }
-                    if cycle == 1_000_000 {
-                        return Err(crate::engine::SimulationError::Circuit(
-                            "transient source-event schedule exceeds the exact enumeration limit of 1000000 PULSE cycles"
-                                .to_string(),
-                        ));
                     }
                     if let Some(previous) = previous_cycle_start
                         && cycle_start <= previous
@@ -823,14 +824,13 @@ impl Engine {
                 } else {
                     *repeat_count as usize
                 };
-                if max_points != usize::MAX && requested_cycles > 1_000_000 {
-                    return Err(crate::engine::SimulationError::Circuit(format!(
-                        "transient source-event schedule requires {requested_cycles} PAT cycles, exceeding the exact enumeration limit 1000000"
-                    )));
-                }
-                let max_cycles = requested_cycles.min(1_000_000);
+                Self::check_periodic_source_schedule(
+                    requested_cycles as Value,
+                    source_times.len(),
+                    max_points,
+                )?;
 
-                for cycle in 1..=max_cycles {
+                for cycle in 1..=requested_cycles {
                     if cycle % 1024 == 0 {
                         Self::check_source_breakpoint_collection(breakpoints, abort, max_points)?;
                     }
@@ -973,6 +973,11 @@ impl Engine {
         if repeating_knots.is_empty() {
             return Self::check_source_breakpoint_collection(breakpoints, abort, max_points);
         }
+        Self::check_periodic_source_schedule(
+            (tstop - repeat_start) / period,
+            repeating_knots.len(),
+            max_points,
+        )?;
         let mut cycle = 1.0;
         let mut previous_seam = last;
         loop {
@@ -1001,15 +1006,6 @@ impl Engine {
                 break;
             }
             cycle += 1.0;
-            if cycle > 1.0e6 {
-                if max_points != usize::MAX && repeat_start + period * cycle <= tstop {
-                    return Err(crate::engine::SimulationError::Circuit(
-                        "transient source-event PWL repetition exceeds the exact enumeration limit 1000000"
-                            .to_string(),
-                    ));
-                }
-                break;
-            }
         }
         Self::check_source_breakpoint_collection(breakpoints, abort, max_points)
     }
@@ -1103,16 +1099,12 @@ impl Engine {
         // the boundary against rounding of the quotient. Preserve the same
         // multiply-then-add event clock as sided waveform evaluation.
         let mut cycle = (distance.floor() - 1.0).max(first_cycle);
-        for iteration in 0..=1_000_000_usize {
+        Self::check_periodic_source_schedule((stop - lower) / period.abs(), 1, max_points)?;
+        loop {
             Self::check_source_breakpoint_collection(clocks, abort, max_points)?;
             let at = origin + period * cycle;
             if (forward && at > stop) || (!forward && at < lower) {
                 break;
-            }
-            if iteration == 1_000_000 {
-                return Err(SimulationError::Circuit(
-                    "physical PWL schedule exceeds 1000000 active cycles".into(),
-                ));
             }
             if !at.is_finite() {
                 return Err(SimulationError::Circuit(
@@ -1136,6 +1128,42 @@ impl Engine {
             cycle = next_cycle;
         }
         Self::check_source_breakpoint_collection(clocks, abort, max_points)
+    }
+
+    /// Refuse a repeating source schedule the breakpoint table cannot take
+    /// before enumerating it.
+    ///
+    /// `cycles` is the schedule's own cycle count, its window over its
+    /// period, and `edges` the clocks one cycle adds. A cycle adds at least
+    /// one clock of its own, so more cycles than the table's policy holds
+    /// are refused up front. Clocks shared with other sources are not
+    /// counted, so the per-cycle check against the actual table stays
+    /// authoritative for the union. The table the schedule fills is then
+    /// confirmed with the allocator. Nothing else bounds the count: ngspice
+    /// and Xyce schedule a repeating source for as many periods as the run
+    /// spans.
+    fn check_periodic_source_schedule(
+        cycles: Value,
+        edges: usize,
+        max_points: usize,
+    ) -> Result<(), SimulationError> {
+        let cycles = if cycles.is_nan() {
+            0
+        } else {
+            // A float-to-integer cast saturates: an unbounded window is
+            // `usize::MAX` cycles, which every check below refuses.
+            cycles.max(0.0).floor() as usize
+        };
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ResultValues,
+            cycles,
+            max_points,
+        )?;
+        crate::analysis::confirm_working_values(
+            "transient source-event schedule",
+            cycles.saturating_mul(edges.max(1)),
+        )?;
+        Ok(())
     }
 
     fn check_source_breakpoint_collection(
