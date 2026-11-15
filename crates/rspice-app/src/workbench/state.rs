@@ -5,7 +5,7 @@
 //! the task surface inside each canonical workspace.
 
 use rspice_app_workbench::workbench::state::console_views;
-pub(in crate::workbench) use rspice_app_workbench::workbench::state::navigator_tree;
+use rspice_app_workbench::workbench::state::navigator_tree;
 mod stimulus_editor;
 use rspice_app_simulate::workbench::state::simulate_session;
 #[cfg(test)]

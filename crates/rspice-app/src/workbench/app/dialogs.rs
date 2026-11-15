@@ -15,7 +15,6 @@ pub(crate) mod create_model_bound_symbol;
 pub(crate) mod design_request;
 pub(crate) mod design_review_comments;
 pub(crate) mod engineering_table;
-pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::fact_grid;
 pub(crate) mod find_replace;
 pub(crate) mod grid_snap_routing;
 pub(crate) use rspice_app_hardcopy::workbench::app::dialogs::hardcopy;

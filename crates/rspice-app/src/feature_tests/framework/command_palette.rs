@@ -5,13 +5,13 @@ use egui::{Context, Id, Key, Modifiers, Order, Rect, pos2, vec2};
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::command_palette::*;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::CommandSpec;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
+use rspice_app_workbench::workbench::app::command_palette::*;
 
 #[test]
 fn task_focused_menu_can_open_the_palette_in_an_exact_scope() {

@@ -126,7 +126,9 @@ impl RSpiceApp {
             if self.state.workbench.command_palette.open
                 && let Some(input) = palette_input
             {
-                super::command_palette::route_opening_input(ctx, input);
+                rspice_app_workbench::workbench::app::command_palette::route_opening_input(
+                    ctx, input,
+                );
                 self.state.shortcut_resolver.reset();
             }
         }

@@ -3,7 +3,6 @@
 
 use egui::{Context, RichText};
 
-use super::fact_grid;
 use crate::services::license::LicenseInfo;
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::state::shortcuts::ShortcutPreferences;
@@ -15,6 +14,7 @@ use crate::workbench::app_state::session::shortcuts::ShortcutCategory;
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
+use rspice_app_workbench::workbench::app::dialogs::fact_grid;
 
 pub(in crate::workbench) mod report_problem;
 pub(in crate::workbench) mod site;
