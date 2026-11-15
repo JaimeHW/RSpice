@@ -60,46 +60,21 @@ pub fn analyze_xyce_connectivity(
     elements: &[Element],
 ) -> Result<ConnectivityDiagnostics, ConnectivityAnalysisError> {
     let mut union = TerminalNodes::default();
-    // Per node, by union index: the first device attached to it, and whether
-    // a device of another name is attached too.
-    let mut attachments: Vec<Option<(&str, bool)>> = Vec::new();
+    let mut attachments = DeviceAttachments::default();
     let mut terminals = Vec::new();
-    let mut seen_on_device = Vec::new();
 
     for element in elements {
         refuse_model_specific_leads(element)?;
         terminals.clear();
         extend_element_terminal_nodes(element, &mut terminals);
-        seen_on_device.clear();
+        attachments.begin_device();
         for &node in &terminals {
-            let index = union.ensure_node(node);
-            if seen_on_device.contains(&index) {
-                continue;
-            }
-            seen_on_device.push(index);
-            if attachments.len() <= index {
-                attachments.resize(index + 1, None);
-            }
-            match &mut attachments[index] {
-                slot @ None => *slot = Some((element.name.as_str(), false)),
-                Some((first, shared)) => {
-                    *shared |= !first.eq_ignore_ascii_case(&element.name);
-                }
-            }
+            attachments.attach(union.ensure_node(node), &element.name);
         }
         union.join_groups(element, xyce_dc_lead_groups(element)?);
     }
 
-    // A node's normalized name is its key, so sorting the names orders the
-    // nodes by key.
-    let mut one_device_terminal_nodes = attachments
-        .iter()
-        .enumerate()
-        .filter(|(_, attachment)| attachment.is_some_and(|(_, shared)| !shared))
-        .filter(|(index, _)| !is_ground_name(union.name_at(*index)))
-        .map(|(index, _)| union.normalized_name(index))
-        .collect::<Vec<_>>();
-    one_device_terminal_nodes.sort_unstable();
+    let one_device_terminal_nodes = attachments.one_device_nodes(&union);
 
     let ground_root = union.index_of("0").map(|index| union.root_of(index));
     let mut no_dc_path_nodes = (0..union.names.len())
@@ -113,6 +88,54 @@ pub fn analyze_xyce_connectivity(
         one_device_terminal_nodes,
         no_dc_path_nodes,
     })
+}
+
+/// How many distinct devices reach each node of a walk, by union index: the
+/// first device attached to a node, and whether a device of another name is
+/// attached too. [`analyze_xyce_connectivity`]'s one-device count, kept apart
+/// from any lead grouping so the DC walk can take the same count.
+#[derive(Default)]
+struct DeviceAttachments<'a> {
+    by_node: Vec<Option<(&'a str, bool)>>,
+    /// The nodes the current device has reached, so a device on one node
+    /// twice counts once.
+    on_device: Vec<usize>,
+}
+
+impl<'a> DeviceAttachments<'a> {
+    fn begin_device(&mut self) {
+        self.on_device.clear();
+    }
+
+    fn attach(&mut self, index: usize, device: &'a str) {
+        if self.on_device.contains(&index) {
+            return;
+        }
+        self.on_device.push(index);
+        if self.by_node.len() <= index {
+            self.by_node.resize(index + 1, None);
+        }
+        match &mut self.by_node[index] {
+            slot @ None => *slot = Some((device, false)),
+            Some((first, shared)) => *shared |= !first.eq_ignore_ascii_case(device),
+        }
+    }
+
+    /// The non-ground nodes no second device reaches, by normalized name.
+    fn one_device_nodes(&self, union: &TerminalNodes<'_>) -> Vec<String> {
+        // A node's normalized name is its key, so sorting the names orders
+        // the nodes by key.
+        let mut nodes = self
+            .by_node
+            .iter()
+            .enumerate()
+            .filter(|(_, attachment)| attachment.is_some_and(|(_, shared)| !shared))
+            .filter(|(index, _)| !is_ground_name(union.name_at(*index)))
+            .map(|(index, _)| union.normalized_name(index))
+            .collect::<Vec<_>>();
+        nodes.sort_unstable();
+        nodes
+    }
 }
 
 /// Refuse a device whose lead groups only its code model knows.
@@ -230,6 +253,12 @@ pub struct DcGroundPathDiagnostics {
     /// a walk over deck elements cannot see them, so the component is not
     /// reported as lacking a DC path; the post-solve audit still judges it.
     pub floating_component_has_module_terminal: Vec<bool>,
+    /// When the walk was asked to count devices: the nodes
+    /// [`analyze_xyce_connectivity`] reports as reached by no more than one
+    /// device, from this walk instead of one of its own. `None` when not
+    /// asked, or when that analysis would refuse the deck because an
+    /// element's Xyce lead grouping is model-specific or unresolved.
+    pub one_device_terminal_nodes: Option<Vec<String>>,
 }
 
 /// Installed DC meaning of a capacitor's authored `IC=` value.
@@ -313,6 +342,7 @@ pub fn analyze_dc_ground_paths(
         false,
         reference,
         &|_| None,
+        false,
     )
 }
 
@@ -342,12 +372,17 @@ pub struct ModuleDcConduction {
 /// of its nodes the module's DC equations tie ([`ModuleDcConduction`]), or
 /// `None` when it cannot tell, and the components the instance reaches stay
 /// uncertain.
+///
+/// `count_devices` has the same walk also count the devices on each node,
+/// filling [`DcGroundPathDiagnostics::one_device_terminal_nodes`], so a
+/// build that reports both diagnostics walks its elements once.
 pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
     elements: &'a [Element],
     capacitor_ic_mode: CapacitorIcDcMode,
     inductor_ic_enforced: bool,
     reference: Option<&'a str>,
     module_conduction: &dyn Fn(&Element) -> Option<ModuleDcConduction>,
+    count_devices: bool,
 ) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
     let mut union = TerminalNodes::default();
     // By union index, which is the order the elements first reach each node:
@@ -364,10 +399,22 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
     let mut module_current_nodes: Vec<&str> = Vec::new();
     let mut analysis_complete = true;
     let mut terminals = Vec::new();
+    // Dropped at the first element whose Xyce lead grouping is unknown:
+    // `analyze_xyce_connectivity` refuses such a deck, so it has no count.
+    let mut attachments = count_devices.then(DeviceAttachments::default);
 
     for element in elements {
         terminals.clear();
         extend_element_terminal_nodes(element, &mut terminals);
+        if attachments.is_some() && xyce_dc_lead_groups(element).is_err() {
+            attachments = None;
+        }
+        if let Some(attachments) = &mut attachments {
+            attachments.begin_device();
+            for &node in &terminals {
+                attachments.attach(union.ensure_node(node), &element.name);
+            }
+        }
         if matches!(element.kind, ElementKind::Subcircuit { .. }) {
             // An X card still standing after flattening is a compiled module.
             for node in &element.nodes {
@@ -459,6 +506,8 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
         .iter()
         .map(|index| union.root_of(*index))
         .collect();
+    let one_device_terminal_nodes =
+        attachments.map(|attachments| attachments.one_device_nodes(&union));
 
     let Some(ground) = union
         .index_of("0")
@@ -467,7 +516,10 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
     else {
         // No ground reference at all. Circuit validation owns that report;
         // every node would otherwise be listed here.
-        return Ok(DcGroundPathDiagnostics::default());
+        return Ok(DcGroundPathDiagnostics {
+            one_device_terminal_nodes,
+            ..Default::default()
+        });
     };
 
     let floating: Vec<usize> = (0..union.names.len())
@@ -527,6 +579,7 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
         floating_components,
         floating_component_is_certain,
         floating_component_has_module_terminal,
+        one_device_terminal_nodes,
     })
 }
 
@@ -1650,6 +1703,81 @@ mod tests {
         );
     }
 
+    /// The DC walk's device count is the Xyce connectivity analysis's: the
+    /// same nodes, sorted, and none where that analysis refuses the deck.
+    #[test]
+    fn dc_walk_counts_one_device_nodes_as_the_xyce_analysis_does() {
+        let counted = |deck: &str, reference: Option<&str>| {
+            let netlist = Netlist::parse(deck).expect("deck parses");
+            let flat = flatten_netlist_with_models(&netlist)
+                .expect("deck flattens")
+                .elements;
+            let walk = |count_devices| {
+                analyze_dc_ground_paths_with_ic_modes(
+                    &flat,
+                    CapacitorIcDcMode::EnforcedConstraint,
+                    false,
+                    reference,
+                    &|_| None,
+                    count_devices,
+                )
+                .expect("topology is supported")
+            };
+            let uncounted = walk(false);
+            assert_eq!(uncounted.one_device_terminal_nodes, None);
+            let counted = walk(true);
+            assert_eq!(
+                DcGroundPathDiagnostics {
+                    one_device_terminal_nodes: None,
+                    ..counted.clone()
+                },
+                uncounted,
+                "counting devices leaves the DC diagnostics as they were"
+            );
+            let xyce = analyze_xyce_connectivity(&flat)
+                .ok()
+                .map(|diagnostics| diagnostics.one_device_terminal_nodes);
+            assert_eq!(counted.one_device_terminal_nodes, xyce);
+            counted.one_device_terminal_nodes
+        };
+
+        // Lowercase spellings, a device on one node twice, a controlled
+        // source's sense pair, and a node only a capacitor reaches.
+        let mixed = "one-device nodes\n\
+                     V1 in 0 1\n\
+                     R1 in zz 1k\n\
+                     Rloop loop loop 1k\n\
+                     E1 out 0 sense1 sense2 2\n\
+                     Rsense sense1 0 1k\n\
+                     Cfloat lonely in 1p\n\
+                     Rbad IN bad_one 10\n\
+                     .end\n";
+        assert_eq!(
+            counted(mixed, None),
+            Some(
+                ["BAD_ONE", "LONELY", "LOOP", "OUT", "SENSE2", "ZZ"]
+                    .map(String::from)
+                    .to_vec()
+            )
+        );
+        // A deck that names no node 0 counts its reference net as any other.
+        assert_eq!(
+            counted(
+                "no ground\nV1 a b 1\nR1 a b 1k\nR2 b c 1k\n.end\n",
+                Some("b")
+            ),
+            Some(vec!["C".to_string()])
+        );
+        // An XSPICE code model's lead groups are its own: no count.
+        let xspice = "code model\n\
+                      V1 in 0 1\n\
+                      A1 in out amp\n\
+                      .model amp gain(gain=2)\n\
+                      R1 out 0 1k\n\
+                      .end\n";
+        assert_eq!(counted(xspice, None), None);
+    }
+
     fn dc_ground_paths_of(deck: &str) -> Vec<String> {
         let netlist = Netlist::parse(deck).expect("deck parses");
         let flat = flatten_netlist_with_models(&netlist)
@@ -2008,6 +2136,7 @@ mod tests {
             false,
             None,
             &|_| None,
+            false,
         )
         .expect("Xyce capacitor-IC topology is supported");
         assert!(enforced.no_dc_path_nodes.is_empty());
@@ -2018,6 +2147,7 @@ mod tests {
             false,
             None,
             &|_| None,
+            false,
         )
         .expect("transient-only capacitor-IC topology is supported");
         assert_eq!(seed_only.no_dc_path_nodes, ["OUT"]);
@@ -2060,6 +2190,7 @@ mod tests {
                 false,
                 reference,
                 &|_| None,
+                false,
             )
             .expect("topology is supported")
         };

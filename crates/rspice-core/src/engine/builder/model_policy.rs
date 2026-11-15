@@ -2309,12 +2309,14 @@ pub(super) fn native_bsim4_model_params_upper_map(
 
 /// Report topology diagnostics and return their typed DC severity.
 ///
-/// Two independent questions are asked here. Xyce's lead-group analysis
-/// supplies the "connected to only 1 device Terminal" notice, which is a
-/// wiring-mistake heuristic. [`analyze_dc_ground_paths`] answers the separate
-/// question of whether anything determines a node's DC voltage. Every such
-/// node is warned. The typed result separately identifies current-driven
-/// floating components that the operating point must refuse.
+/// Two independent questions are asked here. Xyce's device count supplies
+/// the "connected to only 1 device Terminal" notice, which is a wiring-mistake
+/// heuristic. [`analyze_dc_ground_paths`] answers the separate question of
+/// whether anything determines a node's DC voltage. Every such node is
+/// warned. The typed result separately identifies current-driven floating
+/// components that the operating point must refuse. One walk over the
+/// elements answers both; only a deck with a global shunt, which skips the
+/// DC question, asks the Xyce analysis for its count.
 ///
 /// [`analyze_dc_ground_paths`]: crate::netlist::analyze_dc_ground_paths
 #[allow(clippy::too_many_arguments)]
@@ -2330,13 +2332,17 @@ pub(super) fn collect_floating_nodes(
     code_model_nodes: &CodeModelNodes,
 ) -> crate::netlist::DcGroundPathDiagnostics {
     let report = !topology_already_reported();
-    if report && let Ok(diagnostics) = crate::netlist::analyze_xyce_connectivity(flat_elements) {
-        for node in diagnostics.one_device_terminal_nodes {
+    let warn_one_device_nodes = |nodes: Vec<String>| {
+        for node in nodes {
             log::warn!("Voltage Node ({node}) connected to only 1 device Terminal");
         }
-    }
+    };
 
     if has_global_rshunt {
+        if report && let Ok(diagnostics) = crate::netlist::analyze_xyce_connectivity(flat_elements)
+        {
+            warn_one_device_nodes(diagnostics.one_device_terminal_nodes);
+        }
         // RSHUNT is an authored conducting path from every electrical node to
         // ground. Lead-count diagnostics remain useful, but a no-DC-path
         // warning or fatal subset would contradict the installed circuit.
@@ -2348,16 +2354,23 @@ pub(super) fn collect_floating_nodes(
 
     // An unanalyzable topology yields no nodes rather than a guess, leaving
     // every analysis free to run exactly as it did before.
-    let Ok(diagnostics) = crate::netlist::analyze_dc_ground_paths_with_ic_modes(
+    let Ok(mut diagnostics) = crate::netlist::analyze_dc_ground_paths_with_ic_modes(
         flat_elements,
         capacitor_ic_mode,
         inductor_ic_enforced,
         reference,
         module_conduction,
+        report,
     ) else {
         return crate::netlist::DcGroundPathDiagnostics::default();
     };
     if report {
+        warn_one_device_nodes(
+            diagnostics
+                .one_device_terminal_nodes
+                .take()
+                .unwrap_or_default(),
+        );
         let accounted = code_model_nodes.accounted_floating_nodes(&diagnostics);
         for node in diagnostics
             .reported_no_dc_path_nodes()
