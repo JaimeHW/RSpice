@@ -22,7 +22,7 @@ use super::{
     SymbolPointer, SymbolViewport, hit_handle, hit_label, hit_origin, hit_pin, hit_shape,
     snap_point, snap_to_terminal_grid,
 };
-use crate::view::mobile_controls::touch_latches;
+use crate::view::mobile_controls::{TouchLatches, touch_latches};
 
 /// Identity of the actual symbol view and the registry revision used to resolve an event.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,9 +118,11 @@ pub fn canvas_request(
             .ctx
             .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace));
     // On touch the strip's latches stand in for Shift and for a box drag.
-    let latches = (viewport.pointer == SymbolPointer::Finger)
-        .then(|| touch_latches(&response.ctx))
-        .unwrap_or_default();
+    let latches = if viewport.pointer == SymbolPointer::Finger {
+        touch_latches(&response.ctx)
+    } else {
+        TouchLatches::default()
+    };
     let input = SymbolCanvasInput {
         pointer: pressed_at
             .or_else(|| response.interact_pointer_pos())
