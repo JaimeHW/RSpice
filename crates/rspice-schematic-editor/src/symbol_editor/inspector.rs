@@ -635,6 +635,103 @@ fn pin_section(
     changed
 }
 
+/// The corners a closed outline needs, and the points an open line does.
+const POLYGON_CORNERS: usize = 3;
+const LINE_POINTS: usize = 2;
+
+/// A line's or a polygon's points, one row each with its X and Y and a
+/// button that removes it, and a row that adds one after the last. A line
+/// keeps two points and a polygon three: their remove buttons stay greyed.
+fn vertex_table(
+    ui: &mut Ui,
+    edit: &mut InspectorEdit,
+    before: &SymbolDocument,
+    shape: usize,
+    points: &mut Vec<Point>,
+    closed: bool,
+) -> bool {
+    let fewest = if closed { POLYGON_CORNERS } else { LINE_POINTS };
+    let removable = points.len() > fewest;
+    let reason = if closed {
+        "A polygon keeps at least three corners"
+    } else {
+        "A line keeps at least two points"
+    };
+    let mut changed = false;
+    let mut remove = None;
+    for (row, point) in points.iter_mut().enumerate() {
+        let id = ui.id().with(("symbol-vertex", shape, row));
+        let mut buffers = [point.x, point.y].map(|value| value.to_string());
+        for (axis, buffer) in buffers.iter_mut().enumerate() {
+            if let Some(typed) = ui.data_mut(|data| data.get_temp::<String>(id.with(axis))) {
+                *buffer = typed;
+            }
+        }
+        let parsed = buffers
+            .clone()
+            .map(|buffer| buffer.trim().parse::<i32>().ok());
+        let [x_text, y_text] = &mut buffers;
+        let response = rspice_ui_kit::panels::property_row_pair_input(
+            ui,
+            &format!("Point {}", row + 1),
+            [x_text, y_text],
+            ["X", "Y"],
+            parsed.map(|value| value.is_none()),
+            Some(rspice_ui_kit::panels::PropertyRowAction {
+                icon: WorkbenchIcon::Close,
+                label: "Remove point",
+                enabled: removable,
+                disabled_reason: Some(reason),
+            }),
+        );
+        for (axis, field) in [&response.first, &response.second].into_iter().enumerate() {
+            if field.changed() {
+                let typed = buffers[axis].clone();
+                ui.data_mut(|data| data.insert_temp(id.with(axis), typed.clone()));
+                let value = if axis == 0 { &mut point.x } else { &mut point.y };
+                if let Ok(number) = typed.trim().parse::<i32>()
+                    && number != *value
+                {
+                    record_once(edit, before);
+                    *value = number;
+                    changed = true;
+                }
+            }
+            if field.lost_focus() {
+                ui.data_mut(|data| data.remove_temp::<String>(id.with(axis)));
+                edit.session.undo_recorded = false;
+            }
+        }
+        if response.action.is_some_and(|action| action.clicked()) {
+            remove = Some(row);
+        }
+    }
+    if let Some(row) = remove {
+        edit.record_undo(before);
+        points.remove(row);
+        edit.session.undo_recorded = false;
+        changed = true;
+    }
+    if labeled_icon_button(
+        ui,
+        WorkbenchIcon::Add,
+        "Add point",
+        false,
+        ui.available_width(),
+    )
+    .clicked()
+    {
+        // One terminal step on from the last point, where it is easy to
+        // see and drag.
+        let last = points.last().copied().unwrap_or_default();
+        edit.record_undo(before);
+        points.push(last + Point::new(rspice_design::symbol::SYMBOL_TERMINAL_GRID, 0));
+        edit.session.undo_recorded = false;
+        changed = true;
+    }
+    changed
+}
+
 /// The four orientations an arrow head takes, in quarter turns.
 const ARROW_ROTATIONS: [i32; 4] = [0, 1, 2, 3];
 
@@ -677,37 +774,49 @@ fn shape_section(
     let mut changed = false;
     let mut edited = shape;
     match &mut edited {
-        SymbolShape::Polyline { points, closed: _ } => {
-            if let Some(first) = points.first_mut() {
-                let mut anchor = *first;
-                // "Position", not "Start": editing either moves the whole
-                // shape, which is what the delta below applies.
-                let moved = coordinate_row(ui, edit, &before, "Position X", &mut anchor.x)
-                    | coordinate_row(ui, edit, &before, "Position Y", &mut anchor.y);
-                if moved {
-                    let delta = Point::new(anchor.x - first.x, anchor.y - first.y);
-                    for point in points.iter_mut() {
-                        *point = *point + delta;
-                    }
-                    changed = true;
-                }
+        SymbolShape::Polyline { points, closed } => {
+            changed |= vertex_table(ui, edit, &before, index, points, *closed);
+            let mut is_closed = *closed;
+            // A closed outline needs three corners; with two the switch
+            // stays as it is.
+            if rspice_ui_kit::widgets::switch_row(ui, "Closed", &mut is_closed)
+                && (!is_closed || points.len() >= POLYGON_CORNERS)
+            {
+                record_once(edit, &before);
+                *closed = is_closed;
+                changed = true;
             }
         }
         SymbolShape::Rectangle { min, max } => {
-            let mut anchor = *min;
-            let moved = coordinate_row(ui, edit, &before, "Position X", &mut anchor.x)
-                | coordinate_row(ui, edit, &before, "Position Y", &mut anchor.y);
-            if moved {
-                let delta = Point::new(anchor.x - min.x, anchor.y - min.y);
-                *min = *min + delta;
-                *max = *max + delta;
+            // X and Y are the top-left corner, as the rectangle is drawn
+            // from; each row changes its own measure and nothing else.
+            let (mut x, mut y) = (min.x, min.y);
+            let (mut width, mut height) = (max.x - min.x, max.y - min.y);
+            if coordinate_row(ui, edit, &before, "X", &mut x) {
+                *max = Point::new(x + width, max.y);
+                min.x = x;
+                changed = true;
+            }
+            if coordinate_row(ui, edit, &before, "Y", &mut y) {
+                *max = Point::new(max.x, y + height);
+                min.y = y;
+                changed = true;
+            }
+            if integer_row(ui, edit, &before, "Width", &mut width, |width| width >= 1) {
+                max.x = min.x + width;
+                changed = true;
+            }
+            if integer_row(ui, edit, &before, "Height", &mut height, |height| {
+                height >= 1
+            }) {
+                max.y = min.y + height;
                 changed = true;
             }
         }
         SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
             changed |= coordinate_row(ui, edit, &before, "Center X", &mut center.x);
             changed |= coordinate_row(ui, edit, &before, "Center Y", &mut center.y);
-            changed |= coordinate_row(ui, edit, &before, "Radius", radius);
+            changed |= integer_row(ui, edit, &before, "Radius", radius, |radius| radius >= 1);
         }
         SymbolShape::Arc {
             center,
@@ -717,9 +826,15 @@ fn shape_section(
         } => {
             changed |= coordinate_row(ui, edit, &before, "Center X", &mut center.x);
             changed |= coordinate_row(ui, edit, &before, "Center Y", &mut center.y);
-            changed |= coordinate_row(ui, edit, &before, "Radius", radius);
-            changed |= coordinate_row(ui, edit, &before, "Start °", start_degrees);
-            changed |= coordinate_row(ui, edit, &before, "Sweep °", sweep_degrees);
+            changed |= integer_row(ui, edit, &before, "Radius", radius, |radius| radius >= 1);
+            changed |= integer_row(ui, edit, &before, "Start °", start_degrees, |degrees| {
+                (-360..=360).contains(&degrees)
+            });
+            // Clockwise positive, as the arc tool draws it; a whole turn at
+            // most, and never none.
+            changed |= integer_row(ui, edit, &before, "Sweep °", sweep_degrees, |degrees| {
+                degrees != 0 && (-360..=360).contains(&degrees)
+            });
         }
         // A drawing's curve is not a whole-unit shape to retype; it can move.
         SymbolShape::Curve(curve) => {

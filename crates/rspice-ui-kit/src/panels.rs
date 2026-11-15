@@ -1698,6 +1698,147 @@ pub fn property_row_input_action(
     (edit_response, action_response)
 }
 
+/// What a [`property_row_pair_input`] row answered: its two fields and its
+/// trailing action, when it has one.
+#[derive(Debug)]
+pub struct PropertyRowPair {
+    pub first: Response,
+    pub second: Response,
+    pub action: Option<Response>,
+}
+
+/// Editable property row holding two values side by side, such as one
+/// point's X and Y in a table of points, with an optional trailing action
+/// (remove the row). The fields share the value column equally; the action
+/// is a square as tall as them, ending on the inset every row ends on.
+///
+/// `names` are the fields' accessible names; `invalid` outlines a field
+/// whose typed text has not been applied.
+pub fn property_row_pair_input(
+    ui: &mut Ui,
+    label: &str,
+    values: [&mut String; 2],
+    names: [&str; 2],
+    invalid: [bool; 2],
+    action: Option<PropertyRowAction<'_>>,
+) -> PropertyRowPair {
+    let t = Tokens::get(ui.ctx());
+    let (slot, _) = row_slot(ui, None, Sense::hover());
+    row_label(ui, slot.label, label);
+    let field = slot.field();
+    let gap = 4.0;
+    let action_rect = action.map(|_| {
+        Rect::from_min_max(
+            Pos2::new(field.right() - field.height(), field.top()),
+            field.max,
+        )
+    });
+    let fields_right = action_rect.map_or(field.right(), |rect| rect.left() - gap);
+    let half = ((fields_right - field.left() - gap) * 0.5).max(1.0);
+    let rects = [
+        Rect::from_min_max(field.min, Pos2::new(field.left() + half, field.bottom())),
+        Rect::from_min_max(
+            Pos2::new(fields_right - half, field.top()),
+            Pos2::new(fields_right, field.bottom()),
+        ),
+    ];
+    let [first_value, second_value] = values;
+    let mut responses = Vec::with_capacity(2);
+    for ((value, rect), (name, invalid)) in [first_value, second_value]
+        .into_iter()
+        .zip(rects)
+        .zip(names.into_iter().zip(invalid))
+    {
+        let text_color = if invalid {
+            t.color.err
+        } else {
+            ui.visuals().override_text_color.unwrap_or(t.color.text)
+        };
+        let edit = egui::TextEdit::singleline(value)
+            .font(theme::field_mono())
+            .text_color(text_color)
+            .desired_width(rect.width())
+            .margin(field_margin(ui, rect, 7));
+        let response = ui
+            .scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                |ui| ui.add(edit),
+            )
+            .inner;
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label(format!("{label} {name}"));
+            if invalid {
+                node.set_invalid(egui::accesskit::Invalid::True);
+            } else {
+                node.clear_invalid();
+            }
+        });
+        if invalid {
+            ui.painter().rect_stroke(
+                rect,
+                t.radius,
+                Stroke::new(1.0, t.color.err),
+                egui::StrokeKind::Inside,
+            );
+        }
+        responses.push(response);
+    }
+    slot.close(ui);
+    let action = action.zip(action_rect).map(|(action, rect)| {
+        let response = ui.interact(
+            rect,
+            ui.id().with(("property-row-pair-action", label, action.label)),
+            if action.enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                action.enabled,
+                format!("{} {label}", action.label),
+            )
+        });
+        let fill = if response.hovered() && action.enabled {
+            t.color.bg_hover
+        } else {
+            t.color.bg_elevated
+        };
+        ui.painter().rect(
+            rect,
+            t.radius,
+            fill,
+            Stroke::new(1.0, t.color.border),
+            egui::StrokeKind::Inside,
+        );
+        action.icon.paint(
+            ui.painter(),
+            Rect::from_center_size(rect.center(), Vec2::splat(15.0)),
+            if action.enabled {
+                t.color.text_dim
+            } else {
+                t.color.text_faint
+            },
+        );
+        theme::paint_focus_ring_outset(ui, &response, rect);
+        match (action.enabled, action.disabled_reason) {
+            (false, Some(reason)) => response.on_hover_text(reason),
+            _ => response.on_hover_text(action.label),
+        }
+    });
+    let second = responses.pop().expect("two fields");
+    let first = responses.pop().expect("two fields");
+    PropertyRowPair {
+        first,
+        second,
+        action,
+    }
+}
+
 /// Selectable twin of [`property_row`], with the same fixed label/value
 /// columns as read-only rows and text inputs. `options` carries a durable
 /// value and its presentation label; the returned flag is true only when the
