@@ -65,15 +65,12 @@ const LAYERS: &[(&str, u32)] = &[
     // `workbench`, where the interior order below ranks them.
     //
     // Locating the production half of a source file that inspects itself.
-    // It references nothing, and `automation_workflow`, `simulation` and
-    // `workbench` all reference it, so the bottom layer is the only position
-    // that clears every inbound edge at once.
+    // It references nothing, so the bottom layer clears every inbound edge
+    // at once.
     ("source_guard", 0),
     // The design system.
     ("ui", 1),
     // Domain services over the persisted model.
-    ("analysis", 4),
-    ("automation_workflow", 4),
     ("services", 5),
     ("simulation", 6),
     // Editors and inspectors.
