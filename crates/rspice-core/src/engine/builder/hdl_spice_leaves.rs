@@ -76,14 +76,17 @@ pub fn hdl_external_cells(netlist: &Netlist) -> Vec<ExternalCell> {
                 .collect(),
         })
         .collect();
+    // A deck library may hold thousands of model cards; look names up rather
+    // than scanning every cell for each card.
+    let mut names: rustc_hash::FxHashSet<String> = cells
+        .iter()
+        .map(|cell| cell.name.to_ascii_lowercase())
+        .collect();
     for model in &netlist.models {
         let Some(device) = model_device(&model.model_type) else {
             continue;
         };
-        if cells
-            .iter()
-            .any(|cell| cell.name.eq_ignore_ascii_case(&model.name))
-        {
+        if !names.insert(model.name.to_ascii_lowercase()) {
             continue;
         }
         cells.push(ExternalCell {
