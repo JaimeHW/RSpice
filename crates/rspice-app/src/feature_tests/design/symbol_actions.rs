@@ -94,7 +94,8 @@ fn cut_paste_commands_preserve_order_unique_pin_names_and_undo() {
     Command::Paste.execute(&mut app);
     let pasted = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(pasted.body.len(), 4);
-    let pin = pasted.pin("IN_copy2").unwrap();
+    // The copy takes the next free name, not a copy suffix.
+    let pin = pasted.pin("IN1").unwrap();
     assert_eq!(pin.position, Some(Point::new(0, 30)));
     assert_eq!(pin.side, before.pins[0].side);
     assert_eq!(pin.length, before.pins[0].length);
@@ -104,7 +105,7 @@ fn cut_paste_commands_preserve_order_unique_pin_names_and_undo() {
     );
     assert_eq!(
         app.state.design.symbol.editor.effective_selection().pins,
-        ["IN_copy2".to_owned()].into()
+        ["IN1".to_owned()].into()
     );
     assert!(app.state.undo_active_symbol_document().unwrap());
     assert_eq!(

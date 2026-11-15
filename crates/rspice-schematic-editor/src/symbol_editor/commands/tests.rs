@@ -274,3 +274,25 @@ fn turning_or_mirroring_a_selection_carries_each_pins_side() {
         }
     }
 }
+
+/// A pasted or duplicated pin takes the next free name, counting up from
+/// the number its name ends in, and never `<name>_copy`.
+#[test]
+fn a_copied_pin_takes_the_next_free_name() {
+    let document = SymbolDocument {
+        pins: ["D3", "D4", "CLK", "A0[7:0]", "Q09", "in1"]
+            .into_iter()
+            .map(|name| SymbolPin::new(name, PortDirection::In, None))
+            .collect(),
+        ..SymbolDocument::default()
+    };
+    for (copied, named) in [
+        ("D3", "D5"),
+        ("CLK", "CLK1"),
+        ("A0[7:0]", "A1[7:0]"),
+        ("Q09", "Q10"),
+        ("IN", "IN2"),
+    ] {
+        assert_eq!(next_free_pin_name(&document, copied), named, "{copied}");
+    }
+}

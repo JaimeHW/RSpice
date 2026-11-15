@@ -238,18 +238,25 @@ pub fn clipboard_from_selection(
     SymbolClipboard { pins, shapes }
 }
 
-fn unique_symbol_pin_name(document: &SymbolDocument, base: &str) -> String {
-    let mut candidate = format!("{base}_copy");
-    let mut suffix = 2usize;
-    while document
-        .pins
-        .iter()
-        .any(|pin| pin.name.eq_ignore_ascii_case(&candidate))
-    {
-        candidate = format!("{base}_copy{suffix}");
-        suffix += 1;
-    }
-    candidate
+/// The name a pasted or duplicated pin takes: the first free one counting
+/// up from the number `base` ends in, ahead of any bus range, its digits as
+/// wide as they were. `D3` gives `D4`, `CLK` gives `CLK1` and `A0[7:0]`
+/// gives `A1[7:0]`.
+fn next_free_pin_name(document: &SymbolDocument, base: &str) -> String {
+    let (stem, range) = match base.find('[') {
+        Some(at) if base.ends_with(']') => base.split_at(at),
+        _ => (base, ""),
+    };
+    let prefix = stem.trim_end_matches(|character: char| character.is_ascii_digit());
+    let digits = &stem[prefix.len()..];
+    let width = digits.len();
+    let first = digits
+        .parse::<u64>()
+        .map_or(1, |number| number.saturating_add(1));
+    (first..)
+        .map(|number| format!("{prefix}{number:0width$}{range}"))
+        .find(|candidate| document.pin(candidate).is_none())
+        .unwrap_or_else(|| base.to_owned())
 }
 
 fn paste(
@@ -275,7 +282,7 @@ fn paste(
         }
     }
     for mut pin in clipboard.pins {
-        pin.name = unique_symbol_pin_name(document, &pin.name);
+        pin.name = next_free_pin_name(document, &pin.name);
         if let Some(position) = pin.position.as_mut() {
             *position = *position + delta;
         }
