@@ -411,11 +411,11 @@ fn executed_options_reach_stability_and_analysis_limits_publish_nothing() {
         .unwrap();
     assert!((cold / hot - 2.0).abs() < 0.001);
     let mut config = SimulationConfig::default();
-    config.resource_limits.max_analysis_points = 2;
+    config.resource_limits.max_result_values = 2;
     let engine = Engine::try_new(config).unwrap();
     let variables = circuit.netlist().params.clone();
     assert!(
-        matches!(circuit.execute(&engine,&command("stb",SWEEP),&variables,&NoAbort),Err(ControlExecutionError::Simulation {source:SimulationError::ResourceLimit(limit),..}) if limit.resource==ResourceKind::AnalysisPoints)
+        matches!(circuit.execute(&engine,&command("stb",SWEEP),&variables,&NoAbort),Err(ControlExecutionError::Simulation {source:SimulationError::ResourceLimit(limit),..}) if limit.resource==ResourceKind::ResultValues)
     );
     assert_eq!(circuit.datasets().len(), 2);
     assert_eq!(document(&circuit, 0), first);

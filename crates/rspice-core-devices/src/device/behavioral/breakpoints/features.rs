@@ -287,9 +287,9 @@ impl EventSchedule<'_> {
                     }
                 }
                 ResourceLimitError::ensure(
-                    ResourceKind::AnalysisPoints,
+                    ResourceKind::ResultValues,
                     roots.len(),
-                    self.max_points,
+                    self.max_values,
                 )?;
                 continue;
             }
@@ -320,9 +320,9 @@ impl EventSchedule<'_> {
                         roots.insert(time.to_bits());
                     }
                     ResourceLimitError::ensure(
-                        ResourceKind::AnalysisPoints,
+                        ResourceKind::ResultValues,
                         roots.len(),
-                        self.max_points,
+                        self.max_values,
                     )?;
                     continue;
                 }
@@ -345,9 +345,9 @@ impl EventSchedule<'_> {
                         roots.insert(interval.upper.to_bits());
                     }
                     ResourceLimitError::ensure(
-                        ResourceKind::AnalysisPoints,
+                        ResourceKind::ResultValues,
                         roots.len(),
-                        self.max_points,
+                        self.max_values,
                     )?;
                     continue;
                 }
@@ -512,7 +512,7 @@ impl EventSchedule<'_> {
         let mut candidates = EventSchedule {
             tstop: self.tstop,
             abort: self.abort,
-            max_points: self.max_points,
+            max_values: self.max_values,
             physical_corners: self.physical_corners,
             isolation_work: self.isolation_work,
             events: BTreeSet::new(),

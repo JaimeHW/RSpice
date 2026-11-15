@@ -204,7 +204,7 @@ fn event_enumeration_is_cancellable_and_resource_bounded() {
 
     let mut config = SimulationConfig::default();
     let mut limits = ResourceLimits::default();
-    limits.max_analysis_points = 3;
+    limits.max_result_values = 3;
     config.resource_limits = limits;
     let bounded = Engine::new(config)
         .transient_source_event_times_with_abort(
@@ -214,9 +214,9 @@ fn event_enumeration_is_cancellable_and_resource_bounded() {
             &["Vpulse".to_string()],
             &NoAbort,
         )
-        .expect_err("event schedule must obey the configured point limit");
+        .expect_err("event schedule must obey the configured value limit");
     assert!(
-        bounded.to_string().contains("analysis") && bounded.to_string().contains("3"),
+        bounded.to_string().contains("result_values") && bounded.to_string().contains("3"),
         "unexpected resource-bound error: {bounded}"
     );
 }

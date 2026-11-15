@@ -128,7 +128,6 @@ fn resource_name(name: &str) -> Option<&'static str> {
         FlattenedElements,
         CircuitNodes,
         MatrixUnknowns,
-        AnalysisPoints,
         ResultValues,
         TransportHistoryBytes,
         TransportHistoryRecords,

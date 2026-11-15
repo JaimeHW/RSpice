@@ -50,7 +50,6 @@ pub(super) fn preflight(
             return Err(SimulationError::Aborted);
         }
         validate_request(index, analysis, transient_stop)?;
-        engine.ensure_analysis_points(analysis.points)?;
         qualify_rustfft_forward_length(analysis.points).map_err(|error| {
             SimulationError::Circuit(format!(
                 ".FFT request {} cannot create a qualified transform plan: {error}",

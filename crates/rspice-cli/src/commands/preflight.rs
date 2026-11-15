@@ -49,9 +49,11 @@ fn invalid(message: impl std::fmt::Display) -> CliError {
     }
 }
 
-fn points_limit(requested: usize, limit: usize) -> CliError {
+/// A sweep retains at least one value per point, so its point count is
+/// checked against the retained-value limit before anything solves.
+fn values_limit(requested: usize, limit: usize) -> CliError {
     rspice_core::SimulationError::ResourceLimit(ResourceLimitError {
-        resource: ResourceKind::AnalysisPoints,
+        resource: ResourceKind::ResultValues,
         requested,
         limit,
     })
@@ -71,13 +73,13 @@ fn frequency(
         points,
         start,
         stop,
-        limits.max_analysis_points,
+        limits.max_result_values,
         &crate::abort::ProcessAbort,
     )
     .map(|_| ())
     .map_err(|error| match error {
         FrequencyGridError::Aborted => CliError::Interrupted,
-        FrequencyGridError::LimitExceeded { requested, limit } => points_limit(requested, limit),
+        FrequencyGridError::LimitExceeded { requested, limit } => values_limit(requested, limit),
         error => invalid(error),
     })
 }
@@ -85,11 +87,11 @@ fn frequency(
 fn dc_points(spec: DcSweepSpec, limits: ResourceLimits) -> Result<usize, CliError> {
     use rspice_core::netlist::SweepPointGenerationError;
     let values = spec
-        .points_bounded_with_abort(limits.max_analysis_points, &crate::abort::ProcessAbort)
+        .points_bounded_with_abort(limits.max_result_values, &crate::abort::ProcessAbort)
         .map_err(|error| match error {
             SweepPointGenerationError::Aborted => CliError::Interrupted,
             SweepPointGenerationError::LimitExceeded { requested, limit } => {
-                points_limit(requested, limit)
+                values_limit(requested, limit)
             }
             error => invalid(error),
         })?;
@@ -221,8 +223,8 @@ fn analysis_request(
                 .transpose()?
                 .unwrap_or(1);
             let count = inner.saturating_mul(outer);
-            if count > limits.max_analysis_points {
-                Err(points_limit(count, limits.max_analysis_points))
+            if count > limits.max_result_values {
+                Err(values_limit(count, limits.max_result_values))
             } else {
                 Ok(())
             }

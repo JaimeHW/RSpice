@@ -266,11 +266,6 @@ pub(crate) fn check_bordered_workload(
             limits.max_matrix_unknowns.min(MAX_DENSE_UNKNOWNS)
         },
     )?;
-    ResourceLimitError::ensure(
-        ResourceKind::AnalysisPoints,
-        grid.sample_count(),
-        limits.max_analysis_points,
-    )?;
     // The iterative backend stores circuit-sized frequency blocks and a
     // bounded Arnoldi basis, never a full coupled Jacobian or inverse.
     let linear_values = if linear.uses_krylov(size) {

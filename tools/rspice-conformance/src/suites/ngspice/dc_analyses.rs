@@ -278,7 +278,7 @@ impl TestRunner {
 
         let mut points = Vec::new();
         let mut point_index = 0usize;
-        let max_points = 2_000_000usize;
+        let max_points = rspice_core::ResourceLimits::default().max_result_values;
         let eps = (step.abs() * 1e-9).max(1e-18);
         let done = |value: Value| -> bool {
             if step > 0.0 {
@@ -298,7 +298,7 @@ impl TestRunner {
             points.push(if snapped_to_stop { stop } else { value });
             point_index += 1;
             if point_index >= max_points {
-                return Err("DC sweep exceeded point limit".to_string());
+                return Err("DC sweep exceeded the retained-value limit".to_string());
             }
             if snapped_to_stop {
                 break;

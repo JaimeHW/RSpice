@@ -187,7 +187,7 @@ fn static_control_checks_report_deferred_values_without_executing_the_script() {
 }
 
 #[test]
-fn control_analysis_checks_keep_include_locations_and_configured_point_limits() {
+fn control_analysis_checks_keep_include_locations_and_configured_value_limits() {
     let dir = common::test_dir("control-check-limits");
     let deck = dir.join("deck.cir");
     let include = dir.join("commands.inc");
@@ -198,7 +198,7 @@ fn control_analysis_checks_keep_include_locations_and_configured_point_limits() 
     )
     .unwrap();
     std::fs::write(&include, "* included\n.control\nac lin 20 1 20\n.endc\n").unwrap();
-    std::fs::write(&config, "[resources]\nmax_analysis_points=10\n").unwrap();
+    std::fs::write(&config, "[resources]\nmax_result_values=10\n").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .arg("--config")
         .arg(config)

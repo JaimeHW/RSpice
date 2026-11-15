@@ -97,13 +97,6 @@ impl QpnoiseAnalysisResult {
         let outputs = m.request.outputs.len();
         let count = m.request.frequencies_hz.len();
         let rows = m.node_names.len().saturating_add(m.branch_names.len());
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            count
-                .saturating_mul(outputs)
-                .saturating_mul(self.sources.len().max(1)),
-            limits.max_analysis_points,
-        )?;
         if rows == 0
             || rows > 65_536
             || self.points.len() != count

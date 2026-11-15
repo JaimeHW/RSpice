@@ -86,18 +86,9 @@ pub fn control_options(
     line: usize,
     params: &ParamContext,
     current: &SimulationOptions,
-    max_analysis_points: usize,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationOptions, ParseWithAbortError> {
-    options_overlay(
-        arguments,
-        line,
-        params,
-        current,
-        max_analysis_points,
-        true,
-        abort,
-    )
+    options_overlay(arguments, line, params, current, true, abort)
 }
 
 /// Apply one `.OPTIONS` argument list to a materialized circuit's options.
@@ -108,7 +99,6 @@ pub fn simulation_options_with_overrides(
     arguments: &str,
     params: &ParamContext,
     current: &SimulationOptions,
-    max_analysis_points: usize,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationOptions, ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
@@ -119,15 +109,7 @@ pub fn simulation_options_with_overrides(
         }
         .into());
     }
-    options_overlay(
-        arguments,
-        1,
-        params,
-        current,
-        max_analysis_points,
-        false,
-        abort,
-    )
+    options_overlay(arguments, 1, params, current, false, abort)
 }
 
 fn options_overlay(
@@ -135,7 +117,6 @@ fn options_overlay(
     line: usize,
     params: &ParamContext,
     current: &SimulationOptions,
-    max_analysis_points: usize,
     control_command: bool,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationOptions, ParseWithAbortError> {
@@ -154,7 +135,6 @@ fn options_overlay(
         line,
         params,
         &mut candidate,
-        max_analysis_points,
         &mut HashSet::new(),
         &mut diagnostics,
         None,
@@ -481,12 +461,6 @@ impl DataTableBuilder {
             self.flat_values.push(parse_data_table_value_with_abort(
                 line_num, &self.name, field, params, abort,
             )?);
-            crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::AnalysisPoints,
-                self.flat_values.len().div_ceil(self.params.len()),
-                self.resource_limits.max_analysis_points,
-            )
-            .map_err(ParseError::from)?;
         }
         ensure_parse_not_aborted(abort)?;
         Ok(())
@@ -518,12 +492,6 @@ impl DataTableBuilder {
             .into());
         }
         let row_count = self.flat_values.len() / columns;
-        crate::resource::ResourceLimitError::ensure(
-            crate::resource::ResourceKind::AnalysisPoints,
-            row_count,
-            self.resource_limits.max_analysis_points,
-        )
-        .map_err(ParseError::from)?;
         let mut rows = Vec::new();
         rows.try_reserve_exact(row_count).map_err(|error| {
             ParseError::Io(std::io::Error::other(format!(
@@ -833,7 +801,6 @@ fn parse_netlist_impl(
         }
     }
     state.parameter_overrides = overrides.to_vec();
-    state.max_analysis_points = options.resource_limits.max_analysis_points;
     state.allow_unmatched_subckt_ends = options.expression_dialect == ExpressionDialect::Xyce;
     // Both ngspice and Xyce close the currently open subcircuit and treat the
     // optional `.ENDS` label as documentary. Real-world decks contain stale
@@ -5351,24 +5318,6 @@ mod cancellation_tests {
                 resource: crate::resource::ResourceKind::ResultValues,
                 requested: 4,
                 limit: 3,
-            })
-        ));
-
-        let point_error = parse_netlist_with_options(
-            source,
-            NetlistParseOptions {
-                resource_limits: crate::resource::ResourceLimits::default()
-                    .with(|limits| limits.max_analysis_points = 1),
-                ..NetlistParseOptions::default()
-            },
-        )
-        .expect_err("two rows must exceed a one-point policy");
-        assert!(matches!(
-            point_error,
-            ParseError::ResourceLimit(crate::resource::ResourceLimitError {
-                resource: crate::resource::ResourceKind::AnalysisPoints,
-                requested: 2,
-                limit: 1,
             })
         ));
     }

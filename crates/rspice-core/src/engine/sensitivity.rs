@@ -1141,7 +1141,6 @@ impl Engine {
         let progress = StudyProgress::new(abort)?;
         Self::validate_parameter_sensitivity_inputs(param_value, delta)?;
         super::ac::validate_ac_frequencies(frequencies)?;
-        self.ensure_analysis_points(frequencies.len())?;
         progress.report(0.05)?;
         let work = progress.stage(0.05, 0.9);
         let abort: &dyn AbortSignal = &work;
@@ -3704,7 +3703,6 @@ impl Engine {
                     .to_string(),
             ));
         }
-        self.ensure_analysis_points(frequencies.len())?;
         let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
         self.ensure_sensitivity_capability(&flat, abort)?;
         Self::validate_design_parameter_filters(&flat, filters, "AC")?;
@@ -3860,7 +3858,7 @@ impl Engine {
                     sweep.points,
                     sweep.start_freq,
                     sweep.stop_freq,
-                    self.config.resource_limits.max_analysis_points,
+                    self.config.resource_limits.max_result_values,
                     abort,
                 )
             })

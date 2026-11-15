@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn the_gate_still_has_an_analysis_to_close_on() {
         let mut limits = ResourceLimits::default();
-        limits.max_analysis_points /= 2;
+        limits.max_result_values /= 2;
         assert!(
             execution_resource_policy_blocker(&NON_ENFORCING, limits).is_some(),
             "the spec these tests rely on is no longer outside the enforcing list"

@@ -428,7 +428,7 @@ fn compression_retains_every_sample_the_interval_lattice_reads() {
             netlist.options.output_interval_schedule.as_ref(),
             0.0,
             *uncompressed.time.last().expect("accepted samples exist"),
-            limits.max_analysis_points,
+            limits.max_result_values,
         )
         .expect("the accepted grid projects the authored lattice");
     let expanded = compressed
@@ -441,7 +441,7 @@ fn compression_retains_every_sample_the_interval_lattice_reads() {
             netlist.options.output_interval_schedule.as_ref(),
             0.0,
             *expanded.time.last().expect("retained samples exist"),
-            limits.max_analysis_points,
+            limits.max_result_values,
         )
         .expect("the retained grid projects the same authored lattice");
 

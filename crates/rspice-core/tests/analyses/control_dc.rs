@@ -315,7 +315,7 @@ fn failures_cancellation_and_cumulative_limits_do_not_publish_or_consume_ids() {
     execute(&mut circuit, &engine, "dc", "V1 0 1 .5").unwrap();
     assert_eq!(circuit.datasets()[1].name, "dc2");
     let mut config = SimulationConfig::default();
-    config.resource_limits.max_analysis_points = 3;
+    config.resource_limits.max_result_values = 3;
     assert!(matches!(
         execute(
             &mut circuit,

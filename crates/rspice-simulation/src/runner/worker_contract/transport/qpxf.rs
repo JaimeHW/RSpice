@@ -44,7 +44,7 @@ impl WorkerQpxfResultTransport {
             .ok_or("QPXF path count overflow")?;
         let limits = rspice_core::ResourceLimits::default();
         if points == 0
-            || points > limits.max_analysis_points
+            || points > limits.max_result_values
             || coordinates == 0
             || coordinates > 65_536
             || paths == 0

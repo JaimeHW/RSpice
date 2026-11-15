@@ -3526,7 +3526,6 @@ impl Engine {
             )));
         }
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_analysis_points(frequencies.len())?;
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;

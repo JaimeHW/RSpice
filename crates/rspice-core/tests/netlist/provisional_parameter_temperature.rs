@@ -168,7 +168,7 @@ fn parameter_error_keeps_the_included_declaration_origin() {
 fn resource_errors_are_not_replaced_by_retained_parameter_errors() {
     use rspice_core::netlist::{NetlistParseOptions, ParseError};
     let mut options = NetlistParseOptions::default();
-    options.resource_limits.max_analysis_points = 2;
+    options.resource_limits.max_result_values = 2;
     let error = Netlist::parse_with_options(
         "Resource priority\n.param scale={1/(TEMP-27)}\n.data samples x\n1\n2\n3\n.enddata\n.temp 85\n.end\n",
         options,

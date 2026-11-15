@@ -382,10 +382,13 @@ fn netlist_spectral_envelope_modulation_events_bound_steps_without_enumerating_r
         "selected physical clocks\nVrf rf 0 PULSE(0 1 0 1n 1n 400n 1u)\nRrf rf 0 1k\nVmod out 0 PWL(0 0 {event:.17e} 0 {event:.17e} 1 2m 1)\nRmod out 0 1k\nVnear near 0 PWL(0 0 {adjacent:.17e} 0 {adjacent:.17e} 2 2m 2)\nRnear near 0 1k\nImod load 0 PWL(0 0 {event:.17e} 0 {event:.17e} -1m 2m -1m)\nRload load 0 1k\nVdefault d 0 PULSE(0 1 1.2m)\nRdefault d 0 1k\n.end\n"
     );
     let netlist = Netlist::parse(&deck).unwrap();
+    // The budget holds the selected events and the spectral workspace, but
+    // not the 8,000 RF edges (40,000 retained values) an all-source
+    // collection would keep.
     let settings = SimulationConfig {
         spice_dialect: crate::config::SpiceDialect::Ngspice,
         resource_limits: crate::ResourceLimits::default()
-            .with(|limits| limits.max_analysis_points = 64),
+            .with(|limits| limits.max_result_values = 30_000),
         ..SimulationConfig::default()
     };
     let mut request = config(&["vmod", "VNEAR", "Imod", "Vdefault"]);

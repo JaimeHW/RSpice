@@ -77,15 +77,6 @@ pub(crate) fn visit_with_abort(
             return Err(invalid("an output observation must be nonzero"));
         }
     }
-    ResourceLimitError::ensure(
-        ResourceKind::AnalysisPoints,
-        config
-            .frequencies_hz
-            .len()
-            .saturating_mul(observations.len())
-            .saturating_mul(sources.len().max(1)),
-        limits.max_analysis_points,
-    )?;
     // Charge borrowed source/observation data and the retained point alongside
     // both numerical workspaces. Future points stream, so no sweep-sized copy.
     let mut resident = observations
@@ -175,11 +166,6 @@ pub(crate) fn visit_with_abort(
                 modes += usize::from(*amplitude != Complex64::ZERO);
             }
             let pairs = projector.selected.len().saturating_mul(modes);
-            ResourceLimitError::ensure(
-                ResourceKind::AnalysisPoints,
-                pairs,
-                limits.max_analysis_points,
-            )?;
             workspace = workspace.max(projector.workspace_values(
                 observations.len(),
                 pairs.saturating_mul(

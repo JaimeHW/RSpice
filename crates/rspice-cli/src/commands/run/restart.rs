@@ -46,21 +46,7 @@ pub(super) fn run_authored_restart(
             })?;
             let parent = restart_namespace_parent(&ctx.args.input)?;
             validate_restart_logical_name(job, "JOB")?;
-            let available_points = ctx
-                .engine
-                .config()
-                .resource_limits
-                .max_analysis_points
-                .saturating_sub(ctx.netlist.options.output_time_points.len())
-                .saturating_sub(
-                    ctx.netlist
-                        .options
-                        .output_interval_schedule
-                        .as_ref()
-                        .map_or(0, |schedule| schedule.intervals.len()),
-                )
-                .saturating_sub(ctx.netlist.options.timeint_breakpoints.len())
-                .saturating_sub(restart.intervals.len());
+            let checkpoint_limit = ctx.engine.config().resource_limits.max_result_values;
             // Construction validates the complete nominal namespace before
             // the expensive simulation. Xyce may intentionally skip nominal
             // files when one accepted step crosses several cadence points.
@@ -70,7 +56,7 @@ pub(super) fn run_authored_restart(
                 &restart.intervals,
                 tstop,
                 restart.pack,
-                available_points,
+                checkpoint_limit,
             )
             .map_err(|error| restart_cli_error(error.to_string()))?;
             let (result, checkpoints) = ctx

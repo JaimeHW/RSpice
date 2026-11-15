@@ -163,7 +163,6 @@ impl Engine {
         let retained_result_values =
             stb_retained_result_value_count(frequency_count, config.compute_nyquist)
                 .map_err(map_stb_analysis_error)?;
-        self.ensure_analysis_points(frequency_count)?;
         self.ensure_result_values(retained_result_values)?;
 
         let probe_name = config
@@ -654,7 +653,6 @@ mod tests {
     fn stb_retained_result_overflow_fails_before_circuit_work() {
         let netlist = Netlist::parse(RESOURCE_LIMIT_DECK).expect("STB resource deck parses");
         let mut limits = crate::ResourceLimits::unlimited();
-        limits.max_analysis_points = usize::MAX;
         limits.max_result_values = usize::MAX;
         let simulation_config = crate::engine::SimulationConfig {
             resource_limits: limits,

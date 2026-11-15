@@ -172,7 +172,7 @@ pub(super) fn frequency(
         points,
         start_freq,
         stop_freq,
-        engine.config().resource_limits.max_analysis_points,
+        engine.config().resource_limits.max_result_values,
         abort,
     )
     .map_err(|error| frequency_error(line, error))?;

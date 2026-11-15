@@ -205,11 +205,6 @@ impl BehavioralSources {
                             .len()
                             .saturating_add(additions.len())
                             .saturating_add(1);
-                        ResourceLimitError::ensure(
-                            ResourceKind::AnalysisPoints,
-                            count - 1,
-                            limits.max_analysis_points,
-                        )?;
                         // Input, additions and eventual output coexist, as
                         // does the bounded depth-first subdivision scratch.
                         ResourceLimitError::ensure(
@@ -283,7 +278,7 @@ mod tests {
                 1.0,
                 &mut original,
                 &NoAbort,
-                limits.max_analysis_points,
+                limits.max_result_values,
                 true,
             )
             .unwrap();
@@ -374,20 +369,16 @@ mod tests {
                 .is_none()
         );
         let sources = source("exp(-1000000*(cos(8*pi*time)-0.25)^2)");
-        for limits in [
-            ResourceLimits::default().with(|limits| limits.max_analysis_points = 2),
-            ResourceLimits::default().with(|limits| limits.max_result_values = 4),
-        ] {
-            assert!(matches!(
-                sources.refine_time_mesh(
-                    &[0.0, 1.0],
-                    NonlinearConvergenceCriteria::default(),
-                    &limits,
-                    &NoAbort
-                ),
-                Err(BehavioralBreakpointError::Resource(_))
-            ));
-        }
+        let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 4);
+        assert!(matches!(
+            sources.refine_time_mesh(
+                &[0.0, 1.0],
+                NonlinearConvergenceCriteria::default(),
+                &limits,
+                &NoAbort
+            ),
+            Err(BehavioralBreakpointError::Resource(_))
+        ));
         assert!(matches!(
             sources.refine_time_mesh(
                 &[0.0, 1.0],
@@ -433,16 +424,11 @@ mod tests {
         sources
             .current_sources
             .push(sources.current_sources[0].clone());
-        let limits =
-            ResourceLimits::default().with(|limits| limits.max_analysis_points = first.len() - 1);
         let repeated = sources
-            .refine_time_mesh(&original, criteria, &limits, &NoAbort)
+            .refine_time_mesh(&original, criteria, &ResourceLimits::default(), &NoAbort)
             .unwrap()
             .unwrap();
-        assert_eq!(
-            first, repeated,
-            "identical sources share numerical clocks and their point budget"
-        );
+        assert_eq!(first, repeated, "identical sources share numerical clocks");
         for pair in repeated.windows(2) {
             let left = sources.current_sources[0].evaluate(&[], pair[0]).unwrap();
             let right = sources.current_sources[0].evaluate(&[], pair[1]).unwrap();
@@ -481,7 +467,7 @@ mod tests {
                         1.0,
                         &mut original,
                         &NoAbort,
-                        limits.max_analysis_points,
+                        limits.max_result_values,
                         true,
                     )
                     .unwrap();

@@ -16,10 +16,10 @@ pub(crate) fn request_from_draft(
             return Err("Checkpoint capture requires a finite positive stop time".into());
         }
         let count = (stop / interval).ceil();
-        let limit = ResourceLimits::default().max_analysis_points;
+        let limit = ResourceLimits::default().max_result_values;
         if !count.is_finite() || count > limit as f64 {
             return Err(format!(
-                "Transient checkpoint schedule exceeds {limit} capture points; increase the interval"
+                "Transient checkpoint schedule needs more than {limit} capture times, the retained-value limit; increase the interval"
             ));
         }
         for index in 1..(count as usize) {

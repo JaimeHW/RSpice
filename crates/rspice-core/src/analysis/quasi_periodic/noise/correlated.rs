@@ -28,11 +28,6 @@ impl QuasiPeriodicNoiseProjector {
             .iter()
             .fold(1usize, |n, d| n.saturating_mul(2 * (d / 2) + 1));
         let pairs = modes.saturating_mul(self.selected.len());
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            pairs,
-            self.limits.max_analysis_points,
-        )?;
         Ok(pairs
             .saturating_mul(self.grid.dimensions().len() + 16 + 16 * outputs)
             .saturating_add(

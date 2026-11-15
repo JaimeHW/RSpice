@@ -113,7 +113,7 @@ pub(crate) fn run_hbnoise_analysis_from_hb_on_materialized_with_context(
         config.stop_freq,
         config.points_per_unit,
         config.sweep.runner_keyword(),
-        context.limits.max_analysis_points,
+        context.limits.max_result_values,
         abort,
     )?;
     if (config.integrated_noise || config.contributor_ranking) && frequencies.len() < 2 {

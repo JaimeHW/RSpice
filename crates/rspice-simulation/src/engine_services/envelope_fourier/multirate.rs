@@ -83,11 +83,6 @@ pub(super) fn run(
             }
             retained = retained.saturating_add(usize::from(*time <= config.stop_time));
         }
-        ensure_envelope_limit(
-            ResourceKind::AnalysisPoints,
-            retained,
-            context.limits.max_analysis_points,
-        )?;
         netlist
             .options
             .output_time_points
@@ -100,7 +95,7 @@ pub(super) fn run(
         uniform_envelope_times(
             config.stop_time,
             step,
-            context.limits.max_analysis_points,
+            context.limits.max_result_values,
             abort,
         )?
     } else {
@@ -161,11 +156,6 @@ fn project(
     context: ServiceContext<'_>,
 ) -> ServiceRunResult<EnvelopeData> {
     let abort = context.abort;
-    ensure_envelope_limit(
-        ResourceKind::AnalysisPoints,
-        mission.samples.len(),
-        context.limits.max_analysis_points,
-    )?;
     let state = &mission.final_state;
     let grid = state.grid();
     let bins: Vec<_> = grid
@@ -189,7 +179,7 @@ fn project(
                 Some(schedule),
                 unique[0],
                 *unique.last().unwrap(),
-                context.limits.max_analysis_points,
+                context.limits.max_result_values,
             )
             .map_err(ServiceRunError::from)?;
         time = projection.times().to_vec();
@@ -200,10 +190,10 @@ fn project(
         // Exactly two sides per event, one sample at every other report.
         time.dedup();
         let count = time.len().saturating_add(mission.transitions.len());
-        let limit = context.limits.max_analysis_points;
+        let limit = context.limits.max_result_values;
         if count > limit {
             return Err(ServiceRunError::resource_limit(
-                rspice_core::ResourceKind::AnalysisPoints,
+                rspice_core::ResourceKind::ResultValues,
                 count,
                 limit,
             ));

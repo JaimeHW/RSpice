@@ -506,7 +506,6 @@ fn study_run_enforces_captured_execution_limits_without_replacing_output() {
     let baseline: Value = serde_json::from_slice(&baseline.stdout).unwrap();
     for (setting, resource, limit) in [
         ("max_matrix_unknowns", "matrix_unknowns", 2),
-        ("max_analysis_points", "analysis_points", 2),
         ("max_result_values", "result_values", 1),
     ] {
         std::fs::write(
@@ -563,7 +562,6 @@ fn standalone_advanced_studies_inherit_solver_and_frequency_budgets() {
                 "transfer_gain": true, "input_resistance": true, "output_resistance": true,
                 "normalization": "none", "accuracy": "balanced"
             }}),
-            false,
         ),
         (
             "stb",
@@ -572,7 +570,6 @@ fn standalone_advanced_studies_inherit_solver_and_frequency_budgets() {
                 "probe_node": "VPROBE", "start_freq": 100.0, "stop_freq": 100000.0,
                 "sweep": "Decade", "points_per_decade": 20, "compute_nyquist": true
             }}),
-            true,
         ),
         (
             "sp",
@@ -583,7 +580,6 @@ fn standalone_advanced_studies_inherit_solver_and_frequency_budgets() {
                 "ports": [{"node_pos": "in", "node_neg": "0", "z0": null},
                           {"node_pos": "out", "node_neg": "0", "z0": null}]
             }}),
-            true,
         ),
         (
             "disto",
@@ -592,7 +588,6 @@ fn standalone_advanced_studies_inherit_solver_and_frequency_budgets() {
                 "start_freq": 10.0, "stop_freq": 1000.0, "points_per_unit": 3,
                 "sweep": "Linear", "f2_over_f1": null
             }}),
-            true,
         ),
         (
             "dcmatch",
@@ -601,7 +596,6 @@ fn standalone_advanced_studies_inherit_solver_and_frequency_budgets() {
                 "output_expression": "V(out)", "sigma_multiplier": 1.0, "contributor_limit": 0,
                 "include_process": false, "include_mismatch": true, "normalized_contributions": true
             }}),
-            false,
         ),
         (
             "soa",
@@ -613,10 +607,9 @@ fn standalone_advanced_studies_inherit_solver_and_frequency_budgets() {
                 "check_vbe_max": false, "max_vbe": 0.9,
                 "check_vce_max": false, "max_vce": 5.0
             }}),
-            true,
         ),
     ];
-    for (name, source, analysis, swept) in cases {
+    for (name, source, analysis) in cases {
         std::fs::write(&circuit, source).unwrap();
         document["tasks"] = json!([{ "id": name, "analysis": analysis }]);
         let path = save(&root, &document);
@@ -644,11 +637,7 @@ fn standalone_advanced_studies_inherit_solver_and_frequency_budgets() {
         for (setting, resource, limit) in [
             ("max_matrix_unknowns", "matrix_unknowns", 1),
             ("max_result_values", "result_values", 1),
-            ("max_analysis_points", "analysis_points", 2),
         ] {
-            if setting == "max_analysis_points" && !swept {
-                continue;
-            }
             std::fs::write(
                 root.join("config.toml"),
                 format!("[resources]\n{setting} = {limit}\n"),
@@ -677,7 +666,7 @@ fn output_sampling_budget_failures_preserve_exit_code_and_existing_artifact() {
     let destination = root.join("result.json");
     std::fs::write(
         root.join("config.toml"),
-        "[resources]\nmax_analysis_points=1024\n",
+        "[resources]\nmax_result_values=1024\n",
     )
     .unwrap();
     std::fs::write(&destination, "previous result").unwrap();
@@ -725,9 +714,12 @@ fn output_sampling_budget_failures_preserve_exit_code_and_existing_artifact() {
         };
         assert_eq!(output.status.code(), Some(75), "study={study}: {output:?}");
         let error: Value = serde_json::from_slice(&output.stderr).unwrap();
-        assert_eq!(error["error"]["resource"], "analysis_points", "{error}");
+        assert_eq!(error["error"]["resource"], "result_values", "{error}");
         assert_eq!(error["error"]["limit"], 1024);
-        assert_eq!(error["error"]["requested"], 1025);
+        assert!(
+            error["error"]["requested"].as_u64().unwrap() > 1024,
+            "{error}"
+        );
         assert_eq!(
             std::fs::read_to_string(&destination).unwrap(),
             "previous result"
@@ -945,13 +937,16 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
         let published = std::fs::read(&destination).unwrap();
         std::fs::write(
             root.join("config.toml"),
-            "[resources]\nmax_analysis_points = 2\n",
+            "[resources]\nmax_result_values = 2\n",
         )
         .unwrap();
         let failure = run();
         assert_eq!(failure.status.code(), Some(75), "{name}: {failure:?}");
         let error: Value = serde_json::from_slice(&failure.stderr).unwrap();
-        assert_eq!(error["error"]["resource"], "analysis_points");
+        assert_eq!(
+            error["error"]["resource"], "result_values",
+            "{name}: {error}"
+        );
         assert_eq!(error["error"]["limit"], 2);
         assert_eq!(std::fs::read(&destination).unwrap(), published);
     }
@@ -1033,7 +1028,6 @@ fn envelope_studies_enforce_custom_limits_and_preserve_existing_output() {
         assert_eq!(saved["schema"], "rspice.study.results");
         for (setting, resource, limit) in [
             ("max_matrix_unknowns", "matrix_unknowns", 1),
-            ("max_analysis_points", "analysis_points", 2),
             ("max_result_values", "result_values", 1),
         ] {
             std::fs::write(&destination, "previous result").unwrap();
@@ -1095,7 +1089,6 @@ fn optimization_study_enforces_candidate_history_and_solver_limits() {
     assert_eq!(saved["schema"], "rspice.study.results");
     for (setting, resource) in [
         ("max_matrix_unknowns", "matrix_unknowns"),
-        ("max_analysis_points", "analysis_points"),
         ("max_result_values", "result_values"),
         ("max_batch_runs", "batch_runs"),
     ] {

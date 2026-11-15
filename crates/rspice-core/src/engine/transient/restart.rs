@@ -47,12 +47,13 @@ pub enum XyceRestartPlanError {
         ".OPTIONS RESTART cadence cannot advance beyond {current:.17e}s; increase the interval or reduce the simulated time scale"
     )]
     CadenceDoesNotAdvance { current: Value },
-    /// The nominal schedule exceeds its caller-provided analysis-point budget.
+    /// The nominal schedule needs more checkpoint times than its caller's
+    /// retained-value budget holds.
     #[error(
-        ".OPTIONS RESTART schedule exceeds the configured analysis-point limit of {}",
+        ".OPTIONS RESTART schedule needs more checkpoint times than the retained-value limit of {}",
         .source.limit
     )]
-    AnalysisPointLimit { source: ResourceLimitError },
+    ScheduleLimit { source: ResourceLimitError },
     /// Xyce's six-significant-digit suffix maps two nominal times to one name.
     #[error(
         ".OPTIONS RESTART filename precision maps more than one checkpoint to '{logical_name}'; choose a wider checkpoint interval or shorter stop time"
@@ -172,8 +173,8 @@ fn push_bounded_checkpoint(
     max_points: usize,
 ) -> Result<(), XyceRestartPlanError> {
     let requested = schedule.len().saturating_add(1);
-    ResourceLimitError::ensure(ResourceKind::AnalysisPoints, requested, max_points)
-        .map_err(|source| XyceRestartPlanError::AnalysisPointLimit { source })?;
+    ResourceLimitError::ensure(ResourceKind::ResultValues, requested, max_points)
+        .map_err(|source| XyceRestartPlanError::ScheduleLimit { source })?;
     schedule.push(time);
     Ok(())
 }

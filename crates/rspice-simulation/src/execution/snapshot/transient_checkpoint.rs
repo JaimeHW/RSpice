@@ -181,7 +181,7 @@ pub(super) fn route_resumes(
             return Err(invalid("Transient task payload changed after preparation"));
         }
         request
-            .validate_times(stop_time, limits)
+            .validate_times(stop_time)
             .map_err(preparation_error)?;
         let config = crate::analysis_preparation::analysis_spec_to_config(&task.task.spec)
             .map_err(invalid)?;
@@ -298,7 +298,7 @@ pub(super) fn route_resumes(
             }
         }
         request
-            .validate_schedule(stop_time, limits)
+            .validate_schedule(stop_time)
             .map_err(|error| invalid(error.to_string()))?;
         let previous = task.config_digest;
         task.task.spec_options.tran_checkpoint = Some(request);

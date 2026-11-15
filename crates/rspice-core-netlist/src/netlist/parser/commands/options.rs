@@ -9,7 +9,6 @@ pub(in crate::netlist::parser) fn parse_options_command(
     line_num: usize,
     params: &ParamContext,
     options: &mut super::SimulationOptions,
-    max_analysis_points: usize,
     unknown_warned: &mut std::collections::HashSet<String>,
     diagnostics: &mut Vec<ParseDiagnostic>,
     mut parameter_direction: Option<&mut ParameterDirectionCapture>,
@@ -35,16 +34,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
         if option_package.as_deref() == Some("RESTART")
             && restart_interval_schedule_starts(stream, params)
         {
-            if let Err(error) = parse_restart_interval_schedule(
-                stream,
-                line_num,
-                params,
-                options,
-                max_analysis_points,
-            ) {
-                if matches!(error, ParseError::ResourceLimit(_)) {
-                    return Err(error);
-                }
+            if let Err(error) = parse_restart_interval_schedule(stream, line_num, params, options) {
                 let Some(sink) = temperature_options.as_mut() else {
                     return Err(error);
                 };
@@ -875,20 +865,8 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                         params,
                         "TIMEINT.BREAKPOINTS",
-                        options
-                            .timeint_breakpoints
-                            .len()
-                            .saturating_add(options.output_time_points.len())
-                            .saturating_add(output_interval_count(options))
-                            .saturating_add(restart_interval_count(options)),
-                        max_analysis_points,
                     )?;
-                    append_canonical_time_points(
-                        &mut options.timeint_breakpoints,
-                        values,
-                        &options.output_time_points,
-                        max_analysis_points,
-                    )?;
+                    append_canonical_time_points(&mut options.timeint_breakpoints, values);
                 }
                 // The run's step ceiling is deliberately outside `TIMEINT`: that
                 // package's own ceiling is `DELMAX`, and a second key inside it
@@ -1203,13 +1181,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     let value = expect_value(stream, line_num, params)?;
                     let initial_interval =
                         parse_positive_real_option("OUTPUT.INITIAL_INTERVAL", value, line_num)?;
-                    let intervals = parse_output_interval_schedule(
-                        stream,
-                        line_num,
-                        params,
-                        options,
-                        max_analysis_points,
-                    )?;
+                    let intervals = parse_output_interval_schedule(stream, line_num, params)?;
                     options.output_interval_schedule =
                         Some(crate::netlist::XyceOutputIntervalSchedule {
                             initial_interval,
@@ -1228,20 +1200,8 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         line_num,
                         params,
                         "OUTPUT.OUTPUTTIMEPOINTS",
-                        options
-                            .output_time_points
-                            .len()
-                            .saturating_add(options.timeint_breakpoints.len())
-                            .saturating_add(output_interval_count(options))
-                            .saturating_add(restart_interval_count(options)),
-                        max_analysis_points,
                     )?;
-                    append_canonical_time_points(
-                        &mut options.output_time_points,
-                        values,
-                        &options.timeint_breakpoints,
-                        max_analysis_points,
-                    )?;
+                    append_canonical_time_points(&mut options.output_time_points, values);
                 }
                 (Some("OUTPUT"), "SNAPSHOTS") => {
                     options.output_snapshots =

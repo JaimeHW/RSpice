@@ -26,11 +26,6 @@ impl QuasiPeriodicNoiseProjector {
         let pairs = self.selected.len().saturating_mul(modes.len());
         // Bound the convolution traversal and its worst-case distinct tuples
         // before allocation, including arbitrary-dimensional sparse lattices.
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            pairs,
-            self.limits.max_analysis_points,
-        )?;
         self.check_values(
             gains.len(),
             pairs.saturating_mul(self.grid.dimensions().len() + gains.len().saturating_mul(16)),

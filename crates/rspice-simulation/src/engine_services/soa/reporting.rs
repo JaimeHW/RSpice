@@ -62,7 +62,7 @@ pub(super) fn projection(
             options.output_interval_schedule.as_ref(),
             start,
             stop,
-            limits.max_analysis_points,
+            limits.max_result_values,
         )
         .map_err(ServiceRunError::from)?
         .times()
@@ -91,7 +91,7 @@ pub(super) fn projection(
     requested.sort_by(f64::total_cmp);
     requested.dedup();
     let projection =
-        TransientOutputProjection::interpolate_times(time, &requested, limits.max_analysis_points)
+        TransientOutputProjection::interpolate_times(time, &requested, limits.max_result_values)
             .map_err(ServiceRunError::from)?;
     // Both the authoritative observations and the reporting view travel with
     // the result. Charge both to the output budget before allocating columns.
@@ -127,18 +127,6 @@ mod tests {
         assert!(matches!(
             projection(&time, &options, 0.2, limits, budget, &NoAbort),
             Err(ServiceRunError::ResourceLimit(_))
-        ));
-        limits = Default::default();
-        limits.max_analysis_points = 2;
-        assert!(matches!(
-            projection(&time, &options, 0.2, limits, budget, &NoAbort),
-            Err(ServiceRunError::ResourceLimit(
-                rspice_core::ResourceLimitError {
-                    resource: rspice_core::ResourceKind::AnalysisPoints,
-                    requested: 3,
-                    limit: 2,
-                }
-            ))
         ));
         let abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         assert!(matches!(

@@ -2,26 +2,6 @@
 
 use super::*;
 
-#[test]
-fn study_reporting_options_keep_the_caller_point_limit() {
-    let circuit = rspice_core::Netlist::parse("Options policy\nR1 out 0 1k\n.end\n").unwrap();
-    let mut limits = rspice_core::ResourceLimits::default();
-    limits.max_analysis_points = 2;
-    let context = services::ServiceContext {
-        source_path: None,
-        limits,
-        abort: &rspice_core::NoAbort,
-    };
-    let error = circuit_with_options(&circuit, ".options output outputtimepoints=0,1,2", context)
-        .unwrap_err();
-    assert!(
-        matches!(&error, SimulationError::ResourceLimit { resource, limit: 2, .. } if resource == "analysis_points"),
-        "{error:?}"
-    );
-    assert!(
-        circuit_with_options(&circuit, ".options output outputtimepoints=0,1", context).is_ok()
-    );
-}
 use crate::execution_options::SpecExecutionOptions;
 use crate::runner::worker_contract::WorkerSpecExecutionOptions;
 use rspice_core::abort_signal::{ImmediateAbort, NoAbort};

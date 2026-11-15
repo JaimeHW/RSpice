@@ -1278,9 +1278,8 @@ mod tests {
         assert_eq!(limits.max_parallel_workers, 6);
         // Everything a run is allowed to materialize stays where the build
         // put it. A reader asking for fewer threads is not asking for a
-        // larger netlist, more analysis points, or a deeper hierarchy.
+        // larger netlist, more result values, or a deeper hierarchy.
         assert_eq!(limits.max_netlist_bytes, shipped.max_netlist_bytes);
-        assert_eq!(limits.max_analysis_points, shipped.max_analysis_points);
         assert_eq!(limits.max_result_values, shipped.max_result_values);
         assert_eq!(limits.max_hierarchy_depth, shipped.max_hierarchy_depth);
         assert_eq!(limits.max_batch_runs, shipped.max_batch_runs);

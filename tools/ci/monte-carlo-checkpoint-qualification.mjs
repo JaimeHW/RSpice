@@ -9,7 +9,7 @@ const deck = "Browser checkpoint\n.param r=1k\nV1 in 0 1\nR1 in out {r}\nR2 out 
 // The worker transport revisions and the shipping default execution resource
 // policy. rspice-simulation's worker-contract tests pin these to the Rust
 // contract (`worker_protocol.rs`, `ResourceLimits::default()`).
-const REQUEST_PROTOCOL = 49;
+const REQUEST_PROTOCOL = 50;
 const RESPONSE_PROTOCOL = 39;
 const EXECUTION_LIMITS = {
   "max_netlist_bytes": 67108864, "max_netlist_lines": 2000000,
@@ -17,7 +17,7 @@ const EXECUTION_LIMITS = {
   "max_external_data_bytes": 268435456, "max_external_data_values": 25000000,
   "max_shared_cache_bytes": 536870912, "max_include_depth": 64, "max_hierarchy_depth": 100,
   "max_flattened_elements": 250000, "max_circuit_nodes": 250000, "max_matrix_unknowns": 250000,
-  "max_analysis_points": 2000000, "max_result_values": 25000000,
+  "max_result_values": 25000000,
   "max_transport_history_bytes": 268435456, "max_mixed_interval_events": 1000000,
   "max_parallel_workers": 64, "max_batch_runs": 10000
 };

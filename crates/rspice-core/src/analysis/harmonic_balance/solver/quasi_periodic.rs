@@ -211,11 +211,6 @@ impl HbSolver {
                 "QPAC needs at least one finite probe offset".into(),
             ));
         }
-        crate::ResourceLimitError::ensure(
-            crate::ResourceKind::AnalysisPoints,
-            offsets_hz.len(),
-            limits.max_analysis_points,
-        )?;
         let values = self
             .unknowns()
             .saturating_mul(grid.len())
@@ -289,11 +284,6 @@ impl HbSolver {
                     .into(),
             ));
         }
-        crate::ResourceLimitError::ensure(
-            crate::ResourceKind::AnalysisPoints,
-            frequencies_hz.len(),
-            limits.max_analysis_points,
-        )?;
         let values = self
             .unknowns()
             .saturating_mul(grid.len())

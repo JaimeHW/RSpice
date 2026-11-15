@@ -345,7 +345,6 @@ mod tests {
         );
         for resource in [
             "matrix_unknowns",
-            "analysis_points",
             "result_values",
             "batch_runs",
             "netlist_bytes",
@@ -353,7 +352,6 @@ mod tests {
             let mut limited = limits;
             match resource {
                 "matrix_unknowns" => limited.max_matrix_unknowns = 1,
-                "analysis_points" => limited.max_analysis_points = 1,
                 "result_values" => limited.max_result_values = 1,
                 "batch_runs" => limited.max_batch_runs = 1,
                 _ => limited.max_netlist_bytes = 1,

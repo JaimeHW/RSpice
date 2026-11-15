@@ -954,18 +954,18 @@ fn export_envelope(
 // Shared refusals
 //=============================================================================
 
-/// Reject a sweep whose requested grid cannot fit the analysis budget before
-/// the solver allocates anything.
+/// Reject a sweep whose requested grid cannot fit the retained-value budget
+/// (at least one value a point) before the solver allocates anything.
 fn preflight_periodic_sweep(
     ctx: &RunContext<'_>,
     sweep: &PeriodicSweep,
     analysis: &str,
 ) -> Result<(), CliError> {
-    let limit = ctx.engine.config().resource_limits.max_analysis_points;
+    let limit = ctx.engine.config().resource_limits.max_result_values;
     if sweep.points > limit {
         return Err(CliError::CoreSimulationError {
             source: rspice_core::SimulationError::ResourceLimit(rspice_core::ResourceLimitError {
-                resource: rspice_core::ResourceKind::AnalysisPoints,
+                resource: rspice_core::ResourceKind::ResultValues,
                 requested: sweep.points,
                 limit,
             }),

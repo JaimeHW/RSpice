@@ -121,11 +121,6 @@ impl QuasiPeriodicNoiseProjector {
             limits.max_matrix_unknowns,
         )?;
         ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            input_lattices.len(),
-            limits.max_analysis_points,
-        )?;
-        ResourceLimitError::ensure(
             ResourceKind::ResultValues,
             grid.sample_count()
                 .saturating_mul(8)

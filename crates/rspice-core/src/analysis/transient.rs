@@ -435,7 +435,7 @@ impl TransientOutputProjection {
             let first = source_times.partition_point(|time| *time < start_time);
             let last = source_times.partition_point(|time| *time <= stop_time);
             crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::AnalysisPoints,
+                crate::resource::ResourceKind::ResultValues,
                 last.saturating_sub(first),
                 max_points,
             )?;
@@ -455,7 +455,7 @@ impl TransientOutputProjection {
             requested.sort_by(Value::total_cmp);
             requested.dedup_by(|left, right| left.to_bits() == right.to_bits());
             crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::AnalysisPoints,
+                crate::resource::ResourceKind::ResultValues,
                 requested.len(),
                 max_points,
             )?;
@@ -505,7 +505,7 @@ impl TransientOutputProjection {
             return Err("sampled output requires finite, increasing reporting times".into());
         }
         crate::resource::ResourceLimitError::ensure(
-            crate::resource::ResourceKind::AnalysisPoints,
+            crate::resource::ResourceKind::ResultValues,
             requested.len(),
             max_points,
         )?;
@@ -2186,7 +2186,7 @@ mod tests {
             let crate::SimulationError::ResourceLimit(error) = error else {
                 panic!("expected a typed resource failure: {error}");
             };
-            assert_eq!(error.resource, crate::ResourceKind::AnalysisPoints);
+            assert_eq!(error.resource, crate::ResourceKind::ResultValues);
             assert_eq!(error.limit, 2);
             assert_eq!(error.requested, 3);
         }

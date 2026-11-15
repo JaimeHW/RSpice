@@ -36,18 +36,18 @@ fn pack_false_selects_the_canonical_unpacked_encoding() {
 }
 
 #[test]
-fn schedule_growth_returns_a_typed_analysis_point_limit() {
+fn schedule_growth_returns_a_typed_retained_value_limit() {
     let error = XyceRestartJobPlan::new("state", 1.0, &[], 4.0, None, 4)
-        .expect_err("five requested checkpoints exceed a four-point limit");
+        .expect_err("five requested checkpoints exceed a four-value limit");
     assert_eq!(
         error.to_string(),
-        ".OPTIONS RESTART schedule exceeds the configured analysis-point limit of 4"
+        ".OPTIONS RESTART schedule needs more checkpoint times than the retained-value limit of 4"
     );
     assert_eq!(
         error,
-        XyceRestartPlanError::AnalysisPointLimit {
+        XyceRestartPlanError::ScheduleLimit {
             source: ResourceLimitError {
-                resource: ResourceKind::AnalysisPoints,
+                resource: ResourceKind::ResultValues,
                 requested: 5,
                 limit: 4,
             },

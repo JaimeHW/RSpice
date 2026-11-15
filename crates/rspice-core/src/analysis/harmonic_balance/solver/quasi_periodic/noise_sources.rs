@@ -67,12 +67,6 @@ impl HbSolver {
             self.unknowns().saturating_mul(grid.len()),
             limits.max_matrix_unknowns,
         )?;
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            grid.sample_count()
-                .saturating_mul(self.nonlinear_devices.len().max(1)),
-            limits.max_analysis_points,
-        )?;
         let mut retained = self
             .unknowns()
             .saturating_mul(
@@ -211,17 +205,6 @@ impl HbSolver {
             ResourceKind::MatrixUnknowns,
             self.unknowns().saturating_mul(grid.len()),
             limits.max_matrix_unknowns,
-        )?;
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            grid.sample_count().saturating_mul(
-                self.native_bjts
-                    .len()
-                    .saturating_add(self.native_bsim3.len())
-                    .saturating_add(self.native_bsim4.len())
-                    .saturating_add(self.native_mos.len()),
-            ),
-            limits.max_analysis_points,
         )?;
         let resident = self
             .unknowns()

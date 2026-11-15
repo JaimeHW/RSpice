@@ -26,14 +26,14 @@ impl EngineBridge {
             config.num_points,
             config.start_freq,
             config.stop_freq,
-            self.engine.config().resource_limits.max_analysis_points,
+            self.engine.config().resource_limits.max_result_values,
             abort,
         )
         .map_err(|error| match error {
             rspice_core::analysis::FrequencyGridError::Aborted => SimulationError::Aborted,
             rspice_core::analysis::FrequencyGridError::LimitExceeded { requested, limit } => {
                 SimulationError::ResourceLimit {
-                    resource: "analysis_points".into(),
+                    resource: "result_values".into(),
                     requested,
                     limit,
                 }

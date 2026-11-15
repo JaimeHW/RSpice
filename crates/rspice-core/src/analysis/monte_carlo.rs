@@ -607,7 +607,6 @@ impl MonteCarloRunner {
             self.config.confidence_pct,
             self.config.confidence_method,
             self.config.num_runs,
-            1,
             self.config.resource_limits,
         )?;
         for (name, (nominal, tolerance)) in &self.tolerances {
@@ -677,7 +676,6 @@ impl MonteCarloRunner {
                             self.config.confidence_pct,
                             self.config.confidence_method,
                             self.config.num_runs,
-                            names.len(),
                             self.config.resource_limits,
                         )?;
                     }

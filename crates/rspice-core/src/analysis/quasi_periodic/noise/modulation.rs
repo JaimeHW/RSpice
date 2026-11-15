@@ -15,11 +15,6 @@ impl QuasiPeriodicNoiseProjector {
                 "colored modulation coefficients differ from their explicit tone tuples",
             ));
         }
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            tuples.len(),
-            self.limits.max_analysis_points,
-        )?;
         self.check_values(
             outputs,
             tuples

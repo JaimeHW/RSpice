@@ -72,7 +72,6 @@ impl Engine {
         validate_transient_window(tstop, max_step)?;
         self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_transient_request_floor(tstop, max_step)?;
         let mut seed_netlist = std::borrow::Cow::Borrowed(netlist);
         if !netlist.saves.keeps_everything() {
             seed_netlist.to_mut().saves.signals.push(SaveSignal::All);

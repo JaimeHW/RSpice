@@ -97,7 +97,7 @@ impl FrequencyGridError {
                 source,
             },
             Self::LimitExceeded { requested, limit } => ResourceLimitError {
-                resource: ResourceKind::AnalysisPoints,
+                resource: ResourceKind::ResultValues,
                 requested,
                 limit,
             }

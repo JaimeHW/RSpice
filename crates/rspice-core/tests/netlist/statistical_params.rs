@@ -576,20 +576,6 @@ mod direct_mc_seed_regressions {
             );
         }
     }
-
-    #[test]
-    fn run_counts_respect_the_callers_analysis_point_limit() {
-        use rspice_core::netlist::NetlistParseOptions;
-        let mut options = NetlistParseOptions::default();
-        options.resource_limits.max_analysis_points = 2;
-        Netlist::parse_with_options("MC runs\n.param count=2\n.mc count\n.end\n", options).unwrap();
-        let error = Netlist::parse_with_options("MC runs\n.mc 3\n.end\n", options)
-            .expect_err("MC must honor the same configured point limit as other analyses");
-        assert!(
-            matches!(error, rspice_core::netlist::ParseError::ResourceLimit(_)),
-            "{error}"
-        );
-    }
 }
 
 #[test]

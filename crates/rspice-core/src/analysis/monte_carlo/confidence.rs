@@ -71,7 +71,6 @@ pub(crate) fn validate_request(
     level_pct: Value,
     method: MeanConfidenceMethod,
     samples: usize,
-    variables: usize,
     limits: ResourceLimits,
 ) -> Result<(), SimulationError> {
     if !level_pct.is_finite() || level_pct <= 0.0 || level_pct >= 100.0 {
@@ -88,19 +87,6 @@ pub(crate) fn validate_request(
                 "Mean bootstrap confidence requires at least two resamples".to_owned(),
             ));
         }
-        let draws = samples
-            .checked_mul(variables)
-            .and_then(|n| n.checked_mul(resamples))
-            .ok_or_else(|| {
-                SimulationError::Circuit(
-                    "Mean bootstrap confidence draw count overflowed".to_owned(),
-                )
-            })?;
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            draws,
-            limits.max_analysis_points,
-        )?;
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
             resamples.saturating_add(samples),
@@ -163,7 +149,7 @@ impl MonteCarloResult {
                     .into(),
             ));
         }
-        validate_request(level_pct, method, samples, self.variables.len(), limits)?;
+        validate_request(level_pct, method, samples, limits)?;
         let retained_values = self.variables.values().try_fold(
             self.successful_trial_indices.as_ref().map_or(0, Vec::len),
             |count, variable| {

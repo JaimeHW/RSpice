@@ -48,16 +48,10 @@ fn envelope_current_branches_survive_all_initializers_and_worker_transport() {
                 },
             )
         };
-        for resource in [
-            "matrix_unknowns",
-            "analysis_points",
-            "result_values",
-            "netlist_bytes",
-        ] {
+        for resource in ["matrix_unknowns", "result_values", "netlist_bytes"] {
             let mut limited = limits;
             match resource {
                 "matrix_unknowns" => limited.max_matrix_unknowns = 1,
-                "analysis_points" => limited.max_analysis_points = 2,
                 "result_values" => limited.max_result_values = 1,
                 _ => limited.max_netlist_bytes = 1,
             }
@@ -530,7 +524,6 @@ fn fourier_limits_cover_source_copies_and_every_selected_output() {
     };
     let mut limits = ResourceLimits::default();
     limits.max_matrix_unknowns = 1;
-    limits.max_analysis_points = 65;
     limits.max_result_values = 228;
     let SimulationResult::Ac {
         waveforms,
@@ -546,13 +539,6 @@ fn fourier_limits_cover_source_copies_and_every_selected_output() {
     assert!(
         (fundamental.y_values[1].hypot(fundamental.y_imag.as_ref().unwrap()[1]) - 1.0).abs()
             < 0.002
-    );
-    let mut fewer_points = limits;
-    fewer_points.max_analysis_points = 64;
-    assert!(
-        matches!(run(spec.clone(), fewer_points), Err(SimulationError::ResourceLimit {
-        resource, requested: 65, limit: 64,
-    }) if resource == "analysis_points")
     );
     let mut fewer_values = limits;
     fewer_values.max_result_values = 227;

@@ -14264,7 +14264,11 @@ impl XyceTestRunner {
         }
 
         let inner_count = primary_points.len().saturating_mul(secondary_points.len());
-        engine.ensure_analysis_points(batch_count.saturating_mul(inner_count))?;
+        rspice_core::ResourceLimitError::ensure(
+            rspice_core::ResourceKind::ResultValues,
+            batch_count.saturating_mul(inner_count),
+            engine.config().resource_limits.max_result_values,
+        )?;
         engine.ensure_batch_runs(batch_count)?;
 
         let mut indices = vec![0usize; outer_points.len()];

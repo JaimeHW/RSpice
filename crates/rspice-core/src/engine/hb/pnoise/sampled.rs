@@ -37,8 +37,6 @@ struct Orbit<'a> {
     first_bound: Value,
     second_bound: Value,
     roundoff: Value,
-    evaluations: usize,
-    limit: usize,
     abort: &'a dyn AbortSignal,
 }
 
@@ -46,7 +44,6 @@ impl<'a> Orbit<'a> {
     fn new(
         state: &HbSolverState,
         nodes: (Option<usize>, Option<usize>),
-        limit: usize,
         abort: &'a dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
         let positive = nodes.0.and_then(|node| state.x.get(node));
@@ -89,8 +86,6 @@ impl<'a> Orbit<'a> {
             first_bound,
             second_bound,
             roundoff,
-            evaluations: 0,
-            limit,
             abort,
         })
     }
@@ -99,12 +94,6 @@ impl<'a> Orbit<'a> {
         if self.abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        self.evaluations = self.evaluations.saturating_add(1);
-        crate::ResourceLimitError::ensure(
-            crate::ResourceKind::AnalysisPoints,
-            self.evaluations,
-            self.limit,
-        )?;
         let mut value = self.coefficients.first().map_or(0.0, |c| c.re);
         let mut derivative = 0.0;
         let (mut value_error, mut derivative_error) = (0.0, 0.0);
@@ -216,7 +205,6 @@ impl PreparedSampling {
         names: &[String],
         nodes: (usize, Option<usize>),
         frequency: Value,
-        limit: usize,
         abort: &dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
         request.validate().map_err(invalid)?;
@@ -224,7 +212,7 @@ impl PreparedSampling {
                            edge: Option<&PeriodicNoiseEdge>,
                            phase: Value|
          -> Result<(Sample, PeriodicNoiseSamplePoint), SimulationError> {
-            let mut orbit = Orbit::new(state, nodes, limit, abort)?;
+            let mut orbit = Orbit::new(state, nodes, abort)?;
             let phase = if let Some(edge) = edge {
                 orbit.crossing(edge)?
             } else {

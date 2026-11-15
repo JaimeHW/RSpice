@@ -89,13 +89,6 @@ impl QpnoiseTransferMetadata {
         let points = m.request.frequencies_hz.len();
         let outputs = m.request.outputs.len();
         let coordinates = m.node_names.len().saturating_add(m.branch_names.len());
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            points
-                .saturating_mul(outputs)
-                .saturating_mul(self.sources.len().max(1)),
-            limits.max_analysis_points,
-        )?;
         if coordinates == 0
             || coordinates > 65_536
             || m.version != 1

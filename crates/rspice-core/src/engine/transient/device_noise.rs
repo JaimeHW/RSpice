@@ -1516,9 +1516,9 @@ impl Engine {
         let count = plan.sample_count();
         if count > max_points {
             return Err(SimulationError::Circuit(format!(
-                "transient noise needs {count} sample breakpoints, past the {max_points}-point \
-                 analysis limit. Lower NOISEFMAX, shorten the transient, or raise \
-                 .OPTIONS MAXANALYSISPOINTS."
+                "transient noise needs {count} sample breakpoints, past the run's \
+                 {max_points}-value retained-result limit. Lower NOISEFMAX or shorten the \
+                 transient."
             )));
         }
         for index in 1..=count {

@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn completion_cancellation_and_resource_errors_never_request_replay() {
         let limit = crate::resource::ResourceLimitError::ensure(
-            crate::resource::ResourceKind::AnalysisPoints,
+            crate::resource::ResourceKind::ResultValues,
             2,
             1,
         )

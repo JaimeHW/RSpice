@@ -482,8 +482,7 @@ impl StbResult {
                 "retained STB result must be successful and nonempty",
             ));
         }
-        if n > limits.max_analysis_points
-            || self.retained_value_count() > limits.max_result_values
+        if self.retained_value_count() > limits.max_result_values
             || self.warnings.len() > limits.max_result_values
         {
             return Err(StbAnalysisError::CapacityOverflow {

@@ -170,9 +170,9 @@ fn scalar_temp_and_sweeps_keep_their_precedence_over_recovered_options() {
 fn failed_group_does_not_hide_a_later_resource_limit() {
     use rspice_core::netlist::{NetlistParseOptions, ParseError};
     let mut options = NetlistParseOptions::default();
-    options.resource_limits.max_analysis_points = 2;
+    options.resource_limits.max_result_values = 2;
     let error = Netlist::parse_with_options(
-        "Resource limit\n.subckt child p\n.options temp={scale/(TNOM-27)}\n.param scale=1\n.ends\n.options OUTPUT OUTPUTTIMEPOINTS=1,2,3 DEVICE TNOM=55\n.end\n",
+        "Resource limit\n.subckt child p\n.options temp={scale/(TNOM-27)}\n.param scale=1\n.ends\n.options DEVICE TNOM=55\n.data live x\n1\n2\n3\n.enddata\n.end\n",
         options,
     ).unwrap_err();
     assert!(matches!(error, ParseError::ResourceLimit(_)), "{error}");

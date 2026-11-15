@@ -838,7 +838,7 @@ impl SolverOwnership {
 /// `Clone` rather than `Copy`: one option states a list of times, and a list
 /// is not a register. The alternative was a fixed-length inline array with a
 /// count, which would have put an arbitrary ceiling on how many output stops
-/// an analysis may name — the engine's own ceiling is the run's analysis-point
+/// an analysis may name — the engine's own bound is the run's retained-value
 /// budget, and that is the only one worth enforcing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OverrideValue {

@@ -1660,8 +1660,12 @@ impl DcSweepSpec {
                 Vec::new()
             };
         }
-        self.points_controlled(2_000_000, false, &NoAbort)
-            .unwrap_or_default()
+        self.points_controlled(
+            crate::resource::ResourceLimits::default().max_result_values,
+            false,
+            &NoAbort,
+        )
+        .unwrap_or_default()
     }
 
     pub fn points_bounded_with_abort(
@@ -4600,7 +4604,7 @@ impl XyceOutputIntervalSchedule {
                 .into());
             }
             crate::resource::ResourceLimitError::ensure(
-                crate::resource::ResourceKind::AnalysisPoints,
+                crate::resource::ResourceKind::ResultValues,
                 events.len().saturating_add(1),
                 max_points,
             )?;
@@ -4680,7 +4684,7 @@ impl XyceOutputIntervalSchedule {
                     || (current_time - next_output_time).abs() < tolerance
                 {
                     crate::resource::ResourceLimitError::ensure(
-                        crate::resource::ResourceKind::AnalysisPoints,
+                        crate::resource::ResourceKind::ResultValues,
                         update_additions.saturating_add(1),
                         max_points,
                     )?;
@@ -4698,7 +4702,7 @@ impl XyceOutputIntervalSchedule {
             } else if current_time < self.intervals[0].time {
                 while next_output_time <= current_time {
                     crate::resource::ResourceLimitError::ensure(
-                        crate::resource::ResourceKind::AnalysisPoints,
+                        crate::resource::ResourceKind::ResultValues,
                         update_additions.saturating_add(1),
                         max_points,
                     )?;

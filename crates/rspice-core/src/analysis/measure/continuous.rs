@@ -121,11 +121,6 @@ impl MeasureEngine {
             return Ok(Vec::new());
         }
         ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            axis.len(),
-            limits.max_analysis_points,
-        )?;
-        ResourceLimitError::ensure(
             ResourceKind::ResultValues,
             self.measurements.len(),
             limits.max_result_values,

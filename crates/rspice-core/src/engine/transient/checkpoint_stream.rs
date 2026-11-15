@@ -76,7 +76,7 @@ impl Engine {
                 checkpoint.time
             }
         };
-        engine.validate_transient_checkpoint_schedule(netlist, accepted_time, tstop, times)?;
+        engine.validate_transient_checkpoint_schedule(accepted_time, tstop, times)?;
         fft::preflight(&engine, netlist, tstop, abort)?;
         if netlist
             .fft_analyses
@@ -87,7 +87,6 @@ impl Engine {
                 "FFT window starts before the resumed trajectory; select an earlier checkpoint or a later FFT window".into(),
             ));
         }
-        engine.ensure_transient_request_floor(tstop - accepted_time, max_step)?;
         Self::ensure_model_run_active(abort)
     }
 
@@ -132,9 +131,8 @@ impl Engine {
                 (Some(checkpoint), checkpoint.startup_mode(), checkpoint.time)
             }
         };
-        self.validate_transient_checkpoint_schedule(netlist, start, tstop, stream.times)?;
+        self.validate_transient_checkpoint_schedule(start, tstop, stream.times)?;
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_transient_request_floor(tstop - start, max_step)?;
         let observe = |point: &ScheduledTransientCheckpoint| {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -171,11 +169,13 @@ impl Engine {
 
     pub(super) fn validate_transient_checkpoint_schedule(
         &self,
-        netlist: &Netlist,
         start: Value,
         stop: Value,
         times: &[Value],
     ) -> Result<(), SimulationError> {
+        // Every scheduled checkpoint is retained, so each holds at least one
+        // value of the run's result budget.
+        self.ensure_result_values(times.len())?;
         let mut previous = None;
         for (index, &time) in times.iter().enumerate() {
             if !time.is_finite() || time < start || time > stop {
@@ -191,31 +191,6 @@ impl Engine {
             }
             previous = Some(time);
         }
-        let retained_schedules = netlist
-            .options
-            .output_time_points
-            .len()
-            .saturating_add(
-                netlist
-                    .options
-                    .output_interval_schedule
-                    .as_ref()
-                    .map_or(0, |schedule| schedule.intervals.len()),
-            )
-            .saturating_add(netlist.options.timeint_breakpoints.len())
-            .saturating_add(
-                netlist
-                    .options
-                    .restart
-                    .as_ref()
-                    .map_or(0, |restart| restart.intervals.len()),
-            )
-            .saturating_add(times.len());
-        crate::resource::ResourceLimitError::ensure(
-            crate::resource::ResourceKind::AnalysisPoints,
-            retained_schedules,
-            self.config.resource_limits.max_analysis_points,
-        )?;
         Ok(())
     }
 }

@@ -88,11 +88,6 @@ impl QuasiPeriodicTransform {
         let widths: Vec<_> = dimensions.iter().map(|n| 2 * (n / 2) + 1).collect();
         let count = widths.iter().fold(1usize, |a, n| a.saturating_mul(*n));
         ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            count,
-            limits.max_analysis_points,
-        )?;
-        ResourceLimitError::ensure(
             ResourceKind::ResultValues,
             count
                 .saturating_mul(dimensions.len() + 2)

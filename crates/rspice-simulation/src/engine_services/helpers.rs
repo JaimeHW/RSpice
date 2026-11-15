@@ -78,7 +78,7 @@ pub(crate) fn generate_freq_points_with_limit_and_abort(
     stop: Value,
     points: usize,
     sweep_type: &str,
-    max_analysis_points: usize,
+    max_points: usize,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<Value>> {
     ensure_not_aborted(abort)?;
@@ -94,12 +94,7 @@ pub(crate) fn generate_freq_points_with_limit_and_abort(
         }
     };
     let result = rspice_core::analysis::ac::try_ac_sweep_frequencies_bounded_with_abort(
-        variation,
-        points,
-        start,
-        stop,
-        max_analysis_points,
-        abort,
+        variation, points, start, stop, max_points, abort,
     );
     ensure_not_aborted(abort)?;
     result.map_err(|error| match error {
@@ -110,7 +105,7 @@ pub(crate) fn generate_freq_points_with_limit_and_abort(
             requested,
             limit,
         } => ServiceRunError::resource_limit(
-            rspice_core::ResourceKind::AnalysisPoints,
+            rspice_core::ResourceKind::ResultValues,
             requested,
             limit,
         ),
@@ -125,9 +120,9 @@ mod tests {
     use super::super::test_entry::parse_sampled;
     use super::*;
 
-    /// The run's default analysis-point ceiling.
+    /// The run's default retained-value limit, which bounds a grid's points.
     fn default_points() -> usize {
-        rspice_core::ResourceLimits::default().max_analysis_points
+        rspice_core::ResourceLimits::default().max_result_values
     }
 
     struct AbortOnPoll {
@@ -199,7 +194,7 @@ mod tests {
             result,
             Err(ServiceRunError::ResourceLimit(
                 rspice_core::ResourceLimitError {
-                    resource: rspice_core::ResourceKind::AnalysisPoints,
+                    resource: rspice_core::ResourceKind::ResultValues,
                     requested: 3,
                     limit: 2,
                 }
@@ -249,7 +244,7 @@ mod tests {
             result,
             Err(ServiceRunError::ResourceLimit(
                 rspice_core::ResourceLimitError {
-                    resource: rspice_core::ResourceKind::AnalysisPoints,
+                    resource: rspice_core::ResourceKind::ResultValues,
                     requested: 61,
                     limit: 60,
                 }

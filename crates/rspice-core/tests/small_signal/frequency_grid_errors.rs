@@ -9,17 +9,17 @@ use rspice_core::analysis::{FrequencyGridError, PacConfig};
 use rspice_core::netlist::FreqVariation;
 use rspice_core::{ResourceKind, SimulationError, SimulationErrorCategory, SimulationErrorCode};
 
-fn point_limited_engine(limit: usize) -> rspice_core::Engine {
+fn value_limited_engine(limit: usize) -> rspice_core::Engine {
     let mut config = rspice_core::SimulationConfig::default();
-    config.resource_limits.max_analysis_points = limit;
+    config.resource_limits.max_result_values = limit;
     rspice_core::Engine::new(config)
 }
 
-fn assert_point_limit(error: SimulationError, limit: usize) {
+fn assert_value_limit(error: SimulationError, limit: usize) {
     let SimulationError::ResourceLimit(error) = error else {
-        panic!("point policy must reject the grid before allocation or construction: {error}");
+        panic!("the value policy must reject the grid before allocation or construction: {error}");
     };
-    assert_eq!(error.resource, ResourceKind::AnalysisPoints);
+    assert_eq!(error.resource, ResourceKind::ResultValues);
     assert_eq!((error.requested, error.limit), (limit + 1, limit));
 }
 
@@ -60,9 +60,9 @@ fn authored_grids_apply_point_policy_before_capacity_and_circuit_construction() 
             AnalysisCommand::Sp { points, .. } => *points = usize::MAX / 2,
             _ => unreachable!(),
         }
-        assert_point_limit(
+        assert_value_limit(
             run_authored_grid(
-                &point_limited_engine(2),
+                &value_limited_engine(2),
                 &netlist,
                 &card,
                 &rspice_core::NoAbort,
@@ -79,7 +79,7 @@ fn authored_grids_apply_point_policy_before_capacity_and_circuit_construction() 
             _ => unreachable!(),
         }
         let error = run_authored_grid(
-            &point_limited_engine(2),
+            &value_limited_engine(2),
             &netlist,
             &card,
             &rspice_core::NoAbort,
@@ -117,8 +117,10 @@ fn authored_grids_budget_actual_lin_dec_and_oct_points_and_remain_cancellable() 
             ))
             .unwrap();
             let card = &netlist.analyses[0];
+            // The grid fits a budget of its own point count, and the run
+            // retains more values than that, so it runs on the default budget.
             let actual = run_authored_grid(
-                &point_limited_engine(expected.len()),
+                &rspice_core::Engine::default(),
                 &netlist,
                 card,
                 &rspice_core::NoAbort,
@@ -128,9 +130,9 @@ fn authored_grids_budget_actual_lin_dec_and_oct_points_and_remain_cancellable() 
             for (actual, expected) in actual.iter().zip(&expected) {
                 assert!((actual / expected - 1.0).abs() < 1e-14);
             }
-            assert_point_limit(
+            assert_value_limit(
                 run_authored_grid(
-                    &point_limited_engine(expected.len() - 1),
+                    &value_limited_engine(expected.len() - 1),
                     &netlist,
                     card,
                     &rspice_core::NoAbort,
@@ -139,12 +141,12 @@ fn authored_grids_budget_actual_lin_dec_and_oct_points_and_remain_cancellable() 
                 expected.len() - 1,
             );
             assert!(matches!(
-                run_authored_grid(&point_limited_engine(0), &netlist, card, &ImmediateAbort),
+                run_authored_grid(&value_limited_engine(0), &netlist, card, &ImmediateAbort),
                 Err(SimulationError::Aborted)
             ));
             let abort = CountingAbort::new(1);
             assert!(matches!(
-                run_authored_grid(&point_limited_engine(10), &netlist, card, &abort),
+                run_authored_grid(&value_limited_engine(10), &netlist, card, &abort),
                 Err(SimulationError::Aborted)
             ));
             assert_eq!(abort.polls_after_abort(), 0);
@@ -186,7 +188,7 @@ fn retained_pnoise_carriers_apply_the_callers_offset_budget() {
         let run = |card: &rspice_core::netlist::PnoiseCard,
                    limit,
                    abort: &dyn rspice_core::AbortSignal| {
-            let limited = point_limited_engine(limit);
+            let limited = value_limited_engine(limit);
             if use_hb {
                 limited.run_pnoise_card_from_hb_with_abort(
                     &netlist,
@@ -199,7 +201,7 @@ fn retained_pnoise_carriers_apply_the_callers_offset_budget() {
             }
         };
         card.sweep.points = usize::MAX / 2;
-        assert_point_limit(run(&card, 2, &NoAbort).unwrap_err(), 2);
+        assert_value_limit(run(&card, 2, &NoAbort).unwrap_err(), 2);
         assert!(matches!(
             run(&card, 2, &rspice_core::abort_signal::ImmediateAbort),
             Err(SimulationError::Aborted)
@@ -387,7 +389,7 @@ fn cancellation_policy_limits_and_invalid_input_remain_distinct() {
     let SimulationError::ResourceLimit(limit) = error else {
         panic!("policy limit lost");
     };
-    assert_eq!(limit.resource, ResourceKind::AnalysisPoints);
+    assert_eq!(limit.resource, ResourceKind::ResultValues);
     assert_eq!((limit.requested, limit.limit), (7, 6));
     let invalid = FrequencyGridError::InvalidStartFrequency;
     assert!(invalid.source().is_none());

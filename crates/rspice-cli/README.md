@@ -901,7 +901,7 @@ numeric resource or convergence details; it also covers argument-parsing and
 timeout failures. `check --json`, `compare --json` and `run --summary -`
 reserve stdout for one JSON document without needing `--quiet`.
 
-The `--summary` document is at `schema_version: 2`. Beside each run's status
+The `--summary` document is at `schema_version: 4`. Beside each run's status
 and measurements it lists every `.ASSERT` report (`assertions`: name,
 analysis, level, the card's file and line, and each violation's start, end or
 `open`, extreme and where it was reached) and every HDL severity-task record
@@ -962,7 +962,6 @@ max_hierarchy_depth = 100
 max_flattened_elements = 250000
 max_circuit_nodes = 250000
 max_matrix_unknowns = 250000
-max_analysis_points = 2000000
 max_result_values = 100000000
 max_parallel_workers = 64               # cap batch/analysis worker fan-out
 max_batch_runs = 10000

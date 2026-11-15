@@ -22,7 +22,7 @@ pub(super) fn projection(
             options.output_interval_schedule.as_ref(),
             0.0,
             period,
-            limits.max_analysis_points,
+            limits.max_result_values,
         )
         .map_err(ServiceRunError::from)?;
         if options.output_interval_schedule.is_some() {
@@ -34,7 +34,7 @@ pub(super) fn projection(
             TransientOutputProjection::interpolate_times(
                 source_times,
                 &times,
-                limits.max_analysis_points,
+                limits.max_result_values,
             )
         } else {
             Ok(scheduled)
@@ -62,11 +62,7 @@ pub(super) fn projection(
         times.push(period);
         times.sort_by(Value::total_cmp);
         times.dedup();
-        TransientOutputProjection::interpolate_times(
-            source_times,
-            &times,
-            limits.max_analysis_points,
-        )
+        TransientOutputProjection::interpolate_times(source_times, &times, limits.max_result_values)
     }
     .map_err(ServiceRunError::from)?;
     let requested = projection
@@ -110,18 +106,17 @@ mod tests {
         )
         .unwrap();
         let mut limits = rspice_core::ResourceLimits::default();
-        limits.max_analysis_points = 10;
+        limits.max_result_values = 10;
         assert!(matches!(
             projection(&[0.0, 1e-3], &netlist.options, limits, 2, &NoAbort),
             Err(ServiceRunError::ResourceLimit(
                 rspice_core::ResourceLimitError {
-                    resource: rspice_core::ResourceKind::AnalysisPoints,
+                    resource: rspice_core::ResourceKind::ResultValues,
                     requested: 11,
                     limit: 10,
                 }
             ))
         ));
-        limits.max_analysis_points = 10_000;
         limits.max_result_values = 2;
         assert!(matches!(
             projection(&[0.0, 1e-3], &netlist.options, limits, 2, &NoAbort),

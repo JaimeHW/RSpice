@@ -364,7 +364,6 @@ fn configured_monte_carlo_preserves_trial_and_population_limits() {
     let base = base();
     let mut limits = ResourceLimits::default();
     limits.max_matrix_unknowns = 32;
-    limits.max_analysis_points = 7;
     limits.max_batch_runs = 6;
     limits.max_result_values = 1000;
     limits.max_parallel_workers = 1;
@@ -397,7 +396,6 @@ fn configured_monte_carlo_preserves_trial_and_population_limits() {
     }
     for resource in [
         "matrix_unknowns",
-        "analysis_points",
         "batch_runs",
         "result_values",
         "netlist_bytes",
@@ -405,7 +403,6 @@ fn configured_monte_carlo_preserves_trial_and_population_limits() {
         let mut limited = limits;
         match resource {
             "matrix_unknowns" => limited.max_matrix_unknowns = 1,
-            "analysis_points" => limited.max_analysis_points = 6,
             "batch_runs" => limited.max_batch_runs = 5,
             "result_values" => limited.max_result_values = 10,
             "netlist_bytes" => limited.max_netlist_bytes = 1,

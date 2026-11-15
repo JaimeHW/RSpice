@@ -1194,7 +1194,7 @@ pub(super) fn finish_transient_result(
                 ctx.netlist.options.output_interval_schedule.as_ref(),
                 output_start,
                 tstop,
-                ctx.engine.config().resource_limits.max_analysis_points,
+                ctx.engine.config().resource_limits.max_result_values,
             )
             .map_err(|error| CliError::from(rspice_core::SimulationError::from(error)))
     };

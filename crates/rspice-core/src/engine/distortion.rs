@@ -34,7 +34,6 @@ impl Engine {
         check_abort(abort)?;
 
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_analysis_points(frequencies.len())?;
         // The Volterra operator is rebuilt at offset biases through the same
         // small-signal matrix, which reads a mixed module's held state without
         // running its discrete half, so the frozen discrete state holds there

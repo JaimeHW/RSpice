@@ -165,7 +165,7 @@ fn provisional_defaults_do_not_consume_the_live_statistical_stream() {
 fn resource_errors_take_priority_over_retained_header_errors() {
     use rspice_core::netlist::{NetlistParseOptions, ParseError};
     let mut options = NetlistParseOptions::default();
-    options.resource_limits.max_analysis_points = 2;
+    options.resource_limits.max_result_values = 2;
     let error = Netlist::parse_with_options("Header resource priority\n.subckt cell p params: gain={58/(TEMP-27)}\n.ends\n.data samples x\n1\n2\n3\n.enddata\n.temp 85\n.end\n", options).unwrap_err();
     assert!(matches!(error, ParseError::ResourceLimit(_)), "{error}");
 }

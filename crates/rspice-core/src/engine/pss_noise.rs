@@ -330,7 +330,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<PeriodicNoiseResult, SimulationError> {
         let offsets =
-            pnoise_card_offsets(card, self.config.resource_limits.max_analysis_points, abort)?;
+            pnoise_card_offsets(card, self.config.resource_limits.max_result_values, abort)?;
         let output = pnoise_card_output(card);
         let autonomous = operating_point.config().is_autonomous();
         check_pnoise_card_carrier(card, autonomous)?;
@@ -381,7 +381,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<PeriodicNoiseResult, SimulationError> {
         let offsets =
-            pnoise_card_offsets(card, self.config.resource_limits.max_analysis_points, abort)?;
+            pnoise_card_offsets(card, self.config.resource_limits.max_result_values, abort)?;
         // A harmonic-balance carrier is driven by construction: its tones are
         // the deck's own sources.
         check_pnoise_card_carrier(card, false)?;
@@ -447,7 +447,6 @@ impl Engine {
                 "oscillator pnoise needs at least one offset frequency".to_string(),
             ));
         }
-        self.ensure_analysis_points(offsets.len())?;
         if let Some(offset) = offsets
             .iter()
             .copied()

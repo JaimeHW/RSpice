@@ -280,7 +280,7 @@ fn resource_errors_take_priority_over_retained_startup_failures() {
     use rspice_core::netlist::{NetlistParseOptions, ParseError};
     for card in [".IC V(out)", ".NODESET V(out)", ".INITCOND C1 IC"] {
         let mut options = NetlistParseOptions::default();
-        options.resource_limits.max_analysis_points = 2;
+        options.resource_limits.max_result_values = 2;
         let error = Netlist::parse_with_options(&format!("Startup resource priority\n{card}={{58/(TEMP-27)}}\n.data samples x\n1\n2\n3\n.enddata\n.temp 85\n.end\n"), options).unwrap_err();
         assert!(matches!(error, ParseError::ResourceLimit(_)), "{error}");
     }

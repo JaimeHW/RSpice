@@ -170,22 +170,6 @@ fn adaptive_spectral_envelope_bounds_retries_resources_and_deadline_probes() {
         1e-5,
         "the exact deadline may precede the preferred floor"
     );
-    let mut tiny = limits;
-    tiny.max_analysis_points = 2;
-    assert!(matches!(
-        advance_spectral_envelope_with_abort(
-            &state,
-            1e-3,
-            1e-3,
-            &control,
-            &tiny,
-            &NoAbort,
-            |state, time, method, limits, abort| solver.step_spectral_envelope_with_abort(
-                state, time, method, &settings, &source, limits, abort
-            )
-        ),
-        Err(Error::ResourceLimit(_))
-    ));
     assert!(matches!(
         advance_spectral_envelope_with_abort(
             &state,

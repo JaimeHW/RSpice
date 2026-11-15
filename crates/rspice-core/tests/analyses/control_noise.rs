@@ -243,7 +243,7 @@ fn noise_failure_and_cumulative_limits_are_typed_and_atomic() {
         );
     }
     let mut config = engine.config().clone();
-    config.resource_limits.max_analysis_points = 2;
+    config.resource_limits.max_result_values = 2;
     for analysis in ["noise", "ac"] {
         let args = if analysis == "noise" {
             "V(out) V1 lin 3 10 100"

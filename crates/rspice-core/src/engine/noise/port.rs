@@ -183,7 +183,6 @@ impl Engine {
                 "Port-noise temperature must be finite and strictly positive, got {temperature}"
             )));
         }
-        self.ensure_analysis_points(frequency_count)?;
         let mut unique_names = HashSet::with_capacity(port_sources.len());
         for source in port_sources {
             if source.trim().is_empty() {

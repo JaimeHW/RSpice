@@ -98,7 +98,6 @@ impl Engine {
         // eigenproblem and its complete retained spectrum before that fast path
         // allocates the matrix, eigenvectors, or probe-participation result.
         engine.ensure_matrix_unknowns(order)?;
-        engine.ensure_analysis_points(order)?;
         let result_values = order
             .saturating_mul(order.saturating_mul(3).saturating_add(7))
             .saturating_add(16);

@@ -151,11 +151,6 @@ where
     let mut solves = 0usize;
     let mut trial = |state: &SpectralEnvelopeState, time: Value, method| {
         check_abort(abort)?;
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            solves.saturating_add(1),
-            limits.max_analysis_points,
-        )?;
         solves += 1;
         let next = solve(state, time, method, &bounded, abort)?;
         check_abort(abort)?;

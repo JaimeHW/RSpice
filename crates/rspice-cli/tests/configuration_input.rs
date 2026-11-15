@@ -37,7 +37,6 @@ fn non_unicode_configuration_values_never_disable_requested_settings() {
         "RSPICE_MAX_FLATTENED_ELEMENTS",
         "RSPICE_MAX_CIRCUIT_NODES",
         "RSPICE_MAX_MATRIX_UNKNOWNS",
-        "RSPICE_MAX_ANALYSIS_POINTS",
         "RSPICE_MAX_RESULT_VALUES",
         "RSPICE_MAX_PARALLEL_WORKERS",
         "RSPICE_MAX_BATCH_RUNS",

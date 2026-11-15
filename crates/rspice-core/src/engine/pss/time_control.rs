@@ -22,9 +22,7 @@ impl Engine {
             )
             .into());
         }
-        let count = count as usize;
-        self.ensure_analysis_points(count)?;
-        Ok(count)
+        Ok(count as usize)
     }
 
     pub(super) fn pss_waveform_within_step_ceiling(&self, waveform: &TransientResult) -> bool {

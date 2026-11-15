@@ -64,11 +64,6 @@ impl QpacResultMetadata {
         check_abort(abort)?;
         self.request.validate()?;
         let points = self.request.offsets_hz.len();
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            points,
-            limits.max_analysis_points,
-        )?;
         let rows = self
             .node_names
             .len()

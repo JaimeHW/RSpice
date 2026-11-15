@@ -119,7 +119,6 @@ pub struct ResourceConfig {
     pub max_flattened_elements: usize,
     pub max_circuit_nodes: usize,
     pub max_matrix_unknowns: usize,
-    pub max_analysis_points: usize,
     pub max_result_values: usize,
     pub max_parallel_workers: usize,
     pub max_batch_runs: usize,
@@ -150,7 +149,6 @@ impl Default for ResourceConfig {
             max_flattened_elements: limits.max_flattened_elements,
             max_circuit_nodes: limits.max_circuit_nodes,
             max_matrix_unknowns: limits.max_matrix_unknowns,
-            max_analysis_points: limits.max_analysis_points,
             max_result_values: BATCH_MAX_RESULT_VALUES.max(limits.max_result_values),
             max_parallel_workers: limits.max_parallel_workers,
             max_batch_runs: limits.max_batch_runs,
@@ -173,7 +171,6 @@ impl ResourceConfig {
         limits.max_flattened_elements = self.max_flattened_elements;
         limits.max_circuit_nodes = self.max_circuit_nodes;
         limits.max_matrix_unknowns = self.max_matrix_unknowns;
-        limits.max_analysis_points = self.max_analysis_points;
         limits.max_result_values = self.max_result_values;
         limits.max_parallel_workers = self.max_parallel_workers;
         limits.max_batch_runs = self.max_batch_runs;
@@ -264,7 +261,6 @@ struct ResourceLayer {
     max_flattened_elements: Option<usize>,
     max_circuit_nodes: Option<usize>,
     max_matrix_unknowns: Option<usize>,
-    max_analysis_points: Option<usize>,
     max_result_values: Option<usize>,
     max_parallel_workers: Option<usize>,
     max_batch_runs: Option<usize>,
@@ -483,9 +479,6 @@ impl Config {
         if let Some(value) = resources.max_matrix_unknowns {
             self.resources.max_matrix_unknowns = value;
         }
-        if let Some(value) = resources.max_analysis_points {
-            self.resources.max_analysis_points = value;
-        }
         if let Some(value) = resources.max_result_values {
             self.resources.max_result_values = value;
         }
@@ -559,7 +552,6 @@ impl Config {
         apply_resource_env!("RSPICE_MAX_FLATTENED_ELEMENTS", max_flattened_elements);
         apply_resource_env!("RSPICE_MAX_CIRCUIT_NODES", max_circuit_nodes);
         apply_resource_env!("RSPICE_MAX_MATRIX_UNKNOWNS", max_matrix_unknowns);
-        apply_resource_env!("RSPICE_MAX_ANALYSIS_POINTS", max_analysis_points);
         apply_resource_env!("RSPICE_MAX_RESULT_VALUES", max_result_values);
         apply_resource_env!("RSPICE_MAX_PARALLEL_WORKERS", max_parallel_workers);
         apply_resource_env!("RSPICE_MAX_BATCH_RUNS", max_batch_runs);

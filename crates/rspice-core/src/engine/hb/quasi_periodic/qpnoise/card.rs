@@ -132,11 +132,6 @@ impl QpnoiseRequest {
     ) -> Result<usize, SimulationError> {
         fields(card)?;
         let count = super::super::frequency_sweep::validate(&card.sweep, limits)?;
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            count.saturating_mul(card.outputs.len()),
-            limits.max_analysis_points,
-        )?;
         Ok(count)
     }
     pub fn from_qpnoise_card(card: &QpnoiseCard) -> Result<Self, SimulationError> {

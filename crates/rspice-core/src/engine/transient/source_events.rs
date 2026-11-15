@@ -326,9 +326,7 @@ impl Engine {
         // This is not a measurement of allocator/B-tree backend heap overhead.
         let words =
             std::mem::size_of::<PhysicalSourceEvent>().div_ceil(std::mem::size_of::<Value>()) + 1;
-        let maximum = limits
-            .max_analysis_points
-            .min(limits.max_result_values / words);
+        let maximum = limits.max_result_values / words;
         for (owner, (name, spec, waveform)) in voltage.chain(current) {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);

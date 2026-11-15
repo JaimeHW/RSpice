@@ -160,7 +160,6 @@ impl SpectreStatisticsPlan {
                 &local,
                 &factor.lower,
                 options,
-                limits.max_analysis_points,
                 &mut result.evaluated_points,
                 abort,
             )?;
@@ -417,11 +416,10 @@ fn integrate(
     variations: &[ResolvedVariation<'_>],
     lower: &[Vec<Value>],
     options: StatisticalMomentOptions,
-    point_limit: usize,
     evaluated: &mut usize,
     abort: &dyn AbortSignal,
 ) -> Result<(WeightedMoments, Value), SpectreStatisticsError> {
-    let budget = options.max_points.min(point_limit);
+    let budget = options.max_points;
     let count = variations.len();
     let bounds = variations.iter().map(score_bounds).collect::<Vec<_>>();
     let mut independent = vec![(Value::NEG_INFINITY, Value::INFINITY); count];
@@ -480,11 +478,6 @@ fn integrate(
         let work = (end - first).saturating_mul(REPLICATES);
         let requested = evaluated.saturating_add(work);
         if requested > budget {
-            // A caller's hard ceiling is distinct from exhausting the authored
-            // convergence budget. Preserve its structured diagnostic.
-            if point_limit < options.max_points {
-                ResourceLimitError::ensure(ResourceKind::AnalysisPoints, requested, point_limit)?;
-            }
             return Err(invalid(
                 0,
                 format!(

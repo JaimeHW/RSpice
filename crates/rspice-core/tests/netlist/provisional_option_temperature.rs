@@ -126,7 +126,6 @@ fn option_overlay_keeps_its_materialized_context_and_atomic_error_contract() {
         "abstol=1e-9 reltol={1/(TEMP-27)} temp=85",
         &ParamContext::new(),
         &current,
-        100,
         &rspice_core::NoAbort,
     );
     assert!(result.is_err());
@@ -178,16 +177,6 @@ fn inactive_temperature_hints_do_not_invalidate_active_options() {
     let netlist = Netlist::parse("Inactive option\n.options reltol={1/(85-TEMP)}\n.if 0\n.options temp=85 reltol={missing}\n.endif\n.end\n").unwrap();
     assert_eq!(netlist.options.temp, None);
     assert_eq!(netlist.options.reltol, Some(1.0 / 58.0));
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn a_later_option_resource_error_remains_terminal() {
-    use rspice_core::netlist::{NetlistParseOptions, ParseError};
-    let mut options = NetlistParseOptions::default();
-    options.resource_limits.max_analysis_points = 2;
-    let error = Netlist::parse_with_options("Option resources\n.options reltol={1/(TEMP-27)} OUTPUT OUTPUTTIMEPOINTS=0,1,2 DEVICE TEMP=85\n.end\n", options).unwrap_err();
-    assert!(matches!(error, ParseError::ResourceLimit(_)), "{error}");
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

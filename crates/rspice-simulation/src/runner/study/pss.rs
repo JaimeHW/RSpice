@@ -61,7 +61,6 @@ pub(super) fn circuit_with_options(
             arguments,
             &circuit.params,
             &circuit.options,
-            context.limits.max_analysis_points,
             abort,
         )
         .map_err(|error| match error {

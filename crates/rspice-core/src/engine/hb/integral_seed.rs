@@ -69,7 +69,6 @@ impl Engine {
                     .to_owned(),
             ));
         }
-        self.ensure_analysis_points(times.len())?;
         // Include the retained physical trajectory and the additional memory
         // rows in the budget before cloning VMs or allocating those rows.
         self.ensure_result_shape(

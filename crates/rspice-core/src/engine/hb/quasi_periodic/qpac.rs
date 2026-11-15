@@ -72,7 +72,6 @@ impl Engine {
         check_abort(abort)?;
         request.validate()?;
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_analysis_points(request.offsets_hz.len())?;
         let producer = state::Producer::capture(netlist, &engine.config, point.config())?;
         let grid = engine.validate_qpss_operating_point_with_abort(netlist, point, abort)?;
         let input_index = grid

@@ -46,14 +46,6 @@ pub(super) fn run_from_trajectory_with_resource_limits(
     })?;
     // The producer already performed the transform. Admit the selected result
     // under the consumer's policy without allocating or recomputing its bins.
-    let points = spectrum.frequency.len();
-    if points > limits.max_analysis_points {
-        return Err(SimulationError::ResourceLimit {
-            resource: "analysis_points".into(),
-            requested: points,
-            limit: limits.max_analysis_points,
-        });
-    }
     let values = spectrum.numeric_value_count().saturating_add(
         trajectory
             .convergence()
@@ -118,7 +110,6 @@ mod tests {
         // This policy cannot solve the producer circuit, but the consumer only
         // publishes the existing nine bins and their three numeric columns.
         limits.max_matrix_unknowns = 1;
-        limits.max_analysis_points = 9;
         limits.max_result_values = 27;
         let run = |limits| {
             run_from_trajectory_with_resource_limits(&request, &trajectory, limits, &NoAbort)
@@ -127,13 +118,6 @@ mod tests {
             panic!("FFT result");
         };
         assert!(std::sync::Arc::ptr_eq(recorded, &spectrum));
-        let mut fewer_bins = limits;
-        fewer_bins.max_analysis_points = 8;
-        assert!(
-            matches!(run(fewer_bins), Err(SimulationError::ResourceLimit {
-            resource, requested: 9, limit: 8,
-        }) if resource == "analysis_points")
-        );
         let mut fewer_values = limits;
         fewer_values.max_result_values = 26;
         assert!(

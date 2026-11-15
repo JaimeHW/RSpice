@@ -1236,7 +1236,6 @@ struct TransientSampleSources<'a> {
 struct TransientCaptureRequest<'a> {
     record_device_op_traces: bool,
     capture: &'a TransientCapturePlan,
-    trajectory_point_count: usize,
     integral_trace: Option<&'a std::cell::RefCell<TransientIntegralTrace>>,
 }
 
@@ -2824,10 +2823,8 @@ impl Engine {
 
     fn ensure_transient_result_limits(
         &self,
-        result: &TransientResult,
         retained_values: usize,
     ) -> Result<(), SimulationError> {
-        self.ensure_analysis_points(result.time.len())?;
         self.ensure_result_values(retained_values)
     }
 
@@ -2848,13 +2845,8 @@ impl Engine {
             .saturating_add(requested / 8)
             .saturating_add(4)
             .max(1);
-        let value_bound = if values_per_sample == 0 {
-            self.config.resource_limits.max_analysis_points
-        } else {
-            self.config.resource_limits.max_result_values / values_per_sample
-        };
+        let value_bound = self.config.resource_limits.max_result_values / values_per_sample.max(1);
         with_headroom
-            .min(self.config.resource_limits.max_analysis_points)
             .min(value_bound.max(1))
             .min(MAX_EAGER_TRACE_POINTS)
     }
@@ -2868,18 +2860,6 @@ impl Engine {
         trace
     }
 
-    fn ensure_transient_request_floor(
-        &self,
-        duration: Value,
-        max_step: Value,
-    ) -> Result<(), SimulationError> {
-        if let Some(grid) = self.config.locked_time_grid.as_deref() {
-            return self.ensure_analysis_points(grid.len());
-        }
-        let requested = (duration / max_step).ceil() as usize;
-        self.ensure_analysis_points(requested.saturating_add(1))
-    }
-
     fn record_transient_solution_sample(
         &self,
         result: &mut TransientResult,
@@ -2891,7 +2871,6 @@ impl Engine {
         let TransientCaptureRequest {
             record_device_op_traces,
             capture,
-            trajectory_point_count,
             integral_trace,
         } = request;
         let TransientSampleSources {
@@ -2910,7 +2889,6 @@ impl Engine {
         let integral_count =
             integral_trace.map_or(0, |_| circuit.behavioral_sources.integral_count());
         let next_point_count = result.time.len().saturating_add(1);
-        self.ensure_analysis_points(trajectory_point_count)?;
         self.ensure_result_shape(
             next_point_count,
             capture
@@ -3139,7 +3117,7 @@ impl Engine {
             retained_result_values =
                 retained_result_values.saturating_add(hdl_variables.record(result, circuit, time));
         }
-        self.ensure_transient_result_limits(result, retained_result_values)?;
+        self.ensure_transient_result_limits(retained_result_values)?;
         abort.observe_transient_sample(result.observable_sample(
             digital_event_codes,
             sample_buses,
@@ -3239,7 +3217,6 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_transient_request_floor(tstop, max_step)?;
         engine.transient_source_event_times_resolved(netlist, tstop, max_step, source_names, abort)
     }
 
@@ -3419,11 +3396,8 @@ impl Engine {
             false,
             abort,
         )?;
-        let mesh = engine.pss_source_mesh(&circuit, config, grid_steps, abort)?;
-        engine.ensure_analysis_points(
-            mesh.as_ref()
-                .map_or(grid_steps, super::pss::PssIntegrationMesh::steps),
-        )
+        engine.pss_source_mesh(&circuit, config, grid_steps, abort)?;
+        Ok(())
     }
 
     fn validated_transient_source_selection(
@@ -3511,7 +3485,7 @@ impl Engine {
             (!selected.is_empty()).then_some(&selected),
             &mut breakpoints,
             abort,
-            self.config.resource_limits.max_analysis_points,
+            self.config.resource_limits.max_result_values,
             SourceBreakpointGeometry::Authored,
         )?;
         Ok(breakpoints.times().to_vec())
@@ -3573,7 +3547,6 @@ impl Engine {
         validate_transient_window(tstop, max_step)?;
         self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_transient_request_floor(tstop, max_step)?;
         engine.run_tran_with_abort_resolved(netlist, tstop, max_step, startup_mode, abort)
     }
 
@@ -3659,7 +3632,6 @@ impl Engine {
     ) -> Result<(TransientResult, TransientEnd), SimulationError> {
         validate_transient_window(tstop, max_step)?;
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_transient_request_floor(tstop, max_step)?;
         engine
             .run_tran_resolved_with_resume(
                 netlist,
@@ -3728,10 +3700,9 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<(TransientResult, Vec<ScheduledTransientCheckpoint>), SimulationError> {
         validate_transient_window(tstop, max_step)?;
-        self.validate_transient_checkpoint_schedule(netlist, 0.0, tstop, checkpoint_times)?;
+        self.validate_transient_checkpoint_schedule(0.0, tstop, checkpoint_times)?;
 
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_transient_request_floor(tstop, max_step)?;
         engine
             .run_tran_resolved_with_resume(
                 netlist,
@@ -3847,7 +3818,6 @@ impl Engine {
         let startup_mode = checkpoint.startup_mode();
 
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_transient_request_floor(tstop - checkpoint.time, max_step)?;
         engine
             .run_tran_resolved_with_resume(
                 netlist,
@@ -5530,7 +5500,7 @@ impl Engine {
             },
             &mut breakpoints,
             abort,
-            self.config.resource_limits.max_analysis_points,
+            self.config.resource_limits.max_result_values,
         )?;
         Self::add_breakpoint_if_in_range(&mut breakpoints, tstop, tstop);
         let source_breakpoint_times = breakpoints.times().to_vec();
@@ -5548,13 +5518,13 @@ impl Engine {
             netlist,
             tstop,
             abort,
-            self.config.resource_limits.max_analysis_points,
+            self.config.resource_limits.max_result_values,
         )?;
         Self::add_transient_noise_breakpoints(
             &mut breakpoints,
             &circuit,
             tstop,
-            self.config.resource_limits.max_analysis_points,
+            self.config.resource_limits.max_result_values,
         )?;
         // A captured state is an accepted point at exactly the requested
         // time, so every requested time is a solver stop.
@@ -6423,7 +6393,7 @@ impl Engine {
                     &Self::veriloga_terminal_meter_observables(&circuit, &solution)?,
                 ),
             );
-            self.ensure_transient_result_limits(&result, retained_result_values)?;
+            self.ensure_transient_result_limits(retained_result_values)?;
         }
 
         // Initialize inductor current and voltage history from DC solution
@@ -6741,7 +6711,7 @@ impl Engine {
             self.ensure_result_values(retained_result_values.saturating_add(trace.names.len()))?;
             retained_result_values = retained_result_values.saturating_add(trace.record(&circuit)?);
         }
-        self.ensure_transient_result_limits(&result, retained_result_values)?;
+        self.ensure_transient_result_limits(retained_result_values)?;
         if !circuit
             .bjts
             .devices
@@ -6977,7 +6947,7 @@ impl Engine {
                     &Self::veriloga_terminal_meter_observables(&circuit, &solution)?,
                 ),
             );
-            self.ensure_transient_result_limits(&result, retained_result_values)?;
+            self.ensure_transient_result_limits(retained_result_values)?;
         }
         // A checkpoint taken where the published row was not the restart
         // state (a startup's operating point, an event's left limit) carries
@@ -12158,12 +12128,6 @@ impl Engine {
                                 "transient accepted-interval count overflowed".to_string(),
                             )
                         })?;
-                    let trajectory_point_count =
-                        accepted_interval_count.checked_add(1).ok_or_else(|| {
-                            SimulationError::Circuit(
-                                "transient trajectory point count overflowed".to_string(),
-                            )
-                        })?;
                     let (row_circuit, row_solution, row_sources) = match left_limit.as_mut() {
                         Some(row) => (
                             &mut row.circuit,
@@ -12207,7 +12171,6 @@ impl Engine {
                             TransientCaptureRequest {
                                 record_device_op_traces,
                                 capture: &capture_plan,
-                                trajectory_point_count,
                                 integral_trace,
                             },
                         )?,
@@ -12912,12 +12875,6 @@ impl Engine {
             accepted_interval_count = accepted_interval_count.checked_add(1).ok_or_else(|| {
                 SimulationError::Circuit("transient accepted-interval count overflowed".to_string())
             })?;
-            let trajectory_point_count =
-                accepted_interval_count.checked_add(1).ok_or_else(|| {
-                    SimulationError::Circuit(
-                        "transient trajectory point count overflowed".to_string(),
-                    )
-                })?;
 
             // Store results
             let (row_circuit, row_solution, row_sources) = match left_limit.as_mut() {
@@ -12963,7 +12920,6 @@ impl Engine {
                     TransientCaptureRequest {
                         record_device_op_traces,
                         capture: &capture_plan,
-                        trajectory_point_count,
                         integral_trace,
                     },
                 )?);
@@ -13730,7 +13686,7 @@ impl Engine {
         let schedule = TransientCompressionOutputSchedule::from_netlist(
             netlist,
             result,
-            limits.max_analysis_points,
+            limits.max_result_values,
         );
         compress_transient_result(
             result,
@@ -16454,7 +16410,7 @@ D1 D 0 DMOD
                 5.0e-3,
                 SimulationConfig::default()
                     .resource_limits
-                    .max_analysis_points,
+                    .max_result_values,
             )
             .expect("OUTPUTTIMEPOINTS projection succeeds");
         assert_eq!(output.times().len(), 5);
@@ -17257,17 +17213,6 @@ D1 D 0 DMOD
                 .to_string()
                 .contains("STOP must be finite and greater than START")
         );
-
-        let oversized = Netlist::parse(
-            "oversized fft\nV1 out 0 1\nR1 out 0 1k\n.tran 1u 1m\n.fft v(out) np=128\n.end\n",
-        )
-        .expect("bounded FFT deck parses");
-        let mut config = SimulationConfig::default();
-        config.resource_limits.max_analysis_points = 64;
-        let error = Engine::new(config)
-            .run_tran(&oversized, 1.0e-3, 1.0e-6)
-            .expect_err("FFT point limit must be enforced");
-        assert!(matches!(error, SimulationError::ResourceLimit(_)));
 
         let cumulative = Netlist::parse(
             "cumulative fft limit\nV1 out 0 1\nR1 out 0 1k\n.tran 1u 1m\n.fft v(out) np=8\n.fft i(V1) np=8\n.end\n",

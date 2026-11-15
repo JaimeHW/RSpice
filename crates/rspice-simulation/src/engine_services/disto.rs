@@ -270,7 +270,7 @@ fn run_disto_analysis_volterra(
         config.stop_freq,
         config.points_per_unit,
         config.sweep.runner_keyword(),
-        context.limits.max_analysis_points,
+        context.limits.max_result_values,
         abort,
     )
     .map_err(|error| DistoRunError::from_service(error, DistoRunError::Data))?;

@@ -41,7 +41,7 @@ fn coordinate_id() -> RunCoordinateId {
 #[test]
 fn resource_failures_publish_stable_numeric_metadata() {
     let limit = rspice_core::ResourceLimitError {
-        resource: ResourceKind::AnalysisPoints,
+        resource: ResourceKind::ResultValues,
         requested: 101,
         limit: 100,
     };

@@ -799,25 +799,12 @@ fn run_pss_spectrum(
         .filter(|name| name.as_str() != "0" && !name.eq_ignore_ascii_case("gnd"))
         .count();
     let values = points.saturating_mul(signals.saturating_mul(3).saturating_add(1));
-    for (resource, requested, limit) in [
-        (
-            rspice_core::ResourceKind::AnalysisPoints,
-            points,
-            context.limits.max_analysis_points,
-        ),
-        (
-            rspice_core::ResourceKind::ResultValues,
-            values,
-            context.limits.max_result_values,
-        ),
-    ] {
-        if requested > limit {
-            return Err(SimulationError::ResourceLimit {
-                resource: resource.as_str().into(),
-                requested,
-                limit,
-            });
-        }
+    if values > context.limits.max_result_values {
+        return Err(SimulationError::ResourceLimit {
+            resource: rspice_core::ResourceKind::ResultValues.as_str().into(),
+            requested: values,
+            limit: context.limits.max_result_values,
+        });
     }
     let mut waveforms = HashMap::new();
     let mut frequencies = Vec::new();
@@ -1140,21 +1127,12 @@ fn run_fourier(
                 .convergence()
                 .map_or(0, |evidence| evidence.transfer_value_count()),
         );
-    for (resource, requested, limit) in [
-        (
-            "analysis_points",
-            harmonics.max(trajectory.time().len()),
-            context.limits.max_analysis_points,
-        ),
-        ("result_values", values, context.limits.max_result_values),
-    ] {
-        if requested > limit {
-            return Err(SimulationError::ResourceLimit {
-                resource: resource.into(),
-                requested,
-                limit,
-            });
-        }
+    if values > context.limits.max_result_values {
+        return Err(SimulationError::ResourceLimit {
+            resource: "result_values".into(),
+            requested: values,
+            limit: context.limits.max_result_values,
+        });
     }
     let mut projections = Vec::with_capacity(outputs);
     projections.push((output_node, output_ref));

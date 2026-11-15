@@ -107,11 +107,6 @@ impl PssIntegrationMesh {
             .saturating_add(1)
             .saturating_mul(self.sampled_edges.len());
         crate::ResourceLimitError::ensure(
-            crate::ResourceKind::AnalysisPoints,
-            capacity,
-            limits.max_analysis_points,
-        )?;
-        crate::ResourceLimitError::ensure(
             crate::ResourceKind::ResultValues,
             capacity.saturating_mul(3),
             limits.max_result_values,
@@ -401,7 +396,6 @@ impl Engine {
                     .shifted(&[offset])
                     .periodic_boundary(mesh.boundary_event);
                 if !seen_edges.contains(&edge.key()) {
-                    self.ensure_analysis_points(edges.len().saturating_add(1))?;
                     self.ensure_result_values(
                         refined
                             .times
@@ -447,7 +441,6 @@ impl Engine {
                 {
                     continue;
                 }
-                self.ensure_analysis_points(corners.len().saturating_add(1))?;
                 self.ensure_result_values(
                     refined
                         .times
@@ -477,7 +470,6 @@ impl Engine {
                 added.push(restart);
             }
         }
-        self.ensure_analysis_points(refined.steps().saturating_add(added.len()))?;
         self.ensure_result_values(
             refined
                 .times
@@ -600,7 +592,7 @@ impl Engine {
         steps: usize,
         abort: &dyn AbortSignal,
     ) -> Result<Option<PssIntegrationMesh>, SimulationError> {
-        self.ensure_analysis_points(steps)?;
+        self.ensure_result_values(steps.saturating_add(1))?;
         if config.is_autonomous() {
             return Ok(None);
         }
@@ -621,21 +613,21 @@ impl Engine {
             Some(&selected),
             &mut breakpoints,
             abort,
-            self.config.resource_limits.max_analysis_points,
+            self.config.resource_limits.max_result_values,
             crate::engine::transient::SourceBreakpointGeometry::PhysicalCorners,
         )?;
         circuit.behavioral_sources.collect_transient_breakpoints(
             period,
             &mut breakpoints,
             abort,
-            self.config.resource_limits.max_analysis_points,
+            self.config.resource_limits.max_result_values,
             true,
         )?;
         circuit.capacitors.collect_transient_breakpoints(
             period,
             &mut breakpoints,
             abort,
-            self.config.resource_limits.max_analysis_points,
+            self.config.resource_limits.max_result_values,
             true,
         )?;
         // A PWL jump has two values at one authored time. Keep the published
@@ -712,7 +704,7 @@ impl Engine {
                     outgoing: if after { time.next_up() } else { time },
                 });
             }
-            self.ensure_analysis_points(breakpoints.times().len())?;
+            self.ensure_result_values(breakpoints.times().len())?;
         }
         drop(authored);
         // The source's pre-startup limit need not equal its periodic incoming
@@ -766,7 +758,6 @@ impl Engine {
                     }
                 }
                 if !seen_edges.contains(&edge.key()) {
-                    self.ensure_analysis_points(sampled_edges.len().saturating_add(1))?;
                     self.ensure_result_values(
                         breakpoints.times().len().saturating_mul(3).saturating_add(
                             source_edges
@@ -795,7 +786,7 @@ impl Engine {
                     PssIntegrationMesh::shifted_clock(&source_events, index, &[phase_delay])
                 };
                 breakpoints.add(arrival);
-                self.ensure_analysis_points(breakpoints.times().len())?;
+                self.ensure_result_values(breakpoints.times().len())?;
             }
         }
         drop(source_events);
@@ -824,7 +815,7 @@ impl Engine {
                     .max(corner.next_up());
                 if restart < next {
                     breakpoints.add(restart);
-                    self.ensure_analysis_points(breakpoints.times().len())?;
+                    self.ensure_result_values(breakpoints.times().len())?;
                 }
             }
         }
@@ -910,7 +901,7 @@ impl Engine {
             };
             if times.last() != Some(&next) {
                 times.push(next);
-                self.ensure_analysis_points(times.len().saturating_sub(1))?;
+                self.ensure_result_values(times.len())?;
             }
         }
         // Resolution accounts for the base mesh, subdivision scratch and
@@ -1192,7 +1183,7 @@ mod tests {
             ),
             Err(SimulationError::Aborted)
         ));
-        let limits = crate::ResourceLimits::default().with(|limits| limits.max_analysis_points = 1);
+        let limits = crate::ResourceLimits::default().with(|limits| limits.max_result_values = 1);
         assert!(matches!(
             refined.pending_sampled_edges(2.25, 1.0, limits, &NoAbort),
             Err(SimulationError::ResourceLimit(_))
@@ -1321,7 +1312,7 @@ mod tests {
             Err(SimulationError::Aborted)
         ));
         let mut limited = Engine::default();
-        limited.config.resource_limits.max_analysis_points = mesh.steps();
+        limited.config.resource_limits.max_result_values = mesh.steps();
         assert!(
             limited
                 .pss_propagated_source_mesh(&mesh, &circuit, &NoAbort)

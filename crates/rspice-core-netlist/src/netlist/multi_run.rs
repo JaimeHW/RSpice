@@ -899,11 +899,6 @@ fn extract_data_tables(
                     )));
                 }
                 let row_count = flat_values.len() / columns;
-                ensure_resource(
-                    ResourceKind::AnalysisPoints,
-                    row_count,
-                    resource_limits.max_analysis_points,
-                )?;
                 table
                     .rows
                     .try_reserve_exact(row_count)
@@ -951,13 +946,7 @@ fn extract_data_tables(
                                 resource_limits.max_result_values,
                             )?;
                             flat_values.push(value);
-                            if !table.params.is_empty() {
-                                ensure_resource(
-                                    ResourceKind::AnalysisPoints,
-                                    flat_values.len().div_ceil(table.params.len()),
-                                    resource_limits.max_analysis_points,
-                                )?;
-                            }
+                            if !table.params.is_empty() {}
                         }
                         Err(_) => {
                             return Err(MultiRunError::new(format!(

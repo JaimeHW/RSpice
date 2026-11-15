@@ -72,11 +72,6 @@ impl PreparedSpectralEnvelope {
         if request.maximum_steps == 0 {
             return Err(invalid("mission step limit must be positive"));
         }
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            request.reporting_times.len(),
-            self.limits.max_analysis_points,
-        )?;
         let mut last = None;
         for &time in &request.reporting_times {
             check_abort(abort)?;
@@ -167,11 +162,6 @@ impl PreparedSpectralEnvelope {
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         check_abort(abort)?;
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            samples.len().saturating_add(1),
-            self.limits.max_analysis_points,
-        )?;
         let values = state
             .spectra()
             .len()
@@ -244,11 +234,14 @@ impl PreparedSpectralEnvelope {
             if state.time() == self.config.stop_time {
                 break;
             }
-            ResourceLimitError::ensure(
-                ResourceKind::AnalysisPoints,
-                accepted_steps.saturating_add(1),
-                request.maximum_steps.min(self.limits.max_analysis_points),
-            )?;
+            if accepted_steps >= request.maximum_steps {
+                return Err(invalid(format!(
+                    "the mission reached its limit of {} accepted steps at {:.17e} s, before its stop time {:.17e} s",
+                    request.maximum_steps,
+                    state.time(),
+                    self.config.stop_time
+                )));
+            }
             let deadline = reporting.peek().copied().unwrap_or(self.config.stop_time);
             let next_event = self.next_source_event_after(state.time())?;
             state = match &request.stepping {

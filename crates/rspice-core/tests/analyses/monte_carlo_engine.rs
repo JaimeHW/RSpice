@@ -511,7 +511,7 @@ fn bootstrap_is_repeatable_and_separate_from_circuit_sampling() {
 }
 
 #[test]
-fn bootstrap_work_is_bounded_before_callback_execution() {
+fn bootstrap_retention_is_bounded_before_callback_execution() {
     let mut config = MonteCarloConfig {
         seed: Some(1),
         ..MonteCarloConfig::new(1000)
@@ -520,14 +520,20 @@ fn bootstrap_work_is_bounded_before_callback_execution() {
         resamples: 10_000,
         seed: 1,
     };
+    // The resampled means and the samples they draw from are retained.
+    config.resource_limits.max_result_values = 10_999;
     let error = MonteCarloRunner::new(config)
         .run::<_, ()>(|_| {
-            panic!("an excessive bootstrap workload must be refused before simulation")
+            panic!("an excessive bootstrap retention must be refused before simulation")
         })
         .unwrap_err();
     assert!(matches!(
         error,
-        rspice_core::SimulationError::ResourceLimit(_)
+        rspice_core::SimulationError::ResourceLimit(rspice_core::ResourceLimitError {
+            resource: rspice_core::ResourceKind::ResultValues,
+            requested: 11_000,
+            limit: 10_999,
+        })
     ));
 }
 

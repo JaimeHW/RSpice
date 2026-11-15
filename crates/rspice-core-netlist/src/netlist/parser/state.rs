@@ -121,7 +121,6 @@ pub(super) struct ParseState {
     pub(super) options: super::SimulationOptions,
     pub(super) temperature_options: temperature::TemperatureOptionPlan,
     /// Parser resource ceiling for vector-valued analysis schedules.
-    pub(super) max_analysis_points: usize,
     pub(super) diagnostics: Vec<ParseDiagnostic>,
     /// Number of successfully parsed, authored PSpice E/G CHEBYSHEV cards.
     ///
@@ -195,7 +194,6 @@ impl ParseState {
             output_requests: Vec::new(),
             options: super::SimulationOptions::default(),
             temperature_options: temperature::TemperatureOptionPlan::default(),
-            max_analysis_points: crate::resource::ResourceLimits::default().max_analysis_points,
             diagnostics: Vec::new(),
             pspice_chebyshev_source_count: 0,
             allow_unmatched_subckt_ends: false,
@@ -578,7 +576,6 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) output_requests: &'a mut Vec<OutputRequest>,
     pub(super) options: &'a mut super::SimulationOptions,
     pub(super) temperature_options: temperature::TemperatureOptionSink<'a>,
-    pub(super) max_analysis_points: usize,
     pub(super) diagnostics: &'a mut Vec<ParseDiagnostic>,
     pub(super) pspice_chebyshev_source_count: &'a mut usize,
     pub(super) spef_includes: &'a mut Vec<String>,
@@ -623,7 +620,6 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) output_requests: &'a mut Vec<OutputRequest>,
     pub(super) options: &'a mut super::SimulationOptions,
     pub(super) temperature_options: temperature::TemperatureOptionSink<'a>,
-    pub(super) max_analysis_points: usize,
     pub(super) diagnostics: &'a mut Vec<ParseDiagnostic>,
     pub(super) spef_includes: &'a mut Vec<String>,
     pub(super) origin: &'a NetlistSourceLocation,

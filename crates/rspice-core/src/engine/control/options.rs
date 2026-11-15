@@ -61,7 +61,6 @@ impl ControlCircuit {
             command.line,
             variables,
             &self.runtime_options,
-            engine.config().resource_limits.max_analysis_points,
             abort,
         )
         .map_err(|error| match error {

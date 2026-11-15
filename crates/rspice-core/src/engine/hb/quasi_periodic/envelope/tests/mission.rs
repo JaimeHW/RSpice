@@ -134,7 +134,7 @@ fn netlist_envelope_mission_adaptive_retains_only_reports_and_recovers_after_fai
     request.maximum_steps = 1;
     assert!(matches!(
         prepared.run_mission_with_abort(&request, None, &NoAbort),
-        Err(SimulationError::ResourceLimit(_))
+        Err(SimulationError::Circuit(message)) if message.contains("limit of 1 accepted steps")
     ));
     assert_eq!(
         prepared.limits.max_result_values,

@@ -64,11 +64,6 @@ pub(super) fn input<'a>(
             ))
         })?;
     ResourceLimitError::ensure(
-        ResourceKind::AnalysisPoints,
-        table.rows.len(),
-        limits.max_analysis_points,
-    )?;
-    ResourceLimitError::ensure(
         ResourceKind::BatchRuns,
         table.rows.len(),
         limits.max_batch_runs,

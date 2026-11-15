@@ -113,7 +113,7 @@ pub(crate) fn run_sparameter_analysis_with_bias(
         config.stop_freq,
         config.points_per_unit,
         config.sweep.runner_keyword(),
-        context.limits.max_analysis_points,
+        context.limits.max_result_values,
         abort,
     )?;
 

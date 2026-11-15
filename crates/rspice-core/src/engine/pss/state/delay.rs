@@ -80,11 +80,6 @@ impl PssDelayBasis {
             .dimension
             .saturating_add(2usize.saturating_mul(line.intervals.saturating_add(1)));
         crate::ResourceLimitError::ensure(
-            crate::ResourceKind::AnalysisPoints,
-            self.dimension,
-            limits.max_analysis_points,
-        )?;
-        crate::ResourceLimitError::ensure(
             crate::ResourceKind::ResultValues,
             self.dimension
                 .saturating_mul(self.dimension)
@@ -158,11 +153,6 @@ impl PssDelayBasis {
                 let dimension = basis
                     .dimension
                     .saturating_add(2usize.saturating_mul(capacity));
-                crate::ResourceLimitError::ensure(
-                    crate::ResourceKind::AnalysisPoints,
-                    dimension,
-                    limits.max_analysis_points,
-                )?;
                 crate::ResourceLimitError::ensure(
                     crate::ResourceKind::ResultValues,
                     dimension.saturating_mul(dimension).saturating_mul(4),
@@ -238,11 +228,6 @@ impl PssDelayBasis {
                     .dimension
                     .saturating_add(2usize.saturating_mul(intervals.saturating_add(1)));
                 crate::ResourceLimitError::ensure(
-                    crate::ResourceKind::AnalysisPoints,
-                    dimension,
-                    limits.max_analysis_points,
-                )?;
-                crate::ResourceLimitError::ensure(
                     crate::ResourceKind::ResultValues,
                     dimension.saturating_mul(dimension).saturating_mul(4),
                     limits.max_result_values,
@@ -293,11 +278,6 @@ impl PssDelayBasis {
             let dimension = basis
                 .dimension
                 .saturating_add(2usize.saturating_mul(capacity));
-            crate::ResourceLimitError::ensure(
-                crate::ResourceKind::AnalysisPoints,
-                dimension,
-                limits.max_analysis_points,
-            )?;
             crate::ResourceLimitError::ensure(
                 crate::ResourceKind::ResultValues,
                 dimension.saturating_mul(dimension).saturating_mul(4),
@@ -380,11 +360,6 @@ impl PssDelayBasis {
             let dimension = basis
                 .dimension
                 .saturating_add(2usize.saturating_mul(intervals.saturating_add(1)));
-            crate::ResourceLimitError::ensure(
-                crate::ResourceKind::AnalysisPoints,
-                dimension,
-                limits.max_analysis_points,
-            )?;
             crate::ResourceLimitError::ensure(
                 crate::ResourceKind::ResultValues,
                 dimension.saturating_mul(dimension).saturating_mul(4),

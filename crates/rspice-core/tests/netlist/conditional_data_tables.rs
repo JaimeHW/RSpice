@@ -21,7 +21,7 @@ fn inactive_table_headers_rows_and_limits_are_not_evaluated() {
         ".data unused x\n1\n2\n3\n.enddata\n",
     ] {
         let mut options = NetlistParseOptions::default();
-        options.resource_limits.max_analysis_points = 2;
+        options.resource_limits.max_result_values = 2;
         let netlist = Netlist::parse_with_options(
             &format!("Inactive data\n.if 0\n{block}.endif\n.end\n"),
             options,
@@ -72,7 +72,7 @@ fn active_tables_keep_syntax_numeric_and_resource_validation() {
         );
     }
     let mut options = NetlistParseOptions::default();
-    options.resource_limits.max_analysis_points = 2;
+    options.resource_limits.max_result_values = 2;
     let error = Netlist::parse_with_options(
         "Active table limit\n.if 1\n.data active x\n1\n2\n3\n.enddata\n.endif\n.end\n",
         options,

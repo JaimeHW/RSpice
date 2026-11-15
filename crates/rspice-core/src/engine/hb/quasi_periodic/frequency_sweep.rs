@@ -72,11 +72,6 @@ pub(super) fn validate(
             count
         }
     };
-    ResourceLimitError::ensure(
-        ResourceKind::AnalysisPoints,
-        count,
-        limits.max_analysis_points,
-    )?;
     ResourceLimitError::ensure(ResourceKind::ResultValues, count, limits.max_result_values)?;
     Ok(count)
 }

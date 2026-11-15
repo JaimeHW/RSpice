@@ -643,8 +643,9 @@ fn ensure_cancellation_report(
 }
 
 /// The JSON run summary's schema. Version 2 added `assertions` and
-/// `hdl_diagnostics`; version 3 added each run's `backends`.
-const RUN_SUMMARY_SCHEMA_VERSION: u32 = 3;
+/// `hdl_diagnostics`; version 3 added each run's `backends`; version 4 dropped
+/// `resource_limits.max_analysis_points`.
+const RUN_SUMMARY_SCHEMA_VERSION: u32 = 4;
 
 /// Write the one-artifact JSON contract for automation: tool identity,
 /// per-run status with every measurement, the deck's checks (`.ASSERT`
@@ -765,7 +766,6 @@ fn resource_limits_summary(limits: rspice_core::ResourceLimits) -> serde_json::V
         "max_flattened_elements": limits.max_flattened_elements,
         "max_circuit_nodes": limits.max_circuit_nodes,
         "max_matrix_unknowns": limits.max_matrix_unknowns,
-        "max_analysis_points": limits.max_analysis_points,
         "max_result_values": limits.max_result_values,
         "max_parallel_workers": limits.max_parallel_workers,
         "max_batch_runs": limits.max_batch_runs,

@@ -58,7 +58,6 @@ fn option_overrides_cancel_without_publishing_partial_assignments() {
         "abstol=1n reltol={work(18)}",
         &netlist.params,
         &netlist.options,
-        100_000,
         &abort,
     );
     assert!(

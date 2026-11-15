@@ -157,7 +157,7 @@ fn invalid_measurement_configuration_and_budgets_stop_before_evaluation() {
                     resamples: 100,
                     seed: 5,
                 };
-                engine_config.resource_limits.max_analysis_points = 200;
+                engine_config.resource_limits.max_result_values = 100;
             }
             _ => unreachable!(),
         }
@@ -211,14 +211,14 @@ fn measurement_execution_preserves_fatal_errors_and_deadline_cancellation() {
                             }
                             1 => SimulationError::ResourceLimit(
                                 rspice_core::resource::ResourceLimitError {
-                                    resource: rspice_core::resource::ResourceKind::AnalysisPoints,
+                                    resource: rspice_core::resource::ResourceKind::ResultValues,
                                     requested: 10,
                                     limit: 1,
                                 },
                             ),
                             2 => SimulationError::Configuration(
                                 rspice_core::config::SimulationConfigError::InvalidCount {
-                                    field: "test.analysis_points",
+                                    field: "test.result_values",
                                     value: 0,
                                 },
                             ),

@@ -101,11 +101,6 @@ impl Engine {
             let intervals = required_intervals as usize + 3;
             total_samples = total_samples.saturating_add(intervals.saturating_add(1));
             crate::ResourceLimitError::ensure(
-                crate::ResourceKind::AnalysisPoints,
-                total_samples,
-                self.config.resource_limits.max_analysis_points,
-            )?;
-            crate::ResourceLimitError::ensure(
                 crate::ResourceKind::ResultValues,
                 total_samples.saturating_mul(11),
                 self.config.resource_limits.max_result_values,

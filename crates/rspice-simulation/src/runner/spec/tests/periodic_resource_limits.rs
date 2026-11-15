@@ -43,11 +43,10 @@ fn periodic_producers_keep_limits_after_resolving_a_successful_op() {
             )
         };
         run(limits).expect("periodic solve accepts custom limits");
-        for resource in ["matrix_unknowns", "analysis_points", "result_values"] {
+        for resource in ["matrix_unknowns", "result_values"] {
             let mut limited = limits;
             match resource {
                 "matrix_unknowns" => limited.max_matrix_unknowns = 1,
-                "analysis_points" => limited.max_analysis_points = 2,
                 _ => limited.max_result_values = 1,
             }
             let error = run(limited).unwrap_err();
@@ -140,17 +139,11 @@ fn qp_consumers_preserve_limits_after_a_worker_round_trip() {
             )
         };
         run(limits).expect("consumer accepts custom limits and the transferred orbit");
-        for resource in [
-            "netlist_bytes",
-            "matrix_unknowns",
-            "analysis_points",
-            "result_values",
-        ] {
+        for resource in ["netlist_bytes", "matrix_unknowns", "result_values"] {
             let mut limited = limits;
             match resource {
                 "netlist_bytes" => limited.max_netlist_bytes = 1,
                 "matrix_unknowns" => limited.max_matrix_unknowns = 1,
-                "analysis_points" => limited.max_analysis_points = 2,
                 _ => limited.max_result_values = 1,
             }
             let error = run(limited).unwrap_err();
@@ -179,16 +172,13 @@ fn pss_spectrum_checks_its_own_point_and_value_footprint() {
         )
     };
     run(limits).unwrap();
-    for (points, values, resource) in [(2, 1000, "analysis_points"), (1000, 1, "result_values")] {
-        let mut limited = limits;
-        limited.max_analysis_points = points;
-        limited.max_result_values = values;
-        let error = run(limited).unwrap_err();
-        assert!(
-            matches!(&error, SimulationError::ResourceLimit { resource: actual, .. } if actual == resource),
-            "{error:?}"
-        );
-    }
+    let mut limited = limits;
+    limited.max_result_values = 1;
+    let error = run(limited).unwrap_err();
+    assert!(
+        matches!(&error, SimulationError::ResourceLimit { resource, .. } if resource == "result_values"),
+        "{error:?}"
+    );
 }
 
 /// Exercise policy enforcement on a carrier that was already solved and
@@ -235,23 +225,11 @@ pub(super) fn run_consumer_with_limit_checks(
                 if resource == "result_values"
         ));
     }
-    for resource in [
-        "netlist_bytes",
-        "matrix_unknowns",
-        "analysis_points",
-        "result_values",
-    ] {
+    for resource in ["netlist_bytes", "matrix_unknowns", "result_values"] {
         let mut limited = limits;
         match resource {
             "netlist_bytes" => limited.max_netlist_bytes = 1,
             "matrix_unknowns" => limited.max_matrix_unknowns = 1,
-            "analysis_points" => {
-                limited.max_analysis_points = if matches!(spec, AnalysisSpec::Pstb) {
-                    1
-                } else {
-                    2
-                };
-            }
             _ => limited.max_result_values = 1,
         }
         let error = run(limited).unwrap_err();

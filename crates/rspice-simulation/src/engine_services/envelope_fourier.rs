@@ -262,7 +262,7 @@ pub fn run_envelope_analysis_with_context(
         &parsed.options,
         &transient.time,
         &carrier_tones,
-        context.limits.max_analysis_points,
+        context.limits.max_result_values,
         abort,
     )? {
         Some(times) => times,
@@ -408,11 +408,6 @@ fn envelope_output_times(
     let abort = context.abort;
     match config.adaptive_mode {
         EnvelopeAdaptiveMode::Enabled => {
-            ensure_envelope_limit(
-                ResourceKind::AnalysisPoints,
-                adaptive_time.len(),
-                context.limits.max_analysis_points,
-            )?;
             let mut output = Vec::with_capacity(adaptive_time.len());
             for (index, time) in adaptive_time.iter().copied().enumerate() {
                 poll_periodically(abort, index)?;
@@ -425,7 +420,7 @@ fn envelope_output_times(
             uniform_envelope_times(
                 config.stop_time,
                 step,
-                context.limits.max_analysis_points,
+                context.limits.max_result_values,
                 abort,
             )
         }
@@ -454,11 +449,6 @@ fn envelope_output_times(
                 (*left - *right).abs() <= 64.0 * Value::EPSILON * scale
             });
             ensure_not_aborted(abort)?;
-            ensure_envelope_limit(
-                ResourceKind::AnalysisPoints,
-                times.len(),
-                context.limits.max_analysis_points,
-            )?;
             Ok(times)
         }
     }
@@ -486,7 +476,7 @@ fn uniform_envelope_times(
         .ok_or_else(|| {
             ServiceRunError::Failure("Envelope output schedule overflowed".to_string())
         })?;
-    ensure_envelope_limit(ResourceKind::AnalysisPoints, point_count, limit)?;
+    ensure_envelope_limit(ResourceKind::ResultValues, point_count, limit)?;
     let mut times = Vec::with_capacity(point_count);
     for index in 0..=interval_count {
         poll_periodically(abort, index)?;
@@ -903,11 +893,6 @@ fn validate_projection_workload(
     signal_count: usize,
     limits: ResourceLimits,
 ) -> ServiceRunResult<()> {
-    ensure_envelope_limit(
-        ResourceKind::AnalysisPoints,
-        sample_count.max(output_count),
-        limits.max_analysis_points,
-    )?;
     let basis_count = carrier_count
         .checked_mul(2)
         .and_then(|count| count.checked_add(1))
@@ -1852,20 +1837,19 @@ mod tests {
             assert!(matches!(
                 uniform_envelope_times(1.0, step, limit, &NoAbort),
                 Err(ServiceRunError::ResourceLimit(error))
-                    if error.resource == ResourceKind::AnalysisPoints && error.requested == requested && error.limit == limit
+                    if error.resource == ResourceKind::ResultValues && error.requested == requested && error.limit == limit
             ));
         }
     }
 
     #[test]
-    fn carrier_projection_uses_caller_workspace_and_point_limits() {
+    fn carrier_projection_uses_caller_workspace_limits() {
         let time = (0..=64).map(|i| f64::from(i) / 64.0).collect::<Vec<_>>();
         let values = time
             .iter()
             .map(|t| (std::f64::consts::TAU * t).cos())
             .collect::<Vec<_>>();
         let mut limits = ResourceLimits::default();
-        limits.max_analysis_points = 65;
         limits.max_result_values = 195;
         let run = |limits| {
             compute_carrier_envelopes_with_context(
@@ -1888,12 +1872,6 @@ mod tests {
             matches!(run(limits), Err(ServiceRunError::ResourceLimit(error))
             if error.resource == ResourceKind::ResultValues && error.requested == 195 && error.limit == 194)
         );
-        limits.max_result_values = 195;
-        limits.max_analysis_points = 64;
-        assert!(
-            matches!(run(limits), Err(ServiceRunError::ResourceLimit(error))
-            if error.resource == ResourceKind::AnalysisPoints && error.requested == 65 && error.limit == 64)
-        );
     }
 
     #[test]
@@ -1901,7 +1879,7 @@ mod tests {
         let times = uniform_envelope_times(
             1.0,
             0.3,
-            ResourceLimits::default().max_analysis_points,
+            ResourceLimits::default().max_result_values,
             &NoAbort,
         )
         .expect("fixed envelope schedule should be representable");

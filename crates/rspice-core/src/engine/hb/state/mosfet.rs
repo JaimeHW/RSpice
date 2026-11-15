@@ -11,7 +11,6 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<MosfetPeriodicChargeIncrements>, SimulationError> {
         let mut result_increments = Vec::with_capacity(circuit.mosfets.len());
-        let mut evaluations = 0usize;
         for device in &circuit.mosfets.devices {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -36,12 +35,6 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                evaluations = evaluations.saturating_add(1);
-                crate::ResourceLimitError::ensure(
-                    crate::ResourceKind::AnalysisPoints,
-                    evaluations,
-                    self.config.resource_limits.max_analysis_points,
-                )?;
                 let rate = gate_phase_rates(device, &spectra, phase);
                 if rate.iter().any(|value| !value.is_finite()) {
                     return Err(SimulationError::Circuit(format!(

@@ -41,12 +41,6 @@ fn validate_source<T>(
         )
         .saturating_add(completion_value_count(result.finish.as_ref()));
     admit(count, limits)?;
-    ResourceLimitError::ensure(
-        ResourceKind::AnalysisPoints,
-        rows,
-        limits.max_analysis_points,
-    )
-    .map_err(ResultDocumentError::ResourceLimit)?;
     let mut names = BTreeSet::new();
     let mut targets = BTreeSet::new();
     let mut frequencies = None;

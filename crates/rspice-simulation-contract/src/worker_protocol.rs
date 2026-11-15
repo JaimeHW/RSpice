@@ -32,7 +32,9 @@ pub struct AnalysisExecutionEnvironment {
 ///     the checkpoint time it resumes from.
 /// 49: a task names its part in its run's transient state hand-off, so a card
 ///     bound to a `.TRAN` task reads the state that task captured in the worker.
-pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 49;
+/// 50: the execution resource policy has no analysis-point limit; retained
+///     values bound every sweep, schedule and grid.
+pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 50;
 
 /// Browser response protocol revisions.
 /// 18: transient-source convergence evidence survives result transport.

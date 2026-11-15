@@ -1153,12 +1153,11 @@ impl Engine {
         if abort.is_aborted() {
             return Err(crate::engine::SimulationError::Aborted);
         }
-        let count = breakpoints.clock_count();
-        if count > max_points {
-            return Err(crate::engine::SimulationError::Circuit(format!(
-                "transient source-event schedule requires more than the configured {max_points} analysis points"
-            )));
-        }
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ResultValues,
+            breakpoints.clock_count(),
+            max_points,
+        )?;
         Ok(())
     }
 
@@ -1249,7 +1248,7 @@ impl Engine {
             .saturating_add(netlist.options.timeint_breakpoints.len())
             .saturating_add(accurate_fft_points);
         crate::resource::ResourceLimitError::ensure(
-            crate::resource::ResourceKind::AnalysisPoints,
+            crate::resource::ResourceKind::ResultValues,
             requested,
             max_points,
         )?;
@@ -1344,7 +1343,7 @@ impl Engine {
             }
         }
         crate::resource::ResourceLimitError::ensure(
-            crate::resource::ResourceKind::AnalysisPoints,
+            crate::resource::ResourceKind::ResultValues,
             union_count,
             max_points,
         )?;
@@ -1949,7 +1948,7 @@ mod tests {
         assert!(matches!(
             error,
             crate::engine::SimulationError::ResourceLimit(crate::resource::ResourceLimitError {
-                resource: crate::resource::ResourceKind::AnalysisPoints,
+                resource: crate::resource::ResourceKind::ResultValues,
                 requested: 4,
                 limit: 3,
             })

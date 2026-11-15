@@ -439,21 +439,6 @@ impl Engine {
     }
 
     #[inline]
-    /// Check a requested analysis-point count against the configured limit.
-    ///
-    /// Callers that materialise sweep points themselves — batch planners, UI
-    /// sweep editors — should pre-validate here so an oversized sweep is
-    /// rejected before the points are allocated rather than during the run.
-    pub fn ensure_analysis_points(&self, requested: usize) -> Result<(), SimulationError> {
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            requested,
-            self.config.resource_limits.max_analysis_points,
-        )?;
-        Ok(())
-    }
-
-    #[inline]
     pub(crate) fn ensure_result_values(&self, requested: usize) -> Result<(), SimulationError> {
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,

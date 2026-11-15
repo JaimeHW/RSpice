@@ -301,14 +301,6 @@ where
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
 
-    let points = config.max_iterations.saturating_add(1);
-    if points > limits.max_analysis_points {
-        return Err(ServiceRunError::resource_limit(
-            rspice_core::ResourceKind::AnalysisPoints,
-            points,
-            limits.max_analysis_points,
-        ));
-    }
     let retained = config
         .max_iterations
         .saturating_add(1)
@@ -739,20 +731,6 @@ mod configured_search_limits {
         .unwrap_err();
         assert!(matches!(error, ServiceRunError::ResourceLimit(_)));
         assert_eq!(calls.get(), 0);
-        let bounded = OptimizationRunConfig {
-            max_iterations: 10,
-            ..Default::default()
-        };
-        limits.max_analysis_points = 10;
-        let error = run_optimization_with_evaluator(&bounded, limits, &NoAbort, |_| {
-            calls.set(calls.get() + 1);
-            Ok(1.0)
-        })
-        .unwrap_err();
-        assert!(matches!(error, ServiceRunError::ResourceLimit(error)
-            if error.resource == rspice_core::ResourceKind::AnalysisPoints && error.requested == 11 && error.limit == 10));
-        assert_eq!(calls.get(), 0);
-        limits.max_analysis_points = 11;
         limits.max_batch_runs = 1;
         let config = OptimizationRunConfig {
             max_iterations: 10,
@@ -768,7 +746,6 @@ mod configured_search_limits {
         );
         assert_eq!(calls.get(), 1);
         calls.set(0);
-        limits.max_analysis_points = usize::MAX;
         limits.max_result_values = usize::MAX;
         let config = OptimizationRunConfig {
             max_iterations: usize::MAX,

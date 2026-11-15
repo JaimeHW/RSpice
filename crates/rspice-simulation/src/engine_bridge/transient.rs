@@ -89,9 +89,7 @@ impl EngineBridge {
             use rspice_core::engine::{
                 TransientCheckpointEncoding, TransientCheckpointStart, TransientCheckpointStream,
             };
-            execution
-                .request
-                .validate_schedule(config.stop_time, self.resource_limits())?;
+            execution.request.validate_schedule(config.stop_time)?;
             let resume = execution
                 .request
                 .resume

@@ -100,7 +100,7 @@ pub(crate) fn validate_checkpoint_request_lengths(
         .fold(numeric_values.saturating_mul(8), |total, n| {
             total.saturating_add(*n)
         });
-    crate::transient_checkpoint::check_limit(
+    rspice_core::ResourceLimitError::ensure(
         rspice_core::ResourceKind::ExternalDataBytes,
         bytes,
         request.execution_limits.max_external_data_bytes,

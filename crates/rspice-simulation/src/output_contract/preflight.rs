@@ -484,7 +484,7 @@ fn frequency_point_count(
         points_per_unit,
         start,
         stop,
-        rspice_core::ResourceLimits::default().max_analysis_points,
+        rspice_core::ResourceLimits::default().max_result_values,
         &rspice_core::NoAbort,
     )
     .ok()

@@ -5,7 +5,6 @@ use crate::analysis::measure::continuous::poll;
 fn statements<'a>(
     netlist: &'a Netlist,
     analysis: &str,
-    points: usize,
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<&'a MeasureStatement>, SimulationError> {
@@ -21,13 +20,6 @@ fn statements<'a>(
             )?;
             selected.push(statement);
         }
-    }
-    if !selected.is_empty() {
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            points,
-            limits.max_analysis_points,
-        )?;
     }
     Ok(selected)
 }
@@ -190,7 +182,7 @@ pub fn evaluate_tran_continuous_measurements_with_limits_and_abort(
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
-    let statements = statements(netlist, "TRAN_CONT", result.time.len(), limits, abort)?;
+    let statements = statements(netlist, "TRAN_CONT", limits, abort)?;
     if statements.is_empty() {
         return Ok(Vec::new());
     }
@@ -320,7 +312,7 @@ pub fn evaluate_dc_continuous_measurements_with_parameter_contexts_limits_and_ab
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
-    let selected = statements(netlist, "DC_CONT", sweep.len(), limits, abort)?;
+    let selected = statements(netlist, "DC_CONT", limits, abort)?;
     if selected.is_empty() {
         return Ok(Vec::new());
     }
@@ -472,7 +464,7 @@ fn evaluate_ac_continuous_with_parameters(
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
-    let statements = statements(netlist, "AC_CONT", sweep.len(), limits, abort)?;
+    let statements = statements(netlist, "AC_CONT", limits, abort)?;
     if statements.is_empty() {
         return Ok(Vec::new());
     }
@@ -561,7 +553,7 @@ fn evaluate_noise_continuous_with_parameters(
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
-    let statements = statements(netlist, "NOISE_CONT", sweep.len(), limits, abort)?;
+    let statements = statements(netlist, "NOISE_CONT", limits, abort)?;
     if statements.is_empty() {
         return Ok(Vec::new());
     }

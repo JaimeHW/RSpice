@@ -2102,7 +2102,6 @@ pub(super) fn parse_mc_command(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-    max_analysis_points: usize,
     report_spans: &mut Vec<std::ops::Range<usize>>,
 ) -> Result<MonteCarloCommand, ParseError> {
     let run_literal = monte_carlo_identity::literal_span(stream, stream.peek().span.start);
@@ -2118,11 +2117,6 @@ pub(super) fn parse_mc_command(
         line: line_num,
         message: format!(".MC run count {runs} exceeds this platform's supported range"),
     })?;
-    crate::resource::ResourceLimitError::ensure(
-        crate::resource::ResourceKind::AnalysisPoints,
-        runs,
-        max_analysis_points,
-    )?;
     let mut command = MonteCarloCommand::new(runs);
     let mut bootstrap = false;
     let mut resamples = None;
@@ -2320,11 +2314,6 @@ pub(super) fn parse_mc_command(
                 message: ".MC RESAMPLES must be at least two".into(),
             });
         }
-        crate::resource::ResourceLimitError::ensure(
-            crate::resource::ResourceKind::AnalysisPoints,
-            resamples,
-            max_analysis_points,
-        )?;
         command.confidence_method =
             crate::netlist::MonteCarloMeanConfidenceMethod::PercentileBootstrap {
                 resamples,

@@ -62,15 +62,12 @@ impl Engine {
         let frequency_count = config.frequency_point_count().map_err(|error| {
             SimulationError::Circuit(format!("Invalid PAC frequency sweep: {error}"))
         })?;
-        self.ensure_analysis_points(frequency_count)?;
         let sideband_count = config.num_sidebands();
-        self.ensure_analysis_points(sideband_count)?;
         let result_record_count = frequency_count.checked_mul(sideband_count).ok_or_else(|| {
             SimulationError::Circuit(format!(
                 "PAC result grid {frequency_count} frequencies x {sideband_count} sidebands overflows this platform"
             ))
         })?;
-        self.ensure_analysis_points(result_record_count)?;
 
         // The operating point needs enough harmonics that every conversion
         // coupling G[k-m] over the sideband span exists, with headroom for
@@ -91,7 +88,6 @@ impl Engine {
         let op_harmonics = span
             .max(extreme)
             .max(if operating_point.is_some() { 1 } else { 8 });
-        self.ensure_analysis_points(op_harmonics.saturating_add(1))?;
         if let Some(operating_point) = &operating_point
             && op_harmonics
                 > match operating_point {

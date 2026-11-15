@@ -6,22 +6,6 @@ use rspice_vocabulary::product::ContentDigest;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-pub(crate) fn check_limit(
-    resource: rspice_core::ResourceKind,
-    requested: usize,
-    limit: usize,
-) -> Result<(), rspice_core::ResourceLimitError> {
-    if requested <= limit {
-        Ok(())
-    } else {
-        Err(rspice_core::ResourceLimitError {
-            resource,
-            requested,
-            limit,
-        })
-    }
-}
-
 pub use rspice_results::transient_checkpoint::checkpoint_digest;
 pub(crate) mod preparation;
 pub use preparation::selected_images;
@@ -149,12 +133,8 @@ pub struct TransientCheckpointRequest {
     pub resume: Option<TransientCheckpointInput>,
 }
 impl TransientCheckpointRequest {
-    pub fn validate_schedule(
-        &self,
-        stop: f64,
-        limits: ResourceLimits,
-    ) -> Result<(), SimulationError> {
-        self.validate_times(stop, limits)?;
+    pub fn validate_schedule(&self, stop: f64) -> Result<(), SimulationError> {
+        self.validate_times(stop)?;
         if self.times.is_empty() && self.resume.is_none() {
             return Err(SimulationError::InvalidConfig(
                 "Transient checkpoint request has no schedule or resume input".into(),
@@ -163,17 +143,7 @@ impl TransientCheckpointRequest {
         Ok(())
     }
 
-    pub(crate) fn validate_times(
-        &self,
-        stop: f64,
-        limits: ResourceLimits,
-    ) -> Result<(), SimulationError> {
-        check_limit(
-            rspice_core::ResourceKind::AnalysisPoints,
-            self.times.len(),
-            limits.max_analysis_points,
-        )
-        .map_err(|error| SimulationError::from(rspice_core::SimulationError::from(error)))?;
+    pub(crate) fn validate_times(&self, stop: f64) -> Result<(), SimulationError> {
         let mut previous = None;
         for &time in &self.times {
             if !time.is_finite() || time < 0.0 || time > stop || previous.is_some_and(|p| time <= p)

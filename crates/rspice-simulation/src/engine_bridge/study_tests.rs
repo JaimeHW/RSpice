@@ -74,7 +74,7 @@ fn materialized_studies_retain_worker_resource_limits() {
     let netlist =
         rspice_core::Netlist::parse("Bounded study\nV1 in 0 AC 1\nR1 in 0 1k\n.end\n").unwrap();
     let mut config = rspice_core::SimulationConfig::default();
-    config.resource_limits.max_analysis_points = 2;
+    config.resource_limits.max_result_values = 2;
     let error = EngineBridge::run_materialized_with_abort(
         &rspice_core::Engine::new(config),
         &AnalysisConfig::Ac(AcAnalysisConfig {

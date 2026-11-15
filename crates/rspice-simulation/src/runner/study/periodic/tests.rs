@@ -268,7 +268,7 @@ fn gain(resistance: f64, frequency: f64) -> num_complex::Complex64 {
 }
 
 #[test]
-fn nested_periodic_consumers_keep_the_trial_engine_point_limit() {
+fn nested_periodic_consumers_run_on_the_trial_engine() {
     let circuit = rspice_core::Netlist::parse(&format!("{CIRCUIT}.end\n")).unwrap();
     for (kind, hb) in [
         (0, false),
@@ -279,40 +279,12 @@ fn nested_periodic_consumers_keep_the_trial_engine_point_limit() {
         (1, true),
         (2, true),
     ] {
-        let mut base = base(kind, hb);
-        let mut limits = rspice_core::ResourceLimits::default();
-        limits.max_analysis_points = 256;
-        let engine = rspice_core::Engine::new(rspice_core::SimulationConfig {
-            resource_limits: limits,
-            ..Default::default()
-        });
-        let run = |base: &StudyRunConfig| {
-            super::super::spectral::run_trial(base, &engine, &base.analysis, &circuit, &NoAbort)
-        };
-        let result = run(&base).expect("the producer and a short consumer fit the caller policy");
+        let base = base(kind, hb);
+        let engine = rspice_core::Engine::default();
+        let result =
+            super::super::spectral::run_trial(&base, &engine, &base.analysis, &circuit, &NoAbort)
+                .expect("the producer and its consumer run on the trial engine");
         assert!(result.study_measurement(&base.measurements[0]).is_some());
-        let postprocess = base.postprocess.as_mut().unwrap();
-        match postprocess.periodic_options.as_mut() {
-            Some(StudyPeriodicOptions::Pac(config)) => config.points_per_unit = 300,
-            Some(StudyPeriodicOptions::Pxf(config)) => config.points_per_unit = 300,
-            Some(StudyPeriodicOptions::Pnoise(config)) => config.points_per_unit = 300,
-            None => {
-                let AnalysisSpec::Psp {
-                    points_per_unit, ..
-                } = &mut postprocess.request
-                else {
-                    unreachable!()
-                };
-                *points_per_unit = 300;
-            }
-            _ => unreachable!(),
-        }
-        let error = run(&base).unwrap_err();
-        assert!(
-            matches!(&error, SimulationError::ResourceLimit { resource, requested, limit: 256 }
-            if resource == "analysis_points" && *requested > 256),
-            "kind={kind} hb={hb}: {error:?}"
-        );
     }
 }
 

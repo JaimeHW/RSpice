@@ -144,7 +144,7 @@ impl TimeCoordinate {
 struct EventSchedule<'a> {
     tstop: Value,
     abort: &'a dyn AbortSignal,
-    max_points: usize,
+    max_values: usize,
     physical_corners: bool,
     // All candidate crossings of one n-ary extremum share an instruction
     // budget, including recursive level isolation and temporary schedules.
@@ -241,9 +241,9 @@ impl EventSchedule<'_> {
             self.events
                 .insert(if time == 0.0 { 0 } else { time.to_bits() });
             ResourceLimitError::ensure(
-                ResourceKind::AnalysisPoints,
+                ResourceKind::ResultValues,
                 self.events.len(),
-                self.max_points,
+                self.max_values,
             )?;
         }
         Ok(())
@@ -401,7 +401,7 @@ impl BehavioralSources {
         tstop: Value,
         breakpoints: &mut BreakpointManager,
         abort: &dyn AbortSignal,
-        max_points: usize,
+        max_values: usize,
         physical_corners: bool,
     ) -> Result<(), BehavioralBreakpointError> {
         collect_expression_breakpoints(
@@ -416,7 +416,7 @@ impl BehavioralSources {
             tstop,
             breakpoints,
             abort,
-            max_points,
+            max_values,
             physical_corners,
         )
     }
@@ -428,7 +428,7 @@ pub fn collect_expression_breakpoints<'a>(
     tstop: Value,
     breakpoints: &mut BreakpointManager,
     abort: &dyn AbortSignal,
-    max_points: usize,
+    max_values: usize,
     physical_corners: bool,
 ) -> Result<(), BehavioralBreakpointError> {
     if abort.is_aborted() {
@@ -449,7 +449,7 @@ pub fn collect_expression_breakpoints<'a>(
         tstop,
         events,
         abort,
-        max_points,
+        max_values,
         physical_corners,
         isolation_work: None,
     };
@@ -467,7 +467,7 @@ pub(super) fn expression_transient_breakpoints(expr: &Expr, tstop: Value) -> Vec
     let mut schedule = EventSchedule {
         tstop,
         abort: &crate::abort_signal::NoAbort,
-        max_points: usize::MAX,
+        max_values: usize::MAX,
         physical_corners: false,
         isolation_work: None,
         events: BTreeSet::new(),
@@ -720,7 +720,7 @@ mod tests {
         let mut schedule = EventSchedule {
             tstop: 1.0,
             abort: &NoAbort,
-            max_points: 1024,
+            max_values: 1024,
             physical_corners: true,
             isolation_work: Some(&work),
             events: BTreeSet::new(),

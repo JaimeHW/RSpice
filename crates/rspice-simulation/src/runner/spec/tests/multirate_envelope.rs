@@ -76,11 +76,10 @@ fn multirate_envelope_saved_controls_execute_and_retain_physical_results() {
             &rspice_core::NoAbort,
         )
     };
-    for resource in ["matrix_unknowns", "analysis_points", "result_values"] {
+    for resource in ["matrix_unknowns", "result_values"] {
         let mut limited = limits;
         match resource {
             "matrix_unknowns" => limited.max_matrix_unknowns = 1,
-            "analysis_points" => limited.max_analysis_points = 2,
             _ => limited.max_result_values = 1,
         }
         let error = run(limited).unwrap_err();

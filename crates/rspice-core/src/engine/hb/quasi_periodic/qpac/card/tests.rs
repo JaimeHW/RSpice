@@ -101,7 +101,7 @@ fn qpac_card_rejects_dropped_options_invalid_grids_and_resource_overruns() {
         assert!(parse(&format!(".QPAC LIST=(1) SOURCE=V1 OUT=V(out) {tuples}")).is_err());
     }
     let card = parse(&format!(".QPAC DEC 100 1 1e100 {PATH}")).unwrap();
-    let limits = ResourceLimits::default().with(|limits| limits.max_analysis_points = 10);
+    let limits = ResourceLimits::default().with(|limits| limits.max_result_values = 10);
     assert!(matches!(
         QpacRequest::from_qpac_card_with_abort(&card, &limits, &NoAbort),
         Err(SimulationError::ResourceLimit(_))
@@ -138,7 +138,7 @@ fn qpac_card_executes_against_the_decks_retained_qpss_state() {
         let limits = ResourceLimits::default();
         assert_eq!(QpacRequest::validate_qpac_card(&sweep, &limits).unwrap(), expected_offsets.len());
         let mut limited = limits;
-        limited.max_analysis_points = expected_offsets.len() - 1;
+        limited.max_result_values = expected_offsets.len() - 1;
         assert!(matches!(QpacRequest::validate_qpac_card(&sweep, &limited), Err(SimulationError::ResourceLimit(_))));
         let result = engine.run_qpac_card_from_qpss_with_abort(&deck, &sweep, &point, &NoAbort).unwrap();
         assert_eq!(result.metadata.request.offsets_hz.len(), expected_offsets.len());

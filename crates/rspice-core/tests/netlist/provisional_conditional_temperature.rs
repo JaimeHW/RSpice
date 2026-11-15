@@ -123,7 +123,7 @@ fn active_resource_limits_remain_terminal_during_recovery() {
         "Recovered limit\n.if (1/(TEMP-27))\n.data live x\n1\n2\n3\n.enddata\n.endif\n.temp 85\n.end\n",
     ] {
         let mut options = NetlistParseOptions::default();
-        options.resource_limits.max_analysis_points = 2;
+        options.resource_limits.max_result_values = 2;
         let error = Netlist::parse_with_options(source, options).unwrap_err();
         assert!(matches!(error, ParseError::ResourceLimit(_)), "{error}");
     }

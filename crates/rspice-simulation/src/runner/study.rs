@@ -284,7 +284,7 @@ mod tests {
         configured.measurements = vec!["last:V(in)".into()];
         configured.histogram_bins = rspice_core::SimulationConfig::default()
             .resource_limits
-            .max_analysis_points
+            .max_result_values
             + 1;
         assert!(matches!(
             run_monte_carlo(

@@ -10,7 +10,6 @@ pub(in crate::netlist::parser) struct AnalysisCardContext<'a> {
     pub(super) line_num: usize,
     pub(super) logical_line: &'a str,
     pub(super) params: &'a ParamContext,
-    pub(super) max_analysis_points: usize,
     pub(super) origin: &'a NetlistSourceLocation,
     pub(super) spice_dialect: crate::config::SpiceDialect,
     pub(super) lin_exists: bool,
@@ -226,7 +225,6 @@ impl ParsedAnalysisCard {
             line_num,
             logical_line,
             params,
-            max_analysis_points,
             origin,
             spice_dialect,
             lin_exists,
@@ -452,13 +450,7 @@ impl ParsedAnalysisCard {
             }
             AnalysisHead::MonteCarlo => {
                 let mut report_spans = Vec::new();
-                let mc_cmd = parse_mc_command(
-                    stream,
-                    line_num,
-                    params,
-                    max_analysis_points,
-                    &mut report_spans,
-                )?;
+                let mc_cmd = parse_mc_command(stream, line_num, params, &mut report_spans)?;
                 monte_carlo_source_card = Some(monte_carlo_identity::SourceCard::new(
                     origin,
                     logical_line,
@@ -751,7 +743,6 @@ mod tests {
                 line_num: 7,
                 logical_line: line,
                 params: &state.params,
-                max_analysis_points: state.max_analysis_points,
                 origin: &NetlistSourceLocation::in_memory(7),
                 spice_dialect: crate::config::SpiceDialect::BestAvailable,
                 lin_exists: state.lin_analysis.is_some(),

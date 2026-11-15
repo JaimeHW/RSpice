@@ -2328,7 +2328,6 @@ fn snapshot_digest(parts: &SnapshotParts, pvt_points: &[PreparedPvtPoint]) -> Co
     writer.u64(parts.execution_limits.max_flattened_elements as u64);
     writer.u64(parts.execution_limits.max_circuit_nodes as u64);
     writer.u64(parts.execution_limits.max_matrix_unknowns as u64);
-    writer.u64(parts.execution_limits.max_analysis_points as u64);
     writer.u64(parts.execution_limits.max_result_values as u64);
     writer.u64(parts.execution_limits.max_transport_history_bytes as u64);
     writer.u64(parts.execution_limits.max_mixed_interval_events as u64);

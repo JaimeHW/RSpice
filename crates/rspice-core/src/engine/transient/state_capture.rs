@@ -277,7 +277,6 @@ impl Engine {
         let requested = capture.times().len();
         self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_transient_request_floor(tstop, max_step)?;
         let (result, _, _) = engine.run_tran_resolved_with_resume(
             netlist,
             netlist,
@@ -329,7 +328,6 @@ impl Engine {
         capture.built = RefCell::new(built);
         let requested = times.len();
         let engine = self.resolved_for_netlist(netlist);
-        engine.ensure_transient_request_floor(tstop, max_step)?;
         let (result, _, _) = engine.run_tran_resolved_with_resume(
             netlist,
             netlist,
@@ -435,7 +433,6 @@ impl Engine {
         engine.config.locked_time_grid = Some(std::sync::Arc::new(mesh.to_vec()));
         engine.config.locked_time_step_sizes =
             steps.map(|steps| std::sync::Arc::new(steps.to_vec()));
-        engine.ensure_transient_request_floor(tstop - image.time, max_step)?;
         let (result, _, _) = engine.run_tran_resolved_with_resume(
             netlist,
             netlist,
@@ -493,7 +490,6 @@ impl Engine {
         self.reset_convergence_quality();
         let mut engine = self.resolved_for_netlist(netlist);
         engine.small_signal_state = None;
-        engine.ensure_transient_request_floor(tstop - checkpoint.time, max_step)?;
         engine.run_tran_resolved_with_resume(
             netlist,
             netlist,

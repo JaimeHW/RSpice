@@ -153,7 +153,6 @@ impl WorkerStbResultTransport {
             || n == 0
             || !n.is_multiple_of(9)
             || n > limits.max_result_values
-            || n / 9 > limits.max_analysis_points
         {
             return Err("STB requires a bounded dedicated sample buffer".into());
         }

@@ -1,14 +1,12 @@
 use std::path::Path;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rspice_core::NoAbort;
-use rspice_core::analysis::HbConfig;
 use rspice_core::analysis::pac::{PacConfig, PacSweepType};
 use rspice_core::netlist::{IncludeProcessor, NetlistParseOptions, ParseError};
 use rspice_core::{
     Engine, Netlist, ResourceKind, ResourceLimitError, ResourceLimits, SimulationConfig,
-    SimulationConfigError, SimulationError,
+    SimulationError,
 };
 
 fn limits_with(update: impl FnOnce(&mut ResourceLimits)) -> ResourceLimits {
@@ -18,20 +16,15 @@ fn limits_with(update: impl FnOnce(&mut ResourceLimits)) -> ResourceLimits {
 }
 
 #[test]
-fn pss_refinement_enforces_point_and_waveform_workspace_limits() {
+fn pss_refinement_enforces_waveform_workspace_limits() {
     use rspice_core::abort_signal::NoAbort;
     use rspice_core::analysis::PssConfig;
     let netlist = Netlist::parse("PSS refinement limits\nV1 in 0 SIN(0 1 1meg)\nR1 in out 1k\nC1 out 0 159.154943091895p\n.end\n").unwrap();
-    for (kind, limits) in [
-        (
-            ResourceKind::AnalysisPoints,
-            limits_with(|limits| limits.max_analysis_points = 32),
-        ),
-        (
+    {
+        let (kind, limits) = (
             ResourceKind::ResultValues,
             limits_with(|limits| limits.max_result_values = 1000),
-        ),
-    ] {
+        );
         let engine = Engine::new(SimulationConfig {
             resource_limits: limits,
             ..Default::default()
@@ -50,8 +43,10 @@ fn pss_refinement_enforces_point_and_waveform_workspace_limits() {
             "{error}"
         );
     }
+    // The default 256-step mesh holds 257 times, one retained value each; an
+    // aliased source's mesh must not fit.
     let engine = Engine::new(SimulationConfig {
-        resource_limits: limits_with(|limits| limits.max_analysis_points = 256),
+        resource_limits: limits_with(|limits| limits.max_result_values = 257),
         ..Default::default()
     });
     for source in [
@@ -86,7 +81,7 @@ fn pss_refinement_enforces_point_and_waveform_workspace_limits() {
                 .unwrap_err(),
         ] {
             assert!(
-                matches!(error, SimulationError::ResourceLimit(ResourceLimitError { resource: ResourceKind::AnalysisPoints, requested, limit: 256 }) if requested > 256),
+                matches!(error, SimulationError::ResourceLimit(ResourceLimitError { resource: ResourceKind::ResultValues, requested, limit: 257 }) if requested > 257),
                 "{error}"
             );
         }
@@ -97,8 +92,10 @@ fn pss_refinement_enforces_point_and_waveform_workspace_limits() {
 fn redundant_flat_knots_do_not_consume_the_pss_source_mesh_budget() {
     use rspice_core::abort_signal::NoAbort;
     use rspice_core::analysis::PssConfig;
+    // Validating the default 257-time mesh retains 526 values for these
+    // decks, inside a 768-value budget.
     let engine = Engine::new(SimulationConfig {
-        resource_limits: limits_with(|limits| limits.max_analysis_points = 256),
+        resource_limits: limits_with(|limits| limits.max_result_values = 768),
         ..Default::default()
     });
     for source in [
@@ -132,10 +129,7 @@ fn narrow_source_pulses_use_bounded_local_meshes_including_scaled_files() {
     let directory = TestDirectory::new("pss-local-mesh");
     let path = directory.0.join("pulse.csv");
     std::fs::write(&path, "0 0\n400 0\n410 1\n510 1\n520 0\n1000000 0\n").unwrap();
-    let engine = Engine::new(SimulationConfig {
-        resource_limits: limits_with(|limits| limits.max_analysis_points = 1024),
-        ..Default::default()
-    });
+    let engine = Engine::default();
     for source in [
         "V1 in 0 PULSE(0 1 400p 10p 10p 100p 1u)".to_owned(),
         "V1 in 0 PWL(0 0 1e-300 0 400p 0 410p 1 510p 1 520p 0 1u 0) R=0".to_owned(),
@@ -586,29 +580,11 @@ fn pac_result_budget_counts_retained_branch_current_spectra() {
 }
 
 #[test]
-fn locked_time_grid_is_rejected_during_configuration_validation() {
-    let config = SimulationConfig {
-        resource_limits: limits_with(|limits| limits.max_analysis_points = 2),
-        locked_time_grid: Some(Arc::new(vec![0.0, 1.0, 2.0])),
-        ..SimulationConfig::default()
-    };
-
-    assert!(matches!(
-        config.validate(),
-        Err(SimulationConfigError::ResourceLimit(ResourceLimitError {
-            resource: ResourceKind::AnalysisPoints,
-            requested: 3,
-            limit: 2,
-        }))
-    ));
-}
-
-#[test]
-fn frequency_and_dc_sweeps_enforce_point_budgets_before_solving() {
+fn frequency_and_dc_sweeps_enforce_value_budgets_before_solving() {
     let netlist =
         Netlist::parse("limited analyses\nV1 1 0 1 AC 1\nR1 1 0 1k\n.end").expect("fixture parses");
     let config = SimulationConfig {
-        resource_limits: limits_with(|limits| limits.max_analysis_points = 2),
+        resource_limits: limits_with(|limits| limits.max_result_values = 2),
         ..SimulationConfig::default()
     };
     let engine = Engine::new(config);
@@ -616,36 +592,17 @@ fn frequency_and_dc_sweeps_enforce_point_budgets_before_solving() {
     assert!(matches!(
         engine.run_ac(&netlist, &[1.0, 10.0, 100.0]),
         Err(SimulationError::ResourceLimit(ResourceLimitError {
-            resource: ResourceKind::AnalysisPoints,
-            requested: 3,
+            resource: ResourceKind::ResultValues,
+            requested,
             limit: 2,
-        }))
+        })) if requested > 3
     ));
     assert!(matches!(
         engine.run_dc_sweep(&netlist, "V1", 0.0, 2.0, 1.0),
         Err(SimulationError::ResourceLimit(ResourceLimitError {
-            resource: ResourceKind::AnalysisPoints,
+            resource: ResourceKind::ResultValues,
             requested: 3,
             limit: 2,
-        }))
-    ));
-}
-
-#[test]
-fn transient_preflight_rejects_a_minimum_point_count_over_budget() {
-    let netlist =
-        Netlist::parse("limited transient\nV1 1 0 1\nR1 1 0 1k\n.end").expect("fixture parses");
-    let config = SimulationConfig {
-        resource_limits: limits_with(|limits| limits.max_analysis_points = 4),
-        ..SimulationConfig::default()
-    };
-
-    assert!(matches!(
-        Engine::new(config).run_tran(&netlist, 1.0, 0.25),
-        Err(SimulationError::ResourceLimit(ResourceLimitError {
-            resource: ResourceKind::AnalysisPoints,
-            requested: 5,
-            limit: 4,
         }))
     ));
 }
@@ -761,24 +718,6 @@ fn step_results_enforce_the_aggregate_result_budget() {
             requested,
             limit: 15,
         })) if requested > 15
-    ));
-}
-
-#[test]
-fn harmonic_balance_rejects_oversized_collocation_before_circuit_build() {
-    let netlist = Netlist::parse("limited harmonic balance\n.end").expect("fixture parses");
-    let config = SimulationConfig {
-        resource_limits: limits_with(|limits| limits.max_analysis_points = 3),
-        ..SimulationConfig::default()
-    };
-
-    assert!(matches!(
-        Engine::new(config).run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(3)),
-        Err(SimulationError::ResourceLimit(ResourceLimitError {
-            resource: ResourceKind::AnalysisPoints,
-            requested,
-            limit: 3,
-        })) if requested > 3
     ));
 }
 
@@ -903,35 +842,30 @@ fn dcmatch_preserves_statistical_moment_resource_errors() {
             let expected = match case {
                 "vector" => {
                     config.resource_limits.max_result_values = 2;
-                    ResourceLimitError {
+                    Some(ResourceLimitError {
                         resource: ResourceKind::ResultValues,
                         requested: 3,
                         limit: 2,
-                    }
+                    })
                 }
                 "matrix" => {
                     config.resource_limits.max_result_values = 128;
-                    ResourceLimitError {
+                    Some(ResourceLimitError {
                         resource: ResourceKind::ResultValues,
                         requested: 288,
                         limit: 128,
-                    }
+                    })
                 }
-                _ => {
-                    config.resource_limits.max_analysis_points = 1;
-                    ResourceLimitError {
-                        resource: ResourceKind::AnalysisPoints,
-                        requested: 512,
-                        limit: 1,
-                    }
-                }
+                _ => None,
             };
-            let engine = Engine::new(config);
-            assert!(
-                matches!(engine.run_dc_match_with_abort(&netlist, &card, &NoAbort), Err(SimulationError::ResourceLimit(error)) if error == expected),
-                "{scope:?}/{case}"
-            );
-            assert_eq!(engine.convergence_quality().total_iterations, 0);
+            if let Some(expected) = expected {
+                let engine = Engine::new(config);
+                assert!(
+                    matches!(engine.run_dc_match_with_abort(&netlist, &card, &NoAbort), Err(SimulationError::ResourceLimit(error)) if error == expected),
+                    "{scope:?}/{case}"
+                );
+                assert_eq!(engine.convergence_quality().total_iterations, 0);
+            }
 
             // The same valid circuit remains executable with sufficient quota.
             // V=I*R is linear in all three independent 10-ohm variations;

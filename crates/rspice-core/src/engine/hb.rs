@@ -1945,14 +1945,12 @@ impl Engine {
         config
             .validate()
             .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
-        let fft_size = config
+        config
             .checked_fft_size()
             .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
-        let spectral_components = config.num_harmonics.checked_add(1).ok_or_else(|| {
+        config.num_harmonics.checked_add(1).ok_or_else(|| {
             HbError::InvalidConfig("num_harmonics exceeds the addressable spectrum".to_owned())
         })?;
-        self.ensure_analysis_points(fft_size)?;
-        self.ensure_analysis_points(spectral_components)?;
         Ok(())
     }
 
@@ -2346,12 +2344,6 @@ mod tests {
             .hb_config_for_dependent_sources(&circuit, config.clone(), Some(128), &NoAbort)
             .unwrap_err();
         assert!(error.to_string().contains("sampling capacity 128"));
-        let mut limited = SimulationConfig::default();
-        limited.resource_limits.max_analysis_points = 128;
-        let error = Engine::new(limited)
-            .hb_config_for_dependent_sources(&circuit, config.clone(), None, &NoAbort)
-            .unwrap_err();
-        assert!(matches!(error, SimulationError::ResourceLimit(_)));
         let abort = crate::abort_signal::CountingAbort::new(0);
         assert!(matches!(
             engine.hb_config_for_dependent_sources(&circuit, config.clone(), None, &abort,),
@@ -2749,7 +2741,7 @@ mod tests {
             spice_dialect: SpiceDialect::Xyce,
             ..Default::default()
         };
-        simulation.resource_limits.max_analysis_points = 20_000;
+        simulation.resource_limits.max_result_values = 20_000;
         let engine = Engine::new(simulation);
         let mut seed = HbSolverState::new(2, config.num_harmonics);
         seed.try_prepare_mna_branches(1, config.num_harmonics)
@@ -2763,7 +2755,7 @@ mod tests {
                 &["v1".to_string()],
                 &NoAbort,
             )
-            .expect("the TAHB transient fits a 20k-point budget");
+            .expect("the TAHB transient fits a 20k-value budget");
         // v(a) = 1 + sin(2*pi*100 kHz*t): DC 1 and -j/2 at k=1, to within
         // the linear-interpolation bound over steps of at most a tenth of
         // the period, (2*pi*1e5)^2 * (1e-6)^2 / 8.

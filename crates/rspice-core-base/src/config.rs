@@ -857,11 +857,6 @@ impl SimulationConfig {
         self.convergence_config.validate()?;
         self.bypass_config.validate()?;
         if let Some(grid) = self.locked_time_grid.as_deref() {
-            ResourceLimitError::ensure(
-                ResourceKind::AnalysisPoints,
-                grid.len(),
-                self.resource_limits.max_analysis_points,
-            )?;
             validate_locked_time_grid(grid)?;
             if let Some(step_sizes) = self.locked_time_step_sizes.as_deref() {
                 if step_sizes.len() != grid.len() {

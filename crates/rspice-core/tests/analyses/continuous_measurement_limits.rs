@@ -122,15 +122,10 @@ fn empty_and_failed_streams_cannot_bypass_the_budget() {
 }
 
 #[test]
-fn input_axis_limit_and_preexisting_cancellation_are_typed() {
+fn preexisting_cancellation_is_typed() {
     let engine = engine(".MEAS TRAN_CONT sample FIND V(out) AT=0.5");
     let axis = [0.0, 1.0];
     let signals = HashMap::from([("V(out)".into(), axis.as_slice())]);
-    let mut policy = limits(3);
-    policy.max_analysis_points = 1;
-    assert!(
-        matches!(engine.evaluate_continuous_with_limits_and_abort(&axis, &signals, &[], &policy, &NoAbort), Err(SimulationError::ResourceLimit(limit)) if limit.resource == ResourceKind::AnalysisPoints)
-    );
     assert!(matches!(
         engine.evaluate_continuous_with_limits_and_abort(
             &axis,

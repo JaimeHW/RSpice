@@ -14,7 +14,6 @@ fn borrowed_preflight_checks_exact_admission_limits_without_solving_rows() {
         table_name: "POINTS".into(),
     };
     let mut limits = ResourceLimits::default();
-    limits.max_analysis_points = 2;
     limits.max_batch_runs = 2;
     limits.max_result_values = 4;
     Engine::validate_frequency_data_request_with_abort(
@@ -26,17 +25,9 @@ fn borrowed_preflight_checks_exact_admission_limits_without_solving_rows() {
     .unwrap();
     // These exact limits admit the four coordinates, without allocating or
     // charging for row solutions that checking does not produce.
-    for resource in [
-        ResourceKind::AnalysisPoints,
-        ResourceKind::BatchRuns,
-        ResourceKind::ResultValues,
-    ] {
+    for resource in [ResourceKind::BatchRuns, ResourceKind::ResultValues] {
         let mut bounded = limits;
         let (requested, limit) = match resource {
-            ResourceKind::AnalysisPoints => {
-                bounded.max_analysis_points = 1;
-                (2, 1)
-            }
             ResourceKind::BatchRuns => {
                 bounded.max_batch_runs = 1;
                 (2, 1)
@@ -314,13 +305,10 @@ fn compatibility_netlists_have_an_aggregate_source_budget() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn row_counts_and_all_table_values_are_checked_before_solving() {
     let netlist = Netlist::parse(DECK).unwrap();
-    for kind in [ResourceKind::AnalysisPoints, ResourceKind::BatchRuns] {
+    {
+        let kind = ResourceKind::BatchRuns;
         let mut limits = ResourceLimits::default();
-        if kind == ResourceKind::AnalysisPoints {
-            limits.max_analysis_points = 1;
-        } else {
-            limits.max_batch_runs = 1;
-        }
+        limits.max_batch_runs = 1;
         let bounded = engine(limits);
         assert_limit(
             bounded

@@ -51,7 +51,6 @@ pub(super) fn parse_command(
         startup_scope,
         options,
         temperature_options,
-        max_analysis_points,
         diagnostics,
         spef_includes,
         origin,
@@ -72,7 +71,6 @@ pub(super) fn parse_command(
             line_num,
             logical_line,
             params,
-            max_analysis_points,
             origin,
             spice_dialect,
             lin_exists: lin_analysis.is_some(),
@@ -248,7 +246,6 @@ pub(super) fn parse_command(
                 line_num,
                 params,
                 options,
-                max_analysis_points,
                 unknown_warned,
                 diagnostics,
                 parameter_direction,
@@ -1900,13 +1897,6 @@ fn restart_interval_schedule_starts(stream: &TokenStream, params: &ParamContext)
     }
 }
 
-fn restart_interval_count(options: &super::SimulationOptions) -> usize {
-    options
-        .restart
-        .as_ref()
-        .map_or(0, |restart| restart.intervals.len())
-}
-
 fn parse_restart_boolean_option(
     stream: &mut TokenStream,
     line_num: usize,
@@ -2053,19 +2043,7 @@ fn parse_restart_interval_schedule(
     line_num: usize,
     params: &ParamContext,
     options: &mut super::SimulationOptions,
-    max_analysis_points: usize,
 ) -> Result<(), ParseError> {
-    let retained_points = options
-        .output_time_points
-        .len()
-        .saturating_add(options.timeint_breakpoints.len())
-        .saturating_add(output_interval_count(options))
-        .saturating_add(
-            options
-                .restart
-                .as_ref()
-                .map_or(0, |restart| restart.intervals.len()),
-        );
     let mut intervals = Vec::new();
     let mut previous_time = options
         .restart
@@ -2109,14 +2087,6 @@ fn parse_restart_interval_schedule(
                 ),
             });
         }
-        crate::resource::ResourceLimitError::ensure(
-            crate::resource::ResourceKind::AnalysisPoints,
-            retained_points
-                .saturating_add(intervals.len())
-                .saturating_add(1),
-            max_analysis_points,
-        )
-        .map_err(ParseError::from)?;
 
         let time = if time == 0.0 { 0.0 } else { time };
         previous_time = Some(time);
@@ -2135,14 +2105,7 @@ fn parse_output_interval_schedule(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-    options: &super::SimulationOptions,
-    max_analysis_points: usize,
 ) -> Result<Vec<crate::netlist::XyceOutputInterval>, ParseError> {
-    let retained_points = options
-        .output_time_points
-        .len()
-        .saturating_add(options.timeint_breakpoints.len())
-        .saturating_add(restart_interval_count(options));
     let mut intervals = Vec::new();
     let mut previous_time = None;
     loop {
@@ -2178,25 +2141,10 @@ fn parse_output_interval_schedule(
                 ),
             });
         }
-        crate::resource::ResourceLimitError::ensure(
-            crate::resource::ResourceKind::AnalysisPoints,
-            retained_points
-                .saturating_add(intervals.len())
-                .saturating_add(1),
-            max_analysis_points,
-        )
-        .map_err(ParseError::from)?;
         let time = if time == 0.0 { 0.0 } else { time };
         previous_time = Some(time);
         intervals.push(crate::netlist::XyceOutputInterval { time, interval });
     }
-}
-
-fn output_interval_count(options: &super::SimulationOptions) -> usize {
-    options
-        .output_interval_schedule
-        .as_ref()
-        .map_or(0, |schedule| schedule.intervals.len())
 }
 
 fn parse_time_point_vector_option(
@@ -2204,8 +2152,6 @@ fn parse_time_point_vector_option(
     line_num: usize,
     params: &ParamContext,
     option_name: &str,
-    retained_points: usize,
-    max_analysis_points: usize,
 ) -> Result<Vec<Value>, ParseError> {
     let mut values = Vec::new();
     loop {
@@ -2213,14 +2159,6 @@ fn parse_time_point_vector_option(
             line: line_num,
             message: format!("{option_name} expects a non-empty comma-separated time list"),
         })?;
-        crate::resource::ResourceLimitError::ensure(
-            crate::resource::ResourceKind::AnalysisPoints,
-            retained_points
-                .saturating_add(values.len())
-                .saturating_add(1),
-            max_analysis_points,
-        )
-        .map_err(ParseError::from)?;
         if !value.is_finite() || value < 0.0 {
             return Err(ParseError::Syntax {
                 line: line_num,
@@ -2244,23 +2182,12 @@ fn parse_time_point_vector_option(
     Ok(values)
 }
 
-fn append_canonical_time_points(
-    target: &mut Vec<Value>,
-    mut values: Vec<Value>,
-    other: &[Value],
-    max_analysis_points: usize,
-) -> Result<(), ParseError> {
+fn append_canonical_time_points(target: &mut Vec<Value>, mut values: Vec<Value>) {
     target.append(&mut values);
     target.sort_by(Value::total_cmp);
     target.dedup_by(|left, right| {
         (*left - *right).abs() <= crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE
     });
-    crate::resource::ResourceLimitError::ensure(
-        crate::resource::ResourceKind::AnalysisPoints,
-        target.len().saturating_add(other.len()),
-        max_analysis_points,
-    )
-    .map_err(ParseError::from)
 }
 
 fn parse_boolean_option(
@@ -7999,17 +7926,6 @@ mod tests {
                 "unexpected error for {option:?}: {error}"
             );
         }
-
-        let error = Netlist::parse_with_options(
-            &deck_with_options(".options output initial_interval=1u 2u 1u 4u 1u"),
-            crate::netlist::NetlistParseOptions {
-                resource_limits: crate::resource::ResourceLimits::default()
-                    .with(|limits| limits.max_analysis_points = 1),
-                ..crate::netlist::NetlistParseOptions::default()
-            },
-        )
-        .expect_err("OUTPUT interval transitions share the analysis-point budget");
-        assert!(error.to_string().contains("analysis_points"));
     }
 
     #[test]
@@ -8207,56 +8123,6 @@ mod tests {
             assert!(
                 error.to_string().contains("RESTART"),
                 "unexpected error for {options:?}: {error}"
-            );
-        }
-    }
-
-    #[test]
-    fn xyce_restart_interval_pairs_obey_the_analysis_point_limit() {
-        let error = Netlist::parse_with_options(
-            &deck_with_options(".options restart initial_interval=1n 10n 2n 20n 4n"),
-            crate::netlist::NetlistParseOptions {
-                resource_limits: crate::resource::ResourceLimits::default()
-                    .with(|limits| limits.max_analysis_points = 1),
-                ..crate::netlist::NetlistParseOptions::default()
-            },
-        )
-        .expect_err("restart schedules must honor the parser resource limit");
-        assert!(matches!(
-            error,
-            ParseError::ResourceLimit(crate::resource::ResourceLimitError {
-                resource: crate::resource::ResourceKind::AnalysisPoints,
-                requested: 2,
-                limit: 1,
-            })
-        ));
-    }
-
-    #[test]
-    fn restart_and_transient_point_schedules_share_one_order_independent_limit() {
-        for options in [
-            ".options restart 10n 2n\n.options output outputtimepoints=20n",
-            ".options output outputtimepoints=20n\n.options restart 10n 2n",
-        ] {
-            let error = Netlist::parse_with_options(
-                &deck_with_options(options),
-                crate::netlist::NetlistParseOptions {
-                    resource_limits: crate::resource::ResourceLimits::default()
-                        .with(|limits| limits.max_analysis_points = 1),
-                    ..crate::netlist::NetlistParseOptions::default()
-                },
-            )
-            .expect_err("all retained transient schedules share the point limit");
-            assert!(
-                matches!(
-                    error,
-                    ParseError::ResourceLimit(crate::resource::ResourceLimitError {
-                        resource: crate::resource::ResourceKind::AnalysisPoints,
-                        requested: 2,
-                        limit: 1,
-                    })
-                ),
-                "unexpected limit error for {options:?}: {error}"
             );
         }
     }
@@ -8493,30 +8359,6 @@ mod tests {
             assert!(error.to_string().contains("INITIAL_INTERVAL"));
             assert!(error.to_string().contains("OUTPUTTIMEPOINTS"));
         }
-    }
-
-    #[test]
-    fn xyce_time_point_lists_share_the_analysis_point_resource_limit() {
-        let error = Netlist::parse_with_options(
-            &deck_with_options(
-                ".options output outputtimepoints=1ms,2ms\n\
-                 .options timeint breakpoints=3ms,4ms",
-            ),
-            crate::netlist::NetlistParseOptions {
-                resource_limits: crate::resource::ResourceLimits::default()
-                    .with(|limits| limits.max_analysis_points = 3),
-                ..crate::netlist::NetlistParseOptions::default()
-            },
-        )
-        .expect_err("combined transient schedules must honor the parser resource limit");
-        assert!(matches!(
-            error,
-            ParseError::ResourceLimit(crate::resource::ResourceLimitError {
-                resource: crate::resource::ResourceKind::AnalysisPoints,
-                requested: 4,
-                limit: 3,
-            })
-        ));
     }
 
     #[test]

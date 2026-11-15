@@ -46,7 +46,7 @@ pub(super) fn configured_times(
     let requested = explicit.len().saturating_add(1);
     if requested > max_points {
         return Err(ServiceRunError::resource_limit(
-            rspice_core::ResourceKind::AnalysisPoints,
+            rspice_core::ResourceKind::ResultValues,
             requested,
             max_points,
         ));

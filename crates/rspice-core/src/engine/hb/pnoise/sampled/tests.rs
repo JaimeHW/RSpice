@@ -16,7 +16,6 @@ fn prepare(request: &PeriodicNoiseSampling) -> Result<PreparedSampling, Simulati
         &["out".into()],
         (0, None),
         1.0,
-        10000,
         &NoAbort,
     )
 }
@@ -143,7 +142,6 @@ fn sampled_pnoise_delay_preserves_different_probe_slopes_and_fractional_phase() 
         &["out".into(), "reference".into()],
         (0, None),
         1.0,
-        10000,
         &NoAbort,
     )
     .unwrap();
@@ -225,19 +223,6 @@ fn sampled_pnoise_crossing_search_resolves_close_pairs_and_refuses_tangencies() 
             &["out".into()],
             (0, None),
             1.0,
-            1,
-            &NoAbort
-        ),
-        Err(SimulationError::ResourceLimit(_))
-    ));
-    assert!(matches!(
-        PreparedSampling::prepare(
-            &request,
-            &sine_state(),
-            &["out".into()],
-            (0, None),
-            1.0,
-            1000,
             &crate::abort_signal::ImmediateAbort
         ),
         Err(SimulationError::Aborted)

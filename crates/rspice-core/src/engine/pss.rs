@@ -2445,7 +2445,6 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         config.validate().map_err(PssError::InvalidConfig)?;
-        self.ensure_analysis_points(config.points_per_period)?;
 
         // Build and prepare circuit
         let mut circuit = match built {
@@ -2489,7 +2488,6 @@ impl Engine {
             .map(|line| (2.0 * config.period() / line.delay()).ceil() as usize)
             .max()
             .unwrap_or(0);
-        self.ensure_analysis_points(delay_steps)?;
         circuit.integration_steps = circuit
             .integration_steps
             .max(delay_steps)
@@ -2518,7 +2516,6 @@ impl Engine {
                 .saturating_add(state_dimension.saturating_mul(state_dimension))
                 .saturating_add(state_dimension.saturating_mul(2)),
         )?;
-        self.ensure_analysis_points(circuit.grid_steps(&config))?;
 
         // Use the exact retained operating point when one was supplied. The
         // basis check happens only after full circuit elaboration and matrix
@@ -2595,7 +2592,6 @@ impl Engine {
             .unwrap_or(0)
             .max(self.pss_minimum_grid_steps(detected_period)?);
         if detected_delay_steps > circuit.integration_steps {
-            self.ensure_analysis_points(detected_delay_steps)?;
             circuit.integration_steps = detected_delay_steps;
             circuit.integration_mesh =
                 self.pss_source_mesh(&circuit, &config, detected_delay_steps, abort)?;
@@ -3257,7 +3253,6 @@ impl Engine {
         fine_steps: usize,
         precision_floor_probe: bool,
     ) -> Result<(), SimulationError> {
-        self.ensure_analysis_points(fine_steps)?;
         // Derivative workers retain only endpoint state. Keep the coarse
         // orbit, the current fine orbit, mesh/index storage and dense shooting
         // workspace. Floor qualification retains one additional solved orbit.
@@ -5310,7 +5305,7 @@ impl Engine {
                 },
                 &mut breakpoints,
                 abort,
-                self.config.resource_limits.max_analysis_points,
+                self.config.resource_limits.max_result_values,
             )?;
         }
         let mut lte_estimator = LteEstimator::with_tolerances_and_reference(
@@ -5361,7 +5356,6 @@ impl Engine {
             fft_results: Vec::new(),
         });
         if fixed_grid && let Some(result) = &mut result {
-            self.ensure_analysis_points(fixed_steps)?;
             self.ensure_result_values(
                 fixed_steps
                     .saturating_add(1)
@@ -5514,7 +5508,6 @@ impl Engine {
                     .fold(0usize, |sum, line| {
                         sum.saturating_add(line.history_storage_values().saturating_add(11))
                     });
-                self.ensure_analysis_points(total_iterations)?;
                 self.ensure_result_values(
                     total_iterations
                         .saturating_add(1)

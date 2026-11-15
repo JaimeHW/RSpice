@@ -70,12 +70,6 @@ impl HbSolver {
             }
         }
         let inputs = bands.saturating_add(2 * harmonics);
-        crate::ResourceLimitError::ensure(
-            crate::ResourceKind::AnalysisPoints,
-            inputs.saturating_mul(bands).saturating_mul(ports.len()),
-            limits.max_analysis_points,
-        )
-        .map_err(error)?;
         let values = inputs
             .saturating_mul(channels.saturating_mul(3).saturating_add(3))
             .saturating_add(

@@ -100,7 +100,6 @@ impl Engine {
                     .into(),
             ));
         }
-        self.ensure_analysis_points(study.histogram_bins)?;
         let mut names = HashSet::new();
         for name in &study.measurements {
             if abort.is_aborted() {
@@ -120,7 +119,6 @@ impl Engine {
             study.confidence_pct,
             study.confidence_method,
             study.num_runs,
-            study.measurements.len(),
             self.config.resource_limits,
         )?;
         // Reserve for trial rows, transposed samples, histogram edges/counts,

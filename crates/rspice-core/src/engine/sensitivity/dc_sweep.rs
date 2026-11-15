@@ -169,7 +169,7 @@ impl Engine {
                 ".SENS sweep point count overflows the platform address space".to_owned(),
             )
         })?;
-        engine.ensure_analysis_points(point_count)?;
+        engine.ensure_result_values(point_count)?;
 
         let mut points = Vec::with_capacity(point_count);
         let outer_values = outer

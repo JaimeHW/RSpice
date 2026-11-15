@@ -674,9 +674,7 @@ impl Engine {
                 return Err(SimulationError::Circuit("sampled PNOISE requires output sideband zero and offsets no higher than half the carrier frequency".into()));
             }
         }
-        self.ensure_analysis_points(offsets.len())?;
         let sideband_count = (max_sideband as usize).saturating_mul(2).saturating_add(1);
-        self.ensure_analysis_points(sideband_count)?;
 
         let span = (max_sideband as usize).saturating_mul(2);
         // Eight harmonics is a default for a carrier solved here, not a
@@ -956,7 +954,6 @@ impl Engine {
                     &node_names,
                     (out_idx, ref_idx),
                     fundamental_freq,
-                    self.config.resource_limits.max_analysis_points,
                     abort,
                 )
             })

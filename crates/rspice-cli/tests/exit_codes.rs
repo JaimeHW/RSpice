@@ -1089,13 +1089,10 @@ fn timeout_exits_one_twenty_four() {
          .end\n",
     )
     .expect("write deck");
-    // This fixture intentionally exceeds production defaults so it can test
-    // runtime cancellation rather than point-count admission control.
-    std::fs::write(
-        &config,
-        "[resources]\nmax_analysis_points = 100000000001\nmax_result_values = 500000000005\n",
-    )
-    .expect("write config");
+    // This fixture intentionally exceeds production defaults so it tests
+    // runtime cancellation rather than the retained-value limit.
+    std::fs::write(&config, "[resources]\nmax_result_values = 500000000005\n")
+        .expect("write config");
 
     let start = std::time::Instant::now();
     let output = run_rspice(&[
@@ -1166,7 +1163,7 @@ fn summary_json_carries_the_verdict() {
     );
     assert_eq!(json["tool"]["name"], "rspice");
     assert_eq!(json["tool"]["commit"], env!("RSPICE_BUILD_COMMIT"));
-    assert_eq!(json["schema_version"], 3);
+    assert_eq!(json["schema_version"], 4);
     assert_eq!(json["status"], "failed");
     assert_eq!(json["counts"]["runs"], 1);
     assert_eq!(json["counts"]["failed_measurements"], 1);

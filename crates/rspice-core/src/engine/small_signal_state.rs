@@ -543,7 +543,7 @@ impl Engine {
                 points,
                 start,
                 stop,
-                self.config.resource_limits.max_analysis_points,
+                self.config.resource_limits.max_result_values,
                 abort,
             )
             .map_err(SimulationError::from)

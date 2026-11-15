@@ -191,18 +191,20 @@ impl QuasiPeriodicGrid {
             QuasiPeriodicSampling::Oversample(values) => (values, false),
             QuasiPeriodicSampling::Exact(values) => (values, true),
         };
+        let too_many = |count: usize| {
+            Error::InvalidConfig(format!(
+                "the phase grid requires {count} collocation points, above the supported limit {MAX_COLLOCATION_POINTS}"
+            ))
+        };
         let minimal_grid = 3usize
             .checked_pow(u32::try_from(tones).unwrap_or(u32::MAX))
             .unwrap_or(usize::MAX);
-        ResourceLimitError::ensure(
-            ResourceKind::AnalysisPoints,
-            minimal_grid,
-            limits.max_analysis_points.min(MAX_COLLOCATION_POINTS),
-        )?;
+        if minimal_grid > MAX_COLLOCATION_POINTS {
+            return Err(too_many(minimal_grid));
+        }
         let mut dimensions = Vec::with_capacity(tones);
         let mut strides = Vec::with_capacity(tones);
         let mut sample_count = 1usize;
-        let point_limit = limits.max_analysis_points.min(MAX_COLLOCATION_POINTS);
         for (harmonics, points) in config.harmonics.iter().zip(samples) {
             check_abort(abort)?;
             let minimum = harmonics
@@ -222,7 +224,9 @@ impl QuasiPeriodicGrid {
             }
             strides.push(sample_count);
             sample_count = sample_count.saturating_mul(size);
-            ResourceLimitError::ensure(ResourceKind::AnalysisPoints, sample_count, point_limit)?;
+            if sample_count > MAX_COLLOCATION_POINTS {
+                return Err(too_many(sample_count));
+            }
             dimensions.push(size);
         }
         // FFT workspace, input/output and scratch are accounted for before any

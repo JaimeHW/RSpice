@@ -4,7 +4,6 @@ use super::*;
 fn bounded_limits() -> ResourceLimits {
     let mut limits = ResourceLimits::default();
     limits.max_matrix_unknowns = 32;
-    limits.max_analysis_points = 5;
     limits.max_batch_runs = 3;
     limits.max_result_values = 1000;
     limits.max_external_data_bytes = 64 * 1024;
@@ -89,7 +88,6 @@ fn monte_carlo_rejects_tight_solver_batch_and_publication_limits_with_typed_erro
     for selected_base in [false, true] {
         for resource in [
             "matrix_unknowns",
-            "analysis_points",
             "batch_runs",
             "result_values",
             "external_data_bytes",
@@ -106,7 +104,6 @@ fn monte_carlo_rejects_tight_solver_batch_and_publication_limits_with_typed_erro
             let mut limits = bounded_limits();
             match resource {
                 "matrix_unknowns" => limits.max_matrix_unknowns = 1,
-                "analysis_points" => limits.max_analysis_points = 4,
                 "batch_runs" => limits.max_batch_runs = 2,
                 "result_values" => limits.max_result_values = 1,
                 "external_data_bytes" => limits.max_external_data_bytes = 1,

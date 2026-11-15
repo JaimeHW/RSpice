@@ -42,20 +42,20 @@ pub(in crate::engine) struct DcOperatingPointState {
 
 /// Enumerate the sweep points a `.DC` spec expands to.
 ///
-/// Bounded by the engine's analysis-point resource limit, so an unbounded
-/// or hostile sweep specification fails here rather than during the run.
+/// Bounded by the engine's retained-value limit, so an unbounded or hostile
+/// sweep specification fails here rather than during the run.
 pub fn bounded_dc_sweep_points(
     engine: &Engine,
     spec: &crate::netlist::DcSweepSpec,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Value>, SimulationError> {
-    spec.points_bounded_with_abort(engine.config.resource_limits.max_analysis_points, abort)
+    spec.points_bounded_with_abort(engine.config.resource_limits.max_result_values, abort)
         .map_err(|error| {
             error.fold(
                 || SimulationError::Aborted,
                 |requested, limit| {
                     ResourceLimitError {
-                        resource: ResourceKind::AnalysisPoints,
+                        resource: ResourceKind::ResultValues,
                         requested,
                         limit,
                     }
@@ -1653,7 +1653,6 @@ impl Engine {
                     "Nested DC sweep point count overflows the platform address space".to_string(),
                 )
             })?;
-        engine.ensure_analysis_points(total_point_count)?;
         let mut lifecycle = DcSweepLifecycle::new(total_point_count)?;
         lifecycle.restart = primary.restart;
         lifecycle.sweep_label = sweep2.source.clone();
