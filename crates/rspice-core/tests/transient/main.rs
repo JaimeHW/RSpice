@@ -2,6 +2,7 @@
 
 mod abort_iteration_bounds;
 mod abort_reader;
+mod activity_bound_edges;
 mod advanced_abort;
 mod behavioral_checkpoint;
 mod checkpoint_encoding;
