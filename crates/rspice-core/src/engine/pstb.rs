@@ -352,11 +352,16 @@ type Reduction = (Vec<Vec<Value>>, Vec<(usize, Value)>);
 /// refuses), and with a probe that is one coordinate the period remembers,
 /// and keeps its own map otherwise (`None`).
 ///
-/// `Φ` maps a coordinate no charge reads to zero, so its columns are those
-/// of the independent coordinates `S` and combinations `Φe_d = Σ a_ds·Φe_s`
-/// of them. Then `Φ = Φ_{:,S}·L` with `(Lz)_s = z_s + Σ_d a_ds·z_d`, and the
-/// nonzero spectrum of `Φ` is that of `L·Φ_{:,S} = Φ_{S,S} + Aᵀ·Φ_{D,S}`, an
-/// operator on `S` whose eigenvectors carry the probe's own coordinate.
+/// A coordinate whose row of `Φ` is exactly zero (the period fixes it
+/// whatever it starts at) or whose column is (nothing the period remembers
+/// reads it) puts `Φ` in block-triangular form with a zero diagonal block,
+/// so deleting its row and column removes one zero multiplier and keeps the
+/// rest; that is repeated until no such coordinate is left. Of those left,
+/// the columns are those of the independent coordinates `S` and
+/// combinations `Φe_d = Σ a_ds·Φe_s` of them. Then `Φ = Φ_{:,S}·L` with
+/// `(Lz)_s = z_s + Σ_d a_ds·z_d`, and the nonzero spectrum of `Φ` is that of
+/// `L·Φ_{:,S} = Φ_{S,S} + Aᵀ·Φ_{D,S}`, an operator on `S` whose eigenvectors
+/// carry the probe's own coordinate.
 fn remembered_coordinates(
     monodromy: &[Vec<Value>],
     basis: &[String],
@@ -364,10 +369,14 @@ fn remembered_coordinates(
     event_orbit: bool,
 ) -> Result<Option<Reduction>, SimulationError> {
     let n = monodromy.len();
-    let structurally_singular = (0..n).any(|k| {
-        monodromy[k].iter().all(|value| *value == 0.0) || monodromy.iter().all(|row| row[k] == 0.0)
-    });
-    if !event_orbit && !structurally_singular {
+    let mut active: Vec<usize> = (0..n).collect();
+    while let Some(position) = active.iter().position(|&k| {
+        active.iter().all(|&col| monodromy[k][col] == 0.0)
+            || active.iter().all(|&row| monodromy[row][k] == 0.0)
+    }) {
+        active.remove(position);
+    }
+    if !event_orbit && active.len() == n {
         return Ok(None);
     }
     let &[(probe_index, _)] = probe.projection.as_slice() else {
@@ -391,11 +400,10 @@ fn remembered_coordinates(
             }
         })
         .collect();
-    let column = |col: usize| -> Vec<Value> {
-        (0..n)
-            .map(|row| monodromy[row][col] * scale[col] / scale[row])
-            .collect()
-    };
+    // Formed over the coordinates left, in the units' scale.
+    let scaled = |row: usize, col: usize| monodromy[row][col] * scale[col] / scale[row];
+    let column =
+        |col: usize| -> Vec<Value> { active.iter().map(|&row| scaled(row, col)).collect() };
     let norm = |vector: &[Value]| {
         vector
             .iter()
@@ -403,8 +411,13 @@ fn remembered_coordinates(
             .sum::<Value>()
             .sqrt()
     };
-    let largest = (0..n).map(|col| norm(&column(col))).fold(0.0, Value::max);
-    let remembered: Vec<usize> = (0..n)
+    let largest = active
+        .iter()
+        .map(|&col| norm(&column(col)))
+        .fold(0.0, Value::max);
+    let remembered: Vec<usize> = active
+        .iter()
+        .copied()
         .filter(|&col| norm(&column(col)) > REMEMBERED * largest)
         .collect();
     if !remembered.contains(&probe_index) {
@@ -448,9 +461,6 @@ fn remembered_coordinates(
         }
     }
     let r = kept.len();
-    if r == n && !event_orbit {
-        return Ok(None);
-    }
     // `a_d = R⁻¹·Qᵀ·Φe_d`, by back substitution on the kept columns' `R`.
     let combinations: Vec<(usize, Vec<Value>)> = dropped
         .into_iter()
@@ -466,8 +476,7 @@ fn remembered_coordinates(
             (col, q_coefficients)
         })
         .collect();
-    // Formed in the units' scale and returned in the coordinates' own units.
-    let scaled = |row: usize, col: usize| monodromy[row][col] * scale[col] / scale[row];
+    // Returned in the coordinates' own units.
     let reduced = (0..r)
         .map(|i| {
             (0..r)
