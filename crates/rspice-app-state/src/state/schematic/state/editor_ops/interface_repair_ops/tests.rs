@@ -251,7 +251,7 @@ fn an_instance_of_a_verilog_a_master_is_repaired_to_the_views_interface() {
                         "name": name,
                         "direction": if *name == "OUT" { "out" } else { "in" },
                         "discipline": "electrical",
-                        "domain": "continuous",
+                        "carrier": "electrical",
                     })
                 })
                 .collect::<Vec<_>>(),

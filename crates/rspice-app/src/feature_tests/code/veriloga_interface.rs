@@ -23,7 +23,7 @@ use crate::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACellSymbol, VerilogACompileOutcome,
 };
 use rspice_app_code::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
-use rspice_design::library::metadata::{PortDomain, SourceViewPort, decode_source_view_ports};
+use rspice_design::library::metadata::{PortCarrier, SourceViewPort, decode_source_view_ports};
 use rspice_design::symbol::generated::{
     GENERATED_PORTS_KEY, GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
 };
@@ -421,7 +421,7 @@ fn a_continuous_vector_is_one_bus_pin_whose_conductors_are_the_modules_terminals
             ("n", PortDirection::InOut),
         ]
     );
-    assert_eq!(ports[0].domain, PortDomain::Continuous);
+    assert_eq!(ports[0].carrier, PortCarrier::Electrical);
     let abi = &app
         .state
         .code
@@ -582,7 +582,7 @@ fn a_discrete_vector_is_one_logic_bus_pin_with_a_conductor_per_bit() {
             ("mode[1:0]", PortDirection::In),
         ]
     );
-    assert_eq!(ports[2].domain, PortDomain::Discrete);
+    assert_eq!(ports[2].carrier, PortCarrier::Logic);
     assert_eq!(ports[2].discipline, "logic");
     let symbol = symbol(&app, &reference);
     assert_eq!(

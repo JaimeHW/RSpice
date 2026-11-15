@@ -336,7 +336,7 @@ mod tests {
         let mut workspace = ProjectWorkspace::default();
         let libraries = project_veriloga_cell(
             &mut workspace,
-            r#"[{"name":"inp","direction":"in","discipline":"electrical","domain":"continuous"},{"name":"out","direction":"out","discipline":"electrical","domain":"continuous"}]"#,
+            r#"[{"name":"inp","direction":"in","discipline":"electrical","carrier":"electrical"},{"name":"out","direction":"out","discipline":"electrical","carrier":"electrical"}]"#,
         );
 
         let candidate = library_cell_placement_candidates(&libraries, &workspace)

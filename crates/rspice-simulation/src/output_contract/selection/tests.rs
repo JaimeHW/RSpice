@@ -14,6 +14,7 @@ fn output_test_net(
         terminals: Vec::new(),
         port,
         wire_ids: Vec::new(),
+        domain: Default::default(),
     }
 }
 

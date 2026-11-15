@@ -224,7 +224,7 @@ fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellV
         .insert("veriloga.module".to_owned(), "moded".to_owned());
     view.metadata.insert(
         "veriloga.ports".to_owned(),
-        r#"[{"name":"p","direction":"inout","discipline":"electrical","domain":"continuous"},{"name":"n","direction":"inout","discipline":"electrical","domain":"continuous"},{"name":"mode","direction":"in","discipline":"logic","domain":"discrete"}]"#
+        r#"[{"name":"p","direction":"inout","discipline":"electrical","carrier":"electrical"},{"name":"n","direction":"inout","discipline":"electrical","carrier":"electrical"},{"name":"mode","direction":"in","discipline":"logic","carrier":"logic"}]"#
             .to_owned(),
     );
     let mut cell = Cell::new(&device.cell);

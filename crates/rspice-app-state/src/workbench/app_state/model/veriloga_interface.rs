@@ -31,9 +31,8 @@ use std::sync::Arc;
 use rspice_core::PortCarrier;
 use rspice_design::library::metadata::{
     CellParameter, ParameterDeclaration, ParameterRange, ParameterScope, ParameterValueType,
-    PortDomain, RangeBound, RangeValue, SourceViewPort, VERILOGA_PARAMETER_CONTRACT_KEY,
-    VERILOGA_PORTS_KEY, encode_source_view_ports, encode_veriloga_parameter_contract,
-    parameter_number_text,
+    RangeBound, RangeValue, SourceViewPort, VERILOGA_PARAMETER_CONTRACT_KEY, VERILOGA_PORTS_KEY,
+    encode_source_view_ports, encode_veriloga_parameter_contract, parameter_number_text,
 };
 use rspice_design::schematic::owned::Schematic;
 use rspice_design::symbol::generated::{
@@ -206,10 +205,7 @@ fn compiled_interface(report: &RuntimeCompileReport) -> Result<Vec<SourceViewPor
                 ModulePortDirection::Inout => PortDirection::InOut,
             },
             discipline: port.discipline.to_string(),
-            domain: match carrier {
-                PortCarrier::Electrical => PortDomain::Continuous,
-                PortCarrier::Logic | PortCarrier::Real => PortDomain::Discrete,
-            },
+            carrier,
         });
     }
     if next_lane != abi.analog_ports.len() {
@@ -231,7 +227,7 @@ pub fn port_electrical_type(
         ports
             .iter()
             .find(|port| port.name.eq_ignore_ascii_case(&spec.name))
-            .filter(|port| port.domain == PortDomain::Discrete)
+            .filter(|port| port.carrier != PortCarrier::Electrical)
             .map(|_| SymbolElectricalType::Logic)
     }
 }

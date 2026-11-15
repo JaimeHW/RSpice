@@ -630,7 +630,17 @@ pub fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     )
     .iter()
     .filter(|net| net_is_in_scope(cx.model, scope, net))
-    .filter(|net| matches_query(&query, &[net.name.as_str(), net.class.keyword(), "net"]))
+    .filter(|net| {
+        matches_query(
+            &query,
+            &[
+                net.name.as_str(),
+                net.class.keyword(),
+                net.domain.label(),
+                "net",
+            ],
+        )
+    })
     .cloned()
     .collect::<Vec<_>>();
     if !navigator_section_header(ui, DesignNavigatorSection::Nets, &nets.len().to_string()) {
@@ -685,7 +695,8 @@ pub fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
                 },
             ),
             1,
-        );
+        )
+        .on_hover_text(net.domain.label());
         if response.clicked() {
             select_navigator_design_net(cx.model, &net, position);
         }

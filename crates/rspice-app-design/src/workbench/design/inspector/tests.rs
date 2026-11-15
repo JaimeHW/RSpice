@@ -229,6 +229,7 @@ fn conductors_on_one_net_inspect_that_net_and_a_split_falls_back_to_multi() {
             terminals: Vec::new(),
             port: None,
             wire_ids: vec![7, 8],
+            domain: Default::default(),
         },
         DesignNet {
             name: "vin".to_owned(),
@@ -237,6 +238,7 @@ fn conductors_on_one_net_inspect_that_net_and_a_split_falls_back_to_multi() {
             terminals: Vec::new(),
             port: None,
             wire_ids: vec![9],
+            domain: Default::default(),
         },
     ];
 
@@ -307,6 +309,7 @@ fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
         }],
         port: Some(PortDirection::Out),
         wire_ids: Vec::new(),
+        domain: Default::default(),
     }];
 
     assert_eq!(
@@ -344,6 +347,7 @@ fn explicit_junction_selection_resolves_its_live_net() {
         terminals: Vec::new(),
         port: None,
         wire_ids: vec![7],
+        domain: Default::default(),
     }];
 
     assert_eq!(
@@ -377,6 +381,7 @@ fn a_selected_interface_port_routes_to_the_shared_net_inspector() {
         terminals: Vec::new(),
         port: Some(PortDirection::In),
         wire_ids: Vec::new(),
+        domain: Default::default(),
     }];
 
     assert_eq!(

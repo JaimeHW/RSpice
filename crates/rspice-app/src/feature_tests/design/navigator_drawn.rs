@@ -492,6 +492,7 @@ fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
         }],
         port: Some(crate::state::PortDirection::Out),
         wire_ids: Vec::new(),
+        domain: Default::default(),
     };
     let session = &mut app.state.model.schematic.session;
     session.editor.selection.select_only_component(9);

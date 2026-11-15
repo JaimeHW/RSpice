@@ -739,6 +739,7 @@ pub fn net_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, name: &str, nets: 
         return;
     };
     let class = net.class;
+    let domain = net.domain;
     let port = net.port;
     let net_name = net.name.clone();
     let terminals = net.terminals.clone();
@@ -754,6 +755,7 @@ pub fn net_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, name: &str, nets: 
 
     section_header(ui, "Net identity", None);
     property_row(ui, "Scope", &scope);
+    property_row(ui, "Kind", domain.label());
     if let Some(declaration) = &off_sheet {
         property_row(
             ui,

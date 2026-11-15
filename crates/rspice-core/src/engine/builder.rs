@@ -11606,8 +11606,11 @@ impl Engine {
             let event_nodes: BTreeSet<_> = boundary_nodes
                 .into_iter()
                 .filter(|node| {
-                    !physical_nodes.contains(node)
-                        && discrete_endpoints.get(node).copied().unwrap_or(0) >= 2
+                    crate::event_net::joins_on_event_kernel(
+                        *node == 0,
+                        physical_nodes.contains(node),
+                        discrete_endpoints.get(node).copied().unwrap_or(0),
+                    )
                 })
                 .collect();
             circuit.validate_mixed_event_connections(&event_nodes)?;

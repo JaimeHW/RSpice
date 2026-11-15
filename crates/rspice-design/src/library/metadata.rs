@@ -327,13 +327,9 @@ struct EncodedParameterContract {
 /// Metadata key under which a Verilog-A view states its interface.
 pub const VERILOGA_PORTS_KEY: &str = "veriloga.ports";
 
-/// Whether a port's discipline is continuous or discrete.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PortDomain {
-    Continuous,
-    Discrete,
-}
+/// What a port carries across the engine's mixed boundary, as the engine
+/// lays the module out.
+pub use rspice_core_base::event_net::PortCarrier;
 
 /// One port of a source view's interface, as `veriloga.ports` states it.
 ///
@@ -347,7 +343,9 @@ pub struct SourceViewPort {
     pub direction: PortDirection,
     /// The declared discipline, such as `electrical` or `logic`.
     pub discipline: String,
-    pub domain: PortDomain,
+    /// What the port carries: the engine's own answer for the compiled
+    /// module, so a net's kind reads the same before a run as during one.
+    pub carrier: PortCarrier,
 }
 
 impl SourceViewPort {
@@ -365,11 +363,11 @@ struct EncodedSourceViewPort {
     name: String,
     direction: String,
     discipline: String,
-    domain: PortDomain,
+    carrier: String,
 }
 
 /// `ports` as a `veriloga.ports` value: a JSON array of
-/// `{name, direction, discipline, domain}` objects.
+/// `{name, direction, discipline, carrier}` objects.
 pub fn encode_source_view_ports(ports: &[SourceViewPort]) -> Result<String, String> {
     serde_json::to_string(
         &ports
@@ -378,7 +376,7 @@ pub fn encode_source_view_ports(ports: &[SourceViewPort]) -> Result<String, Stri
                 name: port.name.clone(),
                 direction: port.direction.keyword().to_owned(),
                 discipline: port.discipline.clone(),
-                domain: port.domain,
+                carrier: port.carrier.label().to_owned(),
             })
             .collect::<Vec<_>>(),
     )
@@ -389,17 +387,17 @@ pub fn encode_source_view_ports(ports: &[SourceViewPort]) -> Result<String, Stri
 /// states them. A legacy names-only list states none.
 pub fn decode_source_view_ports(encoded: &str) -> Option<Vec<SourceViewPort>> {
     let encoded = serde_json::from_str::<Vec<EncodedSourceViewPort>>(encoded).ok()?;
-    Some(
-        encoded
-            .into_iter()
-            .map(|port| SourceViewPort {
+    encoded
+        .into_iter()
+        .map(|port| {
+            Some(SourceViewPort {
+                carrier: PortCarrier::from_label(&port.carrier)?,
                 name: port.name,
                 direction: PortDirection::parse(&port.direction),
                 discipline: port.discipline,
-                domain: port.domain,
             })
-            .collect(),
-    )
+        })
+        .collect()
 }
 
 /// The ports a port-list value states, in order. The structured form carries
@@ -760,31 +758,31 @@ mod tests {
     /// direction and discipline; readers used to force every port `inout`.
     #[test]
     fn a_structured_interface_keeps_its_directions_and_a_legacy_one_reads_inout() {
-        let port = |name: &str, direction, discipline: &str, domain| SourceViewPort {
+        let port = |name: &str, direction, discipline: &str, carrier| SourceViewPort {
             name: name.to_owned(),
             direction,
             discipline: discipline.to_owned(),
-            domain,
+            carrier,
         };
         let ports = [
             port(
                 "sense",
                 PortDirection::In,
                 "electrical",
-                PortDomain::Continuous,
+                PortCarrier::Electrical,
             ),
             port(
                 "d[3:0]",
                 PortDirection::InOut,
                 "electrical",
-                PortDomain::Continuous,
+                PortCarrier::Electrical,
             ),
-            port("mode", PortDirection::Out, "logic", PortDomain::Discrete),
+            port("mode", PortDirection::Out, "logic", PortCarrier::Logic),
         ];
         let encoded = encode_source_view_ports(&ports).unwrap();
         assert_eq!(
             encoded,
-            r#"[{"name":"sense","direction":"in","discipline":"electrical","domain":"continuous"},{"name":"d[3:0]","direction":"inout","discipline":"electrical","domain":"continuous"},{"name":"mode","direction":"out","discipline":"logic","domain":"discrete"}]"#
+            r#"[{"name":"sense","direction":"in","discipline":"electrical","carrier":"electrical"},{"name":"d[3:0]","direction":"inout","discipline":"electrical","carrier":"electrical"},{"name":"mode","direction":"out","discipline":"logic","carrier":"logic"}]"#
         );
         assert_eq!(
             decode_source_view_ports(&encoded).as_deref(),

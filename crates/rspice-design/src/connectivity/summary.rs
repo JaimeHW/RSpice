@@ -1,9 +1,16 @@
 //! Connectivity summaries shared by design inspection, publication and simulation preparation.
 
-use super::{extract_with_hierarchy, net_at_schematic_point, terminal_positions_with_hierarchy};
+use super::{
+    deck_bit_name, extract_with_hierarchy, net_at_schematic_point,
+    terminal_positions_with_hierarchy,
+};
 use crate::hierarchy::HierarchySource;
-use crate::schematic::component::Component;
+use crate::library::metadata::{
+    VERILOGA_PORTS_KEY, decode_source_view_ports, module_interface_view,
+};
+use crate::schematic::component::{BuiltinXspicePortType, Component, LibraryCellInstance};
 use crate::schematic::document::SchematicDocument;
+use rspice_core_base::event_net::{NetDomain, NetEndpoints, PortCarrier};
 use rspice_design_model::port::PortDirection;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -64,6 +71,10 @@ pub struct DesignNet {
     pub port: Option<PortDirection>,
     /// Wires belonging to this net (for canvas highlighting).
     pub wire_ids: Vec<u64>,
+    /// What the net carries at run: electrical, logic, real, or a mix the
+    /// engine converts. Read from the engine's own rule over what each pin
+    /// on it carries, so it is known before anything has run.
+    pub domain: NetDomain,
 }
 
 impl DesignNet {
@@ -162,6 +173,7 @@ fn collect_design_nets(
         nets: extracted_nets,
         point_to_net,
         ground_net,
+        vector_nets,
         ..
     } = extract_with_hierarchy(schematic, hierarchy);
     let net_at = |point| net_at_schematic_point(schematic, &extracted_nets, &point_to_net, point);
@@ -175,14 +187,71 @@ fn collect_design_nets(
     // Terminals are collected in document order so the inspector's
     // connectivity table reads the same way twice for the same drawing.
     let mut terminals: HashMap<usize, Vec<NetTerminal>> = HashMap::new();
+    let mut endpoints: HashMap<usize, NetEndpoints> = HashMap::new();
+    // What the pin at each vector terminal carries, for the bits of its bus.
+    let mut vector_pins = HashMap::new();
+    let vector_terminals: HashSet<_> = vector_nets
+        .nets
+        .iter()
+        .flat_map(|vector| vector.terminals.iter().copied())
+        .collect();
+    // A module's ports are read once per master, however often it is placed.
+    let mut module_carriers: HashMap<String, PinCarriers> = HashMap::new();
+    let no_carriers = PinCarriers::new();
     for component in &schematic.components {
+        // A ground symbol or an interface port is a name for a net, not a
+        // conductor on it.
+        let conductor = !component.kind.spice_prefix().is_empty();
+        let contract;
+        let carriers = match component.library_cell.as_ref() {
+            Some(binding) if binding.builtin_xspice.is_some() => {
+                contract = code_model_carriers(binding);
+                &contract
+            }
+            Some(binding) => module_carriers
+                .entry(HierarchySource::placed_master(binding).key())
+                .or_insert_with(|| module_port_carriers(binding, hierarchy)),
+            None => &no_carriers,
+        };
         for (pin, position) in terminal_positions_with_hierarchy(component, hierarchy) {
+            let (carrier, module_port) = carriers
+                .get(&pin.to_ascii_lowercase())
+                .copied()
+                .unwrap_or((PortCarrier::Electrical, false));
+            let on_bus = vector_terminals.contains(&position);
+            if conductor && on_bus {
+                vector_pins.insert(position, (carrier, module_port));
+            }
             if let Some(net) = net_at(position) {
+                if conductor && !on_bus {
+                    endpoints
+                        .entry(net.id)
+                        .or_default()
+                        .add(carrier, module_port);
+                }
                 terminals.entry(net.id).or_default().push(NetTerminal {
                     component_id: component.id,
                     reference: component.name.clone(),
                     pin,
                 });
+            }
+        }
+    }
+    // A vector pin puts one conductor on every bit of the bus it meets.
+    let net_ids: HashMap<String, usize> = extracted_nets
+        .iter()
+        .map(|net| (net.spice_name().to_ascii_lowercase(), net.id))
+        .collect();
+    for vector in &vector_nets.nets {
+        for point in &vector.terminals {
+            let Some(&(carrier, module_port)) = vector_pins.get(point) else {
+                continue;
+            };
+            for member in vector.declaration.members() {
+                let name = deck_bit_name(&vector.declaration.name, member.index);
+                if let Some(id) = net_ids.get(&name.to_ascii_lowercase()) {
+                    endpoints.entry(*id).or_default().add(carrier, module_port);
+                }
             }
         }
     }
@@ -203,7 +272,10 @@ fn collect_design_nets(
             let name = net.spice_name();
             let authored_name = net.label.is_some();
             let port = ports.get(&name.to_ascii_lowercase()).copied();
-            let class = if ground_net == Some(net.id) || name == "0" {
+            let ground = ground_net == Some(net.id) || name == "0";
+            let mut domain = endpoints.remove(&net.id).unwrap_or_default();
+            domain.ground = ground;
+            let class = if ground {
                 NetClass::Ground
             } else if port == Some(PortDirection::Supply) || power_labelled.contains(&net.id) {
                 NetClass::Supply
@@ -216,6 +288,7 @@ fn collect_design_nets(
                 port,
                 terminals: terminals.remove(&net.id).unwrap_or_default(),
                 wire_ids: net.wires.clone(),
+                domain: domain.domain(),
                 name,
             }
         })
@@ -239,6 +312,57 @@ fn collect_design_nets(
             ))
     });
     nets
+}
+
+/// What each pin of a placed component carries, by folded pin name, with
+/// whether it is a module port. A pin it does not name is electrical.
+type PinCarriers = HashMap<String, (PortCarrier, bool)>;
+
+/// A built-in code model's event pins, as its frozen contract types them.
+fn code_model_carriers(binding: &LibraryCellInstance) -> PinCarriers {
+    let mut carriers = PinCarriers::new();
+    for port in binding
+        .builtin_xspice
+        .iter()
+        .flat_map(|contract| &contract.ports)
+    {
+        let carrier = match port.port_type {
+            BuiltinXspicePortType::Digital => PortCarrier::Logic,
+            BuiltinXspicePortType::Real => PortCarrier::Real,
+            _ => continue,
+        };
+        for pin in port
+            .terminals
+            .iter()
+            .filter_map(|terminal| binding.terminal_order.get(*terminal))
+        {
+            carriers.insert(pin.to_ascii_lowercase(), (carrier, false));
+        }
+    }
+    carriers
+}
+
+/// A module's pins, as the last clean compile of the HDL view it binds, or
+/// that defines its cell's ports, stated them.
+fn module_port_carriers(
+    binding: &LibraryCellInstance,
+    hierarchy: Option<&HierarchySource<'_>>,
+) -> PinCarriers {
+    let mut carriers = PinCarriers::new();
+    let Some((cell, view)) = hierarchy
+        .and_then(|source| source.cell_declaration(&HierarchySource::placed_master(binding)))
+    else {
+        return carriers;
+    };
+    let ports = view
+        .filter(|view| view.view_type.is_hdl_source())
+        .or_else(|| module_interface_view(cell))
+        .and_then(|view| view.metadata.get(VERILOGA_PORTS_KEY))
+        .and_then(|encoded| decode_source_view_ports(encoded));
+    for port in ports.into_iter().flatten() {
+        carriers.insert(port.name.to_ascii_lowercase(), (port.carrier, true));
+    }
+    carriers
 }
 
 /// Net name for every terminal in the design, keyed by instance and pin.

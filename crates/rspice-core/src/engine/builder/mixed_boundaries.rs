@@ -41,10 +41,11 @@ pub(super) fn plan_conversions(
     let mut pending = Vec::new();
     for (host_index, host) in circuit.mixed_signal_hosts.iter().enumerate() {
         for (port_index, (port, signal)) in host.direct_event_ports().enumerate() {
-            if port.node > 0
-                && !physical.contains(&port.node)
-                && endpoints.get(&port.node).copied().unwrap_or(0) >= 2
-            {
+            if crate::event_net::joins_on_event_kernel(
+                port.node == 0,
+                physical.contains(&port.node),
+                endpoints.get(&port.node).copied().unwrap_or(0),
+            ) {
                 continue;
             }
             let segment = segments.get(&port.node);

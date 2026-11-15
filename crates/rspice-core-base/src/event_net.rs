@@ -149,3 +149,157 @@ impl PortCarrier {
         }
     }
 }
+
+impl PortCarrier {
+    /// The carrier a label from [`PortCarrier::label`] names.
+    pub fn from_label(label: &str) -> Option<Self> {
+        [Self::Electrical, Self::Logic, Self::Real]
+            .into_iter()
+            .find(|carrier| carrier.label() == label)
+    }
+}
+
+/// Whether the event endpoints on one net join directly on the event kernel,
+/// with no converter between them and the analog solver.
+///
+/// They do only when nothing else is there: the net is not ground, no
+/// electrical terminal is on it, and at least two event endpoints meet. One
+/// module port alone on a net is an analog node its connect module drives,
+/// which is what Spectre and AMS Designer show, so it keeps its converter.
+/// The engine plans its converters by this, and a design states each net's
+/// kind by it before anything has run.
+pub const fn joins_on_event_kernel(ground: bool, electrical: bool, event_endpoints: usize) -> bool {
+    !ground && !electrical && event_endpoints >= 2
+}
+
+/// What meets on one net, counted by what each conductor carries.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NetEndpoints {
+    /// The net is the ground node.
+    pub ground: bool,
+    /// Electrical terminals on the net.
+    pub electrical: usize,
+    /// Four-state logic endpoints on the net.
+    pub logic: usize,
+    /// Real-valued endpoints on the net.
+    pub real: usize,
+    /// How many of the logic and real endpoints are module ports. The rest
+    /// are code-model event ports, which a net does not need a second
+    /// endpoint to keep.
+    pub module_ports: usize,
+}
+
+impl NetEndpoints {
+    /// Count one conductor; `module_port` says an event endpoint is a module
+    /// port rather than a code model's.
+    pub fn add(&mut self, carrier: PortCarrier, module_port: bool) {
+        match carrier {
+            PortCarrier::Electrical => self.electrical += 1,
+            PortCarrier::Logic => self.logic += 1,
+            PortCarrier::Real => self.real += 1,
+        }
+        if module_port && carrier != PortCarrier::Electrical {
+            self.module_ports += 1;
+        }
+    }
+
+    /// What the net carries at run, by the rule the engine plans with.
+    pub const fn domain(&self) -> NetDomain {
+        let event = self.logic + self.real;
+        if event == 0 {
+            return NetDomain::Electrical;
+        }
+        let analog = self.ground || self.electrical > 0;
+        let converts = if self.module_ports > 0 {
+            !joins_on_event_kernel(self.ground, self.electrical > 0, event)
+        } else {
+            analog
+        };
+        if converts {
+            NetDomain::Mixed
+        } else if self.logic > 0 && self.real > 0 {
+            NetDomain::LogicAndReal
+        } else if self.logic > 0 {
+            NetDomain::Logic
+        } else {
+            NetDomain::Real
+        }
+    }
+}
+
+/// What one net carries at run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum NetDomain {
+    /// Only electrical terminals: one analog node.
+    #[default]
+    Electrical,
+    /// Four-state logic resolved on the event kernel.
+    Logic,
+    /// A real value resolved on the event kernel.
+    Real,
+    /// Event endpoints meet the analog solver through a converter the engine
+    /// inserts when the run is prepared.
+    Mixed,
+    /// Logic and real ports on one event net, which the engine refuses: the
+    /// two meet only through an explicit conversion.
+    LogicAndReal,
+}
+
+impl NetDomain {
+    /// The words a net's kind is shown in.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Electrical => "electrical",
+            Self::Logic => "logic",
+            Self::Real => "real",
+            Self::Mixed => "mixed (converter at run)",
+            Self::LogicAndReal => "logic and real (refused at run)",
+        }
+    }
+}
+
+#[cfg(test)]
+mod net_domain_tests {
+    use super::{NetDomain, NetEndpoints, PortCarrier};
+
+    fn net(ground: bool, carriers: &[(PortCarrier, bool)]) -> NetDomain {
+        let mut endpoints = NetEndpoints {
+            ground,
+            ..NetEndpoints::default()
+        };
+        for &(carrier, module_port) in carriers {
+            endpoints.add(carrier, module_port);
+        }
+        endpoints.domain()
+    }
+
+    #[test]
+    fn a_net_reads_as_the_engine_plans_it() {
+        use PortCarrier::{Electrical, Logic, Real};
+        assert_eq!(
+            net(false, &[(Electrical, false), (Electrical, true)]),
+            NetDomain::Electrical
+        );
+        assert_eq!(
+            net(false, &[(Logic, true), (Logic, true)]),
+            NetDomain::Logic
+        );
+        assert_eq!(net(false, &[(Real, true), (Real, false)]), NetDomain::Real);
+        assert_eq!(
+            net(false, &[(Logic, true), (Electrical, false)]),
+            NetDomain::Mixed
+        );
+        assert_eq!(net(true, &[(Logic, true), (Logic, true)]), NetDomain::Mixed);
+        // One module port alone is an analog node its connect module drives;
+        // one code-model port alone is an event net.
+        assert_eq!(net(false, &[(Logic, true)]), NetDomain::Mixed);
+        assert_eq!(net(false, &[(Logic, false)]), NetDomain::Logic);
+        assert_eq!(
+            net(false, &[(Logic, true), (Real, true)]),
+            NetDomain::LogicAndReal
+        );
+        for carrier in [Electrical, Logic, Real] {
+            assert_eq!(PortCarrier::from_label(carrier.label()), Some(carrier));
+        }
+    }
+}

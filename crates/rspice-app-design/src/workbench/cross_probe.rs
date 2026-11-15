@@ -643,6 +643,7 @@ mod tests {
             }],
             port: Some(crate::state::PortDirection::Out),
             wire_ids: Vec::new(),
+            domain: Default::default(),
         }];
 
         assert_eq!(

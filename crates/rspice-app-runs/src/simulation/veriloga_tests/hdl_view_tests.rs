@@ -640,3 +640,61 @@ fn a_bus_between_discrete_vector_pins_runs_as_its_deck_twin() {
         );
     }
 }
+
+/// Each net's kind as the rail and the net inspector read it: from the
+/// configured design, before anything has run.
+fn net_kinds(state: &RunTestHost) -> Vec<(String, &'static str)> {
+    let model = &state.model;
+    let projection = model
+        .workspace
+        .design_projection(
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
+        )
+        .expect("the design resolves");
+    rspice_design::connectivity::summary::projection_nets(
+        model.library_manager.catalog(),
+        &projection,
+        &model.workspace.content.active_view.key(),
+    )
+    .iter()
+    .map(|net| (net.name.to_ascii_lowercase(), net.domain.label()))
+    .collect()
+}
+
+/// A net's kind is known before a run, by the rule the engine plans its
+/// converters with: two module ports meeting with nothing else are a logic
+/// net, a bus between two discrete vector pins is a logic net per bit, and an
+/// electrical terminal on a logic net makes it a net the engine converts.
+#[test]
+fn a_net_reads_its_kind_before_a_run() {
+    let mut state = design();
+    let kinds = net_kinds(&state);
+    let kind = |kinds: &[(String, &'static str)], name: &str| {
+        kinds
+            .iter()
+            .find(|(net, _)| net == name)
+            .map(|(_, kind)| *kind)
+            .unwrap_or_else(|| panic!("no net {name} in {kinds:?}"))
+    };
+    assert_eq!(kind(&kinds, "d"), "logic", "{kinds:?}");
+    assert_eq!(kind(&kinds, "out"), "electrical", "{kinds:?}");
+
+    device(
+        &mut state,
+        ComponentType::Resistor,
+        "R2",
+        "1k",
+        Point::new(700, 0),
+        &["d", "0"],
+    );
+    state.sync_active_schematic_to_workspace();
+    let kinds = net_kinds(&state);
+    assert_eq!(kind(&kinds, "d"), "mixed (converter at run)", "{kinds:?}");
+
+    let kinds = net_kinds(&bus_design());
+    assert_eq!(kind(&kinds, "mode#1"), "logic", "{kinds:?}");
+    assert_eq!(kind(&kinds, "mode#0"), "logic", "{kinds:?}");
+    assert_eq!(kind(&kinds, "p"), "electrical", "{kinds:?}");
+}
