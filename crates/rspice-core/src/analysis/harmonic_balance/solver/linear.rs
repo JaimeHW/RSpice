@@ -36,7 +36,7 @@ impl ExactPeriodicNetwork {
     pub(crate) fn try_visit_operating_point_entries(
         &self,
         unknowns: usize,
-        mut visitor: impl FnMut(usize, usize, Complex64),
+        visitor: impl FnMut(usize, usize, Complex64),
     ) -> Result<(), HbError> {
         #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
         if let Self::VerilogAOperator {
@@ -51,6 +51,7 @@ impl ExactPeriodicNetwork {
                     "periodic Verilog-A operator '{name}' has a malformed coordinate pair"
                 )));
             }
+            let mut visitor = visitor;
             visitor(*output, *output, Complex64::new(1.0, 0.0));
             return Ok(());
         }
