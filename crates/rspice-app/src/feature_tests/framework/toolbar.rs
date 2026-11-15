@@ -9,10 +9,6 @@ use crate::state::{
 };
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::RSpiceApp;
-use crate::workbench::chrome::toolbar::results::{
-    results_document_is_historical, run_has_current_success_authority,
-};
-use crate::workbench::chrome::toolbar::simulate::pvt_menu_height_for_viewport;
 use crate::workbench::chrome::toolbar::*;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::design::toolbar::{
@@ -22,6 +18,10 @@ use crate::workbench::design::toolbar::{
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use egui::Vec2;
+use rspice_app_results::workbench::chrome::toolbar::results::{
+    results_document_is_historical, run_has_current_success_authority,
+};
+use rspice_app_simulate::workbench::chrome::toolbar::simulate::pvt_menu_height_for_viewport;
 
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])

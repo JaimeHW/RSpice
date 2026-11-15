@@ -10,11 +10,13 @@ use crate::workbench::app_state::diagnostic_store::listing::DiagnosticCounts;
 use crate::workbench::chrome::status_bar::design::{
     design_engineering_context, schematic_cursor_summary, selection_summary,
 };
-use crate::workbench::chrome::status_bar::results::{format_plot_zoom, results_view_summary};
 use crate::workbench::chrome::status_bar::sheets::sheet_position_summary;
 use crate::workbench::framework::host::StatusMark;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
+use rspice_app_results::workbench::chrome::status_bar::results::{
+    format_plot_zoom, results_view_summary,
+};
 use rspice_app_runs::simulation::status::EngineAvailability;
 use rspice_app_runs::simulation::status::{
     preflight_status, simulation_engine_status, simulation_progress_percent,

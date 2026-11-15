@@ -15,8 +15,8 @@ use super::stage::show_on_stage;
 use crate::state::SimulationPage;
 use crate::ui::raster::Canvas;
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::page_raster::STUDIO_BASELINES;
 use egui::vec2;
+use rspice_app_simulate::workbench::surfaces::simulate::page_raster::STUDIO_BASELINES;
 
 const APPROVED_PAGE_WIDTH: f32 = 1100.0;
 

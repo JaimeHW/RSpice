@@ -8,8 +8,8 @@
 //! the resolution behind it names the exact retained record.
 
 use super::stage::show_on_stage;
-use crate::workbench::surfaces::simulate::{page_outputs, page_runset};
 use egui::{Rect, vec2};
+use rspice_app_simulate::workbench::surfaces::simulate::{page_outputs, page_runset};
 
 use crate::product::ContentDigest;
 use crate::state::SimulationPage;

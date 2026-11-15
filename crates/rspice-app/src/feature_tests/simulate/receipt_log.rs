@@ -21,8 +21,8 @@
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::product::AnalysisInstanceId;
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::AnalysisAction;
-use crate::workbench::surfaces::simulate::lifecycle::apply_analysis_action;
+use rspice_app_simulate::workbench::surfaces::simulate::AnalysisAction;
+use rspice_app_simulate::workbench::surfaces::simulate::lifecycle::apply_analysis_action;
 
 /// Every `PLAN` entry the Console holds, oldest first.
 fn plan_entries(app: &RSpiceApp) -> Vec<(LogSeverity, String)> {

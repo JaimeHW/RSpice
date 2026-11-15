@@ -7,11 +7,11 @@
 use super::plan_manager::{app_with_every_lifecycle_state, route_draft};
 use crate::ui::raster::Canvas;
 use crate::workbench::state::SimulationPlanManagerMode;
-use crate::workbench::surfaces::simulate::plan_manager::plan_manager_dialog;
-use crate::workbench::surfaces::simulate::plan_manager::raster::{
+use egui::Vec2;
+use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::plan_manager_dialog;
+use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::raster::{
     PLAN_MANAGER_FINGERPRINTS, baseline_cases, file_stem,
 };
-use egui::Vec2;
 
 /// Render one route at one gated viewport and rasterize it.
 ///

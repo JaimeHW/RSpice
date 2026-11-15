@@ -9,8 +9,8 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::framework::ports::QualificationGate;
-use crate::workbench::surfaces::simulate::page_kit::Tone;
-use crate::workbench::surfaces::simulate::page_models::{
+use rspice_app_simulate::workbench::surfaces::simulate::page_kit::Tone;
+use rspice_app_simulate::workbench::surfaces::simulate::page_models::{
     ModelBindingAction, ModelGate, apply_model_binding_action, gate_reading, gate_status,
 };
 

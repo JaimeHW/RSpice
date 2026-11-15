@@ -16,7 +16,9 @@
 use crate::simulation::controller::SimulationController;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::{engineering_statement, plan_statement_for};
+use rspice_app_simulate::workbench::surfaces::simulate::{
+    engineering_statement, plan_statement_for,
+};
 
 #[test]
 fn the_displayed_statement_is_the_directive_the_controller_emits() {

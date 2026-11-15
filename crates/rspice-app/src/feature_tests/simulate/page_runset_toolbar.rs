@@ -1,9 +1,11 @@
 //! Real toolbar geometry and pointer actions across pane widths and input sizes.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::page_runset::{RunSetFrame, commit, toolbar};
 use egui::{Context, Event, Pos2};
 use egui::{Rect, vec2};
+use rspice_app_simulate::workbench::surfaces::simulate::page_runset::{
+    RunSetFrame, commit, toolbar,
+};
 use rspice_simulation_contract::run_set::RunSetAction;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 

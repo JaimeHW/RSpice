@@ -5,7 +5,7 @@
 
 use crate::io::file_exchange;
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::transient_checkpoint_exchange::{
+use rspice_app_simulate::workbench::surfaces::simulate::transient_checkpoint_exchange::{
     Action, Inspection, KIND, apply, import_id, inspection_id, poll,
 };
 use rspice_results::transient_checkpoint::TransientCheckpointEvidence;

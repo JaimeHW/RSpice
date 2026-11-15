@@ -14,7 +14,6 @@ use crate::workbench::app_state::diagnostic_store::listing::listing_in_pass;
 use crate::workbench::chrome::status_bar::design::{
     design_engineering_context, selection_summary, symbol_tool_hint, zoom_factor,
 };
-use crate::workbench::chrome::status_bar::results::{format_plot_zoom, results_view_summary};
 use crate::workbench::chrome::status_bar::sheets::sheet_position_summary;
 use crate::workbench::chrome::status_bar::shell::platform_label;
 use crate::workbench::commands::vocabulary::Command;
@@ -26,6 +25,9 @@ use crate::workbench::framework::host::{
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_results::workbench::chrome::status_bar::results::{
+    format_plot_zoom, results_view_summary,
+};
 use rspice_app_runs::simulation::status::{
     EngineAvailability, preflight_status, simulation_engine_status,
 };

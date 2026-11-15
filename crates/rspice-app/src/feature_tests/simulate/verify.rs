@@ -8,19 +8,21 @@ use crate::product::AnalysisInstanceId;
 use crate::state::VerificationPage;
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::verify::latest_validated_analysis;
-use crate::workbench::surfaces::verify::raster::add_tuning_variable;
-use crate::workbench::surfaces::verify::raster::sealed_run;
-use crate::workbench::surfaces::verify::raster::stage_literal_tuning_binding;
-use crate::workbench::surfaces::verify::safety::device_safety;
-use crate::workbench::surfaces::verify::safety::soa_rows;
-use crate::workbench::surfaces::verify::safety::soa_summary;
-use crate::workbench::surfaces::verify::table::Verdict;
-use crate::workbench::surfaces::verify::toolbar::Summary;
-use crate::workbench::surfaces::verify::toolbar::TOOLBAR_H;
-use crate::workbench::surfaces::verify::tuning;
-use crate::workbench::surfaces::verify::tuning::sync_tuning_session;
-use crate::workbench::surfaces::verify::tuning::{tuning_commit_block_reason, tuning_is_dirty};
+use rspice_app_simulate::workbench::surfaces::verify::latest_validated_analysis;
+use rspice_app_simulate::workbench::surfaces::verify::raster::add_tuning_variable;
+use rspice_app_simulate::workbench::surfaces::verify::raster::sealed_run;
+use rspice_app_simulate::workbench::surfaces::verify::raster::stage_literal_tuning_binding;
+use rspice_app_simulate::workbench::surfaces::verify::safety::device_safety;
+use rspice_app_simulate::workbench::surfaces::verify::safety::soa_rows;
+use rspice_app_simulate::workbench::surfaces::verify::safety::soa_summary;
+use rspice_app_simulate::workbench::surfaces::verify::table::Verdict;
+use rspice_app_simulate::workbench::surfaces::verify::toolbar::Summary;
+use rspice_app_simulate::workbench::surfaces::verify::toolbar::TOOLBAR_H;
+use rspice_app_simulate::workbench::surfaces::verify::tuning;
+use rspice_app_simulate::workbench::surfaces::verify::tuning::sync_tuning_session;
+use rspice_app_simulate::workbench::surfaces::verify::tuning::{
+    tuning_commit_block_reason, tuning_is_dirty,
+};
 
 /// A tuning commit prepares the run it requires in its own frame and queues
 /// it. An edit to the design before the frame that dispatches it refuses the
@@ -394,7 +396,7 @@ fn soa_rows_put_violations_first_and_the_summary_counts_devices() {
 #[test]
 fn seeded_verify_pages_follow_the_table_grammar() {
     use super::verify_fixtures::{corner_app, monte_carlo_app, optimization_app, soa_app};
-    use crate::workbench::surfaces::verify::raster::{PAGE_WIDTH, page_geometry};
+    use rspice_app_simulate::workbench::surfaces::verify::raster::{PAGE_WIDTH, page_geometry};
 
     for (page, app) in [
         (VerificationPage::Yield, monte_carlo_app()),

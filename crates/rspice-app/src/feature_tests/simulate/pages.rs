@@ -9,8 +9,8 @@ use crate::state::{
     PreflightIssue, PreflightRemediation, PreflightReport, PreparedPreflightContract,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::pages::preflight_currency;
 use rspice_app_runs::workbench::app_state::run_preflight::PreflightCurrency;
+use rspice_app_simulate::workbench::surfaces::simulate::pages::preflight_currency;
 
 fn current_report(
     state: &crate::workbench::AppState,

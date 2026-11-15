@@ -6,10 +6,10 @@
 
 use super::stage::show_on_stage;
 use crate::state::SimulationPage;
-use crate::workbench::surfaces::simulate::fixtures::plan_id;
-use crate::workbench::surfaces::simulate::page_outputs;
 use crate::workbench::{AppState, RSpiceApp};
 use egui::{Rect, vec2};
+use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
+use rspice_app_simulate::workbench::surfaces::simulate::page_outputs;
 
 /// Render one page and collect the text it painted.
 pub(super) fn render(page: SimulationPage, width: f32) -> String {

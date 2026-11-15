@@ -3,8 +3,8 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::{SimulationPlanManagerDraft, SimulationPlanManagerMode};
-use crate::workbench::surfaces::simulate::plan_manager::plan_manager_dialog;
 use egui::Rect;
+use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::plan_manager_dialog;
 
 /// Every fact this route paints lands on screen *whole* at every gated
 /// viewport.

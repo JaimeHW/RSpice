@@ -13,11 +13,11 @@ use crate::state::{
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
     SavedOutputPrecision, SavedOutputStreaming, SpecEntry,
 };
-use crate::workbench::surfaces::simulate::AnalysisAction;
-use crate::workbench::surfaces::simulate::fixtures::plan_id;
-use crate::workbench::surfaces::simulate::lifecycle;
 use crate::workbench::{AppState, RSpiceApp};
 use egui::vec2;
+use rspice_app_simulate::workbench::surfaces::simulate::AnalysisAction;
+use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
+use rspice_app_simulate::workbench::surfaces::simulate::lifecycle;
 
 /// One setup page, rendered with its controls announced so a test can press
 /// the same button an engineer presses.

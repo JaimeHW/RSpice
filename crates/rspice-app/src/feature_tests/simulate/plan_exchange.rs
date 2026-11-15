@@ -7,12 +7,12 @@
 //! import creates.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::plan_manager::exchange::{
+use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::exchange::{
     PACKAGE_EXTENSION, PACKAGE_STEM_LIMIT, SIMULATION_PLAN_PACKAGE_FORMAT,
     SIMULATION_PLAN_PACKAGE_VERSION, commit_import_simulation_plan, envelope_label,
     export_simulation_plan_package, inspect_package, package_file_name, specification_count,
 };
-use crate::workbench::surfaces::simulate::plan_manager::records::plan_catalog_records;
+use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::records::plan_catalog_records;
 
 /// A real export of a real plan, which is the only package these tests use.
 /// A hand-authored JSON fixture would drift from the wire form the moment a

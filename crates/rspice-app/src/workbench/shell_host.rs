@@ -85,9 +85,10 @@ impl Host for RSpiceApp {
             Point::Surface(workspace) => {
                 use crate::workbench::documents::code_workspace::sync_automation_debugger;
                 use crate::workbench::project::workspace_state::LibraryCellviewPage;
-                use crate::workbench::surfaces::{simulate, stimulus, verify};
+                use crate::workbench::surfaces::stimulus;
                 use rspice_app_code::workbench::surfaces::{automation, netlist, veriloga};
                 use rspice_app_project::workbench::surfaces::{library_cellview_manager, project};
+                use rspice_app_simulate::workbench::surfaces::{simulate, verify};
 
                 if app.state.workbench.current_route().surface_id()
                     == super::SurfaceId::ReportAuthoring
@@ -407,12 +408,6 @@ impl Host for RSpiceApp {
             Point::Toolbar(ToolbarSlot::Tools(scope), layout) => {
                 use crate::workbench::chrome::toolbar::feature_tools;
                 use crate::workbench::chrome::toolbar::models::{model_editor_tools, models_tools};
-                use crate::workbench::chrome::toolbar::results::{
-                    offered_tool_groups, results_tracking_button,
-                };
-                use crate::workbench::chrome::toolbar::simulate::{
-                    simulation_tools, verification_tools,
-                };
                 use crate::workbench::chrome::toolbar::{context_separator, toolbar_icon_command};
                 use crate::workbench::design::DesignFeature;
                 use crate::workbench::design::toolbar::{
@@ -423,6 +418,12 @@ impl Host for RSpiceApp {
                 };
                 use rspice_app_project::workbench::chrome::toolbar::project::{
                     no_project_tools, project_tools,
+                };
+                use rspice_app_results::workbench::chrome::toolbar::results::{
+                    offered_tool_groups, results_tracking_button,
+                };
+                use rspice_app_simulate::workbench::chrome::toolbar::simulate::{
+                    simulation_tools, verification_tools,
                 };
 
                 match scope {
@@ -574,7 +575,7 @@ impl Host for RSpiceApp {
             container_draws_search: !matches!(workspace, Workspace::Design | Workspace::Results),
             pins_scroll_bar: match workspace {
                 Workspace::Verify => Some(
-                    crate::workbench::docks::navigator::verify::verification_navigator_requires_scroll,
+                    rspice_app_simulate::workbench::docks::navigator::verify::verification_navigator_requires_scroll,
                 ),
                 _ => None,
             },
@@ -676,7 +677,7 @@ impl Host for RSpiceApp {
     }
 
     fn rail_entry(&self, workspace: Workspace) -> RailEntry<RSpiceApp> {
-        use crate::workbench::chrome::activity_rail::results::{
+        use rspice_app_results::workbench::chrome::activity_rail::results::{
             mark_results_seen, unseen_result_count,
         };
 
@@ -1060,12 +1061,12 @@ impl DocumentHost for AppState {
     fn workspace_documents(&self, workspace: Workspace) -> Vec<WorkspaceDocument> {
         use crate::workbench::chrome::document_bar::design::design_documents;
         use crate::workbench::chrome::document_bar::models::models_documents;
-        use crate::workbench::chrome::document_bar::results::result_documents;
-        use crate::workbench::chrome::document_bar::simulate::{
-            simulation_plan_documents, verification_documents,
-        };
         use rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents;
         use rspice_app_project::workbench::chrome::document_bar::project::project_documents;
+        use rspice_app_results::workbench::chrome::document_bar::results::result_documents;
+        use rspice_app_simulate::workbench::chrome::document_bar::simulate::{
+            simulation_plan_documents, verification_documents,
+        };
 
         let state = self;
         match workspace {
@@ -1104,12 +1105,12 @@ impl DocumentHost for AppState {
 
     fn activate_owned_document(&mut self, document: &WorkspaceDocumentId) -> bool {
         use crate::workbench::chrome::document_bar::design::activate_cell_view;
-        use crate::workbench::chrome::document_bar::results::{
-            activate_result_dataset, activate_visualization_document,
-        };
         use rspice_app_code::workbench::chrome::document_bar::code::{
             activate_generated_netlist, activate_netlist_comparison, activate_netlist_dependency,
             activate_netlist_run_snapshot, activate_owned_netlist,
+        };
+        use rspice_app_results::workbench::chrome::document_bar::results::{
+            activate_result_dataset, activate_visualization_document,
         };
 
         let state = self;

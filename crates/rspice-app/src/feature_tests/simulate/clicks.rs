@@ -20,8 +20,8 @@
 
 use super::stage::show_on_stage;
 use super::workflow_dialogs;
-use crate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
 use egui::vec2;
+use rspice_app_simulate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
 
 use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;

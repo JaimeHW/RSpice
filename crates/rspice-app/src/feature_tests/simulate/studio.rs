@@ -7,10 +7,10 @@ use super::workflow_dialogs::show_workflow_dialogs_on_stage;
 use crate::ui::widgets::DialogChoice;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::ClonePlanDraft;
-use crate::workbench::surfaces::simulate::workflows::commit_clone_plan;
-use crate::workbench::surfaces::simulate::workflows::finish_workflow_choice;
 use egui::Rect;
 use egui::vec2;
+use rspice_app_simulate::workbench::surfaces::simulate::workflows::commit_clone_plan;
+use rspice_app_simulate::workbench::surfaces::simulate::workflows::finish_workflow_choice;
 
 /// A committed plan edit is answered on the status bar: the reader made the
 /// gesture and is looking at its result, so nothing is toasted.

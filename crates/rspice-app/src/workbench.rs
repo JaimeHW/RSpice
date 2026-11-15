@@ -51,18 +51,12 @@ pub(crate) mod browser {
 }
 pub(crate) mod chrome {
     pub(crate) use rspice_app_sheets::workbench::chrome::sheet_strip;
-    pub(crate) mod activity_rail {
-        pub(in crate::workbench) use rspice_app_results::workbench::chrome::activity_rail::results;
-    }
     pub(crate) mod document_bar {
         pub(crate) mod design;
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::document_bar::models;
-        pub(in crate::workbench) use rspice_app_results::workbench::chrome::document_bar::results;
-        pub(in crate::workbench) use rspice_app_simulate::workbench::chrome::document_bar::simulate;
     }
     pub(crate) mod status_bar {
         pub(crate) mod design;
-        pub(crate) use rspice_app_results::workbench::chrome::status_bar::results;
         pub(crate) use rspice_app_sheets::workbench::chrome::status_bar::sheets;
         pub(in crate::workbench) mod shell;
     }
@@ -71,8 +65,6 @@ pub(crate) mod chrome {
     }
     pub(crate) mod toolbar {
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::toolbar::models;
-        pub(crate) use rspice_app_results::workbench::chrome::toolbar::results;
-        pub(crate) use rspice_app_simulate::workbench::chrome::toolbar::simulate;
         pub use rspice_app_workbench::workbench::chrome::toolbar::*;
     }
 }
@@ -91,7 +83,6 @@ pub(crate) mod docks {
     pub(crate) mod navigator {
         pub use rspice_app_workbench::workbench::docks::navigator::*;
         pub(crate) mod stimulus_browser_state;
-        pub(in crate::workbench) use rspice_app_simulate::workbench::docks::navigator::verify;
     }
 }
 pub(crate) mod documents {
@@ -155,9 +146,7 @@ pub(crate) use rspice_app_simulate::workbench::simulate;
 pub(crate) mod slots;
 pub(crate) mod state;
 pub(crate) mod surfaces {
-    pub(crate) use rspice_app_simulate::workbench::surfaces::simulate;
     pub(crate) mod stimulus;
-    pub(crate) use rspice_app_simulate::workbench::surfaces::verify;
 }
 pub(crate) mod workflows;
 

@@ -10,14 +10,16 @@
 use crate::simulation::plan::{AnalysisDraft, AnalysisInstance, AnalysisKind};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::surfaces::simulate::page_save::capture_workload;
-use crate::workbench::surfaces::simulate::participation::PlanParticipation;
-use crate::workbench::surfaces::simulate::workload::{PlanWorkload, instance_task_rate};
+use rspice_app_simulate::workbench::surfaces::simulate::page_save::capture_workload;
+use rspice_app_simulate::workbench::surfaces::simulate::participation::PlanParticipation;
+use rspice_app_simulate::workbench::surfaces::simulate::workload::{
+    PlanWorkload, instance_task_rate,
+};
 use rspice_design::drc::DrcResult;
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 use rspice_simulation_contract::run_set::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetDimensionKind};
 
-use crate::workbench::surfaces::simulate::page_runset::{
+use rspice_app_simulate::workbench::surfaces::simulate::page_runset::{
     exact_plan_task_count, worst_point_task_cost,
 };
 

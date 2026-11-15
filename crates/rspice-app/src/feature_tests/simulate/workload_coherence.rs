@@ -16,17 +16,17 @@
 
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::participation::PlanParticipation;
+use rspice_app_simulate::workbench::surfaces::simulate::participation::PlanParticipation;
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 use rspice_simulation_contract::run_set;
 
 use super::page_runset_parity::{
     app_with, drive_pss_from_the_fixture_supply, enable_only_the_temperature_axis, instance_of,
 };
-use crate::workbench::surfaces::simulate::page_runset::{
+use rspice_app_simulate::workbench::surfaces::simulate::page_runset::{
     exact_plan_task_count, plan_run_set_validation, point_table_note,
 };
-use crate::workbench::surfaces::simulate::workload::{
+use rspice_app_simulate::workbench::surfaces::simulate::workload::{
     PlanWorkload, composition_refusals, modelled_duration,
 };
 

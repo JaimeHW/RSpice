@@ -4,10 +4,10 @@ use rspice_formats::monte_carlo_checkpoint as checkpoint_file;
 
 use crate::io::file_exchange;
 use crate::state::MonteCarloCheckpointEvidence;
-use crate::workbench::surfaces::simulate::checkpoint_exchange::{
+use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_simulate::workbench::surfaces::simulate::checkpoint_exchange::{
     begin_export, begin_import, import_id, poll,
 };
-use crate::workbench::{AppState, RSpiceApp};
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]

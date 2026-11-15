@@ -7,11 +7,11 @@
 use super::page_contracts::render_with;
 use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::simulate::fixtures::plan_id;
-use crate::workbench::surfaces::simulate::fixtures::seed_capture_group;
-use crate::workbench::surfaces::simulate::page_outputs;
-use crate::workbench::surfaces::simulate::page_save;
-use crate::workbench::surfaces::simulate::workflows;
+use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
+use rspice_app_simulate::workbench::surfaces::simulate::fixtures::seed_capture_group;
+use rspice_app_simulate::workbench::surfaces::simulate::page_outputs;
+use rspice_app_simulate::workbench::surfaces::simulate::page_save;
+use rspice_app_simulate::workbench::surfaces::simulate::workflows;
 
 /// The group as the plan currently stores it.
 fn stored_group(app: &RSpiceApp, id: crate::product::CaptureGroupId) -> crate::state::CaptureGroup {

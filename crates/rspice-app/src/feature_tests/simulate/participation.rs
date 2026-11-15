@@ -13,7 +13,7 @@ fn a_refusal_names_dropped_points_the_way_the_table_does() {
     use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
     use super::page_runset_parity::{app_with, scope_to_points};
-    use crate::workbench::surfaces::simulate::participation::reconcile_selections;
+    use rspice_app_simulate::workbench::surfaces::simulate::participation::reconcile_selections;
     use rspice_simulation_contract::run_set;
 
     let mut app = app_with(&[AnalysisKind::OperatingPoint]);
