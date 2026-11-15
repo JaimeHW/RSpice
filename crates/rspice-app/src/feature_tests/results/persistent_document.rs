@@ -1590,13 +1590,13 @@ fn document_frame(app: &mut RSpiceApp, document_id: ResultDocumentId, time: f64)
 /// with it, not only the session's copy.
 #[test]
 fn zoom_previous_steps_a_result_document_back_through_its_kept_windows() {
-    use crate::workbench::commands::vocabulary::Command;
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
     use rspice_app_workbench::workbench::framework::host::Host;
     let (mut app, document_id) = persistent_transient_fixture();
     app.state
         .workbench
         .activate(rspice_app_state::workbench::workspace::Workspace::Results);
-    let key = Command::ZoomPrevious.key();
+    let key = ids::ZOOM_PREVIOUS;
     document_frame(&mut app, document_id, 0.0);
     let pane_id = projection(app.state.results_reads(), document_id)
         .expect("document projection")
@@ -1618,10 +1618,10 @@ fn zoom_previous_steps_a_result_document_back_through_its_kept_windows() {
     let opened = saved_x_range(&app, document_id, pane_id);
     assert!(!app.is_enabled(key));
 
-    app.execute(Command::ZoomIn.key());
+    app.execute(ids::ZOOM_IN);
     document_frame(&mut app, document_id, 1.0);
     let nearer = saved_x_range(&app, document_id, pane_id);
-    app.execute(Command::ZoomIn.key());
+    app.execute(ids::ZOOM_IN);
     document_frame(&mut app, document_id, 2.0);
     assert_ne!(saved_x_range(&app, document_id, pane_id), nearer);
     assert_ne!(nearer, opened);

@@ -12,7 +12,6 @@ use crate::feature_tests::design::create_model_bound_symbol::{
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame_with, themed_context};
 use crate::workbench::app_state::AppState;
-use crate::workbench::commands::vocabulary::Command;
 use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::state::PRIMARY;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
@@ -26,6 +25,7 @@ use rspice_app_state::state::{
 };
 use rspice_app_state::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRoute};
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 fn unique_path(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -383,12 +383,12 @@ fn editing_a_bound_symbol_keeps_its_binding_through_undo_save_and_revert() {
     assert!(fixture.binding().is_some(), "an edit keeps the binding");
     assert!(has_unsaved_changes(&fixture.app.state));
 
-    let undo = fixture.app.command_availability(Command::Undo.key());
+    let undo = fixture.app.command_availability(ids::UNDO);
     assert!(undo.is_available(), "{undo:?}");
-    fixture.app.execute_command_key(Command::Undo.key());
+    fixture.app.execute_command_key(ids::UNDO);
     assert_eq!(fixture.document(), created, "undo puts the drawing back");
     assert!(fixture.binding().is_some(), "undo keeps the binding");
-    fixture.app.execute_command_key(Command::Redo.key());
+    fixture.app.execute_command_key(ids::REDO);
     assert_eq!(
         fixture.pin("G").and_then(|pin| pin.position),
         Some(gate + Point::new(0, -20)),

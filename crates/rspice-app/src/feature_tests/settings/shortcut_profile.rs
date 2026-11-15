@@ -96,8 +96,8 @@ fn default_profile_is_valid_with_complete_symbol_tool_registry() {
         DesignCommand::SymbolPolylineTool.key(),
         DesignCommand::SymbolCircleTool.key(),
         DesignCommand::SymbolArcTool.key(),
-        Command::ZoomFit.key(),
-        Command::Cancel.key(),
+        ids::ZOOM_FIT,
+        ids::CANCEL,
     ] {
         assert!(
             !preferences

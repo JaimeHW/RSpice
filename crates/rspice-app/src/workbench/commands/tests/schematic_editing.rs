@@ -7,6 +7,7 @@
 //! empty or read-only selection has already lied to the user.
 
 use super::*;
+use crate::workbench::commands::vocabulary::command_registry;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 
 #[test]
@@ -527,14 +528,17 @@ fn edit_command_enablement_covers_every_complete_schematic_object_class() {
                 .select_bus_tap(id),
             _ => unreachable!(),
         }
-        assert!(Command::Copy.is_enabled(&app), "copy disabled for {kind}");
-        assert!(Command::Cut.is_enabled(&app), "cut disabled for {kind}");
         assert!(
-            Command::Delete.is_enabled(&app),
+            app.command_key_enabled(ids::COPY),
+            "copy disabled for {kind}"
+        );
+        assert!(app.command_key_enabled(ids::CUT), "cut disabled for {kind}");
+        assert!(
+            app.command_key_enabled(ids::DELETE),
             "delete disabled for {kind}"
         );
         assert!(
-            Command::Duplicate.is_enabled(&app),
+            app.command_key_enabled(ids::DUPLICATE),
             "duplicate disabled for {kind}"
         );
     }
@@ -546,11 +550,11 @@ fn edit_command_enablement_covers_every_complete_schematic_object_class() {
         .editor
         .selection
         .select_only_junction(rspice_app_state::state::Point::new(10, 0));
-    assert!(Command::Copy.is_enabled(&app));
-    assert!(Command::Cut.is_enabled(&app));
-    assert!(Command::Delete.is_enabled(&app));
+    assert!(app.command_key_enabled(ids::COPY));
+    assert!(app.command_key_enabled(ids::CUT));
+    assert!(app.command_key_enabled(ids::DELETE));
     assert!(
-        !Command::Duplicate.is_enabled(&app),
+        !app.command_key_enabled(ids::DUPLICATE),
         "a fixed-offset duplicate cannot invent a valid junction target"
     );
 }
@@ -580,10 +584,10 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
         .editor
         .selection
         .select_only_wire_segment(17, 1);
-    assert!(Command::Delete.is_enabled(&app));
-    assert!(!Command::Copy.is_enabled(&app));
-    assert!(!Command::Cut.is_enabled(&app));
-    assert!(!Command::Duplicate.is_enabled(&app));
+    assert!(app.command_key_enabled(ids::DELETE));
+    assert!(!app.command_key_enabled(ids::COPY));
+    assert!(!app.command_key_enabled(ids::CUT));
+    assert!(!app.command_key_enabled(ids::DUPLICATE));
 
     app.state
         .model
@@ -592,10 +596,10 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
         .editor
         .selection
         .select_only_wire_vertex(17, 1);
-    assert!(Command::Delete.is_enabled(&app));
-    assert!(!Command::Copy.is_enabled(&app));
-    assert!(!Command::Cut.is_enabled(&app));
-    assert!(!Command::Duplicate.is_enabled(&app));
+    assert!(app.command_key_enabled(ids::DELETE));
+    assert!(!app.command_key_enabled(ids::COPY));
+    assert!(!app.command_key_enabled(ids::CUT));
+    assert!(!app.command_key_enabled(ids::DUPLICATE));
 
     app.state
         .model
@@ -605,7 +609,7 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
         .selection
         .select_only_wire_segment(17, 2);
     assert!(
-        !Command::Delete.is_enabled(&app),
+        !app.command_key_enabled(ids::DELETE),
         "an out-of-range wire handle is stale, not a deletable object"
     );
 }
@@ -613,9 +617,9 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
 #[test]
 fn select_all_command_selects_the_active_sheet_without_a_dialog() {
     let mut app = app_with_every_complete_schematic_object();
-    assert_eq!(Command::SelectAll.spec().label, "Select all");
+    assert_eq!(command_registry().label(ids::SELECT_ALL), "Select all");
 
-    Command::SelectAll.execute(&mut app);
+    app.execute_command_key(ids::SELECT_ALL);
 
     assert!(!app.state.dialog_modal_open());
     for id in [1_u64, 2, 5, 6] {
@@ -682,7 +686,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
         .selection
         .select_only_component(1);
 
-    Command::Duplicate.execute(&mut app);
+    app.execute_command_key(ids::DUPLICATE);
     assert!(!app.state.dialog_modal_open());
     assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
         &mut app.state.design.floating_paste,
@@ -691,7 +695,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
     ));
     assert_eq!(app.state.model.schematic.document().components.len(), 2);
 
-    Command::Cut.execute(&mut app);
+    app.execute_command_key(ids::CUT);
     assert!(!app.state.dialog_modal_open());
     assert_eq!(app.state.model.schematic.document().components.len(), 1);
     assert_eq!(app.state.design.schematic_clipboard.components.len(), 1);
@@ -703,7 +707,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
         .editor
         .selection
         .select_only_component(1);
-    Command::Delete.execute(&mut app);
+    app.execute_command_key(ids::DELETE);
     assert!(!app.state.dialog_modal_open());
     assert!(app.state.model.schematic.document().components.is_empty());
 }
@@ -850,7 +854,7 @@ fn cancel_retires_an_armed_array_transaction_and_restores_select() {
     app.state.design.array_selection.armed = true;
     app.state.model.schematic.session.editor.tool = Tool::ArraySelection;
 
-    Command::Cancel.execute(&mut app);
+    app.execute_command_key(ids::CANCEL);
 
     assert!(!app.state.design.array_selection.armed);
     assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
@@ -1300,7 +1304,7 @@ fn app_with_copied_wire(
         .editor
         .selection
         .select_wire(copied);
-    Command::Copy.execute(&mut app);
+    app.execute_command_key(ids::COPY);
     app.state.model.schematic.session.editor.selection.clear();
     app.state.design.canvas_hover = Some(hover);
     app
@@ -1318,7 +1322,7 @@ fn a_pasted_wire_ending_inside_another_splits_it_and_dots_the_t() {
     let stub = Wire::segment(2, Point::new(300, 0), Point::new(300, 50));
     let mut app = app_with_copied_wire(vec![through.clone(), stub.clone()], 2, (10.0, 5.0));
 
-    Command::Paste.execute(&mut app);
+    app.execute_command_key(ids::PASTE);
     assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
         &mut app.state.design.floating_paste,
         &mut app.state.model,
@@ -1377,13 +1381,13 @@ fn a_pasted_pin_landing_inside_a_wire_splits_it() {
         .editor
         .selection
         .select_component(1);
-    Command::Copy.execute(&mut app);
+    app.execute_command_key(ids::COPY);
     app.state.model.schematic.session.editor.selection.clear();
     let grid = f64::from(app.state.model.schematic.document().grid_size);
     let target = Point::new(100 - left.x, 100 - left.y);
     app.state.design.canvas_hover = Some((f64::from(target.x) / grid, f64::from(target.y) / grid));
 
-    Command::Paste.execute(&mut app);
+    app.execute_command_key(ids::PASTE);
     assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
         &mut app.state.design.floating_paste,
         &mut app.state.model,
@@ -1466,7 +1470,7 @@ fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
             .selection
             .select_component(id);
     }
-    Command::Copy.execute(&mut app);
+    app.execute_command_key(ids::COPY);
 
     app.state
         .open_workspace_view(rspice_app_state::state::CellViewRef::new(
@@ -1478,11 +1482,11 @@ fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
     app.state.model.schematic.document_mut_for_test().components = coupled_pair(11);
     app.state.model.schematic.init_undo_history();
     assert!(
-        Command::Paste.is_enabled(&app),
+        app.command_key_enabled(ids::PASTE),
         "a copy from cell A pastes here"
     );
 
-    Command::Paste.execute(&mut app);
+    app.execute_command_key(ids::PASTE);
     assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
         &mut app.state.design.floating_paste,
         &mut app.state.model,
@@ -1569,11 +1573,11 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
     app.state.model.schematic.begin_operation("drag selection");
     carry(&mut app.state.model.schematic, Point::new(0, 100));
     assert_eq!(
-        Command::Undo.availability(&app),
+        app.command_availability(ids::UNDO),
         CommandAvailability::Disabled(mid_drag)
     );
-    Command::Undo.execute(&mut app);
-    app.execute_shortcut_command(Command::Undo);
+    app.execute_command_key(ids::UNDO);
+    app.execute_command_key(ids::UNDO);
     assert_eq!(app.state.model.schematic.document().components.len(), 2);
     assert!(app.state.model.schematic.has_pending_operation());
 
@@ -1581,30 +1585,30 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
     // exactly that, then the placement before it.
     assert!(app.state.model.schematic.end_operation());
     assert_eq!(
-        Command::Undo.availability(&app),
+        app.command_availability(ids::UNDO),
         CommandAvailability::Available
     );
-    Command::Undo.execute(&mut app);
+    app.execute_command_key(ids::UNDO);
     assert_eq!(position(&app), Point::new(0, 0));
     assert_eq!(app.state.model.schematic.document().components.len(), 2);
-    Command::Undo.execute(&mut app);
+    app.execute_command_key(ids::UNDO);
     assert_eq!(app.state.model.schematic.document().components.len(), 1);
 
     // Redo waits the same way, and the redo stack survives the wait.
     app.state.model.schematic.begin_operation("drag selection");
     carry(&mut app.state.model.schematic, Point::new(0, 50));
     assert_eq!(
-        Command::Redo.availability(&app),
+        app.command_availability(ids::REDO),
         CommandAvailability::Disabled(mid_drag)
     );
-    Command::Redo.execute(&mut app);
+    app.execute_command_key(ids::REDO);
     assert_eq!(app.state.model.schematic.document().components.len(), 1);
     assert!(app.state.model.schematic.cancel_operation());
     assert_eq!(
         app.state.model.schematic.history().redo_description(),
         Some("place R2")
     );
-    Command::Redo.execute(&mut app);
+    app.execute_command_key(ids::REDO);
     assert_eq!(app.state.model.schematic.document().components.len(), 2);
 }
 
@@ -1647,8 +1651,9 @@ fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
 /// (audit G-11).
 #[test]
 fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
-    use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
+    use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, last_repeatable};
     use rspice_app_state::state::command_catalog::{CommandPlatform, ShortcutContext};
+    use rspice_app_workbench::workbench::framework::command_registry::CommandFlags;
 
     let repeat = Command::RepeatLastCommand;
     assert_eq!(repeat.default_shortcut_label(CommandPlatform::Desktop), ".");
@@ -1666,15 +1671,15 @@ fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
     assert!(sharing.is_empty(), "`.` is also bound to {sharing:?}");
     // Repeat remembers a command by its stable id, so every command it can
     // repeat must come back from that id as itself.
-    for command in COMMAND_REGISTRY
-        .iter()
-        .copied()
-        .filter(|command| command.repeatable())
+    for spec in command_registry()
+        .ordered()
+        .filter(|spec| spec.flags.contains(CommandFlags::REPEATABLE))
     {
         assert_eq!(
-            Command::from_stable_id(command.stable_id()),
-            Some(command),
-            "{command:?}"
+            last_repeatable(Some(spec.key.as_str())).map(|repeated| repeated.key),
+            Some(spec.key),
+            "{}",
+            spec.key.as_str()
         );
     }
 
@@ -1695,7 +1700,7 @@ fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
         rotated_cw(rotated_cw(before)),
         "Repeat turned the selection a second quarter"
     );
-    Command::Undo.execute(&mut app);
+    app.execute_command_key(ids::UNDO);
     assert_eq!(
         vocabulary::last_repeatable(app.state.workbench.last_repeatable_command.as_deref())
             .map(|spec| spec.key),

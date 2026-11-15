@@ -16,6 +16,7 @@ use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_workbench::workbench::framework::command_registry::CommandFlags;
+use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 
 #[test]
 fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
@@ -88,7 +89,12 @@ fn project_operation_gate_covers_every_mutating_project_command() {
             "ungated: {command:?}"
         );
     }
-    assert!(!Command::Copy.blocked_by_project_operation());
+    assert!(
+        !WorkbenchCommand::Copy
+            .declared_spec()
+            .flags
+            .contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION)
+    );
     let blocked = |command: ResultsCommand| {
         command
             .declared_spec()
@@ -121,7 +127,10 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
     // This independent expectation list prevents the predicate under test
     // from silently omitting a newly exposed submenu route.
     assert!(
-        Command::FindInDesign.requires_open_project(),
+        WorkbenchCommand::FindInDesign
+            .declared_spec()
+            .flags
+            .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
         "missing closed-project boundary: FindInDesign"
     );
     for command in [
@@ -466,10 +475,13 @@ fn the_configuration_chip_passes_the_guards_the_command_does() {
     let command = Command::ConfigurationSets;
     assert!(command.requires_open_project());
     assert!(command.blocked_by_project_operation());
-    assert!(command.source_editor_request().is_none());
-    assert!(!crate::workbench::commands::command_edits_schematic(
-        command
-    ));
+    // Only the workbench's routed commands are handed to a source editor.
+    assert!(WorkbenchCommand::from_key(command.key()).is_none());
+    let flags = command_registry()
+        .spec(command.key())
+        .expect("the Configurations command is registered")
+        .flags;
+    assert!(!flags.contains(CommandFlags::EDITS_ACTIVE_DOCUMENT));
     assert!(!command.commits_inspector_edit());
-    assert!(!command.repeatable());
+    assert!(!flags.contains(CommandFlags::REPEATABLE));
 }

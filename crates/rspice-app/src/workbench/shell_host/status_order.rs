@@ -6,6 +6,7 @@
 //! workspace showing and has something to say, so a cell for one workspace is
 //! listed before the cell that answers for all the others.
 
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 use std::borrow::Cow;
 
 use crate::workbench::chrome::status_bar::shell::platform_label;
@@ -152,7 +153,7 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
         order: 0,
         workspace: Some(Workspace::Results),
         content: plot_zoom_cell,
-        activate: Some(|app, _| Command::ZoomFit.execute(app)),
+        activate: Some(|app, _| app.execute_command_key(ids::ZOOM_FIT)),
     },
     StatusCell {
         key: StatusKey::Zoom,
@@ -160,7 +161,7 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
         order: 0,
         workspace: None,
         content: canvas_zoom_cell,
-        activate: Some(|app, _| Command::ZoomOneToOne.execute(app)),
+        activate: Some(|app, _| app.execute_command_key(ids::ZOOM_ONE_TO_ONE)),
     },
     StatusCell {
         key: StatusKey::Engine,
@@ -303,7 +304,7 @@ fn plot_zoom_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<S
     Some(StatusText {
         text: Cow::Owned(text),
         mark: StatusMark::None,
-        control: if Command::ZoomFit.is_enabled(app) {
+        control: if app.command_key_enabled(ids::ZOOM_FIT) {
             StatusControl::Button
         } else {
             StatusControl::Label
@@ -321,7 +322,7 @@ fn canvas_zoom_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<Status
     Some(StatusText {
         text: Cow::Owned(format!("{}%", (zoom * 100.0).round())),
         mark: StatusMark::None,
-        control: if Command::ZoomOneToOne.is_enabled(app) {
+        control: if app.command_key_enabled(ids::ZOOM_ONE_TO_ONE) {
             StatusControl::Button
         } else {
             StatusControl::Label

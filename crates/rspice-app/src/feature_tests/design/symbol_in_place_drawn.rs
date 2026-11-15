@@ -1,6 +1,7 @@
 //! Editing a symbol in place, driven through whole frames of the application.
 
 use egui::accesskit::Role;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 use crate::feature_tests::replay::{Control, Replay};
 use crate::workbench::commands::vocabulary::Command;
@@ -185,7 +186,7 @@ fn the_zoom_chip_reads_the_in_place_view() {
     let entered = fixture.enter();
     assert_eq!(zoom_chip(&entered), "200%", "the sheet's own zoom");
 
-    Command::ZoomIn.execute(&mut fixture.replay.app);
+    fixture.replay.app.execute_command_key(ids::ZOOM_IN);
     let nearer = fixture.replay.frames(vec![]);
     let zoom = fixture.in_place_zoom();
     assert!(zoom > 2.0, "Zoom in magnified the in-place view");
@@ -1057,7 +1058,7 @@ fn a_shape_drawn_in_place_lands_where_it_was_drawn_and_its_menu_works() {
         }),
         "turned about its middle"
     );
-    Command::Undo.execute(&mut fixture.replay.app);
+    fixture.replay.app.execute_command_key(ids::UNDO);
     fixture.replay.frames(vec![]);
     assert_eq!(
         body(&fixture).last(),

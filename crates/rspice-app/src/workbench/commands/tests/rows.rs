@@ -32,6 +32,7 @@ use rspice_app_workbench::workbench::app_state::session::shortcuts::ShortcutCont
 use rspice_app_workbench::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
 };
+use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 use rspice_app_workbench::workbench::framework::command_registry::{
     CommandFlags, CommandSpec, ids,
 };
@@ -126,10 +127,14 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
         .enumerate()
         .map(|(index, key)| {
             let Some(command) = legacy_command(key) else {
-                let spec = SheetsCommand::ALL
-                    .into_iter()
-                    .find(|command| command.key() == key)
-                    .map(SheetsCommand::declared_spec)
+                let spec = WorkbenchCommand::from_key(key)
+                    .map(WorkbenchCommand::declared_spec)
+                    .or_else(|| {
+                        SheetsCommand::ALL
+                            .into_iter()
+                            .find(|command| command.key() == key)
+                            .map(SheetsCommand::declared_spec)
+                    })
                     .or_else(|| {
                         SettingsCommand::ALL
                             .into_iter()
@@ -170,12 +175,10 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
                 palette_visible: command.palette_visible(),
                 source_editor_only: false,
                 navigates_source_language: false,
-                repeatable: command.repeatable(),
+                repeatable: false,
                 commits_inspector_edit: command.commits_inspector_edit(),
-                edits_active_document: command_edits_schematic(command),
-                source_editor_request: command
-                    .source_editor_request()
-                    .map(|request| format!("{request:?}")),
+                edits_active_document: false,
+                source_editor_request: None,
                 context: context.label(),
                 context_suppressed_by_text_focus: context.suppressed_by_text_focus(),
                 bindings: command
@@ -239,12 +242,10 @@ fn registry_command_rows() -> Vec<CommandRow> {
                 palette_visible: spec.flags.contains(CommandFlags::PALETTE_VISIBLE),
                 source_editor_only: false,
                 navigates_source_language: false,
-                repeatable: command.repeatable(),
+                repeatable: false,
                 commits_inspector_edit: command.commits_inspector_edit(),
-                edits_active_document: command_edits_schematic(command),
-                source_editor_request: command
-                    .source_editor_request()
-                    .map(|request| format!("{request:?}")),
+                edits_active_document: false,
+                source_editor_request: None,
                 context: context.label(),
                 context_suppressed_by_text_focus: context.suppressed_by_text_focus(),
                 bindings: catalog
@@ -294,6 +295,10 @@ fn feature_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> Comma
         edits_active_document: spec.flags.contains(CommandFlags::EDITS_ACTIVE_DOCUMENT),
         source_editor_request: code
             .and_then(CodeCommand::source_editor_request)
+            .or_else(|| {
+                WorkbenchCommand::from_key(spec.key)
+                    .and_then(WorkbenchCommand::source_editor_request)
+            })
             .map(|request| format!("{request:?}")),
         context: spec.context.label(),
         context_suppressed_by_text_focus: spec.context.suppressed_by_text_focus(),
@@ -519,7 +524,7 @@ fn the_registry_order_breaks_ties_as_the_command_registry_does() {
 /// Pairs of commands that share a chord in contexts of equal precedence, the
 /// earlier first in the registry's order.
 const TIED_PAIRS: [(CommandKey, CommandKey); 2] = [
-    (Command::Duplicate.key(), CodeCommand::DuplicateLine.key()),
+    (ids::DUPLICATE, CodeCommand::DuplicateLine.key()),
     (
         DesignCommand::PlaceWire.key(),
         CodeCommand::ToggleLineComment.key(),

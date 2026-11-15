@@ -1,6 +1,5 @@
 //! The shortcut import and export windows over the product's own commands.
 
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::command_registry;
 use egui::Context;
 use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
@@ -25,6 +24,7 @@ use rspice_app_state::state::command_catalog::ShortcutContext;
 use rspice_app_state::state::shortcuts::ShortcutPreferences;
 use rspice_app_state::state::shortcuts::ShortcutProfileLibrary;
 use rspice_app_state::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 pub(crate) fn exported_artifact(profile: &ShortcutPreferences) -> DecodedShortcutArtifact {
     let model = build_shortcut_reference_model(
@@ -145,7 +145,7 @@ fn source_review_is_isolated_until_the_typed_commit_effect_completes() {
     imported
         .set_binding(
             &crate::workbench::commands::vocabulary::CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
             Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -189,7 +189,7 @@ fn stale_base_replans_before_commit() {
     base.edit_active(|profile| {
         profile.set_binding(
             &crate::workbench::commands::vocabulary::CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
             None,

@@ -23,6 +23,7 @@ use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::ApplicationMenu;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
+use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 use rspice_ui_kit::panels::WorkbenchIcon;
 
 /// The command's row under the vocabulary's label.
@@ -32,6 +33,16 @@ const fn command(command: Command) -> MenuEntry {
 
 /// The command's row under a label of the menu's own.
 const fn command_as(command: Command, label: &'static str) -> MenuEntry {
+    MenuEntry::command_as(command.key(), label)
+}
+
+/// The routed command's row under the label the workbench declares.
+const fn workbench(command: WorkbenchCommand) -> MenuEntry {
+    MenuEntry::command(command.key())
+}
+
+/// The routed command's row under a label of the menu's own.
+const fn workbench_as(command: WorkbenchCommand, label: &'static str) -> MenuEntry {
     MenuEntry::command_as(command.key(), label)
 }
 
@@ -223,21 +234,21 @@ const EXPORT_MENU: &[MenuEntry] = &[
 /// 22 rows have 20 letters to give as access keys: Deselect all and the
 /// Select submenu go without.
 const EDIT_MENU: &[MenuEntry] = &[
-    command(Command::Undo).access('U'),
-    command(Command::Redo).access('R'),
+    workbench(WorkbenchCommand::Undo).access('U'),
+    workbench(WorkbenchCommand::Redo).access('R'),
     MenuEntry::Only(
         MenuContext::Drawing,
         &[command(Command::RepeatLastCommand).access('L')],
     ),
     Separator,
-    command(Command::Cut).access('T'),
-    command(Command::Copy).access('C'),
+    workbench(WorkbenchCommand::Cut).access('T'),
+    workbench(WorkbenchCommand::Copy).access('C'),
     // A picture of the selection or the view, for a document or a message.
     MenuEntry::Only(
         MenuContext::Drawing,
         &[hardcopy(HardcopyCommand::CopyAsImage).access('G')],
     ),
-    command(Command::Paste).access('P'),
+    workbench(WorkbenchCommand::Paste).access('P'),
     MenuEntry::Only(
         MenuContext::SourceEditor,
         &[
@@ -248,16 +259,16 @@ const EDIT_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::Drawing,
         &[
-            command(Command::Duplicate).access('E'),
-            command(Command::Delete).access('D'),
+            workbench(WorkbenchCommand::Duplicate).access('E'),
+            workbench(WorkbenchCommand::Delete).access('D'),
         ],
     ),
     Separator,
-    command(Command::SelectAll).access('A'),
+    workbench(WorkbenchCommand::SelectAll).access('A'),
     MenuEntry::Only(
         MenuContext::Drawing,
         &[
-            command(Command::DeselectAll),
+            workbench(WorkbenchCommand::DeselectAll),
             // A symbol view's objects are its own; these kinds are a
             // schematic's.
             MenuEntry::Only(
@@ -291,7 +302,7 @@ const EDIT_MENU: &[MenuEntry] = &[
             design(DesignCommand::RenameSelection).access('M'),
             design(DesignCommand::ObjectProperties).access('O'),
             Separator,
-            command(Command::FindInDesign).access('F'),
+            workbench(WorkbenchCommand::FindInDesign).access('F'),
             design(DesignCommand::FindReplace).access('I'),
         ],
     ),
@@ -342,24 +353,24 @@ const SELECT_MENU: &[MenuEntry] = &[
 /// View: how near, what is drawn over the drawing, which panels stand
 /// around it, and how much of the screen it takes.
 const VIEW_MENU: &[MenuEntry] = &[
-    command(Command::ZoomIn).access('I'),
-    command(Command::ZoomOut).access('O'),
-    command(Command::ZoomOneToOne).access('Z'),
+    workbench(WorkbenchCommand::ZoomIn).access('I'),
+    workbench(WorkbenchCommand::ZoomOut).access('O'),
+    workbench(WorkbenchCommand::ZoomOneToOne).access('Z'),
     // A symbol has no sheet: its Fit frames the symbol.
     MenuEntry::Only(
         MenuContext::NotSymbolView,
         &[
-            command(Command::ZoomFit).access('S'),
+            workbench(WorkbenchCommand::ZoomFit).access('S'),
             design(DesignCommand::FitSchematicContent).access('F'),
         ],
     ),
     MenuEntry::Only(
         MenuContext::SymbolView,
-        &[command_as(Command::ZoomFit, "Fit").access('F')],
+        &[workbench_as(WorkbenchCommand::ZoomFit, "Fit").access('F')],
     ),
-    command(Command::ZoomToSelection).access('T'),
-    command(Command::ZoomBox).access('B'),
-    command(Command::ZoomPrevious).access('V'),
+    workbench(WorkbenchCommand::ZoomToSelection).access('T'),
+    workbench(WorkbenchCommand::ZoomBox).access('B'),
+    workbench(WorkbenchCommand::ZoomPrevious).access('V'),
     Separator,
     MenuEntry::submenu("Grid", GRID_MENU).access('G'),
     design(DesignCommand::VisibilityOptions).access('D'),
@@ -878,15 +889,15 @@ const fn compact_submenu(menu: ApplicationMenu) -> MenuEntry {
 /// twin. The column stays for the rows that carry a check mark, which is why
 /// the check buttons' own glyph is the one no row wears: Check cellview,
 /// Check design, Check and netlist and Validate would read as switched on.
-pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIcon> {
+pub(in crate::workbench) fn command_icon(command: WorkbenchCommand) -> Option<WorkbenchIcon> {
     let icon = match command {
-        Command::Duplicate => WorkbenchIcon::Copy,
-        Command::Delete => WorkbenchIcon::Trash,
-        Command::Undo => WorkbenchIcon::Undo,
-        Command::Redo => WorkbenchIcon::Redo,
-        Command::ZoomIn => WorkbenchIcon::ZoomIn,
-        Command::ZoomOut => WorkbenchIcon::ZoomOut,
-        Command::ZoomFit => WorkbenchIcon::ZoomFit,
+        WorkbenchCommand::Duplicate => WorkbenchIcon::Copy,
+        WorkbenchCommand::Delete => WorkbenchIcon::Trash,
+        WorkbenchCommand::Undo => WorkbenchIcon::Undo,
+        WorkbenchCommand::Redo => WorkbenchIcon::Redo,
+        WorkbenchCommand::ZoomIn => WorkbenchIcon::ZoomIn,
+        WorkbenchCommand::ZoomOut => WorkbenchIcon::ZoomOut,
+        WorkbenchCommand::ZoomFit => WorkbenchIcon::ZoomFit,
         _ => return None,
     };
     Some(icon)

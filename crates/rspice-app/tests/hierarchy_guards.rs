@@ -1030,10 +1030,18 @@ fn every_command_has_a_user_route() {
             Source::read(path).production
         })
         .collect::<Vec<_>>();
+    let ids_production = Source::read(&workbench_root.join(COMMAND_IDS_FILE)).production;
+    // The workbench's routed commands are declared beside the ids, each by
+    // the id it answers to.
+    let declarers = features
+        .iter()
+        .cloned()
+        .chain([ids_production.clone()])
+        .collect::<Vec<_>>();
     let ids = command_ids(
-        &Source::read(&workbench_root.join(COMMAND_IDS_FILE)).production,
+        &ids_production,
         &Source::read(&root.join(COMMAND_REGISTRY_FILE)).production,
-        &features,
+        &declarers,
     );
 
     // A route is wherever it compiles: the chrome's menus and toolbar in the

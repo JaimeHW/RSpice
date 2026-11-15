@@ -17,6 +17,7 @@ use rspice_app_project::workbench::project::commands::{ProjectRequest, ReservedL
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::state::ViewType;
+use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 use rspice_app_workbench::workbench::framework::feature::ModelsPort;
 use rspice_app_workbench::workbench::framework::requests::ProjectFileAction;
 
@@ -52,21 +53,34 @@ pub(super) fn open_help_center(state: &mut AppState, page: crate::workbench::app
     state.shell.help_center.open_routed(page);
 }
 
-/// Whether the netlist document — not merely the workspace that hosts it — is
-/// the thing on screen.
-/// The label a menu row shows for `command` right now: Undo and Redo name
-/// the step they take where the drawing's history names it, Repeat names
-/// the command it repeats, and every other row reads the vocabulary's label.
+/// The label a menu row shows for `command` right now: Repeat names the
+/// command it repeats, and every other row reads the vocabulary's label.
 pub(crate) fn menu_label(command: Command, app: &RSpiceApp) -> std::borrow::Cow<'static, str> {
     let label = command.spec().label;
     let named = match command {
-        Command::Undo | Command::Redo if command.is_enabled(app) => {
-            drawing_step_name(app, command == Command::Undo)
-                .map(|step| format!("{label} {}", lower_first_word(step)))
-        }
         Command::RepeatLastCommand => {
             vocabulary::last_repeatable(app.state.workbench.last_repeatable_command.as_deref())
                 .map(|spec| format!("Repeat {}", lower_first_word(spec.label)))
+        }
+        _ => None,
+    };
+    named.map_or(label.into(), Into::into)
+}
+
+/// The label a menu row shows for the routed `command` right now: Undo and
+/// Redo name the step they take where the drawing's history names it, and
+/// every other row reads the label the command declares.
+pub(crate) fn workbench_menu_label(
+    command: WorkbenchCommand,
+    app: &RSpiceApp,
+) -> std::borrow::Cow<'static, str> {
+    let label = command.declared_spec().label;
+    let named = match command {
+        WorkbenchCommand::Undo | WorkbenchCommand::Redo
+            if app.workbench_command_enabled(command) =>
+        {
+            drawing_step_name(app, command == WorkbenchCommand::Undo)
+                .map(|step| format!("{label} {}", lower_first_word(step)))
         }
         _ => None,
     };
@@ -139,6 +153,8 @@ fn lower_first_word(text: &str) -> String {
     })
 }
 
+/// Whether the netlist document — not merely the workspace that hosts it — is
+/// the thing on screen.
 pub(super) fn netlist_page_is_visible(state: &crate::workbench::AppState) -> bool {
     rspice_app_code::workbench::documents::code_workspace::netlist_page_shown(
         state.workbench.workspace,

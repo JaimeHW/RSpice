@@ -3,6 +3,7 @@
 //! event dispatches by platform, enablement, focus and context precedence,
 //! and the conventional chords of each workspace.
 
+use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 use std::time::Duration;
 
 use egui::{Event, Key, Modifiers};
@@ -167,9 +168,9 @@ fn exact_prefix_dispatches_on_injected_timeout_and_clock_never_rewinds() {
         ids::PREFERENCES,
         vec![ShortcutStroke::new(Key::Q, true, false, false)],
     );
-    bind(
+    bind_key(
         &mut profile,
-        Command::ZoomFit,
+        ids::ZOOM_FIT,
         vec![
             ShortcutStroke::new(Key::Q, true, false, false),
             ShortcutStroke::new(Key::P, true, false, false),
@@ -219,9 +220,9 @@ fn no_timeout_waits_until_a_mismatch_then_dispatches_exact_prefix() {
         ids::PREFERENCES,
         vec![ShortcutStroke::new(Key::Q, true, false, false)],
     );
-    bind(
+    bind_key(
         &mut profile,
-        Command::ZoomFit,
+        ids::ZOOM_FIT,
         vec![
             ShortcutStroke::new(Key::Q, true, false, false),
             ShortcutStroke::new(Key::P, true, false, false),
@@ -331,9 +332,9 @@ fn repeat_release_and_wrong_platform_do_not_resolve() {
 #[test]
 fn disabled_higher_candidate_does_not_consume_lower_eligible_command() {
     let mut profile = ShortcutPreferences::default();
-    bind(
+    bind_key(
         &mut profile,
-        Command::ZoomFit,
+        ids::ZOOM_FIT,
         vec![ShortcutStroke::new(Key::K, true, false, false)],
     );
     bind(
@@ -352,7 +353,7 @@ fn disabled_higher_candidate_does_not_consume_lower_eligible_command() {
         CommandPlatform::Desktop,
         design(true),
         Duration::ZERO,
-        |command| command != Command::ZoomFit.key(),
+        |command| command != ids::ZOOM_FIT,
     );
     assert_eq!(resolved.command, Some(Command::CommandPalette.key()));
     assert_eq!(resolved.consume.len(), 1);
@@ -488,7 +489,7 @@ fn complete_symbol_tool_surface_resolves_through_the_central_registry() {
         (2, Key::L, DesignCommand::SymbolPolylineTool.key()),
         (3, Key::C, DesignCommand::SymbolCircleTool.key()),
         (4, Key::A, DesignCommand::SymbolArcTool.key()),
-        (5, Key::F, Command::ZoomFit.key()),
+        (5, Key::F, ids::ZOOM_FIT),
     ] {
         let resolved = state.resolve(
             &snapshot(&[event(key, Modifiers::NONE, false)], false),
@@ -703,7 +704,7 @@ fn result_context_beats_global_only_when_enabled() {
 /// workspace.
 ///
 /// Their handlers have carried a Results branch all along —
-/// `Command::ZoomFit` queues a view gesture and `Command::Copy` writes the
+/// `WorkbenchCommand::ZoomFit` queues a view gesture and `WorkbenchCommand::Copy` writes the
 /// cursor readout — but the resolver filtered them out before dispatch
 /// because their context was active on the design canvases only. Pressing
 /// the chord the View menu prints beside the row did nothing.
@@ -711,11 +712,11 @@ fn result_context_beats_global_only_when_enabled() {
 fn magnification_and_copy_chords_dispatch_on_a_result_sheet() {
     let profile = ShortcutPreferences::default();
     for command in [
-        Command::ZoomIn,
-        Command::ZoomOut,
-        Command::ZoomFit,
-        Command::ZoomPrevious,
-        Command::Copy,
+        WorkbenchCommand::ZoomIn,
+        WorkbenchCommand::ZoomOut,
+        WorkbenchCommand::ZoomFit,
+        WorkbenchCommand::ZoomPrevious,
+        WorkbenchCommand::Copy,
     ] {
         let sequence = profile
             .effective_bindings(&CommandRegistry, command.key())
@@ -761,7 +762,11 @@ fn magnification_and_copy_chords_dispatch_on_a_result_sheet() {
 #[test]
 fn a_result_sheet_does_not_dispatch_schematic_editing_chords() {
     let profile = ShortcutPreferences::default();
-    for command in [Command::Cut, Command::Paste, Command::Delete] {
+    for command in [
+        WorkbenchCommand::Cut,
+        WorkbenchCommand::Paste,
+        WorkbenchCommand::Delete,
+    ] {
         let sequence = profile
             .effective_bindings(&CommandRegistry, command.key())
             .into_iter()
@@ -804,9 +809,9 @@ fn three_second_policy_uses_the_injected_monotonic_deadline() {
         ids::PREFERENCES,
         vec![ShortcutStroke::new(Key::Q, true, false, false)],
     );
-    bind(
+    bind_key(
         &mut profile,
-        Command::ZoomFit,
+        ids::ZOOM_FIT,
         vec![
             ShortcutStroke::new(Key::Q, true, false, false),
             ShortcutStroke::new(Key::P, true, false, false),
@@ -952,14 +957,14 @@ fn single_key_canvas_require_alt_and_disabled_use_shared_projection() {
 #[test]
 fn application_chrome_and_editor_precedence_policy_changes_real_selection() {
     let mut chrome_first = ShortcutPreferences::default();
-    bind(
+    bind_key(
         &mut chrome_first,
-        Command::Cancel,
+        ids::CANCEL,
         vec![ShortcutStroke::new(Key::Q, true, false, false)],
     );
-    bind(
+    bind_key(
         &mut chrome_first,
-        Command::ZoomFit,
+        ids::ZOOM_FIT,
         vec![ShortcutStroke::new(Key::Q, true, false, false)],
     );
     let mut state = ShortcutResolverState::default();
@@ -972,7 +977,7 @@ fn application_chrome_and_editor_precedence_policy_changes_real_selection() {
         Duration::ZERO,
         |_| true,
     );
-    assert_eq!(chrome.command, Some(Command::Cancel.key()));
+    assert_eq!(chrome.command, Some(ids::CANCEL));
 
     let mut editor_first = chrome_first;
     editor_first
@@ -987,7 +992,7 @@ fn application_chrome_and_editor_precedence_policy_changes_real_selection() {
         Duration::from_millis(1),
         |_| true,
     );
-    assert_eq!(editor.command, Some(Command::ZoomFit.key()));
+    assert_eq!(editor.command, Some(ids::ZOOM_FIT));
 }
 
 #[test]
@@ -1063,7 +1068,7 @@ fn previous_marker_and_redo_answer_their_conventional_keys() {
             design(false),
             DesignCommand::PreviousViolation.key(),
         ),
-        (2, Key::Y, primary(), design(true), Command::Redo.key()),
+        (2, Key::Y, primary(), design(true), ids::REDO),
     ] {
         let resolved = state.resolve(
             &snapshot(&[event(key, modifiers, false)], false),
@@ -1103,7 +1108,7 @@ fn ctrl_d_duplicates_the_line_in_a_focused_source_editor_and_the_selection_on_a_
         Duration::from_millis(1),
         |_| true,
     );
-    assert_eq!(on_canvas.command, Some(Command::Duplicate.key()));
+    assert_eq!(on_canvas.command, Some(ids::DUPLICATE));
     let unfocused = state.resolve(
         &snapshot(&[event(Key::Slash, primary(), false)], true),
         &profile,

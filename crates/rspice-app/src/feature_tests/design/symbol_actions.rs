@@ -2,11 +2,11 @@
 
 use crate::feature_tests::design::symbol_actions_drawn::open_symbol;
 use crate::workbench::app_state::AppState;
-use crate::workbench::commands::vocabulary::Command;
 use rspice_app_design::workbench::app::actions::symbol::*;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::Point;
 use rspice_app_state::state::{CellViewRef, SymbolEditorMetadata, SymbolShape};
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_design::symbol::{SYMBOL_EDITOR_METADATA_KEY, SymbolAttributeKind};
 use rspice_schematic_editor::symbol_editor::commands::{SymbolEditAction, SymbolTransform};
 use rspice_schematic_editor::symbol_editor::interaction::bind_canvas_source;
@@ -38,14 +38,14 @@ fn duplicate_leaves_the_symbol_clipboard_alone() {
     let mut circle = SymbolSelection::default();
     circle.shapes.insert(0);
     app.state.design.symbol.editor.set_selection(circle);
-    Command::Copy.execute(&mut app);
+    app.execute_command_key(ids::COPY);
     let clipboard = app.state.design.symbol.editor.clipboard.clone();
     assert_eq!(clipboard.shapes.len(), 1);
 
     let mut dot = SymbolSelection::default();
     dot.shapes.insert(1);
     app.state.design.symbol.editor.set_selection(dot);
-    Command::Duplicate.execute(&mut app);
+    app.execute_command_key(ids::DUPLICATE);
 
     let document = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(document.body.len(), 3, "the dot was duplicated");
@@ -60,7 +60,7 @@ fn cut_paste_commands_preserve_order_unique_pin_names_and_undo() {
     let mut selection = SymbolSelection::single_pin("IN");
     selection.shapes.extend([0, 1]);
     app.state.design.symbol.editor.set_selection(selection);
-    Command::Cut.execute(&mut app);
+    app.execute_command_key(ids::CUT);
     assert_eq!(app.state.design.symbol.editor.clipboard.shapes, before.body);
     assert_eq!(
         app.state.design.symbol.editor.clipboard.pins,
@@ -91,7 +91,7 @@ fn cut_paste_commands_preserve_order_unique_pin_names_and_undo() {
     // The clipboard's bounds center is (-9, 1); hover wins over viewport center.
     app.state.design.canvas_hover = Some((31.0, 21.0));
     app.state.design.canvas_view_center = Some((100.0, 100.0));
-    Command::Paste.execute(&mut app);
+    app.execute_command_key(ids::PASTE);
     let pasted = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(pasted.body.len(), 4);
     // The copy takes the next free name, not a copy suffix.
@@ -292,7 +292,7 @@ fn escape_lets_go_of_the_shape_being_drawn_then_puts_the_tool_down() {
     app.state.design.symbol.editor.pending_polyline =
         vec![Point::origin(), Point::new(10, 20), Point::new(20, 0)];
 
-    app.execute_shortcut_command(Command::Cancel);
+    app.execute_command_key(ids::CANCEL);
 
     assert_eq!(
         app.state.model.load_active_symbol_document().unwrap(),
@@ -302,7 +302,7 @@ fn escape_lets_go_of_the_shape_being_drawn_then_puts_the_tool_down() {
     assert_eq!(app.state.design.symbol.editor.tool, SymbolTool::Polygon);
     assert!(!app.state.can_undo_active_symbol_document());
 
-    app.execute_shortcut_command(Command::Cancel);
+    app.execute_command_key(ids::CANCEL);
 
     assert_eq!(app.state.design.symbol.editor.tool, SymbolTool::Select);
 }
@@ -402,7 +402,7 @@ fn the_symbol_canvas_shares_the_schematic_navigation() {
     let mut replay = Replay::of(open_symbol());
     replay.frames(Vec::new());
     for _ in 0..30 {
-        replay.app.execute_command_key(Command::ZoomIn.key());
+        replay.app.execute_command_key(ids::ZOOM_IN);
         replay.frame(Vec::new());
     }
     assert_eq!(
@@ -411,17 +411,15 @@ fn the_symbol_canvas_shares_the_schematic_navigation() {
         "Zoom in stops where the schematic's does"
     );
 
-    replay.app.execute_command_key(Command::ZoomBox.key());
+    replay.app.execute_command_key(ids::ZOOM_BOX);
     assert!(replay.app.state.design.symbol.editor.zoom_box.armed);
     replay.app.state.design.symbol.editor.zoom_box.disarm();
 
     // The dot at (20, 10) is framed in the middle of the canvas.
     replay.app.state.design.symbol.editor.select_shape(1);
-    replay.app.execute_command_key(Command::ZoomOut.key());
+    replay.app.execute_command_key(ids::ZOOM_OUT);
     replay.frame(Vec::new());
-    replay
-        .app
-        .execute_command_key(Command::ZoomToSelection.key());
+    replay.app.execute_command_key(ids::ZOOM_TO_SELECTION);
     replay.frame(Vec::new());
     let editor = &replay.app.state.design.symbol.editor;
     assert!(

@@ -686,7 +686,7 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
 #[test]
 fn core_menu_commands_are_all_real_dispatch_commands() {
     let commands = [
-        Command::Undo.key(),
+        ids::UNDO,
         DesignCommand::PlaceWire.key(),
         DesignCommand::PlaceBus.key(),
         DesignCommand::PlaceBusTap.key(),
@@ -919,7 +919,7 @@ fn undo_redo_and_repeat_name_what_they_act_on() {
     );
     assert_eq!(edit_rows(&app)[0], "Undo place resistor");
 
-    app.execute(Command::Undo.key());
+    app.execute(ids::UNDO);
     assert_eq!(edit_rows(&app)[1], "Redo place resistor");
 
     app.state.workbench.last_repeatable_command = Some("place-wire".to_owned());
@@ -940,10 +940,10 @@ fn symbol_undo_and_redo_name_the_step_they_take() {
             .collect::<Vec<_>>()
     };
     app.state.design.symbol.editor.select_shape(0);
-    app.execute(Command::Delete.key());
+    app.execute(ids::DELETE);
     assert_eq!(edit_rows(&app), ["Undo delete dot", "Redo"]);
 
-    app.execute(Command::Undo.key());
+    app.execute(ids::UNDO);
     assert_eq!(edit_rows(&app), ["Undo", "Redo delete dot"]);
 }
 
@@ -986,10 +986,10 @@ fn deselect_all_clears_the_selection() {
         &mut app.state.model.schematic,
     );
     assert_eq!(
-        app.availability(Command::DeselectAll.key()),
+        app.availability(ids::DESELECT_ALL),
         CommandAvailability::Disabled("nothing is selected")
     );
-    app.execute(Command::SelectAll.key());
+    app.execute(ids::SELECT_ALL);
     assert!(
         !app.state
             .model
@@ -999,9 +999,9 @@ fn deselect_all_clears_the_selection() {
             .selection
             .is_empty()
     );
-    assert!(app.is_enabled(Command::DeselectAll.key()));
+    assert!(app.is_enabled(ids::DESELECT_ALL));
 
-    app.execute(Command::DeselectAll.key());
+    app.execute(ids::DESELECT_ALL);
     assert!(
         app.state
             .model
@@ -1011,7 +1011,7 @@ fn deselect_all_clears_the_selection() {
             .selection
             .is_empty()
     );
-    assert!(!app.is_enabled(Command::DeselectAll.key()));
+    assert!(!app.is_enabled(ids::DESELECT_ALL));
 }
 
 /// One frame of what `draw` paints, returning the labels of the menu items
@@ -1384,7 +1384,7 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         (DesignCommand::PlaceJunction.key(), WorkbenchIcon::Junction),
         (DesignCommand::PlacePin.key(), WorkbenchIcon::Pin),
         (DesignCommand::PlaceText.key(), WorkbenchIcon::Text),
-        (Command::Delete.key(), WorkbenchIcon::Trash),
+        (ids::DELETE, WorkbenchIcon::Trash),
         (DesignCommand::AscendHierarchy.key(), WorkbenchIcon::ArrowUp),
         (
             DesignCommand::DescendHierarchyDirect.key(),
@@ -1427,7 +1427,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         Command::About,
         Command::HelpCenter,
         Command::Exit,
-        Command::SelectAll,
         Command::KeyboardShortcuts,
     ] {
         assert_eq!(
@@ -1437,6 +1436,7 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
             command.spec().id
         );
     }
+    assert_eq!(app.command_icon(ids::SELECT_ALL), None);
     for key in [
         DesignCommand::DescendHierarchy.key(),
         DesignCommand::RenameSelection.key(),
@@ -1483,7 +1483,7 @@ fn design_follows_the_view_in_front() {
     let mut app = symbol_view_app();
     let rotate_ccw = DesignCommand::RotateSelectionCounterClockwise.key();
     assert!(!app.is_enabled(rotate_ccw), "nothing is selected yet");
-    app.execute(Command::SelectAll.key());
+    app.execute(ids::SELECT_ALL);
     assert!(
         app.is_enabled(rotate_ccw),
         "Rotate counter-clockwise turns the symbol's selection"

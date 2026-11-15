@@ -1,7 +1,6 @@
 //! Editing a symbol in place on its parent sheet, drawn through a whole application.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
 use egui::{Color32, Context, Pos2, Rect, Vec2, vec2};
 use rspice_app_design::schematic::view::schematic_symbol_context;
 use rspice_app_design::workbench::design::commands::DesignCommand;
@@ -11,6 +10,7 @@ use rspice_app_state::state::{
     Wire,
 };
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 use rspice_schematic_editor::view::coordinates::viewport_from_camera;
 
@@ -147,7 +147,7 @@ fn a_pin_dragged_in_place_lands_under_the_pointer_in_symbol_coordinates() {
 
     // The drag is one step of the symbol: Undo puts the pin and the wire
     // end back together, and Redo carries both again.
-    Command::Undo.execute(&mut fixture.app);
+    fixture.app.execute_command_key(ids::UNDO);
     fixture.frame(vec![]);
     let wire = |fixture: &Fixture| {
         fixture
@@ -165,7 +165,7 @@ fn a_pin_dragged_in_place_lands_under_the_pointer_in_symbol_coordinates() {
     };
     assert_eq!(fixture.symbol_pin("A"), Some(Point::new(-40, -10)));
     assert_eq!(wire(&fixture), start, "Undo took the wire end back");
-    Command::Redo.execute(&mut fixture.app);
+    fixture.app.execute_command_key(ids::REDO);
     fixture.frame(vec![]);
     assert_eq!(fixture.symbol_pin("A"), Some(target));
     assert_eq!(wire(&fixture), world, "Redo carried it again");
@@ -302,7 +302,7 @@ fn leaving_in_place_gives_the_sheet_back_its_own_view() {
     };
     for leave in ["escape", "command"] {
         fixture.enter(0);
-        Command::ZoomIn.execute(&mut fixture.app);
+        fixture.app.execute_command_key(ids::ZOOM_IN);
         fixture.frame(vec![]);
         let session = rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
             &fixture.app.state.design.symbol.in_place,
@@ -360,7 +360,7 @@ fn zoom_previous_steps_back_the_in_place_view_only_where_it_is_shown() {
         (session.zoom, session.pan)
     };
     let entered = view(&fixture);
-    Command::ZoomIn.execute(&mut fixture.app);
+    fixture.app.execute_command_key(ids::ZOOM_IN);
     fixture.frame(vec![]);
     let nearer = view(&fixture);
     assert_ne!(nearer, entered, "Zoom in magnifies the in-place view");
@@ -375,17 +375,17 @@ fn zoom_previous_steps_back_the_in_place_view_only_where_it_is_shown() {
         .is_some()
     );
     assert_eq!(
-        Command::ZoomPrevious.availability(&fixture.app),
+        fixture.app.command_availability(ids::ZOOM_PREVIOUS),
         CommandAvailability::Disabled("open a schematic or symbol"),
         "the in-place canvas is not shown in Simulate"
     );
 
     fixture.app.state.workbench.activate(Workspace::Design);
     assert_eq!(
-        Command::ZoomPrevious.availability(&fixture.app),
+        fixture.app.command_availability(ids::ZOOM_PREVIOUS),
         CommandAvailability::Available
     );
-    Command::ZoomPrevious.execute(&mut fixture.app);
+    fixture.app.execute_command_key(ids::ZOOM_PREVIOUS);
     assert_eq!(
         view(&fixture),
         entered,

@@ -483,7 +483,9 @@ fn undo_and_redo_of_a_waiver_re_state_the_finding_and_drop_preflight() {
     assert!(current_record(&app.state).waived());
 
     retain_report(&mut app.state, Vec::new());
-    app.execute_command_key(crate::workbench::commands::vocabulary::Command::Undo.key());
+    app.execute_command_key(
+        rspice_app_workbench::workbench::framework::command_registry::ids::UNDO,
+    );
     assert!(app.state.model.schematic.document().waivers.is_empty());
     collision_current(&mut app.state);
     assert!(
@@ -496,7 +498,9 @@ fn undo_and_redo_of_a_waiver_re_state_the_finding_and_drop_preflight() {
     );
 
     retain_report(&mut app.state, Vec::new());
-    app.execute_command_key(crate::workbench::commands::vocabulary::Command::Redo.key());
+    app.execute_command_key(
+        rspice_app_workbench::workbench::framework::command_registry::ids::REDO,
+    );
     assert_eq!(
         app.state.model.schematic.document().waivers.entries().len(),
         1

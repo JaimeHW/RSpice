@@ -87,7 +87,7 @@ fn select_by_kind_selects_exactly_that_kind() {
         SchematicObjectKind::ALL
     );
     app.state.design.schematic_selection_filter.instances = false;
-    app.execute(Command::SelectAll.key());
+    app.execute(ids::SELECT_ALL);
     for (kind, selection) in expected {
         let key = DesignCommand::SelectOfKind(kind).key();
         assert_eq!(
@@ -151,7 +151,7 @@ fn zoom_previous_steps_back_through_the_views_the_canvas_showed() {
         let editor = &app.state.model.schematic.session.editor;
         (editor.zoom, editor.pan)
     };
-    let key = Command::ZoomPrevious.key();
+    let key = ids::ZOOM_PREVIOUS;
     canvas_frame(&ctx, &mut app, 0.0);
     let opened = view(&app);
     assert_eq!(
@@ -159,10 +159,10 @@ fn zoom_previous_steps_back_through_the_views_the_canvas_showed() {
         CommandAvailability::Disabled("the view has not changed yet")
     );
 
-    app.execute(Command::ZoomIn.key());
+    app.execute(ids::ZOOM_IN);
     canvas_frame(&ctx, &mut app, 1.0);
     let nearer = view(&app);
-    app.execute(Command::ZoomIn.key());
+    app.execute(ids::ZOOM_IN);
     canvas_frame(&ctx, &mut app, 2.0);
     assert_ne!(view(&app), nearer);
     assert_ne!(nearer, opened);
@@ -255,7 +255,7 @@ fn zoom_previous_steps_a_waveform_sheet_back_through_the_views_it_showed() {
         );
         (pane.x, pane.y)
     };
-    let key = Command::ZoomPrevious.key();
+    let key = ids::ZOOM_PREVIOUS;
     results_frame(&ctx, &mut app, 0.0);
     let opened = view(&app);
     assert_eq!(
@@ -263,10 +263,10 @@ fn zoom_previous_steps_a_waveform_sheet_back_through_the_views_it_showed() {
         CommandAvailability::Disabled("the view has not changed yet")
     );
 
-    app.execute(Command::ZoomIn.key());
+    app.execute(ids::ZOOM_IN);
     results_frame(&ctx, &mut app, 1.0);
     let nearer = view(&app);
-    app.execute(Command::ZoomIn.key());
+    app.execute(ids::ZOOM_IN);
     results_frame(&ctx, &mut app, 2.0);
     assert_ne!(view(&app), nearer);
     assert_ne!(nearer, opened);

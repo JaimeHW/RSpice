@@ -7,6 +7,9 @@
 
 use super::*;
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_workbench::workbench::framework::command_registry::{
+    CommandFlags, WorkbenchCommand,
+};
 
 #[test]
 fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
@@ -119,22 +122,22 @@ fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
     // The canvas carries a zoom command out on its next frame, pivoting on
     // its middle (audit E-1), so each step draws one.
     app.state.model.schematic.session.editor.zoom = 1.0;
-    Command::ZoomIn.execute(&mut app);
+    app.execute_command_key(ids::ZOOM_IN);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert!((app.state.model.schematic.session.editor.zoom - 1.2).abs() < f64::EPSILON);
 
     app.state.model.schematic.session.editor.zoom = 1.0;
-    app.execute_shortcut_command(Command::ZoomOut);
+    app.execute_command_key(ids::ZOOM_OUT);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert!((app.state.model.schematic.session.editor.zoom - (1.0 / 1.2)).abs() < f64::EPSILON);
 
     app.state.model.schematic.session.editor.zoom = 0.251;
-    Command::ZoomOut.execute(&mut app);
+    app.execute_command_key(ids::ZOOM_OUT);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert_eq!(app.state.model.schematic.session.editor.zoom, 0.25);
 
     app.state.model.schematic.session.editor.zoom = 7.99;
-    Command::ZoomIn.execute(&mut app);
+    app.execute_command_key(ids::ZOOM_IN);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert_eq!(app.state.model.schematic.session.editor.zoom, 8.0);
 
@@ -147,7 +150,7 @@ fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
         .session
         .editor
         .needs_drawing_sheet_fit = false;
-    Command::ZoomFit.execute(&mut app);
+    app.execute_command_key(ids::ZOOM_FIT);
     assert_eq!(app.state.model.schematic.session.editor.zoom, 3.5);
     assert_eq!(app.state.model.schematic.session.editor.pan, (127.0, -81.0));
     assert!(!app.state.model.schematic.session.editor.needs_fit);
@@ -229,12 +232,12 @@ fn zoom_commands_keep_the_middle_of_the_canvas_where_it_was() {
     assert_eq!(world_at_canvas_centre(&app, 800.0, 600.0), (2000.0, 100.0));
 
     for (command, zoom) in [
-        (Command::ZoomIn, 0.6),
-        (Command::ZoomIn, 0.72),
-        (Command::ZoomOut, 0.6),
-        (Command::ZoomOneToOne, 1.0),
+        (WorkbenchCommand::ZoomIn, 0.6),
+        (WorkbenchCommand::ZoomIn, 0.72),
+        (WorkbenchCommand::ZoomOut, 0.6),
+        (WorkbenchCommand::ZoomOneToOne, 1.0),
     ] {
-        app.execute_shortcut_command(command);
+        app.execute_command_key(command.key());
         draw_schematic_canvas(&mut app.state, 800.0, 600.0);
         let editor = &app.state.model.schematic.session.editor;
         assert!(
@@ -278,7 +281,7 @@ fn fit_sheet_shows_the_whole_sheet_on_a_small_canvas() {
             && bottom <= f64::from(height) + 1e-6
     };
 
-    Command::ZoomFit.execute(&mut app);
+    app.execute_command_key(ids::ZOOM_FIT);
     draw_schematic_canvas(&mut app.state, width, height);
     assert!(
         fits_on_screen(&app),
@@ -290,7 +293,7 @@ fn fit_sheet_shows_the_whole_sheet_on_a_small_canvas() {
 
     app.state.model.schematic.session.editor.zoom = 0.25;
     for _ in 0..20 {
-        Command::ZoomOut.execute(&mut app);
+        app.execute_command_key(ids::ZOOM_OUT);
         draw_schematic_canvas(&mut app.state, width, height);
     }
     assert!(
@@ -303,11 +306,16 @@ fn fit_sheet_shows_the_whole_sheet_on_a_small_canvas() {
 /// dragged on the canvas. Neither existed.
 #[test]
 fn zoom_to_selection_and_zoom_box_are_commands() {
+    let registry = vocabulary::command_registry();
     for id in ["zoom-to-selection", "zoom-box"] {
-        let command = Command::from_stable_id(id);
-        assert!(command.is_some(), "{id} is not a command");
+        let key = registry.resolve(id);
         assert!(
-            command_catalog().any(|candidate| Some(candidate) == command),
+            key.and_then(WorkbenchCommand::from_key).is_some(),
+            "{id} is not a command"
+        );
+        assert!(
+            key.and_then(|key| registry.spec(key))
+                .is_some_and(|spec| spec.flags.contains(CommandFlags::PALETTE_VISIBLE)),
             "{id} is not offered in the palette"
         );
     }
@@ -340,7 +348,7 @@ fn zoom_to_selection_frames_what_is_selected() {
     let (min_x, min_y, max_x, max_y) = (min.x, min.y, max.x, max.y);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert!(
-        !Command::ZoomToSelection.is_enabled(&app),
+        !app.command_key_enabled(ids::ZOOM_TO_SELECTION),
         "nothing is selected"
     );
 
@@ -351,8 +359,8 @@ fn zoom_to_selection_frames_what_is_selected() {
         .editor
         .selection
         .select_only_component(41);
-    assert!(Command::ZoomToSelection.is_enabled(&app));
-    Command::ZoomToSelection.execute(&mut app);
+    assert!(app.command_key_enabled(ids::ZOOM_TO_SELECTION));
+    app.execute_command_key(ids::ZOOM_TO_SELECTION);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
 
     let (x, y) = world_at_canvas_centre(&app, 800.0, 600.0);
@@ -410,7 +418,7 @@ fn zoom_box_frames_the_dragged_rectangle_and_lets_go() {
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     drive_schematic_canvas(&mut app.state, &ctx, Vec::new());
 
-    app.execute_shortcut_command(Command::ZoomBox);
+    app.execute_command_key(ids::ZOOM_BOX);
     assert!(app.state.model.schematic.session.editor.zoom_box.armed);
     let (from, to) = (egui::pos2(100.0, 100.0), egui::pos2(300.0, 250.0));
     let button = |pos, pressed| egui::Event::PointerButton {
@@ -458,9 +466,9 @@ fn zoom_box_frames_the_dragged_rectangle_and_lets_go() {
 fn escape_lets_go_of_an_armed_zoom_box() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
-    Command::ZoomBox.execute(&mut app);
+    app.execute_command_key(ids::ZOOM_BOX);
     assert!(app.state.model.schematic.session.editor.zoom_box.armed);
-    app.execute_shortcut_command(Command::Cancel);
+    app.execute_command_key(ids::CANCEL);
     assert!(!app.state.model.schematic.session.editor.zoom_box.armed);
 }
 

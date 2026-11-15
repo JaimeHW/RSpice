@@ -13,12 +13,17 @@
 //!
 //! Undo and Redo step the design's histories everywhere the shell lets the
 //! key through: the shell steps the netlist page's own history first.
+//!
+//! Cancel lets go of the innermost thing the design workspace holds, from
+//! any workspace: the shell asks the design feature first, Results after it.
 
+use rspice_schematic_editor::symbol_editor::commands::finish_cancel;
 use rspice_schematic_editor::view::navigation::ZoomRequest;
 
 use crate::state::ViewType;
 use crate::workbench::app::actions::workspace::symbol_in_place::{
-    in_place_bounds, in_place_placement, in_place_session, in_place_session_mut,
+    SymbolInPlaceExit, in_place_bounds, in_place_placement, in_place_session, in_place_session_mut,
+    symbol_in_place_canvas_idle,
 };
 use crate::workbench::app::actions::workspace::{
     HistoryDirection, HistoryStepParts, take_history_step,
@@ -32,14 +37,17 @@ use crate::workbench::app::dialogs::selection::commands::{
     schematic_selection_has_live_object,
 };
 use crate::workbench::app::{
-    copy_active_schematic_selection, cut_schematic_selection, delete_schematic_selection,
-    duplicate_schematic_selection, paste_schematic_clipboard, select_all_schematic_objects,
+    cancel_armed_array_selection_in, cancel_armed_move_selection_in,
+    cancel_armed_stretch_selection_in, cancel_floating_paste_in, copy_active_schematic_selection,
+    cut_schematic_selection, delete_schematic_selection, duplicate_schematic_selection,
+    paste_schematic_clipboard, select_all_schematic_objects,
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{Cx, Reads, RoutedCommand};
 use crate::workbench::framework::requests::FocusNavigatorSearch;
-use crate::workbench::state::{Drawer, Workspace};
+use crate::workbench::slots::DesignState;
+use crate::workbench::state::{Drawer, WorkbenchSession, Workspace};
 
 use super::DesignFeature;
 
@@ -161,6 +169,12 @@ pub(super) const ROUTED: &[RoutedCommand<DesignFeature>] = &[
         takes: |_| true,
         enabled: can_redo,
         execute: redo,
+    },
+    RoutedCommand {
+        key: ids::CANCEL,
+        takes: |reads| cancel_step(reads.state, reads.model, reads.wb).is_some(),
+        enabled: |_| true,
+        execute: cancel,
     },
 ];
 
@@ -552,5 +566,100 @@ fn history_parts<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> HistoryStepParts<'a> 
         runs: &mut *cx.runs,
         run_controller: &mut *cx.handles.run_controller,
         selected_model: cx.peers.models().selected_model(),
+    }
+}
+
+/// What Cancel lets go of, innermost first.
+#[derive(Debug, Clone, Copy)]
+enum CancelStep {
+    /// Nothing on the in-place symbol's canvas to cancel: Escape leaves the
+    /// in-place edit, as Return does.
+    LeaveSymbolInPlace,
+    /// The shape being drawn in the symbol editor, keeping its tool armed;
+    /// with nothing part drawn, the tool itself.
+    SymbolDraft,
+    InlineEdit,
+    /// A pointer edit on the schematic: the innermost active interaction.
+    SchematicDrag,
+    ZoomBox,
+    DescendHierarchy,
+    /// The floating copy; the drawing never changed.
+    FloatingPaste,
+    MoveSelection,
+    StretchSelection,
+    ArraySelection,
+    Drawer,
+    ObjectProperties,
+    TabbedPropertyDialog,
+}
+
+/// The step Cancel takes here, or `None` when the design workspace holds
+/// nothing for it to let go of.
+fn cancel_step(state: &DesignState, model: &Model, wb: &WorkbenchSession) -> Option<CancelStep> {
+    Some(if symbol_editor(wb.workspace, model) {
+        if symbol_in_place_canvas_idle(&state.symbol, model) {
+            CancelStep::LeaveSymbolInPlace
+        } else {
+            CancelStep::SymbolDraft
+        }
+    } else if wb.workspace == Workspace::Design && wb.inline_edit.session().is_some() {
+        CancelStep::InlineEdit
+    } else if state.interaction.drag.owner.is_some() {
+        CancelStep::SchematicDrag
+    } else if model.schematic.session.editor.zoom_box.armed {
+        CancelStep::ZoomBox
+    } else if state.descend_hierarchy.open {
+        CancelStep::DescendHierarchy
+    } else if state.floating_paste.is_some() {
+        CancelStep::FloatingPaste
+    } else if state.move_selection.armed {
+        CancelStep::MoveSelection
+    } else if state.stretch_selection.armed {
+        CancelStep::StretchSelection
+    } else if state.array_selection.armed {
+        CancelStep::ArraySelection
+    } else if wb.drawer.is_some() {
+        CancelStep::Drawer
+    } else if state.object_properties.open {
+        CancelStep::ObjectProperties
+    } else if state.tabbed_property_dialog.open {
+        CancelStep::TabbedPropertyDialog
+    } else {
+        return None;
+    })
+}
+
+fn cancel(cx: &mut Cx<'_, DesignFeature>) {
+    let Some(step) = cancel_step(cx.state, cx.model, cx.wb) else {
+        return;
+    };
+    match step {
+        CancelStep::LeaveSymbolInPlace => {
+            super::navigation(cx).request_symbol_in_place_exit(SymbolInPlaceExit::Parent);
+        }
+        CancelStep::SymbolDraft => finish_cancel(&mut cx.state.symbol.editor),
+        CancelStep::InlineEdit => cx.wb.inline_edit.end(),
+        CancelStep::SchematicDrag => {
+            cx.state.interaction.drag.cancel_schematic_drag(cx.model);
+        }
+        CancelStep::ZoomBox => cx.model.schematic.session.editor.zoom_box.disarm(),
+        CancelStep::DescendHierarchy => cx.state.descend_hierarchy.close(),
+        CancelStep::FloatingPaste => {
+            cancel_floating_paste_in(&mut cx.state.floating_paste, cx.wb);
+        }
+        CancelStep::MoveSelection => {
+            cancel_armed_move_selection_in(&mut cx.state.move_selection, cx.model);
+        }
+        CancelStep::StretchSelection => {
+            cancel_armed_stretch_selection_in(&mut cx.state.stretch_selection, cx.model);
+        }
+        CancelStep::ArraySelection => {
+            cancel_armed_array_selection_in(&mut cx.state.array_selection, cx.model);
+        }
+        CancelStep::Drawer => cx.wb.close_drawer(),
+        CancelStep::ObjectProperties => cx.state.object_properties.close(),
+        CancelStep::TabbedPropertyDialog => {
+            cx.state.tabbed_property_dialog.attempt_close();
+        }
     }
 }

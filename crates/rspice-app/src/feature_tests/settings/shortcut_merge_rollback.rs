@@ -4,7 +4,6 @@
 //! refuses to erase a later edit, and a failed persistence leaves the applied
 //! state exactly as it was.
 
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
 use egui::Key;
@@ -23,6 +22,7 @@ use rspice_app_state::state::shortcuts::ShortcutProfileLibrary;
 use rspice_app_state::state::shortcuts::ShortcutProfileLibraryError;
 use rspice_app_state::state::shortcuts::ShortcutSequence;
 use rspice_app_state::state::shortcuts::ShortcutStroke;
+use rspice_app_workbench::workbench::framework::command_registry::{WorkbenchCommand, ids};
 use serde_json::Value;
 
 pub(crate) fn artifact_from(profile: &ShortcutPreferences) -> DecodedShortcutArtifact {
@@ -85,7 +85,7 @@ pub(crate) fn artifact_value_with_coverage(
 
 pub(crate) fn set(
     profile: &mut ShortcutPreferences,
-    command: Command,
+    command: WorkbenchCommand,
     slot: ShortcutBindingSlot,
     platform: CommandPlatform,
     key: Key,
@@ -127,14 +127,14 @@ pub(crate) fn with_command_extra(
 
 fn with_binding_extra(
     profile: &ShortcutPreferences,
-    command: Command,
+    command: WorkbenchCommand,
     platform: CommandPlatform,
     key: &str,
     value: Value,
 ) -> ShortcutPreferences {
     let mut raw = serde_json::to_value(profile).unwrap();
     let platform = serde_json::to_value(platform).unwrap();
-    let binding = raw["commands"][command.stable_id()]["bindings"]
+    let binding = raw["commands"][command.key().as_str()]["bindings"]
         .as_array_mut()
         .unwrap()
         .iter_mut()
@@ -172,7 +172,7 @@ fn same_target_conflict_honors_every_resolution_policy() {
         let mut base = ShortcutProfileLibrary::default();
         set(
             base.active_mut().unwrap(),
-            Command::ZoomFit,
+            WorkbenchCommand::ZoomFit,
             ShortcutBindingSlot::Primary,
             CommandPlatform::Desktop,
             Key::F13,
@@ -180,7 +180,7 @@ fn same_target_conflict_honors_every_resolution_policy() {
         let mut imported = ShortcutPreferences::default();
         set(
             &mut imported,
-            Command::ZoomFit,
+            WorkbenchCommand::ZoomFit,
             ShortcutBindingSlot::Primary,
             CommandPlatform::Desktop,
             Key::F7,
@@ -204,7 +204,7 @@ fn same_target_conflict_honors_every_resolution_policy() {
         assert_eq!(
             plan.candidate_library().active().resolved_label(
                 &CommandRegistry,
-                Command::ZoomFit.key(),
+                ids::ZOOM_FIT,
                 CommandPlatform::Desktop,
                 OperatingSystem::Windows
             ),
@@ -218,7 +218,7 @@ fn disjoint_platform_slices_of_one_command_merge_without_conflict() {
     let mut base = ShortcutProfileLibrary::default();
     set(
         base.active_mut().unwrap(),
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F13,
@@ -226,7 +226,7 @@ fn disjoint_platform_slices_of_one_command_merge_without_conflict() {
     let mut imported = ShortcutPreferences::default();
     set(
         &mut imported,
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Browser,
         Key::F7,
@@ -235,7 +235,7 @@ fn disjoint_platform_slices_of_one_command_merge_without_conflict() {
         &base,
         &artifact_with_coverage(
             &imported,
-            &[Command::ZoomFit.shortcut_context().label()],
+            &[WorkbenchCommand::ZoomFit.declared_spec().context.label()],
             &[CommandPlatform::Browser],
             false,
         ),
@@ -253,7 +253,7 @@ fn disjoint_platform_slices_of_one_command_merge_without_conflict() {
     assert_eq!(
         plan.candidate_library().active().resolved_label(
             &CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -262,7 +262,7 @@ fn disjoint_platform_slices_of_one_command_merge_without_conflict() {
     assert_eq!(
         plan.candidate_library().active().resolved_label(
             &CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             CommandPlatform::Browser,
             OperatingSystem::Windows
         ),
@@ -275,14 +275,14 @@ fn single_platform_replace_preserves_other_platform_slices() {
     let mut base = ShortcutProfileLibrary::default();
     set(
         base.active_mut().unwrap(),
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F13,
     );
     set(
         base.active_mut().unwrap(),
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Browser,
         Key::F7,
@@ -290,7 +290,7 @@ fn single_platform_replace_preserves_other_platform_slices() {
     let mut imported = ShortcutPreferences::default();
     set(
         &mut imported,
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F8,
@@ -299,7 +299,7 @@ fn single_platform_replace_preserves_other_platform_slices() {
         &base,
         &artifact_with_coverage(
             &imported,
-            &[Command::ZoomFit.shortcut_context().label()],
+            &[WorkbenchCommand::ZoomFit.declared_spec().context.label()],
             &[CommandPlatform::Desktop],
             false,
         ),
@@ -314,7 +314,7 @@ fn single_platform_replace_preserves_other_platform_slices() {
     assert_eq!(
         plan.candidate_library().active().resolved_label(
             &CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -323,7 +323,7 @@ fn single_platform_replace_preserves_other_platform_slices() {
     assert_eq!(
         plan.candidate_library().active().resolved_label(
             &CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             CommandPlatform::Browser,
             OperatingSystem::Windows
         ),
@@ -336,14 +336,14 @@ fn covered_unbind_only_removes_the_covered_platform_slice() {
     let mut base = ShortcutProfileLibrary::default();
     set(
         base.active_mut().unwrap(),
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F13,
     );
     set(
         base.active_mut().unwrap(),
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Browser,
         Key::F7,
@@ -352,7 +352,7 @@ fn covered_unbind_only_removes_the_covered_platform_slice() {
     imported
         .set_binding(
             &CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
             None,
@@ -362,7 +362,7 @@ fn covered_unbind_only_removes_the_covered_platform_slice() {
         &base,
         &artifact_with_coverage(
             &imported,
-            &[Command::ZoomFit.shortcut_context().label()],
+            &[WorkbenchCommand::ZoomFit.declared_spec().context.label()],
             &[CommandPlatform::Desktop],
             false,
         ),
@@ -377,7 +377,7 @@ fn covered_unbind_only_removes_the_covered_platform_slice() {
     assert_eq!(
         plan.candidate_library().active().resolved_label(
             &CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -386,7 +386,7 @@ fn covered_unbind_only_removes_the_covered_platform_slice() {
     assert_eq!(
         plan.candidate_library().active().resolved_label(
             &CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             CommandPlatform::Browser,
             OperatingSystem::Windows
         ),
@@ -399,14 +399,14 @@ fn known_command_and_binding_extension_fields_follow_their_platform_slice() {
     let mut base_profile = ShortcutPreferences::default();
     set(
         &mut base_profile,
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Browser,
         Key::F7,
     );
     let base_profile = with_binding_extra(
         &base_profile,
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         CommandPlatform::Browser,
         "future-binding",
         serde_json::json!({"source":"base"}),
@@ -417,7 +417,7 @@ fn known_command_and_binding_extension_fields_follow_their_platform_slice() {
     let mut imported = ShortcutPreferences::default();
     set(
         &mut imported,
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F8,
@@ -425,12 +425,12 @@ fn known_command_and_binding_extension_fields_follow_their_platform_slice() {
     let imported = with_command_extra(
         &with_binding_extra(
             &imported,
-            Command::ZoomFit,
+            WorkbenchCommand::ZoomFit,
             CommandPlatform::Desktop,
             "future-binding",
             serde_json::json!({"source":"imported"}),
         ),
-        Command::ZoomFit.key(),
+        ids::ZOOM_FIT,
         "future-command",
         serde_json::json!({"mode":"portable"}),
     );
@@ -438,7 +438,7 @@ fn known_command_and_binding_extension_fields_follow_their_platform_slice() {
         &base,
         &artifact_with_coverage(
             &imported,
-            &[Command::ZoomFit.shortcut_context().label()],
+            &[WorkbenchCommand::ZoomFit.declared_spec().context.label()],
             &[CommandPlatform::Desktop],
             false,
         ),
@@ -447,7 +447,7 @@ fn known_command_and_binding_extension_fields_follow_their_platform_slice() {
     )
     .unwrap();
     let candidate = serde_json::to_value(plan.candidate_library().active()).unwrap();
-    let bindings = candidate["commands"][Command::ZoomFit.stable_id()]["bindings"]
+    let bindings = candidate["commands"][ids::ZOOM_FIT.as_str()]["bindings"]
         .as_array()
         .unwrap();
     let desktop = bindings
@@ -460,7 +460,7 @@ fn known_command_and_binding_extension_fields_follow_their_platform_slice() {
         .unwrap();
 
     assert_eq!(
-        candidate["commands"][Command::ZoomFit.stable_id()]["future-command"],
+        candidate["commands"][ids::ZOOM_FIT.as_str()]["future-command"],
         serde_json::json!({"mode":"portable"})
     );
     assert_eq!(
@@ -478,7 +478,7 @@ fn full_replace_resets_omitted_known_and_unknown_command_overrides() {
     let mut profile = ShortcutPreferences::default();
     set(
         &mut profile,
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F13,
@@ -506,7 +506,7 @@ fn full_replace_resets_omitted_known_and_unknown_command_overrides() {
     assert_eq!(
         plan.candidate_library().active().resolved_label(
             &CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -524,7 +524,7 @@ fn imported_unknown_profile_and_command_records_are_preserved() {
     let mut profile = ShortcutPreferences::default();
     set(
         &mut profile,
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F13,
@@ -606,7 +606,7 @@ fn named_preset_import_leaves_active_profile_byte_equivalent() {
     let mut imported = ShortcutPreferences::default();
     set(
         &mut imported,
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F13,
@@ -648,7 +648,7 @@ fn named_preset_import_leaves_active_profile_byte_equivalent() {
             .profile()
             .resolved_label(
                 &CommandRegistry,
-                Command::ZoomFit.key(),
+                ids::ZOOM_FIT,
                 CommandPlatform::Desktop,
                 OperatingSystem::Windows
             ),

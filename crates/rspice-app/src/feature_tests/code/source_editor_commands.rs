@@ -11,6 +11,7 @@ use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::code_workspace::{self, CodeWorkspacePage};
 use rspice_app_state::state::{Point, ProjectSourceId, ProjectSourceLanguage, Wire};
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 const FIRST_LINE: &str = "// Behavioral conductance.";
 
@@ -137,10 +138,10 @@ fn edit_cut_cuts_the_source_selection_and_leaves_the_schematic_alone() {
     assert!(original.starts_with(FIRST_LINE));
 
     assert!(
-        Command::Cut.is_enabled(&app),
+        app.command_key_enabled(ids::CUT),
         "Cut is offered for the source editor's selection"
     );
-    Command::Cut.execute(&mut app);
+    app.execute_command_key(ids::CUT);
     let output = frame(&ctx, &mut app, DESKTOP);
 
     assert_eq!(
@@ -180,7 +181,7 @@ fn edit_cut_cuts_the_source_selection_and_leaves_the_schematic_alone() {
         "the schematic behind the source page lost nothing"
     );
 
-    Command::Undo.execute(&mut app);
+    app.execute_command_key(ids::UNDO);
     frame(&ctx, &mut app, DESKTOP);
     assert_eq!(
         root_text(&app, bundle_id),
@@ -194,9 +195,9 @@ fn edit_select_all_then_copy_reach_the_source_editor() {
     let (ctx, mut app, bundle_id) = veriloga_with_selected_first_line();
     let original = root_text(&app, bundle_id);
 
-    Command::SelectAll.execute(&mut app);
+    app.execute_command_key(ids::SELECT_ALL);
     frame(&ctx, &mut app, DESKTOP);
-    Command::Copy.execute(&mut app);
+    app.execute_command_key(ids::COPY);
     let output = frame(&ctx, &mut app, DESKTOP);
 
     assert!(

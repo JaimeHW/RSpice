@@ -53,6 +53,7 @@ use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
 };
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
 use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
+use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 use rspice_app_workbench::workbench::framework::command_registry::{Registry, ids};
 use rspice_app_workbench::workbench::framework::feature::{CloudSessionPort, ModelsPort};
 use rspice_app_workbench::workbench::framework::host::{
@@ -794,6 +795,9 @@ impl Host for RSpiceApp {
     }
 
     fn menu_label(&self, key: CommandKey) -> std::borrow::Cow<'static, str> {
+        if let Some(command) = WorkbenchCommand::from_key(key) {
+            return crate::workbench::commands::workbench_menu_label(command, self);
+        }
         legacy_command(key).map_or_else(
             || {
                 let label = self.label(key);
@@ -834,7 +838,8 @@ impl Host for RSpiceApp {
     }
 
     fn command_icon(&self, key: CommandKey) -> Option<WorkbenchIcon> {
-        legacy_command(key).map_or_else(|| menus::feature_command_icon(key), menus::command_icon)
+        WorkbenchCommand::from_key(key)
+            .map_or_else(|| menus::feature_command_icon(key), menus::command_icon)
     }
 
     fn palette_icon(&self, key: CommandKey) -> Option<Icon> {
@@ -1273,19 +1278,12 @@ mod tests {
     #[test]
     fn each_framework_id_names_its_command() {
         for (id, command) in [
-            (ids::CANCEL, Command::Cancel),
             (ids::CLEAR_CONSOLE, Command::ClearConsole),
             (ids::COMMAND_PALETTE, Command::CommandPalette),
-            (ids::COPY, Command::Copy),
-            (ids::CUT, Command::Cut),
-            (ids::DELETE, Command::Delete),
-            (ids::DESELECT_ALL, Command::DeselectAll),
             (
                 ids::DESIGN_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Design),
             ),
-            (ids::DUPLICATE, Command::Duplicate),
-            (ids::FIND_IN_DESIGN, Command::FindInDesign),
             (ids::HELP_CENTER, Command::HelpCenter),
             (ids::LEGAL_PRIVACY, Command::LegalPrivacy),
             (
@@ -1298,7 +1296,6 @@ mod tests {
             ),
             (ids::OPEN_CONSOLE, Command::OpenConsole),
             (ids::OPEN_NOTIFICATIONS, Command::OpenNotifications),
-            (ids::PASTE, Command::Paste),
             (
                 ids::PROJECT_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Project),
@@ -1308,7 +1305,6 @@ mod tests {
                 ids::RESULTS_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Results),
             ),
-            (ids::SELECT_ALL, Command::SelectAll),
             (
                 ids::SIMULATE_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Simulate),
@@ -1328,14 +1324,24 @@ mod tests {
                 ids::VERIFY_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Verify),
             ),
-            (ids::ZOOM_BOX, Command::ZoomBox),
-            (ids::ZOOM_FIT, Command::ZoomFit),
-            (ids::ZOOM_IN, Command::ZoomIn),
-            (ids::ZOOM_OUT, Command::ZoomOut),
-            (ids::ZOOM_PREVIOUS, Command::ZoomPrevious),
         ] {
             assert_eq!(id, command.key(), "{command:?}");
             assert_eq!(legacy_command(id), Some(command), "{command:?}");
+        }
+    }
+
+    /// Each routed command the workbench declares is the one its key names,
+    /// and no shell command answers to that key.
+    #[test]
+    fn each_workbench_key_names_its_routed_command() {
+        for command in WorkbenchCommand::ALL {
+            let key = command.key();
+            assert_eq!(
+                WorkbenchCommand::from_key(key),
+                Some(command),
+                "{command:?}"
+            );
+            assert_eq!(legacy_command(key), None, "{command:?}");
         }
     }
 

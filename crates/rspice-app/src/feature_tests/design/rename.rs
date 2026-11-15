@@ -2,9 +2,9 @@
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::commands::vocabulary::Command;
 use rspice_app_design::workbench::app::dialogs::selection::rename::*;
 use rspice_app_state::state::{ComponentType, Point};
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 #[test]
 fn successful_component_rename_retains_id_and_is_exactly_one_undo_step() {
@@ -29,7 +29,7 @@ fn successful_component_rename_retains_id_and_is_exactly_one_undo_step() {
         app.state.model.schematic.document().components[0].name,
         "R_GAIN"
     );
-    app.execute_command_key(Command::Undo.key());
+    app.execute_command_key(ids::UNDO);
     assert_eq!(app.state.model.schematic.document().components[0].id, id);
     assert_eq!(
         app.state.model.schematic.document().components[0].name,
@@ -39,7 +39,7 @@ fn successful_component_rename_retains_id_and_is_exactly_one_undo_step() {
         app.state.model.project_undo_sequence().is_none() && !app.state.model.schematic.can_undo(),
         "rename created more than one undo step"
     );
-    app.execute_command_key(Command::Redo.key());
+    app.execute_command_key(ids::REDO);
     assert_eq!(
         app.state.model.schematic.document().components[0].name,
         "R_GAIN"
@@ -153,7 +153,7 @@ fn instance_rename_remaps_configuration_paths_and_saved_outputs() {
         "the configuration DUT path follows the renamed instance"
     );
     assert!(app.state.model.workspace.content.project_metadata_dirty);
-    app.execute_command_key(Command::Undo.key());
+    app.execute_command_key(ids::UNDO);
     assert_eq!(
         app.state.model.schematic.document().components[0].name,
         "R1"
@@ -182,7 +182,7 @@ fn instance_rename_remaps_configuration_paths_and_saved_outputs() {
         "I(R1)",
         "Undo must restore the executable saved output"
     );
-    app.execute_command_key(Command::Redo.key());
+    app.execute_command_key(ids::REDO);
     assert_eq!(
         app.state.model.schematic.document().components[0].name,
         "RLOAD"

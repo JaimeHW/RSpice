@@ -7,6 +7,7 @@ use egui::Context;
 use rspice_app_design::workbench::app_state::interaction_state::DragType;
 use rspice_app_state::state::{ComponentType, Point, SchematicState, Tool, Wire};
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 #[test]
 fn gesture_release_commits_selection_and_wire_vertex_moves_once() {
@@ -530,7 +531,6 @@ fn switching_sheets_mid_drag_leaves_the_first_sheets_buffer_as_before_the_drag()
 /// Copy the fixture's resistor and Paste it, with the pointer over the
 /// canvas at screen `(x, 100)`.
 fn float_a_pasted_resistor(fixture: &mut Fixture, x: f32) {
-    use crate::workbench::commands::vocabulary::Command;
     let id = fixture.app.state.model.schematic.document().components[0].id;
     fixture
         .app
@@ -541,14 +541,14 @@ fn float_a_pasted_resistor(fixture: &mut Fixture, x: f32) {
         .editor
         .selection
         .select_only_component(id);
-    Command::Copy.execute(&mut fixture.app);
+    fixture.app.execute_command_key(ids::COPY);
     fixture.frame(
         vec![egui::Event::PointerMoved(
             fixture.origin + egui::vec2(x, 100.0),
         )],
         true,
     );
-    Command::Paste.execute(&mut fixture.app);
+    fixture.app.execute_command_key(ids::PASTE);
 }
 
 /// Paste floats the copy under the pointer: nothing lands until the click,
@@ -556,7 +556,6 @@ fn float_a_pasted_resistor(fixture: &mut Fixture, x: f32) {
 /// it as one undo step where the pointer put it (audit G-1).
 #[test]
 fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
-    use crate::workbench::commands::vocabulary::Command;
     use rspice_app_state::state::Rotation;
 
     let mut fixture = Fixture::new(false);
@@ -580,7 +579,7 @@ fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
         .as_ref()
         .expect("the paste floats")
         .at();
-    assert!(!Command::Undo.is_enabled(&fixture.app));
+    assert!(!fixture.app.command_key_enabled(ids::UNDO));
 
     fixture.frame(vec![key(egui::Key::R)], true);
     fixture.frame(
@@ -624,7 +623,7 @@ fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
     assert_eq!(pasted.rotation, Rotation::R90);
     let grid = document.grid_size;
     assert!(pasted.pos.x % grid == 0 && pasted.pos.y % grid == 0);
-    assert!(Command::Undo.is_enabled(&fixture.app));
+    assert!(fixture.app.command_key_enabled(ids::UNDO));
     assert!(
         fixture.app.state.model.schematic.undo(),
         "the paste is one undo step"

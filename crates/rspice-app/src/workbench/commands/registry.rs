@@ -63,32 +63,10 @@ const EXIT: &[ShortcutBinding] = &[primary(
 )];
 const COMMAND_PALETTE: &[ShortcutBinding] =
     &[primary(chord(Key::K, true, false, false, "Ctrl+K"), ALL)];
-const UNDO: &[ShortcutBinding] = &[primary(chord(Key::Z, true, false, false, "Ctrl+Z"), ALL)];
-const REDO: &[ShortcutBinding] = &[
-    primary(chord(Key::Z, true, false, true, "Ctrl+Shift+Z"), ALL),
-    alternate(chord(Key::Y, true, false, false, "Ctrl+Y"), ALL),
-];
-const CUT: &[ShortcutBinding] = &[primary(chord(Key::X, true, false, false, "Ctrl+X"), ALL)];
-const COPY: &[ShortcutBinding] = &[primary(chord(Key::C, true, false, false, "Ctrl+C"), ALL)];
-const PASTE: &[ShortcutBinding] = &[primary(chord(Key::V, true, false, false, "Ctrl+V"), ALL)];
-const DUPLICATE: &[ShortcutBinding] = &[primary(chord(Key::D, true, false, false, "Ctrl+D"), ALL)];
-const DELETE: &[ShortcutBinding] = &[primary(
-    chord(Key::Delete, false, false, false, "Delete"),
-    ALL,
-)];
-const SELECT_ALL: &[ShortcutBinding] = &[primary(chord(Key::A, true, false, false, "Ctrl+A"), ALL)];
-const FIND_DESIGN: &[ShortcutBinding] =
-    &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
 // Virtuoso and ADS both repeat the last command on a bare key; `.` was
 // bound nowhere.
 const REPEAT_LAST_COMMAND: &[ShortcutBinding] =
     &[primary(chord(Key::Period, false, false, false, "."), ALL)];
-const ZOOM_IN: &[ShortcutBinding] = &[
-    primary(chord(Key::Plus, false, false, false, "+"), ALL),
-    alternate(chord(Key::Plus, false, false, true, "+"), ALL),
-];
-const ZOOM_OUT: &[ShortcutBinding] = &[primary(chord(Key::Minus, false, false, false, "−"), ALL)];
-const ZOOM_FIT: &[ShortcutBinding] = &[primary(chord(Key::F, false, false, false, "F"), ALL)];
 // The mockup gives the results managers M, A and Q. Every one of those bare
 // letters already has a single canonical owner in this product — move,
 // symbol arc, object properties — and that one-owner rule is pinned by test
@@ -99,11 +77,6 @@ const FULL_SCREEN: &[ShortcutBinding] = &[
     primary(chord(Key::F11, false, false, false, "F11"), DESKTOP),
     alternate(chord(Key::F, true, true, false, "Ctrl+Alt+F"), HOST),
 ];
-// The browser zooms its page on Ctrl+0, so the key is the desktop's only.
-const ZOOM_ONE_TO_ONE: &[ShortcutBinding] = &[primary(
-    chord(Key::Num0, true, false, false, "Ctrl+0"),
-    DESKTOP,
-)];
 const TOGGLE_NAVIGATOR: &[ShortcutBinding] =
     &[primary(chord(Key::B, true, false, false, "Ctrl+B"), ALL)];
 const TOGGLE_INSPECTOR: &[ShortcutBinding] =
@@ -160,16 +133,6 @@ const AUTOMATION_WORKSPACE: &[ShortcutBinding] =
 /// the four chords under it — a shortcut every reader has already learned.
 const STIMULUS_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num8, false, true, false, "Alt+8"), ALL)];
-/// Virtuoso's `z`.
-const ZOOM_BOX: &[ShortcutBinding] = &[primary(chord(Key::Z, false, false, false, "Z"), ALL)];
-/// W alone draws a wire; Shift+W is taken by no other command and by no
-/// browser.
-const ZOOM_PREVIOUS: &[ShortcutBinding] =
-    &[primary(chord(Key::W, false, false, true, "Shift+W"), ALL)];
-const CANCEL: &[ShortcutBinding] = &[primary(
-    chord(Key::Escape, false, false, false, "Escape"),
-    ALL,
-)];
 
 impl Command {
     /// Commands whose owning surface or dialog has no valid lifecycle without
@@ -182,7 +145,6 @@ impl Command {
                 | Self::CloseActiveDocument
                 | Self::CloseOtherDocuments
                 | Self::CloseAllDocuments
-                | Self::FindInDesign
                 | Self::ConfigurationSets
         )
     }
@@ -214,7 +176,6 @@ impl Command {
         !matches!(
             self,
             Self::CommandPalette
-                | Self::Cancel
                 | Self::ToggleConsoleMaximized
                 | Self::ClearConsole
                 // The macOS Window menu's: a browser page has no window to
@@ -227,25 +188,7 @@ impl Command {
 
     pub const fn shortcut_context(self) -> ShortcutContext {
         match self {
-            Self::Undo
-            | Self::Redo
-            | Self::Cut
-            | Self::Copy
-            | Self::Paste
-            | Self::Duplicate
-            | Self::Delete
-            | Self::SelectAll
-            | Self::DeselectAll
-            | Self::ZoomIn
-            | Self::ZoomOut
-            | Self::ZoomFit
-            | Self::ZoomOneToOne
-            | Self::ZoomPrevious => ShortcutContext::EditContext,
-            Self::FindInDesign
-            | Self::RepeatLastCommand
-            | Self::ZoomToSelection
-            | Self::ZoomBox => ShortcutContext::EngineeringCanvas,
-            Self::Cancel => ShortcutContext::ApplicationChrome,
+            Self::RepeatLastCommand => ShortcutContext::EngineeringCanvas,
             Self::ConfigurationSets => ShortcutContext::DesignWorkspace,
             _ => ShortcutContext::Global,
         }
@@ -263,22 +206,7 @@ impl Command {
             Self::OpenWorkspace(Workspace::Netlist) => AUTOMATION_WORKSPACE,
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
             Self::Exit => EXIT,
-            Self::Undo => UNDO,
-            Self::Redo => REDO,
-            Self::Cut => CUT,
-            Self::Copy => COPY,
-            Self::Paste => PASTE,
-            Self::Duplicate => DUPLICATE,
-            Self::Delete => DELETE,
-            Self::SelectAll => SELECT_ALL,
-            Self::FindInDesign => FIND_DESIGN,
             Self::RepeatLastCommand => REPEAT_LAST_COMMAND,
-            Self::ZoomIn => ZOOM_IN,
-            Self::ZoomOut => ZOOM_OUT,
-            Self::ZoomFit => ZOOM_FIT,
-            Self::ZoomBox => ZOOM_BOX,
-            Self::ZoomPrevious => ZOOM_PREVIOUS,
-            Self::ZoomOneToOne => ZOOM_ONE_TO_ONE,
             Self::ToggleFullScreen => FULL_SCREEN,
             Self::ToggleNavigator => TOGGLE_NAVIGATOR,
             Self::ToggleInspector => TOGGLE_INSPECTOR,
@@ -292,7 +220,6 @@ impl Command {
             Self::HelpCenter => HELP_CENTER,
             Self::ConfigurationSets => NONE,
             Self::CommandPalette => COMMAND_PALETTE,
-            Self::Cancel => CANCEL,
             _ => NONE,
         }
     }
@@ -335,28 +262,10 @@ impl Command {
             Self::ReattachDocument => "the active document is already in the main window",
             Self::ConsolidateWindows => "there are no detached application windows",
             Self::MonitorRecovery => "there are no secondary application windows to recover",
-            // A step taken mid-drag would be folded into the drag when it
-            // lands, so the history waits for the edit to finish or cancel.
-            Self::Undo | Self::Redo if app.state.schematic_edit_in_progress() => {
-                "finish or cancel the edit in progress first"
-            }
-            Self::Undo => "nothing to undo",
-            Self::Redo => "nothing to redo",
-            Self::Cut | Self::Copy | Self::Duplicate | Self::Delete => "select an editable object",
             Self::ConfigurationSets => "open a project",
-            Self::Paste => "clipboard has no compatible content",
             Self::RepeatLastCommand if app.state.workbench.last_repeatable_command.is_none() => {
                 "no placement or edit has run yet"
             }
-            Self::DeselectAll | Self::ZoomToSelection => "nothing is selected",
-            Self::ZoomPrevious
-                if !super::active_schematic_editor(app)
-                    && !super::active_symbol_editor(app)
-                    && app.routed_command_key_enabled(self.key()).is_none() =>
-            {
-                "open a schematic or symbol"
-            }
-            Self::ZoomPrevious => "the view has not changed yet",
             Self::CloseOtherDocuments => "no other closable document is open",
             Self::CloseAllDocuments => "no closable document is open",
             Self::PreviousDocument | Self::NextDocument => "only one document is open",

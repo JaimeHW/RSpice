@@ -45,7 +45,7 @@ use crate::workbench::framework::command_registry::{
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
-    FeatureSurface, Peers, Reads,
+    FeatureSurface, Peers, Reads, RoutedCommand,
 };
 use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
 use crate::workbench::slots::{CodeState, netlist_shown_in, veriloga_compilation_in};
@@ -119,8 +119,19 @@ impl Feature for CodeFeature {
         registry.surface(FeatureSurface {
             show: netlist_first::show,
         });
+        registry.routed(ROUTED);
     }
 }
+
+/// The workbench command the code feature takes a part in: Find on the
+/// netlist page opens the page's own find bar. The shell asks it before the
+/// design feature's search, which would take Find there too.
+const ROUTED: &[RoutedCommand<CodeFeature>] = &[RoutedCommand {
+    key: ids::FIND_IN_DESIGN,
+    takes: |reads| netlist_page_shown(reads.wb.workspace, &reads.state.code_workspace),
+    enabled: |_| true,
+    execute: |cx| cx.state.netlist.find.open = true,
+}];
 
 /// The dialog steps the feature draws, under the keys the shell's dialog
 /// order lists them by: the source document dialogs, Find in source,

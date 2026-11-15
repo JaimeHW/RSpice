@@ -131,6 +131,15 @@ fn route_part<F: Registered>(app: &mut RSpiceApp, routed: &RoutedCommand<F>) -> 
     true
 }
 
+/// Carry out the routed command `key` where `F` takes it here, and say
+/// whether it did: the turn of `F` alone, for a command whose precedence the
+/// shell's edit target states owner by owner.
+pub(super) fn route_to<F: Registered>(app: &mut RSpiceApp, key: CommandKey) -> bool {
+    F::registry()
+        .routed_command(key)
+        .is_some_and(|routed| route_part::<F>(app, routed))
+}
+
 /// The results peer a context over `state` holds for the feature whose slot
 /// is `slot`: none for the results feature itself, whose slot it is.
 macro_rules! results_peer {
@@ -734,6 +743,7 @@ mod tests {
     #[test]
     fn every_command_a_feature_reads_is_one_the_dispatcher_answers() {
         use crate::workbench::commands::vocabulary::legacy_command;
+        use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 
         for ((slot, foreign), (_, menus)) in
             foreign_availability().into_iter().zip(menu_availability())
@@ -742,7 +752,9 @@ mod tests {
             assert!(keys.len() <= ForeignAvailability::CAPACITY, "{slot}");
             for (index, key) in keys.iter().enumerate() {
                 assert!(
-                    spec(*key).is_some() || legacy_command(*key).is_some(),
+                    spec(*key).is_some()
+                        || WorkbenchCommand::from_key(*key).is_some()
+                        || legacy_command(*key).is_some(),
                     "{slot} reads {key:?}, which no command answers to"
                 );
                 assert!(!keys[..index].contains(key), "{slot} reads {key:?} twice");

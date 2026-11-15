@@ -11,8 +11,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use egui::Key;
+
+use super::requests::{SourceEditorRequest, StandardCommand};
 use crate::state::command_catalog::{
-    CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
+    CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext,
+    ShortcutKind,
 };
 
 /// The part of the product that declares a command and carries it out.
@@ -297,6 +301,311 @@ impl CommandCatalog for Registry {
                 spec.flags
                     .contains(CommandFlags::PRIMARY_RESERVED_BY_BROWSER)
             })
+    }
+}
+
+/// The workbench's routed commands: edit, find, zoom and cancel. Each acts on
+/// whatever the reader is working in, so no one feature declares it: the
+/// workbench declares what each one is, the shell sends it to the part that
+/// takes it where the reader is working, in the shell's order of
+/// precedence, and each part registers what it does with it as a
+/// [`RoutedCommand`](super::feature::RoutedCommand).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkbenchCommand {
+    Undo,
+    Redo,
+    Cut,
+    Copy,
+    Paste,
+    Duplicate,
+    Delete,
+    SelectAll,
+    /// Clear the drawing's selection.
+    DeselectAll,
+    FindInDesign,
+    ZoomIn,
+    ZoomOut,
+    ZoomFit,
+    ZoomOneToOne,
+    ZoomToSelection,
+    ZoomBox,
+    /// Go back to the view the canvas showed before this one.
+    ZoomPrevious,
+    Cancel,
+}
+
+const fn primary(chord: ShortcutChord, platforms: &'static [CommandPlatform]) -> ShortcutBinding {
+    ShortcutBinding {
+        chord,
+        platforms,
+        kind: ShortcutKind::Primary,
+    }
+}
+
+const fn alternate(chord: ShortcutChord, platforms: &'static [CommandPlatform]) -> ShortcutBinding {
+    ShortcutBinding {
+        chord,
+        platforms,
+        kind: ShortcutKind::Alternate,
+    }
+}
+
+const fn chord(
+    key: Key,
+    primary_modifier: bool,
+    alt: bool,
+    shift: bool,
+    label: &'static str,
+) -> ShortcutChord {
+    ShortcutChord::new(key, primary_modifier, alt, shift, label)
+}
+
+const ALL_PLATFORMS: &[CommandPlatform] = &CommandPlatform::ALL;
+const DESKTOP: &[CommandPlatform] = &[CommandPlatform::Desktop];
+const NO_BINDINGS: &[ShortcutBinding] = &[];
+const UNDO: &[ShortcutBinding] = &[primary(
+    chord(Key::Z, true, false, false, "Ctrl+Z"),
+    ALL_PLATFORMS,
+)];
+const REDO: &[ShortcutBinding] = &[
+    primary(
+        chord(Key::Z, true, false, true, "Ctrl+Shift+Z"),
+        ALL_PLATFORMS,
+    ),
+    alternate(chord(Key::Y, true, false, false, "Ctrl+Y"), ALL_PLATFORMS),
+];
+const CUT: &[ShortcutBinding] = &[primary(
+    chord(Key::X, true, false, false, "Ctrl+X"),
+    ALL_PLATFORMS,
+)];
+const COPY: &[ShortcutBinding] = &[primary(
+    chord(Key::C, true, false, false, "Ctrl+C"),
+    ALL_PLATFORMS,
+)];
+const PASTE: &[ShortcutBinding] = &[primary(
+    chord(Key::V, true, false, false, "Ctrl+V"),
+    ALL_PLATFORMS,
+)];
+const DUPLICATE: &[ShortcutBinding] = &[primary(
+    chord(Key::D, true, false, false, "Ctrl+D"),
+    ALL_PLATFORMS,
+)];
+const DELETE: &[ShortcutBinding] = &[primary(
+    chord(Key::Delete, false, false, false, "Delete"),
+    ALL_PLATFORMS,
+)];
+const SELECT_ALL: &[ShortcutBinding] = &[primary(
+    chord(Key::A, true, false, false, "Ctrl+A"),
+    ALL_PLATFORMS,
+)];
+const FIND_IN_DESIGN: &[ShortcutBinding] = &[primary(
+    chord(Key::F, true, false, false, "Ctrl+F"),
+    ALL_PLATFORMS,
+)];
+const ZOOM_IN: &[ShortcutBinding] = &[
+    primary(chord(Key::Plus, false, false, false, "+"), ALL_PLATFORMS),
+    alternate(chord(Key::Plus, false, false, true, "+"), ALL_PLATFORMS),
+];
+const ZOOM_OUT: &[ShortcutBinding] = &[primary(
+    chord(Key::Minus, false, false, false, "−"),
+    ALL_PLATFORMS,
+)];
+const ZOOM_FIT: &[ShortcutBinding] = &[primary(
+    chord(Key::F, false, false, false, "F"),
+    ALL_PLATFORMS,
+)];
+// The browser zooms its page on Ctrl+0, so the key is the desktop's only.
+const ZOOM_ONE_TO_ONE: &[ShortcutBinding] = &[primary(
+    chord(Key::Num0, true, false, false, "Ctrl+0"),
+    DESKTOP,
+)];
+/// Virtuoso's `z`.
+const ZOOM_BOX: &[ShortcutBinding] = &[primary(
+    chord(Key::Z, false, false, false, "Z"),
+    ALL_PLATFORMS,
+)];
+/// W alone draws a wire; Shift+W is taken by no other command and by no
+/// browser.
+const ZOOM_PREVIOUS: &[ShortcutBinding] = &[primary(
+    chord(Key::W, false, false, true, "Shift+W"),
+    ALL_PLATFORMS,
+)];
+const CANCEL: &[ShortcutBinding] = &[primary(
+    chord(Key::Escape, false, false, false, "Escape"),
+    ALL_PLATFORMS,
+)];
+
+impl WorkbenchCommand {
+    /// Every routed command, each listed in the registry.
+    pub const ALL: [Self; 18] = [
+        Self::Undo,
+        Self::Redo,
+        Self::Cut,
+        Self::Copy,
+        Self::Paste,
+        Self::Duplicate,
+        Self::Delete,
+        Self::SelectAll,
+        Self::DeselectAll,
+        Self::FindInDesign,
+        Self::ZoomIn,
+        Self::ZoomOut,
+        Self::ZoomFit,
+        Self::ZoomOneToOne,
+        Self::ZoomToSelection,
+        Self::ZoomBox,
+        Self::ZoomPrevious,
+        Self::Cancel,
+    ];
+
+    /// The key a shortcut profile names this command by.
+    pub const fn key(self) -> CommandKey {
+        match self {
+            Self::Undo => ids::UNDO,
+            Self::Redo => ids::REDO,
+            Self::Cut => ids::CUT,
+            Self::Copy => ids::COPY,
+            Self::Paste => ids::PASTE,
+            Self::Duplicate => ids::DUPLICATE,
+            Self::Delete => ids::DELETE,
+            Self::SelectAll => ids::SELECT_ALL,
+            Self::DeselectAll => ids::DESELECT_ALL,
+            Self::FindInDesign => ids::FIND_IN_DESIGN,
+            Self::ZoomIn => ids::ZOOM_IN,
+            Self::ZoomOut => ids::ZOOM_OUT,
+            Self::ZoomFit => ids::ZOOM_FIT,
+            Self::ZoomOneToOne => ids::ZOOM_ONE_TO_ONE,
+            Self::ZoomToSelection => ids::ZOOM_TO_SELECTION,
+            Self::ZoomBox => ids::ZOOM_BOX,
+            Self::ZoomPrevious => ids::ZOOM_PREVIOUS,
+            Self::Cancel => ids::CANCEL,
+        }
+    }
+
+    /// The routed command `key` names; `None` for any other key.
+    pub fn from_key(key: CommandKey) -> Option<Self> {
+        Self::ALL.into_iter().find(|command| command.key() == key)
+    }
+
+    /// Whether the command changes the document in front, so a read-only
+    /// schematic refuses it.
+    const fn edits_active_document(self) -> bool {
+        matches!(
+            self,
+            Self::Undo | Self::Redo | Self::Cut | Self::Paste | Self::Duplicate | Self::Delete
+        )
+    }
+
+    /// What the command declares about itself. Every one but Cancel is
+    /// listed in the palette; Find needs an open project; an edit of the
+    /// document, and Copy, commits the inspector's pending edit first; and
+    /// Repeat runs a paste or a duplicate again.
+    pub const fn declared_spec(self) -> CommandSpec {
+        let (label, group, context, bindings) = match self {
+            Self::Undo => ("Undo", "Edit", ShortcutContext::EditContext, UNDO),
+            Self::Redo => ("Redo", "Edit", ShortcutContext::EditContext, REDO),
+            Self::Cut => ("Cut", "Edit", ShortcutContext::EditContext, CUT),
+            Self::Copy => ("Copy", "Edit", ShortcutContext::EditContext, COPY),
+            Self::Paste => ("Paste", "Edit", ShortcutContext::EditContext, PASTE),
+            Self::Duplicate => ("Duplicate", "Edit", ShortcutContext::EditContext, DUPLICATE),
+            Self::Delete => ("Delete", "Edit", ShortcutContext::EditContext, DELETE),
+            Self::SelectAll => (
+                "Select all",
+                "Edit",
+                ShortcutContext::EditContext,
+                SELECT_ALL,
+            ),
+            Self::DeselectAll => (
+                "Deselect all",
+                "Edit",
+                ShortcutContext::EditContext,
+                NO_BINDINGS,
+            ),
+            Self::FindInDesign => (
+                "Find…",
+                "Edit",
+                ShortcutContext::EngineeringCanvas,
+                FIND_IN_DESIGN,
+            ),
+            Self::ZoomIn => ("Zoom in", "View", ShortcutContext::EditContext, ZOOM_IN),
+            Self::ZoomOut => ("Zoom out", "View", ShortcutContext::EditContext, ZOOM_OUT),
+            Self::ZoomFit => (
+                "Fit drawing sheet",
+                "View",
+                ShortcutContext::EditContext,
+                ZOOM_FIT,
+            ),
+            Self::ZoomOneToOne => (
+                "Zoom 100%",
+                "View",
+                ShortcutContext::EditContext,
+                ZOOM_ONE_TO_ONE,
+            ),
+            Self::ZoomToSelection => (
+                "Zoom to selection",
+                "View",
+                ShortcutContext::EngineeringCanvas,
+                NO_BINDINGS,
+            ),
+            Self::ZoomBox => (
+                "Zoom box",
+                "View",
+                ShortcutContext::EngineeringCanvas,
+                ZOOM_BOX,
+            ),
+            Self::ZoomPrevious => (
+                "Zoom previous",
+                "View",
+                ShortcutContext::EditContext,
+                ZOOM_PREVIOUS,
+            ),
+            Self::Cancel => (
+                "Cancel active command",
+                "Design",
+                ShortcutContext::ApplicationChrome,
+                CANCEL,
+            ),
+        };
+        let edits = self.edits_active_document();
+        CommandSpec {
+            key: self.key(),
+            label,
+            group,
+            flags: CommandFlags::NONE
+                .with(CommandFlags::PALETTE_VISIBLE, !matches!(self, Self::Cancel))
+                .with(
+                    CommandFlags::REQUIRES_OPEN_PROJECT,
+                    matches!(self, Self::FindInDesign),
+                )
+                .with(CommandFlags::EDITS_ACTIVE_DOCUMENT, edits)
+                .with(
+                    CommandFlags::COMMITS_INSPECTOR_EDIT,
+                    edits || matches!(self, Self::Copy),
+                )
+                .with(
+                    CommandFlags::REPEATABLE,
+                    matches!(self, Self::Duplicate | Self::Paste),
+                ),
+            context,
+            bindings,
+            owner: CommandOwner::Framework,
+        }
+    }
+
+    /// What this command asks of a source editor when one is the document on
+    /// screen: the same thing its shortcut does with the editor focused, never
+    /// an edit of the schematic hidden behind it.
+    pub const fn source_editor_request(self) -> Option<SourceEditorRequest> {
+        Some(match self {
+            Self::Undo => SourceEditorRequest::Standard(StandardCommand::Undo),
+            Self::Redo => SourceEditorRequest::Standard(StandardCommand::Redo),
+            Self::Cut => SourceEditorRequest::Standard(StandardCommand::Cut),
+            Self::Copy => SourceEditorRequest::Standard(StandardCommand::Copy),
+            Self::Paste => SourceEditorRequest::Standard(StandardCommand::Paste),
+            Self::Delete => SourceEditorRequest::Standard(StandardCommand::Delete),
+            Self::SelectAll => SourceEditorRequest::Standard(StandardCommand::SelectAll),
+            _ => return None,
+        })
     }
 }
 

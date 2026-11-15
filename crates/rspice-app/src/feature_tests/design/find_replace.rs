@@ -2,13 +2,13 @@
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::commands::vocabulary::Command;
 use egui::Context;
 use rspice_app_design::workbench::app::dialogs::find_replace::tests::part;
 use rspice_app_design::workbench::app::dialogs::find_replace::*;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::state::Point;
 use rspice_app_state::state::{LibraryCellInstance, NetLabel, SchematicState};
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 /// Each option row is one line, its checks in the columns the scope's
 /// segments stand in, and every row of the form is one pitch from the
@@ -199,7 +199,7 @@ fn replace_all_renames_an_instance_as_the_rename_form_does() {
     );
     assert_eq!(outcome(&by_form, form_plan), renamed, "the Rename form");
     assert_eq!(outcome(&by_replace, replace_plan), renamed, "Replace all");
-    by_replace.execute_command_key(Command::Undo.key());
+    by_replace.execute_command_key(ids::UNDO);
     assert_eq!(
         outcome(&by_replace, replace_plan),
         (

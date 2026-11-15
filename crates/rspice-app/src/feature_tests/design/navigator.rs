@@ -3,7 +3,6 @@
 //! what their gestures open.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
 use rspice_app_design::schematic::view::sheet_visibility::{self, SheetScope};
 use rspice_app_design::workbench::design::navigator::tests::{
     add_master, announced_name, click_events, key_event, painted_panel, painted_runs, painted_text,
@@ -14,6 +13,7 @@ use rspice_app_state::state::{
     CellViewRef, ComponentType, InstancePath, PortDirection, SchematicState,
 };
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_app_workbench::workbench::framework::requests::FocusNavigatorSearch;
 use rspice_app_workbench::workbench::state::navigator_tree::NavigatorTreeNode;
 
@@ -548,7 +548,7 @@ fn the_plain_find_command_leaves_the_navigator_filter_alone() {
         .navigator_trees
         .filter_mut(Workspace::Design) = "VOUT".to_owned();
 
-    Command::FindInDesign.execute(&mut app);
+    app.execute_command_key(ids::FIND_IN_DESIGN);
 
     assert_eq!(
         app.state
@@ -579,9 +579,9 @@ fn find_brings_the_navigator_tab_forward_over_the_component_shelf() {
         app.state.design.show_component_shelf();
 
         if by_key {
-            app.execute_shortcut_command(Command::FindInDesign);
+            app.execute_command_key(ids::FIND_IN_DESIGN);
         } else {
-            Command::FindInDesign.execute(&mut app);
+            app.execute_command_key(ids::FIND_IN_DESIGN);
         }
 
         assert!(

@@ -10,13 +10,13 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame_with, open_in_design, open_project_app, themed_context,
 };
-use crate::workbench::commands::vocabulary::Command;
 use rspice_app_code::workbench::app::dialogs::veriloga_build_settings::{
     VerilogABuildSettingsDraft, save_veriloga_build_settings,
 };
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_state::state::ProjectSourceRole;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_app_workbench::workbench::localization::{MessageId, UiTextLocale};
 use rspice_simulation::project_veriloga::build_profile::{
     VerilogAFallbackPolicy, resolve_veriloga_build_profile,
@@ -232,8 +232,8 @@ fn one_undo_takes_back_the_entry_module_in_the_profile_and_the_binding() {
         .profile;
     assert_eq!(profile.entry_modules, ["gain_fast"]);
 
-    assert!(Command::Undo.is_enabled(&app));
-    Command::Undo.execute(&mut app);
+    assert!(app.command_key_enabled(ids::UNDO));
+    app.execute_command_key(ids::UNDO);
     let undone = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(
         undone.selected_module(),
@@ -253,8 +253,8 @@ fn one_undo_takes_back_the_entry_module_in_the_profile_and_the_binding() {
         "the profile document the save added is gone"
     );
 
-    assert!(Command::Redo.is_enabled(&app));
-    Command::Redo.execute(&mut app);
+    assert!(app.command_key_enabled(ids::REDO));
+    app.execute_command_key(ids::REDO);
     let redone = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(redone.selected_module(), Some("gain_fast"));
     assert_eq!(
@@ -344,7 +344,7 @@ fn build_settings_undo_refuses_after_a_later_source_edit() {
     let later = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
 
     assert!(!app.state.model.can_undo_project_design());
-    Command::Undo.execute(&mut app);
+    app.execute_command_key(ids::UNDO);
     let after = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
     assert_eq!(
         after.bundle().closure_digest(),

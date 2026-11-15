@@ -115,7 +115,9 @@ fn desktop_and_phone_layouts_match_the_mockup_contract() {
 fn palette_is_a_typed_registry_projection() {
     let commands = palette_commands_listed();
     assert!(!commands.contains(&Command::CommandPalette));
-    assert!(!commands.contains(&Command::Cancel));
+    assert!(
+        !palette_commands(&RSpiceApp::test_instance()).any(|listed| listed.key() == ids::CANCEL)
+    );
     assert!(
         palette_commands(&RSpiceApp::test_instance())
             .any(|listed| listed.key() == ProjectCommand::OpenProject.key())
@@ -181,7 +183,7 @@ fn a_command_is_found_under_the_menu_that_holds_it() {
             PaletteScope::Design,
             "Design \u{203a} Place",
         ),
-        (Command::SelectAll.key(), PaletteScope::Edit, "Edit"),
+        (ids::SELECT_ALL, PaletteScope::Edit, "Edit"),
         (
             Command::OpenWorkspace(rspice_app_state::workbench::workspace::Workspace::Design).key(),
             PaletteScope::Window,

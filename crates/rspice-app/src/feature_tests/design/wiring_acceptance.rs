@@ -9,7 +9,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::commands::vocabulary::Command;
 use rspice_app_design::schematic::view::gesture_commits;
 use rspice_app_design::schematic::view::schematic_symbol_context;
 use rspice_app_design::schematic::view::selection_transform::{
@@ -26,6 +25,7 @@ use rspice_app_state::state::{
     SheetTemplate, View, ViewType,
 };
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_design::projection::ProjectionSource;
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_schematic_editor::view::pointer_target::PointerTarget;
@@ -424,13 +424,13 @@ impl Bench {
 
     /// Edit > Undo.
     pub(super) fn undo(&mut self) {
-        self.app.execute_command_key(Command::Undo.key());
+        self.app.execute_command_key(ids::UNDO);
         self.end_frame();
     }
 
     /// Edit > Redo.
     pub(super) fn redo(&mut self) {
-        self.app.execute_command_key(Command::Redo.key());
+        self.app.execute_command_key(ids::REDO);
         self.end_frame();
     }
 

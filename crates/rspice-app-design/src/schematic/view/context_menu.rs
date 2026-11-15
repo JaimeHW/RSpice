@@ -245,7 +245,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         label: "Sheet properties",
         shortcut_command: Some(ids::SHEET_PROPERTIES),
     }),
-    // Fitting the drawing sheet is not here. `Command::ZoomFit` already has a
+    // Fitting the drawing sheet is not here. `WorkbenchCommand::ZoomFit` already has a
     // toolbar button on this canvas, a status-bar route, a mobile canvas
     // control and the `F` key; a selection menu that fits without scrolling is
     // worth more than a sixth route to it.

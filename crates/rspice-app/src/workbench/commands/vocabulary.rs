@@ -32,6 +32,7 @@ use rspice_app_state::state::command_catalog::{
 };
 use rspice_app_state::state::{SimulationPage, VerificationPage};
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 use rspice_app_workbench::workbench::framework::command_registry::{self, CommandFlags, Registry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,27 +45,8 @@ pub enum Command {
     RevertActiveDocument,
     CloseActiveDocument,
     Exit,
-    Undo,
-    Redo,
-    Cut,
-    Copy,
-    Paste,
-    Duplicate,
-    Delete,
-    SelectAll,
-    /// Clear the drawing's selection.
-    DeselectAll,
-    FindInDesign,
     /// Run the last placement or editing command again, as it last ran.
     RepeatLastCommand,
-    ZoomIn,
-    ZoomOut,
-    ZoomFit,
-    ZoomOneToOne,
-    ZoomToSelection,
-    ZoomBox,
-    /// Go back to the view the canvas showed before this one.
-    ZoomPrevious,
     ToggleFullScreen,
     ToggleNavigator,
     ToggleInspector,
@@ -99,7 +81,6 @@ pub enum Command {
     /// back to the size it had.
     ZoomWindow,
     ConfigurationSets,
-    Cancel,
     CommandPalette,
     KeyboardShortcuts,
     HelpCenter,
@@ -173,24 +154,7 @@ impl Command {
             Self::CloseActiveDocument => spec("close-document", "Close", "File"),
 
             Self::Exit => spec("exit-rspice", "Exit", "File"),
-            Self::Undo => spec("undo", "Undo", "Edit"),
-            Self::Redo => spec("redo", "Redo", "Edit"),
-            Self::Cut => spec("cut-selection", "Cut", "Edit"),
-            Self::Copy => spec("copy-selection", "Copy", "Edit"),
-            Self::Paste => spec("paste-selection", "Paste", "Edit"),
-            Self::Duplicate => spec("duplicate-selection", "Duplicate", "Edit"),
-            Self::Delete => spec("delete-selection", "Delete", "Edit"),
-            Self::SelectAll => spec("select-all", "Select all", "Edit"),
-            Self::DeselectAll => spec("deselect-all", "Deselect all", "Edit"),
-            Self::FindInDesign => spec("find-design", "Find…", "Edit"),
             Self::RepeatLastCommand => spec("repeat-last-command", "Repeat last command", "Edit"),
-            Self::ZoomIn => spec("zoom-in", "Zoom in", "View"),
-            Self::ZoomOut => spec("zoom-out", "Zoom out", "View"),
-            Self::ZoomFit => spec("canvas-fit-sheet", "Fit drawing sheet", "View"),
-            Self::ZoomOneToOne => spec("zoom-one-to-one", "Zoom 100%", "View"),
-            Self::ZoomToSelection => spec("zoom-to-selection", "Zoom to selection", "View"),
-            Self::ZoomBox => spec("zoom-box", "Zoom box", "View"),
-            Self::ZoomPrevious => spec("zoom-previous", "Zoom previous", "View"),
             Self::ToggleFullScreen => spec("full-screen", "Enter full screen", "View"),
             Self::ToggleNavigator => spec("toggle-navigator", "Toggle navigator", "Window"),
             Self::ToggleInspector => spec("toggle-inspector", "Toggle inspector", "Window"),
@@ -244,7 +208,6 @@ impl Command {
                 "Configuration sets\u{2026}",
                 "Simulate",
             ),
-            Self::Cancel => spec("cancel-active-command", "Cancel active command", "Design"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
             Self::KeyboardShortcuts => spec("command-reference", "Keyboard shortcuts", "Help"),
             Self::HelpCenter => spec("help-center", "RSpice Help", "Help"),
@@ -298,16 +261,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::RevertActiveDocument,
     Command::CloseActiveDocument,
     Command::Exit,
-    Command::Undo,
-    Command::Redo,
-    Command::Cut,
-    Command::Copy,
-    Command::Paste,
-    Command::Duplicate,
-    Command::Delete,
-    Command::SelectAll,
-    Command::DeselectAll,
-    Command::FindInDesign,
     Command::RepeatLastCommand,
     Command::OpenWorkspace(Workspace::Project),
     Command::OpenWorkspace(Workspace::Design),
@@ -317,13 +270,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenWorkspace(Workspace::Verify),
     Command::OpenWorkspace(Workspace::Models),
     Command::OpenWorkspace(Workspace::Netlist),
-    Command::ZoomIn,
-    Command::ZoomOut,
-    Command::ZoomFit,
-    Command::ZoomOneToOne,
-    Command::ZoomToSelection,
-    Command::ZoomBox,
-    Command::ZoomPrevious,
     Command::ToggleFullScreen,
     Command::ToggleNavigator,
     Command::ToggleInspector,
@@ -360,7 +306,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SupportBundle,
     Command::LegalPrivacy,
     Command::About,
-    Command::Cancel,
 ];
 
 /// Every command the registry lists, by key, in the order menus list them
@@ -397,16 +342,16 @@ static COMMAND_ORDER: &[CommandKey] = &[
     HardcopyCommand::PrintHardcopy.key(),
     HardcopyCommand::ExportActiveView.key(),
     Command::Exit.key(),
-    Command::Undo.key(),
-    Command::Redo.key(),
-    Command::Cut.key(),
-    Command::Copy.key(),
+    WorkbenchCommand::Undo.key(),
+    WorkbenchCommand::Redo.key(),
+    WorkbenchCommand::Cut.key(),
+    WorkbenchCommand::Copy.key(),
     HardcopyCommand::CopyAsImage.key(),
-    Command::Paste.key(),
-    Command::Duplicate.key(),
-    Command::Delete.key(),
-    Command::SelectAll.key(),
-    Command::DeselectAll.key(),
+    WorkbenchCommand::Paste.key(),
+    WorkbenchCommand::Duplicate.key(),
+    WorkbenchCommand::Delete.key(),
+    WorkbenchCommand::SelectAll.key(),
+    WorkbenchCommand::DeselectAll.key(),
     DesignCommand::SelectOfKind(SchematicObjectKind::Instances).key(),
     DesignCommand::SelectOfKind(SchematicObjectKind::Wires).key(),
     DesignCommand::SelectOfKind(SchematicObjectKind::NetLabels).key(),
@@ -415,7 +360,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::SelectOfKind(SchematicObjectKind::Shapes).key(),
     DesignCommand::RenameSelection.key(),
     DesignCommand::ObjectProperties.key(),
-    Command::FindInDesign.key(),
+    WorkbenchCommand::FindInDesign.key(),
     DesignCommand::FindReplace.key(),
     Command::RepeatLastCommand.key(),
     SettingsCommand::Preferences.key(),
@@ -454,14 +399,14 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ModelsCommand::ModelValidate.key(),
     ModelsCommand::ModelRunQualificationTests.key(),
     ModelsCommand::ModelCompareRelease.key(),
-    Command::ZoomIn.key(),
-    Command::ZoomOut.key(),
-    Command::ZoomFit.key(),
+    WorkbenchCommand::ZoomIn.key(),
+    WorkbenchCommand::ZoomOut.key(),
+    WorkbenchCommand::ZoomFit.key(),
     DesignCommand::FitSchematicContent.key(),
-    Command::ZoomOneToOne.key(),
-    Command::ZoomToSelection.key(),
-    Command::ZoomBox.key(),
-    Command::ZoomPrevious.key(),
+    WorkbenchCommand::ZoomOneToOne.key(),
+    WorkbenchCommand::ZoomToSelection.key(),
+    WorkbenchCommand::ZoomBox.key(),
+    WorkbenchCommand::ZoomPrevious.key(),
     DesignCommand::CycleGrid.key(),
     DesignCommand::GridDots.key(),
     DesignCommand::GridLines.key(),
@@ -778,7 +723,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::SupportBundle.key(),
     Command::LegalPrivacy.key(),
     Command::About.key(),
-    Command::Cancel.key(),
+    WorkbenchCommand::Cancel.key(),
 ];
 
 /// Ids older builds stored for commands that now answer to another, each with
@@ -792,7 +737,7 @@ const LEGACY_ALIASES: &[(&str, CommandKey)] = &[
         "model-metadata-audit",
         ModelsCommand::Page(ModelsPage::Qualification).key(),
     ),
-    ("fit-canvas", Command::ZoomFit.key()),
+    ("fit-canvas", WorkbenchCommand::ZoomFit.key()),
     ("export-waveforms", ResultsCommand::ExportWaveformsCsv.key()),
     // The cursor manager's slots became the linked-cursors toggle, so a
     // shortcut bound to it keeps doing what the slots now do.
@@ -820,6 +765,7 @@ pub(crate) fn command_registry() -> &'static Registry {
             COMMAND_REGISTRY
                 .iter()
                 .map(|command| command.registry_spec())
+                .chain(WorkbenchCommand::ALL.map(WorkbenchCommand::declared_spec))
                 .chain(SheetsCommand::ALL.map(SheetsCommand::declared_spec))
                 .chain(SettingsCommand::ALL.map(SettingsCommand::declared_spec))
                 .chain(HardcopyCommand::LISTED.map(HardcopyCommand::declared_spec))

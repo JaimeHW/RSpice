@@ -448,11 +448,11 @@ fn a_pin_the_module_dropped_is_named_against_the_module() {
 /// edit gives it back to the compile, which draws it again.
 #[test]
 fn a_compiled_symbol_undoes_saves_and_reverts_as_a_drawn_one() {
-    use crate::workbench::commands::vocabulary::Command;
     use rspice_app_project::workbench::project::commands::ProjectCommand;
     use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         has_unsaved_changes, prepare_revert_active_document,
     };
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
 
     let mut app = open_project_app();
     let reference = compiled_amplifier(&mut app);
@@ -507,10 +507,10 @@ fn a_compiled_symbol_undoes_saves_and_reverts_as_a_drawn_one() {
 
     move_rail(&mut app, Point::new(20, 0));
     assert!(!generated(&app), "the edit made the symbol its author's");
-    app.execute_command_key(Command::Undo.key());
+    app.execute_command_key(ids::UNDO);
     assert_eq!(symbol(&app, &reference), compiled);
     assert!(generated(&app), "undo gave it back to the compile");
-    app.execute_command_key(Command::Redo.key());
+    app.execute_command_key(ids::REDO);
     assert_eq!(
         terminal(&symbol(&app, &reference), "vdd"),
         terminal(&compiled, "vdd") + Point::new(20, 0)

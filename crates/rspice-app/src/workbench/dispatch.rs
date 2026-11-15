@@ -7,9 +7,10 @@
 //! a read-only schematic refuses an edit, a pending inspector edit commits
 //! first, and a repeatable command is recorded for Repeat. Only then does the
 //! command's owner carry it out: the feature that declares it, in its
-//! context, or for a key no feature declares the shell's legacy table
-//! [`Command::run_legacy_arm`]. A command a feature's command raised runs as
-//! soon as that one returns, behind the same prologue.
+//! context; for one of the workbench's routed commands, the part the shell's
+//! edit target sends it to; or for a key neither declares the shell's legacy
+//! table [`Command::run_legacy_arm`]. A command a feature's command raised
+//! runs as soon as that one returns, behind the same prologue.
 //!
 //! The dispatcher is handed a command value or a key. A key names a command
 //! when the registry lists it, or when a feature declares it and leaves it
@@ -22,8 +23,8 @@ use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
 use crate::workbench::commands::{
     active_schematic_editor, answer_project_request, answer_surface_request,
-    carry_out_code_hand_off, command_edits_schematic, file_action, run_project_file_action,
-    select_probed_trace,
+    carry_out_code_hand_off, file_action, run_project_file_action, select_probed_trace,
+    source_editor_redirect,
 };
 use crate::workbench::features;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -43,7 +44,7 @@ use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::state::command_catalog::CommandKey;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::{
-    CommandAvailability, CommandFlags, CommandSpec, ids,
+    CommandAvailability, CommandFlags, CommandSpec, WorkbenchCommand, ids,
 };
 use rspice_app_workbench::workbench::framework::feature::{Execute, held_back};
 use rspice_app_workbench::workbench::framework::host::{Host, InspectorScope};
@@ -53,19 +54,29 @@ use rspice_app_workbench::workbench::framework::requests::{
     OpenInDesign, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
     ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
     SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels, ShowSchematicAnnotations,
-    ShowWaveforms, SourceEditorRequest, StageComponentTuning, SubcircuitSymbolSource,
-    VoidVerilogAEvidence,
+    ShowWaveforms, StageComponentTuning, SubcircuitSymbolSource, VoidVerilogAEvidence,
 };
-use rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession;
+
+/// Who carries out a command once the prologue has let it through.
+#[derive(Debug, Clone, Copy)]
+enum Owner {
+    /// The feature that declares it, in its context.
+    Feature,
+    /// The part the shell's edit target sends it to.
+    Workbench(WorkbenchCommand),
+}
 
 /// The dispatcher by key: where a key becomes the command it names, a
-/// feature's first and the shell's legacy table's otherwise.
+/// feature's first, then a routed command's, and the shell's legacy table's
+/// otherwise.
 impl RSpiceApp {
     /// Carry out the command `key` names behind the prologue every command
     /// shares. A key no command answers to does nothing.
     pub(crate) fn execute_command_key(&mut self, key: CommandKey) {
         if let Some(spec) = features::spec(key) {
-            self.dispatch_feature_command(spec);
+            self.dispatch(*spec, Owner::Feature);
+        } else if let Some(command) = WorkbenchCommand::from_key(key) {
+            self.dispatch(command.declared_spec(), Owner::Workbench(command));
         } else if let Some(command) = legacy_command(key) {
             command.dispatch(self);
         }
@@ -77,6 +88,9 @@ impl RSpiceApp {
     /// `Hidden` for a key no command answers to.
     pub(crate) fn command_availability(&self, key: CommandKey) -> CommandAvailability {
         let Some(spec) = features::spec(key) else {
+            if let Some(command) = WorkbenchCommand::from_key(key) {
+                return self.workbench_command_availability(command);
+            }
             return legacy_command(key).map_or(CommandAvailability::Hidden, |command| {
                 command.availability(self)
             });
@@ -106,6 +120,9 @@ impl RSpiceApp {
         if features::spec(key).is_some() {
             return self.command_availability(key).is_available();
         }
+        if let Some(command) = WorkbenchCommand::from_key(key) {
+            return self.workbench_command_enabled(command);
+        }
         legacy_command(key).is_some_and(|command| command.is_enabled(self))
     }
 
@@ -116,17 +133,37 @@ impl RSpiceApp {
         features::route(self, key)
     }
 
+    /// Carry out the routed command `key` where `F` takes it here, and say
+    /// whether it did: the turn of `F` alone, for a command whose precedence
+    /// the edit target states owner by owner.
+    pub(crate) fn route_command_key_to<F: features::Registered>(
+        &mut self,
+        key: CommandKey,
+    ) -> bool {
+        features::route_to::<F>(self, key)
+    }
+
     /// Whether the routed command `key` can run in the feature that takes it
     /// where the reader is working; `None` when no feature takes it there.
     pub(crate) fn routed_command_key_enabled(&self, key: CommandKey) -> Option<bool> {
         features::routed_enabled(self, key)
     }
 
-    /// Carry out the feature command `spec` declares behind the same
-    /// prologue as [`Command::dispatch`], then every command it raised.
-    fn dispatch_feature_command(&mut self, spec: &CommandSpec) {
+    /// Carry out the command `spec` declares behind the prologue, in its
+    /// `owner`: a feature's, then every command it raised; a routed one, in
+    /// the part that takes it here.
+    fn dispatch(&mut self, spec: CommandSpec, owner: Owner) {
         let flags = spec.flags;
         if held_back(flags, &self.state.platform).is_some() {
+            return;
+        }
+        if let Owner::Workbench(command) = owner
+            && let Some((request, accepted)) =
+                source_editor_redirect(command, &self.state.workbench)
+        {
+            if accepted {
+                self.state.workbench.outbox.push(request);
+            }
             return;
         }
         if flags.contains(CommandFlags::EDITS_ACTIVE_DOCUMENT)
@@ -147,14 +184,19 @@ impl RSpiceApp {
         if flags.contains(CommandFlags::REPEATABLE) && self.command_key_enabled(spec.key) {
             self.state.workbench.last_repeatable_command = Some(spec.key.as_str().to_owned());
         }
-        if self.netlist_takes_run(spec.key) {
-            if self.manual_deck_run_block_reason().is_none() {
-                self.state.request_netlist_manual_deck_run();
+        match owner {
+            Owner::Feature => {
+                if self.netlist_takes_run(spec.key) {
+                    if self.manual_deck_run_block_reason().is_none() {
+                        self.state.request_netlist_manual_deck_run();
+                    }
+                } else {
+                    features::execute(self, spec.key);
+                }
+                self.after_contribution();
             }
-        } else {
-            features::execute(self, spec.key);
+            Owner::Workbench(command) => self.carry_out_workbench_command(command),
         }
-        self.after_contribution();
     }
 
     /// Whether `key` is Run on the Netlist workspace, which runs the deck
@@ -684,27 +726,8 @@ impl Command {
         if self.lacks_open_project(&app.state.platform) {
             return;
         }
-        if let Some((request, accepted)) = self.source_editor_redirect(&app.state.workbench) {
-            if accepted {
-                app.state.workbench.outbox.push(request);
-            }
-            return;
-        }
-        if active_schematic_editor(app)
-            && command_edits_schematic(self)
-            && app.state.model.schematic_edit_read_only()
-        {
-            rspice_app_design::workbench::app::actions::workspace::deny_read_only_edit(
-                &app.state.model,
-                &mut app.state.workbench,
-            );
-            return;
-        }
         if self.commits_inspector_edit() && !app.state.commit_pending_inspector_edit() {
             return;
-        }
-        if self.repeatable() && self.is_enabled(app) {
-            app.state.workbench.last_repeatable_command = Some(self.stable_id().to_owned());
         }
         self.run_legacy_arm(app);
     }
@@ -721,18 +744,6 @@ impl Command {
     /// Whether this command needs an open project and none is open.
     pub(crate) fn lacks_open_project(self, platform: &PlatformState) -> bool {
         self.requires_open_project() && !platform.project_lifecycle.is_open()
-    }
-
-    /// The request the active source editor takes in this command's place,
-    /// with whether it accepts it: a read-only editor refuses a request that
-    /// would change its text. `None` when no source editor takes the command.
-    pub(crate) fn source_editor_redirect(
-        self,
-        workbench: &WorkbenchSession,
-    ) -> Option<(SourceEditorRequest, bool)> {
-        let request = self.source_editor_request()?;
-        let editor = workbench.active_source_editor?;
-        Some((request, editor.editable || !request.mutates_source()))
     }
 }
 

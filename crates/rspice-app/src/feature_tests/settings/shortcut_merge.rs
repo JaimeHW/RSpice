@@ -5,7 +5,6 @@ use crate::feature_tests::settings::shortcut_merge_rollback::{
     artifact_from, artifact_value_with_coverage, artifact_with_coverage, set, set_key,
     with_command_extra,
 };
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
 use egui::Key;
@@ -20,6 +19,7 @@ use rspice_app_state::state::shortcuts::ShortcutPreferences;
 use rspice_app_state::state::shortcuts::ShortcutProfileLibrary;
 use rspice_app_state::state::shortcuts::ShortcutSequence;
 use rspice_app_state::state::shortcuts::ShortcutStroke;
+use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 use std::collections::BTreeSet;
 
@@ -75,7 +75,7 @@ fn exact_cross_command_collision_honors_every_resolution_policy() {
         let mut base = ShortcutProfileLibrary::default();
         set(
             base.active_mut().unwrap(),
-            Command::ZoomFit,
+            WorkbenchCommand::ZoomFit,
             ShortcutBindingSlot::Primary,
             CommandPlatform::Desktop,
             Key::F13,
@@ -107,7 +107,7 @@ fn exact_cross_command_collision_honors_every_resolution_policy() {
         assert_eq!(
             plan.candidate_library().active().resolved_label(
                 &CommandRegistry,
-                Command::ZoomFit.key(),
+                ids::ZOOM_FIT,
                 CommandPlatform::Desktop,
                 OperatingSystem::Windows
             ),
@@ -130,7 +130,7 @@ fn prefix_collision_moves_a_multistroke_sequence_atomically() {
     let mut base = ShortcutProfileLibrary::default();
     set(
         base.active_mut().unwrap(),
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F13,
@@ -162,7 +162,7 @@ fn prefix_collision_moves_a_multistroke_sequence_atomically() {
     assert_eq!(
         plan.candidate_library().active().resolved_label(
             &CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),
@@ -184,7 +184,7 @@ fn partial_context_replace_does_not_leak_uncovered_records_or_extras() {
     let mut base_profile = ShortcutPreferences::default();
     set(
         &mut base_profile,
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F13,
@@ -212,7 +212,7 @@ fn partial_context_replace_does_not_leak_uncovered_records_or_extras() {
     let mut imported = ShortcutPreferences::default();
     set(
         &mut imported,
-        Command::ZoomFit,
+        WorkbenchCommand::ZoomFit,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F8,
@@ -237,7 +237,7 @@ fn partial_context_replace_does_not_leak_uncovered_records_or_extras() {
         &base,
         &artifact_value_with_coverage(
             imported_raw,
-            &[Command::ZoomFit.shortcut_context().label()],
+            &[WorkbenchCommand::ZoomFit.declared_spec().context.label()],
             &[CommandPlatform::Desktop],
             false,
         ),
@@ -253,7 +253,7 @@ fn partial_context_replace_does_not_leak_uncovered_records_or_extras() {
     assert_eq!(
         plan.candidate_library().active().resolved_label(
             &CommandRegistry,
-            Command::ZoomFit.key(),
+            ids::ZOOM_FIT,
             CommandPlatform::Desktop,
             OperatingSystem::Windows
         ),

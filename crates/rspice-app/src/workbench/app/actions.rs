@@ -178,6 +178,7 @@ impl RSpiceApp {
 #[cfg(test)]
 mod shortcut_ownership_tests {
     use super::*;
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
 
     fn assert_grid_pitch_contract(
         app: &RSpiceApp,
@@ -231,10 +232,10 @@ mod shortcut_ownership_tests {
             app.state.model.schematic.session.editor.snap_engine.clone();
         assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
 
-        app.execute_shortcut_command(ShortcutCommand::Undo);
+        app.execute_command_key(ids::UNDO);
         assert_grid_pitch_contract(&app, SchematicGridPitch::Mil50);
 
-        app.execute_shortcut_command(ShortcutCommand::Redo);
+        app.execute_command_key(ids::REDO);
         assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
     }
 
@@ -302,7 +303,7 @@ mod shortcut_ownership_tests {
         let drawn = app.state.model.schematic.document().components.len();
         let owner = publish_sheet_assignment(&mut app.state);
 
-        app.execute_shortcut_command(ShortcutCommand::Undo);
+        app.execute_command_key(ids::UNDO);
         assert_eq!(
             app.state.model.schematic.document().components.len(),
             drawn,
@@ -319,7 +320,7 @@ mod shortcut_ownership_tests {
             "the ascent's own transaction is the step that reverts"
         );
 
-        app.execute_shortcut_command(ShortcutCommand::Redo);
+        app.execute_command_key(ids::REDO);
         assert!(
             app.state
                 .model
@@ -356,7 +357,7 @@ mod shortcut_ownership_tests {
         );
         assert_eq!(app.state.model.schematic.document().components.len(), 2);
 
-        app.execute_shortcut_command(ShortcutCommand::Undo);
+        app.execute_command_key(ids::UNDO);
         assert_eq!(
             app.state.model.schematic.document().components.len(),
             1,
@@ -372,7 +373,7 @@ mod shortcut_ownership_tests {
                 .is_some()
         );
 
-        app.execute_shortcut_command(ShortcutCommand::Undo);
+        app.execute_command_key(ids::UNDO);
         assert!(
             app.state
                 .model
@@ -385,7 +386,7 @@ mod shortcut_ownership_tests {
         );
         assert_eq!(app.state.model.schematic.document().components.len(), 1);
 
-        app.execute_shortcut_command(ShortcutCommand::Undo);
+        app.execute_command_key(ids::UNDO);
         assert!(app.state.model.schematic.document().components.is_empty());
     }
 
@@ -500,7 +501,7 @@ mod shortcut_ownership_tests {
         app.state.results.results.session.cursors.a = Some(0.5);
         app.state.results.results.session.cursor_strip = Some(0);
 
-        app.execute_shortcut_command(ShortcutCommand::Copy);
+        app.execute_command_key(ids::COPY);
 
         use rspice_app_workbench::workbench::framework::requests::ClipboardText;
         let ClipboardText(copied) = app
@@ -557,7 +558,7 @@ mod shortcut_ownership_tests {
 
         // The draft owns nothing until Apply, so one Escape leaves and the
         // bus is as it was.
-        app.execute_shortcut_command(ShortcutCommand::Cancel);
+        app.execute_command_key(ids::CANCEL);
         assert!(!app.state.design.object_properties.open);
         assert_eq!(
             app.state.model.schematic.document().buses[0].declaration,
@@ -665,6 +666,7 @@ mod symbol_action_tests {
     use rspice_app_state::state::{
         Cell, CellViewRef, Library, Point, PortDirection, SymbolDocument, SymbolPin, View, ViewType,
     };
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
 
     #[test]
     fn registered_symbol_tools_are_available_and_execute_complete_state_transitions() {
@@ -701,7 +703,7 @@ mod symbol_action_tests {
             DesignCommand::SymbolArcTool.key(),
             DesignCommand::SymbolPolygonTool.key(),
             DesignCommand::SymbolTextTool.key(),
-            ShortcutCommand::ZoomFit.key(),
+            ids::ZOOM_FIT,
         ] {
             assert!(
                 app.command_availability(command).is_available(),
@@ -769,7 +771,7 @@ mod symbol_action_tests {
         );
 
         app.state.design.symbol.editor.needs_fit = false;
-        app.execute_shortcut_command(ShortcutCommand::ZoomFit);
+        app.execute_command_key(ids::ZOOM_FIT);
         assert!(app.state.design.symbol.editor.needs_fit);
     }
 }
