@@ -368,6 +368,68 @@ class CiConfigurationTests(unittest.TestCase):
                 workflow = read_text(workflow_path)
                 self.assertRegex(workflow, r"(?m)^permissions:\n  contents: read\n")
 
+    def test_rust_caches_key_on_the_dependency_build_and_save_only_from_main(self) -> None:
+        """Every rust-cache step follows the rule ci.yml states at its first.
+
+        rust-cache's own key hashes every workspace Cargo.toml and the
+        runner's environment; with it the store was rewritten on each
+        manifest edit, several times a day, and the nightly's caches were
+        evicted before the next night. Each step is therefore keyed on the
+        dependency fingerprint the step before it computes, saves from main
+        only, and a step that only reads names a key another step saves.
+        """
+        fingerprint = (
+            "      - name: Fingerprint the dependency build\n"
+            "        id: deps\n"
+            "        shell: bash\n"
+            "        run: >-\n"
+            "          echo \"digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;\n"
+            "          awk '/^\\[/ { p = /^\\[profile\\./ } p' Cargo.toml;\n"
+            "          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)\"\n"
+            "          >> \"$GITHUB_OUTPUT\"\n"
+        )
+        step = re.compile(
+            re.escape(fingerprint)
+            + r"(?:      #[^\n]*\n)*"
+            + r"      - uses: Swatinem/rust-cache@[0-9a-f]{40} # v2\n"
+            + r"        with:\n"
+            + r"((?:          [^\n]*\n)+)"
+        )
+        digest = "-${{ steps.deps.outputs.digest }}"
+        saved: set[str] = set()
+        reads: list[tuple[str, str]] = []
+        for workflow_path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+            workflow = workflow_path.read_text(encoding="utf-8")
+            blocks = step.findall(workflow)
+            with self.subTest(workflow=workflow_path.name):
+                self.assertEqual(len(blocks), workflow.count("uses: Swatinem/rust-cache@"))
+            for block in blocks:
+                options = dict(line.strip().split(": ", 1) for line in block.splitlines())
+                key = options.get("shared-key", "")
+                with self.subTest(workflow=workflow_path.name, key=key):
+                    self.assertEqual(options.get("add-rust-environment-hash-key"), "false")
+                    self.assertTrue(key.endswith(digest))
+                    prefix = key[: -len(digest)]
+                    save_if = options.get("save-if", "")
+                    # `cond && 'a' || 'b'`: the step saves `a` where save-if
+                    # repeats `cond`, and reads `b` elsewhere.
+                    chosen = re.findall(r"&& '([a-z0-9-]+)'", prefix)
+                    fallback = re.findall(r"\|\| '([a-z0-9-]+)'", prefix)
+                    if not chosen:
+                        chosen = [prefix.split("-${{", 1)[0]]
+                    if save_if == "false":
+                        names_read, names_saved = chosen + fallback, []
+                    elif save_if == "${{ github.ref == 'refs/heads/main' }}":
+                        names_read, names_saved = [], chosen + fallback
+                    else:
+                        self.assertTrue(save_if.startswith("${{ github.ref == 'refs/heads/main' && "))
+                        names_read, names_saved = fallback, chosen
+                    reads.extend((workflow_path.name, name) for name in names_read)
+                    saved.update(names_saved)
+        for workflow_name, name in reads:
+            with self.subTest(workflow=workflow_name, reads=name):
+                self.assertIn(name, saved)
+
     def test_no_shipping_crate_depends_on_the_conformance_crate(self) -> None:
         """Nothing a user installs may depend on rspice-conformance.
 
