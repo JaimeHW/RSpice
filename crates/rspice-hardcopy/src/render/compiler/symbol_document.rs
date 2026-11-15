@@ -8,6 +8,7 @@
 //! it letters, hung off its anchor as the canvas hangs it.
 
 use super::*;
+use rspice_design::schematic::component_display::SchematicParameterLabelVisibility;
 use rspice_design::schematic::label_layout::{LayoutPoint, PlacedText};
 
 impl SemanticSceneCompiler<'_> {
@@ -241,13 +242,23 @@ impl SemanticSceneCompiler<'_> {
                     rotation,
                     shown,
                 } => {
+                    // A part that hides its value hides the labels that
+                    // letter its values, as the canvas hides them.
+                    let value_hidden = component.is_some_and(|component| {
+                        !component
+                            .display_mode
+                            .show_value(SchematicParameterLabelVisibility::NamesAndValues)
+                    });
+                    if !*shown || value_hidden {
+                        continue;
+                    }
                     let value = component
                         .and_then(|component| {
                             rspice_design::parameters::parse_params_string(&component.params)
                                 .remove(&parameter.to_lowercase())
                         })
                         .unwrap_or_else(|| default.clone());
-                    if !*shown || value.is_empty() {
+                    if value.is_empty() {
                         continue;
                     }
                     let ink = if component.is_some() {

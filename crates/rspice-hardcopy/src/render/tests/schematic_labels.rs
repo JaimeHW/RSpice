@@ -191,6 +191,47 @@ fn a_placed_symbols_label_prints_in_its_values_ink() {
     );
 }
 
+/// A part that hides its value hides its labels too, on paper as on the
+/// canvas: they letter its values.
+#[test]
+fn a_part_that_hides_its_value_prints_no_labels() {
+    use rspice_design::schematic::component_display::ComponentDisplayMode;
+    use rspice_design::symbol::{SymbolTextAlign, SymbolTextRotation, SymbolTextSize};
+
+    let mut symbol = cell_symbol();
+    symbol.body.push(SymbolShape::Label {
+        anchor: SchematicPoint::new(-30, 50),
+        parameter: "W".to_owned(),
+        default: "1u".to_owned(),
+        size: SymbolTextSize::Normal,
+        align: SymbolTextAlign::Left,
+        rotation: SymbolTextRotation::R0,
+        shown: true,
+    });
+    for (mode, lettered) in [
+        (ComponentDisplayMode::Inherit, true),
+        (ComponentDisplayMode::ValueOnly, true),
+        (ComponentDisplayMode::NameOnly, false),
+        (ComponentDisplayMode::Hidden, false),
+    ] {
+        let mut component = part(1, ComponentType::CellInstance, (0, 0), "X1", "amp");
+        component.display_mode = mode;
+        let mut printed = sheet(Vec::new());
+        printed.components.push(SemanticComponent {
+            symbol_source: Some(SemanticSymbolSource::Authored),
+            component,
+            resolved_symbol: Some(symbol.clone()),
+        });
+        let compiled = compile(&printed);
+        let texts = compiled
+            .texts()
+            .into_iter()
+            .map(|(text, ..)| text)
+            .collect::<Vec<_>>();
+        assert_eq!(texts.contains(&"W=1u"), lettered, "{mode:?}: {texts:?}");
+    }
+}
+
 fn semantic(component: Component) -> SemanticComponent {
     let resolved_symbol = (component.kind == ComponentType::CellInstance).then(cell_symbol);
     SemanticComponent {
