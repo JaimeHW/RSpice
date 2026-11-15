@@ -47,8 +47,33 @@ pub(super) fn handle_canvas(
     if let Some(source) = &state.design.symbol.editor.canvas_source
         && let Some(request) =
             canvas_request(source, &state.design.symbol.editor, viewport, response)
+        && apply_canvas_request(state, document, metadata, request)
     {
-        apply_canvas_request(state, document, metadata, request);
+        begin_touch_pan(state, &response.ctx);
+    }
+}
+
+/// A finger's drag that picked nothing up pans the view, as a schematic's
+/// does: the camera catches up with the travel the finger made before the
+/// drag was recognised, and the navigation pass follows it from here until
+/// it lifts.
+fn begin_touch_pan(state: &mut CanvasParts<'_>, ctx: &egui::Context) {
+    rspice_schematic_editor::view::selection_drag::set_touch_pan(ctx, true);
+    let Some(travel) =
+        ctx.input(|input| Some(input.pointer.interact_pos()? - input.pointer.press_origin()?))
+    else {
+        return;
+    };
+    match state.symbol_in_place_mut() {
+        Some(session) => {
+            session.pan.0 += f64::from(travel.x);
+            session.pan.1 += f64::from(travel.y);
+        }
+        None => {
+            let editor = &mut state.design.symbol.editor;
+            editor.pan.0 += travel.x;
+            editor.pan.1 += travel.y;
+        }
     }
 }
 
@@ -228,19 +253,20 @@ fn text_refusal(text: &str) -> Option<&'static str> {
         .then_some("Text cannot hold control characters.")
 }
 
+/// Apply `request` to the symbol in front; whether it began a finger's pan.
 pub(crate) fn apply_canvas_request(
     state: &mut CanvasParts<'_>,
     document: &mut SymbolDocument,
     metadata: &mut SymbolEditorMetadata,
     request: SymbolCanvasRequest,
-) {
+) -> bool {
     if request.source != state.symbol_editor_request_source()
         || state.design.symbol.editor.canvas_source.as_ref() != Some(&request.source)
         || request.tool != state.design.symbol.editor.tool
         || request.selection != state.design.symbol.editor.effective_selection()
         || state.application_modal_open()
     {
-        return;
+        return false;
     }
     let capabilities = SymbolEditCapabilities {
         edit: !state.schematic_edit_read_only(),
@@ -277,6 +303,7 @@ pub(crate) fn apply_canvas_request(
     if !request.input.dragged || request.input.drag_stopped {
         state.finish_symbol_parent_edit();
     }
+    outcome.pan
 }
 
 #[cfg(test)]

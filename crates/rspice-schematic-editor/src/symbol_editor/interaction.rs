@@ -19,9 +19,10 @@ use super::session::{
     SymbolTool, bearing, label_name, selection_subject, shape_kind,
 };
 use super::{
-    SymbolViewport, hit_handle, hit_label, hit_origin, hit_pin, hit_shape, snap_point,
-    snap_to_terminal_grid,
+    SymbolPointer, SymbolViewport, hit_handle, hit_label, hit_origin, hit_pin, hit_shape,
+    snap_point, snap_to_terminal_grid,
 };
+use crate::view::mobile_controls::touch_latches;
 
 /// Identity of the actual symbol view and the registry revision used to resolve an event.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +62,9 @@ pub struct SymbolCanvasInput {
     pub clicked: bool,
     pub double_clicked: bool,
     pub extend_selection: bool,
+    /// The touch strip's box latch: a finger's drag off the selection draws
+    /// a selection box rather than panning.
+    pub box_latched: bool,
     /// Enter, while a line or polygon is being drawn: finish it.
     pub finish: bool,
     /// Backspace, while a shape is being drawn: take back its last point.
@@ -105,6 +109,10 @@ pub fn canvas_request(
         && response
             .ctx
             .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace));
+    // On touch the strip's box latch stands in for a box drag.
+    let latches = (viewport.pointer == SymbolPointer::Finger)
+        .then(|| touch_latches(&response.ctx))
+        .unwrap_or_default();
     let input = SymbolCanvasInput {
         pointer: pressed_at
             .or_else(|| response.interact_pointer_pos())
@@ -116,6 +124,7 @@ pub fn canvas_request(
         clicked: response.clicked_by(egui::PointerButton::Primary),
         double_clicked: response.double_clicked_by(egui::PointerButton::Primary),
         extend_selection: response.ctx.input(|input| input.modifiers.shift),
+        box_latched: latches.select_box,
         finish,
         remove_last_point,
         turn_pin: false,
@@ -187,6 +196,9 @@ pub struct SymbolEditOutcome {
     /// What a completed edit did, where the canvas does not show it at a
     /// glance: "Snapped 3 objects to the grid."
     pub report: Option<String>,
+    /// A finger's drag that began off the selection: the view follows the
+    /// finger until it lifts, as a schematic's does.
+    pub pan: bool,
 }
 
 pub fn edit_canvas(
@@ -283,6 +295,18 @@ fn handle_canvas_interaction(
             .filter(|handle| !(several && handle.handle == SymbolHandle::Anchor));
         if let Some(handle) = handle {
             grabbed = grab_handle(edit, document, handle);
+        } else if viewport.pointer == SymbolPointer::Finger
+            && !finger_takes_hold(edit, document, editor, viewport, pointer)
+        {
+            // A finger moves only what is selected, so a pan across a dense
+            // symbol cannot pick up what lies under it; anywhere else it pans,
+            // or with the box latch on draws a selection box.
+            if input.box_latched && edit.session.tool == SymbolTool::Select {
+                edit.session.marquee_start = Some(body_point);
+                edit.session.marquee_current = Some(body_point);
+            } else {
+                edit.outcome.pan = true;
+            }
         } else if grab_belongs_to_group(edit, document, editor, viewport, pointer) {
             edit.session.dragging_group = Some(body_point);
             edit.session.drag_undo_recorded = false;
@@ -747,6 +771,29 @@ fn toggle_or_select(
         return;
     }
     edit.session.set_selection(replace());
+}
+
+/// Whether a finger's drag from `pointer` takes hold of what is under it:
+/// an object already selected, or the origin, which is never selected and
+/// is moved by its own mark.
+fn finger_takes_hold(
+    edit: &CanvasEdit<'_>,
+    document: &SymbolDocument,
+    editor: &SymbolEditorMetadata,
+    viewport: SymbolViewport,
+    pointer: Pos2,
+) -> bool {
+    let selection = edit.session.effective_selection();
+    if let Some(pin) = hit_pin(document, viewport, pointer) {
+        return selection.contains_pin(&pin);
+    }
+    if let Some(kind) = hit_label(document, editor, edit.session, viewport, pointer) {
+        return selection.attributes.contains(&kind);
+    }
+    if hit_origin(document, viewport, pointer) {
+        return true;
+    }
+    hit_shape(document, viewport, pointer).is_some_and(|index| selection.shapes.contains(&index))
 }
 
 /// Whether the object under `pointer` is one of several already selected.

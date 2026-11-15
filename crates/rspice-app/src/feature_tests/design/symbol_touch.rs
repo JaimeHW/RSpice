@@ -256,6 +256,10 @@ impl Finger {
         self.viewport().world_to_screen(at)
     }
 
+    fn pan(&self) -> (f32, f32) {
+        self.app.state.design.symbol.editor.pan
+    }
+
     fn document(&self) -> SymbolDocument {
         self.app.state.model.load_active_symbol_document().unwrap()
     }
@@ -275,6 +279,14 @@ fn square() -> SymbolShape {
     SymbolShape::Rectangle {
         min: Point::new(-20, -20),
         max: Point::new(20, 20),
+        style: Default::default(),
+    }
+}
+
+fn square_at(x: i32, y: i32) -> SymbolShape {
+    SymbolShape::Rectangle {
+        min: Point::new(x - 10, y - 10),
+        max: Point::new(x + 10, y + 10),
         style: Default::default(),
     }
 }
@@ -368,4 +380,56 @@ fn a_finger_takes_symbol_objects_and_handles_within_its_reach() {
         finger.selection(),
         SymbolSelection::single_pin("IN".to_owned())
     );
+}
+
+/// A finger moves only what is selected: from anywhere else its drag pans
+/// the symbol, so a pan cannot pick up what it starts on.
+#[test]
+fn a_finger_drag_off_the_selection_pans_the_symbol() {
+    let mut finger = Finger::with_body(vec![square()]);
+    let empty = finger.screen(Point::new(60, -60));
+    let pan = finger.pan();
+    finger.drag(empty, empty + egui::vec2(60.0, 40.0));
+    assert_eq!(
+        finger.pan(),
+        (pan.0 + 60.0, pan.1 + 40.0),
+        "the view followed the finger"
+    );
+    assert!(finger.selection().is_empty(), "no box was drawn");
+
+    let body = finger.document().body;
+    let edge = finger.screen(Point::new(20, 0));
+    let pan = finger.pan();
+    finger.drag(edge, edge + egui::vec2(-40.0, 0.0));
+    assert_eq!(finger.document().body, body, "the unselected square stayed");
+    assert!(finger.selection().is_empty(), "and was not selected");
+    assert_eq!(finger.pan(), (pan.0 - 40.0, pan.1));
+
+    // Selected, the square moves with the finger: twenty units left.
+    finger.tap(finger.screen(Point::new(20, 0)));
+    let edge = finger.screen(Point::new(20, 10));
+    finger.drag(edge, edge + egui::vec2(-40.0, 0.0));
+    assert_eq!(
+        finger.document().body[0],
+        SymbolShape::Rectangle {
+            min: Point::new(-40, -20),
+            max: Point::new(0, 20),
+            style: Default::default(),
+        }
+    );
+}
+
+/// With the strip's box latch on, a finger's drag off the selection draws a
+/// selection box instead of panning.
+#[test]
+fn the_box_latch_draws_a_selection_box_on_the_symbol() {
+    let mut finger = Finger::with_body(vec![square_at(-40, -40), square_at(40, -40)]);
+    finger.press("Select with a box");
+    let pan = finger.pan();
+    finger.drag(
+        finger.screen(Point::new(-60, -60)),
+        finger.screen(Point::new(60, -20)),
+    );
+    assert_eq!(finger.selection().shapes, [0, 1].into_iter().collect());
+    assert_eq!(finger.pan(), pan, "the view stayed");
 }
