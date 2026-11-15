@@ -1,5 +1,31 @@
 use super::*;
 
+/// Refuse, by name, an inductance that reads the circuit solution.
+///
+/// QSPICE and LTspice define an inductor that varies only by the flux it
+/// links (`Flux=<expression>`, V = dFlux/dt, with x the inductor's current);
+/// neither takes an inductance that reads a voltage or current. Xyce refuses
+/// one, and ngspice reads it as L·di/dt. That reading and d(L·i)/dt differ
+/// by i·dL/dt whenever L varies, so the card cannot say which it means, and
+/// the flux form says both.
+pub(in crate::engine::builder) fn refuse_solution_dependent_inductance(
+    params: &crate::netlist::ParamContext,
+    element_name: &str,
+    expression: &str,
+) -> Result<(), SimulationError> {
+    let prepared = crate::netlist::expr::prepare_behavioral_expression(expression, params)
+        .unwrap_or_else(|_| expression.to_string());
+    let Some(probe) = crate::netlist::expr::parameter_expression_circuit_probe(&prepared) else {
+        return Ok(());
+    };
+    Err(SimulationError::Circuit(format!(
+        "Inductor '{element_name}': its inductance reads {}, which leaves L*di/dt and \
+         d(L*i)/dt apart; write the flux it links instead, Flux=<expression>, with x the \
+         current through the inductor",
+        probe.reference
+    )))
+}
+
 /// Resolve the effective inductance of a linear inductor instance.
 ///
 /// Resolution order:

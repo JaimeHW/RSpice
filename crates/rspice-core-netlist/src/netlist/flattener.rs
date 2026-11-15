@@ -1824,6 +1824,23 @@ impl<'a> Flattener<'a> {
                 instance_params: instance_params.clone(),
                 deferred_params: deferred_params.clone(),
             },
+            ElementKind::Inductor {
+                value,
+                value_expr,
+                initial_current,
+                model,
+                instance_params,
+                deferred_params,
+            } => ElementKind::Inductor {
+                value: *value,
+                value_expr: value_expr
+                    .as_ref()
+                    .map(|expr| self.remap_behavioral_expression(expr, prefix, node_map)),
+                initial_current: *initial_current,
+                model: model.clone(),
+                instance_params: instance_params.clone(),
+                deferred_params: deferred_params.clone(),
+            },
             ElementKind::StateMachine(machine) => {
                 let mut machine = machine.clone();
                 for rule in &mut machine.rules {
@@ -2389,31 +2406,34 @@ impl<'a> Flattener<'a> {
                 model,
                 instance_params,
                 deferred_params,
-            } => ElementKind::Inductor {
-                value: self.resolve_optional_value_expr(
+            } => {
+                let (value, value_expr) = self.resolve_inductance(
                     *value,
                     value_expr,
                     scope,
                     Some(&mut scalar_direction),
                     abort,
-                )?,
-                value_expr: None,
-                initial_current: *initial_current,
-                model: self.resolve_optional_scoped_model(
-                    model,
-                    scope,
-                    element_path,
-                    model_scope_path,
-                    abort,
-                )?,
-                instance_params: self.merge_deferred_params(
-                    instance_params,
-                    deferred_params,
-                    scope,
-                    abort,
-                )?,
-                deferred_params: Vec::new(),
-            },
+                )?;
+                ElementKind::Inductor {
+                    value,
+                    value_expr,
+                    initial_current: *initial_current,
+                    model: self.resolve_optional_scoped_model(
+                        model,
+                        scope,
+                        element_path,
+                        model_scope_path,
+                        abort,
+                    )?,
+                    instance_params: self.merge_deferred_params(
+                        instance_params,
+                        deferred_params,
+                        scope,
+                        abort,
+                    )?,
+                    deferred_params: Vec::new(),
+                }
+            }
             ElementKind::JilesAthertonInductor {
                 value,
                 model,
@@ -3391,25 +3411,56 @@ impl<'a> Flattener<'a> {
     ) -> Result<Value, ParseWithAbortError> {
         match value_expr {
             Some(expr) => {
-                let prepared = prepare_behavioral_expression_with_abort(expr, scope, abort)
-                    .map_err(|error| {
-                        map_preparation_error(error, |error| {
-                            ParseError::InvalidValue(format!(
-                                "element value expression could not be prepared: {error}"
-                            ))
-                        })
-                    })?;
-                if behavioral_expression_references_runtime_quantity(&prepared) {
-                    return Err(ParseError::InvalidValue(
-                        "runtime-dependent value expressions are not supported for this element"
-                            .to_string(),
-                    )
-                    .into());
-                }
-                self.resolve_prepared_scalar_value(expr, prepared, scope, direction, abort)
+                let prepared = prepare_value_expr(expr, scope, abort)?;
+                self.resolve_prepared_value_expr(expr, prepared, scope, direction, abort)
             }
             None => Ok(value),
         }
+    }
+
+    fn resolve_prepared_value_expr(
+        &self,
+        expr: &str,
+        prepared: String,
+        scope: &ParamContext,
+        direction: Option<&mut Option<Derivative>>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, ParseWithAbortError> {
+        if behavioral_expression_references_runtime_quantity(&prepared) {
+            return Err(ParseError::InvalidValue(
+                "runtime-dependent value expressions are not supported for this element"
+                    .to_string(),
+            )
+            .into());
+        }
+        self.resolve_prepared_scalar_value(expr, prepared, scope, direction, abort)
+    }
+
+    /// An inductor's value. An expression that reads the circuit solution is
+    /// kept, prepared and with no value, so that circuit construction refuses
+    /// it by name as it refuses one at top level.
+    fn resolve_inductance(
+        &self,
+        value: Value,
+        value_expr: &Option<String>,
+        scope: &ParamContext,
+        direction: Option<&mut Option<Derivative>>,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Value, Option<String>), ParseWithAbortError> {
+        let Some(expr) = value_expr else {
+            return Ok((value, None));
+        };
+        let prepared = prepare_value_expr(expr, scope, abort)?;
+        if super::expr::parameter_expression_circuit_probe(&prepared).is_some() {
+            if let Some(direction) = direction {
+                *direction = None;
+            }
+            return Ok((Value::NAN, Some(prepared)));
+        }
+        Ok((
+            self.resolve_prepared_value_expr(expr, prepared, scope, direction, abort)?,
+            None,
+        ))
     }
 
     fn resolve_source_multiplicity(
@@ -5861,6 +5912,22 @@ pub fn flatten_netlist_with_parameter_direction(
         },
         flattener.parameter_direction,
     ))
+}
+
+/// An element value expression with its `.FUNC` calls and parameters
+/// expanded in `scope`.
+fn prepare_value_expr(
+    expr: &str,
+    scope: &ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<String, ParseWithAbortError> {
+    prepare_behavioral_expression_with_abort(expr, scope, abort).map_err(|error| {
+        map_preparation_error(error, |error| {
+            ParseError::InvalidValue(format!(
+                "element value expression could not be prepared: {error}"
+            ))
+        })
+    })
 }
 
 fn xspice_auto_bridge_family(

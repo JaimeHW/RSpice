@@ -2691,3 +2691,77 @@ R1 out 0 1k
         "{refusal}"
     );
 }
+
+// A saturating inductor given its flux, Flux = 1m*tanh(i/1A), ramped to 2 A in
+// 1 ms: V = dFlux/dt = 2*sech^2(i), 0.839949 at 0.5 ms and 0.207117 at 0.9 ms.
+// LTspice 17.2.4 gives 0.840056 and 0.206746 on the braced card; ngspice-46
+// gives 0.839948 and 0.207116 for its behavioural L = dFlux/di = 1m*sech^2(i),
+// which it reads as L*di/dt. The braced and unbraced spellings read x alike.
+#[test]
+fn a_braced_flux_expression_reads_x_as_the_inductor_current() {
+    let netlist = parse(
+        "* saturating inductors given their flux
+.param isat=1
+I1 0 a PWL(0 0 1m 2)
+L1 a 0 Flux={1m*tanh(x/isat)}
+I2 0 b PWL(0 0 1m 2)
+L2 b 0 Flux=1m*tanh(x/{isat})
+.tran 1u 1m
+.end
+",
+    );
+    for time in [0.5e-3_f64, 0.9e-3] {
+        let exact = 2.0 / (2000.0 * time).cosh().powi(2);
+        let values = tran_voltages(&netlist, 1e-3, time, &["a", "b"]);
+        assert_close(&format!("V(a) at {time}"), values[0], exact, 1e-5);
+        assert_close(&format!("V(b) at {time}"), values[1], values[0], 1e-12);
+    }
+}
+
+// An inductance that reads the circuit solution is refused by name, at top
+// level and in a subcircuit. QSPICE and LTspice define a varying inductor only
+// by its flux (LTspice 17.2.4 reads the leading 1m of this card and drops the
+// rest), Xyce refuses an inductance that depends on voltages or currents, and
+// ngspice reads it as L*di/dt; with i*dL/dt between that and d(L*i)/dt, the
+// card does not say which it means.
+#[test]
+fn an_inductance_that_reads_the_solution_is_refused_naming_the_flux_form() {
+    for (deck, element, probe) in [
+        (
+            "* top level
+I1 0 b PWL(0 0 1m 2)
+L2 b 0 L={1m/cosh(I(L2))**2}
+.tran 1u 1m
+.end
+",
+            "L2",
+            "I(L2)",
+        ),
+        (
+            "* in a subcircuit
+.subckt vl n ctl
+L1 n 0 {1m*(1+v(ctl))}
+.ends
+I1 0 c PWL(0 0 1m 2)
+Vc k 0 1
+X1 c k vl
+.tran 1u 1m
+.end
+",
+            "X1.L1",
+            "V(K)",
+        ),
+    ] {
+        let netlist = parse(deck);
+        let refusal = Engine::default()
+            .run_tran(&netlist, 1e-3, 1e-6)
+            .expect_err("an inductance that reads the solution");
+        let message = refusal.to_string();
+        assert!(
+            message.contains(&format!(
+                "Inductor '{element}': its inductance reads {probe}"
+            )) && message.contains("write the flux it links instead, Flux=<expression>"),
+            "{message}"
+        );
+    }
+}

@@ -7452,11 +7452,21 @@ impl Engine {
                 }
                 ElementKind::Inductor {
                     value,
+                    value_expr,
                     initial_current,
                     model,
                     instance_params,
                     ..
                 } => {
+                    if value.is_nan()
+                        && let Some(expression) = value_expr.as_deref()
+                    {
+                        refuse_solution_dependent_inductance(
+                            &netlist.params,
+                            &element.name,
+                            expression,
+                        )?;
+                    }
                     if let Some(core_plan) =
                         xyce_core_by_winding.get(&element.name.to_ascii_uppercase())
                     {

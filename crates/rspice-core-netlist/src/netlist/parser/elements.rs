@@ -9875,7 +9875,10 @@ fn take_state_function(
                 append_behavioral_expr_fragment(&mut expression, &own);
             }
             TokenKind::Expression(inner) => {
-                append_behavioral_expr_fragment(&mut expression, &format!("({inner})"));
+                append_behavioral_expr_fragment(
+                    &mut expression,
+                    &format!("({})", substitute_state_variable(inner, &own)),
+                );
             }
             TokenKind::LParen => {
                 depth += 1;
@@ -9928,6 +9931,79 @@ fn take_state_function(
         provenance: crate::netlist::ElementProvenance::Authored,
     });
     Ok(true)
+}
+
+/// A braced part of a `Q=` or `Flux=` expression with each `x` read as the
+/// element's own voltage or current, `own`. LTspice and QSPICE read `x` alike
+/// whether the expression is braced (`Flux={1m*tanh(x)}`) or not; a number's
+/// scale suffix, a call named `x`, and a probe's operands keep their spelling.
+fn substitute_state_variable(inner: &str, own: &str) -> String {
+    let chars: Vec<char> = inner.chars().collect();
+    let mut out = String::with_capacity(inner.len());
+    let mut index = 0;
+    while index < chars.len() {
+        let c = chars[index];
+        if c.is_ascii_digit()
+            || (c == '.' && chars.get(index + 1).is_some_and(char::is_ascii_digit))
+        {
+            let start = index;
+            while let Some(&d) = chars.get(index) {
+                if matches!(d, 'e' | 'E')
+                    && matches!(chars.get(index + 1), Some('+' | '-'))
+                    && chars.get(index + 2).is_some_and(char::is_ascii_digit)
+                {
+                    index += 3;
+                } else if d.is_ascii_alphanumeric() || d == '.' {
+                    index += 1;
+                } else {
+                    break;
+                }
+            }
+            out.extend(&chars[start..index]);
+            continue;
+        }
+        if !(c.is_alphabetic() || c == '_') {
+            out.push(c);
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while chars
+            .get(index)
+            .is_some_and(|d| d.is_alphanumeric() || matches!(d, '_' | '.' | '$' | '#'))
+        {
+            index += 1;
+        }
+        let word: String = chars[start..index].iter().collect();
+        let mut next = index;
+        while chars.get(next).is_some_and(|d| d.is_whitespace()) {
+            next += 1;
+        }
+        let called = chars.get(next) == Some(&'(');
+        if called && (word.eq_ignore_ascii_case("V") || word.eq_ignore_ascii_case("I")) {
+            out.push_str(&word);
+            let mut depth = 0usize;
+            while let Some(&d) = chars.get(index) {
+                out.push(d);
+                index += 1;
+                match d {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        } else if !called && word.eq_ignore_ascii_case("X") {
+            out.push_str(own);
+        } else {
+            out.push_str(&word);
+        }
+    }
+    out
 }
 
 /// LTspice reads `R=` to the end of the card, or to the next `name=`
