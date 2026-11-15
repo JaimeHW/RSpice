@@ -188,7 +188,7 @@ impl DigitalActiveExchange<'_> {
     pub fn read_net_drive(
         &self,
         net: usize,
-        excluded: Option<ExternalBitDriverId>,
+        excluded: &[ExternalBitDriverId],
     ) -> Option<crate::xspice::verilog::store::BitDrive> {
         self.host.store.connected_drive(net, excluded)
     }

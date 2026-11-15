@@ -358,8 +358,9 @@ impl DigitalSignalStore {
 
     /// What a converter on the caller's event net `net` converts: the
     /// [`Self::boundary_drive`] of its member bits, resolved with every
-    /// XSPICE driver of the net but `excluded` (the converter's own receiving
-    /// half) as one net under IEEE 1364-2005 section 7.10. Verilog-AMS
+    /// XSPICE driver of the net but `excluded` (the inserted converters',
+    /// which read the analog side back) as one net under IEEE 1364-2005
+    /// section 7.10. Verilog-AMS
     /// resolves a digital segment's drivers before its connect module reads
     /// it, so a code model driving the net beside the design is converted
     /// with it, and a strong 0 against a strong 1 converts as `StX`. A forced
@@ -367,15 +368,14 @@ impl DigitalSignalStore {
     pub(crate) fn connected_drive(
         &self,
         net: usize,
-        excluded: Option<ExternalBitDriverId>,
+        excluded: &[ExternalBitDriverId],
     ) -> Option<super::strength::BitDrive> {
         let bits = self.connected.as_ref()?;
         let index = *bits.topology.external_nets.get(net)?;
         let net = bits.topology.nets.get(index)?;
-        let excluded = excluded.map(|driver| driver.0);
         let mut drivers = bits.topology.external_by_net[index]
             .iter()
-            .filter(|&&slot| Some(slot) != excluded)
+            .filter(|&&slot| !excluded.contains(&ExternalBitDriverId(slot)))
             .map(|&slot| bits.external_values[slot])
             .filter(|value| value.state != DigitalState::HighZ)
             .peekable();

@@ -420,14 +420,10 @@ pub(super) trait XspiceDigitalResolver {
     ) -> crate::xspice::CmResult<()>;
     /// What a converter on an HDL port converts on the shared node `node`,
     /// at its strength levels: the design's drive with every XSPICE driver of
-    /// the net but the reading instance `reader`'s own. The owner's answer
-    /// while it runs a trial, and nothing for a node it does not own.
+    /// the net but the inserted converters'. The owner's answer while it runs
+    /// a trial, and nothing for a node it does not own.
     #[cfg(feature = "veriloga")]
-    fn hdl_drive(
-        &self,
-        _node: NodeId,
-        _reader: usize,
-    ) -> Option<crate::xspice::verilog::store::BitDrive> {
+    fn hdl_drive(&self, _node: NodeId) -> Option<crate::xspice::verilog::store::BitDrive> {
         None
     }
 }
@@ -1877,10 +1873,10 @@ impl CircuitData {
             #[cfg(feature = "veriloga")]
             if instance.reads_hdl_drives() {
                 instance.refresh_hdl_drives(|node| {
-                    resolver.hdl_drive(node, index).or_else(|| {
-                        let own =
-                            hdl_bindings.and_then(|bindings| bindings.own_driver(index, node));
-                        hdl_owner?.event_node_drive(node, own)
+                    resolver.hdl_drive(node).or_else(|| {
+                        let converters = hdl_bindings
+                            .map_or(&[][..], |bindings| bindings.converter_drivers(node));
+                        hdl_owner?.event_node_drive(node, converters)
                     })
                 });
             }

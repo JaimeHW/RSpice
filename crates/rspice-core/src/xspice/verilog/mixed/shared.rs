@@ -1097,7 +1097,7 @@ impl MixedDigitalCoordinator {
     pub fn event_node_drive(
         &self,
         node: usize,
-        excluded: Option<crate::xspice::verilog::store::ExternalBitDriverId>,
+        excluded: &[crate::xspice::verilog::store::ExternalBitDriverId],
     ) -> Option<crate::xspice::verilog::store::BitDrive> {
         let net = self.event_nodes.iter().position(|&event| event == node)?;
         self.digital.connected_drive(net, excluded).or_else(|| {

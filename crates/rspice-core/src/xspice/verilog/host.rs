@@ -912,7 +912,7 @@ impl DigitalHost {
     pub(crate) fn connected_drive(
         &self,
         net: usize,
-        excluded: Option<super::store::ExternalBitDriverId>,
+        excluded: &[super::store::ExternalBitDriverId],
     ) -> Option<super::store::BitDrive> {
         self.store.connected_drive(net, excluded)
     }

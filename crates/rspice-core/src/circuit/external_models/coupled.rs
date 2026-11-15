@@ -23,6 +23,9 @@ pub(crate) struct XspiceDigitalBindings {
     drivers: BTreeMap<EventTarget, ExternalBitDriverId>,
     /// Store driver id -> code-model owner and original port element.
     inout_observers: BTreeMap<usize, (usize, EventTarget)>,
+    /// The drivers inserted converters put on each node: the analog side read
+    /// back onto the net, never a driver beside the design.
+    converter_drivers: BTreeMap<NodeId, Vec<ExternalBitDriverId>>,
     real_by_node: BTreeMap<NodeId, DigitalSignalId>,
     real_by_signal: BTreeMap<DigitalSignalId, NodeId>,
     real_drivers: BTreeMap<EventTarget, ExternalRealDriverId>,
@@ -132,6 +135,7 @@ impl XspiceDigitalBindings {
             by_net: BTreeMap::new(),
             drivers: BTreeMap::new(),
             inout_observers: BTreeMap::new(),
+            converter_drivers: BTreeMap::new(),
             real_by_node: BTreeMap::new(),
             real_by_signal: BTreeMap::new(),
             real_drivers: BTreeMap::new(),
@@ -212,15 +216,20 @@ impl XspiceDigitalBindings {
         let mut connected = BTreeSet::new();
         let mut targets = Vec::new();
         let mut inout_sources = BTreeMap::new();
+        let mut converter_targets = BTreeSet::new();
         for (index, instance) in circuit.xspice_instances.iter().enumerate() {
             instance.for_each_event_input_net(|kind, node| {
                 if kind == EventInputKind::Digital && offered.contains_key(&node) {
                     connected.insert(node);
                 }
             });
+            let converter = crate::xspice::is_auto_bridge_name(&instance.name);
             instance.for_each_digital_output_driver(|target| {
                 if offered.contains_key(&target.node_id) {
                     connected.insert(target.node_id);
+                    if converter {
+                        converter_targets.insert(target.clone());
+                    }
                     if instance.ports().iter().any(|port| {
                         port.name == target.port_name
                             && port.direction == crate::xspice::PortDirection::InOut
@@ -261,10 +270,20 @@ impl XspiceDigitalBindings {
                 (ids[index].index(), (inout_sources[target], target.clone()))
             })
             .collect();
+        let mut converter_drivers: BTreeMap<NodeId, Vec<ExternalBitDriverId>> = BTreeMap::new();
+        for ((_, target), &id) in targets.iter().zip(&ids) {
+            if converter_targets.contains(target) {
+                converter_drivers
+                    .entry(target.node_id)
+                    .or_default()
+                    .push(id);
+            }
+        }
         Ok(Some(Self {
             by_node,
             by_net,
             inout_observers,
+            converter_drivers,
             drivers: targets
                 .into_iter()
                 .map(|(_, target)| target)
@@ -279,22 +298,24 @@ impl XspiceDigitalBindings {
     pub(crate) fn contains_node(&self, node: NodeId) -> bool {
         self.by_node.contains_key(&node)
     }
-    /// The driver the code model `owner` (its index among the circuit's
-    /// XSPICE instances) puts on the shared node `node` through an inout
-    /// port: a bidirectional converter's receiving half, which its own
-    /// driving half must not read back.
-    pub(crate) fn own_driver(&self, owner: usize, node: NodeId) -> Option<ExternalBitDriverId> {
-        self.inout_observers
-            .iter()
-            .find(|(_, (index, target))| *index == owner && target.node_id == node)
-            .and_then(|(_, (_, target))| self.drivers.get(target).copied())
+    /// The drivers inserted converters put on the shared node `node`: an
+    /// analog-to-digital converter's output and a bidirectional converter's
+    /// receiving half. They carry the analog side back onto the net, so a
+    /// converter reading the net's drive leaves them out, its own receiving
+    /// half among them.
+    pub(crate) fn converter_drivers(&self, node: NodeId) -> &[ExternalBitDriverId] {
+        self.converter_drivers.get(&node).map_or(&[], Vec::as_slice)
     }
-    /// Whether a code model drives the shared node `node` through an output
-    /// port: not a bidirectional converter's receiving half, which is the
-    /// design's own port read back.
+    /// Whether a code model the deck names drives the shared node `node`
+    /// through an output port: not an inserted converter, and not a
+    /// bidirectional converter's receiving half, which is the design's own
+    /// port read back.
     pub(crate) fn code_model_drives(&self, node: NodeId) -> bool {
+        let converters = self.converter_drivers(node);
         self.drivers.iter().any(|(target, driver)| {
-            target.node_id == node && !self.inout_observers.contains_key(&driver.index())
+            target.node_id == node
+                && !self.inout_observers.contains_key(&driver.index())
+                && !converters.contains(driver)
         })
     }
     pub(crate) fn contains_real_node(&self, node: NodeId) -> bool {
@@ -844,14 +865,10 @@ impl XspiceDigitalResolver for SharedResolver<'_, '_> {
     fn owns(&self, node: NodeId) -> bool {
         self.bindings.by_node.contains_key(&node)
     }
-    fn hdl_drive(
-        &self,
-        node: NodeId,
-        reader: usize,
-    ) -> Option<crate::xspice::verilog::store::BitDrive> {
+    fn hdl_drive(&self, node: NodeId) -> Option<crate::xspice::verilog::store::BitDrive> {
         let &net = self.bindings.by_node.get(&node)?;
         self.exchange
-            .read_net_drive(net, self.bindings.own_driver(reader, node))
+            .read_net_drive(net, self.bindings.converter_drivers(node))
     }
     fn owns_real(&self, node: NodeId) -> bool {
         self.bindings.real_by_node.contains_key(&node)
