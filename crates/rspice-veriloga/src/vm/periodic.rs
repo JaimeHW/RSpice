@@ -80,6 +80,11 @@ pub struct PeriodicOperatorRecord {
     pub input_partials: BTreeMap<(usize, PeriodicOperatorAxis), f64>,
     /// Sites whose initial condition or delay has a nonzero derivative.
     pub dependent_parameters: Vec<bool>,
+    /// `d initial condition / d axis` for each `idt` site along each column
+    /// a derivative program found it nonzero: the condition's derivative,
+    /// for the DC row LRM 2.4 section 4.5.4 gives an `idt`, whose output its
+    /// initial condition fixes.
+    pub initial_condition_partials: BTreeMap<(usize, PeriodicOperatorAxis), f64>,
 }
 
 /// Supplied outputs and the record of one evaluation.
@@ -172,6 +177,13 @@ impl PeriodicOperatorFrame {
         }
         if parameter_derivative != 0.0 {
             self.record.dependent_parameters[site] = true;
+            if let Some(column) = self.column
+                && self.sites[site].kind == PeriodicOperatorKind::Integral
+            {
+                self.record
+                    .initial_condition_partials
+                    .insert((site, column), parameter_derivative);
+            }
         }
         if self.seed == Some(site) { 1.0 } else { 0.0 }
     }
@@ -185,6 +197,7 @@ impl PeriodicOperatorRecord {
             delays: vec![None; count],
             input_partials: BTreeMap::new(),
             dependent_parameters: vec![false; count],
+            initial_condition_partials: BTreeMap::new(),
         }
     }
 }

@@ -24,6 +24,39 @@ impl ExactPeriodicNetwork {
         self.try_visit_frequency_entries(omega, None, unknowns, visitor)
     }
 
+    /// The entries the DC operating point that seeds the periodic solve
+    /// stamps: the direct entries at DC, except that an `idt` whose initial
+    /// condition depends on the circuit's unknowns takes the DC row LRM 2.4
+    /// section 4.5.4 gives it, its output held at that condition (its
+    /// sampler stamps the condition), not the periodic row that holds its
+    /// input's mean at zero. That periodic row can have roots the operating
+    /// point never reaches: PSP 103's non-quasi-static charges solve it at a
+    /// positive channel charge, which a transient from the operating point
+    /// never takes.
+    pub(crate) fn try_visit_operating_point_entries(
+        &self,
+        unknowns: usize,
+        mut visitor: impl FnMut(usize, usize, Complex64),
+    ) -> Result<(), HbError> {
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        if let Self::VerilogAOperator {
+            name,
+            input,
+            output,
+            transfer: super::HbOperatorTransfer::MeanFreeIntegral,
+        } = self
+        {
+            if name.trim().is_empty() || input == output || *output >= unknowns {
+                return Err(HbError::InvalidCircuit(format!(
+                    "periodic Verilog-A operator '{name}' has a malformed coordinate pair"
+                )));
+            }
+            visitor(*output, *output, Complex64::new(1.0, 0.0));
+            return Ok(());
+        }
+        self.try_visit_direct_entries(0.0, unknowns, visitor)
+    }
+
     /// Visit (Y(omega + delta) - Y(omega)) / (j delta). Keeping the
     /// increment separate preserves phase diffusion even below one ulp of
     /// the carrier frequency. LTRA's DC row basis is different; this method

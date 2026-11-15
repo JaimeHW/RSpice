@@ -575,6 +575,59 @@ fn an_idt_whose_initial_condition_moves_with_the_orbit_holds_its_input_mean_at_z
     );
 }
 
+/// An `idt` whose bias-dependent initial condition picks one of the two
+/// roots of its integrand, `idt(-k (V(out) - V(in)) (V(out) + V(in)/5), V(in))`
+/// driving `V(out)`: at `V(out) = V(in)`, where the condition puts it, it is
+/// stable, and at `-V(in)/5` it runs away. Harmonic balance's DC seed is the
+/// circuit's operating point, where LRM 2.4 section 4.5.4 holds the output
+/// at its initial condition, so the periodic solve starts on the stable root
+/// and its harmonics are the settled transient's, within 1e-3 of the
+/// fundamental. A seed that held the integrand's mean at zero from a zero
+/// start took the other root: a DC term of -0.1 V against the transient's
+/// 0.5 V.
+#[test]
+fn a_bias_dependent_idt_starts_the_orbit_from_its_initial_condition() {
+    const PERIODS: f64 = 24.0;
+    const SAMPLES: usize = 512;
+    let (model, deck) = operator_deck(
+        "two_root_integrator",
+        "SIN(0.5 0.05 1meg)",
+        "idt(-2.0e7 * (V(out) - V(in)) * (V(out) + 0.2 * V(in)), V(in))",
+    );
+    let hb = node(&run_hb(&deck, 16), "out");
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let tstop = PERIODS / F0;
+    let tran = Engine::new(SimulationConfig::default())
+        .run_tran_with_startup_mode_and_abort(
+            &netlist,
+            tstop,
+            1.0 / (F0 * SAMPLES as f64),
+            TransientStartupMode::Uic,
+            &rspice_core::NoAbort,
+        )
+        .unwrap_or_else(|error| panic!("the transient must run: {error}"));
+    let _ = std::fs::remove_file(&model);
+    let waveform = tran.try_voltage_waveform_named("out").expect("V(out)");
+    let last = period_spectrum(&tran.time, waveform, tstop, SAMPLES, 3);
+    let before = period_spectrum(&tran.time, waveform, tstop - 1.0 / F0, SAMPLES, 3);
+    let fundamental = last[1].norm();
+    for k in 0..=3 {
+        assert!(
+            (last[k] - before[k]).norm() <= 1e-5 * fundamental,
+            "harmonic {k} has not settled: {} then {}",
+            before[k],
+            last[k]
+        );
+        assert!(
+            (hb[k] - last[k]).norm() <= 1e-3 * fundamental,
+            "harmonic {k}: harmonic balance {} against the settled transient {} \
+             (fundamental {fundamental})",
+            hb[k],
+            last[k]
+        );
+    }
+}
+
 /// `$abstime` reads each sample's instant. A tone at the analysis's own
 /// frequency, scaled by the drive, gives its closed-form harmonics to 1e-9:
 /// `(1 + sin(ωt)/2) sin(ωt) = 1/4 + sin(ωt) - cos(2ωt)/4`. A ramp, whose

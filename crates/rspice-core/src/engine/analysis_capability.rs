@@ -1184,25 +1184,16 @@ fn carrier_refusal(
 
 /// Generated compact models, named in any case as SPICE names are, whose
 /// residual the generator proves but whose harmonics no settled transient has
-/// confirmed, or one contradicts, with what is missing or wrong.
+/// confirmed, with what is missing.
 #[cfg(feature = "veriloga-builtins-base")]
-const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[
-    (
-        "bsimsoi_va",
-        "its harmonics have not been checked against a settled transient: on a common-source \
+const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[(
+    "bsimsoi_va",
+    "its harmonics have not been checked against a settled transient: on a common-source \
          stage its floating body's charging slows only as 1/t, so after 384 periods its \
          fundamental still moves by 1.7e-4 of itself each period, and harmonic balance and the \
          transient disagree on the fundamental by a factor of 9; shooting, which needs no \
          settled transient, refuses it for the `ddt` site harmonic balance carries",
-    ),
-    (
-        "pspnqs103va",
-        "its harmonics disagree with a settled transient: on a common-source stage with three \
-         non-quasi-static collocation points (SWNQS=3), whose transient settles to 1e-5 of its \
-         fundamental a period, harmonic balance and the settled transient disagree on the \
-         fundamental by 1.5e-2 of it",
-    ),
-];
+)];
 
 /// Why shooting refuses a generated model whose source branch stores flux at
 /// its parameters: the period map's state is node voltages, and an

@@ -23,7 +23,38 @@ impl HbSolver {
     /// - Source stepping as fallback
     ///
     /// Returns the DC node voltages if successful.
+    ///
+    /// The seed is the circuit's DC operating point, so an `idt` whose
+    /// initial condition depends on the circuit's unknowns holds its output
+    /// at that condition here, as LRM 2.4 section 4.5.4 has it in DC, and
+    /// takes its periodic reading, its input's mean held at zero, only in the
+    /// periodic solve that starts from this seed.
     pub fn solve_dc_operating_point_with_abort(
+        &mut self,
+        state: &mut HbSolverState,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, HbError> {
+        self.set_operating_point_integrals(true);
+        let seed = self.solve_dc_operating_point_body(state, abort);
+        self.set_operating_point_integrals(false);
+        seed
+    }
+
+    /// Have every Verilog-A sampler stamp the DC operating point's `idt`
+    /// rows, or the periodic solve's.
+    fn set_operating_point_integrals(&mut self, operating_point: bool) {
+        #[cfg(feature = "veriloga")]
+        for device in &mut self.veriloga_nonlinear_devices {
+            device.set_operating_point(operating_point);
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        for device in &mut self.generated_nonlinear_devices {
+            device.set_operating_point(operating_point);
+        }
+        let _ = operating_point;
+    }
+
+    fn solve_dc_operating_point_body(
         &mut self,
         state: &mut HbSolverState,
         abort: &dyn AbortSignal,
@@ -275,7 +306,7 @@ impl HbSolver {
             g_dc[row][column] += value;
         }
         for network in &self.exact_periodic_networks {
-            network.try_visit_direct_entries(0.0, total_unknowns, |row, column, value| {
+            network.try_visit_operating_point_entries(total_unknowns, |row, column, value| {
                 g_dc[row][column] += value.re;
             })?;
         }
@@ -543,7 +574,7 @@ impl HbSolver {
         }
         let unknowns = n + self.exact_mna_branches().len();
         for network in &self.exact_periodic_networks {
-            network.try_visit_direct_entries(0.0, unknowns, |row, column, value| {
+            network.try_visit_operating_point_entries(unknowns, |row, column, value| {
                 let input = if column < n {
                     state.x[column][0]
                 } else {
@@ -671,7 +702,7 @@ impl HbSolver {
         }
         let unknowns = n + self.exact_mna_branches().len();
         for network in &self.exact_periodic_networks {
-            network.try_visit_direct_entries(0.0, unknowns, |row, column, value| {
+            network.try_visit_operating_point_entries(unknowns, |row, column, value| {
                 jacobian[row][column] -= value.re;
             })?;
         }

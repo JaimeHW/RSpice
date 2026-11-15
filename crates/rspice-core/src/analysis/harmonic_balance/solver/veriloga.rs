@@ -42,7 +42,10 @@
 //! `Y - T(jω) U = 0` at every harmonic: `1/(jω)` for `idt`, whose DC output
 //! its initial condition fixes instead, `H(jω)` for a Laplace filter,
 //! `e^{-jωτ}` for a delay and `jω` for a `ddt`. The other `ddt` sites keep
-//! the charge path above.
+//! the charge path above. An `idt` whose initial condition depends on the
+//! circuit's unknowns holds its input's mean at zero in the periodic solve,
+//! and its output at that condition only at the DC operating point that
+//! seeds it, as LRM 2.4 section 4.5.4 has it in DC.
 //!
 //! A module that reads `$abstime` is evaluated at each sample's own instant.
 //! Before solving, both probes' stamps at four instants of the period must
@@ -120,6 +123,10 @@ pub(super) struct HbVerilogADevice {
     /// Whether the module reads `$abstime`, which each sample then sets to
     /// its own instant.
     reads_time: bool,
+    /// Whether the samples are the DC operating point that seeds the
+    /// periodic solve, where a mean-free `idt`'s output is its initial
+    /// condition (see [`Self::set_operating_point`]).
+    operating_point: bool,
 }
 
 /// A probe's Jacobian entries: zero-based row, column and value.
@@ -233,6 +240,7 @@ impl HbVerilogADevice {
             equation_rows,
             operators: Vec::new(),
             reads_time,
+            operating_point: false,
         };
         let networks = device.try_bind_operators(&sites, ports, unknowns)?;
         if reads_time {
@@ -400,6 +408,16 @@ impl HbVerilogADevice {
 
     pub(super) fn name(&self) -> &str {
         &self.static_probe.name
+    }
+
+    /// Stamp the DC operating point that seeds the periodic solve, or the
+    /// periodic solve itself. At the operating point a mean-free `idt`'s
+    /// output row holds its output at its initial condition, with the
+    /// condition's partials, the meaning LRM 2.4 section 4.5.4 gives the
+    /// condition in DC; the solver's operating-point network stamps that
+    /// row's output term.
+    pub(super) fn set_operating_point(&mut self, operating_point: bool) {
+        self.operating_point = operating_point;
     }
 
     /// Zero-based augmented MNA rows the instance stamps.
@@ -587,7 +605,24 @@ impl HbVerilogADevice {
             let input = record.inputs[index]
                 .ok_or_else(|| fail(&ports.label, "its input was not evaluated"))?;
             match ports.site.kind {
-                PeriodicOperatorKind::Integral if ports.mean_free => {}
+                PeriodicOperatorKind::Integral if ports.mean_free => {
+                    if self.operating_point {
+                        let ic = record.initial_conditions[index]
+                            .filter(|ic| ic.is_finite())
+                            .ok_or_else(|| {
+                                fail(&ports.label, "its initial condition was not evaluated")
+                            })?;
+                        f.stamp_rhs(ports.output + 1, ic);
+                        for (&(site, axis), &value) in &record.initial_condition_partials {
+                            if site == index
+                                && let Some(column) =
+                                    self.static_probe.periodic_operator_axis_index(axis)
+                            {
+                                f.stamp(ports.output + 1, column + 1, -value);
+                            }
+                        }
+                    }
+                }
                 PeriodicOperatorKind::Integral => {
                     let ic = record.initial_conditions[index];
                     if ic != ports.parameter {

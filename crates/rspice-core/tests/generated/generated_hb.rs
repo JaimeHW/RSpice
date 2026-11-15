@@ -599,8 +599,9 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
         // PSP's NQS builds carry each collocation point's channel charge as
         // an `idt` whose initial condition is the quasi-static charge at the
         // present bias; harmonic balance holds each integrand's mean at zero
-        // instead (SWNQS=3 turns three of them on). Gear's rule, as for PSP
-        // 102 above.
+        // instead, from a DC seed that holds each charge at that condition
+        // (SWNQS=3 turns three of them on). Gear's rule, as for PSP 102
+        // above.
         #[cfg(feature = "veriloga-model-pspnqs102va")]
         (
             "non-quasi-static MOSFET (PSP 102)",
@@ -620,6 +621,13 @@ fn settled_fixtures() -> Vec<(&'static str, &'static str, &'static str)> {
             "non-quasi-static MOSFET (PSP 102, electrical)",
             "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
                  M1 d g 0 0 nq\n.model nq PSPNQS102EVA SWNQS=3\n.options method=gear\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-pspnqs103va")]
+        (
+            "non-quasi-static MOSFET (PSP 103)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 M1 d g 0 0 nq\n.model nq PSPNQS103VA SWNQS=3\n.options method=gear\n",
             "d",
         ),
         #[cfg(feature = "veriloga-model-pspnqs104va")]
@@ -966,9 +974,8 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
 
 /// A generated model whose harmonics neither a settled transient nor shooting
 /// has confirmed is refused before solving, by instance and module, with
-/// what is missing (BSIM-SOI 4.6.1), as is one a settled transient contradicts,
-/// with by how much (PSP NQS 103), and one whose generator could not prove
-/// its residual `F(x) + dQ(x)/dt`, with the generator's reason; the
+/// what is missing (BSIM-SOI 4.6.1), as is one whose generator could not
+/// prove its residual `F(x) + dQ(x)/dt`, with the generator's reason; the
 /// generator proves every shipped model's.
 #[test]
 fn harmonic_balance_refuses_a_generated_model_by_its_reason() {
@@ -993,18 +1000,6 @@ fn refused_models() -> Vec<(&'static str, &'static str, &'static str, &'static s
             "bsimsoi_va",
             "shooting, which needs no settled transient, refuses it for the `ddt` site harmonic \
              balance carries",
-        ),
-        // The fixture a PSP NQS 103 admission would need: harmonic balance's
-        // fundamental is 3.2e-5 + 0.016318i against the settled transient's
-        // 2.76e-4 + 0.016315i, close to quasi-static PSP 103's 2.87e-4 +
-        // 0.016317i (PSP NQS 102 and 104 pass the same fixture).
-        #[cfg(feature = "veriloga-model-pspnqs103va")]
-        (
-            "XM d d 0 0 pspnqs103va",
-            "XM",
-            "pspnqs103va",
-            "harmonic balance and the settled transient disagree on the fundamental by 1.5e-2 of \
-             it",
         ),
     ]
 }

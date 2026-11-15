@@ -33,8 +33,12 @@
 //!
 //! Every `idt` is carried the same way with `Y = U/(jkω)` at each harmonic,
 //! as the runtime route carries one: its initial condition fixes its DC
-//! output, so it must not depend on the circuit's unknowns, and an orbit in
-//! which its input has a mean over the period is refused after the solve.
+//! output, and an orbit in which its input has a mean over the period is
+//! refused after the solve. One whose initial condition depends on the
+//! circuit's unknowns (PSP's non-quasi-static charges) holds its input's
+//! mean at zero instead, and its output at that condition only at the DC
+//! operating point that seeds the solve, as LRM 2.4 section 4.5.4 has it in
+//! DC.
 
 use super::HbOperatorTransfer;
 use super::HbSolverState;
@@ -82,6 +86,8 @@ struct HbOperatorScratch {
     outputs: Vec<Value>,
     seeds: Vec<Option<u32>>,
     lanes: Vec<u32>,
+    /// One site's initial-condition partials, by lane.
+    initial_condition_partials: Vec<(u32, Value)>,
     /// Per site: the lane its output is seeded along and its column.
     seed_columns: Vec<Option<(u32, usize)>>,
     /// Per site and model row: the held probes' Jacobian in its column.
@@ -118,6 +124,10 @@ pub(super) struct HbGeneratedDevice {
     /// `rows` and every carried site's input and output rows, sorted.
     stamped_rows: Vec<usize>,
     scratch: HbOperatorScratch,
+    /// Whether the samples are the DC operating point that seeds the
+    /// periodic solve, where a mean-free `idt`'s output is its initial
+    /// condition (see [`Self::set_operating_point`]).
+    operating_point: bool,
 }
 
 impl Clone for HbGeneratedDevice {
@@ -136,6 +146,7 @@ impl Clone for HbGeneratedDevice {
             operators: self.operators.clone(),
             stamped_rows: self.stamped_rows.clone(),
             scratch: self.scratch.clone(),
+            operating_point: self.operating_point,
         }
     }
 }
@@ -258,6 +269,7 @@ impl HbGeneratedDevice {
                 outputs: vec![0.0; operators.len()],
                 seeds: vec![None; operators.len()],
                 lanes: Vec::new(),
+                initial_condition_partials: Vec::new(),
                 seed_columns: vec![None; operators.len()],
                 held_static: vec![0.0; operators.len() * rows.len()],
                 held_charge: vec![0.0; operators.len() * rows.len()],
@@ -266,6 +278,7 @@ impl HbGeneratedDevice {
             rows,
             operators,
             stamped_rows,
+            operating_point: false,
         };
         if !sampler.operators.is_empty() {
             sampler.static_probe.install_periodic_frame();
@@ -332,6 +345,16 @@ impl HbGeneratedDevice {
 
     pub(super) fn name(&self) -> &str {
         &self.static_probe.instance_name
+    }
+
+    /// Stamp the DC operating point that seeds the periodic solve, or the
+    /// periodic solve itself. At the operating point a mean-free `idt`'s
+    /// output row holds its output at its initial condition, with the
+    /// condition's partials, the meaning LRM 2.4 section 4.5.4 gives the
+    /// condition in DC; the solver's operating-point network stamps that
+    /// row's output term.
+    pub(super) fn set_operating_point(&mut self, operating_point: bool) {
+        self.operating_point = operating_point;
     }
 
     /// Zero-based augmented MNA rows the instance stamps, its carried
@@ -662,6 +685,29 @@ impl HbGeneratedDevice {
                 if matches!(operator.kind, GeneratedPeriodicKind::Integral) {
                     Self::stamp_integral_dc(frame, site, operator, f)
                         .map_err(|reason| refuse(site, operator.kind, reason))?;
+                }
+                if self.operating_point && operator.mean_free {
+                    let ic = frame.initial_condition(site);
+                    if ic.is_finite() {
+                        f.stamp_rhs(operator.output + 1, ic);
+                        frame.initial_condition_partials(
+                            site,
+                            &mut self.scratch.initial_condition_partials,
+                        );
+                        for &(lane, partial) in &self.scratch.initial_condition_partials {
+                            if let Some(column) =
+                                self.static_probe.lane_unknown(lane, self.num_nodes)
+                            {
+                                f.stamp(operator.output + 1, column + 1, -partial);
+                            }
+                        }
+                    } else if !ic.is_nan() {
+                        return Err(refuse(
+                            site,
+                            operator.kind,
+                            "its initial condition is not finite",
+                        ));
+                    }
                 }
                 frame.input_lanes(site, &mut self.scratch.lanes);
                 for &lane in &self.scratch.lanes {

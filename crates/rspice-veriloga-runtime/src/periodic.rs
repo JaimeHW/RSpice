@@ -41,6 +41,8 @@ pub struct GeneratedPeriodicFrame {
     dependent_initial_conditions: Vec<Cell<bool>>,
     /// `(site, lane, d input / d lane)` for every derivative evaluated.
     input_partials: RefCell<Vec<(usize, u32, f64)>>,
+    /// `(site, lane, d initial condition / d lane)` for every nonzero one.
+    initial_condition_partials: RefCell<Vec<(usize, u32, f64)>>,
 }
 
 impl GeneratedPeriodicFrame {
@@ -53,6 +55,7 @@ impl GeneratedPeriodicFrame {
             initial_conditions: (0..sites).map(|_| Cell::new(f64::NAN)).collect(),
             dependent_initial_conditions: (0..sites).map(|_| Cell::new(false)).collect(),
             input_partials: RefCell::new(Vec::new()),
+            initial_condition_partials: RefCell::new(Vec::new()),
         }
     }
 
@@ -73,6 +76,7 @@ impl GeneratedPeriodicFrame {
             cell.set(false);
         }
         self.input_partials.get_mut().clear();
+        self.initial_condition_partials.get_mut().clear();
     }
 
     /// Record `site`'s input (and an `idt`'s initial condition) and return
@@ -99,6 +103,11 @@ impl GeneratedPeriodicFrame {
             .push((site, lane, input_derivative));
         if initial_condition_derivative != 0.0 {
             self.dependent_initial_conditions[site].set(true);
+            self.initial_condition_partials.borrow_mut().push((
+                site,
+                lane,
+                initial_condition_derivative,
+            ));
         }
         if self.seeds[site] == Some(lane) {
             1.0
@@ -132,6 +141,19 @@ impl GeneratedPeriodicFrame {
             .iter()
             .find(|&&(at, along, _)| at == site && along == lane)
             .map(|&(_, _, value)| value)
+    }
+
+    /// Every lane along which `site`'s initial condition has a nonzero
+    /// partial, with that partial, in the order they were evaluated, each
+    /// once: the condition's derivative, for the DC row LRM 2.4 section
+    /// 4.5.4 gives an `idt`, whose output its initial condition fixes.
+    pub fn initial_condition_partials(&self, site: usize, partials: &mut Vec<(u32, f64)>) {
+        partials.clear();
+        for &(at, lane, value) in self.initial_condition_partials.borrow().iter() {
+            if at == site && !partials.iter().any(|&(seen, _)| seen == lane) {
+                partials.push((lane, value));
+            }
+        }
     }
 
     /// Every lane a derivative of `site`'s input was taken along, in the
