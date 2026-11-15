@@ -1,11 +1,13 @@
 //! The mixed-signal reference corpus, every design, against `outcomes.tsv`.
 //!
-//! Nightly only (`.github/workflows/nightly.yml`, job `mixed-corpus`), once per
-//! route: the route is the build, so the job sets `RSPICE_MIXED_ROUTE` to the
-//! route it compiled and this test refuses a mismatch rather than recording
-//! one route's outcomes under the other's name. `RSPICE_MIXED_EXTENDED=1`
-//! includes the extended analyses. Any cell that regressed, or improved
-//! without being re-recorded, fails the test.
+//! One route in one command. The route is the build, so `RSPICE_MIXED_ROUTE`
+//! names the route this binary was compiled as and the test refuses a
+//! mismatch rather than recording one route's outcomes under the other's
+//! name. `RSPICE_MIXED_EXTENDED=1` includes the extended analyses. Any cell
+//! that regressed, or improved without being re-recorded, fails the test.
+//! The nightly (`.github/workflows/nightly.yml`, jobs `mixed-corpus-build`
+//! and `mixed-corpus`) runs the same `rspice-mixed-corpus run`, each route
+//! built once and its designs split over shards (`--shard K/N`).
 //!
 //! The runner runs the cells concurrently at its default `--jobs`;
 //! `RSPICE_MIXED_JOBS=N` overrides it.
