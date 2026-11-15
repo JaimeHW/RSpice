@@ -23,6 +23,7 @@ mod control_distortion;
 mod control_execution;
 mod control_frequency_data;
 mod control_noise;
+mod control_script_flow;
 mod control_stability;
 mod control_transfer_function;
 mod dc_operating_point_aids;
