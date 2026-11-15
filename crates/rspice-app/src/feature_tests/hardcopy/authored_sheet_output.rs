@@ -7,11 +7,11 @@
 use crate::feature_tests::hardcopy::{hardcopy_parts, resolve_retained_hardcopy_source};
 use crate::product::ContentDigest;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
-use crate::workbench::app::dialogs::hardcopy::publish::{
+use crate::workbench::state::WorkspaceDocumentId;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::publish::{
     active_retained_source_selection, apply_open_resolved, current_metadata, current_plan,
 };
-use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::print::{
     PrinterCapabilityDescriptor, PrinterCapabilitySnapshot, PrinterPaperCapability,
     PrinterResolutionCapability, PrinterTrayCapability,

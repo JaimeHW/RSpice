@@ -41,7 +41,6 @@ use crate::workbench::framework::host::{
     StatusCell, ToolbarScope, ToolbarSlot,
 };
 use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
-use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, RevertReviewToken};
 use crate::workbench::models::ModelsFeature;
@@ -55,6 +54,7 @@ use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 use menus::{APPLICATION_MENU, COMPACT_MENU, application_menu_entries};
 use rspice_app_code::workbench::code::{CodeFeature, SOURCE_EDITOR_MENU};
+use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
 use rspice_app_workbench::workbench::app::dialogs::confirmation::ConfirmationHost;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
     self, ApplicationMenu,
@@ -1385,7 +1385,7 @@ mod tests {
     /// the toolbar holds, under the label they declare, and no id names them.
     #[test]
     fn a_left_out_command_answers_by_key() {
-        use crate::workbench::hardcopy::commands::HardcopyCommand;
+        use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 
         let app = RSpiceApp::test_instance();
         for left_out in HardcopyCommand::REPORT_TOOLBAR {

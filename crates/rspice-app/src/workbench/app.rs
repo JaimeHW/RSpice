@@ -120,8 +120,6 @@ pub(crate) use dialogs::symbol_definition::{
     open_symbol_import_dialog_for, open_symbol_parameter_form_dialog_for,
 };
 
-pub(crate) use dialogs::hardcopy::HardcopyWorkflow;
-
 pub(crate) use dialogs::state::HelpCenterPage;
 
 /// Test-only: the command tests read the rename target back, and the dialog

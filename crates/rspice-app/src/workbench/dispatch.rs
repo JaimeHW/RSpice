@@ -18,7 +18,6 @@
 
 use crate::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
 use crate::state::command_catalog::CommandKey;
-use crate::workbench::app::HardcopyWorkflow;
 use crate::workbench::app::actions::workspace::HistoryDirection;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app_state::PlatformState;
@@ -46,7 +45,6 @@ use crate::workbench::framework::requests::{
     ShowWaveforms, SourceEditorRequest, StageComponentTuning, SubcircuitSymbolSource,
     VoidVerilogAEvidence,
 };
-use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::state::Workspace;
@@ -56,6 +54,8 @@ use rspice_app_code::workbench::code::commands::{
     CodeRequest, NetlistEditorRequest, VerilogAStripRequest,
 };
 use rspice_app_code::workbench::code::requests as code_requests;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
+use rspice_app_hardcopy::workbench::hardcopy;
 
 /// The dispatcher by key: where a key becomes the command it names, a
 /// feature's first and the shell's legacy table's otherwise.

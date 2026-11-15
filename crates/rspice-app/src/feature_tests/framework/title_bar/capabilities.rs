@@ -10,7 +10,7 @@ use crate::state::{
     Point, Selection,
 };
 use crate::workbench::framework::requests::ClipboardImage;
-use crate::workbench::hardcopy::commands::HardcopyCommand;
+use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 
 /// A sheet holding objects of every kind Edit ▸ Select ▸ names, each kind's
 /// expected selection beside it.

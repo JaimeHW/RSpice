@@ -9,9 +9,9 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::{self, command_registry};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags};
-use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 
 #[test]
 fn edit_specifications_opens_the_real_results_editor() {

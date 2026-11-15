@@ -5,11 +5,6 @@ use crate::feature_tests::hardcopy::hardcopy_parts;
 use crate::ui::tokens;
 use crate::ui::tokens::Tokens;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::hardcopy::HardcopyRegion;
-use crate::workbench::app::dialogs::hardcopy::HardcopySection;
-use crate::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
-use crate::workbench::app::dialogs::hardcopy::publish;
-use crate::workbench::app::dialogs::hardcopy::render::*;
 use egui::Align;
 use egui::Context;
 use egui::Frame;
@@ -17,6 +12,11 @@ use egui::Layout;
 use egui::Rect;
 use egui::Vec2;
 use egui::vec2;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyRegion;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopySection;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::publish;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::render::*;
 
 /// Viewports the studio has to fit: the desktop sizes the workbench ships
 /// against, the widths where its three columns stop fitting side by side,

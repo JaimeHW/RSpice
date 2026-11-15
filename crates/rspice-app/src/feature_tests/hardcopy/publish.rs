@@ -4,10 +4,10 @@
 use crate::feature_tests::hardcopy::{hardcopy_parts, resolve_retained_hardcopy_source};
 use crate::product::ContentDigest;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
-use crate::workbench::app::dialogs::hardcopy::publish::active_retained_source_selection;
-use crate::workbench::app::dialogs::hardcopy::publish::*;
-use crate::workbench::app::dialogs::hardcopy::render_hardcopy_dialog;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::publish::active_retained_source_selection;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::publish::*;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::render_hardcopy_dialog;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
 use rspice_hardcopy::render::HardcopyRenderer;
 use rspice_hardcopy::render::HardcopySceneMetadata;
@@ -524,7 +524,7 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
             opened_source: source,
             metadata,
             staged_mapping,
-            operation: crate::workbench::app::dialogs::hardcopy::execution::ExecutionOperation::Publication,
+            operation: rspice_app_hardcopy::workbench::app::dialogs::hardcopy::execution::ExecutionOperation::Publication,
             destination: NativePublicationDestination::Export {
                 path: path.clone(),
                 destination,

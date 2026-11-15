@@ -33,7 +33,7 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, ExportFigure| {
                 app.open_requested_hardcopy_workflow(
-                    crate::workbench::app::HardcopyWorkflow::Export,
+                    rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow::Export,
                 );
             },
         );
@@ -42,8 +42,9 @@ impl RSpiceApp {
 
 #[cfg(test)]
 mod tests {
-    use crate::workbench::app::{HardcopyWorkflow, RSpiceApp};
+    use crate::workbench::app::RSpiceApp;
     use crate::workbench::framework::requests::ExportFigure;
+    use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 
     /// The workflow refuses to open without a retained source, so the fixture
     /// has to make the active cell view the active document first — the same

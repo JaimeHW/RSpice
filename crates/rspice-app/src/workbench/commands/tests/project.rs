@@ -11,11 +11,11 @@ use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::CommandFlags;
-use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 
 #[test]
 fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {

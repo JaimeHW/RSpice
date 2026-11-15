@@ -25,7 +25,6 @@ use crate::workbench::framework::feature::{
     Cx, Feature, FeatureRegistry, ForeignAvailability, LowerHandles, Peers, Reads, RoutedCommand,
     ToolbarId, ToolbarTool,
 };
-use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::results::ResultsFeature;
@@ -33,6 +32,7 @@ use crate::workbench::settings::SettingsFeature;
 use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::simulate::SimulateFeature;
 use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
 
 /// A feature the shell registers: its registry, and its contexts borrowed
 /// from the application.
@@ -709,7 +709,7 @@ mod tests {
                 .count(),
             crate::workbench::sheets::commands::SheetsCommand::ALL.len()
                 + crate::workbench::settings::commands::SettingsCommand::ALL.len()
-                + crate::workbench::hardcopy::commands::HardcopyCommand::LISTED.len()
+                + rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand::LISTED.len()
                 + crate::workbench::results::commands::ResultsCommand::ALL.len()
                 + crate::workbench::cloud::commands::CloudCommand::ALL.len()
                 + crate::workbench::models::commands::ModelsCommand::ALL.len()
@@ -817,8 +817,8 @@ mod tests {
     /// key a container holds still reaches it.
     #[test]
     fn a_command_left_out_of_the_registry_is_reached_by_its_key() {
-        use crate::workbench::hardcopy::commands::HardcopyCommand;
         use crate::workbench::simulate::commands::SimulateCommand;
+        use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 
         let registry = command_registry();
         let left_out = HardcopyCommand::REPORT_TOOLBAR

@@ -119,7 +119,6 @@ pub(crate) mod examples {
 pub(crate) mod features;
 pub(crate) mod frame;
 pub(crate) mod system_contrast;
-pub(crate) use rspice_app_hardcopy::workbench::hardcopy;
 pub(crate) use rspice_app_workbench::workbench::framework;
 pub(crate) use rspice_app_workbench::workbench::layout;
 pub(crate) mod lifecycle {

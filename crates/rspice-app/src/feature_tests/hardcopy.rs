@@ -18,8 +18,8 @@ mod sources;
 mod worker;
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::hardcopy::HardcopyParts;
 use crate::workbench::app_state::AppState;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyParts;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::publication_snapshot::PublicationReads;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::{
     SourceReads, prepare_retained_hardcopy_resolution,

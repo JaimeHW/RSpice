@@ -3,14 +3,14 @@
 
 use crate::feature_tests::hardcopy::hardcopy_parts;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::hardcopy::render::content_options::*;
-use crate::workbench::app::dialogs::hardcopy::render::output_summary;
-use crate::workbench::app::dialogs::hardcopy::{
+use egui::accesskit::Role;
+use egui::{Context, Rect, Vec2, vec2};
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::render::content_options::*;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::render::output_summary;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::{
     DEFAULT_RASTER_DPI, HardcopyRegion, HardcopySection, HardcopyWorkflow, PaperDraft, publish,
     render_hardcopy_dialog,
 };
-use egui::accesskit::Role;
-use egui::{Context, Rect, Vec2, vec2};
 use rspice_hardcopy::render::max_raster_dpi;
 use rspice_hardcopy_contract::{OutputFormat, StandardPaper};
 use std::path::{Path, PathBuf};

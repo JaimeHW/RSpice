@@ -29,11 +29,11 @@ use crate::workbench::commands::vocabulary::{
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::{CommandFlags, CommandSpec, ids};
 use crate::workbench::framework::host::Host;
-use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 
 /// The retired ids `from_stable_id` still answers, each with the live id it
 /// resolves to. Shortcut profiles written by older builds name them.
