@@ -1382,8 +1382,12 @@ mod hb_state_contract_tests {
         let mut malformed = serde_json::to_value(&response).unwrap();
         malformed["outcome"]["Success"]["Hb"]["operating_point"]["integral_spectra"][0]["name"] =
             serde_json::json!("");
-        let malformed: WorkerResponse = serde_json::from_value(malformed).unwrap();
-        assert!(malformed.into_result().is_err());
+        // A malformed retained state is refused when it is read.
+        let error = serde_json::from_value::<WorkerResponse>(malformed).unwrap_err();
+        assert!(
+            error.to_string().contains("non-canonical integral name"),
+            "{error}"
+        );
         let transfer = WorkerResponseTransport::from_response(response.clone()).unwrap();
         assert_eq!(transfer.buffers.len(), 7);
         assert_eq!(transfer.into_response().unwrap(), response);

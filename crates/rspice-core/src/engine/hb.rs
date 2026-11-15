@@ -455,33 +455,15 @@ impl HbOperatingPointIdentity {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn bind(
-        producer: HbOperatingPointProducerInputs,
-        config: &HbConfig,
-        node_names: &[String],
-        spectral_state: &[Vec<Complex64>],
-        mna_branch_names: &[String],
-        mna_branch_spectral_state: &[Vec<Complex64>],
-        integral_spectra: &[HbIntegralSpectrum],
-        iterations: usize,
-        residual_norm: Value,
-    ) -> Self {
+    /// The producer's identity, bound to the digest of the payload it
+    /// produced.
+    fn bind(producer: HbOperatingPointProducerInputs, retained_state_identity: String) -> Self {
         Self {
             version: HB_OPERATING_POINT_IDENTITY_VERSION,
             semantic_netlist_identity: producer.semantic_netlist_identity,
             resolved_simulation_identity: producer.resolved_simulation_identity,
             hb_source_transform_identity: producer.hb_source_transform_identity,
-            retained_state_identity: hb_retained_state_identity(
-                config,
-                node_names,
-                spectral_state,
-                mna_branch_names,
-                mna_branch_spectral_state,
-                integral_spectra,
-                iterations,
-                residual_norm,
-            ),
+            retained_state_identity,
         }
     }
 
@@ -521,6 +503,14 @@ pub struct HbIntegralSpectrum {
     pub coefficients: Vec<Complex64>,
 }
 
+/// The refusal of a retained payload its producer identity does not bind.
+fn retained_payload_mismatch() -> SimulationError {
+    SimulationError::Circuit(
+        "retained HB numerical payload does not match its authenticated producer identity"
+            .to_owned(),
+    )
+}
+
 /// Exact converged harmonic-balance numerical state retained for dependent
 /// periodic small-signal analyses.
 ///
@@ -528,8 +518,14 @@ pub struct HbIntegralSpectrum {
 /// converted to magnitude/phase. This payload keeps the frozen HB basis and
 /// the solver's complex Fourier coefficients in canonical node order so a
 /// dependent analysis never has to re-solve or infer the large-signal state.
+///
+/// Every point is built by one validating constructor, deserialization
+/// included, which checks the parts and binds or verifies the retained-state
+/// digest once. The fields are private and no method takes `&mut self`, so a
+/// point's state is the state its digest was taken from for as long as the
+/// point lives.
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize))]
 pub struct HbOperatingPoint {
     config: HbConfig,
     node_names: Vec<String>,
@@ -549,6 +545,59 @@ pub struct HbOperatingPoint {
     producer_identity: Option<HbOperatingPointIdentity>,
     iterations: usize,
     residual_norm: Value,
+}
+
+/// A [`HbOperatingPoint`]'s serialized fields, read before its constructor
+/// checks them.
+#[cfg(feature = "veriloga")]
+#[derive(serde::Deserialize)]
+struct HbOperatingPointParts {
+    config: HbConfig,
+    node_names: Vec<String>,
+    spectral_state: Vec<Vec<Complex64>>,
+    #[serde(default)]
+    mna_branch_names: Vec<String>,
+    #[serde(default)]
+    mna_branch_spectral_state: Vec<Vec<Complex64>>,
+    #[serde(default)]
+    integral_spectra: Vec<HbIntegralSpectrum>,
+    #[serde(default)]
+    producer_identity: Option<HbOperatingPointIdentity>,
+    iterations: usize,
+    residual_norm: Value,
+}
+
+#[cfg(feature = "veriloga")]
+impl<'de> serde::Deserialize<'de> for HbOperatingPoint {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let parts = <HbOperatingPointParts as serde::Deserialize>::deserialize(deserializer)?;
+        let identity = match parts.producer_identity {
+            Some(identity) => RetainedIdentity::Claimed(identity),
+            None => RetainedIdentity::Absent,
+        };
+        Self::from_retained_parts(
+            parts.config,
+            parts.node_names,
+            parts.spectral_state,
+            parts.mna_branch_names,
+            parts.mna_branch_spectral_state,
+            parts.integral_spectra,
+            parts.iterations,
+            parts.residual_norm,
+            identity,
+        )
+        .map_err(serde::de::Error::custom)
+    }
+}
+
+/// Where a retained point's producer identity comes from.
+enum RetainedIdentity {
+    /// A legacy or caller-assembled identityless artifact.
+    Absent,
+    /// A transported identity, whose digest must match the parts.
+    Claimed(HbOperatingPointIdentity),
+    /// The producer of parts the solver just converged, bound to them here.
+    Produced(HbOperatingPointProducerInputs),
 }
 
 impl HbOperatingPoint {
@@ -707,6 +756,38 @@ impl HbOperatingPoint {
         residual_norm: Value,
         producer_identity: Option<HbOperatingPointIdentity>,
     ) -> Result<Self, SimulationError> {
+        let identity = match producer_identity {
+            Some(identity) => RetainedIdentity::Claimed(identity),
+            None => RetainedIdentity::Absent,
+        };
+        Self::from_retained_parts(
+            config,
+            node_names,
+            spectral_state,
+            mna_branch_names,
+            mna_branch_spectral_state,
+            integral_spectra,
+            iterations,
+            residual_norm,
+            identity,
+        )
+    }
+
+    /// The one constructor every point comes from: it checks the parts,
+    /// then binds a producer's identity to them, taking their digest once,
+    /// or verifies a transported identity's digest against them.
+    #[allow(clippy::too_many_arguments)]
+    fn from_retained_parts(
+        config: HbConfig,
+        node_names: Vec<String>,
+        spectral_state: Vec<Vec<Complex64>>,
+        mna_branch_names: Vec<String>,
+        mna_branch_spectral_state: Vec<Vec<Complex64>>,
+        integral_spectra: Vec<HbIntegralSpectrum>,
+        iterations: usize,
+        residual_norm: Value,
+        identity: RetainedIdentity,
+    ) -> Result<Self, SimulationError> {
         let point = Self {
             config,
             node_names,
@@ -714,18 +795,72 @@ impl HbOperatingPoint {
             mna_branch_names,
             mna_branch_spectral_state,
             integral_spectra,
-            producer_identity,
+            producer_identity: None,
             iterations,
             residual_norm,
         };
-        point.validate()?;
-        Ok(point)
+        let producer_identity = match identity {
+            RetainedIdentity::Absent => {
+                point.validate_parts()?;
+                None
+            }
+            RetainedIdentity::Claimed(identity) => {
+                identity.validate()?;
+                point.validate_parts()?;
+                if identity.retained_state_identity != point.retained_state_digest() {
+                    return Err(retained_payload_mismatch());
+                }
+                Some(identity)
+            }
+            RetainedIdentity::Produced(producer) => {
+                point.validate_parts()?;
+                let identity =
+                    HbOperatingPointIdentity::bind(producer, point.retained_state_digest());
+                identity.validate()?;
+                Some(identity)
+            }
+        };
+        Ok(Self {
+            producer_identity,
+            ..point
+        })
     }
 
-    /// Validate transported or deserialized state without copying its spectra.
-    /// This checks structure and producer-payload authentication, not whether
-    /// the state belongs to a particular consuming circuit.
+    /// Check the point again: its structure and, for a point with a producer
+    /// identity, that identity and its digest against the state the point
+    /// holds. Its constructor already checked all of this, and a point's
+    /// state cannot change after, so dependent analyses do not call it. It
+    /// checks structure and producer-payload authentication, not whether the
+    /// state belongs to a particular consuming circuit.
     pub fn validate(&self) -> Result<(), SimulationError> {
+        if let Some(identity) = self.producer_identity.as_ref() {
+            identity.validate()?;
+        }
+        self.validate_parts()?;
+        if let Some(identity) = self.producer_identity.as_ref()
+            && identity.retained_state_identity != self.retained_state_digest()
+        {
+            return Err(retained_payload_mismatch());
+        }
+        Ok(())
+    }
+
+    /// The digest of the retained numerical payload.
+    fn retained_state_digest(&self) -> String {
+        hb_retained_state_identity(
+            &self.config,
+            &self.node_names,
+            &self.spectral_state,
+            &self.mna_branch_names,
+            &self.mna_branch_spectral_state,
+            &self.integral_spectra,
+            self.iterations,
+            self.residual_norm,
+        )
+    }
+
+    /// Check the configuration, names and spectra, without copying them.
+    fn validate_parts(&self) -> Result<(), SimulationError> {
         let Self {
             config,
             node_names,
@@ -733,7 +868,6 @@ impl HbOperatingPoint {
             mna_branch_names,
             mna_branch_spectral_state,
             integral_spectra,
-            producer_identity,
             residual_norm,
             ..
         } = self;
@@ -742,9 +876,6 @@ impl HbOperatingPoint {
                 "retained HB state has an invalid configuration: {error}"
             ))
         })?;
-        if let Some(identity) = producer_identity.as_ref() {
-            identity.validate()?;
-        }
         if !residual_norm.is_finite() || *residual_norm < 0.0 {
             return Err(SimulationError::Circuit(
                 "retained HB state has an invalid residual norm".to_owned(),
@@ -869,24 +1000,6 @@ impl HbOperatingPoint {
                 )));
             }
         }
-        if let Some(identity) = self.producer_identity.as_ref()
-            && identity.retained_state_identity
-                != hb_retained_state_identity(
-                    &self.config,
-                    &self.node_names,
-                    &self.spectral_state,
-                    &self.mna_branch_names,
-                    &self.mna_branch_spectral_state,
-                    &self.integral_spectra,
-                    self.iterations,
-                    self.residual_norm,
-                )
-        {
-            return Err(SimulationError::Circuit(
-                "retained HB numerical payload does not match its authenticated producer identity"
-                    .to_owned(),
-            ));
-        }
         Ok(())
     }
 
@@ -902,7 +1015,8 @@ impl HbOperatingPoint {
                     .to_owned(),
             )
         })?;
-        self.validate()?;
+        // The point's constructor validated this identity and the parts, and
+        // matched the digest to the state the point still holds.
         let current = HbOperatingPointIdentity::capture(netlist, simulation_config, hb_config)?;
         if retained.semantic_netlist_identity != current.semantic_netlist_identity {
             return Err(SimulationError::Circuit(
@@ -931,7 +1045,8 @@ impl HbOperatingPoint {
         expected_mna_branch_names: &[String],
         expected_integral_names: &[String],
     ) -> Result<HbSolverState, SimulationError> {
-        self.validate()?;
+        // The point's constructor checked its structure, and it cannot have
+        // changed since.
         if self.node_names != expected_node_names {
             return Err(SimulationError::Circuit(format!(
                 "retained HB node basis does not match the elaborated circuit: expected {:?}, received {:?}",
@@ -2263,27 +2378,17 @@ impl Engine {
             .collect::<Vec<_>>();
         let mna_branch_names = periodic_branch_names[..physical_branches].to_vec();
         let mna_branch_spectral_state = state.mna_branch_currents[..physical_branches].to_vec();
-        let producer_identity = if let Some(producer) = producer_inputs {
+        let identity = if let Some(producer) = producer_inputs {
             if producer != HbOperatingPointIdentity::capture(netlist, &self.config, &config)? {
                 return Err(SimulationError::Circuit(
                     "HB semantic producer inputs changed during the periodic solve".to_owned(),
                 ));
             }
-            Some(HbOperatingPointIdentity::bind(
-                producer,
-                &config,
-                &result.node_names,
-                &state.x,
-                &mna_branch_names,
-                &mna_branch_spectral_state,
-                &integral_spectra,
-                state.total_iterations.max(state.iteration),
-                state.residual_norm,
-            ))
+            RetainedIdentity::Produced(producer)
         } else {
-            None
+            RetainedIdentity::Absent
         };
-        let operating_point = HbOperatingPoint::try_from_complete_parts(
+        let operating_point = HbOperatingPoint::from_retained_parts(
             config.clone(),
             result.node_names.clone(),
             state.x.clone(),
@@ -2292,7 +2397,7 @@ impl Engine {
             integral_spectra,
             state.total_iterations.max(state.iteration),
             state.residual_norm,
-            producer_identity,
+            identity,
         )?;
         Ok(HbAnalysisResult {
             result,

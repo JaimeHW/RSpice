@@ -20,14 +20,16 @@ fn integral_point() -> HbOperatingPoint {
             resolved_simulation_identity: "1".repeat(64),
             hb_source_transform_identity: "2".repeat(64),
         },
-        &config,
-        &nodes,
-        &node_state(),
-        &branches,
-        &branch_state(),
-        &integrals,
-        3,
-        1.0e-12,
+        hb_retained_state_identity(
+            &config,
+            &nodes,
+            &node_state(),
+            &branches,
+            &branch_state(),
+            &integrals,
+            3,
+            1.0e-12,
+        ),
     );
     HbOperatingPoint::try_from_complete_parts(
         config,
@@ -129,6 +131,78 @@ fn retained_integral_state_restores_typed_basis_and_authenticates_every_coordina
             .unwrap_err()
             .to_string()
             .contains("integral basis")
+    );
+}
+
+/// A serialized state is checked when it is read, by the constructor every
+/// state comes from, so a dependent analysis does not hash it again.
+#[cfg(feature = "veriloga")]
+#[test]
+fn a_deserialized_hb_state_is_verified_when_it_is_read() {
+    let netlist = Netlist::parse(
+        "* retained HB read\nVIN in 0 DC 1\nR1 in mid 100\nL1 mid out 1u\nRLOAD out 0 1k\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::new(crate::SimulationConfig::default());
+    let point = engine
+        .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(8))
+        .expect("linear HB producer solve completes")
+        .operating_point;
+    let pac = crate::analysis::pac::PacConfig::new()
+        .with_fundamental(1.0e6)
+        .with_sweep(1.0e4, 1.0e4, 1)
+        .with_sweep_type(crate::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(0, 0)
+        .with_input_source("VIN")
+        .with_output_node("out");
+    let encoded = serde_json::to_value(&point).expect("retained HB state serializes");
+    let decoded: HbOperatingPoint =
+        serde_json::from_value(encoded.clone()).expect("an untouched retained HB state reads");
+    assert_eq!(decoded, point);
+    engine
+        .run_pac_from_hb_with_abort(&netlist, pac.clone(), &decoded, &NoAbort)
+        .expect("PAC accepts the state read back");
+
+    let mut tampered = encoded.clone();
+    let real = tampered["spectral_state"][0][1][0]
+        .as_f64()
+        .expect("a spectral coefficient is numeric");
+    tampered["spectral_state"][0][1][0] = serde_json::json!(real + 0.125);
+    let error = serde_json::from_value::<HbOperatingPoint>(tampered)
+        .expect_err("a tampered retained HB state must not read");
+    assert!(
+        error
+            .to_string()
+            .contains("numerical payload does not match"),
+        "the read should name the payload mismatch: {error}"
+    );
+
+    let mut truncated = encoded.clone();
+    truncated["spectral_state"][0]
+        .as_array_mut()
+        .expect("a node's spectrum is an array")
+        .pop();
+    let error = serde_json::from_value::<HbOperatingPoint>(truncated)
+        .expect_err("a malformed retained HB state must not read");
+    assert!(
+        error.to_string().contains("frozen basis"),
+        "the read should name the malformed spectrum: {error}"
+    );
+
+    let mut legacy = encoded;
+    legacy
+        .as_object_mut()
+        .expect("the retained HB state is an object")
+        .remove("producer_identity");
+    let legacy: HbOperatingPoint =
+        serde_json::from_value(legacy).expect("an identityless artifact still reads");
+    assert!(legacy.producer_identity().is_none());
+    let error = engine
+        .run_pac_from_hb_with_abort(&netlist, pac, &legacy, &NoAbort)
+        .expect_err("identityless retained state must fail closed");
+    assert!(
+        error.to_string().contains("legacy identityless artifact"),
+        "{error}"
     );
 }
 
