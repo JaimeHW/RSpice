@@ -242,8 +242,9 @@ pub struct ControlCircuit {
     datasets: Vec<ControlNamedDataset>,
     /// What the devices hold after the last analysis.
     device_state: Option<presentation::DeviceState>,
-    /// The instance parameters the command being run names.
-    instance_quantities: Vec<(String, String, Value)>,
+    /// The instance parameters the command or expression being run names:
+    /// one value, or a source's waveform coefficients.
+    instance_quantities: Vec<(String, String, Vec<Value>)>,
     /// The dataset unqualified vector names resolve against: the newest,
     /// unless `setplot` selected another (ngspice `plot_cur`).
     current: Option<usize>,
@@ -1449,7 +1450,59 @@ enum Evaluated {
     },
 }
 
-impl ControlScalarEvaluator for ControlCircuit {
+/// The evaluator a script's session runs its expressions with
+/// ([`crate::execution::control::ControlSession::next_command`]): the
+/// circuit's vectors and plots, and the engine that reads an
+/// `@device[parameter]` an expression names from the circuit as the script
+/// has left it, as ngspice's vec_get asks the device (frontend/vectors.c).
+pub struct ControlEvaluator<'a> {
+    circuit: &'a mut ControlCircuit,
+    engine: &'a Engine,
+}
+
+impl ControlCircuit {
+    /// The evaluator this script's session runs with, reading device
+    /// quantities with `engine`, the engine the script's commands run on.
+    pub fn evaluator<'a>(&'a mut self, engine: &'a Engine) -> ControlEvaluator<'a> {
+        ControlEvaluator {
+            circuit: self,
+            engine,
+        }
+    }
+}
+
+impl ControlEvaluator<'_> {
+    /// Have ready the device quantities the text names.
+    fn prepare(
+        &mut self,
+        text: &str,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ControlError> {
+        if !text.contains('@') {
+            return Ok(());
+        }
+        self.circuit
+            .prepare_device_state(self.engine, text, line, abort)
+            .map_err(|error| match error {
+                ControlExecutionError::Command(error) => error,
+                ControlExecutionError::Simulation {
+                    source: SimulationError::Aborted,
+                    ..
+                } => {
+                    ControlError::new(line, ControlErrorKind::Aborted, "control execution aborted")
+                }
+                ControlExecutionError::Simulation { source, .. } => {
+                    ControlError::new(line, ControlErrorKind::Host, source.to_string())
+                }
+                ControlExecutionError::Configuration { source, .. } => {
+                    ControlError::new(line, ControlErrorKind::Host, source.to_string())
+                }
+            })
+    }
+}
+
+impl ControlScalarEvaluator for ControlEvaluator<'_> {
     fn evaluate_scalar(
         &mut self,
         expression: &str,
@@ -1457,7 +1510,11 @@ impl ControlScalarEvaluator for ControlCircuit {
         line: usize,
         abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ControlError> {
-        match self.vector_or_scalar(expression, variables, line, abort)? {
+        self.prepare(expression, line, abort)?;
+        match self
+            .circuit
+            .vector_or_scalar(expression, variables, line, abort)?
+        {
             Evaluated::Scalar(value) => Ok(value),
             Evaluated::Vector { value, scalar, .. } => match value.samples.as_slice() {
                 [value] => Ok(*value),
@@ -1485,16 +1542,18 @@ impl ControlScalarEvaluator for ControlCircuit {
         line: usize,
         abort: &dyn AbortSignal,
     ) -> Result<Option<ComplexValue>, ControlError> {
-        match self.vector_or_scalar(expression, variables, line, abort)? {
+        self.prepare(expression, line, abort)?;
+        let circuit = &mut *self.circuit;
+        match circuit.vector_or_scalar(expression, variables, line, abort)? {
             Evaluated::Scalar(value) => {
-                self.bind_scalar(name, value, line)?;
+                circuit.bind_scalar(name, value, line)?;
                 Ok(Some(value))
             }
             Evaluated::Vector {
                 value, arithmetic, ..
             } => {
-                self.bind_vector(name, value, line)?;
-                self.set_vector_untyped(name, arithmetic);
+                circuit.bind_vector(name, value, line)?;
+                circuit.set_vector_untyped(name, arithmetic);
                 Ok(None)
             }
         }
@@ -1509,7 +1568,9 @@ impl ControlScalarEvaluator for ControlCircuit {
         line: usize,
         abort: &dyn AbortSignal,
     ) -> Result<Option<ComplexValue>, ControlError> {
-        self.assign_elements(name, index, expression, variables, line, abort)
+        self.prepare(expression, line, abort)?;
+        self.circuit
+            .assign_elements(name, index, expression, variables, line, abort)
     }
 
     fn vector_words(
@@ -1519,7 +1580,8 @@ impl ControlScalarEvaluator for ControlCircuit {
         line: usize,
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<String>>, ControlError> {
-        self.expand_vector(name, variables, line, abort)
+        self.prepare(name, line, abort)?;
+        self.circuit.expand_vector(name, variables, line, abort)
     }
 
     /// ngspice defines `curplot` from its plots (frontend/options.c:72),
@@ -1528,10 +1590,11 @@ impl ControlScalarEvaluator for ControlCircuit {
     /// (frontend/init.c:40).
     fn host_variable(&mut self, name: &str) -> Option<Vec<String>> {
         match name.to_ascii_lowercase().as_str() {
-            "curplot" => Some(vec![self.plot_name()]),
+            "curplot" => Some(vec![self.circuit.plot_name()]),
             "batchmode" => Some(Vec::new()),
             "oscompiled" => Some(vec![os_compiled().to_string()]),
             "inputdir" => self
+                .circuit
                 .input_directory
                 .clone()
                 .map(|directory| vec![directory]),

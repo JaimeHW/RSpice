@@ -39,7 +39,10 @@ fn assignments_conditions_and_loops_read_retained_transfer_results() {
     let netlist = Netlist::parse(program.declarative_source()).unwrap();
     let mut session = program.start(netlist.params.clone());
     let mut circuit = ControlCircuit::new(netlist).unwrap();
-    while let Some(command) = session.next_command(&mut circuit, &NoAbort).unwrap() {
+    while let Some(command) = session
+        .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
+        .unwrap()
+    {
         circuit
             .execute(&Engine::default(), &command, session.variables(), &NoAbort)
             .unwrap();
@@ -73,6 +76,7 @@ fn unbounded_transfer_reads_fail_only_when_evaluated_and_respect_function_scope(
         ] {
             assert_eq!(
                 circuit
+                    .evaluator(&Engine::default())
                     .evaluate_scalar(expression, &variables, 11, &NoAbort)
                     .unwrap(),
                 ComplexValue::from(expected),
@@ -84,6 +88,7 @@ fn unbounded_transfer_reads_fail_only_when_evaluated_and_respect_function_scope(
         variables.set("input_impedance", 42.0);
         for expression in ["input_impedance", "tf1.V1#input_impedance", "saved()"] {
             let error = circuit
+                .evaluator(&Engine::default())
                 .evaluate_scalar(expression, &variables, 17, &NoAbort)
                 .unwrap_err();
             assert_eq!(error.kind, ControlErrorKind::Expression);
@@ -92,6 +97,7 @@ fn unbounded_transfer_reads_fail_only_when_evaluated_and_respect_function_scope(
         }
         assert!(
             circuit
+                .evaluator(&Engine::default())
                 .evaluate_scalar("tf99.transfer_gain", &variables, 19, &NoAbort)
                 .is_err()
         );
@@ -109,12 +115,14 @@ fn transfer_bindings_preserve_expression_dialects_and_random_evaluation_order() 
         variables.define_function("scaled", vec!["x".into()], "x*tf1.transfer_function");
         assert_eq!(
             circuit
+                .evaluator(&Engine::default())
                 .evaluate_scalar("scaled(2)", &variables, 8, &NoAbort)
                 .unwrap(),
             ComplexValue::from(6000.0)
         );
         assert_eq!(
             circuit
+                .evaluator(&Engine::default())
                 .evaluate_scalar("scaled(1j)", &variables, 8, &NoAbort)
                 .unwrap(),
             ComplexValue::new(0.0, 3000.0)
@@ -132,6 +140,7 @@ fn transfer_bindings_preserve_expression_dialects_and_random_evaluation_order() 
         ] {
             assert_eq!(
                 circuit
+                    .evaluator(&Engine::default())
                     .evaluate_scalar(expression, &variables, 8, &NoAbort)
                     .unwrap(),
                 eval_expression_complex(expression, &reference).unwrap(),

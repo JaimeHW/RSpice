@@ -58,12 +58,14 @@ fn explicit_and_declarative_pz_runs_retain_complex_roots_and_immutable_names() {
     let root = ComplexValue::new(-0.5, 3.0_f64.sqrt() / 2.0);
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("pole(1)", &variables, 12, &NoAbort)
             .unwrap(),
         root,
     );
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("pz1.pole(2)", &variables, 12, &NoAbort)
             .unwrap(),
         root.conj(),
@@ -73,24 +75,28 @@ fn explicit_and_declarative_pz_runs_retain_complex_roots_and_immutable_names() {
     assert_eq!(circuit.datasets()[1].name, "pz2");
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("pz1.pole(1)", &variables, 12, &NoAbort)
             .unwrap(),
         root,
     );
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("pz2.pole(1)", &variables, 12, &NoAbort)
             .unwrap(),
         ComplexValue::from((-3.0 + 5.0_f64.sqrt()) / 2.0),
     );
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("dc_gain", &variables, 12, &NoAbort)
             .unwrap(),
         ComplexValue::from(1.0),
     );
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("hf_gain", &variables, 12, &NoAbort)
             .unwrap(),
         ComplexValue::ZERO,
@@ -162,6 +168,7 @@ fn root_lookup_is_lazy_checked_and_preserves_user_functions_and_random_draws() {
     ] {
         close(
             circuit
+                .evaluator(&Engine::default())
                 .evaluate_scalar(expr, &variables, 17, &NoAbort)
                 .unwrap(),
             expected,
@@ -180,6 +187,7 @@ fn root_lookup_is_lazy_checked_and_preserves_user_functions_and_random_draws() {
         "pz99.pole(1)",
     ] {
         let error = circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar(expr, &variables, 17, &NoAbort)
             .unwrap_err();
         assert_eq!(error.line, 17);
@@ -206,12 +214,14 @@ fn root_lookup_is_lazy_checked_and_preserves_user_functions_and_random_draws() {
     variables.define_function("pole", vec!["n".into()], "n+4j");
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("pole(1)", &variables, 17, &NoAbort)
             .unwrap(),
         ComplexValue::new(1.0, 4.0),
     );
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("pz1.pole(1)", &variables, 17, &NoAbort)
             .unwrap(),
         root,
@@ -364,12 +374,14 @@ fn highpass_zeros_and_unavailable_integrator_gain_are_not_fabricated() {
     let variables = ParamContext::new();
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("zero(1)", &variables, 10, &NoAbort)
             .unwrap(),
         ComplexValue::ZERO,
     );
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("high_frequency_gain", &variables, 10, &NoAbort)
             .unwrap(),
         ComplexValue::from(1.0),
@@ -385,6 +397,7 @@ fn highpass_zeros_and_unavailable_integrator_gain_are_not_fabricated() {
     variables.set("dc_gain", 42.0);
     assert!(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("dc_gain", &variables, 10, &NoAbort)
             .unwrap_err()
             .message
@@ -392,6 +405,7 @@ fn highpass_zeros_and_unavailable_integrator_gain_are_not_fabricated() {
     );
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("if(0,dc_gain,7)", &variables, 10, &NoAbort)
             .unwrap(),
         ComplexValue::from(7.0),

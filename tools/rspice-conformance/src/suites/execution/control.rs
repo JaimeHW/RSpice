@@ -299,7 +299,7 @@ impl ExecutionRunner {
             let mut circuit = ControlCircuit::new(netlist).map_err(control_error)?;
             let mut completed = 0usize;
             while let Some(command) = session
-                .next_command(&mut circuit, &abort)
+                .next_command(&mut circuit.evaluator(&engine), &abort)
                 .map_err(|error| control_error(error.into()))?
             {
                 let previous = circuit.datasets().len();

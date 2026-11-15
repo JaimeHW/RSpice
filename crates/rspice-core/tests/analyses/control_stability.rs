@@ -274,12 +274,14 @@ fn zero_gain_keeps_undefined_phase_and_unbounded_decibels_out_of_finite_expressi
         variables.set("gain_margin_db", 42.0);
         assert_eq!(
             circuit
+                .evaluator(&Engine::default())
                 .evaluate_scalar("if(0,gain_margin_db,7)", &variables, 9, &NoAbort)
                 .unwrap(),
             7.0.into()
         );
         for name in ["gain_margin_db", "stb1.phase_margin", "dc_loop_gain_db"] {
             let error = circuit
+                .evaluator(&Engine::default())
                 .evaluate_scalar(name, &variables, 9, &NoAbort)
                 .unwrap_err();
             assert!(
@@ -369,7 +371,10 @@ fn scalar_assignments_drive_alter_and_preserve_previous_sweeps() {
     let mut session = program.start(netlist.params.clone());
     let mut circuit = ControlCircuit::new(netlist).unwrap();
     let mut first = None;
-    while let Some(command) = session.next_command(&mut circuit, &NoAbort).unwrap() {
+    while let Some(command) = session
+        .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
+        .unwrap()
+    {
         circuit
             .execute(&Engine::default(), &command, session.variables(), &NoAbort)
             .unwrap();

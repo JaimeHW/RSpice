@@ -166,6 +166,7 @@ fn sensitivity_vectors_preserve_complex_values_units_and_scalar_laziness() {
     ] {
         close(
             circuit
+                .evaluator(&Engine::default())
                 .evaluate_scalar(expression, &variables, 9, &NoAbort)
                 .unwrap(),
             derivative,
@@ -173,6 +174,7 @@ fn sensitivity_vectors_preserve_complex_values_units_and_scalar_laziness() {
     }
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("if(0,sens99.R1,7)", &variables, 9, &NoAbort)
             .unwrap(),
         7.0.into(),
@@ -200,6 +202,7 @@ fn sensitivity_vectors_preserve_complex_values_units_and_scalar_laziness() {
     execute(&mut circuit, "sens", "V(out) R1 AC LIN 3 1000 3000").unwrap();
     assert!(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("sens2.R1", &variables, 9, &NoAbort)
             .unwrap_err()
             .message
@@ -207,6 +210,7 @@ fn sensitivity_vectors_preserve_complex_values_units_and_scalar_laziness() {
     );
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("if(0,sens2.R1,7)", &variables, 9, &NoAbort)
             .unwrap(),
         7.0.into(),

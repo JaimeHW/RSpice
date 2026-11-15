@@ -84,7 +84,7 @@ pub(super) fn run(
 
     let execution = (|| -> Result<(), CliError> {
         while let Some(command) = session
-            .next_command(&mut circuit, &crate::abort::ProcessAbort)
+            .next_command(&mut circuit.evaluator(&engine), &crate::abort::ProcessAbort)
             .map_err(|error| map_command(error, script, args))?
         {
             let previous = circuit.datasets().len();

@@ -65,7 +65,10 @@ fn runtime_selected_tables_survive_expansion_and_retained_control_parsing() {
     let mut session = program.start(netlist.params.clone());
     let mut circuit = ControlCircuit::new(netlist).unwrap();
     let engine = Engine::default();
-    while let Some(command) = session.next_command(&mut circuit, &NoAbort).unwrap() {
+    while let Some(command) = session
+        .next_command(&mut circuit.evaluator(&engine), &NoAbort)
+        .unwrap()
+    {
         circuit
             .execute(&engine, &command, session.variables(), &NoAbort)
             .unwrap();

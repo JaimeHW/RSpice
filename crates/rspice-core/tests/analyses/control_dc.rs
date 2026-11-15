@@ -369,7 +369,10 @@ fn mixed_control_program_runs_dc_in_source_order() {
     let mut session = program.start(netlist.params.clone());
     let mut circuit = ControlCircuit::new(netlist).unwrap();
     let engine = Engine::default();
-    while let Some(command) = session.next_command(&mut circuit, &NoAbort).unwrap() {
+    while let Some(command) = session
+        .next_command(&mut circuit.evaluator(&engine), &NoAbort)
+        .unwrap()
+    {
         circuit
             .execute(&engine, &command, session.variables(), &NoAbort)
             .unwrap();

@@ -43,12 +43,18 @@ fn assignments_and_loop_tests_cancel_without_executing_the_next_command() {
             ControlCircuit::new(Netlist::parse(program.declarative_source()).unwrap()).unwrap();
         let mut session = program.start(circuit.netlist().params.clone());
         let abort = CountingAbort::new(128);
-        let error = session.next_command(&mut circuit, &abort).unwrap_err();
+        let error = session
+            .next_command(&mut circuit.evaluator(&Engine::default()), &abort)
+            .unwrap_err();
         assert_eq!(error.kind, ControlErrorKind::Aborted, "{script}: {error}");
         assert_eq!(abort.count(), 129);
         assert_eq!(abort.polls_after_abort(), 0);
         assert!(session.variables().get("expensive").is_none());
-        assert!(session.next_command(&mut circuit, &NoAbort).is_err());
+        assert!(
+            session
+                .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
+                .is_err()
+        );
     }
 }
 

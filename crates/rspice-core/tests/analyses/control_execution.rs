@@ -23,7 +23,10 @@ fn drive(
     let mut session = program.start(netlist.params.clone());
     let mut circuit = ControlCircuit::new(netlist).unwrap();
     let mut presentation = Vec::new();
-    while let Some(command) = session.next_command(&mut circuit, &NoAbort).unwrap() {
+    while let Some(command) = session
+        .next_command(&mut circuit.evaluator(engine), &NoAbort)
+        .unwrap()
+    {
         if let ControlCommandEffect::Presentation(request) = circuit
             .execute(engine, &command, session.variables(), &NoAbort)
             .unwrap()
@@ -572,7 +575,10 @@ fn sealed_source_control_retention_preserves_commands_and_author_locations() {
     let mut session = program.start(netlist.params.clone());
     let mut circuit = ControlCircuit::new(netlist).unwrap();
     let engine = Engine::new(SimulationConfig::default());
-    while let Some(command) = session.next_command(&mut circuit, &NoAbort).unwrap() {
+    while let Some(command) = session
+        .next_command(&mut circuit.evaluator(&engine), &NoAbort)
+        .unwrap()
+    {
         let origin = script.origin(command.line).unwrap();
         assert_eq!(origin.path.as_ref(), Some(&child));
         if command.name == "op" {
@@ -1645,7 +1651,7 @@ fn run_until_error(source: &str) -> (Vec<ControlPresentation>, Option<String>) {
     let mut circuit = ControlCircuit::new(netlist).unwrap();
     let mut presentation = Vec::new();
     loop {
-        let command = match session.next_command(&mut circuit, &NoAbort) {
+        let command = match session.next_command(&mut circuit.evaluator(&engine), &NoAbort) {
             Ok(Some(command)) => command,
             Ok(None) => return (presentation, None),
             Err(error) => return (presentation, Some(error.to_string())),
@@ -2840,7 +2846,10 @@ fn cd_and_inputdir_place_redirected_files_as_ngspice_does() {
     circuit.set_input_directory("decks".into());
     let engine = Engine::new(SimulationConfig::default());
     let mut presented = Vec::new();
-    while let Some(command) = session.next_command(&mut circuit, &NoAbort).unwrap() {
+    while let Some(command) = session
+        .next_command(&mut circuit.evaluator(&engine), &NoAbort)
+        .unwrap()
+    {
         if let ControlCommandEffect::Presentation(request) = circuit
             .execute(&engine, &command, session.variables(), &NoAbort)
             .unwrap()

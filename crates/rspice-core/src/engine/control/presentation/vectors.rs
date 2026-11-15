@@ -904,11 +904,15 @@ impl ControlCircuit {
                     charge(budget, value.samples.len(), line)?;
                     return Ok(leaf(expression, value, leaves));
                 }
-                if let Ok((dataset, raw)) = self.qualified(name, line)
-                    && let Ok(selected) = self.select(dataset, raw, None, line)
-                {
-                    let value = sampled(&selected, budget, line, abort)?;
-                    return Ok(leaf(expression, value, leaves));
+                if let Ok((dataset, raw)) = self.qualified(name, line) {
+                    if let Some(value) = self.held_vector(dataset, raw) {
+                        charge(budget, value.samples.len(), line)?;
+                        return Ok(leaf(expression, value, leaves));
+                    }
+                    if let Ok(selected) = self.select(dataset, raw, None, line) {
+                        let value = sampled(&selected, budget, line, abort)?;
+                        return Ok(leaf(expression, value, leaves));
+                    }
                 }
                 let value = variables
                     .get_complex(name)
@@ -936,6 +940,10 @@ impl ControlCircuit {
                 {
                     let name = format!("{vector}[{quantity}]");
                     let (dataset, raw) = self.qualified(&name, line)?;
+                    if let Some(value) = self.held_vector(dataset, raw) {
+                        charge(budget, value.samples.len(), line)?;
+                        return Ok(leaf(expression, value, leaves));
+                    }
                     let selected = self.select(dataset, raw, None, line)?;
                     let value = sampled(&selected, budget, line, abort)?;
                     return Ok(leaf(expression, value, leaves));

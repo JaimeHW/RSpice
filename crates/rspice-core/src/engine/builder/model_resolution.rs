@@ -244,6 +244,27 @@ pub(in crate::engine) fn resolved_element_value_expression(
     value.is_finite().then_some(value)
 }
 
+/// The value a `.model` card gives one of its parameters in a circuit at
+/// `temperature_kelvin`: the number it authors, or its expression evaluated
+/// as the builder evaluates the card's expressions, `TEMPER` the circuit's
+/// temperature. `None` when the card does not author the parameter.
+pub(in crate::engine) fn model_card_parameter(
+    netlist: &Netlist,
+    model_def: &crate::netlist::ModelDef,
+    temperature_kelvin: f64,
+    name: &str,
+    abort: &dyn AbortSignal,
+) -> Result<Option<f64>, SimulationError> {
+    let resolution = ModelResolution::new(netlist, abort);
+    let context = build_model_eval_context(
+        &resolution,
+        model_def,
+        crate::constants::kelvin_to_celsius(temperature_kelvin),
+        netlist.options.tnom.unwrap_or(27.0),
+    )?;
+    resolve_model_param(model_def, &[name], &context)
+}
+
 /// [`instance_parameter_eval_context`] built at most once per instance, and
 /// only for an instance that has an expression to evaluate.
 ///

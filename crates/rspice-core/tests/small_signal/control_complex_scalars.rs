@@ -29,7 +29,7 @@ fn assignments_and_substitutions_preserve_both_components_and_precedence() {
     let mut session = program.start(ParamContext::new());
     assert!(
         session
-            .next_command(&mut circuit, &NoAbort)
+            .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
             .unwrap()
             .is_none()
     );
@@ -63,7 +63,7 @@ fn imaginary_conditions_drive_if_while_and_dowhile() {
     let mut session = program.start(ParamContext::new());
     assert!(
         session
-            .next_command(&mut circuit, &NoAbort)
+            .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
             .unwrap()
             .is_none()
     );
@@ -83,11 +83,17 @@ fn repeat_requires_an_exactly_real_integer_without_partial_execution() {
         let program = program(&format!("let n = 0\nrepeat {count}\nlet n = n+1\nend"));
         let mut circuit = circuit(&program);
         let mut session = program.start(ParamContext::new());
-        let error = session.next_command(&mut circuit, &NoAbort).unwrap_err();
+        let error = session
+            .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
+            .unwrap_err();
         assert_eq!(error.line, 6);
         assert!(error.message.contains("integer"), "{count}: {error}");
         assert_eq!(session.variables().get("n"), Some(0.0));
-        assert!(session.next_command(&mut circuit, &NoAbort).is_err());
+        assert!(
+            session
+                .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
+                .is_err()
+        );
     }
 }
 
@@ -100,7 +106,9 @@ fn imaginary_nonfinite_values_fail_before_assignment_or_command_publication() {
         let mut variables = ParamContext::new();
         variables.set_complex("bad", ComplexValue::new(2.0, f64::INFINITY));
         let mut session = program.start(variables);
-        let error = session.next_command(&mut circuit, &NoAbort).unwrap_err();
+        let error = session
+            .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
+            .unwrap_err();
         assert_eq!(error.kind, ControlErrorKind::Expression);
         assert_eq!(error.line, 5);
         assert!(error.message.contains("nonfinite"), "{error}");
@@ -131,7 +139,7 @@ fn real_commands_refuse_complex_values_without_mutating_the_circuit() {
         let settings = circuit.settings().clone();
         let mut session = program.start(ParamContext::new());
         let command = session
-            .next_command(&mut circuit, &NoAbort)
+            .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
             .unwrap()
             .unwrap();
         assert!(
@@ -156,7 +164,10 @@ fn complex_print_samples_survive_scalar_and_substitution_bindings() {
     let mut circuit = circuit(&program);
     let mut session = program.start(ParamContext::new());
     let mut printed = false;
-    while let Some(command) = session.next_command(&mut circuit, &NoAbort).unwrap() {
+    while let Some(command) = session
+        .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
+        .unwrap()
+    {
         if let ControlCommandEffect::Presentation(request) = circuit
             .execute(&Engine::default(), &command, session.variables(), &NoAbort)
             .unwrap()
@@ -188,7 +199,7 @@ fn substitutions_roundtrip_subnormal_and_maximum_finite_components() {
         let mut session = program.start(variables);
         assert!(
             session
-                .next_command(&mut circuit, &NoAbort)
+                .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
                 .unwrap()
                 .is_none()
         );
@@ -203,7 +214,7 @@ fn complex_plot_limits_are_not_drawn_and_keep_retained_data() {
     let mut circuit = circuit(&program);
     let mut session = program.start(ParamContext::new());
     let op = session
-        .next_command(&mut circuit, &NoAbort)
+        .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
         .unwrap()
         .unwrap();
     circuit
@@ -211,7 +222,7 @@ fn complex_plot_limits_are_not_drawn_and_keep_retained_data() {
         .unwrap();
     let identity = circuit.datasets()[0].analysis_id;
     let plot = session
-        .next_command(&mut circuit, &NoAbort)
+        .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
         .unwrap()
         .unwrap();
     // ngspice -b ignores plot, so a plot it cannot draw does not stop the run.
@@ -249,7 +260,10 @@ fn explicit_real_projections_and_option_random_draw_order_are_preserved() {
     let expected_draw =
         rspice_core::netlist::expr::eval_expression("aunif(0,1)", &reference).unwrap();
     let mut session = program.start(variables);
-    while let Some(command) = session.next_command(&mut circuit, &NoAbort).unwrap() {
+    while let Some(command) = session
+        .next_command(&mut circuit.evaluator(&Engine::default()), &NoAbort)
+        .unwrap()
+    {
         circuit
             .execute(&Engine::default(), &command, session.variables(), &NoAbort)
             .unwrap();

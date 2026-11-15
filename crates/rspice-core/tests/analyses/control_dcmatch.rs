@@ -143,6 +143,7 @@ fn dcmatch_prints_scalars_and_contributors_without_losing_empty_report_summaries
     let variables = circuit.netlist().params.clone();
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("dcmatch1.sigma_total*3", &variables, 9, &NoAbort)
             .unwrap()
             .re,
@@ -150,6 +151,7 @@ fn dcmatch_prints_scalars_and_contributors_without_losing_empty_report_summaries
     );
     assert!(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("contribution", &variables, 9, &NoAbort)
             .is_err()
     );
@@ -188,6 +190,7 @@ fn dcmatch_prints_scalars_and_contributors_without_losing_empty_report_summaries
     assert_eq!(p.scalars.len(), 2);
     close(
         circuit
+            .evaluator(&Engine::default())
             .evaluate_scalar("sigma_total", &variables, 9, &NoAbort)
             .unwrap()
             .re,

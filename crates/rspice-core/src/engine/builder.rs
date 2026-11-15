@@ -55,13 +55,15 @@ mod resistor_currents;
 mod special_function;
 mod terminal_probes;
 mod variable_delay;
-pub(in crate::engine) use model_resolution::resolved_element_value_expression;
 use model_resolution::*;
 pub use model_resolution::{
     ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinCoverageGap,
     ModelBinInspection, ModelBinInstanceInspection, ModelBinSelectionKind,
     ResolvedResistorParameters, XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION,
     validate_native_xyce_ltra_model_contract,
+};
+pub(in crate::engine) use model_resolution::{
+    model_card_parameter, resolved_element_value_expression,
 };
 mod behavioral;
 mod boundary_supply;
