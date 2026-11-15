@@ -263,13 +263,12 @@ fn accepted_veriloga_event_time(
     // before an event. The step cut at that breakpoint is carried on to the
     // activation instead, where the breakpoint is solved with it (see the
     // step's `breakpoint_before_activation`). So is a step cut at a breakpoint
-    // just before an analog event that the fold reached from a discrete
-    // activation: an HDL edge on a tick drives a `transition` whose end is a
-    // float sum an ulp past the image of the tick it ends on, where the
-    // code-model outputs of that tick are keyed and breakpointed, and stopping
-    // on the image left the end a sliver no step could cross. An analog event
-    // no activation joins keeps the one direction it always had, so a run
-    // without discrete lanes lands where it did.
+    // just before an analog event: an HDL edge on a tick drives a `transition`
+    // whose end is a float sum an ulp past the image of the tick it ends on,
+    // where the code-model outputs of that tick are keyed and breakpointed,
+    // and stopping on the image left the end a sliver no step could cross,
+    // whether the fold reached the end from one of those outputs or the
+    // output is only a breakpoint, as a dac_bridge ramp's end is.
     let members = [analog_event, activation, next_breakpoint];
     let target = latest_coincident_instant(
         earliest,
@@ -8132,9 +8131,13 @@ impl Engine {
             // latest member, so a step cut at the breakpoint is carried on to
             // the activation and the breakpoint is solved there with it.
             // Stopping on the breakpoint left the activation a sliver no step
-            // could cross, landed one floor late. An analog model's event the
-            // fold reached from an activation is carried the same way; one no
-            // activation joins keeps the landing it always had.
+            // could cross, landed one floor late. An analog model's event is
+            // carried the same way, whether or not an activation joins it: a
+            // `transition` an HDL edge starts ends at a float sum an ulp past
+            // the tick image where a code model driven by the same edge
+            // breakpoints its own output, such as the end of a dac_bridge ramp
+            // as long as the transition. Stopped on the image, the end landed
+            // one floor later and the step after it regrew from the floor.
             //
             // A transmission-line arrival is carried the same way. The schedule
             // propagates a source corner through the delay by rounded addition
@@ -8144,12 +8147,9 @@ impl Engine {
             // and the approach fit halved it again, creeping onto the arrival.
             // A GP phase arrival keeps its own landing.
             let breakpoint_before_activation = |target: Value| {
-                let carried = if pending_veriloga_event_time == Some(target) {
-                    !pending_analog_model_event || pending_landing_serves_activation
-                } else {
-                    physical_event_time == Some(target)
-                        && phase_arrival.is_none_or(|arrival| arrival.time != target)
-                };
+                let carried = pending_veriloga_event_time == Some(target)
+                    || (physical_event_time == Some(target)
+                        && phase_arrival.is_none_or(|arrival| arrival.time != target));
                 locked_grid.is_none()
                     && carried
                     && breakpoints.next_after(t).is_some_and(|breakpoint| {

@@ -1615,3 +1615,61 @@ fn a_transition_end_an_ulp_past_a_coupled_output_is_one_landing() {
         "a {shortest:e} s step in the nanosecond after the end"
     );
 }
+
+/// The same transition end against a breakpoint no activation keys: a
+/// dac_bridge the edge starts ramps for as long as the transition and ends
+/// its ramp on the image, which reaches the stepper only as a breakpoint. The
+/// end was stopped on the image, landed one floor later and regrown from the
+/// floor, as the coupled output's once was: the sigma-delta testbench reading
+/// its clock through the 1 V connect rules took two floor landings and about
+/// thirty regrowth points on each of 679 feedback edges.
+#[test]
+fn a_transition_end_an_ulp_past_a_dac_bridge_ramp_end_is_one_landing() {
+    let source = AmsFile::new(
+        "`include \"disciplines.vams\"\n\
+         `timescale 1ns/1ps\n\
+         module drive(b, a);\n\
+           output b; reg b;\n\
+           output a; electrical a;\n\
+           initial begin b = 1'b0; #8104 b = 1'b1; end\n\
+           analog V(a) <+ transition(b ? 1.0 : 0.0, 0, 1n, 1n);\n\
+         endmodule\n",
+    );
+    let text = format!(
+        "one landing for a transition end and a dac_bridge ramp end\n\
+         .hdl \"{}\"\n\
+         xd b a drive\n\
+         abr [b] [ba] dac1\n\
+         .model dac1 dac_bridge(out_low=0 out_high=1 t_rise=1n t_fall=1n)\n\
+         ra a 0 1k\n\
+         rb ba 0 1k\n\
+         .tran 1n 8.2u\n\
+         .end\n",
+        source.path()
+    );
+    let deck = Netlist::parse(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
+    let result = Engine::default().run_tran(&deck, 8.2e-6, 1e-8).unwrap();
+    let image = picosecond(8_105_000);
+    let end = picosecond(8_104_000) + 1.0e-9;
+    assert_eq!(
+        end,
+        image.next_up(),
+        "the transition ends an ulp past the image"
+    );
+    let near = result
+        .time
+        .iter()
+        .filter(|time| (**time - image).abs() <= 1.0e-15)
+        .collect::<Vec<_>>();
+    assert_eq!(near, [&end], "one point for both instants: {near:?}");
+    let shortest = result
+        .time
+        .windows(2)
+        .filter(|pair| pair[0] >= end && pair[0] < end + 1.0e-9)
+        .map(|pair| pair[1] - pair[0])
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        shortest >= 1.0e-12,
+        "a {shortest:e} s step in the nanosecond after the end"
+    );
+}
