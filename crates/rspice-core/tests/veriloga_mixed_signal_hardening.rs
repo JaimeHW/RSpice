@@ -360,10 +360,20 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Pinned)] = &[
         //
         // Re-measured on Linux x64 when the transient stopped carrying a
         // nodal floor: the same 1760 points, grid 0x1b27_94c5_580c_3f52 ->
-        // 0xeb89_2010_5782_1df1. This deck's grid already differed on macOS
-        // ARM64 before that change, so the value is the one CI's Linux jobs
-        // measure, and it pins the point count and grid alone: the voltage
-        // hash is a pin per platform.
+        // 0xeb89_2010_5782_1df1. It pins the point count and grid alone: the
+        // voltage hash is a pin per platform.
+        //
+        // macOS ARM64 measured grid 0xf6b1_e4a3_34f1_efe8 until the step
+        // controllers stopped taking their error ratio's root through the
+        // platform's `pow`. macOS's rounded five of this run's 1355 cube
+        // roots one ulp away from the correctly rounded value Linux's gave.
+        // The first to reach the grid was the growth scale on the step to
+        // 169.29 ns, 1.2450738825145895 for 1.2450738825145893: the restart
+        // after the 170 ns activation is a tenth of that proposal, its
+        // doublings carried the ulp, and the next truncation estimate turned
+        // it into 1.7e-21 s at 171.21 ns, which every later point kept. The
+        // root is now correctly rounded on every platform, and macOS measures
+        // Linux's grid and voltage hash (0x00d9_39ce_b861_87f7).
         Pinned::Grid {
             points: 1760,
             grid_hash: 0xeb89_2010_5782_1df1,

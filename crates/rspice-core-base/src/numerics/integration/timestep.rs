@@ -5,6 +5,7 @@
 //! [`TrapGearController`] picks the method, dropping trapezoidal for Gear-2
 //! when the solution starts ringing.
 
+use super::step_root::root_power;
 use crate::Value;
 use crate::numerics::integration::IntegrationMethod;
 
@@ -296,7 +297,7 @@ impl TimestepController {
             // at it, and keep the same factor as the ceiling: a rejected step
             // always comes back at least that much narrower, whatever the
             // deck's own `reltol` does to the estimate the caller scaled.
-            let factor = (LTE_REJECT_SHRINK_MARGIN * ratio.powf(1.0 / 3.0))
+            let factor = (LTE_REJECT_SHRINK_MARGIN * root_power(ratio, 3))
                 .clamp(0.5, LTE_REJECT_SHRINK_MARGIN);
 
             self.prev_dt = self.current_dt;

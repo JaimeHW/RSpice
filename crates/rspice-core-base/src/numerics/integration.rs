@@ -24,6 +24,7 @@ mod breakpoint;
 mod charge;
 mod companion;
 mod lte;
+mod step_root;
 mod timestep;
 
 pub use breakpoint::{BreakpointManager, BreakpointStepPolicy};

@@ -5,6 +5,7 @@
 //! prediction built from the accepted history, so it needs the same companion
 //! coefficients the devices stamped with.
 
+use super::step_root::root_power;
 use crate::Value;
 use crate::numerics::integration::IntegrationMethod;
 
@@ -1459,7 +1460,7 @@ impl LteEstimator {
         } else {
             lte / self.reltol.max(1.0e-30)
         };
-        (0.5 / (est_over_tol + 0.0001)).powf(1.0 / (method_order.max(1) as Value + 1.0))
+        root_power(0.5 / (est_over_tol + 0.0001), method_order.max(1) + 1)
     }
 
     fn recommend_scale_for_order(&self, lte: Value, method_order: u32) -> Value {
@@ -1470,9 +1471,8 @@ impl LteEstimator {
         } else {
             // Optimal scaling: (tol/lte)^(1/(p+1)) where p is method order
             // For order 2: exponent = 1/3, for order 1: exponent = 1/2
-            let exponent = 1.0 / (method_order.max(1) as Value + 1.0);
             let ratio = self.reltol / lte;
-            ratio.powf(exponent).clamp(0.25, 2.0)
+            root_power(ratio, method_order.max(1) + 1).clamp(0.25, 2.0)
         }
     }
 
