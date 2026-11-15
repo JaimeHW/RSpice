@@ -85,7 +85,7 @@ impl Engine {
                 rhs,
                 solution,
                 gmin_floor,
-                Self::requires_vbic_correction_form(circuit),
+                self.requires_operating_point_correction_form(circuit),
             )
         });
         circuit.restore_nonlinear_state(snapshot);
@@ -178,7 +178,8 @@ impl Engine {
                 rhs,
                 solution,
                 contract.nodal_gmin,
-                contract.junction_gmin.is_some() && Self::requires_vbic_correction_form(circuit),
+                contract.junction_gmin.is_some()
+                    && self.requires_operating_point_correction_form(circuit),
             )
         });
         circuit.dc_floor_held_nodes = held_nodes;
@@ -584,7 +585,7 @@ impl Engine {
             }
             let denominator_floors = Self::dc_solve_denominator_floors(circuit, rhs.len());
             let mut next_solution = Vec::with_capacity(rhs.len());
-            let result = if Self::requires_vbic_correction_form(circuit) {
+            let result = if self.requires_operating_point_correction_form(circuit) {
                 Self::solve_direct_dc_correction(
                     probe,
                     rhs,
@@ -747,7 +748,7 @@ impl Engine {
                 let gmin_floor = self.dc_nodal_gmin_floor(circuit);
                 self.stamp_dc_static_probe_system(circuit, probe, rhs, at, gmin_floor)?;
                 // Correction coordinates already hold `b - J x` in the RHS.
-                if Self::requires_vbic_correction_form(circuit) {
+                if self.requires_operating_point_correction_form(circuit) {
                     return Ok(rhs.to_vec());
                 }
                 let mut residual = Vec::with_capacity(size);
@@ -898,7 +899,7 @@ impl Engine {
             {
                 return false;
             }
-            if Self::requires_vbic_correction_form(circuit) {
+            if self.requires_operating_point_correction_form(circuit) {
                 self.direct_probe_correction_converged(circuit, probe, solution, rhs)
             } else {
                 self.nonlinear_probe_residual_converged(circuit, probe, solution, rhs)
@@ -947,7 +948,7 @@ impl Engine {
                 stamp_error = Some(err);
                 return false;
             }
-            if Self::requires_vbic_correction_form(circuit) {
+            if self.requires_operating_point_correction_form(circuit) {
                 self.direct_probe_correction_converged(circuit, probe, solution, rhs)
             } else {
                 self.nonlinear_probe_residual_converged(circuit, probe, solution, rhs)
@@ -1156,10 +1157,10 @@ impl Engine {
                 rhs,
                 constraints,
                 solution,
-                Self::requires_vbic_correction_form(circuit),
+                self.requires_operating_point_correction_form(circuit),
             )
             .ok()?;
-            if Self::requires_vbic_correction_form(circuit) {
+            if self.requires_operating_point_correction_form(circuit) {
                 return if self.config.spice_dialect == crate::engine::SpiceDialect::Xyce {
                     let norm = rhs.iter().fold(0.0_f64, |sum, value| sum.hypot(*value));
                     norm.is_finite().then_some(norm)

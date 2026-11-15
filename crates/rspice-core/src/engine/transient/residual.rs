@@ -1458,33 +1458,6 @@ impl Engine {
                 })
     }
 
-    /// Whether the transient takes generated Verilog-A rows from the devices'
-    /// physical residuals ([`CircuitData::stamp_generated_veriloga_physical`])
-    /// rather than their companions. The Xyce dialect does: Xyce sums F from
-    /// the device loads, and its OneStep trapezoid adds half the previous
-    /// step's F-B to the next residual (N_TIA_OneStep.C:247-251). A companion
-    /// J*x-I across a module's milliohm branch rounds that branch's picoamperes
-    /// to J*|x|*eps, and OneStep would inject the rounding, with alternating
-    /// sign, into every later step of a circuit that holds such a node on
-    /// picosiemens.
-    ///
-    /// [`CircuitData::stamp_generated_veriloga_physical`]: crate::circuit::CircuitData::stamp_generated_veriloga_physical
-    pub(super) fn generated_rows_are_physical(
-        &self,
-        circuit: &crate::circuit::CircuitData,
-    ) -> bool {
-        #[cfg(feature = "veriloga-builtins-base")]
-        {
-            self.config.spice_dialect == SpiceDialect::Xyce
-                && circuit.has_generated_veriloga_devices()
-        }
-        #[cfg(not(feature = "veriloga-builtins-base"))]
-        {
-            let _ = circuit;
-            false
-        }
-    }
-
     /// Add the generated Verilog-A rows to a transient Newton correction from
     /// the devices' physical residuals, once the rest of the correction has
     /// been formed. OneStep order 2 halves the static DAE these stamps carry,

@@ -160,6 +160,44 @@ impl Engine {
         circuit.bjts.devices.iter().any(|bjt| bjt.mna_promoted())
     }
 
+    /// Whether Newton corrections take generated Verilog-A rows from the
+    /// devices' physical residuals
+    /// ([`CircuitData::stamp_generated_veriloga_physical`]) rather than their
+    /// companions. The Xyce dialect does: Xyce sums F from the device loads
+    /// in every analysis. A companion `J*x - I` across a module's milliohm
+    /// branch, and the matrix slots that sum its kilosiemens, round the
+    /// branch's picoamperes to `J*|x|*eps`, and the companion system's
+    /// solution keeps that rounding. A node the circuit holds on picosiemens
+    /// then settles visibly off its operating point, and the OneStep
+    /// trapezoid, which adds half the previous step's F-B to the next
+    /// residual (N_TIA_OneStep.C:247-251), injects the rounding with
+    /// alternating sign into every later step.
+    ///
+    /// [`CircuitData::stamp_generated_veriloga_physical`]: crate::circuit::CircuitData::stamp_generated_veriloga_physical
+    pub(in crate::engine) fn generated_rows_are_physical(&self, circuit: &CircuitData) -> bool {
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            self.config.spice_dialect == SpiceDialect::Xyce
+                && circuit.has_generated_veriloga_devices()
+        }
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        {
+            let _ = circuit;
+            false
+        }
+    }
+
+    /// Whether the operating-point Newton solves for corrections against
+    /// directly assembled physical currents: promoted VBICs always do, and
+    /// generated Verilog-A devices where
+    /// [`Self::generated_rows_are_physical`] says so.
+    pub(in crate::engine) fn requires_operating_point_correction_form(
+        &self,
+        circuit: &CircuitData,
+    ) -> bool {
+        Self::requires_vbic_correction_form(circuit) || self.generated_rows_are_physical(circuit)
+    }
+
     pub(in crate::engine::convergence) fn solve_direct_dc_correction(
         matrix: &mut StaticMatrix,
         rhs: &[Value],
@@ -833,7 +871,7 @@ impl Engine {
         let result = matrix.with_probe_values(|probe, rhs| -> Result<bool, SimulationError> {
             Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
             circuit.stamp_dc_direct(probe, rhs);
-            if Self::requires_vbic_correction_form(circuit) {
+            if self.requires_operating_point_correction_form(circuit) {
                 let mut correction_rhs = Vec::new();
                 self.try_stamp_operating_point_correction(
                     circuit,
@@ -916,7 +954,7 @@ impl Engine {
                 true,
                 &mut correction_rhs,
             )?;
-            if Self::requires_vbic_correction_form(circuit) {
+            if self.requires_operating_point_correction_form(circuit) {
                 Self::apply_node_voltage_correction_constraints(
                     circuit, probe, rhs, node_hints, solution,
                 )?;
@@ -947,7 +985,7 @@ impl Engine {
         let mut rhs = vec![0.0; size];
         let mut new_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::new();
-        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
+        let uses_direct_correction = self.requires_operating_point_correction_form(circuit);
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let max_iterations = self.continuation_iteration_budget(1, 64);
@@ -982,9 +1020,9 @@ impl Engine {
                 &mut rhs,
                 node_hints,
                 &solution,
-                uses_vbic_correction,
+                uses_direct_correction,
             )?;
-            if uses_vbic_correction {
+            if uses_direct_correction {
                 Self::solve_direct_dc_correction(
                     matrix,
                     &rhs,
@@ -1462,7 +1500,7 @@ impl Engine {
         let mut raw_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::new();
         let mut linearized_delta = Vec::new();
-        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
+        let uses_direct_correction = self.requires_operating_point_correction_form(circuit);
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
         // Newton-Raphson iteration
         let mut damping_state = NewtonDampingState::default();
@@ -1549,7 +1587,7 @@ impl Engine {
                 break;
             }
             Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
-            let solve_result = if uses_vbic_correction {
+            let solve_result = if uses_direct_correction {
                 Self::solve_direct_dc_correction(
                     matrix,
                     &rhs,
@@ -1632,7 +1670,7 @@ impl Engine {
                 node_count,
                 iteration,
             );
-            let linearized_residual_converged = if uses_vbic_correction {
+            let linearized_residual_converged = if uses_direct_correction {
                 linearized_delta.clear();
                 linearized_delta.extend(
                     new_solution
@@ -1732,7 +1770,7 @@ impl Engine {
         // run pays one residual pass and then discards it, because the
         // attribution is only recorded where the failure is actually
         // returned.
-        let newton_failure = if uses_vbic_correction {
+        let newton_failure = if uses_direct_correction {
             // The last Newton RHS describes increments at the preceding
             // iterate. Re-evaluate physical currents at the abort iterate
             // before attributing a failed KCL equation.
@@ -2361,7 +2399,7 @@ impl Engine {
         let mut rhs = vec![0.0; size];
         let mut new_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::new();
-        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
+        let uses_direct_correction = self.requires_operating_point_correction_form(circuit);
         // The Xyce DC update test includes branch currents and cannot accept
         // the first Newton correction. Adding a large correction to the seed
         // can otherwise leave cancellation error in a tiny source current.
@@ -2399,10 +2437,10 @@ impl Engine {
                 &mut rhs,
                 node_hints,
                 &solution,
-                uses_vbic_correction,
+                uses_direct_correction,
             )?;
 
-            if uses_vbic_correction {
+            if uses_direct_correction {
                 Self::solve_direct_dc_correction(
                     matrix,
                     &rhs,
@@ -2922,7 +2960,7 @@ impl Engine {
         let mut rhs = vec![0.0; size];
         let mut raw_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::new();
-        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
+        let uses_direct_correction = self.requires_operating_point_correction_form(circuit);
         // The Xyce DC update test includes branch currents and cannot accept
         // the first Newton correction. Adding a large correction to the seed
         // can otherwise leave cancellation error in a tiny source current.
@@ -2987,10 +3025,10 @@ impl Engine {
                 &mut rhs,
                 node_constraints,
                 &solution,
-                uses_vbic_correction,
+                uses_direct_correction,
             )?;
 
-            let solve_result = if uses_vbic_correction {
+            let solve_result = if uses_direct_correction {
                 Self::solve_direct_dc_correction(
                     matrix,
                     &rhs,

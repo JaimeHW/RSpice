@@ -676,7 +676,7 @@ impl Engine {
         let mut rhs = vec![0.0; size];
         let mut raw_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::new();
-        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
+        let uses_direct_correction = self.requires_operating_point_correction_form(circuit);
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
 
         let mut accepted_dt = None;
@@ -738,7 +738,7 @@ impl Engine {
                     solution = anchor_solution.clone();
                     break;
                 }
-                let solve_result = if uses_vbic_correction {
+                let solve_result = if uses_direct_correction {
                     Self::solve_direct_dc_correction(
                         matrix,
                         &rhs,
@@ -1432,7 +1432,7 @@ impl Engine {
         let mut rhs = vec![0.0; solution.len()];
         let mut raw_solution = Vec::with_capacity(solution.len());
         let mut correction_rhs = Vec::new();
-        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
+        let uses_direct_correction = self.requires_operating_point_correction_form(circuit);
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, solution.len());
 
         for iteration in 0..max_iterations {
@@ -1471,7 +1471,7 @@ impl Engine {
             if stage.nodal <= floor {
                 Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, floor)?;
             }
-            let solve_result = if uses_vbic_correction {
+            let solve_result = if uses_direct_correction {
                 Self::solve_direct_dc_correction(
                     matrix,
                     &rhs,

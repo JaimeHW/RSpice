@@ -91,8 +91,10 @@ impl Engine {
     }
 
     /// Complete a partially assembled operating-point system in correction
-    /// coordinates. VBIC contributes its physical currents after the other
-    /// devices' companions have been converted, avoiding large J*x-I sources.
+    /// coordinates. VBIC, and generated Verilog-A devices where
+    /// [`Self::generated_rows_are_physical`] says so, contribute their
+    /// physical currents after the other devices' companions have been
+    /// converted, avoiding large J*x-I sources.
     pub(in crate::engine::convergence) fn try_stamp_operating_point_correction(
         &self,
         circuit: &mut CircuitData,
@@ -103,15 +105,32 @@ impl Engine {
         correction_rhs: &mut Vec<Value>,
     ) -> Result<(), SimulationError> {
         let solution = probe.solution;
+        let analysis = probe.analysis;
         self.try_stamp_operating_point_devices(circuit, matrix, rhs, probe, static_probe, true)?;
         matrix.correction_rhs_into(rhs, solution, correction_rhs)?;
         circuit.stamp_promoted_vbic_correction(matrix, correction_rhs, solution);
+        if self.generated_rows_are_physical(circuit) {
+            circuit
+                .stamp_generated_veriloga_physical(
+                    matrix,
+                    correction_rhs,
+                    solution,
+                    analysis,
+                    if static_probe {
+                        crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe
+                    } else {
+                        crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited
+                    },
+                )
+                .map_err(SimulationError::from)?;
+        }
         Ok(())
     }
 
     /// Assemble an operating-point Newton system using direct correction
-    /// coordinates when promoted VBIC devices need them. The caller must
-    /// apply constraints and interpret the solve in the same coordinates.
+    /// coordinates when [`Self::requires_operating_point_correction_form`]
+    /// says so. The caller must apply constraints and interpret the solve in
+    /// the same coordinates.
     pub(in crate::engine::convergence) fn try_stamp_operating_point_newton_system(
         &self,
         circuit: &mut CircuitData,
@@ -121,7 +140,7 @@ impl Engine {
         static_probe: bool,
         correction_rhs: &mut Vec<Value>,
     ) -> Result<(), SimulationError> {
-        if Self::requires_vbic_correction_form(circuit) {
+        if self.requires_operating_point_correction_form(circuit) {
             self.try_stamp_operating_point_correction(
                 circuit,
                 matrix,
@@ -179,7 +198,10 @@ impl Engine {
             circuit.try_stamp_nonlinear(matrix, rhs, solution)
         }
         .map_err(SimulationError::from)?;
-        if static_probe {
+        if defer_vbic && self.generated_rows_are_physical(circuit) {
+            // The generated rows join the correction once it is formed.
+            circuit.stamp_behavioral_sources(matrix, rhs, solution, time)
+        } else if static_probe {
             circuit.stamp_behavioral_static_probe(matrix, rhs, solution, time, analysis)
         } else {
             circuit.stamp_behavioral(matrix, rhs, solution, time, analysis)

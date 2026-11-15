@@ -229,7 +229,7 @@ impl Engine {
         let mut rhs = vec![0.0; solution.len()];
         let mut raw_solution = Vec::with_capacity(solution.len());
         let mut correction_rhs = Vec::new();
-        let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
+        let uses_direct_correction = self.requires_operating_point_correction_form(circuit);
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, solution.len());
 
         for iter in 0..max_iterations {
@@ -275,7 +275,7 @@ impl Engine {
             if nodal_gmin <= gmin_floor {
                 Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
             }
-            let solve_result = if uses_vbic_correction {
+            let solve_result = if uses_direct_correction {
                 Self::solve_direct_dc_correction(
                     matrix,
                     &rhs,
