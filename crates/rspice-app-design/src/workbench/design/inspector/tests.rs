@@ -5,21 +5,28 @@
 //! override rather than writing it, and that the panel geometry matches its
 //! design contract.
 
+#[cfg(test)]
 mod off_sheet_connectors;
 
 use super::*;
+use crate::state::Point;
+#[cfg(test)]
 use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+#[cfg(test)]
 use crate::state::{
-    Cell, Library, LibraryCellInstance, Point, PortDirection, SchematicProbe, View, ViewType,
+    Cell, Library, LibraryCellInstance, PortDirection, SchematicProbe, View, ViewType,
 };
+#[cfg(test)]
 use crate::workbench::design::test_host::DesignTestHost;
+#[cfg(test)]
 use crate::workbench::docks::inspector::shared::{
     checks_status, sheet_floating_net_findings, sheet_open_pin_findings,
 };
+#[cfg(test)]
 use rspice_design::drc::DrcSeverity;
 
 /// A resistor and a capacitor placed on the model's sheet.
-pub(crate) fn seed_two_components(model: &mut crate::workbench::app_state::Model) {
+pub fn seed_two_components(model: &mut crate::workbench::app_state::Model) {
     model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(0, 0));
@@ -28,12 +35,14 @@ pub(crate) fn seed_two_components(model: &mut crate::workbench::app_state::Model
         .add_component(ComponentType::Capacitor, Point::new(40, 0));
 }
 
+#[cfg(test)]
 pub(crate) fn state_with_two_components() -> DesignTestHost {
     let mut state = DesignTestHost::default();
     seed_two_components(&mut state.model);
     state
 }
 
+#[cfg(test)]
 fn validation_slot_height(editing: bool, reason: Option<&str>) -> f32 {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -70,7 +79,7 @@ fn a_closed_edit_session_leaves_no_reserved_validation_strip() {
     );
 }
 
-pub(crate) fn accesskit_nodes(
+pub fn accesskit_nodes(
     mut add_contents: impl FnMut(&mut egui::Ui),
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
     let ctx = egui::Context::default();
@@ -113,7 +122,7 @@ fn a_rejection_starts_at_the_panels_inset() {
 
 /// Everything one inspector panel paints, at the dock's real width.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
+pub fn painted_panel(mut contents: impl FnMut(&mut Ui)) -> String {
     fn walk(shape: &egui::epaint::Shape, into: &mut String) {
         match shape {
             egui::epaint::Shape::Text(painted) => {
@@ -1036,6 +1045,7 @@ fn a_device_below_the_root_is_read_under_its_instance_path() {
 /// Measure, in the dock's panel body, the space between a section header and
 /// the first block of its body, and between the body's last block and the
 /// next section's header, for a body drawn by `content`.
+#[cfg(test)]
 fn section_body_padding(mut content: impl FnMut(&mut Ui)) -> (f32, f32) {
     use crate::workbench::design_system::{PANEL_HEADER_GAP, PANEL_SECTION_H, panel_body};
 
@@ -1157,6 +1167,7 @@ fn terminal_rows_start_at_the_panel_inset_with_no_empty_caret_column() {
 /// path names an instance the expanded hierarchy has not got. The design
 /// projection refuses such a configuration, so a surface that still shows
 /// connectivity afterwards is showing the editor buffer's.
+#[cfg(test)]
 fn unresolve_configuration(state: &mut DesignTestHost) {
     let root = state.model.workspace.content.active_view.clone();
     state

@@ -11,7 +11,7 @@
 
 /// One folded shelf query.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ShelfQuery {
+pub struct ShelfQuery {
     folded: String,
 }
 
@@ -32,21 +32,21 @@ pub(crate) enum MatchTier {
 /// lists the query as a synonym, and a label that opens with the query before
 /// one that holds it further in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct MatchRank {
+pub struct MatchRank {
     pub(in super::super) tier: MatchTier,
     by_keyword: bool,
     label_trails: bool,
 }
 
 /// The text one shelf row offers a query.
-pub(crate) struct ShelfTerms<'a> {
-    pub(crate) label: &'a str,
-    pub(crate) keywords: &'a [&'a str],
-    pub(crate) part_numbers: &'a [&'a str],
+pub struct ShelfTerms<'a> {
+    pub label: &'a str,
+    pub keywords: &'a [&'a str],
+    pub part_numbers: &'a [&'a str],
 }
 
 impl ShelfQuery {
-    pub(crate) fn new(raw: &str) -> Self {
+    pub fn new(raw: &str) -> Self {
         Self {
             folded: fold(raw).0,
         }
@@ -59,7 +59,7 @@ impl ShelfQuery {
 
     /// How `terms` answers this query, or `None` when it does not. An empty
     /// query answers every row at the bottom tier.
-    pub(crate) fn rank(&self, terms: &ShelfTerms<'_>) -> Option<MatchRank> {
+    pub fn rank(&self, terms: &ShelfTerms<'_>) -> Option<MatchRank> {
         if self.is_empty() {
             return Some(MatchRank {
                 tier: MatchTier::PartNumberSubstring,

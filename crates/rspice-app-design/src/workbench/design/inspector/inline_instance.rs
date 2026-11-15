@@ -12,7 +12,7 @@ use crate::workbench::framework::requests::StageComponentTuning;
 use rspice_design::schematic::bom::BomField;
 use rspice_vocabulary::property::{deck_number_spelling, list_elements};
 
-pub(crate) fn field_value(component: &Component, field: &InlineEditField) -> String {
+pub fn field_value(component: &Component, field: &InlineEditField) -> String {
     match field {
         InlineEditField::Instance => component.name.clone(),
         InlineEditField::Value => component.value.clone(),
@@ -62,7 +62,7 @@ pub(super) fn field_rejection(
     prepare_field_edit(design, model, wb, component, field, candidate).err()
 }
 
-pub(crate) fn prepare_field_edit(
+pub fn prepare_field_edit(
     design: &DesignState,
     model: &Model,
     wb: &WorkbenchSession,
@@ -323,7 +323,7 @@ fn edited_component(
     Ok(component)
 }
 /// Finish the previous field before opening a draft against the live component.
-pub(crate) fn begin_edit(
+pub fn begin_edit(
     cx: &mut Cx<'_, DesignFeature>,
     component_id: u64,
     field: InlineEditField,
@@ -362,7 +362,7 @@ pub(crate) fn begin_edit(
     true
 }
 
-pub(crate) fn update_edit(cx: &mut Cx<'_, DesignFeature>, text: String) {
+pub fn update_edit(cx: &mut Cx<'_, DesignFeature>, text: String) {
     let Some(session) = cx.wb.inline_edit.session() else {
         return;
     };
@@ -397,7 +397,7 @@ pub(super) fn edit_description(field: &InlineEditField) -> String {
     }
 }
 
-pub(crate) fn component_tuning_action_block_reason(
+pub fn component_tuning_action_block_reason(
     cx: &Cx<'_, DesignFeature>,
     component: &Component,
 ) -> Option<String> {
@@ -443,7 +443,7 @@ pub(super) fn edit_row(
 /// A parameter whose sheet states its unit or what it is passes them as
 /// `caption`: the unit sits inside the field's trailing edge and the
 /// description on the label's hover, editable or not.
-pub(crate) fn edit_row_with_hint(
+pub fn edit_row_with_hint(
     ui: &mut Ui,
     cx: &mut Cx<'_, DesignFeature>,
     component: &Component,
@@ -731,12 +731,7 @@ pub(super) fn off_sheet_declaration(model: &Model, name: &str) -> Option<OffShee
     })
 }
 
-pub(crate) fn net_panel(
-    ui: &mut Ui,
-    cx: &mut Cx<'_, DesignFeature>,
-    name: &str,
-    nets: &[DesignNet],
-) {
+pub fn net_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, name: &str, nets: &[DesignNet]) {
     let Some(net) = nets.iter().find(|net| net.name.eq_ignore_ascii_case(name)) else {
         // The conductor resolved to a net connectivity no longer reports.
         // Fall back to the sheet rather than narrate a phantom object.

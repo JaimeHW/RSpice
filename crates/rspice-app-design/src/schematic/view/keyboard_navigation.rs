@@ -9,7 +9,7 @@ use rspice_schematic_editor::view::keyboard_navigation::{
 use super::{SchematicSymbolContext, parts::CanvasParts};
 use crate::workbench::TogglePreference;
 
-pub(crate) fn handle_keyboard_object_navigation(
+pub fn handle_keyboard_object_navigation(
     response: &Response,
     state: &mut CanvasParts<'_>,
     symbol_context: &SchematicSymbolContext,
@@ -43,18 +43,25 @@ pub(crate) fn handle_keyboard_object_navigation(
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
+    #[cfg(test)]
     use super::*;
+    #[cfg(test)]
     use crate::schematic::view::schematic_symbol_context;
+    #[cfg(test)]
     use crate::workbench::app_state::SchematicKeyboardFocus;
+    #[cfg(test)]
     use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
-    use egui::{Context, Event, Id, Key, Modifiers, RawInput, Rect, Sense, pos2, vec2};
+    #[cfg(test)]
+    use egui::{Context, Id, Sense};
+    use egui::{Event, Key, Modifiers, RawInput, Rect, pos2, vec2};
+    #[cfg(test)]
     use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
 
     use crate::state::{Component, ComponentType, Point};
 
-    pub(crate) fn components() -> Vec<Component> {
+    pub fn components() -> Vec<Component> {
         vec![
             Component::new(11, ComponentType::Resistor, Point::new(10, 20)),
             Component::new(22, ComponentType::Capacitor, Point::new(30, 40)),
@@ -168,7 +175,7 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) fn key_input(key: Key, modifiers: Modifiers) -> RawInput {
+    pub fn key_input(key: Key, modifiers: Modifiers) -> RawInput {
         RawInput {
             screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 480.0))),
             events: vec![Event::Key {
@@ -182,6 +189,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(test)]
     fn run_navigation_frame(
         ctx: &Context,
         key: Key,

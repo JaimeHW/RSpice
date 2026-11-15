@@ -4,11 +4,14 @@
 //! drawing that placed it honest about the fact that it is gone. A copied cell
 //! must take its drawings and leave its review history behind.
 
+#[cfg(test)]
 use super::*;
+#[cfg(test)]
 use crate::workbench::design::test_host::DesignTestHost;
 
 /// A placement that carries a copy of its master's netlist identity, which is
 /// what makes a dangling instance look resolved when it is not.
+#[cfg(test)]
 fn amp_placement_with_netlist_identity(state: &mut DesignTestHost) {
     let binding = state.model.schematic.document_mut_for_test().components[0]
         .library_cell

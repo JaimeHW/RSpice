@@ -60,7 +60,7 @@ pub struct SymbolUiState {
 /// wiring is resolved at its first frame, every frame moves the held ends
 /// from that baseline, and the canvas closes it with
 /// [`finish_symbol_parent_edit`] when the pointer lets go.
-pub(crate) fn store_symbol_canvas_frame(
+pub fn store_symbol_canvas_frame(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -85,7 +85,7 @@ pub(crate) fn store_symbol_canvas_frame(
 }
 
 /// The ports the interface its schematic declares gives the active symbol.
-pub(crate) fn active_symbol_ports(model: &Model) -> Vec<PortSpec> {
+pub fn active_symbol_ports(model: &Model) -> Vec<PortSpec> {
     model.symbol_ports(&model.workspace.content.active_view)
 }
 
@@ -93,7 +93,7 @@ pub(crate) fn active_symbol_ports(model: &Model) -> Vec<PortSpec> {
 /// default: the fields of the parameter form a model binds the symbol to,
 /// else what its cell declares to instances, through its compiled module,
 /// its schematic or the symbol view itself.
-pub(crate) fn active_symbol_label_parameters(model: &Model) -> Vec<LabelParameter> {
+pub fn active_symbol_label_parameters(model: &Model) -> Vec<LabelParameter> {
     let reference = &model.workspace.content.active_view;
     let Some(cell) = model
         .library_manager
@@ -212,10 +212,7 @@ pub(crate) fn create_schematic_pins_from_active_symbol(
     Ok(line)
 }
 
-pub(crate) fn symbol_editor_request_source(
-    model: &Model,
-    wb: &WorkbenchSession,
-) -> SymbolRequestSource {
+pub fn symbol_editor_request_source(model: &Model, wb: &WorkbenchSession) -> SymbolRequestSource {
     SymbolRequestSource {
         project: model.workspace.content.project.id(),
         document: model.workspace.content.active_view.clone(),
@@ -348,8 +345,8 @@ fn restore_active_symbol_snapshot(
 }
 
 /// Whether the active symbol's history holds a step to take back.
-#[cfg(test)]
-pub(crate) fn can_undo_active_symbol_document(symbol: &SymbolUiState, model: &Model) -> bool {
+#[cfg(any(test, feature = "test-support"))]
+pub fn can_undo_active_symbol_document(symbol: &SymbolUiState, model: &Model) -> bool {
     symbol
         .history
         .can_undo(&model.workspace.content.active_key())
@@ -357,7 +354,7 @@ pub(crate) fn can_undo_active_symbol_document(symbol: &SymbolUiState, model: &Mo
 
 /// Step the active symbol's history back; `Ok(false)` when it holds
 /// no step to take.
-pub(crate) fn undo_active_symbol_document(
+pub fn undo_active_symbol_document(
     symbol: &mut SymbolUiState,
     model: &mut Model,
 ) -> Result<bool, String> {
@@ -379,7 +376,7 @@ pub(crate) fn undo_active_symbol_document(
 
 /// Step the active symbol's history forward; `Ok(false)` when it holds
 /// no step to take.
-pub(crate) fn redo_active_symbol_document(
+pub fn redo_active_symbol_document(
     symbol: &mut SymbolUiState,
     model: &mut Model,
 ) -> Result<bool, String> {
@@ -399,7 +396,7 @@ pub(crate) fn redo_active_symbol_document(
     Ok(true)
 }
 
-pub(crate) fn load_active_symbol_editor_metadata(
+pub fn load_active_symbol_editor_metadata(
     model: &Model,
     document: &SymbolDocument,
 ) -> Result<SymbolEditorMetadata, String> {
@@ -427,7 +424,7 @@ fn active_symbol_snapshot(model: &Model, fallback: &SymbolDocument) -> SymbolDoc
 
 /// The refusal message for the symbol editor's read-only banner, naming
 /// which of the four owners holds the lock.
-pub(crate) fn symbol_editor_lock_message(model: &Model) -> String {
+pub fn symbol_editor_lock_message(model: &Model) -> String {
     if let Some(holder) = model
         .live_write_locks
         .schematic_views
@@ -444,7 +441,7 @@ pub(crate) fn symbol_editor_lock_message(model: &Model) -> String {
 
 /// Whether copying the cell into an editable library is a route out of
 /// the lock. It is not one when the whole project refuses writes.
-pub(crate) fn symbol_editor_copy_available(model: &Model) -> bool {
+pub fn symbol_editor_copy_available(model: &Model) -> bool {
     !model.safe_mode.project_read_only()
         && !model.live_write_locks.mirror
         && !model.workspace.content.active_read_only_reference()
@@ -452,7 +449,7 @@ pub(crate) fn symbol_editor_copy_available(model: &Model) -> bool {
 
 /// Draw the active symbol from its ports, as one undoable edit of the
 /// symbol when the drawing changes.
-pub(crate) fn generate_active_symbol_document(
+pub fn generate_active_symbol_document(
     symbol: &mut SymbolUiState,
     model: &mut Model,
 ) -> Result<(), String> {
@@ -481,7 +478,7 @@ fn record_symbol_metadata_edit(symbol: &mut SymbolUiState, model: &Model, before
     push_symbol_undo_snapshot(symbol, key, snapshot, MAX_SYMBOL_UNDO);
 }
 
-pub(crate) fn store_active_symbol_document(
+pub fn store_active_symbol_document(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     document: &SymbolDocument,
@@ -513,7 +510,7 @@ pub(crate) fn store_active_symbol_document(
 /// the save, the wires it holds follow the restored pins, and the symbol is
 /// left with no steps to undo or redo, since none of them leads from the
 /// restored drawing.
-pub(crate) fn revert_active_symbol_with<T, E>(
+pub fn revert_active_symbol_with<T, E>(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     restore: impl FnOnce(&mut Model) -> Result<T, E>,
@@ -680,7 +677,7 @@ fn wire_ends_left_by_removed_pins(
 
 /// Close the held edit: each parent it changed gets one undo record
 /// spanning the whole edit.
-pub(crate) fn finish_symbol_parent_edit(symbol: &mut SymbolUiState, model: &mut Model) {
+pub fn finish_symbol_parent_edit(symbol: &mut SymbolUiState, model: &mut Model) {
     const DESCRIPTION: &str = "move wires with symbol pins";
     let Some((symbol_key, edit)) = symbol.history.take_parent_edit() else {
         return;
@@ -719,7 +716,7 @@ pub(crate) fn finish_symbol_parent_edit(symbol: &mut SymbolUiState, model: &mut 
 }
 
 /// Atomically publish symbol geometry and its authoring-only metadata.
-pub(crate) fn store_active_symbol_editor_bundle(
+pub fn store_active_symbol_editor_bundle(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -742,7 +739,7 @@ pub(crate) fn store_active_symbol_editor_bundle(
 /// cannot recover. A pin rename reaches every instance from here and
 /// nowhere else, because this is the one point at which the old name and
 /// the new one are both still known.
-pub(crate) fn commit_active_symbol_edit(
+pub fn commit_active_symbol_edit(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -844,7 +841,7 @@ fn rename_placed_terminals(
 }
 
 /// Record the edit away from `before` as one undo step called `step`.
-pub(crate) fn record_symbol_edit(
+pub fn record_symbol_edit(
     symbol: &mut SymbolUiState,
     model: &Model,
     before: &SymbolDocument,
@@ -872,7 +869,7 @@ fn push_symbol_undo_snapshot(
 /// The distinction is the point: `Some(0)` says the checks ran and the
 /// pins match, which is a different claim from nobody having looked, and
 /// a control that offered to clear nothing would be a dead control.
-pub(in crate::workbench) fn active_symbol_pin_finding_count(model: &Model) -> Option<usize> {
+pub fn active_symbol_pin_finding_count(model: &Model) -> Option<usize> {
     active_symbol_pin_records(model).map(|records| records.len())
 }
 
@@ -950,7 +947,7 @@ pub(crate) fn cycle_active_symbol_pin_finding(nav: &mut NavigationParts<'_>, ste
 
 /// Check the active symbol's pins against its schematic and publish what
 /// the check finds, with one Console line saying it ran.
-pub(crate) fn run_active_symbol_pin_checks(model: &mut Model, facts: SlotFacts) {
+pub fn run_active_symbol_pin_checks(model: &mut Model, facts: SlotFacts) {
     let reference = model.workspace.content.active_view.clone();
     let inputs = match model.symbol_pin_check_inputs(&reference) {
         Ok(inputs) => inputs,

@@ -10,7 +10,7 @@
 
 use rspice_app_cloud::workbench::slots::cloud;
 use rspice_app_code::workbench::slots::code;
-mod design;
+use rspice_app_design::workbench::slots::design;
 use rspice_app_hardcopy::workbench::slots::hardcopy;
 use rspice_app_models::workbench::slots::models;
 use rspice_app_project::workbench::slots::project;

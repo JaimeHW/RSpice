@@ -3,7 +3,7 @@
 use crate::state::CellViewRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum SymbolImportBindingChoice {
+pub enum SymbolImportBindingChoice {
     #[default]
     ExplicitModelContract,
     /// The model an LTspice symbol names in its own attributes.
@@ -15,15 +15,15 @@ pub(crate) enum SymbolImportBindingChoice {
 /// the transaction so a parse or contract error is always retryable without
 /// reopening the platform picker.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SymbolImportDialogState {
-    pub(crate) open: bool,
-    pub(crate) source_name: String,
-    pub(crate) source_text: String,
-    pub(crate) target_library: String,
-    pub(crate) target_name: String,
-    pub(crate) binding_choice: SymbolImportBindingChoice,
-    pub(crate) binding_source: Option<CellViewRef>,
-    pub(crate) dirty: bool,
+pub struct SymbolImportDialogState {
+    pub open: bool,
+    pub source_name: String,
+    pub source_text: String,
+    pub target_library: String,
+    pub target_name: String,
+    pub binding_choice: SymbolImportBindingChoice,
+    pub binding_source: Option<CellViewRef>,
+    pub dirty: bool,
     pub(crate) discard_confirm: bool,
     pub(crate) source_error: Option<String>,
     pub(crate) validation_error: Option<String>,
@@ -42,7 +42,7 @@ impl SymbolImportDialogState {
         *self = Self::default();
     }
 
-    pub(crate) fn accept_source(&mut self, name: String, text: String) {
+    pub fn accept_source(&mut self, name: String, text: String) {
         // An LTspice symbol names the model it binds; it starts bound to it.
         if is_ltspice_symbol(&name) {
             self.binding_choice = SymbolImportBindingChoice::SymbolAttributes;
@@ -72,17 +72,17 @@ pub(crate) enum ParameterFormPhase {
 /// The parameter form draft is completed by the typed symbol-domain module;
 /// this shell retains navigation, target identity and transaction treatment.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SymbolParameterFormDialogState {
-    pub(crate) open: bool,
-    pub(crate) target: Option<CellViewRef>,
+pub struct SymbolParameterFormDialogState {
+    pub open: bool,
+    pub target: Option<CellViewRef>,
     pub(crate) phase: ParameterFormPhase,
     pub(crate) original_definition: Option<crate::state::ModelBoundSymbolDefinition>,
-    pub(crate) draft_form: Option<crate::state::SymbolParameterForm>,
+    pub draft_form: Option<crate::state::SymbolParameterForm>,
     pub(crate) selected_section: Option<String>,
     pub(crate) selected_field: Option<String>,
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
-    pub(crate) validation_error: Option<String>,
+    pub validation_error: Option<String>,
 }
 
 impl SymbolParameterFormDialogState {

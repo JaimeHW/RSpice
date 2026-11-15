@@ -163,7 +163,7 @@ fn cell_contract_property_sheet(
 /// Exact property contract used by both the modal editor and inline
 /// inspector. Dynamic catalog/library cells must never fall back to the
 /// generic `CellInstance` registry sheet.
-pub(crate) fn authoritative_component_property_sheet(
+pub fn authoritative_component_property_sheet(
     registry: &crate::properties::PropertyEditorSchema,
     model: &Model,
     component: &Component,
@@ -533,7 +533,7 @@ fn format_complex_vector(values: &[rspice_core::Complex64]) -> String {
 /// Single authority for the schematic Object properties command, over the
 /// property schema and the model. Availability requires a live target that the
 /// matching editor can actually open.
-pub(crate) fn selected_object_properties_available_in(
+pub fn selected_object_properties_available_in(
     registry: &PropertyEditorSchema,
     model: &Model,
 ) -> bool {
@@ -630,7 +630,7 @@ pub(crate) fn selected_object_properties_available_in(
 /// What opening a properties form reads and writes of the design feature's
 /// state: the component editor, the generic form, the schema they draw
 /// from, and whether the rename form holds the selection.
-pub(crate) struct PropertyFormParts<'a> {
+pub struct PropertyFormParts<'a> {
     pub(crate) tabbed_property_dialog: &'a mut TabbedPropertyDialogState,
     pub(crate) object_properties: &'a mut ObjectPropertiesDialogState,
     pub(crate) rename_open: bool,
@@ -640,7 +640,7 @@ pub(crate) struct PropertyFormParts<'a> {
 /// Open the schematic component editor for `component_id`, populated from the
 /// component's registry sheet and current values, over the forms, the model
 /// and the session. Refused on read-only views — the editor is an edit path.
-pub(crate) fn open_property_editor_in(
+pub fn open_property_editor_in(
     parts: &mut PropertyFormParts<'_>,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -763,7 +763,7 @@ pub(in crate::workbench) fn stimulus_preview_timing(model: &Model) -> PreviewTim
 /// instances retain their schema-driven editor; buses, taps, and wire-resolved
 /// named nets use the topology-aware generic transaction specified by the
 /// workbench mockup.
-pub(crate) fn open_selected_object_properties_in(
+pub fn open_selected_object_properties_in(
     parts: &mut PropertyFormParts<'_>,
     model: &mut Model,
     wb: &mut WorkbenchSession,

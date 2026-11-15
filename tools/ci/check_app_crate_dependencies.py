@@ -159,6 +159,19 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-design", "rspice-design-model", "rspice-project", "rspice-schematic-editor",
         "rspice-simulation", "rspice-simulation-contract", "rspice-ui-kit",
     },
+    # The design feature: the persisted model, the platform services, the run
+    # tier whose preflight and runs a probe reads, the workbench framework it
+    # registers with, and the design, design-model, schematic-editor, result,
+    # model-library, simulation and painting crates its canvas, symbol editor,
+    # navigator, inspector, stimulus editor and dialogs are built on. Its
+    # test-support seams file masters with the project crate's library
+    # fixtures.
+    "rspice-app-design": {
+        "rspice-app-state", "rspice-app-services", "rspice-app-runs", "rspice-app-workbench",
+        "rspice-vocabulary", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui",
+        "rspice-design", "rspice-design-model", "rspice-results", "rspice-model-library",
+        "rspice-project", "rspice-simulation", "rspice-simulation-contract",
+    },
     "rspice-worker": {"rspice-vocabulary", "rspice-design", "rspice-simulation", "rspice-hardcopy"},
 }
 HEADLESS = set(ALLOWED) - {
@@ -166,13 +179,14 @@ HEADLESS = set(ALLOWED) - {
     "rspice-app-services", "rspice-app-runs", "rspice-app-workbench", "rspice-app-sheets",
     "rspice-app-settings", "rspice-app-results", "rspice-app-hardcopy", "rspice-app-cloud",
     "rspice-app-models", "rspice-app-simulate", "rspice-app-code", "rspice-app-project",
+    "rspice-app-design",
 }
 # The application's feature crates. A feature reaches no other feature, and
 # nothing above the workbench framework.
 FEATURES = {
     "rspice-app-simulate", "rspice-app-results", "rspice-app-models", "rspice-app-sheets",
     "rspice-app-hardcopy", "rspice-app-settings", "rspice-app-cloud", "rspice-app-code",
-    "rspice-app-project",
+    "rspice-app-project", "rspice-app-design",
 }
 GUI_PACKAGES = {"eframe", "winit", "rfd", "wgpu"}
 ENGINE_PACKAGES = {

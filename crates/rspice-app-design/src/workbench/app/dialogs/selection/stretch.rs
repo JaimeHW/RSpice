@@ -27,12 +27,12 @@ use rspice_schematic_editor::session::visibility::SchematicWireRoutingStyle;
 /// mutation and remains stable through the live canvas preview and the
 /// atomic commit.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct StretchSelectionDialogState {
-    pub(crate) armed: bool,
-    pub(crate) policy: crate::state::StretchOrthogonalPolicy,
-    pub(crate) authority: Option<SchematicEditAuthority>,
-    pub(crate) canvas: rspice_schematic_editor::session::stretch::StretchCanvasSession,
-    pub(crate) generation: u64,
+pub struct StretchSelectionDialogState {
+    pub armed: bool,
+    pub policy: crate::state::StretchOrthogonalPolicy,
+    pub authority: Option<SchematicEditAuthority>,
+    pub canvas: rspice_schematic_editor::session::stretch::StretchCanvasSession,
+    pub generation: u64,
 }
 
 impl StretchSelectionDialogState {
@@ -79,7 +79,7 @@ fn policy_for_sheet(wire_routing: SchematicWireRoutingStyle) -> StretchOrthogona
 /// Arm Stretch over the three canvas tools' drafts, the sheet's wire
 /// routing, the model and the session: arming Stretch stops an armed Move
 /// or Create array.
-pub(crate) fn arm_stretch_selection_in(
+pub fn arm_stretch_selection_in(
     draft: &mut StretchSelectionDialogState,
     move_draft: &mut MoveSelectionDialogState,
     array: &mut ArraySelectionDialogState,
@@ -129,7 +129,7 @@ fn validate_draft(draft: &StretchSelectionDialogState, model: &Model) -> Result<
     Ok(())
 }
 
-pub(crate) fn armed_stretch_selection_authority(
+pub fn armed_stretch_selection_authority(
     draft: &StretchSelectionDialogState,
     model: &Model,
 ) -> Result<(), String> {
@@ -141,7 +141,7 @@ pub(crate) fn armed_stretch_selection_authority(
 
 /// End an armed Stretch: close its dialog, and let its tool go if the
 /// canvas still holds it.
-pub(crate) fn cancel_armed_stretch_selection_in(
+pub fn cancel_armed_stretch_selection_in(
     dialog: &mut StretchSelectionDialogState,
     model: &mut Model,
 ) {

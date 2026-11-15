@@ -33,7 +33,7 @@ use crate::workbench::state::WorkbenchSession;
 /// validated as one candidate and the live document remains unchanged until
 /// the canvas commit boundary succeeds.
 #[derive(Debug, Clone)]
-pub(crate) struct ArraySelectionPreviewCache {
+pub struct ArraySelectionPreviewCache {
     pub(crate) plan: crate::state::SchematicArrayPlan,
     pub(crate) library_revision: u64,
     pub(crate) symbol_revision: u64,
@@ -42,15 +42,15 @@ pub(crate) struct ArraySelectionPreviewCache {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ArraySelectionDialogState {
-    pub(crate) open: bool,
-    pub(crate) armed: bool,
-    pub(crate) kind: crate::state::SchematicArrayKind,
-    pub(crate) count: String,
-    pub(crate) naming: String,
+pub struct ArraySelectionDialogState {
+    pub open: bool,
+    pub armed: bool,
+    pub kind: crate::state::SchematicArrayKind,
+    pub count: String,
+    pub naming: String,
     pub(crate) authority: Option<SchematicEditAuthority>,
-    pub(crate) canvas: rspice_schematic_editor::session::transform::TransformCanvasSession,
-    pub(crate) generation: u64,
+    pub canvas: rspice_schematic_editor::session::transform::TransformCanvasSession,
+    pub generation: u64,
     pub(crate) preview_cache: Option<ArraySelectionPreviewCache>,
     pub(crate) initial_kind: crate::state::SchematicArrayKind,
     pub(crate) initial_count: String,
@@ -59,12 +59,7 @@ pub(crate) struct ArraySelectionDialogState {
 }
 
 impl ArraySelectionDialogState {
-    pub(crate) fn open(
-        &mut self,
-        authority: SchematicEditAuthority,
-        count: String,
-        naming: String,
-    ) {
+    pub fn open(&mut self, authority: SchematicEditAuthority, count: String, naming: String) {
         let initial_count = count.clone();
         let initial_naming = naming.clone();
         *self = Self {
@@ -84,7 +79,7 @@ impl ArraySelectionDialogState {
         };
     }
 
-    pub(crate) fn arm(&mut self) {
+    pub fn arm(&mut self) {
         self.open = false;
         self.armed = true;
         self.canvas = Default::default();
@@ -226,7 +221,7 @@ impl DraftValidation {
 
 /// Open Create array over the three canvas tools' drafts, the model and the
 /// session: opening it stops an armed Move or Stretch.
-pub(crate) fn open_array_selection_dialog_in(
+pub fn open_array_selection_dialog_in(
     dialog: &mut ArraySelectionDialogState,
     move_draft: &mut MoveSelectionDialogState,
     stretch: &mut StretchSelectionDialogState,
@@ -390,7 +385,7 @@ fn validate_draft(draft: &ArraySelectionDialogState, model: &Model) -> DraftVali
     }
 }
 
-pub(crate) fn armed_array_selection_authority(
+pub fn armed_array_selection_authority(
     draft: &ArraySelectionDialogState,
     model: &Model,
 ) -> Result<(), String> {
@@ -403,7 +398,7 @@ pub(crate) fn armed_array_selection_authority(
     }
 }
 
-pub(crate) fn armed_array_selection_plan(
+pub fn armed_array_selection_plan(
     draft: &ArraySelectionDialogState,
     model: &Model,
     placement: SchematicArrayPlacement,
@@ -415,10 +410,7 @@ pub(crate) fn armed_array_selection_plan(
 
 /// End an armed Array: close its dialog, and let its tool go if the
 /// canvas still holds it.
-pub(crate) fn cancel_armed_array_selection_in(
-    dialog: &mut ArraySelectionDialogState,
-    model: &mut Model,
-) {
+pub fn cancel_armed_array_selection_in(dialog: &mut ArraySelectionDialogState, model: &mut Model) {
     dialog.close();
     if model.schematic.session.editor.tool == Tool::ArraySelection {
         model.schematic.cancel_tool();

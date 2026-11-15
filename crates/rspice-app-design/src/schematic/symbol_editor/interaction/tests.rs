@@ -4,12 +4,15 @@ use super::*;
 use crate::state::{
     Cell, CellViewRef, Library, Point, PortDirection, SymbolPin, SymbolShape, View, ViewType,
 };
+#[cfg(test)]
 use crate::workbench::SymbolTool;
 use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
+#[cfg(test)]
 use rspice_schematic_editor::symbol_editor::interaction::SymbolCanvasInput;
+#[cfg(test)]
 use rspice_schematic_editor::symbol_editor::session::{SymbolSelection, SymbolTextDraft};
 
-pub(crate) fn open_symbol() -> DesignTestHost {
+pub fn open_symbol() -> DesignTestHost {
     let mut state = DesignTestHost::default();
     let mut library = Library::new("work");
     let mut cell = Cell::new("amp");
@@ -41,7 +44,7 @@ pub(crate) fn open_symbol() -> DesignTestHost {
     state
 }
 
-pub(crate) fn viewport() -> SymbolViewport {
+pub fn viewport() -> SymbolViewport {
     SymbolViewport::new(
         egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0)),
         2.0,
@@ -49,6 +52,7 @@ pub(crate) fn viewport() -> SymbolViewport {
     )
 }
 
+#[cfg(test)]
 fn request(state: &DesignTestHost, input: SymbolCanvasInput) -> SymbolCanvasRequest {
     SymbolCanvasRequest {
         source: crate::workbench::app::symbol_editor_request_source(&state.model, &state.workbench),
@@ -61,11 +65,13 @@ fn request(state: &DesignTestHost, input: SymbolCanvasInput) -> SymbolCanvasRequ
 
 /// The circle tool with its center placed, so that a click anywhere off the
 /// center draws a circle: input that would edit the document if let through.
+#[cfg(test)]
 fn arm_circle(state: &mut DesignTestHost) {
     state.design.symbol.editor.tool = SymbolTool::Circle;
     state.design.symbol.editor.shape_start = Some(Point::origin());
 }
 
+#[cfg(test)]
 fn apply(state: &mut DesignTestHost, request: SymbolCanvasRequest) {
     let mut document = state.model.load_active_symbol_document().unwrap();
     let mut metadata =
@@ -337,8 +343,10 @@ fn symbol_gesture_cannot_follow_the_same_master_into_another_occurrence() {
     assert!(!state.can_undo_active_symbol_document());
 }
 
+#[cfg(test)]
 const TOP: &str = "work/top/schematic";
 /// X1's world position in `top`; INP's wire is 10, INN's is 11.
+#[cfg(test)]
 const X1: Point = Point::new(100, 100);
 
 /// Cell `amp` drawn as an OTA, INP above INN on the left edge, and placed as
@@ -346,6 +354,7 @@ const X1: Point = Point::new(100, 100);
 ///
 /// With `hidden_vertex`, `top` has two sheets: X1 and its wires on Sheet 1,
 /// and on Sheet 2 a wire whose vertex sits exactly where INP meets its wire.
+#[cfg(test)]
 fn ota_placed_in_open_parent(hidden_vertex: bool) -> DesignTestHost {
     use crate::state::{
         Component, ComponentType, LibraryCellInstance, PortSpec, SchematicState, SheetDefinition,
@@ -430,6 +439,7 @@ fn ota_placed_in_open_parent(hidden_vertex: bool) -> DesignTestHost {
     state
 }
 
+#[cfg(test)]
 fn parent_document(
     state: &DesignTestHost,
 ) -> rspice_design::schematic::document::SchematicDocument {
@@ -439,12 +449,14 @@ fn parent_document(
 }
 
 /// The whole of `top` as it would be written, for a bit-for-bit comparison.
+#[cfg(test)]
 fn parent_bits(state: &DesignTestHost) -> serde_json::Value {
     serde_json::to_value(parent_document(state)).unwrap()
 }
 
 /// Each X1 terminal and the wires its net holds, as the extractor reads
 /// `top` against the symbol as it stands now.
+#[cfg(test)]
 fn parent_nets(state: &DesignTestHost) -> std::collections::BTreeMap<String, Vec<u64>> {
     use rspice_design::resolved_symbol::ResolvedCellSymbol;
     let symbol = state.model.load_active_symbol_document().unwrap();
@@ -474,6 +486,7 @@ fn parent_nets(state: &DesignTestHost) -> std::collections::BTreeMap<String, Vec
 }
 
 /// Drag INP through `points`, one frame each, then release.
+#[cfg(test)]
 fn drag_inp(state: &mut DesignTestHost, points: &[Point]) {
     state.design.symbol.editor.dragging_pin = Some("INP".to_owned());
     for point in points {
@@ -500,6 +513,7 @@ fn drag_inp(state: &mut DesignTestHost, points: &[Point]) {
 }
 
 /// INP dragged down the left edge, past INN, to below it.
+#[cfg(test)]
 const PAST_INN: [Point; 4] = [
     Point::new(-30, 0),
     Point::new(-30, 10),

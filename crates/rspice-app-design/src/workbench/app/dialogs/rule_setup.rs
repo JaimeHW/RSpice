@@ -23,14 +23,14 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Design rule setup";
-pub(crate) const PRIMARY: &str = "Apply";
+pub const PRIMARY: &str = "Apply";
 const DESCRIPTION: &str = "The severity each design rule is reported at in this project, and \
     whether a finding of it may be waived. Saved with the project.";
 
 /// What the last column states, for a reader who asks.
 const LOWEST_ALLOWED: &str = "The lowest severity this project may report the rule at; a finding     on an instance the deck cannot write is held at the second where one is named";
 /// Why Apply is unavailable while the draft is the project's deck.
-pub(crate) const UNCHANGED: &str = "No rule's severity has changed.";
+pub const UNCHANGED: &str = "No rule's severity has changed.";
 
 /// Why an option below a rule's floor cannot be chosen.
 const REFUSES_THE_RUN: &str = "A finding of this rule refuses the run whatever it is reported as";
@@ -40,13 +40,13 @@ const NEVER_BLOCKS: &str = "This rule is about the project's libraries and never
 
 /// The draft deck the dialog edits, and why the last edit was refused.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct RuleSetupDialogState {
-    pub(crate) open: bool,
-    pub(crate) draft: DesignRuleDeck,
+pub struct RuleSetupDialogState {
+    pub open: bool,
+    pub draft: DesignRuleDeck,
     refusal: Option<String>,
 }
 
-pub(crate) fn open_rule_setup(
+pub fn open_rule_setup(
     dialog: &mut RuleSetupDialogState,
     model: &Model,
     workbench: &mut WorkbenchSession,
@@ -64,7 +64,7 @@ pub(crate) fn open_rule_setup(
 }
 
 /// The issue that keeps the whole stored deck from being read, if any.
-pub(crate) fn unread_issue(deck: &DesignRuleDeck) -> Option<DeckIssue> {
+pub fn unread_issue(deck: &DesignRuleDeck) -> Option<DeckIssue> {
     deck.issues().into_iter().find(|issue| {
         matches!(
             issue,
@@ -76,7 +76,7 @@ pub(crate) fn unread_issue(deck: &DesignRuleDeck) -> Option<DeckIssue> {
 /// Draw the dialog while it is open, over its draft, the review markers the
 /// drawing shows, the model and the run tier. Returns whether the draft was
 /// applied, so the caller drops any run prepared under the old deck.
-pub(crate) fn render_rule_setup_dialog(
+pub fn render_rule_setup_dialog(
     rule_setup: &mut RuleSetupDialogState,
     review_markers: SchematicReviewMarkerVisibility,
     model: &mut Model,
@@ -133,7 +133,7 @@ pub(crate) fn render_rule_setup_dialog(
 /// Make the draft the project's deck. The reports produced under the old one
 /// go stale through their digests, and preflight authority is dropped,
 /// because what blocks a run has changed.
-pub(crate) fn apply_rule_setup(
+pub fn apply_rule_setup(
     rule_setup: &mut RuleSetupDialogState,
     review_markers: SchematicReviewMarkerVisibility,
     model: &mut Model,
@@ -210,7 +210,7 @@ fn severity_options() -> Vec<String> {
         .collect()
 }
 
-pub(crate) const INHERIT_DEFAULT: &str = "Default";
+pub const INHERIT_DEFAULT: &str = "Default";
 
 fn rule_row(
     ui: &mut Ui,

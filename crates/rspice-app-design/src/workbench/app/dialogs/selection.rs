@@ -2,11 +2,11 @@
 //! armed Move and Stretch tools, and the array, rename, bulk-edit and
 //! shared-properties forms.
 
-pub(in crate::workbench) mod array;
-pub(crate) mod bulk_edit;
-pub(in crate::workbench) mod bulk_filter;
-pub(in crate::workbench) mod commands;
-pub(crate) mod move_selection;
-pub(crate) mod rename;
-pub(crate) mod shared_properties;
-pub(crate) mod stretch;
+pub mod array;
+pub mod bulk_edit;
+pub mod bulk_filter;
+pub mod commands;
+pub mod move_selection;
+pub mod rename;
+pub mod shared_properties;
+pub mod stretch;

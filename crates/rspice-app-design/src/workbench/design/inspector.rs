@@ -6,15 +6,15 @@
 //! itself. Every row is backed by live document state; no panel narrates a
 //! fact the open design cannot supply.
 
-pub(crate) mod component;
-pub(crate) mod model_evidence;
+pub mod component;
+pub mod model_evidence;
 /// Visible to the workbench so the library browser's own gate can render this
 /// pane beside it: the two panels state the same counts about the same design,
 /// and a review that only ever opened one of them would not see them disagree.
-pub(crate) mod stimulus;
-pub(crate) mod symbol;
+pub mod stimulus;
+pub mod symbol;
 
-pub(crate) use component::bind_component_model_from_catalog;
+pub use component::bind_component_model_from_catalog;
 
 use component::*;
 use model_evidence::{ComponentModelEvidence, component_model_evidence};
@@ -312,7 +312,7 @@ fn selected_net_name(model: &Model, nets: &[DesignNet]) -> Option<String> {
 /// typed would be lost; one the selection has moved off is committed, and
 /// when that fails its instance is selected again and held in the inspector
 /// so the edit can be corrected. A symbol's inspector holds no inline edit.
-pub(in crate::workbench) fn prepare(cx: &mut Cx<'_, DesignFeature>) {
+pub fn prepare(cx: &mut Cx<'_, DesignFeature>) {
     cx.state.inspector_holds_failed_edit = None;
     if cx.model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol) {
         return;
@@ -359,13 +359,13 @@ fn inline_edit_is_stale(model: &Model, session: &InlineEditSession) -> bool {
 /// by a pass of the design inspector that shows something other than the
 /// sheet. The shell answers it once the inspector has drawn.
 #[derive(Clone, Debug)]
-pub(crate) struct CommitSheetSection(pub(crate) egui::Context);
+pub struct CommitSheetSection(pub egui::Context);
 
 impl Request for CommitSheetSection {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
-pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     cx.state.inspector_yields_to_sheet = false;
     // prepare() ended a stale edit with nothing typed; one with a draft
     // says so and offers to discard it.
@@ -416,15 +416,15 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
 /// Connectivity for the open sheet as the configured design resolves it: its
 /// nets, and every instance's declared terminals paired with the net each one
 /// binds.
-pub(crate) struct SheetConnectivity {
-    pub(crate) nets: std::sync::Arc<Vec<DesignNet>>,
+pub struct SheetConnectivity {
+    pub nets: std::sync::Arc<Vec<DesignNet>>,
     /// Instance ID → declared terminals in symbol order, each with the net
     /// it binds or `None` when the pin is open.
-    pub(crate) terminals: HashMap<u64, Vec<(String, Option<String>)>>,
+    pub terminals: HashMap<u64, Vec<(String, Option<String>)>>,
     /// Why the design projection could not be built, when it could not.
     /// Present means the two collections above are empty by refusal rather
     /// than because the sheet has nothing on it.
-    pub(crate) unresolved: Option<String>,
+    pub unresolved: Option<String>,
 }
 
 /// Resolve the open sheet's connectivity from the design projection.
@@ -435,7 +435,7 @@ pub(crate) struct SheetConnectivity {
 /// emits. A version-keyed cache here would be wrong anyway: net identity
 /// depends on instance values and port parameters, which do not advance the
 /// schematic topology version.
-pub(crate) fn sheet_connectivity(model: &Model) -> SheetConnectivity {
+pub fn sheet_connectivity(model: &Model) -> SheetConnectivity {
     let projection = match model.workspace.design_projection(
         &model.library_manager,
         &model.workspace.content.active_view,
@@ -623,7 +623,7 @@ fn sheet_row(ui: &mut Ui, model: &Model, object_id: u64) {
 
 // =============================================================================
 // Inline instance editing lives in `design/inline_instance.rs`.
-pub(crate) mod inline_instance;
+pub mod inline_instance;
 use inline_instance::*;
 
 // =============================================================================
@@ -741,7 +741,7 @@ fn shape_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
     sheet_row(ui, cx.model, id);
 }
 
-pub(crate) fn probe_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
+pub fn probe_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
     let Some(probe) = cx
         .model
         .schematic
@@ -832,5 +832,5 @@ pub(crate) fn probe_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) 
     });
 }
 
-#[cfg(test)]
-pub(crate) mod tests;
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests;

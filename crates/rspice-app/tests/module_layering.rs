@@ -58,11 +58,12 @@ const LAYERS: &[(&str, u32)] = &[
     // runs, the run preflight and the runs' slot) in `rspice-app-runs`, below
     // every module here; each may reference them. The workbench framework
     // compiles as `rspice-app-workbench`, and the sheets, settings, results,
-    // hardcopy, cloud, models, simulate, code and project features as
+    // hardcopy, cloud, models, simulate, code, project and design features as
     // `rspice-app-sheets`, `rspice-app-settings`, `rspice-app-results`,
     // `rspice-app-hardcopy`, `rspice-app-cloud`, `rspice-app-models`,
-    // `rspice-app-simulate`, `rspice-app-code` and `rspice-app-project`, inside
-    // `workbench`, where the interior order below ranks them.
+    // `rspice-app-simulate`, `rspice-app-code`, `rspice-app-project` and
+    // `rspice-app-design`, inside `workbench`, where the interior order below
+    // ranks them.
     //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, so the bottom layer clears every inbound edge
@@ -122,17 +123,10 @@ const ALLOWED_VIOLATIONS: &[(&str, &str)] = &[
     // the console/log models moved to `crate::diagnostics` (schematic
     // 102 -> 98, simulation 87 -> 60).
     //
-    // `schematic -> workbench` is the same shape as the retired
-    // `state -> workbench` edge: types the project *persists* still live in
-    // the shell, so a lower layer must name the shell to read them. It retires
-    // the way `state -> workbench` did — by moving the persisted contract down,
-    // not by narrowing a signature.
-    ("schematic", "workbench"),
-    // Editors and orchestration referencing each other sideways; retired by
-    // the granularity folds and the `properties`/`panels` merge.
-    // Result aggregation, optimization execution, netlisting and materialized
-    // OP dispatch remain app-owned until R04/R11 finish their extraction.
-    ("services", "simulation"),
+    // `schematic -> workbench` retired with the design feature's crate: the
+    // schematic binding compiles in rspice-app-design now, which reaches the
+    // shell's hubs through its own root. `services -> simulation` retired with
+    // it, because the design rule checks' tests, its last reference, moved too.
 ];
 
 fn src_dir() -> PathBuf {
@@ -225,11 +219,12 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 }
 
 /// The application crates every whole-file scan must find: this crate and the
-/// thirteen split out of it so far. Discovery may find more, never fewer.
-const KNOWN_APP_CRATES: [&str; 14] = [
+/// fourteen split out of it so far. Discovery may find more, never fewer.
+const KNOWN_APP_CRATES: [&str; 15] = [
     "rspice-app",
     "rspice-app-cloud",
     "rspice-app-code",
+    "rspice-app-design",
     "rspice-app-hardcopy",
     "rspice-app-models",
     "rspice-app-project",
@@ -639,8 +634,7 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "documents/text_document_model",
     "documents/text_editor_commands",
     "documents/virtual_text_editor",
-    // Document engines and the interaction session they hang off.
-    "lifecycle/session",
+    // Document engines.
     "documents/netlist_document",
     "documents/result_document",
     "documents/code_workspace",
@@ -835,7 +829,13 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     // moved into the code feature's tests, or with the dialogs re-homed
     // under it.
     ("app", "code"),
-    ("app", "design"), // the design feature's test host; retires at the design flip
+    // The design dialogs' cases that seed and read the design feature's
+    // state run over its test host, as design's own cases do. The dialogs
+    // compile in rspice-app-design at their application path, so the row is
+    // their cases calling `design::test_host` there. It retires when those
+    // cases reach the host from inside `design`: moved into the design
+    // feature's tests, or with the dialogs re-homed under it.
+    ("app", "design"),
     // `AppState` is the session aggregate, so it inherits two problems from
     // the root it was split out of.
     //
@@ -934,10 +934,10 @@ fn workbench_roots() -> &'static [PathBuf] {
             .filter(|src| crate_of(src) == "rspice-app-workbench" || depends_on_the_framework(src))
             .map(|src| src.join("workbench"))
             .collect();
-        // A floor, not a tally: this crate, the framework and the nine
+        // A floor, not a tally: this crate, the framework and the ten
         // features that compile as crates of their own.
         assert!(
-            roots.len() >= 11 && roots.contains(&workbench_dir()),
+            roots.len() >= 12 && roots.contains(&workbench_dir()),
             "the workbench scan found only {} roots: {roots:?}",
             roots.len()
         );
@@ -1660,15 +1660,15 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_group",
     "rspice-app-workbench/src/workbench/tools/notification_center.rs::foot",
     "rspice-app-project/src/workbench/app/dialogs/design_management/widgets.rs::schematic_preview",
-    "rspice-app/src/workbench/app/dialogs/design_review_comments.rs::review_message",
+    "rspice-app-design/src/workbench/app/dialogs/design_review_comments.rs::review_message",
     "rspice-app/src/workbench/app/dialogs/help.rs::render_shortcuts_help_dialog",
-    "rspice-app/src/workbench/design/navigator.rs::tabs",
-    "rspice-app/src/workbench/design/surface/layout_editor.rs::show_canvas",
+    "rspice-app-design/src/workbench/design/navigator.rs::tabs",
+    "rspice-app-design/src/workbench/design/surface/layout_editor.rs::show_canvas",
     "rspice-app-project/src/workbench/project/library_dialogs/cell_ops.rs::process_copy_cell_dialog",
     "rspice-app-project/src/workbench/surfaces/project/landing.rs::compact_recent_header",
     "rspice-app-project/src/workbench/surfaces/project/landing.rs::compact_section_header",
     "rspice-app-project/src/workbench/surfaces/project/overview.rs::status_rows",
-    "rspice-app/src/workbench/surfaces/stimulus/pwl.rs::table_header",
+    "rspice-app-design/src/workbench/surfaces/stimulus/pwl.rs::table_header",
     "rspice-results-ui/src/noise_contrib.rs::contributor_header",
     "rspice-results-ui/src/waves/expression_editor.rs::show",
     "rspice-schematic-editor/src/property_values.rs::render_value_editor",

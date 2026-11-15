@@ -18,35 +18,31 @@ use rspice_schematic_editor::view::selection_drag::SelectionDragAction;
 
 /// A click with the placement tool for `component_type` armed, landing at
 /// `at` on the grid.
-pub(crate) fn place_component(
-    frame: &mut CanvasFrame<'_>,
-    component_type: ComponentType,
-    at: Point,
-) {
+pub fn place_component(frame: &mut CanvasFrame<'_>, component_type: ComponentType, at: Point) {
     interaction::place_component(&mut frame.parts(), component_type, at);
 }
 
 /// A click with the junction tool at `at`: it adds a dot where two
 /// conductors meet, or takes away the one already there.
-pub(crate) fn click_junction(frame: &mut CanvasFrame<'_>, at: Point) {
+pub fn click_junction(frame: &mut CanvasFrame<'_>, at: Point) {
     interaction::handle_junction_click(&mut frame.parts(), at);
 }
 
 /// Enter on an armed Move whose preview stands at its current delta.
-pub(crate) fn commit_move(frame: &mut CanvasFrame<'_>) {
+pub fn commit_move(frame: &mut CanvasFrame<'_>) {
     let symbols = schematic_symbol_context(&*frame.model);
     move_interaction::commit_armed_move_selection(&mut frame.parts(), &symbols);
 }
 
 /// Enter on an armed Stretch whose preview stands at its current delta.
-pub(crate) fn commit_stretch(frame: &mut CanvasFrame<'_>) {
+pub fn commit_stretch(frame: &mut CanvasFrame<'_>) {
     let symbols = schematic_symbol_context(&*frame.model);
     stretch_interaction::commit_armed_stretch_selection(&mut frame.parts(), &symbols);
 }
 
 /// Press on `target` at `from`, drag through each of `steps` (offsets from
 /// `from`, one frame each) and release: one whole drag of the selection.
-pub(crate) fn drag_selection(
+pub fn drag_selection(
     frame: &mut CanvasFrame<'_>,
     ctx: &egui::Context,
     target: PointerTarget,

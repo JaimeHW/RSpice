@@ -14,6 +14,7 @@
 //! fields are defined here.
 
 pub(crate) use rspice_app_state::workbench::app_state::design_checks;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) use rspice_app_state::workbench::app_state::design_history;
 pub(crate) use rspice_app_state::workbench::app_state::diagnostic_store;
 mod design_access;
@@ -21,7 +22,8 @@ mod design_access;
 mod design_test_support;
 mod execution_context;
 mod full_screen;
-pub(in crate::workbench) mod interaction_state;
+#[cfg(test)]
+pub(in crate::workbench) use rspice_app_design::workbench::app_state::interaction_state;
 #[cfg(test)]
 mod modal_gate_tests;
 pub(crate) use rspice_app_state::workbench::app_state::model;
@@ -46,6 +48,10 @@ use crate::workbench::slots::{
     CloudState, CodeState, DesignState, HardcopyState, ModelsState, ProjectState, ResultsState,
     RunsState, SettingsState, SheetsState, ShellState, SimulateState,
 };
+#[cfg(test)]
+pub use interaction_state::ContextTarget;
+#[cfg(test)]
+pub use interaction_state::DragType;
 use rspice_app_services::services::recent_files::RecentKind;
 use rspice_app_services::workbench::slots::platform::remember_recent_file;
 #[cfg(test)]
@@ -55,27 +61,18 @@ use rspice_app_settings::workbench::app_state::session::shortcut_library::Shortc
 
 #[cfg(test)]
 pub(crate) use design_checks::DesignCheckStatus;
-pub(crate) use design_checks::{model_design_view, model_location_anchor};
+pub(crate) use design_checks::model_location_anchor;
 #[cfg(test)]
 pub(crate) use design_history::DesignManagementHistoryEntry;
-pub(crate) use design_history::{
-    SymbolDefinitionFixtureDelta, publish_symbol_definition_candidate,
-    publish_symbol_definition_candidate_with_fixture,
-};
-pub(crate) use interaction_state::SchematicKeyboardFocus;
-pub use interaction_state::{ContextTarget, DragType};
 pub(crate) use model::{Model, SlotFacts};
 // The platform services' own state, which they name beside the model.
 pub(in crate::workbench) use crate::workbench::slots::PlatformState;
-pub(crate) use rspice_app_workbench::workbench::app_state::session::shortcuts::{
-    accessibility_shortcut_summary, report_engineering_canvas_focus,
-    request_engineering_canvas_focus, return_engineering_canvas_focus, runtime_command_platform,
-};
+#[cfg(test)]
+pub(crate) use rspice_app_workbench::workbench::app_state::session::shortcuts::request_engineering_canvas_focus;
+pub(crate) use rspice_app_workbench::workbench::app_state::session::shortcuts::runtime_command_platform;
 #[cfg(not(target_arch = "wasm32"))]
 pub use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 pub use sim_setup::SimSetupState;
-#[cfg(test)]
-pub use sim_setup::TranSetup;
 #[cfg(test)]
 pub use sim_setup::plan_catalog::SimulationPlanCloneOptions;
 #[cfg(not(target_arch = "wasm32"))]

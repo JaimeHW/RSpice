@@ -19,7 +19,7 @@ use rspice_schematic_editor::symbol_editor::session::{
 /// The request that places the text typed into the text tool's entry, once
 /// the canvas is bound to the document in front; `None` with no draft, or on
 /// a read-only symbol, which lets the draft go.
-pub(crate) fn symbol_text_request(
+pub fn symbol_text_request(
     symbol: &mut SymbolUiState,
     model: &Model,
     wb: &mut WorkbenchSession,
@@ -46,7 +46,7 @@ pub(crate) fn symbol_text_request(
 /// Arm `tool` on the symbol canvas. A pin starts from the document in front
 /// and the ports its interface declares, so the tool offers the next pin it
 /// would place.
-pub(crate) fn activate_symbol_tool(symbol: &mut SymbolUiState, model: &Model, tool: SymbolTool) {
+pub fn activate_symbol_tool(symbol: &mut SymbolUiState, model: &Model, tool: SymbolTool) {
     let pin_tool = tool == SymbolTool::PlacePin;
     let document = pin_tool
         .then(|| model.load_active_symbol_document().ok())
@@ -62,7 +62,7 @@ pub(crate) fn activate_symbol_tool(symbol: &mut SymbolUiState, model: &Model, to
 /// The request that names the pin the Pin tool has just placed what was
 /// typed into its entry; `None` with no entry open, or on a read-only
 /// symbol, which lets the entry go.
-pub(crate) fn symbol_pin_name_request(
+pub fn symbol_pin_name_request(
     symbol: &mut SymbolUiState,
     model: &Model,
     wb: &mut WorkbenchSession,
@@ -88,7 +88,7 @@ pub(crate) fn symbol_pin_name_request(
 /// Turn, flip, line up, space out or snap to the grid the selected pins,
 /// shapes and labels as one edit. `modal_open` is whether anything holding
 /// the application modal is open, which refuses the edit.
-pub(crate) fn edit_selected_symbol_items(
+pub fn edit_selected_symbol_items(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -102,7 +102,7 @@ pub(crate) fn edit_selected_symbol_items(
     apply_symbol_edit_request(symbol, model, wb, modal_open, request);
 }
 
-pub(crate) fn select_all_symbol_items(
+pub fn select_all_symbol_items(
     symbol: &mut SymbolUiState,
     model: &Model,
     wb: &mut WorkbenchSession,
@@ -119,7 +119,7 @@ pub(crate) fn select_all_symbol_items(
         .set_selection(SymbolSelection::all_in(&document));
 }
 
-pub(crate) fn copy_selected_symbol_shape(
+pub fn copy_selected_symbol_shape(
     symbol: &mut SymbolUiState,
     model: &Model,
     wb: &mut WorkbenchSession,
@@ -132,7 +132,7 @@ pub(crate) fn copy_selected_symbol_shape(
 /// Paste the symbol editor's clipboard at the pointer, or at the middle of
 /// the view. `modal_open` is whether anything holding the application modal
 /// is open, which refuses the edit.
-pub(crate) fn paste_symbol_shape(
+pub fn paste_symbol_shape(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -154,7 +154,7 @@ pub(crate) fn paste_symbol_shape(
 }
 
 /// Paste a copy of the selection; the user's clipboard is not touched.
-pub(crate) fn duplicate_selected_symbol_shape(
+pub fn duplicate_selected_symbol_shape(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -211,7 +211,7 @@ fn symbol_paste_request(
 }
 
 /// Delete the selected pins and shapes; `cut` copies them first.
-pub(crate) fn delete_selected_symbol_item(
+pub fn delete_selected_symbol_item(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -225,7 +225,7 @@ pub(crate) fn delete_selected_symbol_item(
     apply_symbol_edit_request(symbol, model, wb, modal_open, request);
 }
 
-pub(crate) fn symbol_edit_request(
+pub fn symbol_edit_request(
     symbol: &SymbolUiState,
     model: &Model,
     wb: &WorkbenchSession,
@@ -242,7 +242,7 @@ pub(crate) fn symbol_edit_request(
 /// Apply `request` unless it is a paste of a clipboard the canvas no longer
 /// holds. `modal_open` is whether anything holding the application modal is
 /// open, which refuses it.
-pub(crate) fn apply_symbol_edit_request(
+pub fn apply_symbol_edit_request(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &mut WorkbenchSession,

@@ -49,10 +49,7 @@ pub(super) fn handle_armed_array_selection(
     }
 }
 
-pub(crate) fn capture(
-    state: &CanvasParts<'_>,
-    transition: TransformInputTransition,
-) -> ArrayInputRequest {
+pub fn capture(state: &CanvasParts<'_>, transition: TransformInputTransition) -> ArrayInputRequest {
     let draft = &state.design.array_selection;
     ArrayInputRequest {
         source: editor_request_source(state),
@@ -65,7 +62,7 @@ pub(crate) fn capture(
     }
 }
 
-pub(crate) fn apply(
+pub fn apply(
     state: &mut CanvasParts<'_>,
     symbols: &SchematicSymbolContext,
     request: ArrayInputRequest,

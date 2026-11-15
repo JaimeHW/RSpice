@@ -7,7 +7,7 @@
 use super::sheet_visibility::with_active_wire_topology_in;
 use super::{Model, SchematicSymbolContext, WorkbenchSession, sync_active_schematic};
 use crate::state::Point;
-pub(crate) use rspice_design::schematic::component_edit::SelectionTransform;
+pub use rspice_design::schematic::component_edit::SelectionTransform;
 
 /// The middle of `bounds`, snapped to the nearest point of a `grid` pitch.
 fn snapped_middle((min_x, min_y, max_x, max_y): (i32, i32, i32, i32), grid: i32) -> Point {
@@ -24,7 +24,7 @@ fn snapped_middle((min_x, min_y, max_x, max_y): (i32, i32, i32, i32), grid: i32)
 /// Turn or flip everything selected on the active sheet as one body about
 /// the grid-snapped middle of its bounds, in one undo step. Returns whether
 /// anything moved.
-pub(crate) fn transform_selection_on_active_sheet(
+pub fn transform_selection_on_active_sheet(
     model: &mut Model,
     wb: &mut WorkbenchSession,
     symbol_context: &SchematicSymbolContext,

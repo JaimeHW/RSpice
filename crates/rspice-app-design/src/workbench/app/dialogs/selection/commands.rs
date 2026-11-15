@@ -33,7 +33,7 @@ use crate::workbench::app::dialogs::selection::commands::floating::{
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
-pub(in crate::workbench) mod floating;
+pub mod floating;
 
 /// Make `selection` the active sheet's selection. Selecting changes no
 /// document, so the buffer's selection is written on its own rather than
@@ -69,7 +69,7 @@ pub(in crate::workbench) fn select_schematic_objects_of_kind(
 ///
 /// The impact report is built before the objects are gone, because that is the
 /// only moment the design still knows which nets they were on.
-pub(crate) fn delete_schematic_selection(model: &mut Model, wb: &mut WorkbenchSession) -> bool {
+pub fn delete_schematic_selection(model: &mut Model, wb: &mut WorkbenchSession) -> bool {
     if refuse_read_only(model) {
         return false;
     }
@@ -101,7 +101,7 @@ pub(crate) fn delete_schematic_selection(model: &mut Model, wb: &mut WorkbenchSe
 
 /// Copy what is selected on the active sheet into `clipboard`, then delete
 /// it.
-pub(crate) fn cut_schematic_selection(
+pub fn cut_schematic_selection(
     clipboard: &mut ClipboardData,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -143,7 +143,7 @@ pub(crate) fn cut_schematic_selection(
 
 /// Duplicate what is selected: the copy floats one grid step off the
 /// current paste anchor until a click places it.
-pub(crate) fn duplicate_schematic_selection(
+pub fn duplicate_schematic_selection(
     design: FloatingCopyParts<'_>,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -155,7 +155,7 @@ pub(crate) fn duplicate_schematic_selection(
 /// One grid step down and to the right: where a duplicate lands from the
 /// point it was asked for, so it is seen beside its source and stays on
 /// the grid.
-pub(crate) fn schematic_grid_step(model: &Model) -> Point {
+pub fn schematic_grid_step(model: &Model) -> Point {
     let grid = model.schematic.document().grid_size.max(1);
     Point::new(grid, grid)
 }
@@ -165,7 +165,7 @@ pub(crate) fn schematic_grid_step(model: &Model) -> Point {
 ///
 /// The user's clipboard is theirs: Duplicate carries its own copy and never
 /// touches it.
-pub(crate) fn duplicate_schematic_selection_at(
+pub fn duplicate_schematic_selection_at(
     mut design: FloatingCopyParts<'_>,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -223,7 +223,7 @@ pub(crate) fn duplicate_schematic_selection_at(
 
 /// Float the app's clipboard at `anchor`, whichever cell view it was
 /// copied from, until a click places it. Returns whether anything floats.
-pub(crate) fn paste_schematic_clipboard_at(
+pub fn paste_schematic_clipboard_at(
     mut design: FloatingCopyParts<'_>,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -246,7 +246,7 @@ pub(crate) fn paste_schematic_clipboard_at(
 
 /// Float the app's clipboard at the pointer, or at the middle of the view,
 /// and say on the prompt line why nothing floats when nothing does.
-pub(crate) fn paste_schematic_clipboard(
+pub fn paste_schematic_clipboard(
     design: FloatingCopyParts<'_>,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -261,7 +261,7 @@ pub(crate) fn paste_schematic_clipboard(
 }
 
 /// Select every object on the active sheet that `filter` admits.
-pub(crate) fn select_all_schematic_objects(
+pub fn select_all_schematic_objects(
     filter: SchematicSelectionFilter,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -317,10 +317,7 @@ pub(super) fn paste_schematic_objects_at(
 /// wires that runs on one line, end to end or overlapping, becomes one wire,
 /// and the junction policy tidies what is left. Returns whether anything was
 /// joined.
-pub(crate) fn join_collinear_wires_on_active_sheet(
-    model: &mut Model,
-    wb: &mut WorkbenchSession,
-) -> bool {
+pub fn join_collinear_wires_on_active_sheet(model: &mut Model, wb: &mut WorkbenchSession) -> bool {
     if refuse_read_only(model) {
         return false;
     }

@@ -45,9 +45,7 @@ pub(crate) fn location_anchor(
 /// The current finding may come from a check of another cellview — a loop
 /// stated inside an instance of this one — so this asks the store for it
 /// rather than the active drawing's own results.
-pub(crate) fn related_marks(
-    state: &CanvasFacts<'_>,
-) -> Option<(DrcSeverity, Vec<crate::state::Point>)> {
+pub fn related_marks(state: &CanvasFacts<'_>) -> Option<(DrcSeverity, Vec<crate::state::Point>)> {
     let subject = state.model.workspace.content.active_schematic_reference();
     let (severity, locations) = state.current_finding_related_marks(&subject)?;
     let view = state.design_view();

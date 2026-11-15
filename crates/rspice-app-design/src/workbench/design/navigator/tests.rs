@@ -15,18 +15,21 @@
 //! application, and the panel harness that holds one, are with the cases that
 //! drive a whole application.
 
+#[cfg(test)]
 use super::shelf::*;
 use super::*;
 use crate::state::{CellViewRef, ComponentType, SchematicState};
 
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(test)]
 mod object_rows;
-pub(crate) mod shelf;
+pub mod shelf;
+#[cfg(test)]
 mod shelf_search;
 
 /// Give the project one more schematic master: the library cell view, and the
 /// content the projection will materialize for it.
-pub(crate) fn add_master(model: &mut Model, library: &str, cell: &str, schematic: SchematicState) {
+pub fn add_master(model: &mut Model, library: &str, cell: &str, schematic: SchematicState) {
     use crate::state::{Library, View, ViewType};
 
     if model.library_manager.get_library(library).is_none() {
@@ -47,7 +50,7 @@ pub(crate) fn add_master(model: &mut Model, library: &str, cell: &str, schematic
 }
 
 /// One placed hierarchical instance, under the name the design gives it.
-pub(crate) fn placed(id: u64, name: &str, library: &str, cell: &str) -> crate::state::Component {
+pub fn placed(id: u64, name: &str, library: &str, cell: &str) -> crate::state::Component {
     let mut component = crate::state::Component::new(
         id,
         ComponentType::CellInstance,
@@ -64,7 +67,7 @@ pub(crate) fn placed(id: u64, name: &str, library: &str, cell: &str) -> crate::s
 
 /// Everything one navigator surface paints, at the dock's real width.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn painted_panel(ctx: &egui::Context, mut contents: impl FnMut(&mut Ui)) -> String {
+pub fn painted_panel(ctx: &egui::Context, mut contents: impl FnMut(&mut Ui)) -> String {
     painted_text(&ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
@@ -158,7 +161,7 @@ fn raw_probe_targets_cover_scalar_differential_and_current_navigation() {
 /// because a meta column that states a hazard has to be told apart from one
 /// that states a count, and that difference is only ever a colour.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn painted_runs(output: &egui::FullOutput) -> Vec<(String, egui::Rect, egui::Color32)> {
+pub fn painted_runs(output: &egui::FullOutput) -> Vec<(String, egui::Rect, egui::Color32)> {
     fn walk(shape: &egui::epaint::Shape, into: &mut Vec<(String, egui::Rect, egui::Color32)>) {
         match shape {
             egui::epaint::Shape::Text(painted) => into.push((
@@ -191,7 +194,7 @@ pub(crate) fn painted_runs(output: &egui::FullOutput) -> Vec<(String, egui::Rect
 
 /// Everything a painted frame carries, as text.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn painted_text(output: &egui::FullOutput) -> String {
+pub fn painted_text(output: &egui::FullOutput) -> String {
     painted_runs(output)
         .into_iter()
         .fold(String::new(), |mut text, (run, _, _)| {
@@ -204,16 +207,14 @@ pub(crate) fn painted_text(output: &egui::FullOutput) -> String {
 /// Where one painted run of a frame sits, for a gesture that has to land on
 /// it.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn run_rect(
-    runs: &[(String, egui::Rect, egui::Color32)],
-    text: &str,
-) -> Option<egui::Rect> {
+pub fn run_rect(runs: &[(String, egui::Rect, egui::Color32)], text: &str) -> Option<egui::Rect> {
     runs.iter()
         .find(|(run, _, _)| run == text)
         .map(|(_, rect, _)| *rect)
 }
 
 /// One glyph rasterized alone in the 15 px slot the shelf paints it in.
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 fn glyph_canvas(glyph: ShelfGlyph) -> crate::ui::raster::Canvas {
     crate::ui::raster::render(egui::vec2(24.0, 24.0), move |ui, background| {
@@ -232,7 +233,7 @@ fn glyph_canvas(glyph: ShelfGlyph) -> crate::ui::raster::Canvas {
 // ---------------------------------------------------------- rails that fold
 
 /// One interface pin, drawn as the typed port editor writes it.
-pub(crate) fn port(
+pub fn port(
     id: u64,
     name: &str,
     netlist_order: Option<usize>,
@@ -260,7 +261,7 @@ pub(crate) fn port(
 
 /// A press and a release at one point, which is what egui reads as a click.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn click_events(at: egui::Pos2) -> Vec<egui::Event> {
+pub fn click_events(at: egui::Pos2) -> Vec<egui::Event> {
     vec![
         egui::Event::PointerMoved(at),
         egui::Event::PointerButton {
@@ -280,7 +281,7 @@ pub(crate) fn click_events(at: egui::Pos2) -> Vec<egui::Event> {
 
 /// One unmodified press.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn key_event(key: egui::Key) -> egui::Event {
+pub fn key_event(key: egui::Key) -> egui::Event {
     egui::Event::Key {
         key,
         physical_key: None,
@@ -296,7 +297,7 @@ pub(crate) fn key_event(key: egui::Key) -> egui::Event {
 /// files a label's text under the second of those and a reader asking only the
 /// first would find the panel's plain rows nameless.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn announced_name(node: &egui::accesskit::Node) -> Option<String> {
+pub fn announced_name(node: &egui::accesskit::Node) -> Option<String> {
     node.label().or_else(|| node.value()).map(str::to_owned)
 }
 

@@ -35,12 +35,12 @@ pub(crate) struct SchematicVisibilityRecovery {
 /// control atomically; Cancel discards them without touching schematic
 /// history, topology, project serialization, or retained result data.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SchematicVisibilityDialogState {
-    pub(crate) open: bool,
-    pub(crate) draft: crate::state::SchematicVisibilityPolicy,
+pub struct SchematicVisibilityDialogState {
+    pub open: bool,
+    pub draft: crate::state::SchematicVisibilityPolicy,
     /// The drawing-sheet layers, edited beside the visibility policy and
     /// applied with it.
-    pub(crate) layers_draft: crate::state::DrawingSheetLayerVisibility,
+    pub layers_draft: crate::state::DrawingSheetLayerVisibility,
 }
 
 impl SchematicVisibilityDialogState {
@@ -67,7 +67,7 @@ const DESCRIPTION: &str = "Choose what the schematic canvas shows on this device
 
 /// Open Display options. Both the schematic-visibility and the
 /// drawing-sheet-layers commands land here; it is one dialog.
-pub(crate) fn open_display_options(
+pub fn open_display_options(
     dialog: &mut SchematicVisibilityDialogState,
     visibility: SchematicVisibilityPolicy,
     layers: DrawingSheetLayerVisibility,
@@ -79,7 +79,7 @@ pub(crate) fn open_display_options(
     true
 }
 
-pub(crate) fn open_schematic_visibility_options(
+pub fn open_schematic_visibility_options(
     dialog: &mut SchematicVisibilityDialogState,
     visibility: SchematicVisibilityPolicy,
     layers: DrawingSheetLayerVisibility,

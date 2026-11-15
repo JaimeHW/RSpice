@@ -11,7 +11,7 @@ mod drag;
 // Interaction State
 // =============================================================================
 
-pub(crate) use rspice_schematic_editor::session::selection::SchematicKeyboardFocus;
+pub use rspice_schematic_editor::session::selection::SchematicKeyboardFocus;
 
 /// Runtime interaction state for UI operations
 ///
@@ -88,7 +88,7 @@ mod tests {
 /// State for drag operations (moving selection, rubber-banding)
 #[derive(Debug, Clone, Default)]
 pub struct DragState {
-    pub(super) owner: Option<SchematicDragOwner>,
+    pub owner: Option<SchematicDragOwner>,
     /// Starting position of the drag (grid coordinates)
     pub start_pos: Option<(i32, i32)>,
 
@@ -105,12 +105,12 @@ pub struct DragState {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct SchematicDragOwner {
+pub struct SchematicDragOwner {
     pub(super) project: crate::product::ProjectId,
     pub(super) document: crate::state::CellViewRef,
     pub(super) occurrence: Option<rspice_design::occurrence::DocumentOccurrence>,
     pub(super) sheet: Option<(Option<rspice_design_model::design_management::SheetId>, u64)>,
-    pub(super) window: crate::workbench::lifecycle::window_session::ApplicationWindowId,
+    pub window: crate::workbench::lifecycle::window_session::ApplicationWindowId,
     pub(super) viewport: egui::ViewportId,
     pub(super) operation_id: u64,
 }
@@ -153,7 +153,7 @@ impl DragState {
 
     /// Let go of the schematic drag, rolling back the operation it holds in
     /// whichever buffer holds it. Answers whether there was a drag.
-    pub(crate) fn cancel_schematic_drag(&mut self, model: &mut super::Model) -> bool {
+    pub fn cancel_schematic_drag(&mut self, model: &mut super::Model) -> bool {
         // Occurrence/sheet changes invalidate input but still roll back the
         // matching active transaction rather than an inactive buffer copy.
         let active = self.operation_is_current(model);

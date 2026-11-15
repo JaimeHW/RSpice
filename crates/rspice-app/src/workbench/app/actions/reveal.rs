@@ -4,9 +4,7 @@
 
 use crate::state::InstancePath;
 use crate::workbench::app_state::AppState;
-pub(in crate::workbench) use rspice_app_workbench::workbench::app::reveal::{
-    placed_instance_in, reaches_in,
-};
+pub(in crate::workbench) use rspice_app_workbench::workbench::app::reveal::placed_instance_in;
 
 /// Show the design with this instance selected and centred.
 pub(in crate::workbench) fn placed_instance(

@@ -57,7 +57,7 @@ impl PropertyEditorSchema {
 
     /// Clear the transaction-scoped cell-instance schema. A later legacy or
     /// unbound cell can therefore never reuse the previous master's fields.
-    pub(crate) fn clear_cell_instance_sheet(&mut self) {
+    pub fn clear_cell_instance_sheet(&mut self) {
         self.cell_instance_sheet = None;
     }
 }

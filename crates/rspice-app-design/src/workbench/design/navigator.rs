@@ -45,13 +45,13 @@ use crate::workbench::docks::navigator::{
 use crate::workbench::state::{ConsolePage, Workspace};
 
 mod find_matches;
-pub(crate) mod hierarchy_tree;
-pub(crate) mod shelf;
-pub(crate) mod stimulus;
-pub(crate) mod symbol;
+pub mod hierarchy_tree;
+pub mod shelf;
+pub mod stimulus;
+pub mod symbol;
 
-#[cfg(test)]
-pub(crate) mod tests;
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests;
 
 const PANEL_TABS_PADDING_X: f32 = 8.0;
 /// Clearance between the location line and the sheet scope beneath it, so the
@@ -237,7 +237,7 @@ fn occurrence_object_row(ui: &mut Ui, row: OccurrenceObjectRow<'_>) -> Response 
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DesignNavigatorSection {
+pub enum DesignNavigatorSection {
     Masters,
     Occurrences,
     Ports,
@@ -255,7 +255,7 @@ impl DesignNavigatorSection {
     /// this string, so a respelled title is not a copy edit — it orphans the
     /// flag every reader's fold state is filed under and reopens the section
     /// on them.
-    pub(crate) fn title(self) -> &'static str {
+    pub fn title(self) -> &'static str {
         match self {
             Self::Masters => "Masters",
             Self::Occurrences => "Occurrences",
@@ -268,7 +268,7 @@ impl DesignNavigatorSection {
     }
 }
 
-pub(crate) const DESIGN_NAVIGATOR_SECTION_ORDER: [DesignNavigatorSection; 7] = [
+pub const DESIGN_NAVIGATOR_SECTION_ORDER: [DesignNavigatorSection; 7] = [
     DesignNavigatorSection::Masters,
     DesignNavigatorSection::Occurrences,
     DesignNavigatorSection::Ports,
@@ -422,7 +422,7 @@ fn flexible_tab_widths<const N: usize>(available: f32, desired: [f32; N]) -> [f3
     desired.map(|width| width * scale)
 }
 
-pub(crate) fn navigator(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub fn navigator(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let enter_rows = navigator_search(ui, cx.wb);
     let (occurrence, master, can_ascend) = navigator_path(&cx.model.workspace);
     let t = Tokens::get(ui.ctx());
@@ -604,7 +604,7 @@ fn net_is_in_scope(model: &Model, scope: SheetScope, net: &DesignNet) -> bool {
         .any(|id| sheet_visibility::object_is_in_scope(model, scope, id))
 }
 
-pub(crate) fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub fn net_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
     let query = normalized(cx.wb.navigator_filter());
     // The rail lists the nets the configured design has. When that design
@@ -737,10 +737,10 @@ fn net_anchor(model: &Model, net: &DesignNet) -> Option<crate::state::Point> {
 }
 
 /// One interface pin, as the ports rail lists it.
-pub(crate) struct PortRow {
+pub struct PortRow {
     component_id: u64,
     position: crate::state::Point,
-    pub(crate) spec: crate::state::PortSpec,
+    pub spec: crate::state::PortSpec,
     contract: crate::state::PortContract,
     /// Where the pin sits in the interface: the order the contract declares,
     /// or the document position that stands in for one until the typed editor
@@ -750,13 +750,13 @@ pub(crate) struct PortRow {
     /// the same order.
     document_index: usize,
     /// Another pin of this cell carries the same name, folded for case.
-    pub(crate) duplicated: bool,
+    pub duplicated: bool,
 }
 
 impl PortRow {
     /// The meta column: the interface position, the direction declared there,
     /// and the conductors the pin carries when its name declares a vector.
-    pub(crate) fn meta(&self) -> String {
+    pub fn meta(&self) -> String {
         let mut meta = format!("#{} \u{00b7} {}", self.order, self.spec.direction.keyword());
         let width = self.spec.width();
         if width > 1 {
@@ -767,7 +767,7 @@ impl PortRow {
 
     /// The whole contract this pin declares, which the meta column has room
     /// for only the position and the direction of.
-    pub(crate) fn tooltip(&self) -> String {
+    pub fn tooltip(&self) -> String {
         let mut lines = vec![
             format!("{} \u{00b7} #{}", self.spec.name, self.order),
             format!(
@@ -807,7 +807,7 @@ impl PortRow {
 /// Duplicate names are counted over the whole cell rather than over the rows
 /// that survive the scope and the filter: a repeated name is a fact about the
 /// interface, and narrowing what is on screen does not un-declare it.
-pub(crate) fn port_rows(model: &Model, scope: SheetScope, query: &str) -> Vec<PortRow> {
+pub fn port_rows(model: &Model, scope: SheetScope, query: &str) -> Vec<PortRow> {
     let mut declared: BTreeMap<String, usize> = BTreeMap::new();
     for spec in model
         .schematic
@@ -939,9 +939,7 @@ fn port_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
 /// two readings deduplicated, because where two occurrences share the master
 /// being edited only one of them is the sheet in front of the reader — and the
 /// other is a row that has to stay.
-pub(crate) fn whole_design_sources(
-    model: &Model,
-) -> Vec<crate::simulation::placed_sources::PlacedSource> {
+pub fn whole_design_sources(model: &Model) -> Vec<crate::simulation::placed_sources::PlacedSource> {
     let plan = model.sim_setup.analysis_plan.as_ref();
     let stimulus_library = &model.workspace.content.stimulus_library;
     let mut rows =
@@ -1020,7 +1018,7 @@ fn design_projection(
 /// control's authority by definition and stays listed at either position —
 /// narrowing it away would make the scope control silently answer a question
 /// about the hierarchy that it does not ask.
-pub(crate) fn derived_row_is_in_scope(
+pub fn derived_row_is_in_scope(
     model: &Model,
     scope: SheetScope,
     occurrence: Option<&crate::state::InstancePath>,
@@ -1035,7 +1033,7 @@ pub(crate) fn derived_row_is_in_scope(
 
 /// The occurrence a derived row is drawn in, when that is not the one on
 /// screen. `None` means the row stands on the sheet in front of the reader.
-pub(crate) fn row_is_elsewhere<'a>(
+pub fn row_is_elsewhere<'a>(
     model: &Model,
     occurrence: Option<&'a crate::state::InstancePath>,
 ) -> Option<&'a crate::state::InstancePath> {
@@ -1240,7 +1238,7 @@ fn rf_port_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
 /// `Z0` is also the spelling [`crate::simulation::placed_sources::PlacedRfPort::summary`]
 /// already carries into the studio's Excitations page, so the two surfaces name
 /// the quantity the same way.
-pub(crate) fn rf_port_meta(port: &crate::simulation::placed_sources::PlacedRfPort) -> String {
+pub fn rf_port_meta(port: &crate::simulation::placed_sources::PlacedRfPort) -> String {
     // Run-scoped, exactly as the excitations rail counts it: a disabled
     // instance is not in the run this plan would dispatch.
     let reading: Vec<_> = port
@@ -1275,7 +1273,7 @@ pub(crate) fn rf_port_meta(port: &crate::simulation::placed_sources::PlacedRfPor
 /// A collision is named last and names its own number, because the reader's
 /// next action is to open the other port carrying it — and the meta column has
 /// room to paint the row as a hazard but not to say what the hazard is.
-pub(crate) fn rf_port_tooltip(
+pub fn rf_port_tooltip(
     port: &crate::simulation::placed_sources::PlacedRfPort,
     collides: bool,
     elsewhere: Option<&crate::state::InstancePath>,
@@ -1333,7 +1331,7 @@ pub(crate) fn rf_port_tooltip(
 /// or find it was the one rail whose rows answered to the pointer alone. The
 /// menu is offered only on the rows of the occurrence being edited, exactly as
 /// the hierarchy tree offers it only where its commands can act.
-pub(crate) fn excitation_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub fn excitation_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
     let query = normalized(cx.wb.navigator_filter());
     let sources = whole_design_sources(cx.model)
@@ -1461,11 +1459,7 @@ pub(crate) fn excitation_section(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
 /// rails that need this answer read different derivations and the question is
 /// the same one every time: a row states a reference, and the menu acts on the
 /// instance that reference was taken from.
-pub(crate) fn placed_object(
-    model: &Model,
-    component_id: u64,
-    reference: &str,
-) -> Option<NavigatorObject> {
+pub fn placed_object(model: &Model, component_id: u64, reference: &str) -> Option<NavigatorObject> {
     let position = model
         .schematic
         .document()
@@ -1667,7 +1661,7 @@ fn reveal_probe_expression(model: &mut Model, wb: &mut WorkbenchSession, express
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum NavigatorObject {
+pub enum NavigatorObject {
     Component {
         id: u64,
         label: String,
@@ -1788,7 +1782,7 @@ fn sorted_unique(values: impl IntoIterator<Item = u64>) -> Vec<u64> {
     values
 }
 
-pub(crate) fn navigator_net_selection_matches(model: &Model, net: &DesignNet) -> bool {
+pub fn navigator_net_selection_matches(model: &Model, net: &DesignNet) -> bool {
     if !model
         .schematic
         .session
@@ -1835,7 +1829,7 @@ pub(crate) fn navigator_net_selection_matches(model: &Model, net: &DesignNet) ->
 /// click, or Shift+F10 on the focused row). Only a row's menu reads the
 /// dispatcher's answer for Show in netlist, so the shell takes the answers
 /// for the navigator's context only then.
-pub(in crate::workbench) fn row_menu_may_show(ctx: &egui::Context) -> bool {
+pub fn row_menu_may_show(ctx: &egui::Context) -> bool {
     if egui::Popup::is_any_open(ctx) {
         return true;
     }
@@ -1924,7 +1918,7 @@ fn navigator_object_context_menu(
 /// Raise the navigator's search over the object the row names, already
 /// filtering by it. The workspace is activated first because the route
 /// transition restores that workspace's saved dock layout.
-pub(crate) fn find_navigator_object_references(
+pub fn find_navigator_object_references(
     design: &mut DesignState,
     wb: &mut WorkbenchSession,
     object: &NavigatorObject,

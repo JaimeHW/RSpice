@@ -28,23 +28,23 @@ use rspice_schematic_editor::vector_preview::deck_bits;
 /// to want the form's defaults back. The names and the document authority do
 /// not — those belong to one batch, in one document.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PinPortDialogState {
-    pub(crate) open: bool,
-    pub(crate) fields: rspice_schematic_editor::pin_placement::PinPlacementFields,
+pub struct PinPortDialogState {
+    pub open: bool,
+    pub fields: rspice_schematic_editor::pin_placement::PinPlacementFields,
     /// The document this batch was named for.
-    pub(crate) authority: Option<crate::state::PlacementAuthority>,
+    pub authority: Option<crate::state::PlacementAuthority>,
     /// The last name armed this session, which the next open suggests from.
     pub(crate) last_name: String,
 }
 
 impl PinPortDialogState {
-    pub(crate) fn open(&mut self, names: String, authority: crate::state::PlacementAuthority) {
+    pub fn open(&mut self, names: String, authority: crate::state::PlacementAuthority) {
         self.open = true;
         self.fields.names = names;
         self.authority = Some(authority);
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         self.open = false;
         self.fields.names.clear();
         self.authority = None;
@@ -52,25 +52,25 @@ impl PinPortDialogState {
 }
 
 const TITLE: &str = "Create pins";
-pub(crate) const PRIMARY: &str = "Place";
+pub const PRIMARY: &str = "Place";
 const DESCRIPTION: &str = "Name the pins of this cell, then click to place each one.";
-pub(crate) const READ_ONLY: &str = "This schematic is read-only.";
+pub const READ_ONLY: &str = "This schematic is read-only.";
 /// What Place waits for while no name is typed.
-pub(crate) const NAMES_MISSING: &str = "Type the names of the pins to place.";
-pub(crate) const DOCUMENT_CHANGED: &str =
+pub const NAMES_MISSING: &str = "Type the names of the pins to place.";
+pub const DOCUMENT_CHANGED: &str =
     "The active schematic changed. Close this form and open it again.";
-pub(crate) const TOO_MANY: &str = "A batch holds at most 256 pins.";
+pub const TOO_MANY: &str = "A batch holds at most 256 pins.";
 
 /// One batch's ceiling. A cell with more than this many new pins is a cell
 /// being generated, not drawn.
-pub(crate) const MAX_NAMES: usize = 256;
+pub const MAX_NAMES: usize = 256;
 
 /// Open Create pins for the active schematic.
 ///
 /// Reopening while a batch is armed offers the names that batch has left,
 /// under the contract it was armed with, so the reader can correct a typo in
 /// name four without replacing the three already on the sheet.
-pub(crate) fn open_create_pins(dialog: &mut PinPortDialogState, model: &Model) {
+pub fn open_create_pins(dialog: &mut PinPortDialogState, model: &Model) {
     let authority = PlacementAuthority::new(schematic_editor_request_source(model));
     let armed = model
         .schematic
@@ -105,7 +105,7 @@ pub(crate) fn open_create_pins(dialog: &mut PinPortDialogState, model: &Model) {
 
 /// What the typed draft is, measured against the live document.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Draft {
+pub enum Draft {
     /// The form cannot be used at all, and says why.
     Blocked(&'static str),
     /// Nothing typed. The primary is off and the footer says what it
@@ -118,7 +118,7 @@ pub(crate) enum Draft {
 }
 
 impl Draft {
-    pub(crate) fn names(&self) -> &[String] {
+    pub fn names(&self) -> &[String] {
         match self {
             Self::Ready(names) => names,
             _ => &[],
@@ -184,7 +184,7 @@ fn draft(form: &PinPortDialogState, model: &Model) -> Draft {
 
 /// What the names declare: the pins, the conductors under them, and where they
 /// will sit in the cell's port list.
-pub(crate) fn declaration_line(model: &Model, names: &[String]) -> Option<String> {
+pub fn declaration_line(model: &Model, names: &[String]) -> Option<String> {
     if names.is_empty() {
         return None;
     }
@@ -206,7 +206,7 @@ pub(crate) fn declaration_line(model: &Model, names: &[String]) -> Option<String
 
 /// The deck formals, for the one case where a reader cannot work them out: a
 /// single name that declares a range.
-pub(crate) fn deck_bits_line(names: &[String]) -> Option<String> {
+pub fn deck_bits_line(names: &[String]) -> Option<String> {
     let [only] = names else {
         return None;
     };
@@ -295,5 +295,5 @@ fn arm_create_pins(
     form.close();
 }
 
-#[cfg(test)]
-pub(crate) mod tests;
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests;

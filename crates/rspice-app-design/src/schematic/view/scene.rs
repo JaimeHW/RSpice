@@ -612,7 +612,7 @@ fn transient_operating_point(state: &CanvasFacts<'_>) -> Option<(crate::state::D
 /// What the status bar says as transient voltages are turned on: the instant
 /// the canvas reads, results cursor A where it lies on the run, or why it
 /// shows none.
-pub(crate) fn transient_annotation_status(model: &Model, cursor_a: Option<f64>) -> String {
+pub fn transient_annotation_status(model: &Model, cursor_a: Option<f64>) -> String {
     let Some(analysis) = annotated_transient(model) else {
         return "No transient result is selected: run a transient analysis to annotate its voltages."
             .to_owned();
@@ -849,9 +849,7 @@ pub(super) fn badge_quantity(value: f64, unit: &str) -> String {
     }
 }
 
-pub(crate) fn operating_point_annotations(
-    state: &CanvasFacts<'_>,
-) -> Vec<OperatingPointCanvasAnnotation> {
+pub fn operating_point_annotations(state: &CanvasFacts<'_>) -> Vec<OperatingPointCanvasAnnotation> {
     let Some((dc_op, retained_annotation, device_op)) = annotated_operating_point(state) else {
         return Vec::new();
     };
@@ -967,19 +965,26 @@ fn device_power<'a>(
     })
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
+    #[cfg(test)]
+    use crate::state::ViewType;
     use crate::state::{
-        AnalysisResult, AnalysisType, CellViewRef, Component, ComponentType, DcOpResult, Junction,
-        OperatingPointValue, SimulationRun, ViewType, Wire,
+        AnalysisResult, AnalysisType, Component, ComponentType, DcOpResult, Junction,
+        OperatingPointValue, SimulationRun,
     };
-    use crate::workbench::design::test_host::{DesignTestHost, canvas_facts, canvas_parts};
+    #[cfg(test)]
+    use crate::state::{CellViewRef, Wire};
+    use crate::workbench::design::test_host::DesignTestHost;
+    #[cfg(test)]
+    use crate::workbench::design::test_host::{canvas_facts, canvas_parts};
     use std::collections::HashMap;
 
     /// Two conductor groups with no wire between them, each carrying the same
     /// authored name. The netlister joins them into one node; a canvas that
     /// traced the drawing itself would see two.
+    #[cfg(test)]
     fn separated_same_name_groups() -> DesignTestHost {
         let mut state = DesignTestHost::default();
         state
@@ -1118,7 +1123,7 @@ pub(crate) mod tests {
         );
     }
 
-    pub(crate) fn state_with_operating_point() -> DesignTestHost {
+    pub fn state_with_operating_point() -> DesignTestHost {
         let mut state = DesignTestHost::default();
         let mut component = Component::new(1, ComponentType::VoltageSource, Point::new(40, 30));
         component.name = "VBIAS".to_owned();
@@ -1173,7 +1178,7 @@ pub(crate) mod tests {
     }
 
     /// A badge's text, its lines joined.
-    pub(crate) fn text(annotation: &OperatingPointCanvasAnnotation) -> String {
+    pub fn text(annotation: &OperatingPointCanvasAnnotation) -> String {
         annotation.lines.join(" · ")
     }
 
@@ -1352,6 +1357,7 @@ pub(crate) mod tests {
     }
 
     /// One prepared run that emitted `amp` at `/X1` and `/X2`.
+    #[cfg(test)]
     fn receipt_for_two_occurrences(master: &CellViewRef) -> crate::state::PreparedRunReceipt {
         use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
         use crate::state::{

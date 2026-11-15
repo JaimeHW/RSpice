@@ -332,10 +332,10 @@ fn app_src_dirs() -> Vec<PathBuf> {
         .map(|path| path.join("src"))
         .collect();
     dirs.sort();
-    // A floor, not a tally: the application is this crate and the thirteen
+    // A floor, not a tally: the application is this crate and the fourteen
     // split out of it, and a discovery that finds fewer has lost its roots.
     assert!(
-        dirs.len() >= 14 && dirs.contains(&src_dir()),
+        dirs.len() >= 15 && dirs.contains(&src_dir()),
         "the guards found only {} application crates under {}; a root list that stops \
          resolving is a guard that has stopped guarding",
         dirs.len(),

@@ -26,7 +26,7 @@ use crate::workbench::state::WorkbenchSession;
 mod symbol_pins;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub(crate) enum EngineeringTableDialogPage {
+pub enum EngineeringTableDialogPage {
     #[default]
     Manager,
     SaveView,
@@ -82,14 +82,14 @@ impl EngineeringTableExportFormat {
 /// from its owning source at open/commit time; the dialog retains only a view
 /// definition and source revision, never a duplicate engineering dataset.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct EngineeringTableDialogState {
-    pub(crate) open: bool,
-    pub(crate) page: EngineeringTableDialogPage,
+pub struct EngineeringTableDialogState {
+    pub open: bool,
+    pub page: EngineeringTableDialogPage,
     pub(crate) draft: Option<crate::state::EngineeringTableView>,
     pub(crate) source_revision: u64,
     pub(crate) selected_saved_id: Option<String>,
-    pub(crate) save_name: String,
-    pub(crate) save_scope: crate::state::EngineeringViewScope,
+    pub save_name: String,
+    pub save_scope: crate::state::EngineeringViewScope,
     pub(crate) save_as_default: bool,
     pub(crate) saved_query: String,
     pub(crate) export_scope: EngineeringTableExportScope,
@@ -101,9 +101,9 @@ pub(crate) struct EngineeringTableDialogState {
     pub(crate) selected_row_ids: std::collections::BTreeSet<String>,
     pub(crate) active_cell: Option<(usize, usize)>,
     pub(crate) focus_cell: Option<(usize, usize)>,
-    pub(crate) row_details_id: Option<String>,
+    pub row_details_id: Option<String>,
     /// The pin table's cell being edited, if any.
-    pub(crate) pin_edit: Option<symbol_pins::PinCellEdit>,
+    pub pin_edit: Option<symbol_pins::PinCellEdit>,
     /// The pin table's row a Shift+click selects the run from.
     pub(crate) pin_anchor: Option<usize>,
     pub(crate) saved_edit_id: Option<String>,
@@ -120,7 +120,7 @@ impl EngineeringTableDialogState {
         self.error = None;
     }
 
-    pub(crate) fn open(&mut self, view: crate::state::EngineeringTableView, source_revision: u64) {
+    pub fn open(&mut self, view: crate::state::EngineeringTableView, source_revision: u64) {
         *self = Self {
             open: true,
             draft: Some(view),
@@ -182,7 +182,7 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-pub(crate) fn open_engineering_table_dialog(
+pub fn open_engineering_table_dialog(
     dialog: &mut EngineeringTableDialogState,
     views: &EngineeringTableViewStore,
     model: &Model,
@@ -379,7 +379,7 @@ fn row_details_form(
 /// What the engineering table draws over and changes: its draft, the views
 /// saved on this device, the model, the symbol editor whose pins it edits,
 /// the platform's project lifecycle and the session.
-pub(crate) struct EngineeringTable<'a> {
+pub struct EngineeringTable<'a> {
     pub(in crate::workbench) dialog: &'a mut EngineeringTableDialogState,
     pub(in crate::workbench) views: &'a mut EngineeringTableViewStore,
     pub(in crate::workbench) model: &'a mut Model,
@@ -390,7 +390,7 @@ pub(crate) struct EngineeringTable<'a> {
 }
 
 impl EngineeringTable<'_> {
-    pub(crate) fn render_engineering_table_dialog(&mut self, ctx: &Context) {
+    pub fn render_engineering_table_dialog(&mut self, ctx: &Context) {
         #[cfg(target_arch = "wasm32")]
         self.consume_engineering_view_import();
         if !self.dialog.open {
@@ -711,7 +711,7 @@ impl EngineeringTable<'_> {
         }
     }
 
-    pub(crate) fn save_engineering_table_view(&mut self, dataset: &EngineeringDataset) {
+    pub fn save_engineering_table_view(&mut self, dataset: &EngineeringDataset) {
         let Some(view) = self.dialog.draft.clone() else {
             return;
         };
@@ -2050,14 +2050,16 @@ fn list_cell(ui: &mut Ui, width: f32, text: RichText) {
     );
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
+    #[cfg(test)]
     use crate::state::{ComponentType, Point};
+    #[cfg(test)]
     use crate::workbench::design::test_host::DesignTestHost;
 
     /// The engineering table over its parts, as its dialog step lends them.
-    pub(crate) fn table<'a>(
+    pub fn table<'a>(
         dialog: &'a mut EngineeringTableDialogState,
         views: &'a mut EngineeringTableViewStore,
         model: &'a mut Model,

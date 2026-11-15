@@ -6,9 +6,10 @@
 
 use super::*;
 use crate::state::{LibraryCellInstance, Point};
+#[cfg(test)]
 use crate::workbench::design::test_host::DesignTestHost;
 
-pub(crate) fn component(id: u64, name: &str, section: Option<&str>) -> Component {
+pub fn component(id: u64, name: &str, section: Option<&str>) -> Component {
     let mut component = Component::new(id, ComponentType::CellInstance, Point::new(id as i32, 0))
         .with_name_value(name, "OPA189");
     let mut binding = LibraryCellInstance::new("analog", "OPA189", "symbol");

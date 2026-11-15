@@ -11,7 +11,7 @@ use crate::workbench::app_state::Model;
 /// measured from a rendered frame: the gate is about whether the instrument
 /// fits the space the shell gives it, and the shell decides that space from
 /// exactly these fields.
-pub(crate) fn stage_size(width: f32, height: f32) -> egui::Vec2 {
+pub fn stage_size(width: f32, height: f32) -> egui::Vec2 {
     use crate::workbench::design_system::ACTIVITY_RAIL_W;
     use crate::workbench::layout::LayoutSpec;
     use crate::workbench::state::WorkbenchSession;
@@ -50,7 +50,7 @@ pub(crate) fn stage_size(width: f32, height: f32) -> egui::Vec2 {
 }
 
 /// One placed source that has adopted a fixture definition.
-pub(crate) fn adopter(model: &mut Model, name: &str, instance: &str) -> u64 {
+pub fn adopter(model: &mut Model, name: &str, instance: &str) -> u64 {
     let definition = model
         .workspace
         .content

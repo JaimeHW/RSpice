@@ -28,7 +28,7 @@ use crate::workbench::state::WorkbenchSession;
 /// the same numeric ID, and it can reject any concurrent edit without
 /// overwriting it.
 #[derive(Debug, Clone)]
-pub(crate) enum RenameSelectionTarget {
+pub enum RenameSelectionTarget {
     Component(Box<crate::state::Component>),
     NetLabel(crate::state::NetLabel),
     NamedNet(crate::workbench::app::NamedNetTarget),
@@ -53,10 +53,10 @@ impl RenameSelectionTarget {
 /// rename workflow. No schematic field is changed until Primary validates and
 /// publishes the draft.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct RenameSelectionDialogState {
-    pub(crate) open: bool,
-    pub(crate) target: Option<RenameSelectionTarget>,
-    pub(crate) draft: String,
+pub struct RenameSelectionDialogState {
+    pub open: bool,
+    pub target: Option<RenameSelectionTarget>,
+    pub draft: String,
     pub(crate) design_execution_epoch: u64,
     pub(crate) active_schematic_epoch: u64,
     pub(crate) topology_version: u64,
@@ -86,7 +86,7 @@ impl RenameSelectionDialogState {
         };
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         *self = Self::default();
     }
 }
@@ -96,7 +96,7 @@ const PRIMARY: &str = "Rename";
 const FIELD_ID: &str = "rename-selected-object-name";
 
 #[derive(Debug, Clone)]
-pub(crate) enum RenameCommit {
+pub enum RenameCommit {
     Component {
         expected: Box<Component>,
         name: String,
@@ -116,7 +116,7 @@ pub(crate) enum RenameCommit {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum RenameValidation {
+pub enum RenameValidation {
     Valid(Box<RenameCommit>),
     Unchanged,
     Invalid(String),
@@ -151,14 +151,14 @@ fn rename_status<'a>(
 /// Whether the active schematic currently owns exactly one live, renameable
 /// object. This is the single availability predicate used by menus, the
 /// command palette, and keyboard dispatch.
-pub(crate) fn rename_selection_available(model: &Model) -> bool {
+pub fn rename_selection_available(model: &Model) -> bool {
     !model.schematic_edit_read_only() && selected_rename_target(model).is_some()
 }
 
 /// Capture the current selection into an isolated stable-identity draft;
 /// nothing opens while the form or another property form
 /// (`another_form_open`) is open, or on a read-only schematic.
-pub(crate) fn open_selected_object_rename(
+pub fn open_selected_object_rename(
     dialog: &mut RenameSelectionDialogState,
     another_form_open: bool,
     model: &Model,
@@ -179,7 +179,7 @@ pub(crate) fn open_selected_object_rename(
     true
 }
 
-pub(crate) fn selected_rename_target(model: &Model) -> Option<RenameSelectionTarget> {
+pub fn selected_rename_target(model: &Model) -> Option<RenameSelectionTarget> {
     let schematic = &model.schematic;
     if let Some(target) = crate::workbench::app::selected_named_net_target(model) {
         return Some(RenameSelectionTarget::NamedNet(target));
@@ -318,7 +318,7 @@ pub(in crate::workbench) fn render_rename_selection_dialog(
 /// What the form is renaming, as its Object row: what kind of thing it is
 /// and the name it has now. No internal ID — the reader cannot act on one,
 /// and the object is the same object either way.
-pub(crate) fn object_context(target: &RenameSelectionTarget) -> String {
+pub fn object_context(target: &RenameSelectionTarget) -> String {
     match target {
         RenameSelectionTarget::Component(component) => {
             format!("{} {}", component.kind.display_name(), component.name)
@@ -335,10 +335,7 @@ pub(crate) fn object_context(target: &RenameSelectionTarget) -> String {
 /// How far the rename reaches, for the two targets that carry other names
 /// with them. A component and a single label rename only themselves, and a
 /// form does not report that it is ordinary.
-pub(crate) fn rename_scope(
-    schematic: &SchematicState,
-    target: &RenameSelectionTarget,
-) -> Option<String> {
+pub fn rename_scope(schematic: &SchematicState, target: &RenameSelectionTarget) -> Option<String> {
     match target {
         RenameSelectionTarget::Component(_) | RenameSelectionTarget::NetLabel(_) => None,
         RenameSelectionTarget::NamedNet(net) => {
@@ -396,7 +393,7 @@ fn rename_session_error(dialog: &RenameSelectionDialogState, model: &Model) -> O
 
 /// `on_sheet` admits the active sheet's objects, the only ones a bus rename
 /// there can reach.
-pub(crate) fn validate_draft(
+pub fn validate_draft(
     schematic: &SchematicState,
     target: &RenameSelectionTarget,
     draft: &str,
@@ -530,7 +527,7 @@ fn stale(message: &str) -> RenameValidation {
     ))
 }
 
-pub(crate) fn apply_commit(model: &mut Model, commit: RenameCommit) -> Result<bool, String> {
+pub fn apply_commit(model: &mut Model, commit: RenameCommit) -> Result<bool, String> {
     let content = &model.workspace.content;
     let catalog = content
         .design_management
@@ -555,14 +552,16 @@ pub(crate) fn apply_commit(model: &mut Model, commit: RenameCommit) -> Result<bo
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
+    #[cfg(test)]
     use crate::state::{Bus, Point};
+    #[cfg(test)]
     use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the dialog as its dialog step does.
-    pub(crate) fn render(
+    pub fn render(
         dialog: &mut RenameSelectionDialogState,
         model: &mut Model,
         workbench: &mut WorkbenchSession,
@@ -572,6 +571,7 @@ pub(crate) mod tests {
     }
 
     /// The commit, over the model it edits.
+    #[cfg(test)]
     pub(crate) fn apply_commit(
         state: &mut DesignTestHost,
         commit: RenameCommit,
@@ -579,7 +579,7 @@ pub(crate) mod tests {
         super::apply_commit(&mut state.model, commit)
     }
 
-    pub(crate) fn key_event(key: egui::Key) -> egui::Event {
+    pub fn key_event(key: egui::Key) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: Some(key),
@@ -688,10 +688,12 @@ pub(crate) mod tests {
         assert!(!schematic.undo());
     }
 
+    #[cfg(test)]
     fn declaration(text: &str) -> crate::state::BusDeclaration {
         crate::state::BusDeclaration::parse(text).unwrap()
     }
 
+    #[cfg(test)]
     fn bus_by_id(state: &DesignTestHost, id: u64) -> Bus {
         state
             .model
@@ -709,6 +711,7 @@ pub(crate) mod tests {
     /// second sheet a `DATA[3:0]` bus passing through that same point.
     /// Returns the tapped bus, the active-sheet destination, and the bus on
     /// the other sheet.
+    #[cfg(test)]
     fn tap_over_another_sheets_bus(
         state: &mut DesignTestHost,
         destination: bool,

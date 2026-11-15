@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 /// The two Design navigator tabs specified by the workbench mockup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub(crate) enum DesignPanel {
+pub enum DesignPanel {
     #[default]
     Navigator,
     ComponentShelf,
@@ -33,115 +33,115 @@ pub(crate) enum DesignPanel {
 
 /// What the design feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct DesignState {
+pub struct DesignState {
     /// Validated configuration transaction for Place bus tap.
-    pub(crate) bus_tap: crate::workbench::app::dialogs::placement::bus_tap::BusTapDialogState,
+    pub bus_tap: crate::workbench::app::dialogs::placement::bus_tap::BusTapDialogState,
 
     /// Exact vector-port widths for a built-in XSPICE placement.
-    pub(crate) builtin_xspice_placement:
+    pub builtin_xspice_placement:
         crate::workbench::app::dialogs::placement::builtin_xspice::BuiltinXspicePlacementDialogState,
 
     /// Snapped, typed net-label placement transaction.
-    pub(crate) net_label_placement:
+    pub net_label_placement:
         crate::workbench::app::dialogs::placement::net_label::NetLabelPlacementDialogState,
 
     /// Display options: device-local schematic visibility and drawing-sheet
     /// layers, neither of which modifies project-owned design data.
-    pub(crate) schematic_visibility_dialog:
+    pub schematic_visibility_dialog:
         crate::workbench::app::dialogs::visibility_options::SchematicVisibilityDialogState,
 
     /// Transactional grid display, exact snapping, and conductor-routing
     /// configuration.
-    pub(crate) grid_snap_routing:
+    pub grid_snap_routing:
         crate::workbench::app::dialogs::grid_snap_routing::GridSnapRoutingDialogState,
 
     /// Explicit menu-owned hierarchy edit-context transaction.
-    pub(crate) descend_hierarchy:
+    pub descend_hierarchy:
         crate::workbench::app::dialogs::hierarchy::descend::DescendHierarchyDialogState,
 
     /// Universal engineering data-grid view, named-view, copy, and export
     /// transaction.
-    pub(crate) engineering_table:
+    pub engineering_table:
         crate::workbench::app::dialogs::engineering_table::EngineeringTableDialogState,
 
     /// Typed interface-port placement transaction.
-    pub(crate) pin_port: crate::workbench::app::dialogs::placement::pin_port::PinPortDialogState,
+    pub pin_port: crate::workbench::app::dialogs::placement::pin_port::PinPortDialogState,
 
     /// Non-electrical typed design-note placement transaction.
-    pub(crate) design_note:
+    pub design_note:
         crate::workbench::app::dialogs::placement::design_note::DesignNoteDialogState,
 
     /// Non-electrical typed documentation-shape placement transaction.
-    pub(crate) documentation_shape:
+    pub documentation_shape:
         crate::workbench::app::dialogs::placement::documentation_shape::DocumentationShapeDialogState,
 
     /// Connectivity-aware selected-object movement transaction.
-    pub(crate) move_selection:
+    pub move_selection:
         crate::workbench::app::dialogs::selection::move_selection::MoveSelectionDialogState,
 
     /// A Paste or Duplicate following the pointer until a click places it.
-    pub(crate) floating_paste:
+    pub floating_paste:
         Option<crate::workbench::app::dialogs::selection::commands::floating::FloatingPaste>,
 
     /// Anchor-preserving conductor/documentation stretch transaction.
-    pub(crate) stretch_selection:
+    pub stretch_selection:
         crate::workbench::app::dialogs::selection::stretch::StretchSelectionDialogState,
 
     /// Named linear, rectangular, or radial documentation array transaction.
-    pub(crate) array_selection:
+    pub array_selection:
         Box<crate::workbench::app::dialogs::selection::array::ArraySelectionDialogState>,
 
     /// Pin-, parameter-, model-, and netlist-compatible instance replacement.
-    pub(crate) replace_instance:
+    pub replace_instance:
         Box<crate::workbench::app::dialogs::replace_instance::ReplaceInstanceDialogState>,
 
     /// Adopting a stimulus definition onto a placed source, or saving one from
     /// it. Both directions are one transaction over one instance, so they are
     /// one session with two modes rather than two dialogs that would each have
     /// to state the same instance and the same card.
-    pub(crate) stimulus_link:
+    pub stimulus_link:
         crate::workbench::app::dialogs::stimulus_link::StimulusLinkDialogState,
 
     /// Multi-document selected-instance extraction transaction.
-    pub(crate) create_hierarchy:
+    pub create_hierarchy:
         Box<crate::workbench::app::dialogs::hierarchy::create::CreateHierarchyDialogState>,
 
     /// The project's design-rule deck.
-    pub(crate) rule_setup: crate::workbench::app::dialogs::rule_setup::RuleSetupDialogState,
+    pub rule_setup: crate::workbench::app::dialogs::rule_setup::RuleSetupDialogState,
 
     /// Live connectivity, typed-bus, and reviewed repair manager.
-    pub(crate) connectivity_manager: Box<ConnectivityManagerDialogState>,
+    pub connectivity_manager: Box<ConnectivityManagerDialogState>,
 
     /// Filtered selection query and atomic active-owner property transaction.
-    pub(crate) selection_bulk_edit: Box<SelectionBulkEditDialogState>,
+    pub selection_bulk_edit: Box<SelectionBulkEditDialogState>,
 
     /// Durable anchored schematic review threads and resolution workflow.
-    pub(crate) design_review_comments: DesignReviewCommentsDialogState,
+    pub design_review_comments: DesignReviewCommentsDialogState,
 
     /// Atomic source-, pin-, graphic-, and generated-view symbol transaction.
-    pub(crate) create_model_bound_symbol: CreateModelBoundSymbolDialogState,
+    pub create_model_bound_symbol: CreateModelBoundSymbolDialogState,
 
     /// Validated RSpice/SVG/EDIF symbol import transaction.
-    pub(crate) symbol_import: SymbolImportDialogState,
+    pub symbol_import: SymbolImportDialogState,
 
     /// Typed, versioned component parameter-form transaction.
-    pub(crate) symbol_parameter_form: SymbolParameterFormDialogState,
+    pub symbol_parameter_form: SymbolParameterFormDialogState,
 
     /// Generic typed properties transaction for non-component schematic
     /// objects selected by Edit, Q, double-click, or the context menu.
-    pub(crate) object_properties:
+    pub object_properties:
         crate::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState,
 
     /// Stable-identity rename transaction for one component, label, logical
     /// named net, or declared bus selected in the active schematic.
-    pub(crate) rename_selection:
+    pub rename_selection:
         crate::workbench::app::dialogs::selection::rename::RenameSelectionDialogState,
 
     /// Find and replace on names, net labels and values.
-    pub(crate) find_replace: crate::workbench::app::dialogs::find_replace::FindReplaceDialogState,
+    pub find_replace: crate::workbench::app::dialogs::find_replace::FindReplaceDialogState,
 
     /// One property form over several selected instances.
-    pub(crate) shared_properties:
+    pub shared_properties:
         crate::workbench::app::dialogs::selection::shared_properties::SharedPropertiesDialogState,
 
     /// Schematic-space cursor position, reported by the canvas each frame the
@@ -192,7 +192,7 @@ pub(crate) struct DesignState {
     /// This is deliberately excluded from the session wire: source-map
     /// and retained-result highlights are presentation state, not project
     /// data or a durable preference value.
-    pub(crate) schematic_cross_probe: crate::workbench::cross_probe::SchematicCrossProbeRuntime,
+    pub schematic_cross_probe: crate::workbench::cross_probe::SchematicCrossProbeRuntime,
     /// Device-local working and named engineering-table views. Project-owned
     /// named views live in `ProjectWorkspace`; this store is the personal
     /// preference authority restored on desktop, web, and tablet hosts.
@@ -225,31 +225,31 @@ pub(crate) struct DesignState {
     pub placement_query: String,
     /// Tabbed property dialog state (commercial-grade property editing).
     /// Boxed: the dialog's tabs carry their drafts.
-    pub(crate) tabbed_property_dialog: Box<crate::properties::TabbedPropertyDialogState>,
+    pub tabbed_property_dialog: Box<crate::properties::TabbedPropertyDialogState>,
     /// Property registry (component property schemas)
-    pub(crate) property_registry: crate::properties::PropertyEditorSchema,
+    pub property_registry: crate::properties::PropertyEditorSchema,
     /// The canvas's interaction state: its drag, hover, last click, context
     /// menu target and keyboard focus. Runtime-only.
-    pub(crate) interaction: crate::workbench::app_state::interaction_state::InteractionState,
+    pub interaction: crate::workbench::app_state::interaction_state::InteractionState,
     /// Where this frame's canvas document drew, for the touch strip the
     /// shell draws over it once the document has. Each pass of the surface
     /// sets it and the shell takes it.
-    pub(crate) touch_strip_canvas: Option<egui::Rect>,
+    pub touch_strip_canvas: Option<egui::Rect>,
     /// Whether this frame's design inspector left its place to the sheet's
     /// section: nothing it inspects is selected, or what is selected is
     /// gone. Each pass of the inspector sets it and the shell takes it.
-    pub(crate) inspector_yields_to_sheet: bool,
+    pub inspector_yields_to_sheet: bool,
     /// The instance whose inline edit failed to commit as the selection
     /// moved off it. It is selected again, and the inspector shows it
     /// whatever else the selection would read as, so the edit can be
     /// corrected. Each frame's inspector prepare sets it.
-    pub(crate) inspector_holds_failed_edit: Option<u64>,
+    pub inspector_holds_failed_edit: Option<u64>,
 }
 
 impl DesignState {
     /// Whether the Design side panel shows the component shelf rather than
     /// the Navigator.
-    pub(crate) fn component_shelf_shown(&self) -> bool {
+    pub fn component_shelf_shown(&self) -> bool {
         self.design_panel == DesignPanel::ComponentShelf
     }
 
@@ -259,19 +259,19 @@ impl DesignState {
     }
 
     /// Bring the component shelf forward in the Design side panel.
-    pub(crate) fn show_component_shelf(&mut self) {
+    pub fn show_component_shelf(&mut self) {
         self.design_panel = DesignPanel::ComponentShelf;
     }
 
     /// Whether a schematic edit is under way: an undo step still open, as
     /// while a drag is held, or a copy floating under the pointer. History
     /// waits for either to land or be cancelled.
-    pub(crate) fn schematic_edit_in_progress(&self, model: &Model) -> bool {
+    pub fn schematic_edit_in_progress(&self, model: &Model) -> bool {
         model.schematic.has_pending_operation() || self.floating_paste.is_some()
     }
 
     /// What a floating Paste or Duplicate reads and writes of this state.
-    pub(crate) fn floating_copy_parts(&mut self) -> FloatingCopyParts<'_> {
+    pub fn floating_copy_parts(&mut self) -> FloatingCopyParts<'_> {
         FloatingCopyParts {
             floating_paste: &mut self.floating_paste,
             move_selection: &mut self.move_selection,
@@ -285,7 +285,7 @@ impl DesignState {
     }
 
     /// What opening a properties form reads and writes of this state.
-    pub(crate) fn property_form_parts(&mut self) -> PropertyFormParts<'_> {
+    pub fn property_form_parts(&mut self) -> PropertyFormParts<'_> {
         PropertyFormParts {
             tabbed_property_dialog: &mut self.tabbed_property_dialog,
             object_properties: &mut self.object_properties,
@@ -296,7 +296,7 @@ impl DesignState {
 
     /// What restoring the active schematic from the workspace reads and
     /// writes of this state.
-    pub(crate) fn schematic_restore_parts(&mut self) -> SchematicRestoreParts<'_> {
+    pub fn schematic_restore_parts(&mut self) -> SchematicRestoreParts<'_> {
         SchematicRestoreParts {
             drag: &mut self.interaction.drag,
             snap: &mut self.schematic_snap,
@@ -308,7 +308,7 @@ impl DesignState {
 
     /// What moving the canvas to another cell view or occurrence reads and
     /// writes of this state, beside `model`, `wb` and `runs`.
-    pub(crate) fn navigation_parts<'a>(
+    pub fn navigation_parts<'a>(
         &'a mut self,
         model: &'a mut Model,
         wb: &'a mut WorkbenchSession,
@@ -332,7 +332,7 @@ impl DesignState {
     }
 
     /// What a history step reads and writes of this state.
-    pub(crate) fn history_parts(&mut self, model: &Model) -> DesignHistoryParts<'_> {
+    pub fn history_parts(&mut self, model: &Model) -> DesignHistoryParts<'_> {
         DesignHistoryParts {
             schematic_edit_in_progress: self.schematic_edit_in_progress(model),
             selected_stimulus_definition: self.selected_stimulus_definition.as_deref(),
@@ -347,7 +347,7 @@ impl DesignState {
         }
     }
 
-    pub(crate) fn set_grid_style(&mut self, style: GridStyle) {
+    pub fn set_grid_style(&mut self, style: GridStyle) {
         if style.visible() {
             self.grid_restore_style = style;
         }
@@ -357,7 +357,7 @@ impl DesignState {
     /// The design frame hook. The pointer and view centre the canvas reports
     /// are the Design canvas's, so while another workspace shows there are
     /// none.
-    pub(crate) fn follow_workspace(&mut self, workspace: crate::workbench::state::Workspace) {
+    pub fn follow_workspace(&mut self, workspace: crate::workbench::state::Workspace) {
         if workspace != crate::workbench::state::Workspace::Design {
             self.canvas_hover = None;
             self.canvas_view_center = None;
@@ -368,14 +368,14 @@ impl DesignState {
     /// another window's document for rendering: that is not navigation, so
     /// the gesture stays owned by its own window and document, and comes
     /// back through [`Self::resume_gesture`].
-    pub(crate) fn set_gesture_aside(
+    pub fn set_gesture_aside(
         &mut self,
     ) -> crate::workbench::app_state::interaction_state::DragState {
         std::mem::take(&mut self.interaction.drag)
     }
 
     /// Take back the gesture [`Self::set_gesture_aside`] set aside.
-    pub(crate) fn resume_gesture(
+    pub fn resume_gesture(
         &mut self,
         drag: crate::workbench::app_state::interaction_state::DragState,
     ) {
@@ -384,13 +384,13 @@ impl DesignState {
 
     /// Move the snap onto the grid the open schematic's editor snaps to, once
     /// the schematic's grid changed.
-    pub(crate) fn follow_schematic_grid(&mut self, model: &crate::workbench::app_state::Model) {
+    pub fn follow_schematic_grid(&mut self, model: &crate::workbench::app_state::Model) {
         self.schematic_snap.grid_size = model.schematic.session.editor.snap_engine.grid_size;
     }
 
     /// The style a cycle sets next, in the upgraded toolbar's exact
     /// presentation order.
-    pub(crate) fn next_grid_style(&self) -> GridStyle {
+    pub fn next_grid_style(&self) -> GridStyle {
         match self.grid {
             GridStyle::Dots => GridStyle::Lines,
             GridStyle::Lines => GridStyle::Off,
@@ -399,7 +399,7 @@ impl DesignState {
     }
 
     /// Cycle the upgraded toolbar's exact presentation order.
-    pub(crate) fn cycle_grid_style(&mut self) -> GridStyle {
+    pub fn cycle_grid_style(&mut self) -> GridStyle {
         let next = self.next_grid_style();
         self.set_grid_style(next);
         next
@@ -415,7 +415,7 @@ impl DesignState {
     /// left is bookkeeping. Keeping one would leave the instrument editing a
     /// record whose saved side no longer exists, and Apply would publish it as
     /// a revision of a definition the library does not hold.
-    pub(crate) fn on_project_changed(&mut self) {
+    pub fn on_project_changed(&mut self) {
         self.selected_stimulus_definition = None;
         self.stimulus_editor.clear();
         self.stimulus_browser.clear();
@@ -425,7 +425,7 @@ impl DesignState {
 /// Grid, snap and wire routing: what the canvas snaps to and how wires route.
 impl DesignState {
     /// Draw Grid, snap and wire routing and carry out what its reader chose.
-    pub(crate) fn render_grid_snap_routing_dialog(
+    pub fn render_grid_snap_routing_dialog(
         &mut self,
         model: &mut Model,
         workbench: &mut WorkbenchSession,
@@ -544,7 +544,7 @@ impl DesignState {
 /// the recovery point a change leaves.
 impl DesignState {
     /// Draw Display options and carry out what its reader chose.
-    pub(crate) fn render_schematic_visibility_dialog(
+    pub fn render_schematic_visibility_dialog(
         &mut self,
         model: &mut Model,
         workbench: &mut WorkbenchSession,
@@ -579,11 +579,7 @@ impl DesignState {
     }
 
     /// Publish both drafts together and close.
-    pub(crate) fn apply_display_options(
-        &mut self,
-        model: &mut Model,
-        workbench: &mut WorkbenchSession,
-    ) {
+    pub fn apply_display_options(&mut self, model: &mut Model, workbench: &mut WorkbenchSession) {
         let policy = self.schematic_visibility_dialog.draft;
         if policy != self.schematic_visibility {
             let recovery = self.capture_visibility_recovery(model);

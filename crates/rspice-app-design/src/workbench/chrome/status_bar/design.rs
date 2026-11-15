@@ -7,7 +7,7 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use rspice_schematic_editor::symbol_editor::session::{label_name, shape_kind};
 
-pub(crate) fn schematic_cursor_summary(model: &Model, grid_x: f64, grid_y: f64) -> String {
+pub fn schematic_cursor_summary(model: &Model, grid_x: f64, grid_y: f64) -> String {
     let grid = f64::from(model.schematic.document().grid_size.max(1));
     let sheet = model.active_drawing_sheet();
     sheet.cursor_status(grid_x * grid, grid_y * grid)
@@ -22,7 +22,7 @@ fn empty_schematic_cursor_summary(model: &Model) -> String {
 /// own units, or the view's empty form while the pointer is off its canvas
 /// (`canvas_hover`, the point the Design canvas last reported). A symbol
 /// reads its own grid, the one `symbol` snaps to.
-pub(crate) fn design_engineering_context(
+pub fn design_engineering_context(
     canvas_hover: Option<(f64, f64)>,
     model: &Model,
     symbol: &SymbolUiState,
@@ -70,7 +70,7 @@ pub(crate) fn design_engineering_context(
     )
 }
 
-pub(crate) fn selection_summary(
+pub fn selection_summary(
     model: &Model,
     wb: &WorkbenchSession,
     platform: &PlatformState,
@@ -153,11 +153,7 @@ fn symbol_selection_summary(symbol: &SymbolUiState, model: &Model) -> String {
 /// reads the in-place view, which frames its parent sheet. The Results
 /// workspace never reaches here — its chip reports plot magnification
 /// instead.
-pub(in crate::workbench) fn zoom_factor(
-    symbol: &SymbolUiState,
-    model: &Model,
-    wb: &WorkbenchSession,
-) -> f64 {
+pub fn zoom_factor(symbol: &SymbolUiState, model: &Model, wb: &WorkbenchSession) -> f64 {
     let symbol_in_front = wb.workspace == Workspace::Design
         && model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol);
     if symbol_in_front && let Some(session) = in_place_session(&symbol.in_place, model) {
@@ -171,7 +167,7 @@ pub(in crate::workbench) fn zoom_factor(
 
 /// What the armed symbol drawing tool takes next, while an editable symbol is
 /// the document in front: "Line: click the next point, Enter to finish".
-pub(crate) fn symbol_tool_hint(
+pub fn symbol_tool_hint(
     symbol: &SymbolUiState,
     model: &Model,
     wb: &WorkbenchSession,

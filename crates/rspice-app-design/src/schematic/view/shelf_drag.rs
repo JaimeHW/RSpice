@@ -17,7 +17,7 @@ use super::selection_transform::{SelectionTransform, transform_selection_on_acti
 /// Typed payload shared by component-shelf drag sources and the schematic
 /// canvas drop target.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SchematicShelfDragPayload {
+pub enum SchematicShelfDragPayload {
     Primitive(ComponentType),
     /// Boxed: a bound cell instance dwarfs a primitive's component type, and
     /// this payload rides in drag state alongside the primitive case.
@@ -32,7 +32,7 @@ impl SchematicShelfDragPayload {
     ///
     /// Interface ports are intentionally excluded: a pin has a name, and only
     /// Create pins can supply one before the drop lands.
-    pub(crate) fn primitive(kind: ComponentType) -> Option<Self> {
+    pub fn primitive(kind: ComponentType) -> Option<Self> {
         (!matches!(kind, ComponentType::Port | ComponentType::CellInstance))
             .then_some(Self::Primitive(kind))
     }
@@ -248,7 +248,7 @@ const fn selection_transform(transform: PlacementTransform) -> SelectionTransfor
 /// Shortcut resolution runs before the schematic canvas is rendered. Without
 /// this boundary, the global `R` placement shortcut can replace an active
 /// ghost with a resistor before the canvas gets a chance to rotate it.
-pub(crate) fn handle_pre_render_placement_transform(
+pub fn handle_pre_render_placement_transform(
     ctx: &egui::Context,
     state: &mut CanvasParts<'_>,
     canvas_has_focus: bool,

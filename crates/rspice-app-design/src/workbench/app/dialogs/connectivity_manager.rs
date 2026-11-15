@@ -43,7 +43,7 @@ use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibilit
 
 const TITLE: &str = "Connectivity, buses and global nets";
 const DESCRIPTION: &str = "Inspect extracted nets, typed vector connectivity, global aliases, and reviewed corrective actions without changing electrical intent implicitly.";
-pub(crate) const PRIMARY: &str = "Apply reviewed connectivity repairs";
+pub const PRIMARY: &str = "Apply reviewed connectivity repairs";
 /// Why "Begin bus placement" is disabled while the declaration is empty.
 const BUS_DECLARATION_MISSING: &str = "Enter a bus declaration to begin placement";
 /// Why the manager's Apply is disabled while nothing is chosen to apply.
@@ -79,16 +79,16 @@ impl ConnectivityManagerTab {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum ConnectivityManagerPage {
+pub enum ConnectivityManagerPage {
     #[default]
     Manager,
     CreateBus,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ConnectivityManagerDialogState {
-    pub(crate) open: bool,
-    pub(crate) page: ConnectivityManagerPage,
+pub struct ConnectivityManagerDialogState {
+    pub open: bool,
+    pub page: ConnectivityManagerPage,
     pub(crate) active_tab: ConnectivityManagerTab,
     pub(crate) authority: Option<SchematicEditAuthority>,
     report: ConnectivityReport,
@@ -97,7 +97,7 @@ pub(crate) struct ConnectivityManagerDialogState {
     pub(crate) policy: ConnectivityPolicy,
     pub(crate) bus_declaration: String,
     endpoint_choices: HashMap<String, usize>,
-    pub(crate) error: Option<String>,
+    pub error: Option<String>,
     pub(crate) receipt: Option<String>,
     pub(crate) body_scroll_offset: f32,
 }
@@ -125,7 +125,7 @@ impl Default for ConnectivityManagerDialogState {
 }
 
 impl ConnectivityManagerDialogState {
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         *self = Self::default();
     }
 
@@ -227,7 +227,7 @@ enum ConnectivityRepairAction {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum RevealTarget {
+pub enum RevealTarget {
     Net {
         wire_ids: Vec<u64>,
         component_ids: Vec<u64>,
@@ -259,7 +259,7 @@ enum ConnectivityBodyAction {
     OpenSourceMap,
 }
 
-pub(crate) fn open_connectivity_manager(
+pub fn open_connectivity_manager(
     dialog: &mut ConnectivityManagerDialogState,
     model: &mut Model,
     workbench: &mut WorkbenchSession,
@@ -1019,14 +1019,14 @@ fn validate_bus_draft(dialog: &ConnectivityManagerDialogState) -> Result<BusDecl
 /// the model and the session. Revealing a finding, opening the source map and
 /// applying reviewed repairs reach the whole session, so it hands those to
 /// the shell.
-pub(crate) struct ConnectivityManager<'a> {
-    pub(crate) dialog: &'a mut ConnectivityManagerDialogState,
-    pub(crate) model: &'a mut Model,
-    pub(crate) workbench: &'a mut WorkbenchSession,
+pub struct ConnectivityManager<'a> {
+    pub dialog: &'a mut ConnectivityManagerDialogState,
+    pub model: &'a mut Model,
+    pub workbench: &'a mut WorkbenchSession,
 }
 
 impl ConnectivityManager<'_> {
-    pub(crate) fn render_connectivity_manager_dialog(&mut self, ctx: &Context) {
+    pub fn render_connectivity_manager_dialog(&mut self, ctx: &Context) {
         if !self.dialog.open {
             return;
         }
@@ -1284,10 +1284,7 @@ impl ConnectivityManager<'_> {
 
 /// Reveal one finding of the report on the canvas, on the view it is drawn
 /// on, over the navigation parts. The caller closes the manager first.
-pub(crate) fn reveal_connectivity_target(
-    mut navigation: NavigationParts<'_>,
-    target: RevealTarget,
-) {
+pub fn reveal_connectivity_target(mut navigation: NavigationParts<'_>, target: RevealTarget) {
     // The checks locate a terminal or a bare point on the projected
     // document, which lays later sheets a stride along; the canvas centres
     // on it where its sheet draws it. A point read off the editor's own
@@ -1404,7 +1401,7 @@ pub(crate) fn reveal_connectivity_target(
 /// Apply the repairs and the policy change the reader chose, as one undo
 /// transaction validated on a copy, then rebuild the report over the result
 /// and publish its check, which reads the runs as `review_markers` shows them.
-pub(crate) fn apply_selected_connectivity_repairs(
+pub fn apply_selected_connectivity_repairs(
     dialog: &mut ConnectivityManagerDialogState,
     model: &mut Model,
     workbench: &mut WorkbenchSession,
@@ -2167,7 +2164,7 @@ fn create_bus_form(
 }
 
 const CREATE_BUS_TITLE: &str = "Create indexed bus";
-pub(crate) const CREATE_BUS_PRIMARY: &str = "Begin bus placement";
+pub const CREATE_BUS_PRIMARY: &str = "Begin bus placement";
 
 /// The line under the declaration: what it declares, why it is refused, or,
 /// while it is empty, what placement waits for.

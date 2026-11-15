@@ -27,7 +27,7 @@ use super::{SchematicSymbolContext, SelectionWindow, parts::CanvasParts};
 /// asked for explicitly, and is offered only where there is more than one
 /// sheet to choose between.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum SheetScope {
+pub enum SheetScope {
     /// Only the objects the active sheet owns.
     ActiveSheet,
     /// Every object of the cell view, whichever sheet owns it.
@@ -37,9 +37,9 @@ pub(crate) enum SheetScope {
 
 impl SheetScope {
     /// The positions a scope control offers, in the order it offers them.
-    pub(crate) const OPTIONS: [Self; 2] = [Self::AllSheets, Self::ActiveSheet];
+    pub const OPTIONS: [Self; 2] = [Self::AllSheets, Self::ActiveSheet];
 
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::AllSheets => "All sheets",
             Self::ActiveSheet => "This sheet",
@@ -94,7 +94,7 @@ pub(crate) fn sheet_scope(ctx: &Context) -> SheetScope {
         .unwrap_or_default()
 }
 
-pub(crate) fn set_sheet_scope(ctx: &Context, scope: SheetScope) {
+pub fn set_sheet_scope(ctx: &Context, scope: SheetScope) {
     ctx.data_mut(|data| data.insert_temp(sheet_scope_id(), scope));
 }
 
@@ -189,7 +189,7 @@ pub(crate) fn selectable_objects_on_active_sheet(
 /// The kind is named outright, so the selection filter, which governs what a
 /// click or a drag picks, does not narrow it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SchematicObjectKind {
+pub enum SchematicObjectKind {
     /// Placed parts and cell instances: every component but a pin.
     Instances,
     /// Wires, each whole.
@@ -207,8 +207,8 @@ pub(crate) enum SchematicObjectKind {
 impl SchematicObjectKind {
     /// Every kind, in the order Edit ▸ Select ▸ lists them; the tests check
     /// their fixtures cover each one.
-    #[cfg(test)]
-    pub(crate) const ALL: [Self; 6] = [
+    #[cfg(any(test, feature = "test-support"))]
+    pub const ALL: [Self; 6] = [
         Self::Instances,
         Self::Wires,
         Self::NetLabels,
@@ -427,7 +427,7 @@ pub(crate) fn with_active_wire_topology_in<R>(
 /// Finish the route being drawn on the active sheet. Conductors on the cell
 /// view's other sheets share its coordinates; they are kept out of reach so
 /// the route can neither split nor dot them.
-pub(crate) fn finish_wire_on_active_sheet(model: &mut Model) -> Option<u64> {
+pub fn finish_wire_on_active_sheet(model: &mut Model) -> Option<u64> {
     model
         .schematic
         .finish_wire(off_active_sheet(&model.workspace))
@@ -492,8 +492,8 @@ pub(super) fn active_sheet_has_objects(model: &Model) -> bool {
 
 /// A cell view with two sheets ([`seed_two_sheets`]) on a new design test
 /// host. Shared by the canvas modules' tests.
-#[cfg(test)]
-pub(crate) fn two_sheet_host(
+#[cfg(any(test, feature = "test-support"))]
+pub fn two_sheet_host(
     active_ids: &[u64],
     hidden_ids: &[u64],
 ) -> crate::workbench::design::test_host::DesignTestHost {
@@ -506,8 +506,8 @@ pub(crate) fn two_sheet_host(
 /// active Sheet 1 and `hidden_ids` belong to Sheet 2. What the model holds
 /// is all a sheet is, so the design test host and the whole application are
 /// seeded alike.
-#[cfg(test)]
-pub(crate) fn seed_two_sheets(model: &mut Model, active_ids: &[u64], hidden_ids: &[u64]) {
+#[cfg(any(test, feature = "test-support"))]
+pub fn seed_two_sheets(model: &mut Model, active_ids: &[u64], hidden_ids: &[u64]) {
     use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
     let key = model.workspace.content.active_schematic_reference().key();

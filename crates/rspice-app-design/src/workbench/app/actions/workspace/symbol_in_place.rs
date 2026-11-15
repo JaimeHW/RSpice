@@ -65,7 +65,7 @@ pub enum SymbolInPlaceExit {
 
 /// Why the selection cannot have its symbol edited in place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SymbolInPlaceRefusal {
+pub enum SymbolInPlaceRefusal {
     NotSchematic,
     NoInstance,
     BuiltInSymbol,
@@ -114,7 +114,7 @@ impl SymbolInPlaceRefusal {
 
 /// The selected instance and the symbol view it would be edited in place
 /// through, or why it cannot be.
-pub(crate) fn selected_symbol_in_place_target(
+pub fn selected_symbol_in_place_target(
     model: &Model,
 ) -> Result<(u64, CellViewRef), SymbolInPlaceRefusal> {
     if !matches!(
@@ -204,7 +204,7 @@ fn symbol_in_place_target(
 }
 
 /// The in-place session the open document of `model` belongs to.
-pub(crate) fn in_place_session<'a>(
+pub fn in_place_session<'a>(
     in_place: &'a Option<Box<SymbolInPlace>>,
     model: &Model,
 ) -> Option<&'a SymbolInPlace> {
@@ -227,7 +227,7 @@ pub(crate) fn sync_in_place_layout(in_place: &Option<Box<SymbolInPlace>>, model:
 }
 
 /// [`in_place_session`], to write to.
-pub(crate) fn in_place_session_mut<'a>(
+pub fn in_place_session_mut<'a>(
     in_place: &'a mut Option<Box<SymbolInPlace>>,
     model: &Model,
 ) -> Option<&'a mut SymbolInPlace> {
@@ -240,10 +240,7 @@ pub(crate) fn in_place_session_mut<'a>(
 /// Where the edited instance puts its symbol on the parent, read from the
 /// parent as it stands. `None` once the parent or the instance is gone,
 /// which ends the session.
-pub(crate) fn in_place_placement(
-    session: &SymbolInPlace,
-    model: &Model,
-) -> Option<SymbolPlacement> {
+pub fn in_place_placement(session: &SymbolInPlace, model: &Model) -> Option<SymbolPlacement> {
     let parent = model
         .workspace
         .content
@@ -258,10 +255,7 @@ pub(crate) fn in_place_placement(
 }
 
 /// The parent-sheet rectangle the edited symbol covers, which Fit frames.
-pub(crate) fn in_place_bounds(
-    session: &SymbolInPlace,
-    model: &Model,
-) -> Option<(f64, f64, f64, f64)> {
+pub fn in_place_bounds(session: &SymbolInPlace, model: &Model) -> Option<(f64, f64, f64, f64)> {
     const MARGIN: f64 = 20.0;
     let placement = in_place_placement(session, model)?;
     let document = model.load_active_symbol_document().ok()?;
@@ -290,7 +284,7 @@ pub(crate) fn in_place_bounds(
 
 /// Whether Esc has nothing of the symbol canvas's own to cancel first, so
 /// it leaves the in-place edit instead.
-pub(crate) fn symbol_in_place_canvas_idle(symbol: &SymbolUiState, model: &Model) -> bool {
+pub fn symbol_in_place_canvas_idle(symbol: &SymbolUiState, model: &Model) -> bool {
     let editor = &symbol.editor;
     in_place_session(&symbol.in_place, model).is_some()
         && editor.tool == crate::workbench::SymbolTool::Select
@@ -384,7 +378,7 @@ impl NavigationParts<'_> {
     /// Leave the in-place edit for `exit`. Every edit made in it stays; a
     /// shape, text or pin name still in flight holds the session, by name,
     /// rather than being dropped on the way out.
-    pub(crate) fn request_symbol_in_place_exit(&mut self, exit: SymbolInPlaceExit) {
+    pub fn request_symbol_in_place_exit(&mut self, exit: SymbolInPlaceExit) {
         if in_place_session(&self.restore.symbol.in_place, self.model).is_none() {
             return;
         }

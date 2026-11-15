@@ -20,7 +20,7 @@ impl DragState {
         self.prepared = Some(model.schematic.prepare_operation());
     }
 
-    pub(crate) fn begin(
+    pub fn begin(
         &mut self,
         model: &mut Model,
         workbench: &WorkbenchSession,
@@ -59,7 +59,7 @@ impl DragState {
         true
     }
 
-    pub(crate) fn in_progress(&self, model: &Model) -> bool {
+    pub fn in_progress(&self, model: &Model) -> bool {
         self.operation_is_current(model)
             && self.owner.as_ref().is_some_and(|owner| {
                 owner.occurrence.as_ref() == model.workspace.content.active_occurrence()
@@ -85,7 +85,7 @@ impl DragState {
         )
     }
 
-    pub(crate) fn owned_by_context(
+    pub fn owned_by_context(
         &self,
         model: &Model,
         workbench: &WorkbenchSession,
@@ -100,7 +100,7 @@ impl DragState {
 
     /// Called before input dispatch and after the canvas has handled release.
     /// An explicit touch cancellation always wins over a synthetic release.
-    pub(crate) fn reconcile(
+    pub fn reconcile(
         &mut self,
         model: &mut Model,
         workbench: &WorkbenchSession,

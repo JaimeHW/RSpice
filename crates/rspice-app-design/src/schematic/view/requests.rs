@@ -13,7 +13,7 @@ use rspice_schematic_editor::view::pointer_target::{
     PointerSelectionEffect, PointerTarget, select_pointer_target,
 };
 
-pub(crate) use crate::workbench::app::schematic_editor_request_source as editor_request_source;
+pub use crate::workbench::app::schematic_editor_request_source as editor_request_source;
 
 /// Whether `target` is an instance the user can descend into. Picking one
 /// leaves a net highlight lit, so the descent (the descend key, the second
@@ -24,7 +24,7 @@ pub(super) fn picks_instance_to_descend(model: &Model, target: Option<PointerTar
         if hierarchy_master_for_component(model, id).is_some())
 }
 
-pub(crate) fn apply_editor_request(state: &mut CanvasParts<'_>, request: EditorRequest) {
+pub fn apply_editor_request(state: &mut CanvasParts<'_>, request: EditorRequest) {
     if request.source != editor_request_source(state)
         || request.selection != state.model.schematic.session.editor.selection
         || state.model.schematic.session.editor.tool != crate::state::Tool::Select
@@ -71,7 +71,7 @@ pub(crate) fn apply_editor_request(state: &mut CanvasParts<'_>, request: EditorR
 /// What the design surface asks of another feature's workspace. The shell
 /// answers it once the surface has drawn, in the frame the reader asked.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum DesignSurfaceRequest {
+pub enum DesignSurfaceRequest {
     /// Show the operating-point viewer with its device filter set to
     /// `device`, which is empty when the selected report does not hold the
     /// clicked device.
@@ -118,7 +118,7 @@ impl Request for DesignSurfaceRequest {
 /// results workspace's selection, so the frame of the click paints the
 /// probe it selected.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct SelectProbedTrace(pub(crate) SelectedResultTrace);
+pub struct SelectProbedTrace(pub SelectedResultTrace);
 
 impl Request for SelectProbedTrace {
     const DRAIN: Drain = Drain::AfterContribution;

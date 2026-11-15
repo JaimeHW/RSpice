@@ -3,16 +3,16 @@
 //! State, controller, renderer, and verification are intentionally split so
 //! this governed workflow can scale without returning to the former GUI shell.
 
-pub(crate) mod controller;
+pub mod controller;
 mod render;
-pub(crate) mod state;
+pub mod state;
 
-pub(crate) use controller::{
+pub use controller::{
     open_create_model_bound_symbol_dialog, open_create_subcircuit_bound_symbol_dialog,
     symbol_attribute_definition,
 };
 pub(in crate::workbench) use render::render_create_model_bound_symbol_dialog;
-pub(crate) use state::CreateModelBoundSymbolDialogState;
+pub use state::CreateModelBoundSymbolDialogState;
 
-#[cfg(test)]
-pub(crate) mod tests;
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests;

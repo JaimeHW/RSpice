@@ -510,10 +510,10 @@ mod tests {
             .map(|path| path.join("src"))
             .collect();
         roots.sort();
-        // A floor, not a tally: the application is this crate and the thirteen
+        // A floor, not a tally: the application is this crate and the fourteen
         // split out of it, and a discovery that finds fewer has lost its roots.
         assert!(
-            roots.len() >= 14 && roots.contains(&manifest.join("src")),
+            roots.len() >= 15 && roots.contains(&manifest.join("src")),
             "the scan found only {} application crates under {}; a root list that stops \
              resolving is a scan that has stopped scanning",
             roots.len(),
@@ -1086,12 +1086,12 @@ mod tests {
     #[test]
     fn the_placement_forms_paint_no_status_in_colour_and_keep_no_mockup_frame() {
         const FILES: [&str; 11] = [
-            "src/workbench/app/dialogs/placement/builtin_xspice.rs",
-            "src/workbench/app/dialogs/placement/bus_tap.rs",
-            "src/workbench/app/dialogs/placement/design_note.rs",
-            "src/workbench/app/dialogs/placement/documentation_shape.rs",
-            "src/workbench/app/dialogs/placement/net_label.rs",
-            "src/workbench/app/dialogs/placement/pin_port.rs",
+            "../rspice-app-design/src/workbench/app/dialogs/placement/builtin_xspice.rs",
+            "../rspice-app-design/src/workbench/app/dialogs/placement/bus_tap.rs",
+            "../rspice-app-design/src/workbench/app/dialogs/placement/design_note.rs",
+            "../rspice-app-design/src/workbench/app/dialogs/placement/documentation_shape.rs",
+            "../rspice-app-design/src/workbench/app/dialogs/placement/net_label.rs",
+            "../rspice-app-design/src/workbench/app/dialogs/placement/pin_port.rs",
             "../rspice-schematic-editor/src/annotations/note_placement.rs",
             "../rspice-schematic-editor/src/annotations/shape_placement.rs",
             "../rspice-schematic-editor/src/bus_tap_placement.rs",
@@ -1755,7 +1755,7 @@ mod tests {
             "edit_cell",
         ),
         (
-            "rspice-app/src/workbench/surfaces/stimulus/pwl.rs",
+            "rspice-app-design/src/workbench/surfaces/stimulus/pwl.rs",
             "cell_edit",
         ),
         (

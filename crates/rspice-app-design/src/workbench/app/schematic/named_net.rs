@@ -6,7 +6,7 @@
 //! guarded undo transaction; anonymous, ground-owned, stale, or ambiguous
 //! conductor selections are never guessed into an editable target.
 
-pub(crate) use crate::state::named_net::{
+pub use crate::state::named_net::{
     NamedNetTarget, apply_named_net_rename, validate_named_net_rename,
 };
 use crate::state::named_net::{NetMembership, net_name_eq, port_terminal};
@@ -17,7 +17,7 @@ use crate::workbench::app_state::Model;
 
 /// Resolve a wire/segment/vertex-only selection or one selected interface
 /// port to exactly one authored, non-ground net.
-pub(crate) fn selected_named_net_target(model: &Model) -> Option<NamedNetTarget> {
+pub fn selected_named_net_target(model: &Model) -> Option<NamedNetTarget> {
     let selection = &model.schematic.session.editor.selection;
     let selected_port = selection.single_component().and_then(|id| {
         model

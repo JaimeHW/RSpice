@@ -5,10 +5,11 @@
 //! same walk of the same design, and a test that only ever opened one of them
 //! would not notice the two disagreeing.
 
+#[cfg(test)]
 use super::*;
 
 /// The dock's own minimum, at the fit the workspace is held to.
-pub(crate) const NAVIGATOR: egui::Vec2 = egui::vec2(228.0, 640.0);
+pub const NAVIGATOR: egui::Vec2 = egui::vec2(228.0, 640.0);
 
 /// Every row's three tracks stay positive at the dock's own minimum, so a name
 /// is elided rather than painted over the mini or under the revision.

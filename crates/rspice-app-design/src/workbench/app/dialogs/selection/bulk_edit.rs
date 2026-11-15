@@ -37,8 +37,8 @@ use crate::workbench::app::actions::workspace::sync_active_schematic;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
-pub(crate) const TITLE: &str = "Bulk edit";
-pub(crate) const PRIMARY: &str = "Apply";
+pub const TITLE: &str = "Bulk edit";
+pub const PRIMARY: &str = "Apply";
 
 const BULK_PROPERTIES: [SelectionBulkProperty; 13] = [
     SelectionBulkProperty::ModelSection,
@@ -223,8 +223,8 @@ impl SelectionBulkEditAuthority {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SelectionBulkEditDialogState {
-    pub(crate) open: bool,
+pub struct SelectionBulkEditDialogState {
+    pub open: bool,
     pub(crate) filter: SelectionBulkFilter,
     selected: BTreeSet<SelectionBulkRowKey>,
     pub(crate) property: SelectionBulkProperty,
@@ -232,7 +232,7 @@ pub(crate) struct SelectionBulkEditDialogState {
     pub(crate) unset_behavior: SelectionBulkUnsetBehavior,
     /// The sections a model section can be set to, from the libraries the
     /// matched instances are bound to. Resolved when the filter changes.
-    pub(crate) bound_sections: Vec<String>,
+    pub bound_sections: Vec<String>,
     authority: Option<SelectionBulkEditAuthority>,
     pub(crate) error: Option<String>,
     pub(crate) body_scroll_offset: f32,
@@ -276,7 +276,7 @@ enum SelectionBulkBodyAction {
     DeleteFilter,
 }
 
-pub(crate) fn open_selection_bulk_edit_dialog(
+pub fn open_selection_bulk_edit_dialog(
     dialog: &mut SelectionBulkEditDialogState,
     filters: &SelectionBulkFilterSession,
     model: &Model,
@@ -310,7 +310,7 @@ pub(crate) fn open_selection_bulk_edit_dialog(
     };
 }
 
-pub(crate) fn render_selection_bulk_edit_dialog(
+pub fn render_selection_bulk_edit_dialog(
     bulk_edit: &mut SelectionBulkEditDialogState,
     filters: &mut SelectionBulkFilterSession,
     model: &mut Model,
@@ -1788,5 +1788,5 @@ fn wildcard_match(pattern: &str, candidate: &str) -> bool {
     !anchored_end || remainder.is_empty()
 }
 
-#[cfg(test)]
-pub(crate) mod tests;
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests;

@@ -1289,6 +1289,7 @@ mod tests {
                 ids::VERIFY_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Verify),
             ),
+            (ids::ZOOM_BOX, Command::ZoomBox),
             (ids::ZOOM_FIT, Command::ZoomFit),
             (ids::ZOOM_IN, Command::ZoomIn),
             (ids::ZOOM_OUT, Command::ZoomOut),

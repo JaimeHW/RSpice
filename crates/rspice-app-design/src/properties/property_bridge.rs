@@ -8,7 +8,7 @@ pub use rspice_design::properties::component::get_primary_property_name;
 use rspice_design::properties::component::{
     apply_properties_with_sheet, collect_properties_with_sheet,
 };
-pub(crate) use rspice_design::properties::component::{
+pub use rspice_design::properties::component::{
     component_source_contract, property_value_to_string, source_commit_refusal,
 };
 
@@ -54,7 +54,7 @@ pub fn apply_properties_to_component(
 /// drifting into a weaker duplicate of the production editor contract.
 /// The caller supplies this instance's authoritative sheet; a dynamic sheet
 /// retained by another component's open dialog is not validation authority.
-pub(crate) fn validate_component_properties(
+pub fn validate_component_properties(
     component: &Component,
     sheet: Option<&PropertySheet>,
 ) -> Vec<(String, String)> {

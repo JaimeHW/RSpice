@@ -44,23 +44,27 @@
 // =============================================================================
 
 /// Application binding for schematic and symbol editors.
-pub(crate) mod schematic;
+pub(crate) use rspice_app_design::schematic;
 
 pub(crate) mod simulation {
     //! The state tier's simulation modules and the run tier's controller, at
     //! the paths the shell's not-yet-moved readers still name. Every other
     //! reader names the owning crate's module.
 
+    #[cfg(test)]
     pub(crate) use rspice_app_state::simulation::placed_sources;
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) use rspice_app_state::simulation::plan;
+    #[cfg(test)]
     pub(crate) use rspice_app_state::simulation::stimulus_realize;
+    #[cfg(test)]
     pub(crate) use rspice_app_state::simulation::table_route;
 
     pub use rspice_app_runs::simulation::controller::SimulationController;
 }
 
 /// Project-bound property editing workflows.
-pub(crate) mod properties;
+pub(crate) use rspice_app_design::properties;
 
 /// Shared UI kit exports used by application presentation.
 pub(crate) use rspice_app_workbench::ui;
@@ -85,8 +89,6 @@ pub(crate) mod services {
     //! still name, and the design rule checks' tests. Every other reader names
     //! the owning crate's module.
 
-    #[cfg(test)]
-    mod drc_tests;
     pub(crate) use rspice_app_cloud::services::license;
     pub(crate) use rspice_app_services::services::model_hub;
 }

@@ -386,7 +386,7 @@ fn check_table(ui: &mut Ui, preview: Option<&SymbolDefinitionImport>) {
                 });
         });
 }
-pub(crate) fn import_candidate(
+pub fn import_candidate(
     draft: &SymbolImportDialogState,
     model: &Model,
 ) -> Result<SymbolDefinitionImport, String> {

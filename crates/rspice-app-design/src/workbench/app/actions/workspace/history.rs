@@ -36,7 +36,7 @@ use super::{
 
 /// What an inspector draft is bound to: the project, the document, the
 /// occurrence and the epochs `model` is at.
-pub(crate) fn inline_edit_authority(model: &Model) -> InlineEditAuthority {
+pub fn inline_edit_authority(model: &Model) -> InlineEditAuthority {
     InlineEditAuthority {
         project: model.workspace.content.project.id(),
         document: model.workspace.content.active_schematic_reference(),
@@ -48,7 +48,7 @@ pub(crate) fn inline_edit_authority(model: &Model) -> InlineEditAuthority {
 
 /// Used by focus changes, document navigation, and commands before they
 /// read or replace the design. A failed commit retains the complete draft.
-pub(crate) fn commit_inline_component_edit(
+pub fn commit_inline_component_edit(
     model: &mut Model,
     wb: &mut WorkbenchSession,
 ) -> Result<bool, String> {
@@ -77,7 +77,7 @@ pub(crate) fn commit_inline_component_edit(
 
 /// A command/navigation boundary reports a refusal once and leaves the
 /// inspector's draft available for correction or explicit cancellation.
-pub(crate) fn commit_pending_inspector_edit(model: &mut Model, wb: &mut WorkbenchSession) -> bool {
+pub fn commit_pending_inspector_edit(model: &mut Model, wb: &mut WorkbenchSession) -> bool {
     match commit_inline_component_edit(model, wb) {
         Ok(_) => true,
         Err(error) => {
@@ -89,7 +89,7 @@ pub(crate) fn commit_pending_inspector_edit(model: &mut Model, wb: &mut Workbenc
 
 /// Which way a history step goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum HistoryDirection {
+pub enum HistoryDirection {
     Undo,
     Redo,
 }
@@ -113,7 +113,7 @@ impl HistoryDirection {
 }
 
 /// What a history step reads and writes of the design feature's state.
-pub(crate) struct DesignHistoryParts<'a> {
+pub struct DesignHistoryParts<'a> {
     /// Whether a schematic edit is under way, which refuses the step.
     pub(crate) schematic_edit_in_progress: bool,
     /// The stimulus definition selected on the Stimulus workspace.
@@ -129,14 +129,14 @@ pub(crate) struct DesignHistoryParts<'a> {
 /// What a history step reads and writes, lent afresh for each of its parts
 /// so that the step only the shell takes, the netlist page's, can be handed
 /// the whole application in between.
-pub(crate) struct HistoryStepParts<'a> {
-    pub(crate) design: DesignHistoryParts<'a>,
-    pub(crate) model: &'a mut Model,
-    pub(crate) wb: &'a mut WorkbenchSession,
-    pub(crate) runs: &'a mut RunsState,
-    pub(crate) run_controller: &'a mut SimulationController,
+pub struct HistoryStepParts<'a> {
+    pub design: DesignHistoryParts<'a>,
+    pub model: &'a mut Model,
+    pub wb: &'a mut WorkbenchSession,
+    pub runs: &'a mut RunsState,
+    pub run_controller: &'a mut SimulationController,
     /// The model the models feature has selected.
-    pub(crate) selected_model: Option<&'a str>,
+    pub selected_model: Option<&'a str>,
 }
 
 /// The netlist page's own history step `direction`, which the shell takes
@@ -152,7 +152,7 @@ pub(crate) type NetlistHistoryStep<H> =
 /// it changed the waivers; and a run prepared or checked under the old
 /// waivers dropped where a schematic's changed, as a waiver recorded from
 /// the Problems page drops it.
-pub(crate) fn take_history_step<H>(
+pub fn take_history_step<H>(
     host: &mut H,
     lend: fn(&mut H) -> HistoryStepParts<'_>,
     netlist: Option<NetlistHistoryStep<H>>,
@@ -371,7 +371,7 @@ fn project_step_is_newer(project: Option<UndoSequence>, document: Option<UndoSeq
 /// before the active document's, as [`take_step`] arbitrates once the redo
 /// steps a newer edit replaced are retired. Nothing changes here: the Edit
 /// menu asks it to name the step the command will take.
-pub(crate) fn project_step_comes_first(
+pub fn project_step_comes_first(
     model: &Model,
     symbol: &SymbolUiState,
     direction: HistoryDirection,
@@ -396,7 +396,7 @@ pub(crate) fn project_step_comes_first(
 /// Undo the newest project design step, if one can be taken; `None` when
 /// there is none to take.
 // Application half of a model operation; it becomes a request.
-pub(crate) fn undo_project_design(
+pub fn undo_project_design(
     design: SchematicRestoreParts<'_>,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -412,7 +412,7 @@ pub(crate) fn undo_project_design(
 /// Redo the newest project design step undone, if one can be taken; `None`
 /// when there is none to take.
 // Application half of a model operation; it becomes a request.
-pub(crate) fn redo_project_design(
+pub fn redo_project_design(
     design: SchematicRestoreParts<'_>,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -462,7 +462,7 @@ fn take_project_step(
 
 /// Bring the document a history step restores to the front: the editor
 /// takes up the drawing the model swapped in, and the console says so.
-pub(crate) fn activate_history_document(
+pub fn activate_history_document(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &mut WorkbenchSession,

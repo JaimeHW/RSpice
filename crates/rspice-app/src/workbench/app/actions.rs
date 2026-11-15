@@ -8,18 +8,17 @@
 
 pub(in crate::workbench) mod export_image;
 pub(in crate::workbench) mod file;
-pub(in crate::workbench) mod hierarchy_net_highlight;
-pub(in crate::workbench) mod property_edit;
+#[cfg(test)]
+pub(in crate::workbench) use rspice_app_design::workbench::app::actions::hierarchy_net_highlight;
+pub(in crate::workbench) use rspice_app_design::workbench::app::actions::property_edit;
 pub(in crate::workbench) mod reveal;
-pub(crate) mod stimulus;
-pub(in crate::workbench) mod stimulus_placement;
-pub(crate) mod symbol;
-pub(crate) use symbol::{
-    activate_symbol_tool, apply_symbol_edit_request, copy_selected_symbol_shape,
-    delete_selected_symbol_item, duplicate_selected_symbol_shape, edit_selected_symbol_items,
-    paste_symbol_shape, select_all_symbol_items, symbol_pin_name_request, symbol_text_request,
-};
-pub(crate) mod workspace;
+#[cfg(test)]
+pub(crate) use rspice_app_design::workbench::app::actions::stimulus;
+#[cfg(test)]
+pub(in crate::workbench) use rspice_app_design::workbench::app::actions::stimulus_placement;
+#[cfg(test)]
+pub(crate) use rspice_app_design::workbench::app::actions::symbol;
+pub(crate) use rspice_app_design::workbench::app::actions::workspace;
 
 use egui::{Context, Popup};
 

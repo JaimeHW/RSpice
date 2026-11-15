@@ -24,15 +24,15 @@ pub(super) fn apply_library_part_row(
 
 /// One indexed part the shelf can offer, with what a click would do.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LibraryPartRow {
-    pub(crate) part_id: String,
+pub struct LibraryPartRow {
+    pub part_id: String,
     /// The part's device class, in the unified index's vocabulary.
     pub(in crate::workbench::design::navigator) device: String,
     /// The part's address: its pack, or the project library holding it.
     pub(in crate::workbench::design::navigator) source: String,
     /// The meta column: the part's device class, and where it stands.
-    pub(crate) meta: String,
-    pub(crate) action: LibraryPartAction,
+    pub meta: String,
+    pub action: LibraryPartAction,
 }
 
 /// Where one library-part click goes.
@@ -42,7 +42,7 @@ pub(crate) struct LibraryPartRow {
 /// not adopted is reviewed first, and a part that cannot be drawn is refused
 /// with the sentence the disabled row carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LibraryPartAction {
+pub enum LibraryPartAction {
     /// Arm now: the definition is already in this project's catalog —
     /// compiled in, or retained when the part was added.
     Arm(Box<PartPlacement>),
@@ -67,7 +67,7 @@ pub(crate) enum LibraryPartAction {
 /// the only door such a definition has onto the canvas. Pack releases the
 /// project has not adopted sit beside them and go through the pack
 /// confirmation instead.
-pub(crate) fn library_part_rows(
+pub fn library_part_rows(
     model_hub: &ModelHubService,
     model: &Model,
     query: &ShelfQuery,

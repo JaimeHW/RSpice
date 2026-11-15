@@ -9,7 +9,7 @@ use crate::workbench::state::{WorkbenchSession, Workspace};
 
 /// Arm `tool` on the schematic in the Design workspace, closing whichever
 /// selection transform (move, stretch or array) another tool left armed.
-pub(crate) fn arm_schematic_tool(
+pub fn arm_schematic_tool(
     move_selection: &mut MoveSelectionDialogState,
     stretch_selection: &mut StretchSelectionDialogState,
     array_selection: &mut ArraySelectionDialogState,

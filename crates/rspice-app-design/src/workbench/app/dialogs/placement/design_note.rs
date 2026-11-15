@@ -15,15 +15,15 @@ use crate::workbench::app_state::Model;
 /// written into the field as a value, so an untouched form placed a note that
 /// said it.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct DesignNoteDialogState {
-    pub(crate) open: bool,
+pub struct DesignNoteDialogState {
+    pub open: bool,
     pub(crate) kind: crate::state::DesignNoteKind,
-    pub(crate) text: String,
+    pub text: String,
     pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
 }
 
 impl DesignNoteDialogState {
-    pub(crate) fn open(&mut self, source: rspice_schematic_editor::requests::EditorRequestSource) {
+    pub fn open(&mut self, source: rspice_schematic_editor::requests::EditorRequestSource) {
         *self = Self {
             open: true,
             kind: crate::state::DesignNoteKind::PlainText,
@@ -140,17 +140,19 @@ fn validate_draft(
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
+    #[cfg(test)]
     use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the dialog as its dialog step does.
-    pub(crate) fn render(dialog: &mut DesignNoteDialogState, model: &mut Model, ctx: &Context) {
+    pub fn render(dialog: &mut DesignNoteDialogState, model: &mut Model, ctx: &Context) {
         render_design_note_dialog(dialog, model, ctx);
     }
 
     /// The draft's validation, over what the form reads.
+    #[cfg(test)]
     fn validate_draft(state: &DesignTestHost) -> Result<PendingDesignNotePlacement, String> {
         super::validate_draft(&state.design.design_note, &state.model)
     }

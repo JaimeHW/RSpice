@@ -8,9 +8,9 @@
 //! - `tabbed_dialog` - The schema-driven schematic component editor
 //! - `property_bridge` - Bidirectional property synchronization
 
-pub(crate) mod property_bridge;
+pub mod property_bridge;
 mod schema;
-pub(crate) mod source_preview;
+pub mod source_preview;
 pub use schema::PropertyEditorSchema;
 pub(crate) mod tabbed_dialog;
 

@@ -52,7 +52,7 @@ pub(super) fn handle_armed_stretch_selection(
     }
 }
 
-pub(crate) fn capture(
+pub fn capture(
     state: &CanvasParts<'_>,
     transition: TransformInputTransition<StretchCanvasSession>,
 ) -> StretchInputRequest {
@@ -65,7 +65,7 @@ pub(crate) fn capture(
     }
 }
 
-pub(crate) fn apply(
+pub fn apply(
     state: &mut CanvasParts<'_>,
     symbols: &SchematicSymbolContext,
     request: StretchInputRequest,
@@ -171,14 +171,19 @@ pub(super) fn commit_armed_stretch_selection(
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
+    #[cfg(test)]
     use crate::schematic::view::schematic_symbol_context;
-    use crate::state::{Junction, Wire};
-    use crate::workbench::design::test_host::{DesignTestHost, canvas_facts, canvas_parts};
+    #[cfg(test)]
+    use crate::state::Junction;
+    use crate::state::Wire;
+    use crate::workbench::design::test_host::DesignTestHost;
+    #[cfg(test)]
+    use crate::workbench::design::test_host::{canvas_facts, canvas_parts};
 
-    pub(crate) fn selected_stretch_wire() -> DesignTestHost {
+    pub fn selected_stretch_wire() -> DesignTestHost {
         selected_stretch_wire_in(DesignTestHost::default())
     }
 
@@ -208,6 +213,7 @@ pub(crate) mod tests {
         state
     }
 
+    #[cfg(test)]
     fn arm_test_stretch(state: &mut DesignTestHost) {
         crate::workbench::app::arm_stretch_selection_in(
             &mut state.design.stretch_selection,

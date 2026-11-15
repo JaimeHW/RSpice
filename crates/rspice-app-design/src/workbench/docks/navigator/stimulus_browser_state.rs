@@ -94,7 +94,7 @@ impl StimulusBrowserState {
     }
 
     /// How many waveforms this browser has asked the engine for.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub const fn evaluations(&self) -> u64 {
         self.evaluations

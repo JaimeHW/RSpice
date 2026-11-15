@@ -65,7 +65,7 @@ struct SelectionObservation {
 /// moving to another subject clears only a trace selected by this mechanism;
 /// a later manual result selection is never overwritten during cleanup.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SchematicCrossProbeRuntime {
+pub struct SchematicCrossProbeRuntime {
     key: Option<SynchronizationKey>,
     selection: Option<SelectionObservation>,
     target: Option<SchematicCrossProbeTarget>,
@@ -78,17 +78,17 @@ pub(crate) struct SchematicCrossProbeRuntime {
 /// schematic selection names now. The shell applies it through the results'
 /// and the netlist's own fns.
 #[derive(Debug)]
-pub(crate) struct CrossProbeProjection {
+pub struct CrossProbeProjection {
     /// The trace the cross-probe selected before, which the results drop
     /// while it is still the one selected.
-    pub(crate) released_trace: Option<SelectedResultTrace>,
+    pub released_trace: Option<SelectedResultTrace>,
     /// The source line the cross-probe asked for before, which the netlist
     /// withdraws while it is still the one requested.
-    pub(crate) released_line: Option<usize>,
+    pub released_line: Option<usize>,
     /// The trace to select now.
-    pub(crate) trace: Option<SelectedResultTrace>,
+    pub trace: Option<SelectedResultTrace>,
     /// The source line to mark now.
-    pub(crate) line: Option<usize>,
+    pub line: Option<usize>,
 }
 
 /// Reconcile one complete frame of schematic selection changes.
@@ -104,7 +104,7 @@ pub(crate) struct CrossProbeProjection {
 ///
 /// `None` when nothing that decides the projection changed, so nothing is
 /// written.
-pub(crate) fn synchronize_schematic_cross_probe(
+pub fn synchronize_schematic_cross_probe(
     model: &Model,
     runtime: &mut SchematicCrossProbeRuntime,
     shown_netlist_document: NetlistDocumentKey,

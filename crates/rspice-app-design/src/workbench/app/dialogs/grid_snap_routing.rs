@@ -82,8 +82,8 @@ pub(crate) enum GridSnapRoutingFocusTarget {
 /// Application-modal transactional owner for the schematic canvas settings
 /// popover. The original and draft are kept separately so Cancel is exact.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct GridSnapRoutingDialogState {
-    pub(crate) open: bool,
+pub struct GridSnapRoutingDialogState {
+    pub open: bool,
     pub(crate) draft: GridSnapRoutingDraft,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) validation_error: Option<String>,
@@ -107,11 +107,11 @@ impl GridSnapRoutingDialogState {
 }
 
 pub(crate) const TITLE: &str = "Grid, snap and wire routing";
-pub(crate) const PRIMARY: &str = "Apply canvas settings";
+pub const PRIMARY: &str = "Apply canvas settings";
 const DESCRIPTION: &str = "Grid display is what you see; snap pitch and snap targets are what the cursor commits to. They are set separately because a coarse grid with fine snapping is a normal way to work.";
 const GRID_STYLES: [GridStyle; 3] = [GridStyle::Dots, GridStyle::Lines, GridStyle::Off];
 
-pub(crate) fn open_grid_snap_routing_dialog(
+pub fn open_grid_snap_routing_dialog(
     dialog: &mut GridSnapRoutingDialogState,
     grid: GridStyle,
     model: &Model,
@@ -320,7 +320,7 @@ fn grid_snap_routing_rows(
     (grid.response.id, spacing.response.id)
 }
 
-pub(crate) const fn grid_style_label(style: GridStyle) -> &'static str {
+pub const fn grid_style_label(style: GridStyle) -> &'static str {
     match style {
         GridStyle::Dots => "Dots",
         GridStyle::Lines => "Lines",

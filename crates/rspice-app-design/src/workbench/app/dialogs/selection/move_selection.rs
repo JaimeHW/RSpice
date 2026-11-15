@@ -29,12 +29,12 @@ use crate::workbench::app_state::Model;
 /// strip, and a tool option a reader set two commands ago is still the one
 /// they meant.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct MoveSelectionDialogState {
-    pub(crate) armed: bool,
-    pub(crate) mode: crate::state::MoveSelectionMode,
+pub struct MoveSelectionDialogState {
+    pub armed: bool,
+    pub mode: crate::state::MoveSelectionMode,
     pub(crate) authority: Option<SchematicEditAuthority>,
-    pub(crate) canvas: rspice_schematic_editor::session::transform::TransformCanvasSession,
-    pub(crate) generation: u64,
+    pub canvas: rspice_schematic_editor::session::transform::TransformCanvasSession,
+    pub generation: u64,
 }
 
 impl MoveSelectionDialogState {
@@ -63,7 +63,7 @@ const COMMAND: &str = "Move";
 /// three canvas tools' drafts and the model. The design feature's command
 /// calls this single boundary so palette, menu and shortcut activation
 /// cannot drift; arming Move stops an armed Stretch or Create array.
-pub(crate) fn arm_move_selection_in(
+pub fn arm_move_selection_in(
     draft: &mut MoveSelectionDialogState,
     stretch: &mut StretchSelectionDialogState,
     array: &mut ArraySelectionDialogState,
@@ -99,7 +99,7 @@ fn validate_draft(draft: &MoveSelectionDialogState, model: &Model) -> Result<(),
 }
 
 /// Fail-closed authority check used again at the canvas commit boundary.
-pub(crate) fn armed_move_selection_authority(
+pub fn armed_move_selection_authority(
     draft: &MoveSelectionDialogState,
     model: &Model,
 ) -> Result<(), String> {
@@ -111,10 +111,7 @@ pub(crate) fn armed_move_selection_authority(
 
 /// End an armed Move: close its dialog, and let its tool go if the
 /// canvas still holds it.
-pub(crate) fn cancel_armed_move_selection_in(
-    dialog: &mut MoveSelectionDialogState,
-    model: &mut Model,
-) {
+pub fn cancel_armed_move_selection_in(dialog: &mut MoveSelectionDialogState, model: &mut Model) {
     dialog.close();
     if model.schematic.session.editor.tool == Tool::MoveSelection {
         model.schematic.cancel_tool();

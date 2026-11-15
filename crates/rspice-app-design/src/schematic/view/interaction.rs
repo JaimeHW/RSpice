@@ -39,7 +39,7 @@ use pin_placement::place_pending_port;
 use pointer_target::pointer_target_with_filter;
 pub(super) use pointer_target::{PointerHit, PointerTarget, pointer_target};
 
-pub(crate) fn handle_tool_interactions(
+pub fn handle_tool_interactions(
     ui: &Ui,
     response: &Response,
     state: &mut CanvasParts<'_>,
@@ -381,7 +381,7 @@ fn select_double_click_action(
     }
 }
 
-pub(crate) fn activate_requirement_link(
+pub fn activate_requirement_link(
     state: &mut CanvasParts<'_>,
     note_id: u64,
     ctx: &egui::Context,
@@ -750,7 +750,7 @@ fn handle_documentation_shape_keyboard(
     }
 }
 
-pub(crate) fn capture_shape_input(
+pub fn capture_shape_input(
     state: &CanvasParts<'_>,
     transition: ShapeInputTransition,
 ) -> ShapeInputRequest {
@@ -768,7 +768,7 @@ pub(crate) fn capture_shape_input(
     }
 }
 
-pub(crate) fn apply_shape_input(state: &mut CanvasParts<'_>, request: ShapeInputRequest) {
+pub fn apply_shape_input(state: &mut CanvasParts<'_>, request: ShapeInputRequest) {
     if request.source != super::requests::editor_request_source(state)
         || request.kind
             != state
@@ -1653,7 +1653,7 @@ pub(super) fn highlight_canvas_net(model: &mut Model, select: impl Fn(&DesignNet
 /// selected wire's (whole, a segment or a corner), the net a selected label
 /// names, or the net a selected part's terminals are on. `Err` says why
 /// there is none to light.
-pub(crate) fn selected_net(
+pub fn selected_net(
     model: &Model,
     net_highlighting: SchematicNetHighlighting,
 ) -> Result<String, &'static str> {
@@ -1703,7 +1703,7 @@ pub(crate) fn selected_net(
 }
 
 /// Light the net the selection is on, and say which, or why none was lit.
-pub(crate) fn highlight_selected_net(
+pub fn highlight_selected_net(
     model: &mut Model,
     net_highlighting: SchematicNetHighlighting,
 ) -> String {

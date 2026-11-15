@@ -8,19 +8,20 @@
 //! it.
 
 use super::*;
+#[cfg(test)]
 use crate::state::{Point, PortDirection, PortDiscipline, PortSignalType};
 
 /// Draw the form as its dialog step does.
-pub(crate) fn render(form: &mut PinPortDialogState, model: &mut Model, ctx: &egui::Context) {
+pub fn render(form: &mut PinPortDialogState, model: &mut Model, ctx: &egui::Context) {
     render_pin_port_dialog(form, model, ctx);
 }
 
 /// The batch the form holds, over what it reads.
-pub(crate) fn draft(form: &PinPortDialogState, model: &Model) -> Draft {
+pub fn draft(form: &PinPortDialogState, model: &Model) -> Draft {
     super::draft(form, model)
 }
 
-pub(crate) fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
+pub fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
     egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -31,7 +32,7 @@ pub(crate) fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
     }
 }
 
-pub(crate) fn key_event(key: egui::Key) -> egui::Event {
+pub fn key_event(key: egui::Key) -> egui::Event {
     egui::Event::Key {
         key,
         physical_key: Some(key),
@@ -98,7 +99,7 @@ fn supply_coerces_signal_to_power_and_power_coerces_direction() {
 
 /// Every labelled node the form publishes, with its role and bounds, after a
 /// few frames at the desktop size.
-pub(crate) fn published(
+pub fn published(
     form: &mut PinPortDialogState,
     model: &mut Model,
 ) -> Vec<(egui::accesskit::Role, String, egui::Rect)> {

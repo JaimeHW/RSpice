@@ -14,17 +14,17 @@ use rspice_schematic_editor::{
 /// electrical contract is not published to the schematic until the primary
 /// action validates every field.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct BusTapDialogState {
-    pub(crate) open: bool,
-    pub(crate) fields: rspice_schematic_editor::bus_tap_placement::BusTapFields,
-    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
+pub struct BusTapDialogState {
+    pub open: bool,
+    pub fields: rspice_schematic_editor::bus_tap_placement::BusTapFields,
+    pub source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
 }
 
 impl BusTapDialogState {
     /// `bus` is the declaration the sheet leaves no doubt about, or empty.
     /// Nothing else is prefilled: a sample written into a field is a tap the
     /// reader never asked for.
-    pub(crate) fn open(
+    pub fn open(
         &mut self,
         source: rspice_schematic_editor::requests::EditorRequestSource,
         bus: String,
@@ -39,7 +39,7 @@ impl BusTapDialogState {
         };
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         *self = Self::default();
     }
 }
@@ -93,7 +93,7 @@ pub(in crate::workbench) fn render_bus_tap_dialog(
     }
 }
 
-pub(crate) fn open_bus_tap(dialog: &mut BusTapDialogState, model: &Model) {
+pub fn open_bus_tap(dialog: &mut BusTapDialogState, model: &Model) {
     let source = crate::workbench::app::schematic_editor_request_source(model);
     let bus = sole_declared_bus(model);
     dialog.open(source, bus);
@@ -123,7 +123,7 @@ fn sole_declared_bus(model: &Model) -> String {
     }
 }
 
-pub(crate) fn placement_source<'a>(
+pub fn placement_source<'a>(
     dialog: &'a BusTapDialogState,
     model: &Model,
 ) -> Result<&'a EditorRequestSource, String> {
@@ -142,22 +142,25 @@ pub(crate) fn placement_source<'a>(
     Ok(source)
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
+    #[cfg(test)]
     use crate::state::BusTapOrientation;
+    #[cfg(test)]
     use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the form as its dialog step does.
-    pub(crate) fn render(dialog: &mut BusTapDialogState, model: &mut Model, ctx: &Context) {
+    pub fn render(dialog: &mut BusTapDialogState, model: &mut Model, ctx: &Context) {
         render_bus_tap_dialog(dialog, model, ctx);
     }
 
+    #[cfg(test)]
     fn test_source() -> EditorRequestSource {
         crate::workbench::app::schematic_editor_request_source(&DesignTestHost::default())
     }
 
-    pub(crate) fn key_event(key: egui::Key) -> egui::Event {
+    pub fn key_event(key: egui::Key) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: Some(key),

@@ -21,7 +21,7 @@ use crate::workbench::state::WorkbenchSession;
 /// Open Create symbol over `model`, from the model `selected_model` names
 /// in the models workspace when it is in the library, else the library's
 /// first.
-pub(crate) fn open_create_model_bound_symbol_dialog(
+pub fn open_create_model_bound_symbol_dialog(
     dialog: &mut CreateModelBoundSymbolDialogState,
     model: &Model,
     wb: &mut WorkbenchSession,
@@ -148,7 +148,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(
     };
 }
 
-pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
+pub fn open_create_subcircuit_bound_symbol_dialog(
     dialog: &mut CreateModelBoundSymbolDialogState,
     model: &Model,
     source_library: String,
@@ -225,7 +225,7 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
     Ok(())
 }
 
-pub(crate) fn validate_create_symbol_draft(
+pub fn validate_create_symbol_draft(
     draft: &CreateModelBoundSymbolDialogState,
     model: &Model,
 ) -> Result<(), String> {
@@ -482,7 +482,7 @@ fn default_cell_name(model: &str) -> String {
 /// a subcircuit (`X`, the default) or a device model; `ModelFile` picks the
 /// model library imported from that file when several hold the name; and
 /// the symbol's pin names, in `SpiceOrder`, are the terminals it binds.
-pub(crate) fn symbol_attribute_definition(
+pub fn symbol_attribute_definition(
     model: &Model,
     graphic: &rspice_model_library::symbol::ImportedGraphicSource,
     target_library: &str,
@@ -650,7 +650,7 @@ pub(crate) fn symbol_attribute_definition(
     build_symbol_definition(model, &draft)
 }
 
-pub(crate) fn build_symbol_definition(
+pub fn build_symbol_definition(
     model: &Model,
     draft: &CreateModelBoundSymbolDialogState,
 ) -> Result<ModelBoundSymbolDefinition, String> {
@@ -1167,7 +1167,7 @@ const fn model_device_prefix(model_type: ModelType) -> &'static str {
 // The domain-owned construction plan is the final authority after every
 // retained UI authority check. Conversion happens once at the transaction
 // boundary, so controls edit typed draft input and never mutate a live cell.
-pub(crate) fn commit_create_model_bound_symbol(
+pub fn commit_create_model_bound_symbol(
     draft: &mut CreateModelBoundSymbolDialogState,
     model: &mut Model,
     workbench: &mut WorkbenchSession,

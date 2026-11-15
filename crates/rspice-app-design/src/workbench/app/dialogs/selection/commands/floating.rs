@@ -29,33 +29,33 @@ use crate::workbench::state::WorkbenchSession;
 /// to the cell view it was asked for in and turned as R and M asked, and the
 /// click pastes it there as one undo step.
 #[derive(Debug, Clone)]
-pub(crate) struct FloatingPaste {
-    pub(crate) objects: rspice_design::schematic::clipboard::ClipboardData,
+pub struct FloatingPaste {
+    pub objects: rspice_design::schematic::clipboard::ClipboardData,
     /// Where the copy's middle sat when the pointer took hold of it.
-    pub(crate) start: crate::state::Point,
+    pub start: crate::state::Point,
     /// The grid point the pointer took hold at; until the pointer is over
     /// the canvas, nothing has, and the copy jumps to it when it arrives.
-    pub(crate) grab: Option<crate::state::Point>,
+    pub grab: Option<crate::state::Point>,
     /// How far the pointer has carried the copy since.
-    pub(crate) delta: crate::state::Point,
+    pub delta: crate::state::Point,
     /// The cell view and sheet the copy was bound to.
-    pub(crate) view_path: String,
-    pub(crate) sheet: Option<crate::state::SheetId>,
-    pub(crate) origin: FloatingPasteOrigin,
+    pub view_path: String,
+    pub sheet: Option<crate::state::SheetId>,
+    pub origin: FloatingPasteOrigin,
     /// The drawing the placement would leave, for the position, content and
     /// orientation it was worked out for.
-    pub(crate) preview: Option<FloatingPastePreview>,
+    pub preview: Option<FloatingPastePreview>,
 }
 
 impl FloatingPaste {
     /// Where the copy's middle sits now, on the document grid.
-    pub(crate) fn at(&self) -> crate::state::Point {
+    pub fn at(&self) -> crate::state::Point {
         self.start + self.delta
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct FloatingPastePreview {
+pub struct FloatingPastePreview {
     pub(crate) at: crate::state::Point,
     pub(crate) content_version: u64,
     /// What the placement would change, taken once when the preview is
@@ -66,7 +66,7 @@ pub(crate) struct FloatingPastePreview {
 
 /// What floated, for the line the placement answers with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FloatingPasteOrigin {
+pub enum FloatingPasteOrigin {
     Paste,
     Duplicate {
         count: usize,
@@ -79,7 +79,7 @@ pub(crate) enum FloatingPasteOrigin {
 /// feature's state: the copy it holds, the armed commands it stops, where
 /// the pointer is, the clipboard Paste floats and how Duplicate treats the
 /// nets it leaves.
-pub(crate) struct FloatingCopyParts<'a> {
+pub struct FloatingCopyParts<'a> {
     pub(crate) floating_paste: &'a mut Option<FloatingPaste>,
     pub(crate) move_selection: &'a mut MoveSelectionDialogState,
     pub(crate) stretch_selection: &'a mut StretchSelectionDialogState,
@@ -159,7 +159,7 @@ pub(super) fn float_schematic_objects(
 
 /// Land the floating copy where it sits now. Returns whether anything was
 /// placed.
-pub(crate) fn place_floating_paste(
+pub fn place_floating_paste(
     floating: &mut Option<FloatingPaste>,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -265,7 +265,7 @@ impl FloatingPaste {
 
 /// Let the floating copy go, saying so on `wb`'s status bar. Returns whether
 /// a copy was floating.
-pub(crate) fn cancel_floating_paste_in(
+pub fn cancel_floating_paste_in(
     floating: &mut Option<FloatingPaste>,
     wb: &mut WorkbenchSession,
 ) -> bool {
@@ -278,7 +278,7 @@ pub(crate) fn cancel_floating_paste_in(
 
 /// Turn or flip the floating copy about its middle. Returns whether a copy
 /// was floating.
-pub(crate) fn turn_floating_paste(
+pub fn turn_floating_paste(
     floating: &mut Option<FloatingPaste>,
     transform: SelectionTransform,
 ) -> bool {
@@ -292,10 +292,7 @@ pub(crate) fn turn_floating_paste(
 
 /// Why the floating copy can no longer land where it was asked for, if it
 /// cannot: it was bound to one cell view and one sheet.
-pub(crate) fn floating_paste_scope(
-    floating: &Option<FloatingPaste>,
-    model: &Model,
-) -> Result<(), String> {
+pub fn floating_paste_scope(floating: &Option<FloatingPaste>, model: &Model) -> Result<(), String> {
     match floating.as_ref() {
         Some(floating) => floating_scope(model, floating),
         None => Ok(()),
@@ -326,7 +323,7 @@ fn active_sheet(model: &Model) -> Option<crate::state::SheetId> {
 }
 
 /// `point` on the nearest point of a `grid` pitch.
-pub(crate) fn on_grid(point: Point, grid: i32) -> Point {
+pub fn on_grid(point: Point, grid: i32) -> Point {
     let grid = grid.max(1);
     let snap = |value: i32| {
         let value = f64::from(value) / f64::from(grid);

@@ -323,3 +323,36 @@ fn a_selected_memristor_selects_the_trace_the_engine_names_it_by() {
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
 }
+
+/// A run that named nothing: the Results page offers no highlight for it, and
+/// marking its sites marks nothing on the drawing. The offer is the results
+/// feature's and the marking the design feature's, so the case runs here.
+#[test]
+fn a_run_that_named_nothing_offers_no_highlight() {
+    let mut state =
+        crate::workbench::app::actions::workspace::tests::state_with_probed_conductors();
+
+    assert!(
+        !crate::workbench::documents::result_document::operational_state::active_failure_names_objects(
+            &state.model
+        ),
+        "with no failed analysis on display there is nothing to offer"
+    );
+    assert!(
+        !crate::workbench::app::highlight_active_failure_sites(
+            &mut state.model,
+            &mut state.workbench
+        ),
+        "and nothing to mark"
+    );
+    assert!(
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .wires
+            .is_empty()
+    );
+}

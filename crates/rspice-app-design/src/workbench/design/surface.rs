@@ -1,6 +1,6 @@
 //! Hierarchical design document surface.
 
-pub(crate) mod layout_editor;
+pub mod layout_editor;
 mod tool_options;
 
 use egui::{Context, Id, Key, Modifiers, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
@@ -176,9 +176,9 @@ const CANVAS_BREADCRUMB_ELISION: &str = "\u{2026}";
 /// elision that stands for crumbs there was no room for — carries none and is
 /// not a place you can go.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct BreadcrumbCrumb {
-    pub(crate) label: String,
-    pub(crate) level: Option<usize>,
+pub struct BreadcrumbCrumb {
+    pub label: String,
+    pub level: Option<usize>,
 }
 
 impl BreadcrumbCrumb {
@@ -191,7 +191,7 @@ impl BreadcrumbCrumb {
     }
 }
 
-pub(crate) fn breadcrumb(ctx: &Context, canvas: &mut CanvasFrame<'_>, content_rect: Rect) {
+pub fn breadcrumb(ctx: &Context, canvas: &mut CanvasFrame<'_>, content_rect: Rect) {
     let t = Tokens::get(ctx);
     let in_place = symbol_in_place_breadcrumb_segments(&canvas.facts());
     let leaves_in_place = in_place.is_some();
@@ -399,7 +399,7 @@ fn crumb_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
 
 /// The whole occurrence path, library first; a row too narrow for it elides
 /// the middle rather than any choice dropping levels.
-pub(crate) fn hierarchy_breadcrumb_segments(model: &Model) -> Vec<BreadcrumbCrumb> {
+pub fn hierarchy_breadcrumb_segments(model: &Model) -> Vec<BreadcrumbCrumb> {
     let active = &model.workspace.content.active_view;
     let occurrence = model
         .workspace
@@ -453,7 +453,7 @@ fn with_alpha(color: egui::Color32, alpha: u8) -> egui::Color32 {
 /// rather than after it — and names every occurrence it will reach on hover.
 ///
 /// [`master_occurrence_paths`] is the one derivation of that scope.
-pub(crate) fn occurrence_scope_banner(ui: &mut Ui, model: &Model) {
+pub fn occurrence_scope_banner(ui: &mut Ui, model: &Model) {
     let occurrences = master_occurrence_paths(model);
     if occurrences.len() < 2 {
         return;
@@ -485,7 +485,7 @@ pub(crate) fn occurrence_scope_banner(ui: &mut Ui, model: &Model) {
 ///
 /// The document's occurrence ends at its own reference by construction, so
 /// the master asked about is `active_view`.
-pub(crate) fn master_occurrence_paths(model: &Model) -> Vec<String> {
+pub fn master_occurrence_paths(model: &Model) -> Vec<String> {
     let Ok(projection) = model.workspace.design_projection(
         &model.library_manager,
         &model.workspace.content.active_view,
@@ -608,11 +608,13 @@ fn unsupported_document(ui: &mut Ui, model: &Model, view_type: ViewType) {
     );
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
+    #[cfg(test)]
     use crate::workbench::design::test_host::DesignTestHost;
 
+    #[cfg(test)]
     fn crumb_labels(state: &DesignTestHost) -> Vec<String> {
         hierarchy_breadcrumb_segments(&state.model)
             .into_iter()
@@ -620,11 +622,7 @@ pub(crate) mod tests {
             .collect()
     }
 
-    pub(crate) fn descended(
-        model: &mut crate::workbench::app_state::Model,
-        instance: &str,
-        cell: &str,
-    ) {
+    pub fn descended(model: &mut crate::workbench::app_state::Model, instance: &str, cell: &str) {
         model.workspace.descend_into(
             instance.to_owned(),
             crate::state::CellViewRef::new("user", cell, "schematic"),

@@ -3,14 +3,14 @@
 //!
 //! What it has not registered yet, the shell's legacy tables still serve.
 
-pub(crate) mod commands;
-pub(crate) mod inspector;
-pub(crate) mod navigator;
+pub mod commands;
+pub mod inspector;
+pub mod navigator;
 mod routed;
-pub(crate) mod surface;
-#[cfg(test)]
-pub(crate) mod test_host;
-pub(crate) mod toolbar;
+pub mod surface;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_host;
+pub mod toolbar;
 
 use egui::Context;
 use rspice_schematic_editor::symbol_editor::commands::{
@@ -97,7 +97,7 @@ use crate::workbench::state::{Drawer, WorkbenchSession, Workspace};
 use commands::DesignCommand;
 
 /// The design feature.
-pub(crate) struct DesignFeature;
+pub struct DesignFeature;
 
 impl Feature for DesignFeature {
     type State = DesignState;
@@ -1376,7 +1376,7 @@ const DIALOGS: &[FeatureDialog<DesignFeature>] = &[
 /// as the shell's dialog order lists it: the property form holds the
 /// application modal, the descent chooser is drawn beside the canvas, and
 /// every other dialog holds the dialog gate.
-pub(crate) fn dialog_modality(key: DialogKey) -> Modality {
+pub fn dialog_modality(key: DialogKey) -> Modality {
     match key.0 {
         "design.property" => Modality::Application,
         "design.descend_hierarchy" => Modality::Modeless,
@@ -1403,7 +1403,7 @@ impl DesignFeature {
     /// Open the symbol Update symbol updated in the symbol editor, where it
     /// is finished by hand, with the pins it gained selected, ready to be
     /// placed.
-    pub(crate) fn open_updated_veriloga_symbol(
+    pub fn open_updated_veriloga_symbol(
         cx: &mut Cx<'_, Self>,
         symbol: Option<CellViewRef>,
         pins: Vec<String>,
@@ -1413,7 +1413,7 @@ impl DesignFeature {
 
     /// Switch to the schematic the offered placement names and arm the
     /// device there, as the shelf arms a cell.
-    pub(crate) fn place_veriloga_device(
+    pub fn place_veriloga_device(
         cx: &mut Cx<'_, Self>,
         target: CellViewRef,
         binding: LibraryCellInstance,

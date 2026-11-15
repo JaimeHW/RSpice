@@ -6,20 +6,20 @@
 //! atomic project-library publication together so neither native nor browser
 //! builds can bypass the same contract.
 
-pub(crate) mod import_workflow;
+pub mod import_workflow;
 mod parameter_form_workflow;
 mod render;
 mod source_picker;
-pub(crate) mod state;
+pub mod state;
 
 pub(in crate::workbench) use render::render_symbol_definition_dialogs;
-pub(crate) use state::{SymbolImportDialogState, SymbolParameterFormDialogState};
+pub use state::{SymbolImportDialogState, SymbolParameterFormDialogState};
 
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::WorkbenchSession;
 
-pub(crate) fn open_symbol_import_dialog(
+pub fn open_symbol_import_dialog(
     dialog: &mut SymbolImportDialogState,
     model: &Model,
     wb: &mut WorkbenchSession,
@@ -32,7 +32,7 @@ pub(crate) fn open_symbol_import_dialog(
 /// electrical binding source. Callers that present their own shared
 /// Library/Cell/View selection use this entry point so an unrelated active
 /// Design document cannot silently retarget the transaction.
-pub(crate) fn open_symbol_import_dialog_for(
+pub fn open_symbol_import_dialog_for(
     dialog: &mut SymbolImportDialogState,
     model: &Model,
     wb: &mut WorkbenchSession,
@@ -59,7 +59,7 @@ pub(crate) fn open_symbol_import_dialog_for(
     };
 }
 
-pub(crate) fn open_symbol_parameter_form_dialog(
+pub fn open_symbol_parameter_form_dialog(
     form: &mut SymbolParameterFormDialogState,
     model: &Model,
     wb: &mut WorkbenchSession,
@@ -78,7 +78,7 @@ pub(crate) fn open_symbol_parameter_form_dialog(
 /// This explicit form is required by the Library/Cellview specialist route:
 /// its project-library selection is authoritative even when another symbol
 /// remains open in the Design workspace.
-pub(crate) fn open_symbol_parameter_form_dialog_for(
+pub fn open_symbol_parameter_form_dialog_for(
     form: &mut SymbolParameterFormDialogState,
     model: &Model,
     wb: &mut WorkbenchSession,

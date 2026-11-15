@@ -104,7 +104,7 @@ fn projected_nets(model: &Model, cell_view_key: &str) -> Arc<Vec<DesignNet>> {
 
 /// Light the active cell view's net named `name`. Returns whether one was
 /// found.
-pub(crate) fn light_net_named(model: &mut Model, name: &str) -> bool {
+pub fn light_net_named(model: &mut Model, name: &str) -> bool {
     let nets = projected_nets(model, &model.workspace.content.active_view.key());
     let Some(net) = nets.iter().find(|net| net.name.eq_ignore_ascii_case(name)) else {
         return false;

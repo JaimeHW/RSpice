@@ -15,7 +15,7 @@ use rspice_schematic_editor::symbol_editor::interaction::{
 };
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
-pub(crate) fn bind_active_canvas(state: &mut CanvasParts<'_>) {
+pub fn bind_active_canvas(state: &mut CanvasParts<'_>) {
     let source = state.symbol_editor_request_source();
     bind_canvas_source(&mut state.design.symbol.editor, source);
 }
@@ -254,7 +254,7 @@ fn text_refusal(text: &str) -> Option<&'static str> {
 }
 
 /// Apply `request` to the symbol in front; whether it began a finger's pan.
-pub(crate) fn apply_canvas_request(
+pub fn apply_canvas_request(
     state: &mut CanvasParts<'_>,
     document: &mut SymbolDocument,
     metadata: &mut SymbolEditorMetadata,
@@ -306,5 +306,5 @@ pub(crate) fn apply_canvas_request(
     outcome.pan
 }
 
-#[cfg(test)]
-pub(crate) mod tests;
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests;

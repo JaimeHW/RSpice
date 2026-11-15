@@ -70,10 +70,7 @@ pub(super) fn handle_select_dragging(
     }
 }
 
-pub(crate) fn capture(
-    state: &CanvasParts<'_>,
-    action: SelectionDragAction,
-) -> SelectionDragRequest {
+pub fn capture(state: &CanvasParts<'_>, action: SelectionDragAction) -> SelectionDragRequest {
     SelectionDragRequest {
         source: editor_request_source(state),
         selection: state.model.schematic.session.editor.selection.clone(),
@@ -82,7 +79,7 @@ pub(crate) fn capture(
     }
 }
 
-pub(crate) fn dispatch(
+pub fn dispatch(
     state: &mut CanvasParts<'_>,
     ctx: &egui::Context,
     symbols: &SchematicSymbolContext,
@@ -92,7 +89,7 @@ pub(crate) fn dispatch(
     apply(state, ctx, symbols, request);
 }
 
-pub(crate) fn apply(
+pub fn apply(
     state: &mut CanvasParts<'_>,
     ctx: &egui::Context,
     symbols: &SchematicSymbolContext,

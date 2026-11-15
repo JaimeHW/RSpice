@@ -39,7 +39,7 @@ pub(crate) fn check_design(model: &mut Model, wb: &mut WorkbenchSession, facts: 
 /// The hierarchy below is walked only for what no single cellview can
 /// answer — whether the design reaches ground and whether a cycle runs
 /// through it — so it answers in the time the one drawing takes.
-pub(crate) fn check_active_cellview(
+pub fn check_active_cellview(
     model: &mut Model,
     wb: &mut WorkbenchSession,
     facts: SlotFacts,
@@ -73,7 +73,7 @@ fn run_design_check(
 /// Record what `check` found, and take the reader to the findings when it
 /// found errors, the way a preflight that blocks a run does. Nothing is
 /// toasted: the reader asked, and the Problems page is the answer.
-pub(crate) fn report(
+pub fn report(
     model: &mut Model,
     wb: &mut WorkbenchSession,
     check: &str,

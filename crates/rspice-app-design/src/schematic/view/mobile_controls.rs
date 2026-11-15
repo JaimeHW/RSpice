@@ -28,7 +28,7 @@ use super::shelf_drag::PlacementTransform;
 /// offered while an operation is live, and the modal facts. A
 /// command a button runs is raised through the context, and the shell runs
 /// it once the surface has drawn.
-pub(crate) fn show(ctx: &Context, cx: &mut Cx<'_, DesignFeature>, content_rect: Rect) {
+pub fn show(ctx: &Context, cx: &mut Cx<'_, DesignFeature>, content_rect: Rect) {
     if !canvas_touch_mode(ctx) {
         return;
     }
@@ -72,7 +72,7 @@ const fn strip_canvas_of(view_type: Option<ViewType>) -> Option<StripCanvas> {
 /// Whether a route, a move, a placement or a box is live: what Esc would
 /// cancel on the canvas. On a symbol, whether a tool is armed, a shape or a
 /// name is part made, or something is held.
-pub(crate) fn operation_live(state: &CanvasFacts<'_>) -> bool {
+pub fn operation_live(state: &CanvasFacts<'_>) -> bool {
     if state.model.workspace.content.active_view_type() == Some(ViewType::Symbol) {
         return state.design.symbol.editor.cancellable();
     }
@@ -113,11 +113,7 @@ const fn floating_transform(action: MobileCanvasAction) -> Option<PlacementTrans
     }
 }
 
-pub(crate) fn execute_action(
-    ctx: &Context,
-    cx: &mut Cx<'_, DesignFeature>,
-    request: MobileCanvasRequest,
-) {
+pub fn execute_action(ctx: &Context, cx: &mut Cx<'_, DesignFeature>, request: MobileCanvasRequest) {
     if request.source != super::requests::editor_request_source(&canvas_facts_in(cx))
         || cx.wb.current_route().surface_id() != SurfaceId::Design
         || strip_canvas_of(cx.model.workspace.content.active_view_type()).is_none()

@@ -9,7 +9,7 @@ use crate::workbench::framework::requests::{Drain, Request};
 /// one, and has it taken straight after it draws, in the frame the reader
 /// chose it.
 #[derive(Debug, Clone)]
-pub(crate) enum DesignRequest {
+pub enum DesignRequest {
     /// A checked Descend into hierarchy choice.
     Descend(DescendHierarchy),
     /// Open the component editor again on one instance, whose card a

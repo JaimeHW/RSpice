@@ -68,14 +68,14 @@ pub(crate) fn display_spelling(value: f64, unit: &str) -> String {
 ///
 /// The revision is part of the key so a definition published in another surface
 /// while the list is up redraws rather than showing the picture it had.
-pub(crate) type MiniCache = std::collections::HashMap<(String, u32), Result<WaveformTrace, String>>;
+pub type MiniCache = std::collections::HashMap<(String, u32), Result<WaveformTrace, String>>;
 
 /// Evaluate every definition's mini that is not already held, and report how
 /// many were evaluated.
 ///
 /// The count is what the tests read: a claim about per-frame cost is only worth
 /// making if something can hold the surface to it.
-pub(crate) fn ensure_minis(
+pub fn ensure_minis(
     cache: &mut MiniCache,
     library: &crate::state::StimulusLibrary,
     timing: PreviewTiming,

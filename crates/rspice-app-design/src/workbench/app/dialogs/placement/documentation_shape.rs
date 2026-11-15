@@ -11,15 +11,15 @@ use crate::workbench::app_state::Model;
 
 /// Isolated draft for the Draw documentation shape transaction.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct DocumentationShapeDialogState {
-    pub(crate) open: bool,
-    pub(crate) kind: crate::state::DocumentationShapeKind,
+pub struct DocumentationShapeDialogState {
+    pub open: bool,
+    pub kind: crate::state::DocumentationShapeKind,
     pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
     pub(crate) expected_shapes: Vec<crate::state::DocumentationShape>,
 }
 
 impl DocumentationShapeDialogState {
-    pub(crate) fn open(
+    pub fn open(
         &mut self,
         source: rspice_schematic_editor::requests::EditorRequestSource,
         expected_shapes: Vec<crate::state::DocumentationShape>,

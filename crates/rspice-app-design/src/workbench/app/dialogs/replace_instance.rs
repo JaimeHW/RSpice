@@ -28,13 +28,13 @@ use crate::workbench::state::WorkbenchSession;
 /// `candidates`. The selected component's stable identifier is retained so
 /// the commit cannot drift to a later selection.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ReplaceInstanceDialogState {
-    pub(crate) open: bool,
-    pub(crate) source_component_id: u64,
+pub struct ReplaceInstanceDialogState {
+    pub open: bool,
+    pub source_component_id: u64,
     pub(crate) current: String,
-    pub(crate) replacement: String,
+    pub replacement: String,
     /// The masters the instance can be replaced with, the likeliest first.
-    pub(crate) candidates: Vec<String>,
+    pub candidates: Vec<String>,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) replacement_authority: Option<crate::state::SchematicReplacementAuthority>,
     pub(crate) initial_target_identity: String,
@@ -44,19 +44,19 @@ pub(crate) struct ReplaceInstanceDialogState {
     pub(crate) dirty: bool,
 }
 
-pub(crate) struct ReplaceInstanceOpen {
-    pub(crate) authority: SchematicEditAuthority,
-    pub(crate) replacement_authority: crate::state::SchematicReplacementAuthority,
-    pub(crate) source_component_id: u64,
-    pub(crate) current: String,
-    pub(crate) replacement: String,
-    pub(crate) initial_target_identity: String,
-    pub(crate) initial_target_spec: crate::state::SchematicReplacementTargetSpec,
-    pub(crate) candidates: Vec<String>,
+pub struct ReplaceInstanceOpen {
+    pub authority: SchematicEditAuthority,
+    pub replacement_authority: crate::state::SchematicReplacementAuthority,
+    pub source_component_id: u64,
+    pub current: String,
+    pub replacement: String,
+    pub initial_target_identity: String,
+    pub initial_target_spec: crate::state::SchematicReplacementTargetSpec,
+    pub candidates: Vec<String>,
 }
 
 impl ReplaceInstanceDialogState {
-    pub(crate) fn open(&mut self, request: ReplaceInstanceOpen) {
+    pub fn open(&mut self, request: ReplaceInstanceOpen) {
         let initial_replacement = request.replacement.clone();
         *self = Self {
             open: true,
@@ -254,7 +254,7 @@ impl ReplacementValidation {
     }
 }
 
-pub(crate) fn replace_instance_available(registry: &PropertyEditorSchema, model: &Model) -> bool {
+pub fn replace_instance_available(registry: &PropertyEditorSchema, model: &Model) -> bool {
     if model.schematic_edit_read_only() {
         return false;
     }
@@ -276,7 +276,7 @@ pub(crate) fn replace_instance_available(registry: &PropertyEditorSchema, model:
         .any(|entry| !entry.is_same_master(source))
 }
 
-pub(crate) fn open_replace_instance_dialog(
+pub fn open_replace_instance_dialog(
     dialog: &mut ReplaceInstanceDialogState,
     registry: &PropertyEditorSchema,
     model: &Model,
@@ -322,15 +322,15 @@ pub(crate) fn open_replace_instance_dialog(
 
 /// What Replace instance draws over and changes: its draft, the property
 /// sheets the instance catalog reads, the model and the session.
-pub(crate) struct ReplaceInstance<'a> {
-    pub(crate) dialog: &'a mut ReplaceInstanceDialogState,
-    pub(crate) registry: &'a PropertyEditorSchema,
-    pub(crate) model: &'a mut Model,
-    pub(crate) workbench: &'a mut WorkbenchSession,
+pub struct ReplaceInstance<'a> {
+    pub dialog: &'a mut ReplaceInstanceDialogState,
+    pub registry: &'a PropertyEditorSchema,
+    pub model: &'a mut Model,
+    pub workbench: &'a mut WorkbenchSession,
 }
 
 impl ReplaceInstance<'_> {
-    pub(crate) fn render_replace_instance_dialog(&mut self, ctx: &Context) {
+    pub fn render_replace_instance_dialog(&mut self, ctx: &Context) {
         if !self.dialog.open {
             return;
         }

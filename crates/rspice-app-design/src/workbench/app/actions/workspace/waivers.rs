@@ -16,7 +16,7 @@ use super::symbol_document::run_active_symbol_pin_checks;
 /// An undo restores the document whole, a waiver with it, and nothing
 /// about that tells the published findings: without this a finding whose
 /// waiver was undone would still be listed waived, and still not count.
-pub(crate) fn restate_waived_findings(
+pub fn restate_waived_findings(
     model: &mut Model,
     facts: SlotFacts,
     before: &StoredWaivers,

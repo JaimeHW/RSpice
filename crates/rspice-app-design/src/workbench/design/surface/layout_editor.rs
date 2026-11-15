@@ -82,7 +82,7 @@ struct ResolvedDisplayContract {
     ordered_layers: Vec<LayoutLayerPurpose>,
 }
 
-pub(crate) fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>) {
+pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>) {
     // The status bar reads the cursor from here; a frame with no canvas
     // under the pointer has none.
     canvas.design.canvas_hover = None;

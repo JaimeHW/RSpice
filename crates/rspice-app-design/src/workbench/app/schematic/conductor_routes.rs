@@ -23,7 +23,7 @@ fn conductor_source(
 
 /// Start a wire at `position` on the open schematic, bound to where it
 /// started. A read-only schematic starts none.
-pub(crate) fn start_canvas_wire(
+pub fn start_canvas_wire(
     model: &mut Model,
     workbench: &WorkbenchSession,
     ctx: &egui::Context,
@@ -39,7 +39,7 @@ pub(crate) fn start_canvas_wire(
 
 /// Start a bus route at `position`, bound to the document, view, window and
 /// viewport it is drawn in.
-pub(crate) fn start_canvas_bus(
+pub fn start_canvas_bus(
     model: &mut Model,
     workbench: &WorkbenchSession,
     ctx: &egui::Context,
@@ -58,7 +58,7 @@ pub(crate) fn start_canvas_bus(
 /// Let an uncommitted route go once the document, view, window or viewport
 /// it was drawn in is no longer in front, or the schematic became read-only.
 /// Returns whether it was let go.
-pub(crate) fn reconcile_conductor_route(
+pub fn reconcile_conductor_route(
     model: &mut Model,
     workbench: &WorkbenchSession,
     ctx: &egui::Context,

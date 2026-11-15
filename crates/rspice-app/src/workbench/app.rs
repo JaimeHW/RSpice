@@ -84,7 +84,6 @@ mod browser_history;
 pub(crate) mod code_adapters;
 pub(crate) mod dialogs;
 pub(crate) mod project_transactions;
-pub(crate) mod schematic;
 
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::models::pack_persistence;
@@ -103,17 +102,11 @@ pub(crate) use rspice_app_workbench::workbench::app::dialogs::confirmation_state
 #[cfg(test)]
 pub(crate) use rspice_app_sheets::workbench::app::actions::sheets;
 
-pub(crate) use dialogs::connectivity_manager::ConnectivityManagerDialogState;
 #[cfg(test)]
 pub(crate) use dialogs::connectivity_manager::open_connectivity_manager;
 
-pub(crate) use dialogs::selection::bulk_edit::SelectionBulkEditDialogState;
-
-pub(crate) use dialogs::design_review_comments::DesignReviewCommentsDialogState;
-
 pub(crate) use dialogs::create_model_bound_symbol::{
-    CreateModelBoundSymbolDialogState, open_create_model_bound_symbol_dialog,
-    open_create_subcircuit_bound_symbol_dialog,
+    open_create_model_bound_symbol_dialog, open_create_subcircuit_bound_symbol_dialog,
 };
 pub(crate) use dialogs::symbol_definition::{
     open_symbol_import_dialog_for, open_symbol_parameter_form_dialog_for,
@@ -126,75 +119,85 @@ pub(crate) use dialogs::state::HelpCenterPage;
 #[cfg(test)]
 pub(in crate::workbench) use dialogs::selection::rename::RenameSelectionTarget;
 
+#[cfg(test)]
+pub(crate) use rspice_app_design::workbench::app::schematic;
 pub(crate) use rspice_app_state::workbench::app::schematic::placement::arm_pack_part;
-pub(crate) use schematic::conductor_routes::{
-    reconcile_conductor_route, start_canvas_bus, start_canvas_wire,
-};
-pub(crate) use schematic::edit_authority::{
-    SchematicEditAuthority, schematic_editor_request_source, symbol_context_revision,
-};
-pub(crate) use schematic::placement::arm_schematic_tool;
+#[cfg(test)]
+pub(crate) use schematic::edit_authority::SchematicEditAuthority;
+#[cfg(test)]
+pub(crate) use schematic::edit_authority::schematic_editor_request_source;
 
-pub(crate) use schematic::named_net::{
-    NamedNetTarget, apply_named_net_rename, selected_named_net_target, validate_named_net_rename,
-};
-
-pub(crate) use dialogs::hierarchy::create::open_create_hierarchy_dialog;
-pub(crate) use dialogs::replace_instance::{
-    open_replace_instance_dialog, replace_instance_available,
-};
-pub(crate) use dialogs::stimulus_link::{
-    StimulusLinkMode, open_stimulus_link, show_stimulus_definition,
-};
-
-pub(crate) use actions::property_edit::{
-    PropertyFormParts, authoritative_component_property_sheet, open_selected_object_properties_in,
-    selected_object_properties_available_in,
-};
+#[cfg(test)]
+pub(crate) use actions::property_edit::authoritative_component_property_sheet;
+#[cfg(test)]
+pub(crate) use actions::property_edit::selected_object_properties_available_in;
+#[cfg(test)]
 pub(crate) use actions::stimulus_placement::arm_placement_from_definition;
+#[cfg(test)]
+pub(crate) use actions::workspace::copy_active_schematic_selection;
+#[cfg(test)]
+pub(crate) use actions::workspace::hierarchy_master_for_component;
+#[cfg(test)]
+pub(crate) use actions::workspace::symbol_document::generate_active_symbol_document;
+#[cfg(test)]
+pub(crate) use actions::workspace::symbol_document::load_active_symbol_editor_metadata;
+#[cfg(test)]
+pub(crate) use actions::workspace::symbol_document::record_symbol_edit;
+#[cfg(test)]
+pub(crate) use actions::workspace::symbol_document::symbol_editor_copy_available;
+#[cfg(test)]
+pub(crate) use actions::workspace::symbol_document::symbol_editor_request_source;
+#[cfg(test)]
+pub(crate) use actions::workspace::symbol_in_place::in_place_bounds;
+#[cfg(test)]
+pub(crate) use actions::workspace::symbol_in_place::in_place_placement;
+pub(crate) use actions::workspace::symbol_in_place::in_place_session;
+#[cfg(test)]
+pub(crate) use actions::workspace::symbol_in_place::in_place_session_mut;
+pub(crate) use dialogs::hierarchy::create::open_create_hierarchy_dialog;
+#[cfg(test)]
+pub(crate) use dialogs::placement::net_label::open_net_label_placement_in;
+#[cfg(test)]
+pub(crate) use dialogs::placement::net_label::place_sequenced_net_label_in;
+#[cfg(test)]
+pub(crate) use dialogs::replace_instance::open_replace_instance_dialog;
+#[cfg(test)]
+pub(crate) use dialogs::replace_instance::replace_instance_available;
+#[cfg(test)]
+pub(crate) use dialogs::selection::array::open_array_selection_dialog_in;
+#[cfg(test)]
+pub(crate) use dialogs::selection::commands::delete_schematic_selection;
+#[cfg(test)]
+pub(crate) use dialogs::selection::commands::duplicate_schematic_selection_at;
+#[cfg(test)]
+pub(crate) use dialogs::selection::commands::floating::on_grid;
+#[cfg(test)]
+pub(crate) use dialogs::selection::commands::floating::place_floating_paste;
+#[cfg(test)]
+pub(crate) use dialogs::selection::commands::paste_schematic_clipboard_at;
+#[cfg(test)]
+pub(crate) use dialogs::selection::commands::select_all_schematic_objects;
+#[cfg(test)]
+pub(crate) use dialogs::selection::move_selection::arm_move_selection_in;
+#[cfg(test)]
+pub(crate) use dialogs::selection::move_selection::armed_move_selection_authority;
+#[cfg(test)]
+pub(crate) use dialogs::selection::stretch::arm_stretch_selection_in;
+#[cfg(test)]
+pub(crate) use dialogs::stimulus_link::StimulusLinkMode;
+#[cfg(test)]
+pub(crate) use dialogs::stimulus_link::open_stimulus_link;
+pub(crate) use dialogs::stimulus_link::show_stimulus_definition;
 
 pub(crate) use actions::workspace::{
-    copy_active_schematic_selection, deny_read_only_edit, hierarchy_master_for_component,
-    highlight_active_failure_sites, log_anchor_refusal, selected_hierarchy_master,
-    selected_instance_veriloga_source,
-    symbol_document::{
-        active_symbol_ports, finish_symbol_parent_edit, generate_active_symbol_document,
-        load_active_symbol_editor_metadata, record_symbol_edit, store_symbol_canvas_frame,
-        symbol_editor_copy_available, symbol_editor_lock_message, symbol_editor_request_source,
-    },
-    symbol_in_place::{
-        SymbolInPlace, SymbolInPlaceRefusal, in_place_bounds, in_place_placement, in_place_session,
-        in_place_session_mut, selected_symbol_in_place_target, sync_in_place_layout,
-    },
-    sync_active_schematic, veriloga_master_of_component, veriloga_source_for_component,
+    deny_read_only_edit, highlight_active_failure_sites, log_anchor_refusal,
 };
-pub(crate) use dialogs::find_replace::find_replace_matches;
-pub(crate) use dialogs::placement::net_label::{
-    open_net_label_placement_in, place_sequenced_net_label_in,
-};
-pub(crate) use dialogs::selection::array::{
-    ArraySelectionDialogState, ArraySelectionPreviewCache, armed_array_selection_authority,
-    armed_array_selection_plan, cancel_armed_array_selection_in, open_array_selection_dialog_in,
-};
-pub(crate) use dialogs::selection::commands::floating::{
-    FloatingCopyParts, cancel_floating_paste_in, floating_paste_scope, on_grid,
-    place_floating_paste, turn_floating_paste,
-};
-pub(crate) use dialogs::selection::commands::{
-    cut_schematic_selection, delete_schematic_selection, duplicate_schematic_selection,
-    duplicate_schematic_selection_at, join_collinear_wires_on_active_sheet,
-    paste_schematic_clipboard, paste_schematic_clipboard_at, schematic_grid_step,
-    select_all_schematic_objects,
-};
-pub(crate) use dialogs::selection::move_selection::{
-    arm_move_selection_in, armed_move_selection_authority, cancel_armed_move_selection_in,
-};
-pub(crate) use dialogs::selection::stretch::{
-    arm_stretch_selection_in, armed_stretch_selection_authority, cancel_armed_stretch_selection_in,
-};
+pub(crate) use dialogs::selection::array::cancel_armed_array_selection_in;
+pub(crate) use dialogs::selection::commands::floating::cancel_floating_paste_in;
+pub(crate) use dialogs::selection::move_selection::cancel_armed_move_selection_in;
+pub(crate) use dialogs::selection::stretch::cancel_armed_stretch_selection_in;
 pub(crate) use dialogs::symbol_definition::{
-    SymbolImportDialogState, SymbolParameterFormDialogState, open_symbol_import_dialog,
-    open_symbol_parameter_form_dialog,
+    open_symbol_import_dialog, open_symbol_parameter_form_dialog,
 };
 
 // =============================================================================

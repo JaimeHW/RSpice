@@ -5,12 +5,12 @@
 //! rather than on one selected object, and they are the actions that a
 //! read-only schematic refuses.
 
-pub(crate) mod design_checks;
-pub(in crate::workbench) mod history;
+pub mod design_checks;
+pub mod history;
 mod navigation;
-pub(crate) mod symbol_document;
-pub(in crate::workbench) mod symbol_in_place;
-pub(in crate::workbench) mod waivers;
+pub mod symbol_document;
+pub mod symbol_in_place;
+pub mod waivers;
 
 use crate::diagnostics::LogAnchor;
 use crate::state::{CellViewRef, ComponentType, RetainedSimulationState, SchematicState, ViewType};
@@ -20,18 +20,18 @@ use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 use symbol_document::{SymbolUiState, project_active_symbol_session};
 
-pub(crate) use history::{
+pub use history::{
     DesignHistoryParts, HistoryDirection, HistoryStepParts, commit_inline_component_edit,
     commit_pending_inspector_edit, inline_edit_authority, project_step_comes_first,
     take_history_step,
 };
-pub(crate) use navigation::NavigationParts;
+pub use navigation::NavigationParts;
 
 /// What restoring the active schematic from the workspace reads and writes
 /// of the design feature's state: the canvas drag it lets go, the snap and
 /// routing the new buffer takes up, the visibility whose wire routing follows
 /// a new schematic, and the symbol editor projected onto the view in front.
-pub(crate) struct SchematicRestoreParts<'a> {
+pub struct SchematicRestoreParts<'a> {
     pub(crate) drag: &'a mut DragState,
     pub(crate) snap: &'a mut crate::state::SnapEngine,
     pub(crate) routing_mode: &'a mut crate::state::WireRoutingMode,
@@ -99,7 +99,7 @@ fn schematic_for_workspace(
 /// joining two authored cell pins is captured with the selected
 /// instances instead of being silently omitted. The copy goes to the
 /// app's clipboard, which outlives the cell view it came from.
-pub(crate) fn copy_active_schematic_selection(
+pub fn copy_active_schematic_selection(
     clipboard: &mut rspice_design::schematic::clipboard::ClipboardData,
     model: &Model,
 ) -> bool {
@@ -144,7 +144,7 @@ pub(crate) fn capture_active_schematic_selection(
 /// [`LogAnchor::Schematic`] and [`LogAnchor::Symbol`] carry geometry
 /// captured at the finding, so they always have somewhere to go — the
 /// staleness question is only asked of anchors that resolve by name.
-pub(crate) fn log_anchor_refusal(model: &Model, anchor: &LogAnchor) -> Option<String> {
+pub fn log_anchor_refusal(model: &Model, anchor: &LogAnchor) -> Option<String> {
     match anchor {
         LogAnchor::Schematic { .. } | LogAnchor::Symbol { .. } => None,
         LogAnchor::Simulation { nets, devices } => {
@@ -177,7 +177,7 @@ pub(crate) fn log_anchor_refusal(model: &Model, anchor: &LogAnchor) -> Option<St
 /// The command form of [`highlight_failed_run_sites`], taking its
 /// subject from the selected result so any surface can offer it without
 /// re-deriving which run is being looked at.
-pub(crate) fn highlight_active_failure_sites(model: &mut Model, wb: &mut WorkbenchSession) -> bool {
+pub fn highlight_active_failure_sites(model: &mut Model, wb: &mut WorkbenchSession) -> bool {
     let Some(attribution) = model
         .simulation
         .active_analysis()
@@ -237,7 +237,7 @@ pub(crate) fn highlight_failed_run_sites(
 }
 
 /// The openable Verilog-A view of the one selected instance.
-pub(crate) fn selected_instance_veriloga_source(model: &Model) -> Option<CellViewRef> {
+pub fn selected_instance_veriloga_source(model: &Model) -> Option<CellViewRef> {
     model
         .schematic
         .session
@@ -259,10 +259,7 @@ pub(crate) fn hierarchical_edit_in_place_enabled(model: &Model) -> bool {
 /// resolves to a module yet. This says what kind of master the instance
 /// has; [`veriloga_source_for_component`] says whether it can be
 /// opened.
-pub(crate) fn veriloga_master_of_component(
-    model: &Model,
-    component_id: u64,
-) -> Option<CellViewRef> {
+pub fn veriloga_master_of_component(model: &Model, component_id: u64) -> Option<CellViewRef> {
     let binding = model
         .schematic
         .document()
@@ -291,10 +288,7 @@ pub(crate) fn veriloga_master_of_component(
 /// schematic instance. Merely spelling a view `veriloga` is insufficient:
 /// the library view, cell-view-owned source bundle, and selected module
 /// contract must all resolve before navigation is offered.
-pub(crate) fn veriloga_source_for_component(
-    model: &Model,
-    component_id: u64,
-) -> Option<CellViewRef> {
+pub fn veriloga_source_for_component(model: &Model, component_id: u64) -> Option<CellViewRef> {
     let component = model
         .schematic
         .document()
@@ -320,7 +314,7 @@ pub(crate) fn veriloga_source_for_component(
 }
 
 /// The selected instance's name and the schematic master it descends into.
-pub(crate) fn selected_hierarchy_master(model: &Model) -> Option<(String, CellViewRef)> {
+pub fn selected_hierarchy_master(model: &Model) -> Option<(String, CellViewRef)> {
     model
         .schematic
         .session
@@ -335,7 +329,7 @@ pub(crate) fn selected_hierarchy_master(model: &Model) -> Option<(String, CellVi
 /// A generic `CellInstance` can also bind a SPICE, symbol, or Verilog-A
 /// view. Those bindings are valid design objects, but they are not
 /// descendable hierarchy and must not enable the descend command.
-pub(crate) fn hierarchy_master_for_component(
+pub fn hierarchy_master_for_component(
     model: &Model,
     component_id: u64,
 ) -> Option<(String, CellViewRef)> {
@@ -380,7 +374,7 @@ pub(crate) fn read_only_master_message(model: &Model) -> String {
 
 /// Refuse an edit on a read-only view, with a prompt that names the
 /// library. Returns true when the edit must be blocked.
-pub(crate) fn deny_read_only_edit(model: &Model, wb: &mut WorkbenchSession) -> bool {
+pub fn deny_read_only_edit(model: &Model, wb: &mut WorkbenchSession) -> bool {
     if !model.schematic_edit_read_only() {
         return false;
     }
@@ -411,7 +405,7 @@ pub(crate) fn deny_read_only_edit(model: &Model, wb: &mut WorkbenchSession) -> b
 /// on the status bar, over the parts it reaches.
 ///
 /// [`Model::sync_active_schematic_to_workspace`]: crate::workbench::app_state::Model::sync_active_schematic_to_workspace
-pub(crate) fn sync_active_schematic(model: &mut Model, workbench: &mut WorkbenchSession) {
+pub fn sync_active_schematic(model: &mut Model, workbench: &mut WorkbenchSession) {
     if let Some(prompt) = model.sync_active_schematic_to_workspace() {
         workbench.prompt(prompt);
     }
@@ -420,7 +414,7 @@ pub(crate) fn sync_active_schematic(model: &mut Model, workbench: &mut Workbench
 /// Resolve the user defaults into one explicit, project-portable document
 /// policy. This is the only constructor production UI paths use for a new
 /// schematic/testbench document. Existing buffers are never rewritten.
-pub(crate) fn new_schematic_document(
+pub fn new_schematic_document(
     model: &Model,
     snap: &crate::state::SnapEngine,
     routing_mode: crate::state::WireRoutingMode,
@@ -492,7 +486,7 @@ pub(crate) fn rebuild_active_connections_from_symbols(model: &mut Model) {
 
 /// Take up the active view's schematic from the workspace's working copy,
 /// as a history step or a reload left it.
-pub(crate) fn restore_active_schematic_from_workspace(
+pub fn restore_active_schematic_from_workspace(
     mut design: SchematicRestoreParts<'_>,
     model: &mut Model,
     wb: &WorkbenchSession,
@@ -518,7 +512,7 @@ pub(crate) fn restore_active_schematic_from_workspace(
 
 /// Mark the active schematic as a new document for the edits that read it,
 /// and project the symbol editor's session onto the view now in front.
-pub(crate) fn bump_active_schematic_epoch(
+pub fn bump_active_schematic_epoch(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &WorkbenchSession,
@@ -527,5 +521,5 @@ pub(crate) fn bump_active_schematic_epoch(
     project_active_symbol_session(symbol, model, wb);
 }
 
-#[cfg(test)]
-pub(crate) mod tests;
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests;

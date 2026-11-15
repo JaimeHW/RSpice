@@ -49,7 +49,7 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     apply_request(cx, request);
 }
 
-pub(crate) fn apply_request(cx: &mut Cx<'_, DesignFeature>, mut request: SymbolInspectorRequest) {
+pub fn apply_request(cx: &mut Cx<'_, DesignFeature>, mut request: SymbolInspectorRequest) {
     if request.source != symbol_editor_request_source(cx.model, cx.wb)
         || request.expected_selection != cx.state.symbol.editor.effective_selection()
         || cx.application_modal_open()

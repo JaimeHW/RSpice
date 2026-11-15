@@ -2,14 +2,16 @@
 
 use egui::Context;
 
+#[cfg(test)]
 use super::controller::{inferred_model_pins, parse_target};
 use super::state::*;
+#[cfg(test)]
 use crate::state::model_library::ModelType;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 /// Draw the dialog as its dialog step does.
-pub(crate) fn render(
+pub fn render(
     draft: &mut CreateModelBoundSymbolDialogState,
     model: &mut Model,
     workbench: &mut WorkbenchSession,
@@ -18,7 +20,7 @@ pub(crate) fn render(
     super::render::render_create_model_bound_symbol_dialog(draft, model, workbench, ctx);
 }
 
-pub(crate) fn node_bounds(
+pub fn node_bounds(
     nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
     role: egui::accesskit::Role,
     label: &str,

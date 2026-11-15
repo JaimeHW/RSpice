@@ -14,9 +14,9 @@ use rspice_app_state::workbench::app::schematic::placement::arm_cell_instance;
 /// one or more vector ports. Width edits remain runtime-only until the
 /// primary action materializes and validates the exact durable binding.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct BuiltinXspicePlacementDialogState {
-    pub(crate) open: bool,
-    pub(crate) stable_id: String,
+pub struct BuiltinXspicePlacementDialogState {
+    pub open: bool,
+    pub stable_id: String,
     pub(crate) display_name: String,
     pub(crate) vector_ports: Vec<crate::state::CatalogXspiceVectorPort>,
     pub(crate) widths: std::collections::BTreeMap<String, usize>,
@@ -25,7 +25,7 @@ pub(crate) struct BuiltinXspicePlacementDialogState {
 }
 
 impl BuiltinXspicePlacementDialogState {
-    pub(crate) fn open(
+    pub fn open(
         &mut self,
         stable_id: impl Into<String>,
         display_name: impl Into<String>,

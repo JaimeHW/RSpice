@@ -1,4 +1,4 @@
 //! Hierarchy creation and edit-context descent.
 
-pub(crate) mod create;
-pub(crate) mod descend;
+pub mod create;
+pub mod descend;

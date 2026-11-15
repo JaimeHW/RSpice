@@ -25,22 +25,19 @@ use rspice_schematic_editor::component_properties::{
 /// What the schematic component editor draws over and changes: its draft,
 /// the property sheets, the stimulus link it hands an instance to, the
 /// definition it shows in the Stimulus Library, the model and the session.
-pub(crate) struct PropertyDialog<'a> {
-    pub(crate) dialog: &'a mut TabbedPropertyDialogState,
-    pub(crate) registry: &'a mut PropertyEditorSchema,
-    pub(crate) stimulus_link: &'a mut StimulusLinkDialogState,
-    pub(crate) selected_stimulus_definition: &'a mut Option<String>,
-    pub(crate) model: &'a mut Model,
-    pub(crate) workbench: &'a mut WorkbenchSession,
+pub struct PropertyDialog<'a> {
+    pub dialog: &'a mut TabbedPropertyDialogState,
+    pub registry: &'a mut PropertyEditorSchema,
+    pub stimulus_link: &'a mut StimulusLinkDialogState,
+    pub selected_stimulus_definition: &'a mut Option<String>,
+    pub model: &'a mut Model,
+    pub workbench: &'a mut WorkbenchSession,
 }
 
 impl PropertyDialog<'_> {
     /// Render the floating schematic component editor. A re-adopted stimulus
     /// asks the shell to reopen the editor on the instance's new card.
-    pub(crate) fn render_property_dialog(
-        &mut self,
-        ctx: &egui::Context,
-    ) -> ComponentPropertyDialogResult {
+    pub fn render_property_dialog(&mut self, ctx: &egui::Context) -> ComponentPropertyDialogResult {
         if self.dialog.open {
             self.dialog.session_error = component_property_session_error(self.dialog, self.model);
             refresh_source_contract_advisories(self.dialog, self.registry, self.model);
@@ -591,7 +588,7 @@ fn model_is_component_value(kind: ComponentType) -> bool {
     )
 }
 
-pub(crate) fn component_property_session_error(
+pub fn component_property_session_error(
     dialog: &TabbedPropertyDialogState,
     model: &Model,
 ) -> Option<String> {

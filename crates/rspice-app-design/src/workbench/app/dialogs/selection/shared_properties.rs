@@ -30,13 +30,13 @@ const MIXED: &str = "mixed";
 
 /// One property every selected instance's kind owns.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SharedField {
-    pub(crate) key: String,
+pub struct SharedField {
+    pub key: String,
     pub(crate) label: String,
     /// The value every instance holds (empty when none sets it), or `None`
     /// when they differ.
-    pub(crate) common: Option<String>,
-    pub(crate) text: String,
+    pub common: Option<String>,
+    pub text: String,
 }
 
 impl SharedField {
@@ -51,10 +51,10 @@ impl SharedField {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SharedPropertiesDialogState {
-    pub(crate) open: bool,
+pub struct SharedPropertiesDialogState {
+    pub open: bool,
     pub(crate) ids: Vec<u64>,
-    pub(crate) fields: Vec<SharedField>,
+    pub fields: Vec<SharedField>,
     /// The drawing the form was opened on; an edit since refuses Apply.
     pub(crate) content_version: u64,
     pub(crate) error: Option<String>,
@@ -88,7 +88,7 @@ pub(crate) fn shared_properties_available(registry: &PropertyEditorSchema, model
 /// Open the form on the selection, unless a dialog holds the workbench
 /// (`modal_open`) or the schematic refuses the edit. Returns whether it
 /// opened.
-pub(crate) fn open_shared_properties(
+pub fn open_shared_properties(
     dialog: &mut SharedPropertiesDialogState,
     registry: &PropertyEditorSchema,
     modal_open: bool,
@@ -199,7 +199,7 @@ fn retyped(current: &PropertyValue, text: &str) -> PropertyValue {
 
 /// Write every edited field to every instance, as one undo step. Returns
 /// how many instances changed, or which one refused and why.
-pub(crate) fn apply_shared_properties(
+pub fn apply_shared_properties(
     form: &SharedPropertiesDialogState,
     registry: &PropertyEditorSchema,
     model: &mut Model,
@@ -316,18 +316,20 @@ pub(in crate::workbench) fn render_shared_properties_dialog(
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
     use crate::state::Point;
+    #[cfg(test)]
     use crate::workbench::design::test_host::DesignTestHost;
 
     /// Whether the form can open, over the parts it reads.
+    #[cfg(test)]
     fn shared_properties_available(state: &DesignTestHost) -> bool {
         super::shared_properties_available(&state.design.property_registry, &state.model)
     }
 
-    pub(crate) fn resistor(id: u64, name: &str, value: &str) -> Component {
+    pub fn resistor(id: u64, name: &str, value: &str) -> Component {
         let mut component =
             Component::new(id, ComponentType::Resistor, Point::new(id as i32 * 100, 0));
         component.name = name.to_owned();
@@ -335,6 +337,7 @@ pub(crate) mod tests {
         component
     }
 
+    #[cfg(test)]
     fn two_resistors() -> DesignTestHost {
         let mut state = DesignTestHost::default();
         let document = state.model.schematic.document_mut_for_test();

@@ -10,7 +10,7 @@ use crate::workbench::state::WorkspaceDocumentId;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// One tab per cell view open in Design.
-pub(in crate::workbench) fn design_documents(model: &Model) -> Vec<WorkspaceDocument> {
+pub fn design_documents(model: &Model) -> Vec<WorkspaceDocument> {
     model
         .workspace
         .content
@@ -30,10 +30,7 @@ pub(in crate::workbench) fn design_documents(model: &Model) -> Vec<WorkspaceDocu
 }
 
 /// Show a cell view that is open in Design.
-pub(in crate::workbench) fn activate_cell_view(
-    navigation: &mut NavigationParts<'_>,
-    reference: &CellViewRef,
-) -> bool {
+pub fn activate_cell_view(navigation: &mut NavigationParts<'_>, reference: &CellViewRef) -> bool {
     if navigation
         .model
         .workspace
@@ -49,7 +46,7 @@ pub(in crate::workbench) fn activate_cell_view(
     }
 }
 
-pub(crate) const fn icon_for_view(view_type: ViewType) -> WorkbenchIcon {
+pub const fn icon_for_view(view_type: ViewType) -> WorkbenchIcon {
     match view_type {
         ViewType::Schematic | ViewType::Testbench => WorkbenchIcon::Design,
         ViewType::Symbol => WorkbenchIcon::Models,

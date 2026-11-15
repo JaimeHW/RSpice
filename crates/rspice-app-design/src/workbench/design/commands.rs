@@ -24,7 +24,7 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 
 /// One command of the design feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DesignCommand {
+pub enum DesignCommand {
     /// Create a definition and select it.
     NewStimulusDefinition,
     /// Copy the selected definition into an editable duplicate.
@@ -415,7 +415,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 101] = [
+    pub const ALL: [Self; 101] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -520,7 +520,7 @@ impl DesignCommand {
     ];
 
     /// The key a shortcut profile names this command by.
-    pub(crate) const fn key(self) -> CommandKey {
+    pub const fn key(self) -> CommandKey {
         match self {
             Self::NewStimulusDefinition => CommandKey::new("stimulus-new"),
             Self::DuplicateStimulusDefinition => CommandKey::new("stimulus-duplicate"),
@@ -659,7 +659,7 @@ impl DesignCommand {
 
     /// The command a shortcut profile names by `key`, if the feature
     /// declares it.
-    pub(crate) fn from_key(key: CommandKey) -> Option<Self> {
+    pub fn from_key(key: CommandKey) -> Option<Self> {
         Self::ALL.into_iter().find(|command| command.key() == key)
     }
 
@@ -699,7 +699,7 @@ impl DesignCommand {
     /// with chords of their own; editing a symbol in place is a chord of the
     /// design workspace, and Return leaves it. Cycling the grid is a chord
     /// of every drawing canvas.
-    pub(crate) const fn declared_spec(self) -> CommandSpec {
+    pub const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let open = palette.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
         let project = open.with(CommandFlags::BLOCKED_BY_PROJECT_OPERATION, true);
@@ -1099,7 +1099,7 @@ impl DesignCommand {
 /// defines, "... from model" for a symbol bound to a model, and "... from
 /// schematic" otherwise. The menu row, the palette, the toolbar and the
 /// undo step all read this one name.
-pub(crate) fn update_pins_label(source: &str) -> &'static str {
+pub fn update_pins_label(source: &str) -> &'static str {
     match source {
         "module" => "Update pins from module",
         "model" => "Update pins from model",

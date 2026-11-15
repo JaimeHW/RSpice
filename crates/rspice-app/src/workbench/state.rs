@@ -4,25 +4,32 @@
 //! for navigation, dock visibility, responsive drawers, and the selection of
 //! the task surface inside each canonical workspace.
 
-use rspice_app_workbench::workbench::state::console_views;
-use rspice_app_workbench::workbench::state::navigator_tree;
-mod stimulus_editor;
 use rspice_app_simulate::workbench::state::simulate_session;
 #[cfg(test)]
 use rspice_app_simulate::workbench::state::workflow_drafts;
+use rspice_app_workbench::workbench::state::console_views;
+#[cfg(test)]
+pub(crate) use rspice_app_workbench::workbench::state::navigator_tree::{
+    NavigatorTreeNode, NavigatorTreeState,
+};
 pub(crate) use rspice_app_workbench::workbench::state::workbench_session;
 
 // The workbench's own session and the views over its records, which the
 // workbench reads by these paths.
-pub use console_views::{ConsoleChannel, InlineEditField};
+pub use console_views::ConsoleChannel;
+#[cfg(test)]
+pub(crate) use console_views::InlineEditAuthority;
+#[cfg(test)]
+pub use console_views::InlineEditField;
+#[cfg(test)]
+pub(crate) use console_views::InlineEditSession;
 #[cfg(test)]
 pub use console_views::{
     ConsoleReveal, ConsoleSelection, ConsoleSeverity, ConsoleView, NotificationFilter,
 };
-pub(crate) use console_views::{InlineEditAuthority, InlineEditSession};
-pub use navigator_tree::*;
+#[cfg(test)]
+pub use rspice_app_design::workbench::state::stimulus_editor::*;
 pub use simulate_session::*;
-pub use stimulus_editor::*;
 #[cfg(test)]
 use workbench_session::LAYOUT_SCHEMA_VERSION;
 pub use workbench_session::default_console_height;

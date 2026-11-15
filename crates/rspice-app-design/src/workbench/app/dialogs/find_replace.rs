@@ -27,11 +27,11 @@ const PRIMARY: &str = "Replace all";
 const DESCRIPTION: &str = "Replace text in instance names, net labels and property values.";
 const FIND_FIELD: &str = "find-replace-find";
 const REPLACE_FIELD: &str = "find-replace-replace";
-pub(crate) const SCOPES: [&str; 3] = ["Sheet", "Cell view", "Hierarchy below"];
+pub const SCOPES: [&str; 3] = ["Sheet", "Cell view", "Hierarchy below"];
 
 /// Where Replace all reaches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FindScope {
+pub enum FindScope {
     /// The sheet on the canvas.
     Sheet,
     /// Every sheet of the cell view on the canvas.
@@ -43,14 +43,14 @@ pub(crate) enum FindScope {
 
 /// The form's draft. It outlives one opening, as a find box does.
 #[derive(Debug, Clone)]
-pub(crate) struct FindReplaceDialogState {
-    pub(crate) open: bool,
-    pub(crate) find: String,
-    pub(crate) replace: String,
+pub struct FindReplaceDialogState {
+    pub open: bool,
+    pub find: String,
+    pub replace: String,
     /// An index into the scopes, as the segmented control keeps it.
-    pub(crate) scope: usize,
+    pub scope: usize,
     pub(crate) targets: FindTargets,
-    pub(crate) options: FindOptions,
+    pub options: FindOptions,
 }
 
 impl Default for FindReplaceDialogState {
@@ -78,16 +78,16 @@ impl FindReplaceDialogState {
 
 /// The matches in one cell view.
 #[derive(Debug, Clone)]
-pub(crate) struct DocumentMatches {
+pub struct DocumentMatches {
     pub(crate) reference: CellViewRef,
     pub(crate) key: String,
-    pub(crate) path: String,
-    pub(crate) matches: Vec<FindMatch>,
+    pub path: String,
+    pub matches: Vec<FindMatch>,
 }
 
 /// Every text the form's query changes, cell view by cell view, the active
 /// one first; or why the query cannot run.
-pub(crate) fn find_replace_matches(
+pub fn find_replace_matches(
     form: &FindReplaceDialogState,
     model: &Model,
 ) -> Result<Vec<DocumentMatches>, String> {
@@ -175,7 +175,7 @@ fn read_only(model: &Model, reference: &CellViewRef) -> bool {
 /// Make every listed change, one undo step per cell view. Every cell view
 /// is checked before any changes. Returns the number of texts changed and
 /// of cell views they were in.
-pub(crate) fn replace_all(
+pub fn replace_all(
     form: &FindReplaceDialogState,
     edit_in_progress: bool,
     model: &mut Model,
@@ -303,7 +303,7 @@ pub(in crate::workbench) fn render_find_replace_dialog(
 /// none, or why Replace all is refused. A form nobody has typed into has
 /// refused nothing, so it states what Replace all is waiting for, without the
 /// failure mark.
-pub(crate) fn find_replace_summary(
+pub fn find_replace_summary(
     find: &str,
     found: &Result<Vec<DocumentMatches>, String>,
     count: usize,
@@ -325,12 +325,12 @@ fn plural<'a>(count: usize, one: &'a str, many: &'a str) -> &'a str {
     if count == 1 { one } else { many }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
 
     use crate::state::{Component, ComponentType, Point};
 
-    pub(crate) fn part(id: u64, name: &str, value: &str) -> Component {
+    pub fn part(id: u64, name: &str, value: &str) -> Component {
         let mut component =
             Component::new(id, ComponentType::Resistor, Point::new(id as i32 * 100, 0));
         component.name = name.to_owned();

@@ -14,37 +14,37 @@ use crate::workbench::{slots::DesignState, state::WorkbenchSession};
 
 use super::symbols::SymbolLibrary;
 
-pub(crate) mod array_interaction;
+pub mod array_interaction;
 mod bus_interaction;
-pub(crate) mod context_menu;
+pub mod context_menu;
 pub(crate) mod drawing_sheet;
 mod edge_pan;
 mod floating_paste;
-#[cfg(test)]
-pub(crate) mod frame_cost;
-#[cfg(test)]
-pub(crate) mod gesture_commits;
+#[cfg(any(test, feature = "test-support"))]
+pub mod frame_cost;
+#[cfg(any(test, feature = "test-support"))]
+pub mod gesture_commits;
 pub(crate) mod grid_snap_selection;
-pub(crate) mod interaction;
-pub(crate) mod keyboard_navigation;
-pub(crate) mod mobile_controls;
-pub(crate) mod move_interaction;
+pub mod interaction;
+pub mod keyboard_navigation;
+pub mod mobile_controls;
+pub mod move_interaction;
 mod parts;
 mod pick_chooser;
 mod preview;
-pub(crate) mod requests;
-pub(crate) use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
+pub mod requests;
+pub use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
 use rspice_schematic_editor::view::symbol_context::SelectionWindow;
-pub(crate) mod scene;
-pub(crate) mod selection_drag;
+pub mod scene;
+pub mod selection_drag;
 pub(crate) mod selection_layout;
-pub(crate) mod selection_transform;
-pub(crate) mod sheet_visibility;
+pub mod selection_transform;
+pub mod sheet_visibility;
 mod shelf_drag;
 mod snap_resolution;
 pub(crate) mod standard_value_snap;
-pub(crate) mod stretch_interaction;
-pub(crate) mod violations;
+pub mod stretch_interaction;
+pub mod violations;
 mod zoom_box;
 
 use rspice_schematic_editor::view::{
@@ -55,12 +55,12 @@ use rspice_schematic_editor::view::{
 
 use self::coordinates::viewport_from_camera;
 use self::interaction::handle_tool_interactions;
-pub(crate) use self::interaction::{highlight_selected_net, selected_net};
+pub use self::interaction::{highlight_selected_net, selected_net};
 use self::keyboard_navigation::handle_keyboard_object_navigation;
 use self::navigation::handle_viewport_navigation;
 use self::preview::{draw_interaction_previews, draw_shelf_drag_preview};
 use self::scene::draw_scene;
-pub(crate) use self::scene::transient_annotation_status;
+pub use self::scene::transient_annotation_status;
 use self::shelf_drag::{
     ShelfDropOutcome, can_accept_shelf_drop, commit_shelf_drop, handle_placement_transform_keys,
 };
@@ -69,16 +69,14 @@ pub(crate) use self::interaction::{
     ensure_probe_visible_with_feedback, ensure_retained_probe_visible_with_feedback,
     toggle_probe_with_feedback,
 };
-pub(crate) use self::mobile_controls::show as show_mobile_canvas_controls;
-pub(crate) use self::parts::{
+pub use self::mobile_controls::show as show_mobile_canvas_controls;
+pub use self::parts::{
     CanvasFacts, CanvasFrame, CanvasParts, canvas_frame_in, canvas_parts_in, canvas_parts_lent,
 };
-#[cfg(test)]
-pub(crate) use self::parts::{asked_dialog_waits, canvas_facts_lent, canvas_frame_lent};
-pub(crate) use self::requests::{DesignSurfaceRequest, SelectProbedTrace};
-pub(crate) use self::shelf_drag::{
-    SchematicShelfDragPayload, handle_pre_render_placement_transform,
-};
+#[cfg(any(test, feature = "test-support"))]
+pub use self::parts::{asked_dialog_waits, canvas_facts_lent, canvas_frame_lent};
+pub use self::requests::{DesignSurfaceRequest, SelectProbedTrace};
+pub use self::shelf_drag::{SchematicShelfDragPayload, handle_pre_render_placement_transform};
 
 /// Whether the typed component-shelf payload is currently over the schematic
 /// canvas rectangle captured during the previous settled frame.
@@ -94,7 +92,7 @@ pub(crate) fn shelf_drag_over_schematic_canvas(ctx: &egui::Context) -> bool {
 
 /// Compose the editor's resolved symbols from the current app-owned sources,
 /// as the model composes them.
-pub(crate) fn schematic_symbol_context(state: &impl AsRef<Model>) -> SchematicSymbolContext {
+pub fn schematic_symbol_context(state: &impl AsRef<Model>) -> SchematicSymbolContext {
     state.as_ref().schematic_symbol_context()
 }
 
@@ -121,7 +119,7 @@ fn refresh_symbol_context_after_interactions(
     refreshed
 }
 
-pub(crate) fn canvas_accessibility_view<'a>(
+pub fn canvas_accessibility_view<'a>(
     state: &CanvasFacts<'a>,
 ) -> canvas::CanvasAccessibilityView<'a> {
     canvas::CanvasAccessibilityView {
@@ -136,7 +134,7 @@ pub(crate) fn canvas_accessibility_view<'a>(
     }
 }
 
-pub(crate) fn schematic_accessibility_shortcuts(
+pub fn schematic_accessibility_shortcuts(
     model: &Model,
     commands: &Registry,
     platform: crate::state::command_catalog::CommandPlatform,

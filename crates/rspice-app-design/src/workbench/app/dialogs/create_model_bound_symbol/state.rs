@@ -8,8 +8,8 @@ use crate::state::{
     CellViewRef, PortDirection, PortSpec, PropertyType, SymbolElectricalType, SymbolPinSide,
 };
 
-pub(crate) const TITLE: &str = "Create model-bound symbol";
-pub(crate) const PRIMARY: &str = "Create symbol revision";
+pub const TITLE: &str = "Create model-bound symbol";
+pub const PRIMARY: &str = "Create symbol revision";
 pub(super) const DESCRIPTION: &str = "Create one governed symbol definition from an explicit source contract, ordered electrical terminals, and versioned generated views.";
 /// Held in every state: only a refusal paints a strip, and a surface sized to
 /// its content would jump under the pointer as the draft became valid.
@@ -21,7 +21,7 @@ pub(super) const PIN_ROW_HEIGHT: f32 = 30.0;
 pub(super) const FIELD_GAP: f32 = 10.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum CreateSymbolSourceMode {
+pub enum CreateSymbolSourceMode {
     #[default]
     Model,
     ExistingSchematicPins,
@@ -37,7 +37,7 @@ impl CreateSymbolSourceMode {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum CreateSymbolTemplate {
+pub enum CreateSymbolTemplate {
     #[default]
     OperationalAmplifier5Pin,
     RectangularIc,
@@ -61,7 +61,7 @@ impl CreateSymbolTemplate {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum CreateSymbolPinType {
+pub enum CreateSymbolPinType {
     #[default]
     AnalogInput,
     AnalogOutput,
@@ -128,7 +128,7 @@ impl CreateSymbolPinType {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum CreateSymbolPinSide {
+pub enum CreateSymbolPinSide {
     #[default]
     Left,
     Right,
@@ -159,14 +159,14 @@ impl CreateSymbolPinSide {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CreateSymbolPinDraft {
-    pub(crate) name: String,
-    pub(crate) electrical_type: CreateSymbolPinType,
-    pub(crate) side: CreateSymbolPinSide,
+pub struct CreateSymbolPinDraft {
+    pub name: String,
+    pub electrical_type: CreateSymbolPinType,
+    pub side: CreateSymbolPinSide,
 }
 
 impl CreateSymbolPinDraft {
-    pub(crate) fn new(
+    pub fn new(
         name: impl Into<String>,
         electrical_type: CreateSymbolPinType,
         side: CreateSymbolPinSide,
@@ -243,22 +243,22 @@ impl CreateSymbolSchematicSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CreateModelBoundSymbolDialogState {
-    pub(crate) open: bool,
-    pub(crate) target: String,
-    pub(crate) source_mode: CreateSymbolSourceMode,
+pub struct CreateModelBoundSymbolDialogState {
+    pub open: bool,
+    pub target: String,
+    pub source_mode: CreateSymbolSourceMode,
     pub(crate) model_source: Option<CreateSymbolModelSource>,
     pub(crate) schematic_source: Option<CreateSymbolSchematicSource>,
-    pub(crate) template: CreateSymbolTemplate,
-    pub(crate) pins: Vec<CreateSymbolPinDraft>,
-    pub(crate) symbol: bool,
-    pub(crate) parameter_form: bool,
-    pub(crate) simulation_test_fixture: bool,
-    pub(crate) pin_contract_reviewed: bool,
+    pub template: CreateSymbolTemplate,
+    pub pins: Vec<CreateSymbolPinDraft>,
+    pub symbol: bool,
+    pub parameter_form: bool,
+    pub simulation_test_fixture: bool,
+    pub pin_contract_reviewed: bool,
     pub(crate) selected_pin: Option<usize>,
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
-    pub(crate) validation_error: Option<String>,
+    pub validation_error: Option<String>,
     pub(crate) expected_library_revision: u64,
 }
 
@@ -328,7 +328,7 @@ impl CreateModelBoundSymbolDialogState {
         }
     }
 
-    pub(crate) fn select_source(&mut self, mode: CreateSymbolSourceMode) {
+    pub fn select_source(&mut self, mode: CreateSymbolSourceMode) {
         if mode == self.source_mode || !self.source_available(mode) {
             return;
         }

@@ -27,7 +27,7 @@ use crate::workbench::state::WorkbenchSession;
 const TITLE: &str = "Design review comments";
 const PRIMARY: &str = "Post reply";
 /// Why "Post reply" is disabled: there is no thread to reply to.
-pub(crate) const NO_THREAD_SELECTED: &str = "Select a review thread to reply to.";
+pub const NO_THREAD_SELECTED: &str = "Select a review thread to reply to.";
 /// Why "Post reply" is disabled: the reply is empty.
 const NO_REPLY_WRITTEN: &str = "Write a reply to post it.";
 /// Where every row of the body starts, as the title and footer do.
@@ -54,7 +54,7 @@ impl DesignReviewStatusFilter {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum DesignReviewRevisionScope {
+pub enum DesignReviewRevisionScope {
     #[default]
     CurrentAndCarried,
     CurrentOnly,
@@ -63,7 +63,7 @@ pub(crate) enum DesignReviewRevisionScope {
 impl DesignReviewRevisionScope {
     const ALL: [Self; 2] = [Self::CurrentAndCarried, Self::CurrentOnly];
 
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::CurrentAndCarried => "Current revision + carried forward",
             Self::CurrentOnly => "Current revision only",
@@ -72,19 +72,19 @@ impl DesignReviewRevisionScope {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DesignReviewCommentsDialogState {
-    pub(crate) open: bool,
+pub struct DesignReviewCommentsDialogState {
+    pub open: bool,
     pub(crate) status_filter: DesignReviewStatusFilter,
     pub(crate) revision_scope: DesignReviewRevisionScope,
     pub(crate) selected_note_id: Option<u64>,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) expected_design_notes: Vec<DesignNote>,
-    pub(crate) reply: String,
+    pub reply: String,
     pub(crate) assignment_editor_open: bool,
     pub(crate) assignment: String,
     pub(crate) evidence_picker_open: bool,
     pub(crate) selected_evidence: Option<usize>,
-    pub(crate) error: Option<String>,
+    pub error: Option<String>,
     pub(crate) body_scroll_offset: f32,
     /// Who "My assignments" means: the user, by the one name the application
     /// knows them by. Read from the identity every frame the dialog shows.
@@ -135,7 +135,7 @@ struct EvidenceCandidate {
 }
 
 #[derive(Default, Debug, Clone)]
-pub(crate) enum ReviewAction {
+pub enum ReviewAction {
     #[default]
     None,
     Select(u64),
@@ -148,7 +148,7 @@ pub(crate) enum ReviewAction {
     Reopen,
 }
 
-pub(crate) fn open_design_review_comments(
+pub fn open_design_review_comments(
     dialog: &mut DesignReviewCommentsDialogState,
     model: &Model,
     platform: &PlatformState,
@@ -178,24 +178,24 @@ pub(crate) fn open_design_review_comments(
     };
 }
 
-pub(crate) fn reply_id() -> egui::Id {
+pub fn reply_id() -> egui::Id {
     egui::Id::new(("rspice.design-review", "reply"))
 }
 
 /// What Design review comments draws over and changes: its draft, the
 /// design note form a new comment opens, the model, the session, and the
 /// cloud's state and sessions that name the reviewer.
-pub(crate) struct ReviewComments<'a> {
-    pub(crate) dialog: &'a mut DesignReviewCommentsDialogState,
-    pub(crate) design_note: &'a mut DesignNoteDialogState,
-    pub(crate) model: &'a mut Model,
-    pub(crate) workbench: &'a mut WorkbenchSession,
-    pub(crate) cloud: &'a dyn CloudPort,
-    pub(crate) session: &'a dyn CloudSessionPort,
+pub struct ReviewComments<'a> {
+    pub dialog: &'a mut DesignReviewCommentsDialogState,
+    pub design_note: &'a mut DesignNoteDialogState,
+    pub model: &'a mut Model,
+    pub workbench: &'a mut WorkbenchSession,
+    pub cloud: &'a dyn CloudPort,
+    pub session: &'a dyn CloudSessionPort,
 }
 
 impl ReviewComments<'_> {
-    pub(crate) fn render_design_review_comments_dialog(&mut self, ctx: &Context) {
+    pub fn render_design_review_comments_dialog(&mut self, ctx: &Context) {
         if !self.dialog.open {
             return;
         }
@@ -287,7 +287,7 @@ impl ReviewComments<'_> {
         self.session.review_actor(self.cloud)
     }
 
-    pub(crate) fn handle_design_review_action(&mut self, action: ReviewAction) {
+    pub fn handle_design_review_action(&mut self, action: ReviewAction) {
         match action {
             ReviewAction::None => {}
             ReviewAction::Select(id) => {
@@ -663,7 +663,7 @@ fn review_body(
     action
 }
 
-pub(crate) const NO_THREADS: &str = "No review threads match this filter";
+pub const NO_THREADS: &str = "No review threads match this filter";
 
 fn review_thread_row(ui: &mut Ui, note: &DesignNote, selected: bool) -> egui::Response {
     let t = Tokens::get(ui.ctx());
@@ -1056,8 +1056,8 @@ fn relative_time(timestamp_ms: u64) -> String {
     crate::time_compat::relative_age(std::time::Duration::from_millis(elapsed))
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
     use crate::state::DesignNote;
 
@@ -1073,7 +1073,7 @@ pub(crate) mod tests {
         });
     }
 
-    pub(crate) fn review_note(id: u64) -> DesignNote {
+    pub fn review_note(id: u64) -> DesignNote {
         DesignNote::new(
             id,
             Point::new(10, 20),

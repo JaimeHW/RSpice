@@ -31,19 +31,19 @@ use rspice_schematic_editor::object_properties::{
 /// invariants span stable authority, exact coordinates, and neighboring
 /// topology.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ObjectPropertiesDialogState {
-    pub(crate) open: bool,
-    pub(crate) draft: Option<ObjectPropertiesDraft>,
+pub struct ObjectPropertiesDialogState {
+    pub open: bool,
+    pub draft: Option<ObjectPropertiesDraft>,
     /// Canonical source captured with the isolated draft.
-    pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
+    pub source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
     /// Actual tab identity; a symbol tab can resolve to its paired schematic.
     pub(crate) view_path: String,
-    pub(crate) dirty: bool,
+    pub dirty: bool,
     pub(crate) validation_error: Option<String>,
 }
 
 impl ObjectPropertiesDialogState {
-    pub(crate) fn open_bus(
+    pub fn open_bus(
         &mut self,
         bus: &crate::state::Bus,
         source: rspice_schematic_editor::requests::EditorRequestSource,
@@ -180,7 +180,7 @@ impl ObjectPropertiesDialogState {
         };
     }
 
-    pub(crate) fn mark_edited(&mut self) {
+    pub fn mark_edited(&mut self) {
         self.dirty = self
             .draft
             .as_ref()
@@ -188,15 +188,15 @@ impl ObjectPropertiesDialogState {
         self.validation_error = None;
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         *self = Self::default();
     }
 }
 
-pub(crate) const PRIMARY: &str = "Apply";
+pub const PRIMARY: &str = "Apply";
 
 #[derive(Debug, Clone)]
-pub(crate) enum PropertyCommit {
+pub enum PropertyCommit {
     Bus {
         expected: Bus,
         declaration: Option<BusDeclaration>,
@@ -229,7 +229,7 @@ pub(crate) enum PropertyCommit {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum DraftValidation {
+pub enum DraftValidation {
     Incomplete {
         field: &'static str,
         message: String,
@@ -243,7 +243,7 @@ pub(crate) enum DraftValidation {
 }
 
 impl DraftValidation {
-    pub(crate) fn can_commit(&self) -> bool {
+    pub fn can_commit(&self) -> bool {
         matches!(self, Self::Valid(_, _))
     }
 
@@ -275,14 +275,14 @@ impl DraftValidation {
 /// that result by document generation and exact draft source keeps repaints
 /// cheap without weakening the fresh validation performed by Primary.
 #[derive(Debug, Clone)]
-pub(crate) struct CachedDraftResolution {
-    pub(crate) key: DraftResolutionKey,
-    pub(crate) validation: DraftValidation,
+pub struct CachedDraftResolution {
+    pub key: DraftResolutionKey,
+    pub validation: DraftValidation,
     bus_choices: Vec<(u64, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DraftResolutionKey {
+pub struct DraftResolutionKey {
     source: EditorRequestSource,
     view_path: String,
     target_matches_baseline: bool,
@@ -487,10 +487,7 @@ fn resolve_draft_for_repaint(
     (validation, bus_choices)
 }
 
-pub(crate) fn draft_resolution_key(
-    model: &Model,
-    draft: &ObjectPropertiesDraft,
-) -> DraftResolutionKey {
+pub fn draft_resolution_key(model: &Model, draft: &ObjectPropertiesDraft) -> DraftResolutionKey {
     let (target_matches_baseline, draft_source) = match draft {
         ObjectPropertiesDraft::Bus(draft) => (
             model
@@ -587,7 +584,7 @@ pub(crate) fn draft_resolution_key(
     }
 }
 
-pub(crate) fn object_property_session_error(
+pub fn object_property_session_error(
     dialog: &ObjectPropertiesDialogState,
     model: &Model,
 ) -> Option<String> {
@@ -1060,14 +1057,17 @@ fn bus_choices(
     choices
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
-    use crate::state::{BusParseError, BusTargetKind, NetLabel, Point, Wire};
+    use crate::state::Point;
+    #[cfg(test)]
+    use crate::state::{BusParseError, BusTargetKind, NetLabel, Wire};
+    #[cfg(test)]
     use crate::workbench::design::test_host::DesignTestHost;
 
     /// Draw the dialog as its dialog step does.
-    pub(crate) fn render(
+    pub fn render(
         dialog: &mut ObjectPropertiesDialogState,
         model: &mut Model,
         workbench: &mut WorkbenchSession,
@@ -1077,6 +1077,7 @@ pub(crate) mod tests {
     }
 
     /// What a repaint's cached resolution is keyed by, over the model it reads.
+    #[cfg(test)]
     pub(crate) fn draft_resolution_key(
         state: &DesignTestHost,
         draft: &ObjectPropertiesDraft,
@@ -1084,7 +1085,7 @@ pub(crate) mod tests {
         super::draft_resolution_key(&state.model, draft)
     }
 
-    pub(crate) fn key_event(key: egui::Key) -> egui::Event {
+    pub fn key_event(key: egui::Key) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: Some(key),
@@ -1094,7 +1095,7 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) fn declared_bus(id: u64, y: i32, declaration: &str) -> Bus {
+    pub fn declared_bus(id: u64, y: i32, declaration: &str) -> Bus {
         Bus::segment(
             id,
             Point::new(0, y),

@@ -21,7 +21,7 @@ use crate::workbench::state::{WorkbenchSession, Workspace};
 /// Returns the refusal sentence when there is nothing to arm: the caller shows
 /// it where the reader asked, rather than this pushing a console line for a
 /// failure the reader is standing in front of.
-pub(crate) fn arm_placement_from_definition(
+pub fn arm_placement_from_definition(
     model: &mut Model,
     wb: &mut WorkbenchSession,
     name: &str,

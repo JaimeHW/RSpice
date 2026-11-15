@@ -6,9 +6,7 @@
 
 use super::*;
 use crate::schematic::view::schematic_symbol_context;
-use crate::workbench::ResultViewer;
 use crate::workbench::design::test_host::{DesignTestHost, canvas_facts, canvas_parts};
-use crate::workbench::results::commands::ResultsCommand;
 use egui::{Context, Rect, pos2, vec2};
 
 use crate::state::{
@@ -260,11 +258,11 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
         ),
         // G-12: the Arrange page, which a phone reaches only from here.
         ("Arrange", None),
-        ("Cut selection", Some(Command::Cut.key())),
-        ("Copy selection", Some(Command::Copy.key())),
-        ("Paste here", Some(Command::Paste.key())),
-        ("Duplicate", Some(Command::Duplicate.key())),
-        ("Delete", Some(Command::Delete.key())),
+        ("Cut selection", Some(ids::CUT)),
+        ("Copy selection", Some(ids::COPY)),
+        ("Paste here", Some(ids::PASTE)),
+        ("Duplicate", Some(ids::DUPLICATE)),
+        ("Delete", Some(ids::DELETE)),
     ];
     let tail = [
         (
@@ -281,10 +279,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
             "Add voltage or current probe…",
             Some(DesignCommand::PlaceProbe.key()),
         ),
-        (
-            "Open operating point",
-            Some(ResultsCommand::ResultViewer(ResultViewer::Op).key()),
-        ),
+        ("Open operating point", Some(ids::RESULT_OPERATING_POINT)),
     ];
     let menu = |slot: &[(&'static str, Option<CommandKey>)]| {
         head.iter()
@@ -334,15 +329,12 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
                 "Fit schematic content",
                 Some(DesignCommand::FitSchematicContent.key())
             ),
-            ("Zoom box", Some(Command::ZoomBox.key())),
+            ("Zoom box", Some(ids::ZOOM_BOX)),
             (
                 "Add voltage or current probe…",
                 Some(DesignCommand::PlaceProbe.key())
             ),
-            (
-                "Open operating point",
-                Some(ResultsCommand::ResultViewer(ResultViewer::Op).key())
-            ),
+            ("Open operating point", Some(ids::RESULT_OPERATING_POINT)),
         ],
     );
     // Something selected, then a click on the bare sheet: the selection's

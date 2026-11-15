@@ -28,18 +28,18 @@ use crate::workbench::state::WorkbenchSession;
 /// authority. No durable schematic object exists until the dialog's primary
 /// action validates and publishes the complete label.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct NetLabelPlacementDialogState {
-    pub(crate) open: bool,
-    pub(crate) name: String,
+pub struct NetLabelPlacementDialogState {
+    pub open: bool,
+    pub name: String,
     pub(crate) anchor: Option<crate::state::Point>,
     pub(crate) authority: Option<SchematicEditAuthority>,
     /// Which label the armed tool is placing. The direction of an off-sheet
     /// connector is part of the draft, so it publishes with the name in one
     /// transaction rather than needing a second edit.
-    pub(crate) kind: crate::state::NetLabelKind,
+    pub kind: crate::state::NetLabelKind,
     /// Where on the screen the entry sits, taken from the click that opened
     /// it. Kept, so the card does not follow the pointer once it is up.
-    pub(crate) screen_anchor: Option<egui::Pos2>,
+    pub screen_anchor: Option<egui::Pos2>,
     pub(crate) validation_error: Option<String>,
 }
 
@@ -66,7 +66,7 @@ impl NetLabelPlacementDialogState {
         *self.screen_anchor.get_or_insert(pointer)
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         *self = Self::default();
     }
 }
@@ -79,7 +79,7 @@ const CONNECTOR_TITLE: &str = "Off-sheet connector";
 const MAX_NAMES: usize = 1024;
 
 #[derive(Debug, Clone)]
-pub(crate) struct NetLabelPlacementCommit {
+pub struct NetLabelPlacementCommit {
     authority: SchematicEditAuthority,
     anchor: Point,
     name: String,
@@ -89,7 +89,7 @@ pub(crate) struct NetLabelPlacementCommit {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum DraftValidation {
+pub enum DraftValidation {
     Incomplete(&'static str),
     Invalid(String),
     /// Boxed: the commit dwarfs the two message-only variants.
@@ -122,7 +122,7 @@ impl DraftValidation {
 /// Returning `false` means the active document does not currently own edit
 /// authority or another application modal already owns the interaction
 /// (`dialog_modal_open`, whether the dialog gate was held).
-pub(crate) fn open_net_label_placement_in(
+pub fn open_net_label_placement_in(
     dialog: &mut NetLabelPlacementDialogState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
@@ -277,7 +277,7 @@ fn anchor_on_bus(model: &Model, anchor: Point) -> bool {
 /// step, and arm the one after it. Returns whether a sequence answered the
 /// click; with none armed, the click opens the entry. `dialog_modal_open` is
 /// whether the dialog gate was held.
-pub(crate) fn place_sequenced_net_label_in(
+pub fn place_sequenced_net_label_in(
     model: &mut Model,
     wb: &mut WorkbenchSession,
     dialog_modal_open: bool,
@@ -370,12 +370,12 @@ fn apply_commit(
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests {
     use super::*;
 
     /// Draw the entry as its dialog step does.
-    pub(crate) fn render(
+    pub fn render(
         dialog: &mut NetLabelPlacementDialogState,
         model: &mut Model,
         workbench: &mut WorkbenchSession,
@@ -385,15 +385,12 @@ pub(crate) mod tests {
     }
 
     /// The draft's validation, over what the entry reads.
-    pub(crate) fn validate_draft(
-        dialog: &NetLabelPlacementDialogState,
-        model: &Model,
-    ) -> DraftValidation {
+    pub fn validate_draft(dialog: &NetLabelPlacementDialogState, model: &Model) -> DraftValidation {
         super::validate_draft(dialog, model)
     }
 
     /// The entry's publication, over what it writes.
-    pub(crate) fn apply_commit(
+    pub fn apply_commit(
         model: &mut Model,
         workbench: &mut WorkbenchSession,
         commit: NetLabelPlacementCommit,
@@ -401,7 +398,7 @@ pub(crate) mod tests {
         super::apply_commit(model, workbench, commit)
     }
 
-    pub(crate) fn key_event(key: egui::Key) -> egui::Event {
+    pub fn key_event(key: egui::Key) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: Some(key),

@@ -20,7 +20,7 @@ use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum HierarchyDescendEditMode {
+pub enum HierarchyDescendEditMode {
     #[default]
     EditInPlace,
     OpenIsolated,
@@ -36,13 +36,13 @@ pub(crate) enum HierarchyDescendEditMode {
 /// user's hierarchy preference. The menu workflow owns the explicit
 /// edit-context choices defined by the upgraded mockup.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct DescendHierarchyDialogState {
-    pub(crate) open: bool,
+pub struct DescendHierarchyDialogState {
+    pub open: bool,
     pub(crate) instance_name: String,
     pub(crate) reference: Option<crate::state::CellViewRef>,
-    pub(crate) edit_mode: HierarchyDescendEditMode,
+    pub edit_mode: HierarchyDescendEditMode,
     pub(crate) authority: Option<SchematicEditAuthority>,
-    pub(crate) parent_dirty: bool,
+    pub parent_dirty: bool,
     pub(crate) validation_error: Option<String>,
     /// The instance's cell has a symbol and no schematic master: its symbol
     /// edited in place is the one way in.
@@ -90,7 +90,7 @@ impl DescendHierarchyDialogState {
         };
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         *self = Self::default();
     }
 }
@@ -100,7 +100,7 @@ const PRIMARY: &str = "Open edit context";
 const DESCRIPTION: &str =
     "Review the operation, its inputs, impact, validation state, and available actions.";
 
-pub(crate) fn open_descend_hierarchy_dialog(
+pub fn open_descend_hierarchy_dialog(
     dialog: &mut DescendHierarchyDialogState,
     model: &Model,
     workbench: &mut WorkbenchSession,
@@ -171,7 +171,7 @@ pub(crate) fn selected_symbol_only_instance(model: &Model) -> Option<String> {
 /// Draw Descend into hierarchy over its draft and the model it reads. A
 /// checked choice goes to the shell as [`DesignRequest::Descend`]; a refused
 /// one stays on the form with its reason.
-pub(crate) fn render_descend_hierarchy_dialog(
+pub fn render_descend_hierarchy_dialog(
     dialog: &mut DescendHierarchyDialogState,
     model: &Model,
     workbench: &mut WorkbenchSession,
@@ -241,7 +241,7 @@ fn descend_target_path(workspace: &crate::state::ProjectWorkspace, instance: &st
 /// Descend into hierarchy's checked choice, which the dialog's step hands the
 /// shell as [`DesignRequest::Descend`].
 #[derive(Debug, Clone)]
-pub(crate) enum DescendHierarchy {
+pub enum DescendHierarchy {
     /// Edit the selected instance's symbol on this sheet.
     EditSymbolInPlace,
     /// Open the selected instance's master as the reader chose.
@@ -254,7 +254,7 @@ pub(crate) enum DescendHierarchy {
 
 /// Check the draft against the model as it stands: the choice to carry out,
 /// or why it is refused.
-pub(crate) fn descend_request(
+pub fn descend_request(
     draft: &DescendHierarchyDialogState,
     model: &Model,
 ) -> Result<DescendHierarchy, String> {
@@ -296,10 +296,7 @@ pub(crate) fn descend_request(
 /// Carry out a checked Descend into hierarchy choice over the navigation
 /// parts: open the view, descend into the instance or edit the symbol in
 /// place. The dialog is closed before.
-pub(crate) fn answer_descend_hierarchy(
-    mut navigation: NavigationParts<'_>,
-    request: DescendHierarchy,
-) {
+pub fn answer_descend_hierarchy(mut navigation: NavigationParts<'_>, request: DescendHierarchy) {
     match request {
         DescendHierarchy::EditSymbolInPlace => {
             navigation.edit_selected_symbol_in_place();

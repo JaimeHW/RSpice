@@ -32,7 +32,7 @@ use super::{
 /// writes: the design slot's restore parts, its canvas hover and view
 /// centre, and the highlight each occurrence held when it was left; the
 /// model; the session; and the runs.
-pub(crate) struct NavigationParts<'a> {
+pub struct NavigationParts<'a> {
     pub(crate) restore: SchematicRestoreParts<'a>,
     pub(crate) canvas_hover: &'a mut Option<(f64, f64)>,
     pub(crate) canvas_view_center: &'a mut Option<(f64, f64)>,
@@ -46,7 +46,7 @@ impl NavigationParts<'_> {
     /// Open `reference` in front. A view the library does not hold is
     /// refused on the status bar: no document is made up for a view that is
     /// gone.
-    pub(crate) fn open_workspace_view(&mut self, reference: CellViewRef) {
+    pub fn open_workspace_view(&mut self, reference: CellViewRef) {
         if self.model.workspace.content.active_view != reference {
             if !commit_pending_inspector_edit(self.model, self.wb) {
                 return;
@@ -119,11 +119,7 @@ impl NavigationParts<'_> {
     /// instance name on the active document's occurrence. Without an instance
     /// there is no occurrence step to record, so the master opens as its own
     /// design root rather than inheriting a name it was not reached by.
-    pub(crate) fn descend_into_instance(
-        &mut self,
-        instance: Option<String>,
-        reference: CellViewRef,
-    ) {
+    pub fn descend_into_instance(&mut self, instance: Option<String>, reference: CellViewRef) {
         if !commit_pending_inspector_edit(self.model, self.wb) {
             return;
         }
@@ -167,14 +163,14 @@ impl NavigationParts<'_> {
     }
 
     /// Ascend one hierarchy level (the U gesture / pathbar action).
-    pub(crate) fn ascend_workspace_level(&mut self) {
+    pub fn ascend_workspace_level(&mut self) {
         let depth = self.model.workspace.content.occurrence_depth();
         if depth >= 2 {
             self.focus_workspace_breadcrumb(depth - 2);
         }
     }
 
-    pub(crate) fn focus_workspace_breadcrumb(&mut self, index: usize) {
+    pub fn focus_workspace_breadcrumb(&mut self, index: usize) {
         if !commit_pending_inspector_edit(self.model, self.wb) {
             return;
         }
@@ -247,7 +243,7 @@ impl NavigationParts<'_> {
 
     /// Follow `anchor` to what it points at: the object or pin in its
     /// drawing, the objects a failed run named, or the run a row names.
-    pub(crate) fn navigate_to_log_anchor(&mut self, anchor: LogAnchor) {
+    pub fn navigate_to_log_anchor(&mut self, anchor: LogAnchor) {
         match anchor {
             LogAnchor::Schematic {
                 cell_view,
@@ -371,7 +367,7 @@ impl NavigationParts<'_> {
     /// the diagnostic store. It used to be an index into the list this function
     /// sorts for itself, which no other surface could read and which a
     /// republished batch silently repointed.
-    pub(crate) fn cycle_violation(&mut self, step: isize) {
+    pub fn cycle_violation(&mut self, step: isize) {
         // A symbol view's findings are the pin checks', which address a pin on a
         // symbol rather than a spot in a drawing — and they are published as
         // records, so the tour reads them from the store and names each one by

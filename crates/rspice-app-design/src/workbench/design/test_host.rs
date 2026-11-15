@@ -8,20 +8,31 @@
 
 use rspice_app_state::workbench::workspace::restore_session_model_library_manager;
 
+#[cfg(test)]
 use crate::diagnostics::LogAnchor;
 use crate::properties::PropertyEditorSchema;
-use crate::schematic::view::{CanvasFacts, CanvasParts, canvas_facts_lent, canvas_parts_lent};
+#[cfg(test)]
+use crate::schematic::view::{CanvasFacts, canvas_facts_lent};
+use crate::schematic::view::{CanvasParts, canvas_parts_lent};
+#[cfg(test)]
+use crate::state::SchematicState;
 use crate::state::pdk_config::PdkConfig;
-use crate::state::{CellViewRef, SchematicState, SymbolDocument, SymbolEditorMetadata};
+use crate::state::{CellViewRef, SymbolDocument, SymbolEditorMetadata};
+#[cfg(test)]
+use crate::workbench::app::actions::workspace::new_schematic_document;
+#[cfg(test)]
 use crate::workbench::app::actions::workspace::symbol_document::{
-    can_undo_active_symbol_document, redo_active_symbol_document, store_active_symbol_document,
-    store_active_symbol_editor_bundle, undo_active_symbol_document,
+    can_undo_active_symbol_document, redo_active_symbol_document, undo_active_symbol_document,
 };
-use crate::workbench::app::actions::workspace::{
-    NavigationParts, new_schematic_document, sync_active_schematic,
+use crate::workbench::app::actions::workspace::symbol_document::{
+    store_active_symbol_document, store_active_symbol_editor_bundle,
 };
+use crate::workbench::app::actions::workspace::{NavigationParts, sync_active_schematic};
+use crate::workbench::app_state::Model;
+#[cfg(test)]
+use crate::workbench::app_state::SlotFacts;
+#[cfg(test)]
 use crate::workbench::app_state::diagnostic_store::{BatchStanding, DiagnosticBatch};
-use crate::workbench::app_state::{Model, SlotFacts, prompt_text};
 use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::framework::feature::harness::{fresh_session_code, fresh_session_results};
 use crate::workbench::slots::{DesignState, RunsState};
@@ -30,11 +41,11 @@ use crate::workbench::state::WorkbenchSession;
 /// The design feature's state, the shared model, the workbench session and
 /// the runs, under the names `AppState` gives them.
 #[derive(Clone)]
-pub(crate) struct DesignTestHost {
-    pub(crate) design: Box<DesignState>,
-    pub(crate) model: Model,
-    pub(crate) workbench: Box<WorkbenchSession>,
-    pub(crate) runs: Box<RunsState>,
+pub struct DesignTestHost {
+    pub design: Box<DesignState>,
+    pub model: Model,
+    pub workbench: Box<WorkbenchSession>,
+    pub runs: Box<RunsState>,
 }
 
 impl Default for DesignTestHost {
@@ -86,6 +97,7 @@ impl DesignTestHost {
     }
 
     /// `AppState::new_schematic_document`, the same one line.
+    #[cfg(test)]
     pub(crate) fn new_schematic_document(&self) -> SchematicState {
         new_schematic_document(
             &self.model,
@@ -95,6 +107,7 @@ impl DesignTestHost {
     }
 
     /// `AppState::jump_to_log_anchor`, the same one line.
+    #[cfg(test)]
     pub(crate) fn jump_to_log_anchor(&mut self, anchor: LogAnchor) {
         self.navigation().navigate_to_log_anchor(anchor);
     }
@@ -123,36 +136,45 @@ impl DesignTestHost {
     }
 
     /// `AppState::can_undo_active_symbol_document`, the same one line.
+    #[cfg(test)]
     pub(crate) fn can_undo_active_symbol_document(&self) -> bool {
         can_undo_active_symbol_document(&self.design.symbol, &self.model)
     }
 
     /// `AppState::undo_active_symbol_document`, the same one line.
+    #[cfg(test)]
     pub(crate) fn undo_active_symbol_document(&mut self) -> Result<bool, String> {
         undo_active_symbol_document(&mut self.design.symbol, &mut self.model)
     }
 
     /// `AppState::redo_active_symbol_document`, the same one line.
+    #[cfg(test)]
     pub(crate) fn redo_active_symbol_document(&mut self) -> Result<bool, String> {
         redo_active_symbol_document(&mut self.design.symbol, &mut self.model)
     }
 
     /// `AppState::slot_facts`, the same one line: what model code reads of
     /// the runs and the design state.
+    #[cfg(test)]
     pub(crate) fn slot_facts(&self) -> SlotFacts {
         self.runs
             .slot_facts(self.design.schematic_visibility.review_markers)
     }
 
     /// `AppState::diagnostic_batch_standing`, the same one line.
+    #[cfg(test)]
     pub(crate) fn diagnostic_batch_standing(&self, batch: &DiagnosticBatch) -> BatchStanding {
         self.model
             .diagnostic_batch_standing(batch, self.slot_facts())
     }
 
     /// `AppState::prompt_text`, the same one line.
+    #[cfg(test)]
     pub(crate) fn prompt_text(&self) -> Option<&str> {
-        prompt_text(&self.workbench)
+        self.workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.text.as_str())
     }
 }
 
@@ -178,6 +200,7 @@ pub(crate) fn canvas_parts(host: &mut DesignTestHost) -> CanvasParts<'_> {
 /// The canvas's facts from the host, as `canvas_facts` reads them from the
 /// whole application, with the results workspace and the code feature
 /// answering as a fresh session's do.
+#[cfg(test)]
 pub(crate) fn canvas_facts(host: &DesignTestHost) -> CanvasFacts<'_> {
     canvas_facts_lent(
         &host.design,

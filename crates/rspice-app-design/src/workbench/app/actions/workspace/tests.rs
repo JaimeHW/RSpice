@@ -4,18 +4,29 @@
 //! importantly - what a read-only document refuses to let it do.
 
 mod deletion_integrity;
+#[cfg(test)]
 mod symbol_wire_remap;
 
+#[cfg(test)]
 use crate::diagnostics::LogAnchor;
+#[cfg(test)]
+use crate::state::PortSpec;
 use crate::state::{
-    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
-    PortDirection, PortSpec, Rotation, SYMBOL_DOCUMENT_METADATA_KEY, SchematicState,
-    SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolResolver, View, ViewType, Wire,
+    Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, Point, PortDirection,
+    SchematicState, SymbolDocument, SymbolPin, View, ViewType, Wire,
 };
+#[cfg(test)]
+use crate::state::{
+    Component, Rotation, SYMBOL_DOCUMENT_METADATA_KEY, SymbolEditorMetadata, SymbolResolver,
+};
+#[cfg(test)]
 use crate::workbench::ChoicePreference;
+#[cfg(test)]
 use crate::workbench::app::copy_active_schematic_selection;
 use crate::workbench::design::test_host::DesignTestHost;
+#[cfg(test)]
 use crate::workbench::state::Workspace;
+#[cfg(test)]
 use rspice_design::resolved_symbol::ResolvedSymbolSource;
 
 #[test]
@@ -188,6 +199,7 @@ fn schematic_edit_authority_includes_late_safe_mode_project_read_only() {
     ));
 }
 
+#[cfg(test)]
 fn symbol_document(pins: &[(&str, PortDirection, Point)]) -> SymbolDocument {
     SymbolDocument {
         pins: pins
@@ -198,6 +210,7 @@ fn symbol_document(pins: &[(&str, PortDirection, Point)]) -> SymbolDocument {
     }
 }
 
+#[cfg(test)]
 fn amp_binding(pins: &[(&str, PortDirection)]) -> LibraryCellInstance {
     let ports: Vec<PortSpec> = pins
         .iter()
@@ -211,6 +224,7 @@ fn amp_binding(pins: &[(&str, PortDirection)]) -> LibraryCellInstance {
     binding
 }
 
+#[cfg(test)]
 fn state_with_amp_symbol(document: SymbolDocument) -> DesignTestHost {
     let mut state = DesignTestHost::default();
 
@@ -277,7 +291,7 @@ fn production_copy_uses_authored_symbol_terminal_geometry() {
     );
 }
 
-pub(crate) fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> DesignTestHost {
+pub fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> DesignTestHost {
     let mut state = DesignTestHost::default();
 
     let mut library = Library::new("work");
@@ -1037,7 +1051,7 @@ fn create_library_rejects_a_canonical_identity_collision() {
 /// The default project owns `user/top/schematic`; this adds the second cell,
 /// the instance that binds it, its owned source, and its sheet catalog, so one
 /// rename has something to move in every propagation row.
-pub(crate) fn state_with_populated_user_library() -> DesignTestHost {
+pub fn state_with_populated_user_library() -> DesignTestHost {
     let mut state = DesignTestHost::default();
     let top = CellViewRef::new("user", "top", "schematic");
     let amp = CellViewRef::new("user", "amp", "schematic");
@@ -1119,7 +1133,7 @@ pub(crate) fn state_with_populated_user_library() -> DesignTestHost {
 
 /// A sheet drawing the conductors `OUT` and `MID`, with a cross-probe map
 /// captured at the topology it is currently drawn at.
-fn state_with_probed_conductors() -> DesignTestHost {
+pub fn state_with_probed_conductors() -> DesignTestHost {
     use std::collections::HashMap;
 
     let mut state = DesignTestHost::default();
@@ -1148,6 +1162,7 @@ fn state_with_probed_conductors() -> DesignTestHost {
     state
 }
 
+#[cfg(test)]
 fn prompt_text(state: &DesignTestHost) -> String {
     state.prompt_text().unwrap_or_default().to_owned()
 }
@@ -1254,34 +1269,5 @@ fn a_simulation_anchor_says_which_named_objects_this_sheet_does_not_draw() {
     assert!(
         prompt.contains("ELSEWHERE") && prompt.contains("Marked 1 of 2"),
         "a partial marking must say how partial it is: {prompt}"
-    );
-}
-
-#[test]
-fn a_run_that_named_nothing_offers_no_highlight() {
-    let mut state = state_with_probed_conductors();
-
-    assert!(
-        !crate::workbench::documents::result_document::operational_state::active_failure_names_objects(
-            &state.model
-        ),
-        "with no failed analysis on display there is nothing to offer"
-    );
-    assert!(
-        !crate::workbench::app::highlight_active_failure_sites(
-            &mut state.model,
-            &mut state.workbench
-        ),
-        "and nothing to mark"
-    );
-    assert!(
-        state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .wires
-            .is_empty()
     );
 }

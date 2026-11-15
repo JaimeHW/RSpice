@@ -21,11 +21,11 @@ use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::session::SymbolTool;
 
 /// The schematic's toolbar.
-pub(crate) const SCHEMATIC_TOOLBAR: ToolbarId = ToolbarId::new("design.schematic");
+pub const SCHEMATIC_TOOLBAR: ToolbarId = ToolbarId::new("design.schematic");
 /// The toolbar of an open symbol cellview.
-pub(crate) const SYMBOL_TOOLBAR: ToolbarId = ToolbarId::new("design.symbol");
+pub const SYMBOL_TOOLBAR: ToolbarId = ToolbarId::new("design.symbol");
 /// The Stimulus Library's toolbar.
-pub(crate) const STIMULUS_TOOLBAR: ToolbarId = ToolbarId::new("design.stimulus");
+pub const STIMULUS_TOOLBAR: ToolbarId = ToolbarId::new("design.stimulus");
 
 /// Every toolbar the design feature registers.
 pub(crate) const TOOLBARS: &[(ToolbarId, &[ToolbarEntry<DesignFeature>])] = &[
@@ -34,7 +34,7 @@ pub(crate) const TOOLBARS: &[(ToolbarId, &[ToolbarEntry<DesignFeature>])] = &[
     (STIMULUS_TOOLBAR, STIMULUS),
 ];
 
-pub(crate) const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, &str); 11] = [
+pub const DESIGN_DIRECT_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, &str); 11] = [
     (
         DesignCommand::SelectTool.key(),
         WorkbenchIcon::Select,
@@ -278,7 +278,7 @@ const SCHEMATIC: &[ToolbarEntry<DesignFeature>] = &[
     ),
 ];
 
-pub(crate) fn design_toolbar_command_selected(tool: Tool, key: CommandKey) -> bool {
+pub fn design_toolbar_command_selected(tool: Tool, key: CommandKey) -> bool {
     match DesignCommand::from_key(key) {
         Some(DesignCommand::SelectTool) => tool == Tool::Select,
         Some(DesignCommand::PlaceInstance) => {

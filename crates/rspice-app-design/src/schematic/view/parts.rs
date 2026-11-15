@@ -60,7 +60,7 @@ use super::requests::{DesignSurfaceRequest, SelectProbedTrace};
 /// The design slot, the model, the session and the runs the canvas reads
 /// and writes, beside the results workspace and the two modal facts it
 /// reads.
-pub(crate) struct CanvasParts<'a> {
+pub struct CanvasParts<'a> {
     pub(crate) design: &'a mut DesignState,
     pub(crate) model: &'a mut Model,
     pub(crate) workbench: &'a mut WorkbenchSession,
@@ -77,7 +77,7 @@ pub(crate) struct CanvasParts<'a> {
 
 /// The canvas's parts of the design feature's context, with its modal facts
 /// as the shell lent them.
-pub(crate) fn canvas_parts_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasParts<'a> {
+pub fn canvas_parts_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasParts<'a> {
     let application_modal_open = cx.application_modal_open();
     let dialog_modal_open = cx.dialog_modal_open();
     canvas_parts_lent(
@@ -98,7 +98,7 @@ pub(crate) fn canvas_parts_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasPa
 /// `application_modal_open` and `dialog_modal_open`: a modal dialog of the
 /// design feature's own, or one the surface asked for that waits, counts as
 /// well.
-pub(crate) fn canvas_parts_lent<'a>(
+pub fn canvas_parts_lent<'a>(
     state: &'a mut DesignState,
     model: &'a mut Model,
     wb: &'a mut WorkbenchSession,
@@ -145,7 +145,7 @@ pub(crate) fn canvas_application_modal_open_in(cx: &Cx<'_, DesignFeature>) -> bo
 /// one the surface asked for that waits, read as the step takes them. The
 /// surface closes no modal dialog and opens another feature's only by
 /// asking, so a step reads what the whole application would tell it.
-pub(crate) struct CanvasFrame<'a> {
+pub struct CanvasFrame<'a> {
     pub(crate) design: &'a mut DesignState,
     pub(crate) model: &'a mut Model,
     pub(crate) workbench: &'a mut WorkbenchSession,
@@ -162,7 +162,7 @@ pub(crate) struct CanvasFrame<'a> {
 
 /// The canvas frame over the design feature's context, with its modal facts
 /// as the shell lent them.
-pub(crate) fn canvas_frame_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasFrame<'a> {
+pub fn canvas_frame_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasFrame<'a> {
     let application_modal_open = cx.application_modal_open();
     let dialog_modal_open = cx.dialog_modal_open();
     canvas_frame_lent(
@@ -181,7 +181,7 @@ pub(crate) fn canvas_frame_in<'a>(cx: &'a mut Cx<'_, DesignFeature>) -> CanvasFr
 /// The canvas frame over the design slot, the model, the session, the runs
 /// and the results workspace, with the two modal facts lent as
 /// `application_modal_open` and `dialog_modal_open`.
-pub(crate) fn canvas_frame_lent<'a>(
+pub fn canvas_frame_lent<'a>(
     state: &'a mut DesignState,
     model: &'a mut Model,
     wb: &'a mut WorkbenchSession,
@@ -263,7 +263,7 @@ impl CanvasFrame<'_> {
 
 /// Whether a dialog the design surface asked for waits in `workbench`'s
 /// outbox for the shell to open it.
-pub(crate) fn asked_dialog_waits(workbench: &WorkbenchSession) -> bool {
+pub fn asked_dialog_waits(workbench: &WorkbenchSession) -> bool {
     workbench
         .outbox
         .peek::<DesignSurfaceRequest>()
@@ -281,7 +281,7 @@ impl AsRef<Model> for CanvasParts<'_> {
 /// and the results workspace (the selected trace and the cursor a transient
 /// is annotated at), with the trace a probe selected that waits for it.
 #[derive(Clone, Copy)]
-pub(crate) struct CanvasFacts<'a> {
+pub struct CanvasFacts<'a> {
     pub(crate) design: &'a DesignState,
     pub(crate) model: &'a Model,
     pub(crate) runs: &'a RunsState,
@@ -309,7 +309,7 @@ pub(crate) fn canvas_facts_in<'a>(cx: &'a Cx<'_, DesignFeature>) -> CanvasFacts<
 
 /// The canvas's facts from the design slot, the model, the session, the
 /// runs and the results workspace.
-pub(crate) fn canvas_facts_lent<'a>(
+pub fn canvas_facts_lent<'a>(
     state: &'a DesignState,
     model: &'a Model,
     wb: &'a WorkbenchSession,
@@ -436,12 +436,12 @@ impl CanvasParts<'_> {
     }
 
     /// Whether anything that holds the application modal was open.
-    pub(crate) fn application_modal_open(&self) -> bool {
+    pub fn application_modal_open(&self) -> bool {
         self.application_modal
     }
 
     /// Whether anything the dialog gate counts was open.
-    pub(crate) fn dialog_modal_open(&self) -> bool {
+    pub fn dialog_modal_open(&self) -> bool {
         self.dialog_modal
     }
 
@@ -605,7 +605,7 @@ impl CanvasParts<'_> {
         reconcile_conductor_route(self.model, self.workbench, ctx)
     }
 
-    pub(crate) fn start_canvas_wire(&mut self, ctx: &egui::Context, position: Point) {
+    pub fn start_canvas_wire(&mut self, ctx: &egui::Context, position: Point) {
         start_canvas_wire(self.model, self.workbench, ctx, position);
     }
 

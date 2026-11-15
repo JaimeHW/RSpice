@@ -43,7 +43,7 @@ const SHOWN_ROWS: f32 = 12.0;
 /// A cell of the pin table being edited: the rows the edit sets, the
 /// column, and the text typed or picked so far.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PinCellEdit {
+pub struct PinCellEdit {
     pub(crate) rows: Vec<String>,
     pub(crate) row: String,
     pub(crate) column: PinTableColumn,

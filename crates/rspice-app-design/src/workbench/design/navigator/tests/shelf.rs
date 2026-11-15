@@ -8,14 +8,20 @@
 //! the identity column is painted rather than typeset, because the bundled
 //! faces do not hold the marks the mockup's catalog uses.
 
+#[cfg(any(test, not(target_arch = "wasm32")))]
 use super::super::shelf::*;
+#[cfg(any(test, not(target_arch = "wasm32")))]
 use super::*;
-use crate::schematic::{
-    ComponentCategory, PaletteRow, component_palette, palette_rows, supply_palette,
-};
+#[cfg(test)]
+use crate::schematic::{ComponentCategory, component_palette, supply_palette};
+#[cfg(test)]
+use crate::schematic::{PaletteRow, palette_rows};
+#[cfg(test)]
 use crate::state::model_hub::{ModelHubPartRow, PartPlacement, PartProvenance, PartState};
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
+#[cfg(test)]
 use crate::state::{ComponentType, engine_only_xspice_devices};
+#[cfg(test)]
 use rspice_app_state::veriloga_library::BUILTIN_VERILOGA_MODELS;
 
 /// The shelf's built-in Verilog-A rows read and stand as the Library page
@@ -154,7 +160,7 @@ fn shelf_search_matches_labels_case_insensitively() {
 /// A library of pinned bytes the project retained: one macromodel, one card a
 /// device family draws, one card no family does, and one section-scoped
 /// subcircuit key a netlist cannot reference by name.
-pub(crate) fn retained_model_library(name: &str) -> ModelLibrary {
+pub fn retained_model_library(name: &str) -> ModelLibrary {
     use crate::state::model_library::{DeviceModel, ModelSubcircuitInterface, ModelType};
 
     let mut library = ModelLibrary::new(name);
@@ -322,6 +328,7 @@ fn an_unadopted_release_reviews_and_an_incompatible_one_refuses() {
 /// Every glyph the Component shelf can paint, deduplicated: each placeable
 /// palette entry's, each primitive group band's, and the marks the XSPICE,
 /// Verilog-A and library sections use.
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 fn every_shelf_glyph() -> Vec<ShelfGlyph> {
     let mut glyphs = vec![
@@ -497,7 +504,7 @@ fn shelf_rows_of_different_families_paint_distinct_glyph_slots() {
 
 /// The whole Component shelf, through the entry point the dock calls.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn draw_component_shelf(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
+pub fn draw_component_shelf(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     component_shelf(ui, cx);
 }
 

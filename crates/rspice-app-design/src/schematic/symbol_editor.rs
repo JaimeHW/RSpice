@@ -2,7 +2,7 @@
 
 mod context_menu;
 mod in_place;
-pub(crate) mod interaction;
+pub mod interaction;
 
 use egui::{Sense, Ui, WidgetInfo, WidgetType, vec2};
 
@@ -24,7 +24,7 @@ use rspice_schematic_editor::symbol_editor::{
     update_viewport,
 };
 
-pub(crate) fn symbol_canvas_accessibility_label(
+pub fn symbol_canvas_accessibility_label(
     document: &SymbolDocument,
     state: &CanvasFacts<'_>,
     read_only: bool,
@@ -268,10 +268,7 @@ pub fn show(
     Some(viewport.rect)
 }
 
-pub(crate) fn apply_surface_request(
-    canvas: &mut CanvasFrame<'_>,
-    request: SymbolSurfaceRequest,
-) -> bool {
+pub fn apply_surface_request(canvas: &mut CanvasFrame<'_>, request: SymbolSurfaceRequest) -> bool {
     if request.source != symbol_editor_request_source(canvas.model, canvas.workbench)
         || canvas.application_modal_open()
     {

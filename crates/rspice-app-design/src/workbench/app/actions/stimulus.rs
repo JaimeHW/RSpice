@@ -172,7 +172,7 @@ pub(crate) fn delete_needs_confirmation(
 /// Nothing reaches into the design to repoint adopters: an instance that
 /// adopted before the rename is on whatever sheet it is on, and the definition
 /// keeps answering to the name that instance copied.
-pub(crate) fn apply_draft(
+pub fn apply_draft(
     selection: &mut Option<String>,
     editor: &mut StimulusEditorState,
     model: &mut Model,
@@ -248,7 +248,7 @@ pub(crate) fn revert_draft(
 }
 
 /// Step the selected definition's draft back, if it has one.
-pub(crate) fn undo_draft(
+pub fn undo_draft(
     selection: Option<&str>,
     editor: &mut StimulusEditorState,
     model: &Model,
@@ -270,7 +270,7 @@ pub(crate) fn redo_draft(
 }
 
 /// Rename the working record.
-pub(crate) fn edit_name(
+pub fn edit_name(
     selection: Option<&str>,
     editor: &mut StimulusEditorState,
     model: &Model,
@@ -284,7 +284,7 @@ pub(crate) fn edit_name(
 }
 
 /// Switch the waveform shape. The shape parameters reset; undo restores them.
-pub(crate) fn edit_family(
+pub fn edit_family(
     selection: Option<&str>,
     editor: &mut StimulusEditorState,
     model: &Model,
@@ -308,7 +308,7 @@ pub(crate) fn edit_kind(
 }
 
 /// Write one waveform field, in the instance's own spelling.
-pub(crate) fn edit_field(
+pub fn edit_field(
     selection: Option<&str>,
     editor: &mut StimulusEditorState,
     model: &Model,
@@ -464,7 +464,7 @@ pub(crate) fn readopt_adopter(
 /// the reader asked to place the definition, the library's published revision
 /// is the only thing anything can adopt, and a verb that declines rather than
 /// stating what it did sends them looking for a setting.
-pub(crate) fn place_selected_definition(
+pub fn place_selected_definition(
     selection: Option<&str>,
     editor: &StimulusEditorState,
     model: &mut Model,
@@ -612,7 +612,7 @@ pub(crate) fn design_adopters(model: &Model, name: &str) -> Vec<StimulusAdopter>
 /// that needs the terminals, the key figure or the analyses reading it takes
 /// them from the list the run was built from.
 #[derive(Debug, Clone)]
-pub(crate) struct StimulusAdopter {
+pub struct StimulusAdopter {
     /// The row [`design_adopters`] resolved this from.
     pub source: crate::simulation::placed_sources::PlacedSource,
     /// Whether the buffer on screen is the one this instance is drawn in, and

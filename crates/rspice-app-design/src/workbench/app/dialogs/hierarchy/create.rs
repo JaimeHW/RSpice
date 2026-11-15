@@ -42,15 +42,15 @@ pub(crate) struct CreateHierarchyPortDraft {
 /// selection. The live parent, library, and workspace remain untouched until
 /// the primary action validates and swaps a complete project candidate.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct CreateHierarchyDialogState {
-    pub(crate) open: bool,
-    pub(crate) cell_name: String,
+pub struct CreateHierarchyDialogState {
+    pub open: bool,
+    pub cell_name: String,
     pub(crate) target_view: crate::state::ViewType,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) plan: Option<crate::state::HierarchyExtractionPlan>,
     pub(crate) ports: Vec<CreateHierarchyPortDraft>,
     pub(crate) library_revision: u64,
-    pub(crate) validation_error: Option<String>,
+    pub validation_error: Option<String>,
 }
 
 impl CreateHierarchyDialogState {
@@ -92,7 +92,7 @@ const TITLE: &str = "Create hierarchical cell";
 const PRIMARY: &str = "Create and descend";
 /// The sentence assistive technology reads for the whole form.
 const DESCRIPTION: &str = "Move the selected instances into a new cell, with a port for every net that crosses the selection's edge.";
-pub(crate) const VIEW_OPTIONS: [&str; 2] = ["Schematic", "Symbol"];
+pub const VIEW_OPTIONS: [&str; 2] = ["Schematic", "Symbol"];
 /// The ports table: each port, and the parent net it carries.
 const PORT_COLUMNS: [TableColumn<'static>; 4] = [
     TableColumn {
@@ -113,7 +113,7 @@ const PORT_COLUMNS: [TableColumn<'static>; 4] = [
     },
 ];
 
-pub(crate) fn open_create_hierarchy_dialog(
+pub fn open_create_hierarchy_dialog(
     dialog: &mut CreateHierarchyDialogState,
     model: &Model,
     workbench: &mut WorkbenchSession,
@@ -170,16 +170,16 @@ fn default_cell_name(model: &Model) -> String {
 
 /// What Create hierarchy draws over: its draft, the model it checks the
 /// draft against and the session it hands the extraction to.
-pub(crate) struct CreateHierarchy<'a> {
-    pub(crate) dialog: &'a mut CreateHierarchyDialogState,
-    pub(crate) model: &'a Model,
-    pub(crate) workbench: &'a mut WorkbenchSession,
+pub struct CreateHierarchy<'a> {
+    pub dialog: &'a mut CreateHierarchyDialogState,
+    pub model: &'a Model,
+    pub workbench: &'a mut WorkbenchSession,
 }
 
 impl CreateHierarchy<'_> {
     /// Draw Create hierarchy. A checked extraction goes to the shell, which
     /// carries it out over the whole session.
-    pub(crate) fn render_create_hierarchy_dialog(&mut self, ctx: &Context) {
+    pub fn render_create_hierarchy_dialog(&mut self, ctx: &Context) {
         if !self.dialog.open {
             return;
         }
@@ -347,7 +347,7 @@ fn validate_draft(
     Ok(plan)
 }
 
-pub(crate) fn commit_create_hierarchy(
+pub fn commit_create_hierarchy(
     dialog: &mut CreateHierarchyDialogState,
     symbol: &mut SymbolUiState,
     model: &mut Model,

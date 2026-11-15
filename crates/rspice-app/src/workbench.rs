@@ -51,33 +51,35 @@ pub(crate) mod browser {
 }
 pub(crate) mod chrome {
     pub(crate) mod document_bar {
-        pub(crate) mod design;
+        pub(crate) use rspice_app_design::workbench::chrome::document_bar::design;
     }
     pub(crate) mod status_bar {
-        pub(crate) mod design;
+        pub(crate) use rspice_app_design::workbench::chrome::status_bar::design;
         pub(in crate::workbench) mod shell;
     }
     pub(crate) mod title_bar {
-        pub(in crate::workbench) mod design;
+        pub(in crate::workbench) use rspice_app_design::workbench::chrome::title_bar::design;
     }
     pub(crate) mod toolbar {
         pub use rspice_app_workbench::workbench::chrome::toolbar::*;
     }
 }
 pub(crate) mod commands;
-mod cross_probe;
-pub(crate) mod design;
+use rspice_app_design::workbench::cross_probe;
+pub(crate) use rspice_app_design::workbench::design;
 pub(crate) mod diagnostic_routes;
 pub(crate) use rspice_ui_kit::panels as design_system;
 mod dispatch;
 pub(crate) mod docks {
-    pub(crate) use navigator::stimulus_browser_state::StimulusBrowserState;
     pub(crate) mod inspector {
+        #[cfg(test)]
         pub use rspice_app_workbench::workbench::docks::inspector::*;
     }
     pub(crate) mod navigator {
-        pub use rspice_app_workbench::workbench::docks::navigator::*;
-        pub(crate) mod stimulus_browser_state;
+        #[cfg(test)]
+        pub(crate) use rspice_app_design::workbench::docks::navigator::stimulus_browser_state;
+        #[cfg(test)]
+        pub(crate) use rspice_app_workbench::workbench::docks::navigator::show;
     }
 }
 pub(crate) mod documents {
@@ -108,13 +110,12 @@ pub(crate) mod lifecycle {
     //!
     //! `project_lifecycle` owns the transactional document registry and the
     //! accepted baseline; `project_checkpoint` and `recovery_checkpoint` write
-    //! the crash-recovery record; `recovery` reads it back. `session` and
-    //! `window_session` are the runtime state a restart has to reconstruct — open
-    //! views, selection, symbol editor, window bounds — none of which the project
-    //! file itself persists.
+    //! the crash-recovery record; `recovery` reads it back. `window_session` is
+    //! the runtime state a restart has to reconstruct — open views, selection,
+    //! symbol editor, window bounds — none of which the project file itself
+    //! persists.
 
     pub(crate) use rspice_app_services::workbench::lifecycle::project_lifecycle;
-    pub(crate) mod session;
     pub(crate) use rspice_app_workbench::workbench::lifecycle::window_session;
 }
 use rspice_app_workbench::workbench::localization;
@@ -136,21 +137,23 @@ pub(crate) use rspice_app_simulate::workbench::simulate;
 pub(crate) mod slots;
 pub(crate) mod state;
 pub(crate) mod surfaces {
-    pub(crate) mod stimulus;
+    pub(crate) use rspice_app_design::workbench::surfaces::stimulus;
 }
 pub(crate) mod workflows;
 
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;
 pub use documents::result_document::ResultViewer;
-pub use lifecycle::session::{SymbolGridSpacing, SymbolTool};
 pub use lifecycle::window_session::ApplicationWindowId;
+#[cfg(test)]
+pub(crate) use localization::MessageCatalog;
+pub(crate) use localization::MessageId;
 pub use localization::UiTextLocale;
-pub(crate) use localization::{MessageCatalog, MessageId};
+#[cfg(test)]
+pub use preferences::ChoicePreference;
 #[cfg(test)]
 pub(crate) use preferences::DrawingSheetPersonalPreferences;
 pub use preferences::{
-    BackgroundTaskAttention, ChoicePreference, TogglePreference, WorkspacePreferences,
-    WorkspacePreset,
+    BackgroundTaskAttention, TogglePreference, WorkspacePreferences, WorkspacePreset,
 };
 #[cfg(test)]
 pub use preferences::{
@@ -161,7 +164,10 @@ pub use routing::navigation::BrowserHistoryEffect;
 pub use routing::navigation::{RouteTransitionSource, SurfaceNavigation};
 pub use routing::surface_catalog::{SurfaceArchetype, SurfaceId};
 pub use routing::surface_route::SurfaceRoute;
-pub use rspice_design::symbol::edit::{SymbolCommitIntent, SymbolDocumentSnapshot};
+#[cfg(test)]
+pub use rspice_design::symbol::edit::SymbolCommitIntent;
+#[cfg(test)]
+pub(crate) use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 pub use state::WorkbenchSession;
 
 pub use app::RSpiceApp;

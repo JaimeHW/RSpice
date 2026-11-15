@@ -29,7 +29,7 @@
 //! its net; undo restores the old type and the old card together because the
 //! whole thing is one entry.
 
-pub(crate) mod adopt;
+pub mod adopt;
 mod extract;
 mod shell;
 
@@ -49,7 +49,7 @@ use shell::MiniCache;
 
 /// Which direction the dialog is open in.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum StimulusLinkMode {
+pub enum StimulusLinkMode {
     /// Copy a definition onto the instance.
     #[default]
     Adopt,
@@ -64,13 +64,13 @@ pub(crate) enum StimulusLinkMode {
 /// the sheet, and the dialog is modal, so nothing can move underneath it while
 /// it is up.
 #[derive(Debug, Clone)]
-pub(crate) struct StimulusLinkDialogState {
-    pub(crate) open: bool,
+pub struct StimulusLinkDialogState {
+    pub open: bool,
     mode: StimulusLinkMode,
     component_id: u64,
     reference: String,
-    pub(crate) chip: String,
-    pub(crate) provenance: ProvenanceState,
+    pub chip: String,
+    pub provenance: ProvenanceState,
     card: String,
     nets: [String; 2],
     timing: PreviewTiming,
@@ -79,12 +79,12 @@ pub(crate) struct StimulusLinkDialogState {
     data_root: Option<std::path::PathBuf>,
     retained_table: Option<std::path::PathBuf>,
     /// Adopt: the definition the reader has picked.
-    pub(crate) pick: Option<String>,
+    pub pick: Option<String>,
     /// Adopt: what the reader has typed into the list filter.
     filter: String,
     /// Extract: the name and purpose being authored.
-    pub(crate) name: String,
-    pub(crate) purpose: String,
+    pub name: String,
+    pub purpose: String,
     /// Extract: whether the generated name is still the untouched suggestion
     /// and should be offered whole to the first keystroke.
     select_name: bool,
@@ -152,7 +152,7 @@ fn stimulus_link_target(model: &Model, component_id: u64) -> Option<&Component> 
 ///
 /// Returns the sentence to show the reader when it refuses, so the surface
 /// that asked states it where they are looking.
-pub(crate) fn open_stimulus_link(
+pub fn open_stimulus_link(
     link: &mut StimulusLinkDialogState,
     model: &Model,
     component_id: u64,
@@ -333,7 +333,7 @@ fn consequence(component: &Component, definition: &StimulusDefinition) -> String
 }
 
 /// Why this name cannot be saved, in the model's own words.
-pub(crate) fn extract_refusal(model: &Model, component: &Component, name: &str) -> Option<String> {
+pub fn extract_refusal(model: &Model, component: &Component, name: &str) -> Option<String> {
     if let Err(error) = StimulusDefinition::new(
         name,
         component.kind,
@@ -366,7 +366,7 @@ fn family_line(component: &Component) -> String {
 /// the per-frame clone of the session does not copy every evaluated curve, and
 /// are only put back while the dialog is still open: a closed dialog holds no
 /// samples for a library it is no longer showing.
-pub(crate) fn render_stimulus_link_dialog(
+pub fn render_stimulus_link_dialog(
     dialog: &mut StimulusLinkDialogState,
     selected_definition: &mut Option<String>,
     model: &mut Model,
@@ -411,7 +411,7 @@ pub(crate) fn render_stimulus_link_dialog(
 /// Copy one definition onto the instance, re-typing it first when the family
 /// differs. One component transaction, so one undo restores the type and the
 /// card together.
-pub(crate) fn commit_adoption(
+pub fn commit_adoption(
     model: &mut Model,
     component_id: u64,
     definition: &StimulusDefinition,
@@ -477,7 +477,7 @@ pub(crate) fn commit_adoption(
 
 /// Publish the instance's card as a new `r1` definition and point the instance
 /// at it.
-pub(crate) fn commit_extraction(
+pub fn commit_extraction(
     dialog: &StimulusLinkDialogState,
     selected_definition: &mut Option<String>,
     model: &mut Model,
@@ -529,7 +529,7 @@ pub(crate) fn commit_extraction(
 
 /// Select one definition in the Stimulus Library and bring its workspace
 /// forward.
-pub(crate) fn show_stimulus_definition(
+pub fn show_stimulus_definition(
     selected: &mut Option<String>,
     workbench: &mut WorkbenchSession,
     name: &str,

@@ -482,6 +482,7 @@ use faer.
 | [`rspice-app-simulate`](crates/rspice-app-simulate) | The application's simulate feature: the Simulation and Verification Studios, the analysis plan and its run sets, the plan manager and the jobs manager |
 | [`rspice-app-code`](crates/rspice-app-code) | The application's code feature: the netlist and Verilog-A source editors, their documents and workflows, the source dialogs and the automation workspace |
 | [`rspice-app-project`](crates/rspice-app-project) | The application's project feature: the project pages, the launcher and examples browser, the Library browser and its dialogs, configuration sets, design management and revision history |
+| [`rspice-app-design`](crates/rspice-app-design) | The application's design feature: the schematic canvas and symbol editor, the design workspace's navigator, inspector, surfaces and toolbar, the stimulus editor, and the design dialogs and actions |
 | [`rspice-design`](crates/rspice-design) | Schematic documents, connectivity, hierarchy, rule checks and symbols |
 | [`rspice-design-model`](crates/rspice-design-model) | Design-management data and the signed drawing-sheet package |
 | [`rspice-schematic-editor`](crates/rspice-schematic-editor) | Schematic and symbol editor painting and interaction |

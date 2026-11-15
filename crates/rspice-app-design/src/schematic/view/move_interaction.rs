@@ -50,10 +50,7 @@ pub(super) fn handle_armed_move_selection(
     }
 }
 
-pub(crate) fn capture(
-    state: &CanvasParts<'_>,
-    transition: TransformInputTransition,
-) -> MoveInputRequest {
+pub fn capture(state: &CanvasParts<'_>, transition: TransformInputTransition) -> MoveInputRequest {
     MoveInputRequest {
         source: editor_request_source(state),
         selection: state.model.schematic.session.editor.selection.clone(),
@@ -63,7 +60,7 @@ pub(crate) fn capture(
     }
 }
 
-pub(crate) fn apply(
+pub fn apply(
     state: &mut CanvasParts<'_>,
     symbols: &SchematicSymbolContext,
     request: MoveInputRequest,
