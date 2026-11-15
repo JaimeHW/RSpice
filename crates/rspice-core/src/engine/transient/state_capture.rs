@@ -635,10 +635,12 @@ mod tests {
 
     /// A segment across ideal switch changes cuts its locked step where a
     /// switch's control crosses the threshold its accepted state changes at,
-    /// so each change is dated at its crossing, and lands on every one of the
-    /// run's accepted times. The pulse ramps V(in) linearly, so the switch
-    /// opens where it falls through 0.8 V (2.512 us, 3.512 us) and closes
-    /// where it rises through 1.2 V (3.012 us).
+    /// so each change is dated at its crossing, restarts at order one over a
+    /// tenth of the mesh step it landed in (half of what is left when that
+    /// tenth does not fit twice), and lands on every one of the run's
+    /// accepted times. The pulse ramps V(in) linearly, so the switch opens
+    /// where it falls through 0.8 V (2.512 us, 3.512 us) and closes where it
+    /// rises through 1.2 V (3.012 us).
     ///
     /// The run dates each change at its first accepted point past the
     /// crossing instead, up to 8.2 ps late here (2.5119846 us, then
@@ -656,11 +658,38 @@ mod tests {
             .copied()
             .filter(|time| !run.0.time[first..].contains(time))
             .collect();
-        assert_eq!(cuts.len(), 3, "one cut per switch change: {cuts:?}");
-        for (cut, crossing) in cuts.iter().zip([2.512e-6, 3.012e-6, 3.512e-6]) {
+        assert_eq!(
+            cuts.len(),
+            6,
+            "a landing and a restart per switch change: {cuts:?}"
+        );
+        let mesh = &run.0.time[first..];
+        for (pair, crossing) in cuts.chunks(2).zip([2.512e-6, 3.012e-6, 3.512e-6]) {
+            let (landing, restart) = (pair[0], pair[1]);
             assert!(
-                (cut - crossing).abs() <= 1.0e-15,
-                "the change at {crossing:e} s is dated at {cut:e} s"
+                (landing - crossing).abs() <= 1.0e-15,
+                "the change at {crossing:e} s is dated at {landing:e} s"
+            );
+            let start = mesh
+                .iter()
+                .copied()
+                .filter(|time| *time < landing)
+                .fold(Value::NEG_INFINITY, Value::max);
+            let target = mesh
+                .iter()
+                .copied()
+                .find(|time| *time > landing)
+                .expect("the run steps past the change");
+            let tenth = 0.1 * (target - start);
+            let expected = if target - landing >= 2.0 * tenth {
+                landing + tenth
+            } else {
+                landing + 0.5 * (target - landing)
+            };
+            assert_eq!(
+                restart.to_bits(),
+                expected.to_bits(),
+                "the order-one restart after {landing:e} s ends at {expected:e} s, not {restart:e} s"
             );
         }
         for node in ["in", "a", "out", "m"] {
