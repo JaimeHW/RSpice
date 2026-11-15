@@ -681,10 +681,6 @@ impl Engine {
             }
         }
 
-        let mut perturbed = netlist.clone();
-        if let Some(seed) = statistical_seed {
-            perturbed.params.set_random_seed(seed);
-        }
         let mut retained_parameters = netlist.ast_overlay().parameters.clone();
         retained_parameters.extend(param_overrides.iter().cloned());
         let effective_overrides: Vec<_> = retained_parameters
@@ -697,29 +693,42 @@ impl Engine {
                 direction: direction.is_some_and(|target| name.eq_ignore_ascii_case(target)),
             })
             .collect();
-        for (index, parameter) in effective_overrides.iter().enumerate() {
-            if index.is_multiple_of(64) && abort.is_aborted() {
-                return Err(SimulationError::Aborted);
+        // A netlist with its source is replayed from it, and a copy with the
+        // overrides set in place is then needed only to check the device
+        // overrides against the netlist as it stands before the replay.
+        let mut perturbed = (netlist.source_text.is_none() || !device_overrides.is_empty())
+            .then(|| netlist.clone());
+        if let Some(perturbed) = &mut perturbed {
+            if let Some(seed) = statistical_seed {
+                perturbed.params.set_random_seed(seed);
             }
-            if parameter.global {
-                perturbed
-                    .params
-                    .set_global(&parameter.name, parameter.value);
-            } else {
-                perturbed.params.set(&parameter.name, parameter.value);
+            for (index, parameter) in effective_overrides.iter().enumerate() {
+                if index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                if parameter.global {
+                    perturbed
+                        .params
+                        .set_global(&parameter.name, parameter.value);
+                } else {
+                    perturbed.params.set(&parameter.name, parameter.value);
+                }
             }
+            perturbed.retain_overlay_parameters(retained_parameters.clone());
         }
-        perturbed.retain_overlay_parameters(retained_parameters.clone());
         crate::resource::ResourceLimitError::ensure(
             crate::resource::ResourceKind::NetlistBytes,
-            perturbed.retained_source_bytes(),
+            netlist.retained_source_bytes_with_parameters(&retained_parameters),
             resource_limits.max_netlist_bytes,
         )?;
-        let applied_device_overrides = Self::apply_device_parameter_overrides_with_abort(
-            &mut perturbed,
-            &device_overrides,
-            abort,
-        )?;
+        let applied_device_overrides = match &mut perturbed {
+            Some(perturbed) => Self::apply_device_parameter_overrides_with_abort(
+                perturbed,
+                &device_overrides,
+                abort,
+            )?,
+            None => 0,
+        };
 
         // Identity comes from the resolved environment. Source occurrences
         // cannot distinguish dependencies, included definitions or zero influence.
@@ -728,6 +737,7 @@ impl Engine {
             .filter(|(name, _)| netlist.params.has_any_parameter_binding(name))
             .count();
         let Some(source) = &netlist.source_text else {
+            let perturbed = perturbed.expect("a netlist without its source is copied");
             return Ok((perturbed, defined_parameters + applied_device_overrides));
         };
         let parse_options = crate::netlist::NetlistParseOptions {

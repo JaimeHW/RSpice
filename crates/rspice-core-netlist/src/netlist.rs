@@ -1525,9 +1525,19 @@ impl Netlist {
     /// Retained root input, including parameter values materialized by a study.
     #[doc(hidden)]
     pub fn retained_source_bytes(&self) -> usize {
-        self.ast_overlay.parameters.iter().fold(
+        self.retained_source_bytes_with_parameters(&self.ast_overlay.parameters)
+    }
+
+    /// [`Self::retained_source_bytes`] of this netlist were `parameters` its
+    /// retained parameter overlay.
+    #[doc(hidden)]
+    pub fn retained_source_bytes_with_parameters(
+        &self,
+        parameters: &BTreeMap<String, Value>,
+    ) -> usize {
+        parameters.keys().fold(
             self.source_text.as_ref().map_or(0, String::len),
-            |bytes, (name, _)| {
+            |bytes, name| {
                 bytes
                     .saturating_add(name.len())
                     .saturating_add(std::mem::size_of::<Value>())
