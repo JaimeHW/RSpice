@@ -450,16 +450,27 @@ fn a_deleted_pin_leaves_its_wire_open_and_says_so() {
     assert_eq!(parent.document().wires[0].points, wire, "the wire stayed");
 }
 
-/// The sheet's tab is a way out of the edit: pressing it ends the session,
-/// and the sheet is as it was, with the instance selected.
+/// Leaving the edit by another way than its own exit, here the sheet's tab,
+/// ends the session as its exit does: the symbol tab it opened goes, and the
+/// sheet is as it was, with the instance selected.
 #[test]
-fn leaving_by_the_sheet_tab_ends_the_session() {
+fn leaving_by_the_sheet_tab_closes_the_tab_the_session_opened() {
     let mut fixture = InPlace::new();
     fixture.enter();
     fixture.replay.click("top \u{00b7} schematic", Role::Tab);
     let state = &fixture.replay.app.state;
     assert_eq!(state.model.workspace.content.active_view, fixture.parent);
     assert!(state.design.symbol.in_place.is_none());
+    assert!(
+        !state
+            .model
+            .workspace
+            .content
+            .open_views
+            .iter()
+            .any(|open| open.reference == fixture.symbol),
+        "the symbol tab the session opened is closed"
+    );
     let editor = &state.model.schematic.session.editor;
     assert_eq!((editor.zoom, editor.pan), (2.0, (60.0, 40.0)));
     assert_eq!(editor.selection.single_component(), Some(fixture.instance));

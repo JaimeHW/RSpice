@@ -259,13 +259,15 @@ pub(crate) fn project_active_symbol_session(
     };
 
     // Leaving the symbol by any route but the session's own exit ends an
-    // in-place edit; what it changed stays, as any symbol edit does.
-    if symbol
+    // in-place edit as the exit does: what it changed stays, as any symbol
+    // edit does, and the symbol tab it opened goes. The sheet's own camera
+    // and selection were never the session's to change.
+    if let Some(session) = symbol
         .in_place
-        .as_ref()
-        .is_some_and(|session| session.symbol != model.workspace.content.active_view)
+        .take_if(|session| session.symbol != model.workspace.content.active_view)
+        && !session.symbol_was_open
     {
-        symbol.in_place = None;
+        model.workspace.content.close_view(&session.symbol);
     }
     let source = symbol_editor_request_source(model, wb);
     let is_symbol =
