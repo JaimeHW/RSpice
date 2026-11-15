@@ -308,14 +308,15 @@ impl ControlCircuit {
 
     /// Whether only the vector evaluator can evaluate the expression: it
     /// reads a `let` vector or a constant, or calls a function the dataset
-    /// resolver lacks, or a plot `setplot new` made is current, where the
-    /// dataset resolver has no dataset to read.
+    /// resolver lacks, or a plot `setplot new` made or the constants plot is
+    /// current, where the dataset resolver has no dataset to read.
     pub(in crate::engine::control) fn needs_vector_path(
         &self,
         expression: &Expr,
         variables: &ParamContext,
     ) -> bool {
-        self.vectors.current_plot().is_some()
+        self.current_plot().is_none()
+            || self.vectors.current_plot().is_some()
             || self.names_user_vector(expression)
             || names_device_quantity(expression)
             || self.names_constant(expression, variables)
@@ -731,6 +732,41 @@ impl ControlCircuit {
             .map(|vector| (vector.name.as_str(), &vector.value))
     }
 
+    /// The constants plot's vectors, each with whether it is the plot's
+    /// scale: those bound in it, then each constant no `let` rebound.
+    /// frontend/cpitf.c:40 makes `yes` first, so it is the scale (vec_new)
+    /// until `setscale` names another.
+    pub(super) fn constants_plot(&self) -> Vec<(String, VectorValue, bool)> {
+        let scale = self.vectors.constants_scale.as_deref().unwrap_or("yes");
+        let bound = self
+            .vectors
+            .vectors
+            .iter()
+            .filter(|vector| vector.plot.is_none())
+            .map(|vector| (vector.name.to_ascii_lowercase(), vector.value.clone()));
+        let constants = CONSTANTS.iter().filter_map(|name| {
+            let value = constant(name)?;
+            let value = VectorValue {
+                samples: vec![value],
+                complex: value.im != 0.0,
+                scale: None,
+                unit: SignalUnit::Unspecified,
+            };
+            Some(((*name).to_owned(), value))
+        });
+        let mut listed: Vec<(String, VectorValue, bool)> = Vec::new();
+        for (name, value) in bound.chain(constants) {
+            if !listed
+                .iter()
+                .any(|(known, _, _)| known.eq_ignore_ascii_case(&name))
+            {
+                let is_scale = name.eq_ignore_ascii_case(scale);
+                listed.push((name, value, is_scale));
+            }
+        }
+        listed
+    }
+
     /// ngspice `setscale vector` (frontend/com_setscale.c:70): the vector
     /// of the current user plot or constants plot that its others run
     /// against. False when the plot has no vector of that name.
@@ -914,6 +950,9 @@ impl ControlCircuit {
                         let value = sampled(&selected, budget, line, abort)?;
                         return Ok(leaf(expression, value, leaves));
                     }
+                } else if let Some(value) = self.held_device_vector(name) {
+                    charge(budget, value.samples.len(), line)?;
+                    return Ok(leaf(expression, value, leaves));
                 }
                 let value = variables
                     .get_complex(name)
@@ -1270,11 +1309,21 @@ fn builtin_function(name: &str, arity: usize) -> Option<(&'static [&'static str]
     })
 }
 
-/// ngspice's constants plot (frontend/cpitf.c:40). The ngspice-46 release
-/// prints boltz = 1.380649e-23, so its charge, Boltzmann and Planck
-/// constants are the exact SI 2019 values.
+/// The constants plot's vectors as frontend/cpitf.c:40 names them.
+const CONSTANTS: [&str; 12] = [
+    "yes", "TRUE", "no", "FALSE", "pi", "e", "c", "i", "kelvin", "echarge", "boltz", "planck",
+];
+
+/// ngspice's constants plot (frontend/cpitf.c:40), with the values of
+/// include/ngspice/const.h: its charge, Boltzmann and Planck constants are
+/// CODATA 2014's 1.6021766208e-19, 1.38064852e-23 and 6.62607004e-34, each
+/// the double nearest. ngspice-46's charge is one ulp below it, as
+/// frontend/parser/numparse.c:157 forms a number as its mantissa times
+/// pow(10, exponent). A name may carry the plot's `const.` prefix.
 fn constant(name: &str) -> Option<ComplexValue> {
-    Some(match name.to_ascii_lowercase().as_str() {
+    let name = name.to_ascii_lowercase();
+    let name = name.strip_prefix("const.").unwrap_or(&name);
+    Some(match name {
         "yes" | "true" => 1.0.into(),
         "no" | "false" => 0.0.into(),
         "pi" => std::f64::consts::PI.into(),
@@ -1282,9 +1331,9 @@ fn constant(name: &str) -> Option<ComplexValue> {
         "c" => 299_792_458.0.into(),
         "i" => ComplexValue::new(0.0, 1.0),
         "kelvin" => (-273.15).into(),
-        "echarge" => 1.602_176_634e-19.into(),
-        "boltz" => 1.380_649e-23.into(),
-        "planck" => 6.626_070_15e-34.into(),
+        "echarge" => 1.602_176_620_8e-19.into(),
+        "boltz" => 1.380_648_52e-23.into(),
+        "planck" => 6.626_070_04e-34.into(),
         _ => return None,
     })
 }

@@ -371,12 +371,16 @@ impl ControlCircuit {
     }
 
     /// ngspice `plot_setcur` (frontend/vectors.c:1160): `new` makes an empty
-    /// plot current, any other name the plot of that name.
+    /// plot current, any other name the plot of that name; `const` is the
+    /// constants plot, first in ngspice's plot list (plotting.c:14).
     fn set_plot(&mut self, name: &str, line: usize) -> Result<(), ControlError> {
         if name.eq_ignore_ascii_case("new") {
             // frontend/vectors.c:1164 plot_alloc("unknown").
             let name = self.new_plot_name("unknown", line)?;
             self.vectors.new_plot(name, self.datasets.len());
+        } else if name.eq_ignore_ascii_case("const") {
+            self.current = None;
+            self.vectors.leave_plot();
         } else if let Some(index) = self.dataset_index(name) {
             self.current = Some(index);
             self.vectors.leave_plot();

@@ -745,9 +745,24 @@ fn batch_commands_print_or_continue_as_ngspice_b_runs_them() {
         Some(ControlPresentationKind::Text(text)) => text,
         other => panic!("expected batch text, got {other:?}"),
     };
+    // Before any analysis the constants plot is current, as ngspice-46
+    // lists it (frontend/cpitf.c:40), `yes` its scale.
     assert_eq!(
         text(kind(&mut circuit, "display", "")),
-        "There are no vectors currently active.\n"
+        "Here are the vectors currently active:\n\nTitle: Constant values\n\
+         Name: const (constants)\n\n\
+         \x20   FALSE               : notype, real, 1 long\n\
+         \x20   TRUE                : notype, real, 1 long\n\
+         \x20   boltz               : notype, real, 1 long\n\
+         \x20   c                   : notype, real, 1 long\n\
+         \x20   e                   : notype, real, 1 long\n\
+         \x20   echarge             : notype, real, 1 long\n\
+         \x20   i                   : notype, complex, 1 long\n\
+         \x20   kelvin              : notype, real, 1 long\n\
+         \x20   no                  : notype, real, 1 long\n\
+         \x20   pi                  : notype, real, 1 long\n\
+         \x20   planck              : notype, real, 1 long\n\
+         \x20   yes                 : notype, real, 1 long [default scale]\n"
     );
     kind(&mut circuit, "op", "");
     // com_echo.c: words unquoted and joined by one space; -n drops the newline.

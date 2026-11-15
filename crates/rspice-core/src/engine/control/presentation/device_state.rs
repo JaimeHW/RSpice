@@ -427,6 +427,22 @@ impl ControlCircuit {
             .map(|(_, _, values)| values.as_slice())
     }
 
+    /// The quantity as the device holds it, read while no analysis plot is
+    /// current, as before any analysis with the constants plot current.
+    pub(super) fn held_device_vector(&self, name: &str) -> Option<VectorValue> {
+        let (device, quantity) = split_quantity(name)?;
+        let samples = match self.held_values(device, quantity) {
+            Some(values) => values.iter().map(|value| (*value).into()).collect(),
+            None => vec![self.held_quantity(device, quantity)?.into()],
+        };
+        Some(VectorValue {
+            samples,
+            complex: false,
+            scale: None,
+            unit: SignalUnit::Unspecified,
+        })
+    }
+
     /// The vector of a quantity a device holds as several values, read when
     /// no `save` put the quantity in `dataset`.
     pub(super) fn held_vector(

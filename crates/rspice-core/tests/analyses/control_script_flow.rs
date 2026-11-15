@@ -1,7 +1,7 @@
 //! The control commands ngspice's scripted regression decks rely on, each
 //! checked against what ngspice-46 prints for the same script: `goto` and
 //! `label`, `@device[parameter]` in an expression, a vector `alter` value,
-//! `remcirc`, and `stop` with `resume`.
+//! `remcirc`, `stop` with `resume`, and the constants plot.
 
 use rspice_core::engine::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlPresentation,
@@ -279,6 +279,79 @@ fn stop_interrupts_a_transient_and_resume_continues_it_altered() {
         .unwrap();
     let end = *result.voltages[node].last().unwrap();
     assert!((end + 2.43686).abs() < 1e-4, "v(2) = {end} at 2 ms");
+}
+
+/// ngspice's constants plot is current before any analysis
+/// (frontend/plotting/plotting.c:14): `print`, `$&` and `@device[param]`
+/// read it, a `let` binds in it and `display` lists what it bound, a later
+/// plot reads its vectors, and `setplot const` makes it current again.
+/// Its constants are those of include/ngspice/const.h; ngspice-46 prints
+/// every value below for the same script, but echoes the charge to 17
+/// digits one ulp lower, as 1.6021766207999999e-19: its number parser
+/// rounds twice (frontend/parser/numparse.c:157), where this host holds
+/// the double nearest 1.6021766208e-19.
+#[test]
+fn the_constants_plot_answers_before_any_analysis() {
+    let (_, presented, error) = run("constants\nV1 1 0 1\nR1 1 0 1k\n.control\necho $curplot\n\
+         print pi e c boltz echarge kelvin planck yes no true false i\nlet a = pi*2\n\
+         print a const.pi\necho $&pi $&a\nprint @r1[resistance]\nlet rr = @r1[resistance]\n\
+         echo $&rr\ndisplay a rr\nop\necho $curplot\nprint a v(1)\nsetplot const\n\
+         echo $curplot\nlet b = 7\n\
+         setplot op1\nprint b\nset csnumprec=17\necho $&boltz $&echarge $&planck\n.endc\n.end\n");
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "const",
+            "3.14159 6.28319",
+            "1000",
+            "    a                   : notype, real, 1 long\n    \
+             rr                  : notype, real, 1 long",
+            "op1",
+            "const",
+            "1.3806485199999999e-23 1.6021766208000001e-19 6.6260700399999999e-34",
+        ]
+    );
+    let values = printed(&presented)
+        .into_iter()
+        .map(|(_, samples)| samples)
+        .collect::<Vec<_>>();
+    let expected: [&[f64]; 18] = [
+        &[std::f64::consts::PI],
+        &[std::f64::consts::E],
+        &[299_792_458.0],
+        &[1.380_648_52e-23],
+        &[1.602_176_620_8e-19],
+        &[-273.15],
+        &[6.626_070_04e-34],
+        &[1.0],
+        &[0.0],
+        &[1.0],
+        &[0.0],
+        &[0.0],
+        &[2.0 * std::f64::consts::PI],
+        &[std::f64::consts::PI],
+        &[1000.0],
+        &[2.0 * std::f64::consts::PI],
+        &[1.0],
+        &[7.0],
+    ];
+    assert_eq!(values.len(), expected.len(), "{values:?}");
+    for (value, expected) in values.iter().zip(expected) {
+        assert!(
+            close(value, expected, 1e-12 * expected[0].abs()),
+            "{values:?}"
+        );
+    }
+    // `i` is the imaginary unit.
+    let traces = presented
+        .iter()
+        .find_map(|request| match &request.kind {
+            ControlPresentationKind::Print(traces) => Some(traces),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(traces[11].y.samples[0].im, 1.0);
 }
 
 /// ngspice's `resume` with no run in progress starts one, as `run` does

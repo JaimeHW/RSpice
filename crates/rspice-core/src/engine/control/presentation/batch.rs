@@ -328,7 +328,8 @@ impl ControlCircuit {
     }
 
     /// `display [vectors...]` on the current plot: a dataset's vectors with
-    /// the `let` vectors bound in it, or a plot `setplot new` made.
+    /// the `let` vectors bound in it, a plot `setplot new` made, or the
+    /// constants plot.
     pub(in crate::engine) fn display(
         &self,
         command: &ControlCommand,
@@ -358,7 +359,18 @@ impl ControlCircuit {
             return listed(command, header, lines, requested);
         }
         let Some(dataset) = self.current_dataset() else {
-            return Ok("There are no vectors currently active.\n".into());
+            // The constants plot (frontend/plotting/plotting.c:14).
+            let lines = self
+                .constants_plot()
+                .into_iter()
+                .map(|(name, value, scale)| {
+                    let line = vector_line(&name, &value, scale);
+                    (name, line)
+                })
+                .collect();
+            let header = "Here are the vectors currently active:\n\nTitle: Constant values\n\
+                          Name: const (constants)\n\n";
+            return listed(command, header.to_owned(), lines, requested);
         };
         let length = dataset.length();
         let numeric = if dataset.is_complex() {
