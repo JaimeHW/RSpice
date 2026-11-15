@@ -41,10 +41,20 @@ pub(in crate::engine) struct CapturedTransientState {
     pub(in crate::engine) solver: Option<rspice_matrix::StaticMatrixSolverCheckpoint>,
 }
 
+/// The integration step that reached an accepted point: its length and the
+/// companion coefficients the circuit's reactive elements integrated it
+/// with. The run's starting point has none.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::engine) struct AcceptedStep {
+    pub(in crate::engine) step: Value,
+    pub(in crate::engine) coefficients: crate::numerics::integration::CompanionCoefficients,
+}
+
 /// Offered every accepted point of a run, with the circuit and solution as
-/// accepted there; it reads and changes nothing of the run.
+/// accepted there and the step that reached it; it reads and changes nothing
+/// of the run.
 pub(in crate::engine) type AcceptedPointObserver<'a> =
-    dyn Fn(Value, &CircuitData, &[Value]) -> Result<(), SimulationError> + 'a;
+    dyn Fn(Value, &CircuitData, &[Value], Option<AcceptedStep>) -> Result<(), SimulationError> + 'a;
 
 /// A run's capture request and the states it has captured so far.
 pub(in crate::engine) struct TransientStateCapture<'a> {
@@ -146,9 +156,10 @@ impl<'a> TransientStateCapture<'a> {
         circuit: &CircuitData,
         solution: &[Value],
         matrix: &crate::solver::StaticMatrix,
+        step: Option<AcceptedStep>,
     ) -> Result<bool, SimulationError> {
         if let Some(observer) = self.observer {
-            observer(time, circuit, solution)?;
+            observer(time, circuit, solution, step)?;
         }
         let mut captured = self.captured.borrow_mut();
         let Some(&requested) = self.times.get(captured.len()) else {

@@ -632,6 +632,40 @@ impl CircuitData {
             }
     }
 
+    /// Whether every charge the circuit stores is re-taken from a transient
+    /// segment's starting solution, as capacitors', inductors' and their
+    /// couplings' are: no device keeps a charge of its own between steps (a
+    /// junction or diffusion charge, a core's magnetization, a model's
+    /// integrator or event state). Switches, diodes without charge storage
+    /// and behavioral sources keep none.
+    pub(crate) fn has_no_device_charge_history(&self) -> bool {
+        let semiconductors = self
+            .diodes
+            .devices
+            .iter()
+            .all(|diode| !diode.has_charge_storage())
+            && self.bjts.is_empty()
+            && self.mosfets.is_empty()
+            && self.b3soi.is_empty()
+            && self.b3soi_fd.is_empty()
+            && self.b3soi_pd.is_empty()
+            && self.bsim3v3.is_empty()
+            && self.bsim4v8.is_empty()
+            && self.ekv26s.is_empty()
+            && self.ekv3s.is_empty()
+            && self.vdmoses.is_empty()
+            && self.jfets.is_empty();
+        let models = self.xyce_memristors.is_empty()
+            && self.jiles_atherton_inductors.is_empty()
+            && self.xyce_core_groups.is_empty()
+            && !self.has_xspice_devices();
+        #[cfg(feature = "veriloga-builtins-base")]
+        let models = models && !self.has_generated_veriloga_devices();
+        #[cfg(feature = "veriloga")]
+        let models = models && !self.has_veriloga_devices() && !self.has_mixed_signal_hosts();
+        semiconductors && models
+    }
+
     pub(crate) fn can_use_zero_bias_for_explicit_xspice_ac(&self) -> bool {
         !self.xspice_instances.is_empty()
             && !self.has_non_xspice_nonlinear_devices()

@@ -611,3 +611,264 @@ fn event_pnoise_samples_the_switched_capacitor_kt_over_c() {
     let evidence = noise.sampling.as_ref().expect("sampling evidence");
     assert!((evidence.output.phase_degrees - 356.4).abs() < 1.0e-9);
 }
+
+/// `Φ` by the variational recurrence and by forward differences at the
+/// stabilized boundary of `deck`.
+struct Monodromies {
+    exact: Vec<Vec<Value>>,
+    differenced: Vec<Vec<Value>>,
+    /// The seconds the recurrence and the differences took.
+    seconds: (f64, f64),
+    /// Where the period starts.
+    start: Value,
+    names: Vec<String>,
+}
+
+impl Monodromies {
+    fn coordinate(&self, name: &str) -> usize {
+        self.names
+            .iter()
+            .position(|candidate| {
+                candidate
+                    .trim_start_matches(super::EVENT_BASIS_PREFIX)
+                    .eq_ignore_ascii_case(name)
+            })
+            .unwrap_or_else(|| panic!("{name} is a coordinate of {:?}", self.names))
+    }
+}
+
+fn both_monodromies(deck: &str, config: &PssConfig) -> Monodromies {
+    let netlist = Netlist::parse(deck).expect("the deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let prepared = engine
+        .prepare_event_orbit(&netlist, config, None, &NoAbort)
+        .expect("the orbit stabilizes");
+    let orbit = prepared.orbit(&netlist, config, &NoAbort);
+    let (image, mesh) = (&prepared.image, &prepared.mesh);
+    let z = prepared
+        .basis
+        .read(image)
+        .expect("the boundary's coordinates");
+    let base = orbit.traverse(image, &z, mesh).expect("one period");
+    eprintln!("{} events over the period", base.events.len());
+    let clock = std::time::Instant::now();
+    let exact = orbit
+        .variational_jacobian(image, &z, mesh)
+        .expect("the recurrence runs")
+        .expect("the recurrence is exact here");
+    let exact_seconds = clock.elapsed().as_secs_f64();
+    let clock = std::time::Instant::now();
+    let differenced = orbit
+        .finite_difference_jacobian(image, &z, &base, mesh)
+        .expect("the differences run");
+    Monodromies {
+        exact,
+        differenced,
+        seconds: (exact_seconds, clock.elapsed().as_secs_f64()),
+        start: image.time,
+        names: prepared.basis.names().to_vec(),
+    }
+}
+
+/// The largest entry difference of two square matrices, relative to the
+/// largest entry of the second.
+fn worst_relative(exact: &[Vec<Value>], differenced: &[Vec<Value>]) -> (Value, (usize, usize)) {
+    let scale = differenced
+        .iter()
+        .flatten()
+        .fold(0.0_f64, |m, v| m.max(v.abs()));
+    let mut worst = (0.0, (0, 0));
+    for (row, (a, b)) in exact.iter().zip(differenced).enumerate() {
+        for (col, (x, y)) in a.iter().zip(b).enumerate() {
+            let miss = (x - y).abs() / scale;
+            if miss > worst.0 {
+                worst = (miss, (row, col));
+            }
+        }
+    }
+    worst
+}
+
+/// The dominant multiplier of a monodromy.
+fn dominant_multiplier(phi: &[Vec<Value>]) -> Complex64 {
+    let (multipliers, _) = crate::analysis::pss::ShootingNewtonSolver::new(1.0e-9)
+        .compute_floquet_spectrum_with_abort(phi, &NoAbort)
+        .expect("the spectrum qualifies");
+    multipliers
+        .into_iter()
+        .max_by(|a, b| a.norm().total_cmp(&b.norm()))
+        .expect("a multiplier")
+}
+
+/// The C11 analog-clock twin's period map is affine with the switches held
+/// to their clocks, so its forward differences are exact up to the
+/// traversals' Newton tolerance, and the recurrence meets them there. Both
+/// carry the charge-sharing multiplier C2/(C1 + C2) = 0.9 of the held
+/// sample; C1's own memory decays through Ron·C1 = 1 ns over the 459 ns S1
+/// is closed.
+#[test]
+fn the_recurrence_meets_the_differenced_period_map_of_the_switched_capacitor_twin() {
+    let config = PssConfig::new(1.0e6).with_tstab(10.0e-6);
+    let Monodromies {
+        exact,
+        differenced,
+        seconds: (fast, slow),
+        ..
+    } = both_monodromies(SC_PULSE, &config);
+    let (worst, at) = worst_relative(&exact, &differenced);
+    let (exact_mu, differenced_mu) = (
+        dominant_multiplier(&exact),
+        dominant_multiplier(&differenced),
+    );
+    eprintln!(
+        "C11 pulse: worst |exact - FD| = {worst:e} of the largest entry at {at:?}; \
+         multipliers {exact_mu} and {differenced_mu}; {fast:.3} s against {slow:.3} s"
+    );
+    assert!(worst <= 1.0e-6, "worst relative miss {worst:e} at {at:?}");
+    assert!(
+        (exact_mu - Complex64::new(0.9, 0.0)).norm() <= 1.0e-6,
+        "{exact_mu}"
+    );
+}
+
+/// A smooth orbit: a diode charging an RC through 2 kΩ, whose junction
+/// conductance changes over the period by eleven decades. Forward differences carry the
+/// map's curvature over their 1e-4 step; the recurrence is the derivative
+/// itself. A junction charge is a history the segment carries over from its
+/// image, so a diode that stores one keeps the differences.
+#[test]
+fn the_recurrence_meets_the_differenced_period_map_of_a_diode_rc() {
+    let deck = "diode rc
+vin in 0 sin(0 2 1meg)
+r0 in d 2k
+d1 d out dmod
+r1 out 0 10k
+c1 out 0 1n
+.model dmod d is=1e-14
+.end
+";
+    let config = PssConfig::new(1.0e6).with_tstab(5.0e-6);
+    let charged = Netlist::parse(&deck.replace("is=1e-14", "is=1e-14 cjo=2p")).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let prepared = engine
+        .prepare_event_orbit(&charged, &config, None, &NoAbort)
+        .expect("the orbit stabilizes");
+    assert!(
+        !prepared
+            .orbit(&charged, &config, &NoAbort)
+            .admits_variational(&prepared.image),
+        "a junction charge is a history the recurrence does not take"
+    );
+    let Monodromies {
+        exact,
+        differenced,
+        seconds: (fast, slow),
+        ..
+    } = both_monodromies(deck, &config);
+    let (worst, at) = worst_relative(&exact, &differenced);
+    let (exact_mu, differenced_mu) = (
+        dominant_multiplier(&exact),
+        dominant_multiplier(&differenced),
+    );
+    eprintln!(
+        "diode RC: worst |exact - FD| = {worst:e} of the largest entry at {at:?}; \
+         multipliers {exact_mu} and {differenced_mu}; {fast:.3} s against {slow:.3} s"
+    );
+    assert!(worst <= 1.0e-4, "worst relative miss {worst:e} at {at:?}");
+    assert!((exact_mu - differenced_mu).norm() <= 1.0e-4 * differenced_mu.norm().max(1.0e-3));
+}
+
+/// A switch a state controls: the RC at `c` (R1·C1 = 300 ns) sets when S1
+/// connects the RC at `x` to its 1 V supply through Ron, so both instants
+/// move with v(c), and each saltation carries its move into x's charge.
+///
+/// The closed form, on the sine's steady state `v(c) = A·sin(ωt − φ)` with
+/// `A = 1/√(1 + (ωR1C1)²)` and `φ = atan(ωR1C1)`: S1 closes where v(c) rises
+/// through vt + vh = 0.25 and opens where it falls through vt − vh = 0.15.
+/// Closed, x relaxes to `V∞ = R2/(Ron + R2)` through `τ_on = (Ron‖R2)·C2`;
+/// open, to `R2/(Roff + R2)` through `τ_off = (Roff‖R2)·C2`. Then
+///
+/// - `Φ_cc = exp(−T/R1C1)`,
+/// - `Φ_xx = exp(−T_on/τ_on − T_off/τ_off)`,
+/// - `Φ_xc = Σ (ẋ_old − ẋ_new)(τ_i)·δτ_i/δc₀·exp(−∫ after τ_i)`, with
+///   `δτ_i = −exp(−(τ_i − t₀)/R1C1)/v̇(c)(τ_i)` per unit of v(c) at `t₀`.
+///
+/// The recurrence meets all three to the trapezoidal steps' error. The
+/// forward differences of the discrete map carry only half of the closing
+/// jump: the transient's split step ends just past the crossing, and its
+/// trapezoid averages the open and closed slopes over it.
+#[test]
+fn the_recurrence_carries_a_state_controlled_switchs_saltation() {
+    let deck = "sampler
+vin in 0 sin(0 1 1meg)
+r1 in c 1k
+c1 c 0 300p
+vb b 0 dc 1
+s1 b x c 0 swm
+r2 x 0 2k
+c2 x 0 300p
+.model swm sw vt=0.2 vh=0.05 ron=1k roff=1e9
+.end
+";
+    let config = PssConfig::new(1.0e6).with_tstab(5.0e-6);
+    let monodromies = both_monodromies(deck, &config);
+    let (c, x) = (
+        monodromies.coordinate("V(c)"),
+        monodromies.coordinate("V(x)"),
+    );
+    let (period, omega) = (1.0e-6, 2.0 * std::f64::consts::PI * 1.0e6);
+    let (r1c1, ron, r2, roff, c2) = (300.0e-9, 1.0e3, 2.0e3, 1.0e9, 300.0e-12);
+    let amplitude = 1.0 / (1.0 + (omega * r1c1).powi(2)).sqrt();
+    let lag = (omega * r1c1).atan();
+    let start = monodromies.start;
+    let after_start = |phase: Value| {
+        let mut instant = (phase + lag) / omega;
+        while instant < start {
+            instant += period;
+        }
+        instant
+    };
+    let closes = after_start((0.25 / amplitude).asin());
+    let opens = after_start(std::f64::consts::PI - (0.15 / amplitude).asin());
+    assert!(closes < opens && opens < start + period);
+    let rate = |instant: Value| amplitude * omega * (omega * instant - lag).cos();
+    let (tau_on, settle_on) = (ron * r2 / (ron + r2) * c2, r2 / (ron + r2));
+    let (tau_off, settle_off) = (roff * r2 / (roff + r2) * c2, r2 / (roff + r2));
+    let (decay_on, decay_off) = (
+        (-(opens - closes) / tau_on).exp(),
+        (-(start + period - opens) / tau_off).exp(),
+    );
+    let wrapped_off = (-(period - (opens - closes)) / tau_off).exp();
+    // v(x) where S1 closes, from v(x) = settle + (v - settle)·decay around
+    // the period.
+    let at_close = (settle_off + (settle_on - settle_on * decay_on - settle_off) * wrapped_off)
+        / (1.0 - decay_on * wrapped_off);
+    let at_open = settle_on + (at_close - settle_on) * decay_on;
+    let delay = |instant: Value| -(-(instant - start) / r1c1).exp() / rate(instant);
+    let closing = ((settle_off - at_close) / tau_off - (settle_on - at_close) / tau_on)
+        * delay(closes)
+        * decay_on
+        * decay_off;
+    let opening = ((settle_on - at_open) / tau_on - (settle_off - at_open) / tau_off)
+        * delay(opens)
+        * decay_off;
+    let expected = [
+        ((c, c), (-period / r1c1).exp()),
+        ((x, x), decay_on * wrapped_off),
+        ((x, c), closing + opening),
+    ];
+    for ((row, col), closed_form) in expected {
+        let (exact, differenced) = (
+            monodromies.exact[row][col],
+            monodromies.differenced[row][col],
+        );
+        eprintln!(
+            "sampler Φ[{}][{}]: recurrence {exact:.6e}, differences {differenced:.6e}, closed form {closed_form:.6e}",
+            monodromies.names[row], monodromies.names[col]
+        );
+        assert!(
+            (exact - closed_form).abs() <= 1.0e-2 * closed_form.abs(),
+            "Φ[{row}][{col}] = {exact:e} against {closed_form:e}"
+        );
+    }
+}

@@ -3,7 +3,9 @@
 //! A traversal writes `z` into the boundary image, runs the transient engine
 //! over the locked mesh for one period and reads `z` back at the end. The
 //! inner Newton iteration solves `Π(z) − z = 0` with the discrete state held,
-//! from finite-difference columns of `Φ = ∂Π/∂z`. Every trial keeps the
+//! from `Φ = ∂Π/∂z`: the variational recurrence of the accepted steps
+//! ([`super::variational`]) where it is exact, finite-difference columns
+//! elsewhere. Every trial keeps the
 //! orbit's event signature (the ordered list of the discrete changes a
 //! period makes), and a step that changes it is halved, up to eight times.
 
@@ -12,7 +14,9 @@ use super::basis::{DiscreteFingerprint, ShootingBasis};
 use super::boundary::{self, ObservedEvent};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::PssConfig;
-use crate::engine::transient::state_capture::{AcceptedPointObserver, CapturedTransientState};
+use crate::engine::transient::state_capture::{
+    AcceptedPointObserver, AcceptedStep, CapturedTransientState,
+};
 use crate::engine::{Engine, SimulationError, TransientResult};
 use crate::{CircuitData, Netlist, Value};
 
@@ -84,7 +88,10 @@ impl Orbit<'_> {
         }
         let start = self.basis.write(image, z)?;
         let probes = std::cell::RefCell::new(Vec::with_capacity(mesh.len() + 8));
-        let observer = |time: Value, circuit: &CircuitData, _solution: &[Value]| {
+        let observer = |time: Value,
+                        circuit: &CircuitData,
+                        _solution: &[Value],
+                        _step: Option<AcceptedStep>| {
             probes
                 .borrow_mut()
                 .push(super::basis::probe(time, circuit)?);
@@ -135,9 +142,24 @@ impl Orbit<'_> {
             .fold(0.0, Value::max)
     }
 
+    /// `Φ` at `z`: the variational recurrence of the accepted steps where it
+    /// is the map's exact derivative, and forward differences elsewhere.
+    pub(super) fn jacobian(
+        &self,
+        image: &CapturedTransientState,
+        z: &[Value],
+        base: &Traversal,
+        mesh: &[Value],
+    ) -> Result<Vec<Vec<Value>>, SimulationError> {
+        match self.variational_jacobian(image, z, mesh)? {
+            Some(phi) => Ok(phi),
+            None => self.finite_difference_jacobian(image, z, base, mesh),
+        }
+    }
+
     /// `Φ` at `z` by forward differences, each column taken on a trial that
     /// keeps `base`'s event signature.
-    pub(super) fn jacobian(
+    pub(super) fn finite_difference_jacobian(
         &self,
         image: &CapturedTransientState,
         z: &[Value],

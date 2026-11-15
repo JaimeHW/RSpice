@@ -26,6 +26,8 @@
 //! - [`pnoise`]: PNOISE on the orbit, by the transposed recurrence.
 //! - [`monodromy`]: the linearized period's map, reduced once for every
 //!   frequency's periodicity solve.
+//! - [`variational`]: the period map's exact Jacobian, by the variational
+//!   recurrence of the accepted steps with the switches' saltations.
 
 mod basis;
 mod boundary;
@@ -34,11 +36,14 @@ mod monodromy;
 mod newton;
 mod pac;
 mod pnoise;
+mod variational;
 
 use crate::abort_signal::AbortSignal;
 use crate::analysis::pss::{PeriodicWaveform, PssResult};
 use crate::analysis::{FloquetOrbitKind, FloquetSpectrumEvidence, PssConfig};
-use crate::engine::transient::state_capture::{AcceptedPointObserver, CapturedTransientState};
+use crate::engine::transient::state_capture::{
+    AcceptedPointObserver, AcceptedStep, CapturedTransientState,
+};
 use crate::engine::{Engine, PssAnalysisResult, SimulationError, UnsupportedCapabilityError};
 use crate::identity::AnalysisKind;
 use crate::{CircuitData, Netlist, Value};
@@ -429,7 +434,10 @@ impl Engine {
             .collect();
         let history_start = tstab - (DISCRETE_ITERATIONS as Value + 2.0) * period;
         let recorded = std::cell::RefCell::new(Vec::new());
-        let observer = |time: Value, circuit: &CircuitData, _solution: &[Value]| {
+        let observer = |time: Value,
+                        circuit: &CircuitData,
+                        _solution: &[Value],
+                        _step: Option<AcceptedStep>| {
             if time >= history_start {
                 recorded.borrow_mut().push(basis::probe(time, circuit)?);
             }
@@ -645,9 +653,32 @@ impl Orbit<'_> {
             coarse_mesh = fine_mesh;
         };
         let start = self.basis.write(image, &fine.z)?;
+        let mut fine = fine;
+        let linearization_miss = match self.certify_linearization(
+            &start,
+            &fine.z,
+            &fine.traversal,
+            &fine_mesh,
+            &fine.jacobian,
+        ) {
+            Ok(miss) => miss,
+            // A recurrence the seeded directions do not confirm (a switch a
+            // state controls, whose saltation the discrete map carries only
+            // in part) gives way to differences.
+            Err(_) if self.admits_variational(image) => {
+                fine.jacobian =
+                    self.finite_difference_jacobian(image, &fine.z, &fine.traversal, &fine_mesh)?;
+                self.certify_linearization(
+                    &start,
+                    &fine.z,
+                    &fine.traversal,
+                    &fine_mesh,
+                    &fine.jacobian,
+                )?
+            }
+            Err(refusal) => return Err(refusal),
+        };
         let phi = fine.jacobian.clone();
-        let linearization_miss =
-            self.certify_linearization(&start, &fine.z, &fine.traversal, &fine_mesh, &phi)?;
         let (min_event_gap, _) = self.certify_margins(&fine.traversal)?;
         let (multipliers, evidence) = if phi.is_empty() {
             (Vec::new(), FloquetSpectrumEvidence::NoDynamicModes)
@@ -663,7 +694,6 @@ impl Orbit<'_> {
                     }
                 })?
         };
-        let mut fine = fine;
         fine.iterations = iterations;
         Ok(Certified {
             solved: fine,

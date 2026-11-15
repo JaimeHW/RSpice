@@ -45,7 +45,9 @@ use super::{DISCRETE_ITERATIONS, EVENT_CARRIER, MESH_REFINEMENTS, boundary};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::pac::{PacConfig, PacResult};
 use crate::engine::ac::SmallSignalAnalysisKind;
-use crate::engine::transient::state_capture::{AcceptedPointObserver, CapturedTransientState};
+use crate::engine::transient::state_capture::{
+    AcceptedPointObserver, AcceptedStep, CapturedTransientState,
+};
 use crate::engine::{
     Engine, PacAnalysisResult, PssOperatingPoint, SimulationError, UnsupportedCapabilityError,
 };
@@ -91,12 +93,12 @@ fn analysis_name(analysis: AnalysisKind) -> &'static str {
 }
 
 /// The small-signal operator at one accepted point of the period.
-struct Operator {
+pub(super) struct Operator {
     time: Value,
     /// `G` on the structure's stored positions.
-    g: Vec<Value>,
+    pub(super) g: Vec<Value>,
     /// `C` on the structure's stored positions.
-    c: Vec<Value>,
+    pub(super) c: Vec<Value>,
     /// Every voltage and then current switch's state.
     switches: Vec<u64>,
     /// Every device noise source at this point, when the period collects
@@ -544,7 +546,7 @@ pub(super) fn reproduce_boundary(
 /// Reads `Y(jω) = G + jωC` at accepted points on one scratch circuit, linked
 /// to the structure once: at every point the run's evolving device state is
 /// copied into it, and one matrix takes every fill.
-struct Linearizer<'a> {
+pub(super) struct Linearizer<'a> {
     circuit: CircuitData,
     matrix: ComplexMatrix,
     stored: usize,
@@ -552,7 +554,7 @@ struct Linearizer<'a> {
 }
 
 impl<'a> Linearizer<'a> {
-    fn new(
+    pub(super) fn new(
         circuit: &CircuitData,
         structure: &StaticMatrix,
         noise: Option<&'a NoiseCatalog>,
@@ -571,7 +573,7 @@ impl<'a> Linearizer<'a> {
     /// `run` and `solution`, read at `omega` and split into `G` and `C`; the
     /// device noise sources are read when `with_noise` and the period
     /// collects them.
-    fn operator(
+    pub(super) fn operator(
         &mut self,
         time: Value,
         run: &CircuitData,
@@ -672,7 +674,10 @@ impl Orbit<'_> {
         }
         let linearizer = RefCell::new(linearizer);
         let operators = RefCell::new(vec![first]);
-        let observer = |time: Value, circuit: &CircuitData, solution: &[Value]| {
+        let observer = |time: Value,
+                        circuit: &CircuitData,
+                        solution: &[Value],
+                        _step: Option<AcceptedStep>| {
             let point = linearizer
                 .borrow_mut()
                 .operator(time, circuit, solution, 1.0, true)?;

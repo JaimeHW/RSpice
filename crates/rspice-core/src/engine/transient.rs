@@ -7766,7 +7766,7 @@ impl Engine {
         // The starting point is accepted state too, so a capture requested at
         // the run's first time is taken here.
         if let Some(capture) = state_capture
-            && capture.offer(t, &circuit, &solution, &matrix)?
+            && capture.offer(t, &circuit, &solution, &matrix, None)?
         {
             tstop = t;
         }
@@ -12221,7 +12221,16 @@ impl Engine {
                         abort,
                     )?;
                     if let Some(capture) = state_capture
-                        && capture.offer(t, &circuit, &solution, &matrix)?
+                        && capture.offer(
+                            t,
+                            &circuit,
+                            &solution,
+                            &matrix,
+                            Some(state_capture::AcceptedStep {
+                                step: t - accepted_from,
+                                coefficients: coeff,
+                            }),
+                        )?
                     {
                         tstop = t;
                     }
@@ -12966,7 +12975,16 @@ impl Engine {
                 abort,
             )?;
             if let Some(capture) = state_capture
-                && capture.offer(t, &circuit, &solution, &matrix)?
+                && capture.offer(
+                    t,
+                    &circuit,
+                    &solution,
+                    &matrix,
+                    Some(state_capture::AcceptedStep {
+                        step: t - accepted_from,
+                        coefficients: coeff,
+                    }),
+                )?
             {
                 tstop = t;
             }
