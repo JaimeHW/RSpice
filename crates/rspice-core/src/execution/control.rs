@@ -494,6 +494,29 @@ impl ControlProgram {
             .map(|(target, _)| target)
     }
 
+    /// The instruction after the top-level statement that holds `from`: past
+    /// the `end` of the outermost block around it, or the next one when it
+    /// is itself at the top level. An `else` holds its branch in its own
+    /// list and stands at the level of its `if`.
+    fn after_top_level_statement(&self, from: usize) -> usize {
+        let mut statement = from;
+        while let Some(opening) = self
+            .instructions
+            .get(statement)
+            .and_then(|instruction| instruction.list)
+        {
+            statement = opening;
+        }
+        match self
+            .instructions
+            .get(statement)
+            .map(|instruction| &instruction.op)
+        {
+            Some(Op::If { end, .. } | Op::Loop { end, .. } | Op::Else { end }) => end + 1,
+            _ => statement + 1,
+        }
+    }
+
     pub fn start(&self, variables: ParamContext) -> ControlSession<'_> {
         ControlSession {
             program: self,
@@ -506,6 +529,7 @@ impl ControlProgram {
             steps: 0,
             failed: false,
             quit_status: None,
+            warnings: Vec::new(),
         }
     }
 }
@@ -530,6 +554,14 @@ struct LoopFrame {
     state: LoopState,
 }
 
+/// A script error ngspice reports and runs on after, as its control loop
+/// does with a `goto` whose label it has not read (frontend/control.c:888).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlWarning {
+    pub line: usize,
+    pub message: String,
+}
+
 pub struct ControlSession<'a> {
     program: &'a ControlProgram,
     variables: ParamContext,
@@ -546,6 +578,9 @@ pub struct ControlSession<'a> {
     steps: usize,
     failed: bool,
     quit_status: Option<i32>,
+    /// What the script reported on its way to the command `next_command`
+    /// returned last.
+    warnings: Vec<ControlWarning>,
 }
 
 impl ControlSession<'_> {
@@ -584,6 +619,13 @@ impl ControlSession<'_> {
         self.quit_status
     }
 
+    /// What the script reported while `next_command` found the command it
+    /// returned last (or the script's end), for the host to show; ngspice
+    /// prints these and runs on.
+    pub fn take_warnings(&mut self) -> Vec<ControlWarning> {
+        std::mem::take(&mut self.warnings)
+    }
+
     /// Yield the next host command. A host failure must stop the session; it
     /// must not call this again as though that command had succeeded.
     pub fn next_command(
@@ -594,6 +636,7 @@ impl ControlSession<'_> {
         if self.failed {
             return Err(syntax(0, "session already failed"));
         }
+        self.warnings.clear();
         let result = self.advance(evaluator, abort);
         if result.is_err() {
             self.failed = true;
@@ -853,10 +896,23 @@ impl ControlSession<'_> {
                     let [label] = words.as_slice() else {
                         return Err(syntax(line, "goto requires one label"));
                     };
-                    let target = self
-                        .program
-                        .label_target(self.pc, &label.text)
-                        .ok_or_else(|| syntax(line, format!("label {} not found", label.text)))?;
+                    let Some(target) = self.program.label_target(self.pc, &label.text) else {
+                        // ngspice reports a label it has not read and runs on
+                        // with the top-level statement after the one holding
+                        // the goto, every block around the goto left
+                        // (frontend/control.c:888).
+                        self.warnings.push(ControlWarning {
+                            line,
+                            message: format!(
+                                "goto: label {} not found; as in ngspice, the script continues \
+                                 after the top-level statement that holds the goto",
+                                label.text
+                            ),
+                        });
+                        self.loops.clear();
+                        self.pc = self.program.after_top_level_statement(self.pc);
+                        continue;
+                    };
                     // Leaving a loop for a label outside it ends that loop,
                     // as doblock() does when its body returns a label it
                     // does not hold (frontend/control.c:329).

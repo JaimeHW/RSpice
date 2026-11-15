@@ -85,10 +85,29 @@ pub(super) fn run(
     let mut hosted = std::collections::HashSet::new();
 
     let execution = (|| -> Result<(), CliError> {
-        while let Some(command) = session
-            .next_command(&mut circuit.evaluator(&engine), &crate::abort::ProcessAbort)
-            .map_err(|error| map_command(error, script, args))?
-        {
+        loop {
+            let command = session
+                .next_command(&mut circuit.evaluator(&engine), &crate::abort::ProcessAbort)
+                .map_err(|error| map_command(error, script, args))?;
+            // What ngspice reports and runs on after, such as a `goto` to a
+            // label it has not read.
+            for warning in session.take_warnings() {
+                if !quiet {
+                    let origin = script.origin(warning.line).cloned().unwrap_or_else(|| {
+                        rspice_core::netlist::NetlistSourceLocation::in_file(
+                            &args.input,
+                            warning.line,
+                        )
+                    });
+                    crate::console::diagnostic_line(format_args!(
+                        "Warning: {origin}: {}",
+                        warning.message
+                    ));
+                }
+            }
+            let Some(command) = command else {
+                break;
+            };
             let effect = circuit
                 .execute_with_transient_runner(
                     &engine,

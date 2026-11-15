@@ -7,12 +7,25 @@ use rspice_core::engine::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlPresentation,
     ControlPresentationKind,
 };
-use rspice_core::execution::control::{ControlLimits, ControlProgram};
+use rspice_core::execution::control::{ControlLimits, ControlProgram, ControlWarning};
 use rspice_core::{Engine, Netlist, NoAbort, SimulationConfig};
 
 /// Run `source`'s script to its end or first error, keeping what it asked
 /// to present.
 fn run(source: &str) -> (ControlCircuit, Vec<ControlPresentation>, Option<String>) {
+    let (circuit, presented, _, error) = run_reporting(source);
+    (circuit, presented, error)
+}
+
+/// [`run`], also keeping what the script reported and ran on after.
+fn run_reporting(
+    source: &str,
+) -> (
+    ControlCircuit,
+    Vec<ControlPresentation>,
+    Vec<ControlWarning>,
+    Option<String>,
+) {
     let engine = Engine::new(SimulationConfig::default());
     let program =
         ControlProgram::parse_deck_with_abort(source, ControlLimits::default(), &NoAbort).unwrap();
@@ -20,18 +33,32 @@ fn run(source: &str) -> (ControlCircuit, Vec<ControlPresentation>, Option<String
     let mut session = program.start(netlist.params.clone());
     let mut circuit = ControlCircuit::new(netlist).unwrap();
     let mut presented = Vec::new();
+    let mut warnings = Vec::new();
     loop {
-        let command = match session.next_command(&mut circuit.evaluator(&engine), &NoAbort) {
+        let next = session.next_command(&mut circuit.evaluator(&engine), &NoAbort);
+        warnings.extend(session.take_warnings());
+        let command = match next {
             Ok(Some(command)) => command,
-            Ok(None) => return (circuit, presented, None),
-            Err(error) => return (circuit, presented, Some(error.to_string())),
+            Ok(None) => return (circuit, presented, warnings, None),
+            Err(error) => return (circuit, presented, warnings, Some(error.to_string())),
         };
         match circuit.execute(&engine, &command, session.variables(), &NoAbort) {
             Ok(ControlCommandEffect::Presentation(request)) => presented.push(request),
             Ok(_) => {}
-            Err(error) => return (circuit, presented, Some(error.to_string())),
+            Err(error) => return (circuit, presented, warnings, Some(error.to_string())),
         }
     }
+}
+
+/// Every echoed line, in order.
+fn texts(presented: &[ControlPresentation]) -> Vec<&str> {
+    presented
+        .iter()
+        .filter_map(|request| match &request.kind {
+            ControlPresentationKind::Text(text) => Some(text.trim_end()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Every printed column, by expression, in print order.
@@ -75,6 +102,43 @@ fn goto_jumps_to_its_label_and_ends_the_loops_it_leaves() {
         .map(|(_, samples)| samples)
         .collect::<Vec<_>>();
     assert_eq!(values, [vec![3.0], vec![10.0], vec![2.0]]);
+}
+
+/// ngspice-46 echoes `one` .. `six`, `w 1`, `w 2` and `seven`, and reports
+/// labels later, later2, nowhere and after not found: a `goto` whose label
+/// it has not read reports it and runs on with the top-level statement
+/// after the one holding the goto, leaving the `if` and `while` around it
+/// (frontend/control.c:888), while a label already read is found.
+#[test]
+fn goto_to_an_unread_label_reports_it_and_runs_on() {
+    let (_, presented, warnings, error) = run_reporting(
+        "goto ahead\nV1 1 0 1\nR1 1 0 1k\n.control\necho one\ngoto later\necho two\nlabel later\n\
+         echo three\nlet k = 0\nif k = 0\necho in-if\ngoto later2\necho in-if-after\nend\n\
+         echo four\nlabel later2\necho five\nlet m = 0\nlabel back\nlet m = m + 1\nif m < 3\n\
+         goto back\nend\necho m $&m\ngoto nowhere\necho six\nlet w = 0\nwhile w < 5\n\
+         let w = w + 1\nif w = 2\ngoto after\nelse\necho w $&w\nend\nend\necho w $&w\n\
+         label after\necho seven\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "one", "two", "three", "in-if", "four", "five", "m 3", "six", "w 1", "w 2", "seven"
+        ]
+    );
+    let reported = warnings
+        .iter()
+        .map(|warning| (warning.line, warning.message.split(';').next().unwrap()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reported,
+        [
+            (6, "goto: label later not found"),
+            (13, "goto: label later2 not found"),
+            (26, "goto: label nowhere not found"),
+            (32, "goto: label after not found"),
+        ]
+    );
 }
 
 /// ngspice-46 prints @v1[pulse] as the seven coefficients the deck gave,
