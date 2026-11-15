@@ -457,6 +457,27 @@ use generated_model_routing::{
     try_route_generated_mos_model, try_route_generated_resistor_model,
 };
 
+/// Whether a transient's stop time changes the shape of `circuit`, built
+/// without one. Of everything a stop time changes, only a BJT's internal
+/// nodes change the circuit's shape.
+fn stop_time_reshapes(circuit: &CircuitData) -> bool {
+    !circuit.bjts.devices.is_empty()
+}
+
+/// Whether a transient's stop time changes anything in `circuit`, built
+/// without one: its shape, or the samples a TRNOISE or TRRANDOM source draws
+/// over the run.
+fn stop_time_changes(circuit: &CircuitData) -> bool {
+    stop_time_reshapes(circuit)
+        || circuit
+            .voltage_sources
+            .source_specs
+            .iter()
+            .chain(&circuit.current_sources.source_specs)
+            .flatten()
+            .any(super::transient::noise::spec_contains_transient_random)
+}
+
 #[inline]
 fn check_build_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
     if abort.is_aborted() {
@@ -6246,6 +6267,24 @@ impl Engine {
             .map(|built| built.circuit)
     }
 
+    /// The circuit a transient to `tstop` builds of `netlist`, given `built`,
+    /// the circuit [`Self::build_circuit_with_abort`] built of it: `built`
+    /// itself when a stop time changes nothing in it, else the transient's
+    /// own build.
+    pub(super) fn transient_circuit_from(
+        &self,
+        netlist: &Netlist,
+        built: CircuitData,
+        tstop: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<CircuitData, SimulationError> {
+        if self.small_signal_state.is_none() && !stop_time_changes(&built) {
+            return Ok(built);
+        }
+        drop(built);
+        self.build_transient_circuit_with_abort(netlist, tstop, abort)
+    }
+
     /// Retain RF identities from the same elaboration that constructs the circuit.
     pub(super) fn build_circuit_with_rf_ports(
         &self,
@@ -6323,10 +6362,8 @@ impl Engine {
         }
         let mut built = built;
         built.circuit.analog_task_output = self.config.hdl.output.clone();
-        // Of everything a transient stop time changes, only a BJT's internal
-        // nodes change the circuit's shape.
         if default_ports.is_empty()
-            && (transient_stop_time.is_none() || built.circuit.bjts.devices.is_empty())
+            && (transient_stop_time.is_none() || !stop_time_reshapes(&built.circuit))
         {
             self.record_built_topology(netlist, &built.circuit);
         }

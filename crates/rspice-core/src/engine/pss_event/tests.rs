@@ -650,7 +650,7 @@ fn monodromies(deck: &str, config: &PssConfig, central: Option<Value>) -> Monodr
     let netlist = Netlist::parse(deck).expect("the deck parses");
     let engine = Engine::new(SimulationConfig::default());
     let prepared = engine
-        .prepare_event_orbit(&netlist, config, None, &NoAbort)
+        .prepare_event_orbit(&netlist, None, config, None, &NoAbort)
         .expect("the orbit stabilizes");
     let orbit = prepared.orbit(&netlist, config, &NoAbort);
     let (image, mesh) = (&prepared.image, &prepared.mesh);
@@ -785,7 +785,7 @@ c1 out 0 1n
     let netlist = Netlist::parse(deck).unwrap();
     let engine = Engine::new(SimulationConfig::default());
     let prepared = engine
-        .prepare_event_orbit(&netlist, &config, None, &NoAbort)
+        .prepare_event_orbit(&netlist, None, &config, None, &NoAbort)
         .expect("the orbit stabilizes");
     assert!(
         prepared
@@ -987,7 +987,7 @@ c2 x 0 300p
         .expect("the sampler's orbit certifies");
     assert!(point.is_event_orbit());
     let prepared = engine
-        .prepare_event_orbit(&netlist, &config, None, &NoAbort)
+        .prepare_event_orbit(&netlist, None, &config, None, &NoAbort)
         .expect("the orbit stabilizes");
     let orbit = prepared.orbit(&netlist, &config, &NoAbort);
     let (image, mesh) = (&prepared.image, &prepared.mesh);
@@ -1035,7 +1035,7 @@ s1 a 0 a 0 swm
     let netlist = Netlist::parse(deck).unwrap();
     let engine = Engine::new(SimulationConfig::default());
     let prepared = engine
-        .prepare_event_orbit(&netlist, &config, None, &NoAbort)
+        .prepare_event_orbit(&netlist, None, &config, None, &NoAbort)
         .expect("the orbit stabilizes");
     let orbit = prepared.orbit(&netlist, &config, &NoAbort);
     let z = prepared.basis.read(&prepared.image).expect("coordinates");

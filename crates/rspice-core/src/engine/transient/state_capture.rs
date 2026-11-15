@@ -71,6 +71,9 @@ pub(in crate::engine) struct TransientStateCapture<'a> {
     /// The live image a segment starts from, in place of an operating point
     /// or a checkpoint: the run continues the circuit the image holds.
     start: Option<&'a CapturedTransientState>,
+    /// The circuit a caller already built for the run, which the run
+    /// integrates in place of building its own; taken once.
+    built: RefCell<Option<CircuitData>>,
     /// Offered every accepted point before any capture.
     observer: Option<&'a AcceptedPointObserver<'a>>,
 }
@@ -83,6 +86,7 @@ impl std::fmt::Debug for TransientStateCapture<'_> {
             .field("stops_at_last", &self.stops_at_last)
             .field("captured", &self.captured.borrow().len())
             .field("start", &self.start.map(|image| image.time))
+            .field("built", &self.built.borrow().is_some())
             .field("observed", &self.observer.is_some())
             .finish()
     }
@@ -134,6 +138,7 @@ impl<'a> TransientStateCapture<'a> {
             stops_at_last,
             captured: RefCell::new(Vec::with_capacity(times.len())),
             start: None,
+            built: RefCell::new(None),
             observer: None,
         })
     }
@@ -141,6 +146,11 @@ impl<'a> TransientStateCapture<'a> {
     /// The live image the run starts from, when it is a segment.
     pub(in crate::engine) fn start(&self) -> Option<&'a CapturedTransientState> {
         self.start
+    }
+
+    /// The circuit the caller built for the run, the first time it is asked.
+    pub(in crate::engine) fn take_built(&self) -> Option<CircuitData> {
+        self.built.take()
     }
 
     /// The requested times, which the run adds as hard breakpoints.
@@ -301,10 +311,12 @@ impl Engine {
     /// Run a transient from its operating point (or `dc_seed`) to `tstop`,
     /// capturing the accepted state at each of `times` and offering every
     /// accepted point to `observer`; the run continues past the last capture
-    /// to `tstop`.
+    /// to `tstop`. `built`, when given, is the circuit the transient builds
+    /// of `netlist` for `tstop`, and the run integrates it instead of
+    /// building it again.
     pub(in crate::engine) fn run_tran_observed(
         &self,
-        netlist: &Netlist,
+        (netlist, built): (&Netlist, Option<CircuitData>),
         (tstop, max_step): (Value, Value),
         dc_seed: Option<&crate::engine::PeriodicDcOperatingPointSeed>,
         times: &[Value],
@@ -314,6 +326,7 @@ impl Engine {
         validate_transient_window(tstop, max_step)?;
         let mut capture = TransientStateCapture::through_stop(times, tstop)?;
         capture.observer = Some(observer);
+        capture.built = RefCell::new(built);
         let requested = times.len();
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop, max_step)?;

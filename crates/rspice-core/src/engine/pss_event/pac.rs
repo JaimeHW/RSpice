@@ -172,7 +172,7 @@ impl Engine {
             ));
         }
         let pss_config = operating_point.config();
-        let prepared = self.prepare_event_orbit(netlist, pss_config, None, abort)?;
+        let prepared = self.prepare_event_orbit(netlist, None, pss_config, None, abort)?;
         if prepared.basis.names() != operating_point.shooting_state_basis() {
             return Err(carrier_refusal(format!(
                 "PAC cannot reproduce the event orbit: its coordinates at the reproduced \

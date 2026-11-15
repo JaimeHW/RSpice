@@ -4685,7 +4685,13 @@ impl Engine {
             .and_then(state_capture::TransientStateCapture::start)
         {
             Some(image) => image.circuit.clone(),
-            None => self.build_transient_circuit_with_abort(netlist, window.tstop, abort)?,
+            None => match plan
+                .state_capture
+                .and_then(state_capture::TransientStateCapture::take_built)
+            {
+                Some(built) => built,
+                None => self.build_transient_circuit_with_abort(netlist, window.tstop, abort)?,
+            },
         };
         if let Some(seed) = window.dc_seed {
             seed.validate_for_circuit(&circuit)?;

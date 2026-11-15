@@ -473,7 +473,7 @@ impl Engine {
                 ));
             }
         };
-        let prepared = self.prepare_event_orbit(netlist, pss_config, None, abort)?;
+        let prepared = self.prepare_event_orbit(netlist, None, pss_config, None, abort)?;
         if prepared.basis.names() != operating_point.shooting_state_basis() {
             return Err(refusal(
                 EVENT_CARRIER,

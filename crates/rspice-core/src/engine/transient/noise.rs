@@ -104,7 +104,9 @@ pub(in crate::engine) fn expand_transient_noise(
     Ok(())
 }
 
-fn spec_contains_transient_random(spec: &SourceSpec) -> bool {
+/// Whether `spec` draws TRNOISE or TRRANDOM samples, which a transient
+/// expands for its stop time.
+pub(in crate::engine) fn spec_contains_transient_random(spec: &SourceSpec) -> bool {
     match spec {
         SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
             spec_contains_transient_random(inner)

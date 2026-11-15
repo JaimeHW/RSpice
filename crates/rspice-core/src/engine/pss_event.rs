@@ -387,7 +387,7 @@ impl Engine {
         dc_seed: Option<&crate::engine::PssDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
     ) -> Result<EventPss, SimulationError> {
-        let prepared = self.prepare_event_orbit(netlist, config, dc_seed, abort)?;
+        let prepared = self.prepare_event_orbit(netlist, None, config, dc_seed, abort)?;
         let orbit = prepared.orbit(netlist, config, abort);
         let (image, solved, mesh, discrete_iterations) = orbit.solve_discrete(
             prepared.image.clone(),
@@ -405,10 +405,12 @@ impl Engine {
     }
 
     /// Stabilize the circuit, choose its quiet boundary and lay out the
-    /// orbit's coordinates and nominal mesh there.
+    /// orbit's coordinates and nominal mesh there. `built`, when given, is
+    /// the circuit [`Engine::build_circuit_with_abort`] built of `netlist`.
     fn prepare_event_orbit(
         &self,
         netlist: &Netlist,
+        built: Option<CircuitData>,
         config: &PssConfig,
         dc_seed: Option<&crate::engine::PssDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
@@ -446,9 +448,13 @@ impl Engine {
         let observer: &AcceptedPointObserver<'_> = &observer;
         // The run goes on one period past the last candidate, so the window
         // from any of them is accepted instants of its own.
+        let tstop = tstab + period;
+        let built = built
+            .map(|circuit| resolved.transient_circuit_from(netlist, circuit, tstop, abort))
+            .transpose()?;
         let (stabilization, images) = resolved.run_tran_observed(
-            netlist,
-            (tstab + period, max_step),
+            (netlist, built),
+            (tstop, max_step),
             dc_seed,
             &candidates,
             observer,
