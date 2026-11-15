@@ -91,6 +91,12 @@ pub fn canvas_request(
     viewport: SymbolViewport,
     response: &egui::Response,
 ) -> Option<SymbolCanvasRequest> {
+    // A finger held still opens the context menu. egui reports the press as
+    // a drag started on that same frame, and the lift that follows as its
+    // end; neither is the canvas's, so the rest of the press does nothing.
+    if held_for_menu(response) {
+        return None;
+    }
     let drag_started = response.drag_started_by(egui::PointerButton::Primary);
     // A drag reports as started only once the pointer has left the press by
     // egui's threshold, and what it picks up is what was under the press.
@@ -147,6 +153,25 @@ pub fn canvas_request(
         viewport,
         input,
     })
+}
+
+/// Whether the press on `response` is a long press, which belongs to the
+/// context menu from the frame it is recognised until the finger lifts.
+fn held_for_menu(response: &egui::Response) -> bool {
+    let id = response.id.with("symbol-canvas.held-for-menu");
+    if response.long_touched() {
+        response.ctx.data_mut(|data| data.insert_temp(id, true));
+        return true;
+    }
+    let held = response.ctx.data(|data| data.get_temp::<bool>(id)) == Some(true);
+    let pressed = response
+        .ctx
+        .input(|input| input.pointer.primary_down() || input.pointer.primary_released());
+    if held && !pressed {
+        response.ctx.data_mut(|data| data.remove::<bool>(id));
+        return false;
+    }
+    held
 }
 
 /// Discard unfinished input if its document, occurrence or externally edited revision changed.

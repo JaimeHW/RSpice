@@ -199,6 +199,16 @@ impl Finger {
         self.tap(at);
     }
 
+    /// A finger held still past egui's long-press time, then lifted.
+    fn long_press(&mut self, pos: Pos2) {
+        self.settle();
+        self.down(pos);
+        self.frame_after(0.9, vec![Self::touch(TouchPhase::Move, pos)]);
+        self.up(pos);
+        self.frame(Vec::new());
+        self.frame(Vec::new());
+    }
+
     /// One finger from `from` to `to` in four steps, held there until it has
     /// no speed left to fling with, then lifted.
     fn drag(&mut self, from: Pos2, to: Pos2) {
@@ -446,4 +456,40 @@ fn the_add_latch_adds_to_the_symbol_selection() {
     assert_eq!(finger.selection().shapes, [0, 1].into_iter().collect());
     finger.tap(finger.screen(Point::new(-30, -40)));
     assert_eq!(finger.selection(), SymbolSelection::single_shape(1));
+}
+
+/// A long press opens the canvas menu and does nothing else: with a drawing
+/// tool armed it starts no shape, and the lift that ends it places no point.
+#[test]
+fn a_long_press_on_the_symbol_canvas_only_opens_its_menu() {
+    let mut finger = Finger::with_body(vec![square()]);
+    finger.arm(SymbolTool::Rectangle);
+    finger.long_press(finger.screen(Point::new(60, -60)));
+    assert_eq!(
+        finger.app.state.design.symbol.editor.shape_start, None,
+        "the press began no rectangle"
+    );
+    assert!(
+        finger.find("Draw rectangle").is_some(),
+        "the empty canvas's menu is open"
+    );
+    finger.press("Draw line");
+
+    finger.tap(finger.screen(Point::new(-60, 40)));
+    finger.tap(finger.screen(Point::new(-20, 40)));
+    finger.long_press(finger.screen(Point::new(60, 40)));
+    assert_eq!(
+        finger.app.state.design.symbol.editor.pending_polyline,
+        vec![Point::new(-60, 40), Point::new(-20, 40)],
+        "the long press placed no point"
+    );
+    finger.press("Finish");
+    assert_eq!(
+        finger.document().body.last(),
+        Some(&SymbolShape::Polyline {
+            points: vec![Point::new(-60, 40), Point::new(-20, 40)],
+            closed: false,
+            style: Default::default(),
+        })
+    );
 }
