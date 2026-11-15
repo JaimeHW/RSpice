@@ -25,6 +25,7 @@ use crate::state::engineering_table::{
     EngineeringDataset, EngineeringProjection, active_schematic_dataset, symbol_pin_dataset,
     symbol_pin_row_index,
 };
+use crate::ui::theme;
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::select_with_response;
 use crate::workbench::SymbolCommitIntent;
@@ -544,7 +545,7 @@ fn cell_editor(
         size,
         TextEdit::singleline(&mut edit.text)
             .id_salt(&salt)
-            .font(egui::TextStyle::Body),
+            .font(theme::field_sans()),
     );
     if !edit.begun {
         // The value is selected whole, so typing replaces it.
