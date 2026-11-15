@@ -15,6 +15,7 @@ mod digest;
 mod error;
 mod format;
 mod io;
+mod reader;
 mod schema;
 mod writer;
 
@@ -26,5 +27,6 @@ pub use error::StoreError;
 #[cfg(any(unix, windows))]
 pub use io::FileIo;
 pub use io::{MemoryIo, SegmentIo};
+pub use reader::{SegmentReader, SegmentState};
 pub use schema::{Axis, RunMeta, Schema, Signal, SignalKind};
 pub use writer::{RunStatus, SegmentWriter, StopReason, StoreReceipt};

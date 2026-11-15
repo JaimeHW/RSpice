@@ -49,6 +49,18 @@ impl RunStatus {
             Self::Stopped(StopReason::Failed(message)) => (1, 5, message),
         }
     }
+
+    pub(crate) fn decode(status: u8, reason: u8, message: String) -> Option<Self> {
+        Some(match (status, reason) {
+            (0, 0) => Self::Completed,
+            (1, 1) => Self::Stopped(StopReason::DiskFull),
+            (1, 2) => Self::Stopped(StopReason::MemoryFull),
+            (1, 3) => Self::Stopped(StopReason::Cancelled),
+            (1, 4) => Self::Stopped(StopReason::Timeout),
+            (1, 5) => Self::Stopped(StopReason::Failed(message)),
+            _ => return None,
+        })
+    }
 }
 
 /// What a finished segment holds.
@@ -155,6 +167,8 @@ pub(crate) struct IndexEntry {
     pub(crate) x_min: f64,
     pub(crate) x_max: f64,
 }
+
+pub(crate) const INDEX_ENTRY_LEN: usize = 48;
 
 impl IndexEntry {
     fn put(&self, frame: &mut FrameBuf) {

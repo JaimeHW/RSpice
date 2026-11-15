@@ -124,6 +124,17 @@ impl LogicalDigest {
         self.row_count += rows as u64;
     }
 
+    /// Hash rows given as x and one column per value slot.
+    pub(crate) fn columns(&mut self, x: &[f64], columns: &[Vec<f64>]) {
+        for (row, &x) in x.iter().enumerate() {
+            self.rows.value(x);
+            for column in columns {
+                self.rows.value(column[row]);
+            }
+        }
+        self.row_count += x.len() as u64;
+    }
+
     /// The digest over everything written, bound to the schema's canonical bytes.
     pub(crate) fn finish(self, schema_bytes: &[u8]) -> Digest {
         let mut hasher = Sha256::default();

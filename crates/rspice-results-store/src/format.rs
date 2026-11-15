@@ -29,17 +29,20 @@ pub(crate) enum FrameKind {
     Schema = 1,
     RunMeta = 2,
     Chunk = 3,
+    Events = 4,
+    Summary = 5,
     Index = 6,
     End = 7,
 }
 
 impl FrameKind {
-    #[cfg(test)]
     pub(crate) fn from_u8(value: u8) -> Option<Self> {
         Some(match value {
             1 => Self::Schema,
             2 => Self::RunMeta,
             3 => Self::Chunk,
+            4 => Self::Events,
+            5 => Self::Summary,
             6 => Self::Index,
             7 => Self::End,
             _ => return None,
@@ -219,7 +222,6 @@ pub(crate) fn frame_crc(header: &[u8], payload: &[u8]) -> u32 {
     hasher.finalize()
 }
 
-#[cfg(test)]
 /// A decoded frame header.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FrameHeader {
@@ -229,7 +231,6 @@ pub(crate) struct FrameHeader {
     pub(crate) crc: u32,
 }
 
-#[cfg(test)]
 impl FrameHeader {
     pub(crate) fn parse(bytes: &[u8; FRAME_HEADER_LEN]) -> Option<Self> {
         if bytes[..4] != FRAME_MAGIC || bytes[6] != 0 || bytes[7] != 0 {
@@ -250,6 +251,78 @@ impl FrameHeader {
     /// Offset of the next frame after this one at `offset`.
     pub(crate) fn next(&self, offset: u64) -> u64 {
         align8(offset + FRAME_HEADER_LEN as u64 + u64::from(self.payload_len))
+    }
+}
+
+/// A bounds-checked little-endian reader over a payload; every short read is a typed corruption.
+pub(crate) struct Cursor<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+    /// Segment offset of `bytes[0]`, for error messages.
+    base: u64,
+}
+
+impl<'a> Cursor<'a> {
+    pub(crate) fn new(bytes: &'a [u8], base: u64) -> Self {
+        Self {
+            bytes,
+            pos: 0,
+            base,
+        }
+    }
+
+    pub(crate) fn remaining(&self) -> usize {
+        self.bytes.len() - self.pos
+    }
+
+    pub(crate) fn error(&self, reason: &str) -> StoreError {
+        StoreError::corrupt(self.base + self.pos as u64, reason)
+    }
+
+    pub(crate) fn take(&mut self, len: usize) -> Result<&'a [u8], StoreError> {
+        let end = self
+            .pos
+            .checked_add(len)
+            .filter(|&end| end <= self.bytes.len());
+        let end = end.ok_or_else(|| self.error("a field runs past the end of its frame"))?;
+        let slice = &self.bytes[self.pos..end];
+        self.pos = end;
+        Ok(slice)
+    }
+
+    pub(crate) fn u8(&mut self) -> Result<u8, StoreError> {
+        Ok(self.take(1)?[0])
+    }
+    pub(crate) fn u16(&mut self) -> Result<u16, StoreError> {
+        Ok(u16::from_le_bytes(
+            self.take(2)?.try_into().unwrap_or_default(),
+        ))
+    }
+    pub(crate) fn u32(&mut self) -> Result<u32, StoreError> {
+        Ok(u32::from_le_bytes(
+            self.take(4)?.try_into().unwrap_or_default(),
+        ))
+    }
+    pub(crate) fn u64(&mut self) -> Result<u64, StoreError> {
+        Ok(u64::from_le_bytes(
+            self.take(8)?.try_into().unwrap_or_default(),
+        ))
+    }
+    pub(crate) fn f64(&mut self) -> Result<f64, StoreError> {
+        Ok(f64::from_bits(self.u64()?))
+    }
+    pub(crate) fn string(&mut self) -> Result<String, StoreError> {
+        let len = self.u32()? as usize;
+        let bytes = self.take(len)?;
+        String::from_utf8(bytes.to_vec()).map_err(|_| self.error("a name is not UTF-8"))
+    }
+    /// A count of items each at least `item_bytes` long, checked against what is left.
+    pub(crate) fn count(&mut self, item_bytes: usize) -> Result<usize, StoreError> {
+        let count = self.u32()? as usize;
+        if count.saturating_mul(item_bytes.max(1)) > self.remaining() {
+            return Err(self.error("a count exceeds the bytes left in its frame"));
+        }
+        Ok(count)
     }
 }
 

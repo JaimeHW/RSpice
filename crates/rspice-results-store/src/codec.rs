@@ -1,11 +1,11 @@
-//! Block codecs: `XOR+shuffle+LZ4` for float columns, `plain` when LZ4 does not shrink a block.
+//! Block codecs: `XOR+shuffle+LZ4` for float columns, `LZ4` for byte columns, `plain` when LZ4 does
+//! not shrink a block.
 //!
 //! `XOR+shuffle` XORs each value's bits with the previous value's (the first with zero), then writes
 //! byte 0 of every value, then byte 1, and so on. Neighbouring samples share their sign, exponent and
 //! leading mantissa bits, so the high byte planes become long runs LZ4 compresses well. `plain` is
 //! the raw little-endian values, so a reader never pays a transform for incompressible data.
 
-#[cfg(test)]
 use crate::StoreError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,9 +13,19 @@ use crate::StoreError;
 pub(crate) enum Codec {
     Plain = 0,
     XorShuffleLz4 = 1,
+    Lz4 = 2,
 }
 
-impl Codec {}
+impl Codec {
+    pub(crate) fn from_u8(value: u8) -> Option<Self> {
+        Some(match value {
+            0 => Self::Plain,
+            1 => Self::XorShuffleLz4,
+            2 => Self::Lz4,
+            _ => return None,
+        })
+    }
+}
 
 /// Largest encoded size of a block of `raw_len` bytes, whichever codec wins.
 pub(crate) fn max_encoded_len(raw_len: usize) -> usize {
@@ -49,7 +59,6 @@ fn xor_shuffle(values: &[f64], planes: &mut [u8]) {
     }
 }
 
-#[cfg(test)]
 fn xor_unshuffle(planes: &[u8], out: &mut [f64]) {
     let n = out.len();
     let planes = &planes[..n * 8];
@@ -88,7 +97,6 @@ pub(crate) fn encode_f64(values: &[f64], planes: &mut [u8], out: &mut [u8]) -> (
     }
 }
 
-#[cfg(test)]
 /// Decode a float column of `out.len()` values. `planes` is reusable scratch.
 pub(crate) fn decode_f64(
     codec: Codec,
@@ -123,6 +131,12 @@ pub(crate) fn decode_f64(
                 ));
             }
             xor_unshuffle(&planes[..raw_len], out);
+        }
+        Codec::Lz4 => {
+            return Err(StoreError::corrupt(
+                offset,
+                "a float block names the byte codec",
+            ));
         }
     }
     Ok(())

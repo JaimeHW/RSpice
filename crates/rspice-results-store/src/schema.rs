@@ -1,7 +1,7 @@
 //! What a segment holds: the shared x axis, the signals, and the run's metadata.
 
 use crate::StoreError;
-use crate::format::PutLe;
+use crate::format::{Cursor, PutLe};
 
 /// The run's shared x axis (time, frequency or the swept value).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -47,6 +47,17 @@ impl SignalKind {
             Self::RealEvent => (3, 0),
             Self::Bus { width } => (4, width),
         }
+    }
+
+    fn from_code(code: u8, width: u32) -> Option<Self> {
+        Some(match code {
+            0 => Self::Real,
+            1 => Self::Complex,
+            2 => Self::Logic,
+            3 => Self::RealEvent,
+            4 => Self::Bus { width },
+            _ => return None,
+        })
     }
 }
 
@@ -133,6 +144,33 @@ impl Schema {
             out.put_str(&signal.path);
         }
     }
+
+    pub(crate) fn decode(cursor: &mut Cursor<'_>) -> Result<Self, StoreError> {
+        let x = Axis {
+            name: cursor.string()?,
+            unit: cursor.string()?,
+        };
+        let count = cursor.count(21)?;
+        let mut signals = Vec::with_capacity(count);
+        for _ in 0..count {
+            let code = cursor.u8()?;
+            let width = cursor.u32()?;
+            let kind = SignalKind::from_code(code, width)
+                .ok_or_else(|| cursor.error("unknown signal kind"))?;
+            signals.push(Signal {
+                name: cursor.string()?,
+                unit: cursor.string()?,
+                kind,
+                quantity: cursor.string()?,
+                path: cursor.string()?,
+            });
+        }
+        let schema = Self { x, signals };
+        schema
+            .validate()
+            .map_err(|_| cursor.error("a bus width is outside 1 to 64 bits"))?;
+        Ok(schema)
+    }
 }
 
 /// The run a segment records: the analysis card, sweep values, seed and options.
@@ -165,5 +203,30 @@ impl RunMeta {
             out.put_str(name);
             out.put_str(value);
         }
+    }
+
+    pub(crate) fn decode(cursor: &mut Cursor<'_>) -> Result<Self, StoreError> {
+        let analysis = cursor.string()?;
+        let count = cursor.count(12)?;
+        let mut sweep = Vec::with_capacity(count);
+        for _ in 0..count {
+            sweep.push((cursor.string()?, cursor.f64()?));
+        }
+        let seed = match cursor.u8()? {
+            0 => None,
+            1 => Some(cursor.u64()?),
+            _ => return Err(cursor.error("the seed flag is neither 0 nor 1")),
+        };
+        let count = cursor.count(8)?;
+        let mut options = Vec::with_capacity(count);
+        for _ in 0..count {
+            options.push((cursor.string()?, cursor.string()?));
+        }
+        Ok(Self {
+            analysis,
+            sweep,
+            seed,
+            options,
+        })
     }
 }

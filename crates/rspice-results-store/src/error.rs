@@ -35,7 +35,6 @@ pub enum StoreError {
 }
 
 impl StoreError {
-    #[cfg(test)]
     pub(crate) fn corrupt(offset: u64, reason: impl Into<String>) -> Self {
         Self::Corrupt {
             offset,
