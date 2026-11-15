@@ -1,0 +1,77 @@
+# Measure gates for xspice/pll/pll-xspice (execution-manifest contract: !measures).
+#
+# Why measures: a charge-pump PLL locking a 400 MHz d_osc VCO, divided by 40,
+# to a 10 MHz reference over 25 us. Its plotted outputs s1, s2, u1n and d1
+# are dac_bridge copies of digital nets with 0.1 ns ramps, and ngspice-46
+# moves those edges by up to 153 ps under its own 10x timestep refinement
+# (.tran 0.1n against 0.01n), more than a whole ramp. A pointwise sample
+# taken on a ramp therefore compares where two runs happened to step, not
+# the loop: the stored reference differs from ngspice's own 10x run by more
+# than the pointwise tolerance at 28 u1n and 22 d1 of its 1,001 rows.
+# Against ngspice at the deck step, RSpice places all 245 divider edges, 250
+# reference edges and 245 pump pulses in the same order, with the same count,
+# closer than ngspice's own refinement scatter, and tracks the control
+# voltage cont to 1.4e-4 V where ngspice's refinement moves it 1.8e-4 V.
+#
+# The gates measure what the deck is for: cont settling to lock, the divided
+# VCO's period converging on the 100 ns reference, and the phase detector's
+# edges. The stored table keeps 1,001 rows, one per 25 ns, too sparse to
+# resolve a 0.1 ns edge, so every gate carries ref=: the value measured from
+# ngspice-46 at the deck step at full resolution (.tran 0.1n 25u uic,
+# trapezoidal, every accepted point). Each tolerance is twice the larger of
+# ngspice's own movement under 10x refinement and RSpice's deviation from
+# ref=, taken over every crossing or window of the family (in a
+# full-resolution RSpice run, and the gate run itself):
+#
+#   family                               ngspice 10x moves   RSpice deviates   tolerance
+#   cont means, ten windows                   7.4e-5 V           3.2e-5 V        1.5e-4 V
+#   s1 rises at 0.5 (divider)                 153 ps              64 ps          310 ps
+#   s2 rises at 0.5 (reference)                95 ps              95 ps          200 ps
+#   u1n falls at 0.25 (pump up)               153 ps              64 ps          310 ps
+#   d1 rises at 0.75 (pump down)               95 ps              95 ps          200 ps
+#   s1 period, 5-10 us                        0.60 ps            0.39 ps         1.2 ps
+#   s1 period, 10-25 us                       0.29 ps            0.24 ps         0.57 ps
+#
+# u1n and d1 start at out_undef = 0.5 until the phase detector's flip-flops
+# are first clocked, so their gates read 0.25 and 0.75, never the 0.5 level
+# they rest on.
+v(cont)	mean	t0=1e-09	t1=1e-06	tol_abs=0.00015	tol_rel=0	ref=2.2904152032e+00
+v(cont)	mean	t0=1e-06	t1=2e-06	tol_abs=0.00015	tol_rel=0	ref=2.0696469388e+00
+v(cont)	mean	t0=2e-06	t1=3e-06	tol_abs=0.00015	tol_rel=0	ref=1.8797120005e+00
+v(cont)	mean	t0=3e-06	t1=4e-06	tol_abs=0.00015	tol_rel=0	ref=1.9273864921e+00
+v(cont)	mean	t0=4e-06	t1=6e-06	tol_abs=0.00015	tol_rel=0	ref=1.9401154325e+00
+v(cont)	mean	t0=6e-06	t1=8e-06	tol_abs=0.00015	tol_rel=0	ref=1.9482112141e+00
+v(cont)	mean	t0=8e-06	t1=1e-05	tol_abs=0.00015	tol_rel=0	ref=1.9439454994e+00
+v(cont)	mean	t0=1e-05	t1=1.5e-05	tol_abs=0.00015	tol_rel=0	ref=1.9433829976e+00
+v(cont)	mean	t0=1.5e-05	t1=2e-05	tol_abs=0.00015	tol_rel=0	ref=1.9438776365e+00
+v(cont)	mean	t0=2e-05	t1=2.5e-05	tol_abs=0.00015	tol_rel=0	ref=1.9439204624e+00
+v(s1)	cross	level=0.5	dir=rise	n=1	tol=3.1e-10	ref=2.0870602159e-07
+v(s1)	cross	level=0.5	dir=rise	n=2	tol=3.1e-10	ref=3.8986612538e-07
+v(s1)	cross	level=0.5	dir=rise	n=10	tol=3.1e-10	ref=1.4359551709e-06
+v(s1)	cross	level=0.5	dir=rise	n=50	tol=3.1e-10	ref=5.4208644444e-06
+v(s1)	cross	level=0.5	dir=rise	n=100	tol=3.1e-10	ref=1.0413359363e-05
+v(s1)	cross	level=0.5	dir=rise	n=150	tol=3.1e-10	ref=1.5411711845e-05
+v(s1)	cross	level=0.5	dir=rise	n=200	tol=3.1e-10	ref=2.0411333630e-05
+v(s1)	cross	level=0.5	dir=rise	n=245	tol=3.1e-10	ref=2.4911291385e-05
+v(s2)	cross	level=0.5	dir=rise	n=1	tol=2e-10	ref=1.1300000000e-08
+v(s2)	cross	level=0.5	dir=rise	n=2	tol=2e-10	ref=1.1124197456e-07
+v(s2)	cross	level=0.5	dir=rise	n=125	tol=2e-10	ref=1.2411300000e-05
+v(s2)	cross	level=0.5	dir=rise	n=250	tol=2e-10	ref=2.4911247058e-05
+v(u1n)	cross	level=0.25	dir=fall	n=1	tol=3.1e-10	ref=2.0888102159e-07
+v(u1n)	cross	level=0.25	dir=fall	n=2	tol=3.1e-10	ref=3.9009112538e-07
+v(u1n)	cross	level=0.25	dir=fall	n=10	tol=3.1e-10	ref=1.4361801709e-06
+v(u1n)	cross	level=0.25	dir=fall	n=50	tol=3.1e-10	ref=5.4210894444e-06
+v(u1n)	cross	level=0.25	dir=fall	n=100	tol=3.1e-10	ref=1.0413584363e-05
+v(u1n)	cross	level=0.25	dir=fall	n=150	tol=3.1e-10	ref=1.5411936845e-05
+v(u1n)	cross	level=0.25	dir=fall	n=200	tol=3.1e-10	ref=2.0411558630e-05
+v(u1n)	cross	level=0.25	dir=fall	n=244	tol=3.1e-10	ref=2.4811515268e-05
+v(d1)	cross	level=0.75	dir=rise	n=1	tol=2e-10	ref=1.1475000000e-08
+v(d1)	cross	level=0.75	dir=rise	n=2	tol=2e-10	ref=2.1152500000e-07
+v(d1)	cross	level=0.75	dir=rise	n=10	tol=2e-10	ref=1.4115250574e-06
+v(d1)	cross	level=0.75	dir=rise	n=50	tol=2e-10	ref=5.4114950000e-06
+v(d1)	cross	level=0.75	dir=rise	n=100	tol=2e-10	ref=1.0411525000e-05
+v(d1)	cross	level=0.75	dir=rise	n=150	tol=2e-10	ref=1.5411525000e-05
+v(d1)	cross	level=0.75	dir=rise	n=200	tol=2e-10	ref=2.0411518832e-05
+v(d1)	cross	level=0.75	dir=rise	n=244	tol=2e-10	ref=2.4811487550e-05
+v(s1)	period	level=0.5	dir=rise	t0=5e-06	t1=1e-05	tol_abs=1.2e-12	tol_rel=0	ref=9.9592736806e-08
+v(s1)	period	level=0.5	dir=rise	t0=1e-05	t1=2.5e-05	tol_abs=5.7e-13	tol_rel=0	ref=9.9978994624e-08

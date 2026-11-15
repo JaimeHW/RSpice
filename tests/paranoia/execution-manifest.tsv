@@ -126,6 +126,6 @@ various/nic_soa.cir	executes	SOA-checked negative-impedance transient !extended
 xspice/delta-sigma/counter-test.cir	executes	delta-sigma counter transient !extended
 xspice/delta-sigma/delta-sigma-1.cir	executes	delta-sigma modulator transient !extended
 xspice/delta-sigma/mod1-ct-test.cir	executes	continuous-time modulator transient; bitstream unconverged at the deck step !extended !measures
-xspice/pll/pll-xspice.cir	executes	PLL lock transient !extended
+xspice/pll/pll-xspice.cir	executes	PLL lock transient; 0.1 ns edges move more than a ramp under refinement !extended !measures
 xspice/pll/pll-xspice-fstep.cir	executes	PLL frequency-step transient !extended
 transient-noise/simple-noise.cir	executes	25k-step noise transient, run twice by .alter !extended
