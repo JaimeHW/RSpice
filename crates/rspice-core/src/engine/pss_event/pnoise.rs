@@ -35,8 +35,8 @@
 //!   tolerance, applied to the noise amplitude.
 
 use super::pac::{
-    LinearPeriod, SMALL_SIGNAL_MESH_UNCERTIFIED, input_excitation, output_selection,
-    probe_frequencies, reproduce_boundary, small_signal_refusal,
+    LinearPeriod, RESPONSES_PER_BLOCK, SMALL_SIGNAL_MESH_UNCERTIFIED, input_excitation,
+    output_selection, probe_frequencies, reproduce_boundary, small_signal_refusal,
 };
 use super::{EVENT_CARRIER, MESH_REFINEMENTS, boundary};
 use crate::abort_signal::AbortSignal;
@@ -176,6 +176,19 @@ enum Observation {
     Sideband(i32),
 }
 
+/// One backward sweep's forcing at every accepted point, and the output and
+/// reference it enters at.
+type BackwardSweep<'a> = (&'a [Complex64], (usize, Option<usize>));
+
+/// One noise reading: the offset, what is observed, and the output it is
+/// observed at with its reference.
+#[derive(Clone, Copy)]
+struct NoiseProbe {
+    omega: Value,
+    observation: Observation,
+    output: (usize, Option<usize>),
+}
+
 /// One offset's noise at the output.
 struct OffsetNoise {
     /// Each source's share, in catalog order.
@@ -235,111 +248,154 @@ impl LinearPeriod {
         weights
     }
 
-    /// One backward sweep of the transposed recurrence under `forcing`,
-    /// starting from `closure` (the next period's term into the last step),
-    /// offering every step's `λₖ` to `visit`. Returns `B₀ᵀ·λ₀`.
+    /// One backward sweep of the transposed recurrence for a block of
+    /// requests, each under its own forcing into its own output, from
+    /// `closure` (each request's next-period term into the last step, `n`
+    /// values apiece, request-major), offering every step's `λₖ` block to
+    /// `visit`. Returns each request's `B₀ᵀ·λ₀`. Every request's arithmetic is
+    /// the one a sweep of it alone performs, and the block's right-hand
+    /// sides share each step's factored solve.
     fn sweep_back(
         &self,
-        forcing: &[Complex64],
-        output: (usize, Option<usize>),
-        closure: Option<&[Complex64]>,
+        requests: &[BackwardSweep<'_>],
+        closure: Option<Vec<Complex64>>,
         mut visit: impl FnMut(usize, &[Complex64]),
     ) -> Result<Vec<Complex64>, SimulationError> {
         let n = self.n;
+        let count = requests.len();
         let zero = Complex64::new(0.0, 0.0);
-        let mut next = closure.map_or_else(|| vec![zero; n], <[_]>::to_vec);
-        let mut rhs = vec![0.0; 2 * n];
-        let mut solved = Vec::with_capacity(2 * n);
-        let mut lambda = vec![zero; n];
+        let mut next = closure.unwrap_or_else(|| vec![zero; n * count]);
+        let mut rhs = vec![0.0; 2 * n * count];
+        let mut solved = Vec::with_capacity(2 * n * count);
+        let mut lambda = vec![zero; n * count];
         for k in (0..self.steps.len()).rev() {
-            let weight = forcing[k + 1];
-            next[output.0] += weight;
-            if let Some(reference) = output.1 {
-                next[reference] -= weight;
+            for (request, &(forcing, output)) in requests.iter().enumerate() {
+                let next = &mut next[request * n..(request + 1) * n];
+                let weight = forcing[k + 1];
+                next[output.0] += weight;
+                if let Some(reference) = output.1 {
+                    next[reference] -= weight;
+                }
+                let (re, im) = rhs[2 * request * n..2 * (request + 1) * n].split_at_mut(n);
+                for (row, value) in next.iter().enumerate() {
+                    re[row] = value.re;
+                    im[row] = value.im;
+                }
             }
-            for (row, value) in next.iter().enumerate() {
-                rhs[row] = value.re;
-                rhs[n + row] = value.im;
-            }
-            self.solve_step(k, &rhs, 2, true, &mut solved)?;
-            for (row, value) in lambda.iter_mut().enumerate() {
-                *value = Complex64::new(solved[row], solved[n + row]);
+            self.solve_step(k, &rhs, 2 * count, true, &mut solved)?;
+            for (request, values) in lambda.chunks_exact_mut(n).enumerate() {
+                let (re, im) = solved[2 * request * n..2 * (request + 1) * n].split_at(n);
+                for (value, (re, im)) in values.iter_mut().zip(re.iter().zip(im)) {
+                    *value = Complex64::new(*re, *im);
+                }
             }
             visit(k, &lambda);
             next.fill(zero);
-            self.multiply(k, &lambda, &mut next, true);
+            self.multiply_block(k, &lambda, &mut next, true);
         }
         Ok(next)
     }
 
-    /// The noise `observation` sees at offset `omega`, and the input's gain
-    /// into it when `input` names the input sideband.
+    /// The noise each probe sees, a block of probes at a time, and the input's
+    /// gain into it when `input` names the input sideband.
     fn noise(
         &self,
-        omega: Value,
+        probes: &[NoiseProbe],
         fundamental: Value,
-        observation: Observation,
-        output: (usize, Option<usize>),
         input: Option<i32>,
-    ) -> Result<OffsetNoise, SimulationError> {
-        let forcing = self.forcing(omega, fundamental, observation);
-        let first = self.sweep_back(&forcing, output, None, |_, _| {})?;
-        let rotation = Complex64::from_polar(1.0, omega * self.period);
-        let closure = self.monodromy.solve(rotation, first, true).ok_or_else(|| {
-            refusal(
-                EVENT_CARRIER,
-                format!(
-                    "PNOISE on the event orbit is singular at {:.6e} Hz: e^(jωT) is a Floquet \
-                     multiplier of the orbit",
-                    omega / TAU
-                ),
-                None,
-            )
-        })?;
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<OffsetNoise>, SimulationError> {
+        let n = self.n;
         let sources = self.noise.first().map_or(0, Vec::len);
-        let mut shares = vec![0.0; sources];
-        let mut gain = Complex64::new(0.0, 0.0);
-        let input_frequency = input.map(|m| omega + Value::from(m) * fundamental);
-        self.sweep_back(&forcing, output, Some(&closure), |k, lambda| {
-            let h = self.phases[k + 1] - self.phases[k];
-            let end = if self.steps[k].changes.is_empty() {
-                0.5
-            } else {
-                1.0
-            };
-            let at = |node: usize| {
-                if node == 0 {
-                    Complex64::new(0.0, 0.0)
-                } else {
-                    lambda[node - 1]
-                }
-            };
-            for (share, (before, after)) in shares
-                .iter_mut()
-                .zip(self.noise[k].iter().zip(&self.noise[k + 1]))
-            {
-                let density = (1.0 - end) * before.density + end * after.density;
-                if density != 0.0 {
-                    *share +=
-                        self.period * (at(after.pos) - at(after.neg)).norm_sqr() * density / h;
-                }
+        let mut noises = Vec::with_capacity(probes.len());
+        for block in probes.chunks(RESPONSES_PER_BLOCK) {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
             }
-            if let Some(frequency) = input_frequency {
-                let u0 = Complex64::from_polar(1.0, frequency * self.phases[k]);
-                let u1 = Complex64::from_polar(1.0, frequency * self.phases[k + 1]);
-                let step = &self.steps[k];
-                for (row, &entry) in self.excitation.iter().enumerate() {
-                    if entry != 0.0 {
-                        let theta = step.theta[row];
-                        gain += lambda[row] * entry * (u1 * theta + u0 * (1.0 - theta));
+            let forcings: Vec<Vec<Complex64>> = block
+                .iter()
+                .map(|probe| self.forcing(probe.omega, fundamental, probe.observation))
+                .collect();
+            let requests: Vec<BackwardSweep<'_>> = forcings
+                .iter()
+                .zip(block)
+                .map(|(forcing, probe)| (forcing.as_slice(), probe.output))
+                .collect();
+            let first = self.sweep_back(&requests, None, |_, _| {})?;
+            let mut closure = Vec::with_capacity(first.len());
+            for (probe, first) in block.iter().zip(first.chunks_exact(n)) {
+                let rotation = Complex64::from_polar(1.0, probe.omega * self.period);
+                let solved = self
+                    .monodromy
+                    .solve(rotation, first.to_vec(), true)
+                    .ok_or_else(|| {
+                        refusal(
+                            EVENT_CARRIER,
+                            format!(
+                                "PNOISE on the event orbit is singular at {:.6e} Hz: e^(jωT) is \
+                                 a Floquet multiplier of the orbit",
+                                probe.omega / TAU
+                            ),
+                            None,
+                        )
+                    })?;
+                closure.extend(solved);
+            }
+            let mut shares = vec![vec![0.0; sources]; block.len()];
+            let mut gains = vec![Complex64::new(0.0, 0.0); block.len()];
+            self.sweep_back(&requests, Some(closure), |k, lambdas| {
+                let h = self.phases[k + 1] - self.phases[k];
+                let end = if self.steps[k].changes.is_empty() {
+                    0.5
+                } else {
+                    1.0
+                };
+                for (request, probe) in block.iter().enumerate() {
+                    let lambda = &lambdas[request * n..(request + 1) * n];
+                    let at = |node: usize| {
+                        if node == 0 {
+                            Complex64::new(0.0, 0.0)
+                        } else {
+                            lambda[node - 1]
+                        }
+                    };
+                    for (share, (before, after)) in shares[request]
+                        .iter_mut()
+                        .zip(self.noise[k].iter().zip(&self.noise[k + 1]))
+                    {
+                        let density = (1.0 - end) * before.density + end * after.density;
+                        if density != 0.0 {
+                            *share +=
+                                self.period * (at(after.pos) - at(after.neg)).norm_sqr() * density
+                                    / h;
+                        }
+                    }
+                    if let Some(m) = input {
+                        let frequency = probe.omega + Value::from(m) * fundamental;
+                        let u0 = Complex64::from_polar(1.0, frequency * self.phases[k]);
+                        let u1 = Complex64::from_polar(1.0, frequency * self.phases[k + 1]);
+                        let step = &self.steps[k];
+                        for (row, &entry) in self.excitation.iter().enumerate() {
+                            if entry != 0.0 {
+                                let theta = step.theta[row];
+                                gains[request] +=
+                                    lambda[row] * entry * (u1 * theta + u0 * (1.0 - theta));
+                            }
+                        }
                     }
                 }
-            }
-        })?;
-        Ok(OffsetNoise {
-            shares,
-            gain: input.map(|_| gain),
-        })
+            })?;
+            noises.extend(
+                shares
+                    .into_iter()
+                    .zip(gains)
+                    .map(|(shares, gain)| OffsetNoise {
+                        shares,
+                        gain: input.map(|_| gain),
+                    }),
+            );
+        }
+        Ok(noises)
     }
 
     /// Refuse an orbit with a switch whose control carries noise where it
@@ -351,9 +407,11 @@ impl LinearPeriod {
         omega: Value,
         fundamental: Value,
         output_noise: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         // Switches on one control that change at one point cross together.
         let mut checked = Vec::new();
+        let mut crossings = Vec::new();
         for (index, step) in self.steps.iter().enumerate() {
             for &switch in &step.changes {
                 let (name, positive, negative) =
@@ -382,23 +440,32 @@ impl LinearPeriod {
                     continue;
                 }
                 checked.push((index, control));
-                let time = self.phases[index + 1];
-                let noise = self
-                    .noise(omega, fundamental, Observation::Sample(time), control, None)?
-                    .total();
-                if noise > QUIET_CONTROL * output_noise {
-                    return Err(refusal(
-                        EVENT_CARRIER,
-                        format!(
-                            "PNOISE on the event orbit refuses switch '{name}': its control \
-                             carries {noise:.3e} of noise power per hertz where it changes at \
-                             {:.6e} s, so its crossing moves with the noise and the impulse \
-                             that adds is not formed",
-                            time.rem_euclid(self.period)
-                        ),
-                        Some(name),
-                    ));
-                }
+                crossings.push((name, self.phases[index + 1], control));
+            }
+        }
+        let probes: Vec<NoiseProbe> = crossings
+            .iter()
+            .map(|&(_, time, control)| NoiseProbe {
+                omega,
+                observation: Observation::Sample(time),
+                output: control,
+            })
+            .collect();
+        let noises = self.noise(&probes, fundamental, None, abort)?;
+        for (&(name, time, _), noise) in crossings.iter().zip(&noises) {
+            let noise = noise.total();
+            if noise > QUIET_CONTROL * output_noise {
+                return Err(refusal(
+                    EVENT_CARRIER,
+                    format!(
+                        "PNOISE on the event orbit refuses switch '{name}': its control \
+                         carries {noise:.3e} of noise power per hertz where it changes at \
+                         {:.6e} s, so its crossing moves with the noise and the impulse \
+                         that adds is not formed",
+                        time.rem_euclid(self.period)
+                    ),
+                    Some(name),
+                ));
             }
         }
         Ok(())
@@ -538,14 +605,25 @@ impl Engine {
         )?;
         let reltol = prepared.mesh_tolerance.0;
         let catalog = NoiseCatalog::new(self.config.spice_dialect, self.config.temperature);
-        let total = |period: &LinearPeriod, offset: Value| -> Result<Value, SimulationError> {
-            Ok(period
-                .noise(TAU * offset, fundamental, observation, output, None)?
-                .total())
-        };
+        let totals =
+            |period: &LinearPeriod, offsets: &[Value]| -> Result<Vec<Value>, SimulationError> {
+                let probes: Vec<NoiseProbe> = offsets
+                    .iter()
+                    .map(|&offset| NoiseProbe {
+                        omega: TAU * offset,
+                        observation,
+                        output,
+                    })
+                    .collect();
+                Ok(period
+                    .noise(&probes, fundamental, None, abort)?
+                    .iter()
+                    .map(OffsetNoise::total)
+                    .collect())
+            };
         let probes = probe_frequencies(offsets);
         let mut coarse_mesh = boundary::bisect(&mesh, start.time);
-        let mut coarse = orbit.linear_period(
+        let coarse = orbit.linear_period(
             &start,
             z,
             &coarse_mesh,
@@ -553,6 +631,7 @@ impl Engine {
             &excitation,
             Some(&catalog),
         )?;
+        let mut coarse_totals = totals(&coarse, &probes)?;
         let mut refinements = 1;
         let fine = loop {
             refinements += 1;
@@ -565,19 +644,17 @@ impl Engine {
                 &excitation,
                 Some(&catalog),
             )?;
+            let fine_totals = totals(&fine, &probes)?;
             let mut worst = (0.0, probes[0]);
-            for &offset in &probes {
-                if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
-                }
-                let (a, b) = (total(&coarse, offset)?.sqrt(), total(&fine, offset)?.sqrt());
+            for ((&offset, a), b) in probes.iter().zip(&coarse_totals).zip(&fine_totals) {
+                let (a, b) = (a.sqrt(), b.sqrt());
                 let value = (a - b).abs() / (reltol * b).max(Value::MIN_POSITIVE);
                 if value > worst.0 {
                     worst = (value, offset);
                 }
             }
             if worst.0 <= 1.0 {
-                break fine;
+                break (fine, fine_totals[0]);
             }
             if refinements > MESH_REFINEMENTS {
                 return Err(refusal(
@@ -591,15 +668,12 @@ impl Engine {
                     None,
                 ));
             }
-            coarse = fine;
+            coarse_totals = fine_totals;
             coarse_mesh = fine_mesh;
         };
-        fine.refuse_noisy_crossings(
-            circuit,
-            TAU * offsets[0],
-            fundamental,
-            total(&fine, offsets[0])?,
-        )?;
+        // The first probe is the first offset.
+        let (fine, first_total) = fine;
+        fine.refuse_noisy_crossings(circuit, TAU * offsets[0], fundamental, first_total, abort)?;
         let labels = catalog.labels();
         let mut contributors: Vec<(String, Vec<Value>)> = Vec::new();
         let mut slot_of = Vec::with_capacity(labels.len());
@@ -615,11 +689,16 @@ impl Engine {
         }
         let mut output_noise = Vec::with_capacity(offsets.len());
         let mut input_noise = input.map(|_| Vec::with_capacity(offsets.len()));
-        for &offset in offsets {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let noise = fine.noise(TAU * offset, fundamental, observation, output, input)?;
+        let probes: Vec<NoiseProbe> = offsets
+            .iter()
+            .map(|&offset| NoiseProbe {
+                omega: TAU * offset,
+                observation,
+                output,
+            })
+            .collect();
+        let noises = fine.noise(&probes, fundamental, input, abort)?;
+        for (&offset, noise) in offsets.iter().zip(noises) {
             let total = noise.total();
             if !total.is_finite() {
                 return Err(SimulationError::Circuit(format!(

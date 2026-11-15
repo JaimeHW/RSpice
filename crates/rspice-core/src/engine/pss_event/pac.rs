@@ -141,6 +141,24 @@ struct Response {
     trajectory: Vec<Vec<Complex64>>,
 }
 
+/// Inputs swept together: their right-hand sides share each step's factored
+/// solve, and their sweeps hold `n` values apiece.
+pub(super) const RESPONSES_PER_BLOCK: usize = 16;
+
+/// What one input's response is read for.
+#[derive(Clone, Copy)]
+struct Reading {
+    /// The input's angular frequency `ω`.
+    omega: Value,
+    /// The first sideband `m` read, at `ω + m·ω₀`.
+    first: i32,
+    /// How many consecutive sidebands are read.
+    count: usize,
+    /// Every unknown when `None`; else an output and its reference, read as
+    /// their difference.
+    entries: Option<(usize, Option<usize>)>,
+}
+
 impl Engine {
     /// PAC around an orbit event shooting solved.
     pub(in crate::engine) fn run_event_pac(
@@ -219,25 +237,31 @@ impl Engine {
         )?;
         let reltol = config.reltol;
         let abstol = prepared.mesh_tolerance.1;
-        let probes = probe_frequencies(&frequencies);
+        let fundamental = std::f64::consts::TAU * config.fundamental_freq;
+        let count = (config.sideband_min..=config.sideband_max).count();
+        let every_unknown = |frequency: Value| Reading {
+            omega: std::f64::consts::TAU * frequency,
+            first: config.sideband_min,
+            count,
+            entries: None,
+        };
+        let probes: Vec<Reading> = probe_frequencies(&frequencies)
+            .into_iter()
+            .map(every_unknown)
+            .collect();
         let mut coarse_mesh = boundary::bisect(&mesh, start.time);
-        let mut coarse =
-            orbit.linear_period(&start, z, &coarse_mesh, &structure, &excitation, None)?;
+        let coarse = orbit.linear_period(&start, z, &coarse_mesh, &structure, &excitation, None)?;
+        let mut coarse_spectra = coarse.read(&probes, fundamental, abort)?;
         let mut refinements = 1;
         let fine = loop {
             refinements += 1;
             let fine_mesh = boundary::bisect(&coarse_mesh, start.time);
             let fine = orbit.linear_period(&start, z, &fine_mesh, &structure, &excitation, None)?;
-            let worst = probes
+            let fine_spectra = fine.read(&probes, fundamental, abort)?;
+            let worst = coarse_spectra
                 .iter()
-                .map(|&frequency| {
-                    let omega = std::f64::consts::TAU * frequency;
-                    let a = coarse.sidebands(&coarse.respond(omega)?, omega, &config);
-                    let b = fine.sidebands(&fine.respond(omega)?, omega, &config);
-                    Ok(deviation(&a, &b, num_nodes, reltol, abstol))
-                })
-                .collect::<Result<Vec<_>, SimulationError>>()?
-                .into_iter()
+                .zip(&fine_spectra)
+                .map(|(a, b)| deviation(a, b, num_nodes, reltol, abstol))
                 .fold((0.0, 0), |worst, (value, node)| {
                     if value > worst.0 {
                         (value, node)
@@ -260,7 +284,7 @@ impl Engine {
                     ),
                 ));
             }
-            coarse = fine;
+            coarse_spectra = fine_spectra;
             coarse_mesh = fine_mesh;
         };
         fine.refuse_moving_crossings(circuit, &frequencies)?;
@@ -290,13 +314,30 @@ impl Engine {
         }
         result.pac_magnitude = config.pac_magnitude;
         result.include_dc = config.include_dc;
-        let fundamental = std::f64::consts::TAU * config.fundamental_freq;
-        for (index, &frequency) in frequencies.iter().enumerate() {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let omega = std::f64::consts::TAU * frequency;
-            let spectra = fine.sidebands(&fine.respond(omega)?, omega, &config);
+        // Each frequency's own response is read at every unknown; with an
+        // output, each other input sideband's response is read there alone.
+        let inputs: Vec<i32> = (config.sideband_min..=config.sideband_max)
+            .filter(|&input| input != 0)
+            .collect();
+        let readings: Vec<Reading> = frequencies
+            .iter()
+            .flat_map(|&frequency| {
+                let own = every_unknown(frequency);
+                let inputs = &inputs;
+                let shifted = output.into_iter().flat_map(move |selection| {
+                    inputs.iter().map(move |&input| Reading {
+                        omega: own.omega + Value::from(input) * fundamental,
+                        first: config.sideband_min - input,
+                        count,
+                        entries: Some(selection),
+                    })
+                });
+                std::iter::once(own).chain(shifted)
+            })
+            .collect();
+        let mut read = fine.read(&readings, fundamental, abort)?.into_iter();
+        for index in 0..frequencies.len() {
+            let spectra = read.next().expect("every frequency is read");
             for (k, values) in (config.sideband_min..=config.sideband_max).zip(&spectra) {
                 let data = result.get_sideband_data_mut(index, k).ok_or_else(|| {
                     SimulationError::Circuit(format!(
@@ -320,22 +361,21 @@ impl Engine {
             let Some((out, reference)) = output else {
                 continue;
             };
-            let read = |values: &[Complex64]| {
+            let at = |values: &[Complex64]| {
                 values[out] - reference.map_or(Complex64::new(0.0, 0.0), |r| values[r])
             };
+            let shifted: Vec<_> = inputs
+                .iter()
+                .map(|_| read.next().expect("every input sideband is read"))
+                .collect();
+            let mut shifted = shifted.iter();
             for input in config.sideband_min..=config.sideband_max {
-                let shifted = omega + Value::from(input) * fundamental;
-                let response = if input == 0 {
-                    None
-                } else {
-                    Some(fine.respond(shifted)?)
-                };
+                let response = if input == 0 { None } else { shifted.next() };
                 for output_sideband in config.sideband_min..=config.sideband_max {
-                    let value = if input == 0 {
-                        read(&spectra[(output_sideband - config.sideband_min) as usize])
-                    } else {
-                        let response = response.as_ref().expect("solved above");
-                        read(&fine.sideband(response, shifted, output_sideband - input, &config))
+                    let offset = (output_sideband - config.sideband_min) as usize;
+                    let value = match response {
+                        None => at(&spectra[offset]),
+                        Some(response) => response[offset][0],
                     };
                     result
                         .conversion_matrix
@@ -844,9 +884,7 @@ impl LinearPeriod {
             for index in 0..self.steps.len() {
                 product.clear();
                 product.resize(n * count, 0.0);
-                for (x, out) in block.chunks_exact(n).zip(product.chunks_exact_mut(n)) {
-                    self.multiply(index, x, out, false);
-                }
+                self.multiply_block(index, &block, &mut product, false);
                 self.solve_step(index, &product, count, false, &mut solved)?;
                 std::mem::swap(&mut block, &mut solved);
             }
@@ -859,17 +897,19 @@ impl LinearPeriod {
         Ok(monodromy)
     }
 
-    /// `out += B·x` for step `index`, or `Bᵀ·x` when `transposed`.
-    pub(super) fn multiply<T>(&self, index: usize, x: &[T], out: &mut [T], transposed: bool)
+    /// `out += B·x` for step `index`, or `Bᵀ·x` when `transposed`, on every
+    /// vector of a block of `n` values apiece.
+    pub(super) fn multiply_block<T>(&self, index: usize, x: &[T], out: &mut [T], transposed: bool)
     where
         T: Copy + std::ops::Mul<Value, Output = T> + std::ops::AddAssign,
     {
+        let n = self.n;
+        let count = x.len() / n;
         for (&(row, col), &value) in self.positions.iter().zip(&self.steps[index].b) {
             if value != 0.0 {
-                if transposed {
-                    out[col] += x[row] * value;
-                } else {
-                    out[row] += x[col] * value;
+                let (from, to) = if transposed { (row, col) } else { (col, row) };
+                for vector in 0..count {
+                    out[vector * n + to] += x[vector * n + from] * value;
                 }
             }
         }
@@ -900,101 +940,151 @@ impl LinearPeriod {
         })
     }
 
-    /// One sweep of the recurrence from `x0` under `u(t) = e^{jωt}`.
-    fn sweep(
+    /// One sweep of the recurrence for a block of inputs `u(t) = e^{jωt}`,
+    /// one per `omegas`, from `start` (`n` values per input, input-major),
+    /// offering every step's index and the block before and after it to
+    /// `visit`; returns the block at the period's end. Every input's arithmetic
+    /// is the one a sweep of that input alone performs, and the block's
+    /// right-hand sides share each step's factored solve.
+    fn sweep_block(
         &self,
-        x0: Vec<Complex64>,
-        omega: Value,
-        keep: bool,
-    ) -> Result<Vec<Vec<Complex64>>, SimulationError> {
+        omegas: &[Value],
+        start: Vec<Complex64>,
+        mut visit: impl FnMut(usize, &[Complex64], &[Complex64]),
+    ) -> Result<Vec<Complex64>, SimulationError> {
         let n = self.n;
-        let input = |phase: Value| Complex64::from_polar(1.0, omega * phase);
-        let mut trajectory = Vec::with_capacity(if keep { self.phases.len() } else { 1 });
-        let mut x = x0;
-        let mut product = vec![Complex64::new(0.0, 0.0); n];
-        let mut rhs = vec![0.0; 2 * n];
-        let mut solved = Vec::with_capacity(2 * n);
+        let count = omegas.len();
+        let zero = Complex64::new(0.0, 0.0);
+        let mut x = start;
+        let mut next = vec![zero; n * count];
+        let mut product = vec![zero; n * count];
+        let mut rhs = vec![0.0; 2 * n * count];
+        let mut solved = Vec::with_capacity(2 * n * count);
         for (index, step) in self.steps.iter().enumerate() {
-            let (u0, u1) = (input(self.phases[index]), input(self.phases[index + 1]));
-            product.fill(Complex64::new(0.0, 0.0));
-            self.multiply(index, &x, &mut product, false);
-            for (row, &sum) in product.iter().enumerate() {
-                let theta = step.theta[row];
-                let sum = sum + self.excitation[row] * (u1 * theta + u0 * (1.0 - theta));
-                rhs[row] = sum.re;
-                rhs[n + row] = sum.im;
+            product.fill(zero);
+            self.multiply_block(index, &x, &mut product, false);
+            for (input, &omega) in omegas.iter().enumerate() {
+                let u0 = Complex64::from_polar(1.0, omega * self.phases[index]);
+                let u1 = Complex64::from_polar(1.0, omega * self.phases[index + 1]);
+                let sums = &product[input * n..(input + 1) * n];
+                let (re, im) = rhs[2 * input * n..2 * (input + 1) * n].split_at_mut(n);
+                for (row, &sum) in sums.iter().enumerate() {
+                    let theta = step.theta[row];
+                    let sum = sum + self.excitation[row] * (u1 * theta + u0 * (1.0 - theta));
+                    re[row] = sum.re;
+                    im[row] = sum.im;
+                }
             }
-            self.solve_step(index, &rhs, 2, false, &mut solved)?;
-            let next: Vec<Complex64> = solved[..n]
-                .iter()
-                .zip(&solved[n..])
-                .map(|(re, im)| Complex64::new(*re, *im))
-                .collect();
-            if keep {
-                trajectory.push(std::mem::replace(&mut x, next));
-            } else {
-                x = next;
+            self.solve_step(index, &rhs, 2 * count, false, &mut solved)?;
+            for (input, values) in next.chunks_exact_mut(n).enumerate() {
+                let (re, im) = solved[2 * input * n..2 * (input + 1) * n].split_at(n);
+                for (value, (re, im)) in values.iter_mut().zip(re.iter().zip(im)) {
+                    *value = Complex64::new(*re, *im);
+                }
             }
+            visit(index, &x, &next);
+            std::mem::swap(&mut x, &mut next);
         }
-        trajectory.push(x);
-        Ok(trajectory)
+        Ok(x)
+    }
+
+    /// Each input's periodic start `x(t₀) = (e^{jωT}I − M)⁻¹·r(ω)`, from a
+    /// sweep of the block from rest.
+    fn periodic_starts(&self, omegas: &[Value]) -> Result<Vec<Complex64>, SimulationError> {
+        let n = self.n;
+        let rest = vec![Complex64::new(0.0, 0.0); n * omegas.len()];
+        let ends = self.sweep_block(omegas, rest, |_, _, _| {})?;
+        let mut starts = Vec::with_capacity(ends.len());
+        for (&omega, r) in omegas.iter().zip(ends.chunks_exact(n)) {
+            let rotation = Complex64::from_polar(1.0, omega * self.period);
+            let x0 = self
+                .monodromy
+                .solve(rotation, r.to_vec(), false)
+                .ok_or_else(|| {
+                    carrier_refusal(format!(
+                        "PAC on the event orbit is singular at {:.6e} Hz: e^(jωT) is a Floquet \
+                         multiplier of the orbit",
+                        omega / std::f64::consts::TAU
+                    ))
+                })?;
+            starts.extend(x0);
+        }
+        Ok(starts)
     }
 
     /// The periodic response to `u(t) = e^{jωt}`.
     fn respond(&self, omega: Value) -> Result<Response, SimulationError> {
-        let rest = vec![Complex64::new(0.0, 0.0); self.n];
-        let r = self
-            .sweep(rest, omega, false)?
-            .pop()
-            .expect("a sweep ends somewhere");
-        let rotation = Complex64::from_polar(1.0, omega * self.period);
-        let x0 = self.monodromy.solve(rotation, r, false).ok_or_else(|| {
-            carrier_refusal(format!(
-                "PAC on the event orbit is singular at {:.6e} Hz: e^(jωT) is a Floquet \
-                 multiplier of the orbit",
-                omega / std::f64::consts::TAU
-            ))
+        let start = self.periodic_starts(&[omega])?;
+        let mut trajectory = Vec::with_capacity(self.phases.len());
+        trajectory.push(start.clone());
+        self.sweep_block(&[omega], start, |_, _, after| {
+            trajectory.push(after.to_vec())
         })?;
-        Ok(Response {
-            trajectory: self.sweep(x0, omega, true)?,
-        })
+        Ok(Response { trajectory })
     }
 
-    /// `Y_m` of every unknown for `m` in the analysis's sideband range.
-    fn sidebands(
+    /// The sidebands every reading asks for, its inputs swept a block at a
+    /// time: `Y_m = (1/T)∫x(t)·e^{−j(ω+mω₀)t}dt` over absolute time, by the
+    /// trapezoidal rule on the mesh, accumulated as the sweep passes.
+    fn read(
         &self,
-        response: &Response,
-        omega: Value,
-        config: &PacConfig,
-    ) -> Vec<Vec<Complex64>> {
-        (config.sideband_min..=config.sideband_max)
-            .map(|m| self.sideband(response, omega, m, config))
-            .collect()
-    }
-
-    /// `Y_m = (1/T)∫x(t)·e^{−j(ω+mω₀)t}dt`, trapezoidal on the mesh.
-    fn sideband(
-        &self,
-        response: &Response,
-        omega: Value,
-        m: i32,
-        config: &PacConfig,
-    ) -> Vec<Complex64> {
-        let fundamental = std::f64::consts::TAU * config.fundamental_freq;
-        let frequency = omega + Value::from(m) * fundamental;
-        let mut sum = vec![Complex64::new(0.0, 0.0); self.n];
-        let weight = |phase: Value| Complex64::from_polar(1.0, -frequency * phase);
-        for index in 1..self.phases.len() {
-            let (t0, t1) = (self.phases[index - 1], self.phases[index]);
-            let half = 0.5 * (t1 - t0);
-            let (w0, w1) = (weight(t0) * half, weight(t1) * half);
-            let (x0, x1) = (&response.trajectory[index - 1], &response.trajectory[index]);
-            for (entry, (a, b)) in sum.iter_mut().zip(x0.iter().zip(x1)) {
-                *entry += a * w0 + b * w1;
+        readings: &[Reading],
+        fundamental: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Vec<Vec<Complex64>>>, SimulationError> {
+        let n = self.n;
+        let mut spectra = Vec::with_capacity(readings.len());
+        for block in readings.chunks(RESPONSES_PER_BLOCK) {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let omegas: Vec<Value> = block.iter().map(|reading| reading.omega).collect();
+            let start = self.periodic_starts(&omegas)?;
+            let mut sums: Vec<Vec<Vec<Complex64>>> = block
+                .iter()
+                .map(|reading| {
+                    let width = reading.entries.map_or(n, |_| 2);
+                    vec![vec![Complex64::new(0.0, 0.0); width]; reading.count]
+                })
+                .collect();
+            self.sweep_block(&omegas, start, |index, before, after| {
+                let (t0, t1) = (self.phases[index], self.phases[index + 1]);
+                let half = 0.5 * (t1 - t0);
+                for (input, (reading, sums)) in block.iter().zip(&mut sums).enumerate() {
+                    let x0 = &before[input * n..(input + 1) * n];
+                    let x1 = &after[input * n..(input + 1) * n];
+                    for (m, sum) in (reading.first..).zip(sums.iter_mut()) {
+                        let frequency = reading.omega + Value::from(m) * fundamental;
+                        let weight = |phase: Value| Complex64::from_polar(1.0, -frequency * phase);
+                        let (w0, w1) = (weight(t0) * half, weight(t1) * half);
+                        match reading.entries {
+                            None => {
+                                for (entry, (a, b)) in sum.iter_mut().zip(x0.iter().zip(x1)) {
+                                    *entry += a * w0 + b * w1;
+                                }
+                            }
+                            Some((out, reference)) => {
+                                sum[0] += x0[out] * w0 + x1[out] * w1;
+                                if let Some(reference) = reference {
+                                    sum[1] += x0[reference] * w0 + x1[reference] * w1;
+                                }
+                            }
+                        }
+                    }
+                }
+            })?;
+            for (reading, mut sums) in block.iter().zip(sums) {
+                for sum in &mut sums {
+                    sum.iter_mut().for_each(|entry| *entry /= self.period);
+                    if let Some((_, reference)) = reading.entries {
+                        let referred = reference.map_or(Complex64::new(0.0, 0.0), |_| sum[1]);
+                        *sum = vec![sum[0] - referred];
+                    }
+                }
+                spectra.push(sums);
             }
         }
-        sum.iter_mut().for_each(|entry| *entry /= self.period);
-        sum
+        Ok(spectra)
     }
 
     /// Refuse an orbit with a switch whose control carries small signal at
