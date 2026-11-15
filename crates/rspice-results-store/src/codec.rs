@@ -84,15 +84,35 @@ fn write_plain(values: &[f64], out: &mut [u8]) {
 }
 
 /// Encode a float column into `out` (at least [`max_encoded_len`] bytes); returns the codec chosen
-/// and the bytes used. `planes` is scratch of at least `values.len() * 8` bytes.
-pub(crate) fn encode_f64(values: &[f64], planes: &mut [u8], out: &mut [u8]) -> (Codec, usize) {
+/// and the bytes used. `planes` is scratch of at least `values.len() * 8` bytes. Without
+/// `compress` the block is always `plain`.
+pub(crate) fn encode_f64(
+    values: &[f64],
+    planes: &mut [u8],
+    out: &mut [u8],
+    compress: bool,
+) -> (Codec, usize) {
     let raw_len = values.len() * 8;
-    xor_shuffle(values, planes);
-    match lz4_flex::block::compress_into(&planes[..raw_len], out) {
-        Ok(len) if len < raw_len => (Codec::XorShuffleLz4, len),
+    let compressed = compress.then(|| {
+        xor_shuffle(values, planes);
+        lz4_flex::block::compress_into(&planes[..raw_len], out)
+    });
+    match compressed {
+        Some(Ok(len)) if len < raw_len => (Codec::XorShuffleLz4, len),
         _ => {
             write_plain(values, &mut out[..raw_len]);
             (Codec::Plain, raw_len)
+        }
+    }
+}
+
+/// Encode a byte column into `out` (at least [`max_encoded_len`] bytes).
+pub(crate) fn encode_bytes(raw: &[u8], out: &mut [u8], compress: bool) -> (Codec, usize) {
+    match compress.then(|| lz4_flex::block::compress_into(raw, out)) {
+        Some(Ok(len)) if len < raw.len() => (Codec::Lz4, len),
+        _ => {
+            out[..raw.len()].copy_from_slice(raw);
+            (Codec::Plain, raw.len())
         }
     }
 }
@@ -136,6 +156,35 @@ pub(crate) fn decode_f64(
             return Err(StoreError::corrupt(
                 offset,
                 "a float block names the byte codec",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Decode a byte column of `out.len()` bytes.
+pub(crate) fn decode_bytes(
+    codec: Codec,
+    encoded: &[u8],
+    out: &mut [u8],
+    offset: u64,
+) -> Result<(), StoreError> {
+    match codec {
+        Codec::Plain if encoded.len() == out.len() => out.copy_from_slice(encoded),
+        Codec::Lz4 => {
+            let used = lz4_flex::block::decompress_into(encoded, out)
+                .map_err(|_| StoreError::corrupt(offset, "a byte block does not decompress"))?;
+            if used != out.len() {
+                return Err(StoreError::corrupt(
+                    offset,
+                    "a byte block decompresses to the wrong length",
+                ));
+            }
+        }
+        _ => {
+            return Err(StoreError::corrupt(
+                offset,
+                "a byte block has the wrong codec or length",
             ));
         }
     }

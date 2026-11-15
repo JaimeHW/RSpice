@@ -9,6 +9,7 @@
 
 use crate::codec::{self, Codec};
 use crate::digest::{Digest, LogicalDigest};
+use crate::events::{EventChange, EventKind, decode_events, hash_change, parse_events_header};
 use crate::format::{
     Cursor, FORMAT_VERSION, FRAME_HEADER_LEN, FrameHeader, FrameKind, LEVEL1_ROWS, POINTERS_AT,
     SEGMENT_MAGIC, SUPERBLOCK_LEN, bucket_rows, fold_max, fold_min, frame_crc, summary_frame_rows,
@@ -52,12 +53,26 @@ pub(crate) struct SummaryRef {
     pub(crate) x_max: f64,
 }
 
+/// Where one `EVENTS` frame is and what it covers.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EventsRef {
+    pub(crate) offset: u64,
+    pub(crate) first: u64,
+    pub(crate) count: u32,
+    pub(crate) t_min: f64,
+    pub(crate) t_max: f64,
+}
+
 /// Every frame the reader found, in stream order.
 #[derive(Default)]
 struct Catalogue {
     chunks: Vec<ChunkRef>,
     /// `summaries[0]` is level 2.
     summaries: Vec<Vec<SummaryRef>>,
+    /// Per event signal (in id order), its `EVENTS` frames.
+    events: Vec<Vec<EventsRef>>,
+    /// Per event signal, the changes in those frames.
+    event_counts: Vec<u64>,
     rows: u64,
     last_index: Option<u64>,
     /// A provisional frame was accepted: only provisional frames may follow it.
@@ -77,6 +92,20 @@ impl Catalogue {
 
     /// Accept a summary frame only when it is the next of its level, follows a complete frame,
     /// and covers rows already read.
+    /// Accept an `EVENTS` frame only when it continues its signal's changes.
+    fn events(&mut self, position: usize, frame: EventsRef) -> bool {
+        if self.events.len() <= position {
+            self.events.resize_with(position + 1, Vec::new);
+            self.event_counts.resize(position + 1, 0);
+        }
+        if frame.first != self.event_counts[position] || frame.count == 0 {
+            return false;
+        }
+        self.event_counts[position] += u64::from(frame.count);
+        self.events[position].push(frame);
+        true
+    }
+
     fn summary(&mut self, level: u8, summary: SummaryRef) -> bool {
         if level < 2 {
             return false;
@@ -110,6 +139,8 @@ struct EndRecord {
     chunks: u64,
     last_index: u64,
     digest: Digest,
+    /// Per event signal: (signal id, changes).
+    event_totals: Vec<(u32, u64)>,
 }
 
 /// Reads one segment.
@@ -120,6 +151,8 @@ pub struct SegmentReader<I: SegmentIo> {
     meta: RunMeta,
     slots: usize,
     analog: Vec<AnalogColumn>,
+    /// Event signals in id order: (signal id, kind).
+    event_signals: Vec<(u32, EventKind)>,
     catalogue: Catalogue,
     state: SegmentState,
     planes: Vec<u8>,
@@ -163,6 +196,7 @@ impl<I: SegmentIo> SegmentReader<I> {
             meta: RunMeta::default(),
             slots: 0,
             analog: Vec::new(),
+            event_signals: Vec::new(),
             catalogue: Catalogue::default(),
             state: SegmentState::Recovered,
             planes: Vec::new(),
@@ -198,6 +232,11 @@ impl<I: SegmentIo> SegmentReader<I> {
             slot += slots;
         }
         reader.slots = slot;
+        for (id, signal) in reader.schema.signals.iter().enumerate() {
+            if let Some(kind) = EventKind::of(signal.kind) {
+                reader.event_signals.push((id as u32, kind));
+            }
+        }
 
         if end_at >= body && reader.open_complete(end_at, body).is_ok() {
             return Ok(reader);
@@ -275,7 +314,7 @@ impl<I: SegmentIo> SegmentReader<I> {
         }
         let end = Self::parse_end(&payload, end_at)?;
         let (catalogue, _) = self.load_chain(end.last_index, body)?;
-        if catalogue.rows != end.rows || catalogue.chunks.len() as u64 != end.chunks {
+        if !self.end_matches(&end, &catalogue) {
             return Err(StoreError::corrupt(
                 end_at,
                 "END's totals disagree with its index chain",
@@ -302,12 +341,20 @@ impl<I: SegmentIo> SegmentReader<I> {
         let last_index = cursor.u64()?;
         let mut digest = [0u8; 32];
         digest.copy_from_slice(cursor.take(32)?);
+        let count = cursor.count(16)?;
+        let mut event_totals = Vec::with_capacity(count);
+        for _ in 0..count {
+            let signal = cursor.u32()?;
+            cursor.u32()?;
+            event_totals.push((signal, cursor.u64()?));
+        }
         Ok(EndRecord {
             status,
             rows,
             chunks,
             last_index,
             digest: Digest(digest),
+            event_totals,
         })
     }
 
@@ -366,12 +413,29 @@ impl<I: SegmentIo> SegmentReader<I> {
                 .ok_or_else(|| cursor.error("unknown frame kind"))?;
             let level = cursor.u8()?;
             cursor.u16()?;
-            let _signal = cursor.u32()?;
+            let signal = cursor.u32()?;
             let frame = cursor.u64()?;
             let first = cursor.u64()?;
             let count = cursor.u64()?;
             let x_min = cursor.f64()?;
             let x_max = cursor.f64()?;
+            if kind == FrameKind::Events {
+                let position = self.event_position(signal);
+                let count = u32::try_from(count)
+                    .map_err(|_| cursor.error("an EVENTS frame of more than 2^32 changes"))?;
+                let events = EventsRef {
+                    offset: frame,
+                    first,
+                    count,
+                    t_min: x_min,
+                    t_max: x_max,
+                };
+                if frame >= offset
+                    || position.is_none_or(|position| !catalogue.events(position, events))
+                {
+                    return Err(cursor.error("an index lists event changes out of order"));
+                }
+            }
             if kind == FrameKind::Summary {
                 let buckets = count.div_ceil(bucket_rows(level.max(2))) as u32;
                 let summary = SummaryRef {
@@ -439,6 +503,7 @@ impl<I: SegmentIo> SegmentReader<I> {
                 FrameKind::Summary if !header.partial() => {
                     self.scan_summary(catalogue, at, &payload).unwrap_or(false)
                 }
+                FrameKind::Events => self.scan_events(catalogue, at, &payload).unwrap_or(false),
                 FrameKind::Index if !header.partial() => {
                     let fits = payload.len() >= 24
                         && u64_at(&payload, 0) == catalogue.last_index.unwrap_or(u64::MAX)
@@ -449,9 +514,9 @@ impl<I: SegmentIo> SegmentReader<I> {
                     fits
                 }
                 FrameKind::End if !header.partial() => {
-                    return Self::parse_end(&payload, at).ok().filter(|end| {
-                        end.rows == catalogue.rows && end.chunks == catalogue.chunks.len() as u64
-                    });
+                    return Self::parse_end(&payload, at)
+                        .ok()
+                        .filter(|end| self.end_matches(end, catalogue));
                 }
                 _ => false,
             };
@@ -661,7 +726,7 @@ impl<I: SegmentIo> SegmentReader<I> {
     /// Recompute the logical digest from the readable data; equal to `END`'s for a complete
     /// segment.
     pub fn digest(&mut self) -> Result<Digest, StoreError> {
-        let mut digest = LogicalDigest::new(std::iter::empty());
+        let mut digest = LogicalDigest::new(self.event_signals.iter().map(|&(id, _)| id));
         let mut x = Vec::new();
         let mut columns = vec![Vec::new(); self.slots];
         for index in 0..self.catalogue.chunks.len() {
@@ -674,8 +739,119 @@ impl<I: SegmentIo> SegmentReader<I> {
             }
             digest.columns(&x, &columns);
         }
+        for position in 0..self.event_signals.len() {
+            let (id, kind) = self.event_signals[position];
+            let changes = self.events(id as usize, f64::NEG_INFINITY, f64::INFINITY)?;
+            let stream = digest.event_stream(position, changes.len() as u64);
+            let mut value = Vec::new();
+            for change in &changes {
+                value.clear();
+                change.value.put(&mut value);
+                hash_change(
+                    stream,
+                    kind,
+                    change.time,
+                    change.sequence,
+                    &value,
+                    change.strength,
+                );
+            }
+        }
         let mut schema_bytes = Vec::new();
         self.schema.encode(&mut schema_bytes);
         Ok(digest.finish(&schema_bytes))
+    }
+
+    /// Changes of event signal `signal` read so far.
+    pub fn event_count(&self, signal: usize) -> Result<u64, StoreError> {
+        let position = self
+            .event_position(signal as u32)
+            .ok_or_else(|| Self::not_event(signal))?;
+        Ok(self
+            .catalogue
+            .event_counts
+            .get(position)
+            .copied()
+            .unwrap_or(0))
+    }
+
+    fn not_event(signal: usize) -> StoreError {
+        StoreError::OutOfRange(format!("signal {signal} is not an event signal"))
+    }
+
+    /// The changes of event signal `signal` with time in `t0 ..= t1`, in commit order.
+    pub fn events(
+        &mut self,
+        signal: usize,
+        t0: f64,
+        t1: f64,
+    ) -> Result<Vec<EventChange>, StoreError> {
+        let position = self
+            .event_position(signal as u32)
+            .ok_or_else(|| Self::not_event(signal))?;
+        let kind = self.event_signals[position].1;
+        let mut changes = Vec::new();
+        let frames = self
+            .catalogue
+            .events
+            .get(position)
+            .cloned()
+            .unwrap_or_default();
+        for frame in frames {
+            if !(frame.t_max >= t0 && frame.t_min <= t1) {
+                continue;
+            }
+            let (_, payload) = self.read_frame(frame.offset)?;
+            let start = changes.len();
+            decode_events(&payload, frame.offset, kind, &mut changes)?;
+            let mut keep = start;
+            for at in start..changes.len() {
+                if changes[at].time >= t0 && changes[at].time <= t1 {
+                    changes.swap(keep, at);
+                    keep += 1;
+                }
+            }
+            changes.truncate(keep);
+        }
+        Ok(changes)
+    }
+
+    /// The position of signal id `signal` among the event signals.
+    fn event_position(&self, signal: u32) -> Option<usize> {
+        self.event_signals.iter().position(|&(id, _)| id == signal)
+    }
+
+    fn end_matches(&self, end: &EndRecord, catalogue: &Catalogue) -> bool {
+        end.rows == catalogue.rows
+            && end.chunks == catalogue.chunks.len() as u64
+            && end.event_totals.len() == self.event_signals.len()
+            && end
+                .event_totals
+                .iter()
+                .enumerate()
+                .all(|(position, &(id, count))| {
+                    id == self.event_signals[position].0
+                        && catalogue.event_counts.get(position).copied().unwrap_or(0) == count
+                })
+    }
+
+    fn scan_events(
+        &self,
+        catalogue: &mut Catalogue,
+        offset: u64,
+        payload: &[u8],
+    ) -> Result<bool, StoreError> {
+        let header = parse_events_header(payload, offset)?;
+        let Some(position) = self.event_position(header.signal) else {
+            return Ok(false);
+        };
+        let events = EventsRef {
+            offset,
+            first: header.first,
+            count: header.count,
+            t_min: header.t_min,
+            t_max: header.t_max,
+        };
+        Ok(catalogue.events(position, events))
     }
 }

@@ -14,6 +14,7 @@
 //! real tail, so the final bytes do not depend on when, or whether, flushes happened.
 
 use crate::digest::{Digest, LogicalDigest};
+use crate::events::{EventBuffer, EventChange, EventKind, EventScratch};
 use crate::format::{
     FLAG_PARTIAL, FORMAT_VERSION, FrameBuf, FrameKind, INDEX_CHUNKS, INDEX_ENTRY_LIMIT,
     LEVEL1_ROWS, POINTERS_AT, POINTERS_LEN, SEGMENT_MAGIC, SUPERBLOCK_LEN, bucket_rows, canonical,
@@ -124,14 +125,24 @@ pub(crate) struct Layout {
     pub(crate) slots: usize,
     pub(crate) chunk_rows: usize,
     pub(crate) analog: Vec<AnalogColumn>,
+    /// Event signals in id order: (signal id, kind).
+    pub(crate) events: Vec<(u32, EventKind)>,
+    /// For each signal id, its position in `events`, or `u32::MAX`.
+    pub(crate) event_index: Vec<u32>,
     pub(crate) schema_bytes: Vec<u8>,
 }
 
 impl Layout {
     fn new(schema: &Schema, chunk_rows: usize) -> Self {
         let mut analog = Vec::new();
+        let mut events = Vec::new();
+        let mut event_index = vec![u32::MAX; schema.signals.len()];
         let mut slot = 0;
-        for signal in &schema.signals {
+        for (id, signal) in schema.signals.iter().enumerate() {
+            if let Some(kind) = EventKind::of(signal.kind) {
+                event_index[id] = events.len() as u32;
+                events.push((id as u32, kind));
+            }
             let slots = signal.kind.slots();
             if slots > 0 {
                 analog.push(AnalogColumn {
@@ -147,8 +158,33 @@ impl Layout {
             slots: slot,
             chunk_rows,
             analog,
+            events,
+            event_index,
             schema_bytes,
         }
+    }
+
+    /// Check one change against the schema; returns the signal's position among event signals.
+    #[inline]
+    pub(crate) fn event_position(&self, change: &EventChange) -> Result<usize, StoreError> {
+        let position = self
+            .event_index
+            .get(change.signal as usize)
+            .copied()
+            .unwrap_or(u32::MAX);
+        if position == u32::MAX {
+            return Err(StoreError::EventSignal {
+                signal: change.signal,
+                reason: "the signal is not an event signal",
+            });
+        }
+        let (_, kind) = self.events[position as usize];
+        kind.admits(&change.value)
+            .map_err(|reason| StoreError::EventSignal {
+                signal: change.signal,
+                reason,
+            })?;
+        Ok(position as usize)
     }
 }
 
@@ -257,6 +293,10 @@ pub(crate) struct Encoder<I: SegmentIo> {
     index_dir: Vec<IndexDirEntry>,
     pyramid: Pyramid,
     summary_dir: Vec<SummaryDirEntry>,
+    events: Vec<EventBuffer>,
+    event_scratch: EventScratch,
+    /// Whether blocks may be compressed (tests write `plain`-only segments to compare digests).
+    compress: bool,
     digest: LogicalDigest,
 }
 
@@ -266,6 +306,7 @@ impl<I: SegmentIo> Encoder<I> {
         schema: &Schema,
         meta: &RunMeta,
         chunk_rows: usize,
+        compress: bool,
     ) -> Result<Self, StoreError> {
         schema.validate()?;
         let layout = Layout::new(schema, chunk_rows);
@@ -293,7 +334,14 @@ impl<I: SegmentIo> Encoder<I> {
             index_dir: Vec::new(),
             pyramid: Pyramid::new(layout.analog.len()),
             summary_dir: Vec::new(),
-            digest: LogicalDigest::new(std::iter::empty()),
+            events: layout
+                .events
+                .iter()
+                .map(|&(id, kind)| EventBuffer::new(id, kind))
+                .collect(),
+            event_scratch: EventScratch::new(compress),
+            compress,
+            digest: LogicalDigest::new(layout.events.iter().map(|&(id, _)| id)),
             layout,
             io: {
                 io.truncate(0)?;
@@ -419,8 +467,12 @@ impl<I: SegmentIo> Encoder<I> {
                 &self.columns[base..base + rows]
             };
             let at = self.frame.payload_len();
-            let (codec, len) =
-                codec::encode_f64(values, &mut self.planes, self.frame.spare(max_block));
+            let (codec, len) = codec::encode_f64(
+                values,
+                &mut self.planes,
+                self.frame.spare(max_block),
+                self.compress,
+            );
             self.frame.advance(len);
             let entry = table_at + 12 * block;
             self.frame.patch_u32(entry, at as u32);
@@ -453,6 +505,11 @@ impl<I: SegmentIo> Encoder<I> {
             .rows(&batch.x, &batch.values, self.layout.slots, batch.rows);
         self.next_chunk += 1;
         self.rows += batch.rows as u64;
+        for position in 0..self.events.len() {
+            if self.events[position].len() > 0 {
+                self.write_events(position)?;
+            }
+        }
         self.fold_level1();
         for index in 0..self.pyramid.levels() {
             if self.pyramid.is_full(index) {
@@ -550,9 +607,60 @@ impl<I: SegmentIo> Encoder<I> {
         self.write_pointers(0)
     }
 
+    /// Take changes in arrival order; a signal's buffer that reaches 4,096 changes is written at
+    /// once. The changes were checked against the schema when they were staged.
+    pub(crate) fn add_events(&mut self, changes: &[EventChange]) -> Result<(), StoreError> {
+        for change in changes {
+            let position = self.layout.event_index[change.signal as usize] as usize;
+            if self.events[position].push(change) {
+                self.write_events(position)?;
+                if self.entries.len() >= INDEX_ENTRY_LIMIT {
+                    self.write_index()?;
+                }
+                self.settle()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Write event signal `position`'s buffer as a real `EVENTS` frame and empty it.
+    fn write_events(&mut self, position: usize) -> Result<(), StoreError> {
+        let buffer = &self.events[position];
+        let (first, count, t_min, t_max) =
+            buffer.encode(0, &mut self.frame, &mut self.event_scratch);
+        let signal = buffer.signal;
+        let offset = self.emit_real()?;
+        self.entries.push(IndexEntry {
+            kind: FrameKind::Events,
+            level: 0,
+            signal,
+            offset,
+            first,
+            count,
+            x_min: t_min,
+            x_max: t_max,
+        });
+        let buffer = &mut self.events[position];
+        buffer.digest(self.digest.event_stream(position, count));
+        buffer.clear();
+        Ok(())
+    }
+
     /// Write the open chunk as provisional frames at the tail, durably, without advancing the tail.
     pub(crate) fn write_provisional(&mut self, batch: &Batch) -> Result<(), StoreError> {
         let mut at = self.tail;
+        for position in 0..self.events.len() {
+            if self.events[position].len() > 0 {
+                self.events[position].encode(
+                    FLAG_PARTIAL,
+                    &mut self.frame,
+                    &mut self.event_scratch,
+                );
+                let bytes = self.frame.finish()?;
+                self.io.write_at(at, bytes)?;
+                at += bytes.len() as u64;
+            }
+        }
         if batch.rows > 0 {
             self.encode_chunk(batch, self.next_chunk, FLAG_PARTIAL);
             let bytes = self.frame.finish()?;
@@ -569,6 +677,11 @@ impl<I: SegmentIo> Encoder<I> {
 
     /// Write the last frames and `END`; returns the receipt and the segment's I/O.
     pub(crate) fn finish(mut self, status: &RunStatus) -> Result<(StoreReceipt, I), StoreError> {
+        for position in 0..self.events.len() {
+            if self.events[position].len() > 0 {
+                self.write_events(position)?;
+            }
+        }
         self.write_final_summaries()?;
         if !self.entries.is_empty() || self.last_index.is_none() {
             self.write_index()?;
@@ -586,8 +699,12 @@ impl<I: SegmentIo> Encoder<I> {
         self.frame.put_u64(self.next_chunk);
         self.frame.put_u64(self.last_index.unwrap_or(u64::MAX));
         self.frame.put(&digest.0);
-        // Event totals: none without event signals.
-        self.frame.put_u32(0);
+        self.frame.put_u32(self.events.len() as u32);
+        for buffer in &self.events {
+            self.frame.put_u32(buffer.signal);
+            self.frame.put_u32(0);
+            self.frame.put_u64(buffer.written);
+        }
         self.frame.put_u32(self.index_dir.len() as u32);
         for entry in &self.index_dir {
             self.frame.put_u64(entry.offset);
@@ -609,7 +726,7 @@ impl<I: SegmentIo> Encoder<I> {
         let receipt = StoreReceipt {
             rows: self.rows,
             chunks: self.next_chunk,
-            events: 0,
+            events: self.events.iter().map(|buffer| buffer.written).sum(),
             bytes: self.tail,
             digest,
         };
@@ -641,7 +758,18 @@ impl<I: SegmentIo> SegmentWriter<I> {
         chunk_rows: usize,
     ) -> Result<Self, StoreError> {
         debug_assert!(chunk_rows.is_power_of_two() && chunk_rows >= LEVEL1_ROWS);
-        let encoder = Encoder::create(io, schema, meta, chunk_rows)?;
+        Self::with_options(io, schema, meta, chunk_rows, true)
+    }
+
+    /// A writer with chunks of `chunk_rows` rows, and every block `plain` unless `compress`.
+    pub(crate) fn with_options(
+        io: I,
+        schema: &Schema,
+        meta: &RunMeta,
+        chunk_rows: usize,
+        compress: bool,
+    ) -> Result<Self, StoreError> {
+        let encoder = Encoder::create(io, schema, meta, chunk_rows, compress)?;
         Ok(Self {
             open: Batch::new(chunk_rows, encoder.layout().slots),
             encoder,
@@ -708,6 +836,20 @@ impl<I: SegmentIo> SegmentWriter<I> {
         }
         open.values[(row - open.first_row) as usize * open.slots + slot] = value;
         Ok(())
+    }
+
+    /// Stage event changes, in commit order. Each is checked against the schema first; a change
+    /// for a signal that is not an event signal, or of the wrong kind, is refused and nothing of
+    /// this call is kept.
+    pub fn push_events(&mut self, changes: &[EventChange]) -> Result<(), StoreError> {
+        if self.stopped {
+            return Err(StoreError::WriterStopped);
+        }
+        for change in changes {
+            self.encoder.layout().event_position(change)?;
+        }
+        let result = self.encoder.add_events(changes);
+        self.guard(result)
     }
 
     /// Make every row pushed so far durable by writing the open chunk provisionally.

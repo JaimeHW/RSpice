@@ -13,8 +13,10 @@
 mod codec;
 mod digest;
 mod error;
+mod events;
 mod format;
 mod io;
+mod manifest;
 mod reader;
 mod schema;
 mod summary;
@@ -26,9 +28,13 @@ mod tests;
 
 pub use digest::Digest;
 pub use error::StoreError;
+pub use events::{EventChange, EventValue, Logic};
 #[cfg(any(unix, windows))]
 pub use io::FileIo;
 pub use io::{MemoryIo, SegmentIo};
+#[cfg(any(unix, windows))]
+pub use manifest::StoreDir;
+pub use manifest::{Manifest, Member};
 pub use reader::{SegmentReader, SegmentState};
 pub use schema::{Axis, RunMeta, Schema, Signal, SignalKind};
 pub use tile::{Tile, pixel_of};

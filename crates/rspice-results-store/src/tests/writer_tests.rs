@@ -29,7 +29,7 @@ fn float_blocks_round_trip_bit_for_bit() {
     let mut planes = vec![0; 3000 * 8];
     for (values, expected) in [(&smooth, Codec::XorShuffleLz4), (&noise, Codec::Plain)] {
         let mut out = vec![0; codec::max_encoded_len(values.len() * 8)];
-        let (codec, len) = codec::encode_f64(values, &mut planes, &mut out);
+        let (codec, len) = codec::encode_f64(values, &mut planes, &mut out, true);
         assert_eq!(codec, expected);
         let mut decoded = vec![0.0; values.len()];
         let mut scratch = Vec::new();
@@ -37,6 +37,13 @@ fn float_blocks_round_trip_bit_for_bit() {
         let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
         assert_eq!(bits(&decoded), bits(values));
     }
+    let bytes: Vec<u8> = (0..5000u32).map(|i| (i / 300) as u8).collect();
+    let mut out = vec![0; codec::max_encoded_len(bytes.len())];
+    let (codec, len) = codec::encode_bytes(&bytes, &mut out, true);
+    assert_eq!(codec, Codec::Lz4);
+    let mut decoded = vec![0; bytes.len()];
+    codec::decode_bytes(codec, &out[..len], &mut decoded, 0).unwrap();
+    assert_eq!(decoded, bytes);
 }
 
 /// Write `count` rows with `push`, calling `sync` before the rows `syncs` names.

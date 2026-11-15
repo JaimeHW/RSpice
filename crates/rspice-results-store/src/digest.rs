@@ -75,6 +75,19 @@ impl Default for ValueHasher {
 
 impl ValueHasher {
     #[inline(always)]
+    pub(crate) fn bytes(&mut self, bytes: &[u8]) {
+        if self.len + bytes.len() > self.buffer.len() {
+            self.drain();
+            if bytes.len() > self.buffer.len() {
+                self.hasher.update(bytes);
+                return;
+            }
+        }
+        self.buffer[self.len..self.len + bytes.len()].copy_from_slice(bytes);
+        self.len += bytes.len();
+    }
+
+    #[inline(always)]
     pub(crate) fn value(&mut self, value: f64) {
         if self.len + 8 > self.buffer.len() {
             self.drain();
@@ -133,6 +146,13 @@ impl LogicalDigest {
             }
         }
         self.row_count += x.len() as u64;
+    }
+
+    /// The digest stream of the `index`-th event signal, which `count` more changes will enter.
+    pub(crate) fn event_stream(&mut self, index: usize, count: u64) -> &mut ValueHasher {
+        let stream = &mut self.events[index];
+        stream.2 += count;
+        &mut stream.1
     }
 
     /// The digest over everything written, bound to the schema's canonical bytes.
