@@ -103,6 +103,8 @@ fn scalar_impl(
         scopes: Vec::new(),
         static_scopes: HashMap::new(),
         static_local_count: 0,
+        block_path: Vec::new(),
+        named_locals: Vec::new(),
     };
     let entry = lowerer.builder.create_block();
     lowerer.builder.seal_block(entry);
@@ -532,6 +534,8 @@ fn resolve_one(
         scopes: Vec::new(),
         static_scopes: HashMap::new(),
         static_local_count: 0,
+        block_path: Vec::new(),
+        named_locals: Vec::new(),
     };
     let entry = lowerer.builder.create_block();
     lowerer.builder.seal_block(entry);
@@ -744,6 +748,8 @@ pub(super) fn initializer(
         scopes: Vec::new(),
         static_scopes: HashMap::new(),
         static_local_count: 0,
+        block_path: Vec::new(),
+        named_locals: Vec::new(),
     };
     let entry = lowerer.builder.create_block();
     lowerer.builder.seal_block(entry);

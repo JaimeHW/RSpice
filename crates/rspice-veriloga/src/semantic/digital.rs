@@ -53,6 +53,9 @@ pub struct AnalyzedDigital {
     pub processes: Vec<AnalyzedDigitalProcess>,
     /// Tasks and functions, in declaration order.
     pub routines: Vec<super::digital_routines::AnalyzedDigitalRoutine>,
+    /// The module's generate blocks (IEEE 1364-2005 section 12.4), by path
+    /// below it (`g[0]`, `g[0].inner`), each after the block holding it.
+    pub generate_blocks: Vec<SmolStr>,
     /// Hierarchical names that may name a task or function of a scope below
     /// this one (IEEE 1364-2005 section 12.5): the parser's symbol, mapped to
     /// the instance names and then the routine's name.
@@ -696,6 +699,8 @@ pub struct ElaboratedDigitalInstance {
     /// The instance's tasks and functions: each instance has its own static
     /// storage for them (IEEE 1364-2005 section 10.2.3).
     pub routines: Vec<super::digital_routines::AnalyzedDigitalRoutine>,
+    /// The instance's generate blocks, by path below it.
+    pub generate_blocks: Vec<SmolStr>,
     /// The instance's hierarchical routine names, relative to it.
     pub routine_names: std::collections::BTreeMap<SmolStr, Vec<SmolStr>>,
     /// The instance's hierarchical signal references, every path below the
@@ -952,6 +957,7 @@ impl SemanticAnalyzer {
             bit_aliases: Vec::new(),
             processes,
             routines,
+            generate_blocks: generate_blocks(module),
             // Generate expansion rebinds a name it defers under a symbol of
             // its own, so both tables are asked.
             routine_names: module
@@ -4581,6 +4587,31 @@ fn mark_floating_output_ports(
             port.floating_output = true;
         }
     }
+}
+
+/// The generate blocks of `module`, by path below it, each after the block
+/// holding it.
+fn generate_blocks(module: &crate::ast::Module) -> Vec<SmolStr> {
+    let mut blocks: Vec<(usize, String)> = module
+        .hierarchical_scopes
+        .keys()
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            let mut name = String::new();
+            for key in path {
+                if !name.is_empty() {
+                    name.push('.');
+                }
+                name.push_str(&key.name);
+                if let Some(index) = key.index {
+                    name.push_str(&format!("[{index}]"));
+                }
+            }
+            (path.len(), name)
+        })
+        .collect();
+    blocks.sort();
+    blocks.into_iter().map(|(_, name)| name.into()).collect()
 }
 
 #[cfg(test)]

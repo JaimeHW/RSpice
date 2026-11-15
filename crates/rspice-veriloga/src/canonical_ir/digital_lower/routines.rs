@@ -497,6 +497,8 @@ pub(super) fn lower_routine(
         scopes: Vec::new(),
         static_scopes: HashMap::new(),
         static_local_count: 0,
+        block_path: Vec::new(),
+        named_locals: Vec::new(),
     };
     let kind = if routine.is_function() {
         DigitalScopeKind::Function

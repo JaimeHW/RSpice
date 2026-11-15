@@ -58,6 +58,7 @@ impl ProcessLowerer<'_> {
                 .contains_key(&local.span)
                 .then_some(DigitalLocalId::from(id))
         }));
+        required.extend(self.named_locals.iter().map(|(local, _)| *local));
         // Read every startup SSA definition before changing any local's representation.
         let initial: Vec<_> = required
             .into_iter()
@@ -75,7 +76,16 @@ impl ProcessLowerer<'_> {
             }
             let declaration = &self.locals[usize::from(local)];
             let name = declaration.name.clone().expect("source local");
-            let mut storage_name = format!("$local:{process}:{local}:{name}");
+            // A named block's variable a dump lists goes by its hierarchical
+            // name, which no declared signal can take.
+            let mut storage_name = self
+                .named_locals
+                .iter()
+                .find(|(named, _)| *named == local)
+                .map_or_else(
+                    || format!("$local:{process}:{local}:{name}"),
+                    |(_, path)| path.to_string(),
+                );
             // Escaped source identifiers may contain arbitrary punctuation.
             while self
                 .signals
@@ -514,6 +524,14 @@ pub(super) fn any_statement(
 }
 
 /// Whether a body forks (IEEE 1364-2005 section 9.8.2).
+/// Whether `statement` calls `$dumpvars`.
+pub(super) fn calls_dumpvars(statement: &DigitalStatement) -> bool {
+    any_statement(
+        statement,
+        &|statement| matches!(statement, DigitalStatement::SystemTask(task) if task.name == "$dumpvars"),
+    )
+}
+
 pub(super) fn contains_fork(statement: &DigitalStatement) -> bool {
     any_statement(statement, &|statement| {
         matches!(statement, DigitalStatement::Fork(_))

@@ -126,6 +126,7 @@ struct TableOffsets {
     scopes: u32,
     observers: u32,
     overrides: u32,
+    aliases: u32,
 }
 
 /// An instance scope's path with its root renamed to the instance: each
@@ -271,6 +272,10 @@ pub fn link_digital_plans(
             .overrides
             .checked_add(index(instance.plan.overrides.len(), "override")?)
             .ok_or_else(|| error("linked override count exceeds u32"))?;
+        tables.aliases = tables
+            .aliases
+            .checked_add(index(instance.plan.signal_aliases.len(), "port alias")?)
+            .ok_or_else(|| error("linked port alias count exceeds u32"))?;
         layouts.push(Layout {
             tables: instance_tables,
             instance,
@@ -511,6 +516,13 @@ pub fn link_digital_plans(
             relocate_span(&mut alias.span, &layout.map);
             plan.real_aliases.push(alias);
         }
+        for alias in &source.signal_aliases {
+            plan.signal_aliases
+                .push(super::digital::DigitalSignalAlias {
+                    signal: layout.map.signals[usize::from(alias.signal)],
+                    name: format!("{}.{}", layout.instance.name, alias.name).into(),
+                });
+        }
         for observer in &source.absdelta {
             let mut observer = observer.clone();
             observer.signal = layout.map.signals[usize::from(observer.signal)];
@@ -701,6 +713,7 @@ pub fn link_digital_plans(
                     DigitalSystemArgument::Signal(signal) => {
                         *signal = layout.map.signals[usize::from(*signal)];
                     }
+                    DigitalSystemArgument::Alias(alias) => *alias += layout.tables.aliases,
                     DigitalSystemArgument::Empty
                     | DigitalSystemArgument::String(_)
                     | DigitalSystemArgument::Value { .. }

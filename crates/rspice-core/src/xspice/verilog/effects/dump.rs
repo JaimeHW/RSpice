@@ -21,6 +21,16 @@
 //! and resumes, and `$dumpall` writes every current value (sections 18.1.3
 //! and 18.1.5). Memories are not dumped (section 18.1.2). The `$date` block
 //! is left empty, so a dump is a function of the design and its inputs.
+//!
+//! # How the header is laid out
+//!
+//! Section 18.2 leaves the layout to the tool, and the header follows Icarus
+//! Verilog's: each `$dumpvars` argument in call order, under the scopes that
+//! enclose it, a scope with its variables and then its scopes as deep as the
+//! call asks. A scope an earlier argument dumped adds only its scopes, and a
+//! variable an earlier argument named is skipped, each with a warning. A
+//! port that its connection joined to another scope's net is listed in its
+//! own scope with that net's identifier code, as one value under two names.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -60,19 +70,32 @@ pub(crate) enum DumpPhase {
     Stopped,
 }
 
-/// One dumped variable.
+/// One dumped variable: a value the dump follows, which one `$var` line
+/// names, or several when ports joined to its net name it too.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DumpVar {
     pub signal: u32,
-    /// The scopes enclosing it, outermost first, with their VCD scope types.
-    pub scope: Vec<(String, String)>,
-    pub name: String,
-    pub kind: String,
     pub width: u32,
     /// `[msb:lsb]`, for a vector.
     pub range: Option<(i64, i64)>,
     pub real: bool,
+}
+
+/// One line of the header, laid out as the `$dumpvars` calls ask.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum HeaderLine {
+    Scope {
+        kind: &'static str,
+        name: String,
+    },
+    Upscope,
+    /// A `$var` line naming variable `var`.
+    Var {
+        var: usize,
+        kind: &'static str,
+        name: String,
+    },
 }
 
 /// The value last written for a variable; a real by its bits, so that two
@@ -105,6 +128,19 @@ pub(crate) struct Dump {
     pub written: u64,
     /// The last `#time` written.
     pub time: Option<u64>,
+    /// The header as the step's `$dumpvars` calls laid it out, written when
+    /// that step ends.
+    #[serde(skip)]
+    header: Vec<HeaderLine>,
+    /// The scopes whose variables those calls dumped, and the variables they
+    /// named one by one, by full name.
+    #[serde(skip)]
+    scanned: BTreeSet<String>,
+    #[serde(skip)]
+    named: BTreeSet<String>,
+    /// The design as the dump lays it out, built at the first `$dumpvars`.
+    #[serde(skip)]
+    tree: Option<Arc<DumpTree>>,
 }
 
 impl Default for Dump {
@@ -121,6 +157,10 @@ impl Default for Dump {
             limit: None,
             written: 0,
             time: None,
+            header: Vec::new(),
+            scanned: BTreeSet::new(),
+            named: BTreeSet::new(),
+            tree: None,
         }
     }
 }
@@ -217,65 +257,186 @@ fn hierarchy(plan: &CanonicalDigitalPlan, name: &str, linked: bool) -> (String, 
     }
 }
 
-/// The VCD scope type of each scope path (section 18.2.3.4).
-fn scope_types(plan: &CanonicalDigitalPlan) -> BTreeMap<String, &'static str> {
-    plan.scopes
-        .iter()
-        .map(|scope| {
-            (
-                scope.path.to_string(),
-                match scope.kind {
-                    DigitalScopeKind::Module => "module",
-                    DigitalScopeKind::Block => "begin",
-                    DigitalScopeKind::Task => "task",
-                    DigitalScopeKind::Function => "function",
-                },
-            )
-        })
-        .collect()
+/// The design's scopes and variables as a dump lays them out (IEEE 1364-2005
+/// section 18.2.3.4). Each scope lists its variables and then its scopes,
+/// each group in the order Icarus Verilog lists it: nets, variables, then
+/// integers and reals; functions, generate blocks, module instances, named
+/// blocks, then tasks; by name within each.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct DumpTree {
+    nodes: Vec<DumpScope>,
+    by_path: BTreeMap<String, usize>,
+    roots: Vec<usize>,
+    linked: bool,
 }
 
-fn var_for(
-    plan: &CanonicalDigitalPlan,
+#[derive(Debug, PartialEq, Eq)]
+struct DumpScope {
+    path: String,
+    name: String,
+    kind: &'static str,
+    rank: u8,
+    parent: Option<usize>,
+    vars: Vec<DumpMember>,
+    children: Vec<usize>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct DumpMember {
+    rank: u8,
+    name: String,
+    kind: &'static str,
     signal: u32,
-    types: &BTreeMap<String, &'static str>,
-    linked: bool,
-) -> Option<DumpVar> {
-    let declared = plan.signals.get(signal as usize)?;
-    let real = declared.kind.is_real();
-    if !real && declared.width == 0 {
-        // A named event has no value to dump.
-        return None;
-    }
-    let (scope, name) = hierarchy(plan, &declared.name, linked);
-    let mut path = String::new();
-    let mut levels = Vec::new();
-    for segment in scope.split('.').filter(|segment| !segment.is_empty()) {
-        if !path.is_empty() {
-            path.push('.');
+}
+
+impl DumpTree {
+    fn new(plan: &CanonicalDigitalPlan) -> Self {
+        let mut tree = Self {
+            linked: is_linked(plan),
+            ..Self::default()
+        };
+        for scope in &plan.scopes {
+            let kind = match scope.kind {
+                DigitalScopeKind::Function => ("function", 0),
+                DigitalScopeKind::Generate => ("begin", 1),
+                DigitalScopeKind::Module => ("module", 2),
+                DigitalScopeKind::Block => ("begin", 3),
+                DigitalScopeKind::Task => ("task", 4),
+            };
+            tree.scope(&scope.path, Some(kind));
         }
-        path.push_str(segment);
-        let kind = types.get(&path).copied().unwrap_or("module");
-        levels.push((segment.to_owned(), kind.to_owned()));
+        let memories: BTreeSet<u32> = plan
+            .arrays
+            .iter()
+            .filter_map(|array| array.storage.cell_range())
+            .flatten()
+            .collect();
+        // A variable port keeps its own storage beside the net it drives, and
+        // that storage is what the source declared: the net would be a second
+        // `o` in the same scope.
+        let own_storage: BTreeSet<&str> = plan
+            .signals
+            .iter()
+            .map(|signal| signal.name.as_str())
+            .filter(|name| !name.starts_with('@'))
+            .collect();
+        for (index, signal) in plan.signals.iter().enumerate() {
+            let index = index as u32;
+            let real = signal.kind.is_real();
+            // Storage a process keeps without a name a dump can list it by,
+            // memories (section 18.1.2) and named events, which have no value
+            // to dump, are left out.
+            if (signal.local.is_some() && signal.name.starts_with('$'))
+                || memories.contains(&index)
+                || (!real && signal.width == 0)
+            {
+                continue;
+            }
+            if let Some((instance, port)) = port_net_spelling(&signal.name)
+                && own_storage.contains(format!("{instance}.{port}").as_str())
+            {
+                continue;
+            }
+            let (rank, kind) = if real {
+                (2, "real")
+            } else if signal.integer {
+                (2, "integer")
+            } else if signal.procedurally_assignable {
+                (1, "reg")
+            } else {
+                (0, "wire")
+            };
+            tree.member(plan, &signal.name, rank, kind, index);
+        }
+        for alias in &plan.signal_aliases {
+            tree.member(plan, &alias.name, 0, "wire", alias.signal.index());
+        }
+        let keys: Vec<(u8, String)> = tree
+            .nodes
+            .iter()
+            .map(|node| (node.rank, node.name.clone()))
+            .collect();
+        for node in &mut tree.nodes {
+            node.children.sort_by(|a, b| keys[*a].cmp(&keys[*b]));
+            node.vars
+                .sort_by(|a, b| (a.rank, &a.name).cmp(&(b.rank, &b.name)));
+        }
+        tree
     }
-    let kind = if real {
-        "real"
-    } else if declared.integer {
-        "integer"
-    } else if declared.procedurally_assignable {
-        "reg"
-    } else {
-        "wire"
-    };
-    Some(DumpVar {
-        signal,
-        scope: levels,
-        name,
-        kind: kind.to_owned(),
-        width: if real { 64 } else { declared.width },
-        range: declared.bounds.filter(|_| !real),
-        real,
-    })
+
+    /// The scope at `path`, made with its parents if new; `kind` is the
+    /// plan's for it, and a scope only a path names is a module.
+    fn scope(&mut self, path: &str, kind: Option<(&'static str, u8)>) -> usize {
+        if let Some(&node) = self.by_path.get(path) {
+            if let Some((kind, rank)) = kind {
+                self.nodes[node].kind = kind;
+                self.nodes[node].rank = rank;
+            }
+            return node;
+        }
+        let (parent, name) = match path.rsplit_once('.') {
+            Some((above, name)) => (Some(self.scope(above, None)), name),
+            None => (None, path),
+        };
+        let (kind, rank) = kind.unwrap_or(("module", 2));
+        let node = self.nodes.len();
+        self.nodes.push(DumpScope {
+            path: path.to_owned(),
+            name: name.to_owned(),
+            kind,
+            rank,
+            parent,
+            vars: Vec::new(),
+            children: Vec::new(),
+        });
+        self.by_path.insert(path.to_owned(), node);
+        match parent {
+            Some(parent) => self.nodes[parent].children.push(node),
+            None => self.roots.push(node),
+        }
+        node
+    }
+
+    /// Add the variable a plan names `name` to its scope, once.
+    fn member(
+        &mut self,
+        plan: &CanonicalDigitalPlan,
+        name: &str,
+        rank: u8,
+        kind: &'static str,
+        signal: u32,
+    ) {
+        let (scope, name) = hierarchy(plan, name, self.linked);
+        // A net elaboration made for a port expression has no source name.
+        if name.starts_with("__rspice_") {
+            return;
+        }
+        let node = self.scope(&scope, None);
+        let scope = &mut self.nodes[node];
+        // A function's result is not one of its variables.
+        if (scope.kind == "function" && name == scope.name)
+            || scope.vars.iter().any(|var| var.name == name)
+        {
+            return;
+        }
+        scope.vars.push(DumpMember {
+            rank,
+            name,
+            kind,
+            signal,
+        });
+    }
+
+    /// The scope and place of the variable a plan names `name`.
+    fn var(&self, plan: &CanonicalDigitalPlan, name: &str, signal: u32) -> Option<(usize, usize)> {
+        let (scope, name) = hierarchy(plan, name, self.linked);
+        let node = *self.by_path.get(&scope)?;
+        let member = self.nodes[node]
+            .vars
+            .iter()
+            .position(|var| var.name == name && var.signal == signal)?;
+        Some((node, member))
+    }
 }
 
 /// A four-state value as VCD writes it: `0`/`1`/`x`/`z` for a scalar, `b`
@@ -523,7 +684,7 @@ impl HdlEffects {
             }
             Kind::Dumpvars => match self.dump.phase {
                 DumpPhase::Idle | DumpPhase::Selecting(_) => {
-                    self.select_dump_vars(plan, site, args);
+                    self.select_dump_vars(plan, site, args, clock);
                     self.dump.phase = DumpPhase::Selecting(tick);
                 }
                 DumpPhase::Dumping | DumpPhase::Stopped => self.warn(
@@ -570,12 +731,17 @@ impl HdlEffects {
         Ok(())
     }
 
-    /// Add `$dumpvars(levels, scope_or_variable, ...)`'s selection.
+    /// Lay out `$dumpvars(levels, scope_or_variable, ...)`'s selection as
+    /// Icarus Verilog does: each argument under the scopes enclosing it, a
+    /// scope with its variables and, `levels` deep (all when 0, section
+    /// 18.1.2), its scopes. A scope already dumped dumps only its scopes, and
+    /// a variable already named is skipped.
     fn select_dump_vars(
         &mut self,
         plan: &CanonicalDigitalPlan,
         site: &DigitalSystemCall,
         args: &[DigitalScalar],
+        clock: Option<DigitalClock>,
     ) {
         let levels = match site.arguments.first() {
             Some(DigitalSystemArgument::Value { operand, class }) => integer_of(
@@ -592,80 +758,171 @@ impl HdlEffects {
             .max(0) as usize,
             _ => 0,
         };
-        let memories: BTreeSet<u32> = plan
-            .arrays
-            .iter()
-            .filter_map(|array| array.storage.cell_range())
-            .flatten()
-            .collect();
-        let mut chosen: Vec<u32> = Vec::new();
-        let roots: Vec<String> = plan
-            .scopes
-            .iter()
-            .filter(|scope| scope.parent.is_none())
-            .map(|scope| scope.path.to_string())
-            .collect();
-        let mut scopes: Vec<String> = Vec::new();
+        let levels = if levels == 0 { usize::MAX } else { levels };
+        let tree = Arc::clone(
+            self.dump
+                .tree
+                .get_or_insert_with(|| Arc::new(DumpTree::new(plan))),
+        );
+        // A scope, or a variable as its scope and place.
+        let mut items: Vec<(usize, Option<usize>)> = Vec::new();
         for argument in site.arguments.iter().skip(1) {
-            match argument {
-                DigitalSystemArgument::Signal(signal) => chosen.push(signal.index()),
+            let item = match argument {
+                DigitalSystemArgument::Signal(signal) => plan
+                    .signals
+                    .get(signal.index() as usize)
+                    .and_then(|declared| tree.var(plan, &declared.name, signal.index())),
+                DigitalSystemArgument::Alias(alias) => plan
+                    .signal_aliases
+                    .get(*alias as usize)
+                    .and_then(|alias| tree.var(plan, &alias.name, alias.signal.index())),
                 DigitalSystemArgument::Scope(scope) => {
-                    if let Some(scope) = plan.scopes.get(scope.index()) {
-                        scopes.push(scope.path.to_string());
-                    }
+                    let found = plan
+                        .scopes
+                        .get(scope.index())
+                        .and_then(|scope| tree.by_path.get(scope.path.as_str()));
+                    items.extend(found.map(|&node| (node, None)));
+                    None
                 }
-                _ => {}
-            }
+                _ => None,
+            };
+            items.extend(item.map(|(node, member)| (node, Some(member))));
         }
         if site.arguments.len() <= 1 {
-            scopes = roots;
+            items = tree.roots.iter().map(|&root| (root, None)).collect();
         }
-        let linked = is_linked(plan);
-        // A variable port keeps its own storage beside the net it drives, and
-        // that storage is what the source declared: the net would be a second
-        // `o` in the same scope.
-        let own_storage: BTreeSet<&str> = plan
-            .signals
+        let mut vars: BTreeMap<u32, usize> = self
+            .dump
+            .vars
             .iter()
-            .map(|signal| signal.name.as_str())
-            .filter(|name| !name.starts_with('@'))
+            .enumerate()
+            .map(|(index, var)| (var.signal, index))
             .collect();
-        for (index, signal) in plan.signals.iter().enumerate() {
-            let index = index as u32;
-            if signal.local.is_some() || memories.contains(&index) || scopes.is_empty() {
-                continue;
+        for (node, member) in items {
+            let scope = &tree.nodes[node];
+            match member {
+                Some(member) => {
+                    let var = &scope.vars[member];
+                    let full = format!("{}.{}", scope.path, var.name);
+                    if self.dump.scanned.contains(&scope.path) || self.dump.named.contains(&full) {
+                        self.warn(
+                            plan,
+                            site,
+                            clock,
+                            &format!("skipping `{full}`, which is already dumped"),
+                        );
+                        continue;
+                    }
+                    let depth = self.open_dump_scopes(&tree, Some(node));
+                    self.dump_member(plan, var, &mut vars);
+                    self.close_dump_scopes(depth);
+                    self.dump.named.insert(full);
+                }
+                None => {
+                    let depth = self.open_dump_scopes(&tree, scope.parent);
+                    self.scan_dump_scope(plan, site, clock, (&tree, node), levels, &mut vars);
+                    self.close_dump_scopes(depth);
+                }
             }
-            if let Some((instance, port)) = port_net_spelling(&signal.name)
-                && own_storage.contains(format!("{instance}.{port}").as_str())
-            {
-                continue;
-            }
-            let (scope, _) = hierarchy(plan, &signal.name, linked);
-            let inside = scopes.iter().any(|root| {
-                let depth = if scope == *root {
-                    1
-                } else if let Some(rest) = scope.strip_prefix(root.as_str())
-                    && rest.starts_with('.')
-                {
-                    rest.split('.').count()
-                } else {
-                    return false;
-                };
-                levels == 0 || depth <= levels
+        }
+    }
+
+    /// Open `node` and the scopes enclosing it, outermost first; how many.
+    fn open_dump_scopes(&mut self, tree: &DumpTree, node: Option<usize>) -> usize {
+        let mut chain = Vec::new();
+        let mut at = node;
+        while let Some(node) = at {
+            chain.push(node);
+            at = tree.nodes[node].parent;
+        }
+        for &node in chain.iter().rev() {
+            self.dump.header.push(HeaderLine::Scope {
+                kind: tree.nodes[node].kind,
+                name: tree.nodes[node].name.clone(),
             });
-            if inside {
-                chosen.push(index);
+        }
+        chain.len()
+    }
+
+    fn close_dump_scopes(&mut self, depth: usize) {
+        self.dump
+            .header
+            .extend(std::iter::repeat_n(HeaderLine::Upscope, depth));
+    }
+
+    /// A scope with its variables, unless an earlier call dumped them, and
+    /// its scopes `levels` deep.
+    fn scan_dump_scope(
+        &mut self,
+        plan: &CanonicalDigitalPlan,
+        site: &DigitalSystemCall,
+        clock: Option<DigitalClock>,
+        (tree, node): (&DumpTree, usize),
+        levels: usize,
+        vars: &mut BTreeMap<u32, usize>,
+    ) {
+        let scope = &tree.nodes[node];
+        let again = !self.dump.scanned.insert(scope.path.clone());
+        if again {
+            self.warn(
+                plan,
+                site,
+                clock,
+                &format!(
+                    "the variables of `{}` are already dumped; only its scopes are added",
+                    scope.path
+                ),
+            );
+        }
+        self.dump.header.push(HeaderLine::Scope {
+            kind: scope.kind,
+            name: scope.name.clone(),
+        });
+        if !again {
+            for member in &scope.vars {
+                if !self
+                    .dump
+                    .named
+                    .contains(&format!("{}.{}", scope.path, member.name))
+                {
+                    self.dump_member(plan, member, vars);
+                }
             }
         }
-        let types = scope_types(plan);
-        let mut known: BTreeSet<u32> = self.dump.vars.iter().map(|var| var.signal).collect();
-        for signal in chosen {
-            if known.insert(signal)
-                && let Some(var) = var_for(plan, signal, &types, linked)
-            {
-                self.dump.vars.push(var);
+        if levels > 1 {
+            for &child in &scope.children {
+                self.scan_dump_scope(plan, site, clock, (tree, child), levels - 1, vars);
             }
         }
+        self.dump.header.push(HeaderLine::Upscope);
+    }
+
+    /// A `$var` line for `member`, whose signal is a new variable unless a
+    /// line already names it.
+    fn dump_member(
+        &mut self,
+        plan: &CanonicalDigitalPlan,
+        member: &DumpMember,
+        vars: &mut BTreeMap<u32, usize>,
+    ) {
+        let Some(declared) = plan.signals.get(member.signal as usize) else {
+            return;
+        };
+        let var = *vars.entry(member.signal).or_insert_with(|| {
+            let real = declared.kind.is_real();
+            self.dump.vars.push(DumpVar {
+                signal: member.signal,
+                width: if real { 64 } else { declared.width },
+                range: declared.bounds.filter(|_| !real),
+                real,
+            });
+            self.dump.vars.len() - 1
+        });
+        self.dump.header.push(HeaderLine::Var {
+            var,
+            kind: member.kind,
+            name: member.name.clone(),
+        });
     }
 
     /// Append dump text to the dump file.
@@ -861,37 +1118,29 @@ impl HdlEffects {
             crate::io::vcd::VCD_WRITER_VERSION,
             super::format::time_unit_name(plan.timing.precision_exponent)
         );
-        let mut open: Vec<(String, String)> = Vec::new();
-        for (index, var) in self.dump.vars.iter().enumerate() {
-            let shared = open
-                .iter()
-                .zip(&var.scope)
-                .take_while(|(open, wanted)| open == wanted)
-                .count();
-            while open.len() > shared {
-                open.pop();
-                header.push_str("$upscope $end\n");
+        for line in std::mem::take(&mut self.dump.header) {
+            match line {
+                HeaderLine::Scope { kind, name } => {
+                    header.push_str(&format!("$scope {kind} {name} $end\n"));
+                }
+                HeaderLine::Upscope => header.push_str("$upscope $end\n"),
+                HeaderLine::Var { var, kind, name } => {
+                    let width = self.dump.vars[var].width;
+                    let range = self.dump.vars[var]
+                        .range
+                        .map(|(msb, lsb)| format!(" [{msb}:{lsb}]"))
+                        .unwrap_or_default();
+                    header.push_str(&format!(
+                        "$var {kind} {width} {} {name}{range} $end\n",
+                        crate::io::vcd::canonical_identifier(var),
+                    ));
+                }
             }
-            for (name, kind) in var.scope.iter().skip(shared) {
-                header.push_str(&format!("$scope {kind} {name} $end\n"));
-                open.push((name.clone(), kind.clone()));
-            }
-            let range = var
-                .range
-                .map(|(msb, lsb)| format!(" [{msb}:{lsb}]"))
-                .unwrap_or_default();
-            header.push_str(&format!(
-                "$var {} {} {} {}{range} $end\n",
-                var.kind,
-                var.width,
-                crate::io::vcd::canonical_identifier(index),
-                var.name
-            ));
-        }
-        for _ in open {
-            header.push_str("$upscope $end\n");
         }
         header.push_str("$enddefinitions $end\n");
+        self.dump.tree = None;
+        self.dump.scanned.clear();
+        self.dump.named.clear();
         self.dump_write(plan, None, clock, header);
         self.dump.recording = true;
         self.dump_block(plan, None, clock, store, tick, "dumpvars");

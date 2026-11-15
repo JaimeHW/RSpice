@@ -1334,6 +1334,17 @@ pub struct DigitalRealAlias {
     pub span: SourceSpanRef,
 }
 
+/// A port of an instance that a port connection joined to the net it
+/// connects (IEEE 1364-2005 section 12.3.10): another name of that net, in
+/// the port's own scope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalSignalAlias {
+    pub signal: DigitalSignalId,
+    /// The port's hierarchical name, as a signal of the plan is named
+    /// (`u1.a`).
+    pub name: SmolStr,
+}
+
 /// The discrete-domain half of a module, lowered.
 ///
 /// Lifted out beside the analog body rather than folded into it, for the same
@@ -1361,6 +1372,10 @@ pub struct CanonicalDigitalPlan {
     pub bit_aliases: Vec<DigitalBitAlias>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub real_aliases: Vec<DigitalRealAlias>,
+    /// The ports joined to the net their instance connects them to, which
+    /// have no signal of their own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signal_aliases: Vec<DigitalSignalAlias>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub processes: Vec<CfgDigitalProcess>,
     /// Every continuous driver in the module, in declaration order.
@@ -1528,6 +1543,8 @@ pub enum DigitalScopeKind {
     Module,
     /// A named `begin : name` block (IEEE 1364-2005 section 9.8.3).
     Block,
+    /// A generate block (section 12.4).
+    Generate,
     /// A task's body (section 10.2).
     Task,
     /// A function's body (section 10.4).
@@ -2065,10 +2082,14 @@ pub enum DigitalSystemArgument {
         array: DigitalArrayRef,
         class: DigitalValueClass,
     },
-    /// A module instance or named block named by a reference argument.
+    /// A module instance, generate block, named block, task or function
+    /// named by a reference argument.
     Scope(DigitalScopeId),
     /// A net or variable named by a reference argument.
     Signal(DigitalSignalId),
+    /// A port joined to another scope's net, named by a reference argument:
+    /// an index into [`CanonicalDigitalPlan::signal_aliases`].
+    Alias(u32),
 }
 
 /// The source line a call was written on, for its diagnostics.

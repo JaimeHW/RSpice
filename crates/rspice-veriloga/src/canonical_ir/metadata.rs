@@ -273,7 +273,11 @@ use smol_str::SmolStr;
 /// Version 192 records the routines a digital plan calls in another top-level
 /// module (`CanonicalDigitalPlan::external_routines`), which linking the roots
 /// binds. An earlier artifact refused such a call.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 192;
+/// Version 193 records generate blocks as scopes of their own kind, the ports
+/// a port connection joined to another scope's net
+/// (`CanonicalDigitalPlan::signal_aliases`), and a reference argument naming
+/// such a port. An earlier artifact named neither.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 193;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

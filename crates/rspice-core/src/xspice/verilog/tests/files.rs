@@ -437,6 +437,240 @@ endmodule
     );
 }
 
+/// The header from its first `$scope` through `$enddefinitions`.
+fn dump_header(text: &str) -> &str {
+    let start = text
+        .find("$scope")
+        .unwrap_or_else(|| panic!("no scope in\n{text}"));
+    let end = text
+        .find("$enddefinitions $end\n")
+        .map_or(text.len(), |end| end + 21);
+    &text[start..end]
+}
+
+/// Section 18.1.2: `$dumpvars` of a hierarchical name dumps that scope, an
+/// instance, a generate block, a named block or a task, under the scopes that
+/// enclose it, `levels` deep. A port joined to the net it connects is listed
+/// in its own scope with that net's code. The header is Icarus Verilog's for
+/// the same calls.
+#[test]
+fn a_dump_of_hierarchical_scopes_lays_them_out_as_icarus_does() {
+    const SOURCE: &str = r#"`timescale 1ns/1ns
+module leaf(input d, output q);
+  reg r;
+  assign q = ~d;
+  always @(d) r = d;
+endmodule
+module mid(input d, output q);
+  wire w;
+  leaf u1(.d(d), .q(w));
+  assign q = w;
+  genvar i;
+  generate for (i = 0; i < 2; i = i + 1) begin : g
+    reg [1:0] gv;
+    initial gv = 2'd1;
+  end endgenerate
+  generate if (1) begin : gi
+    reg [2:0] giv;
+    initial giv = 3'd5;
+  end endgenerate
+endmodule
+module tb;
+  reg d;
+  wire q;
+  integer k;
+  mid dut(.d(d), .q(q));
+  task t;
+    reg [3:0] tv;
+    tv = 4'd3;
+  endtask
+  initial begin : blk
+    reg [2:0] bv;
+    bv = 1;
+    $dumpfile("work/scopes.vcd");
+    $dumpvars(1, tb.dut);
+    $dumpvars(0, tb.dut.u1);
+    $dumpvars(0, tb.dut.gi);
+    $dumpvars(0, tb.blk);
+    $dumpvars(0, tb.t);
+    d = 0; #1 d = 1; #1 t; #1 $finish;
+  end
+endmodule
+"#;
+    const ICARUS: &str = r#"$scope module tb $end
+$scope module dut $end
+$var wire 1 ! d $end
+$var wire 1 " q $end
+$var wire 1 # w $end
+$upscope $end
+$upscope $end
+$scope module tb $end
+$scope module dut $end
+$scope module u1 $end
+$var wire 1 ! d $end
+$var wire 1 # q $end
+$var reg 1 $ r $end
+$upscope $end
+$upscope $end
+$upscope $end
+$scope module tb $end
+$scope module dut $end
+$scope begin gi $end
+$var reg 3 % giv [2:0] $end
+$upscope $end
+$upscope $end
+$upscope $end
+$scope module tb $end
+$scope begin blk $end
+$var reg 3 & bv [2:0] $end
+$upscope $end
+$upscope $end
+$scope module tb $end
+$scope task t $end
+$var reg 4 ' tv [3:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+"#;
+    let directory = run_directory("dump-scopes");
+    let report = bench_in(&directory, SOURCE, false);
+    assert_eq!(dump_header(&written(&report, "work/scopes.vcd")), ICARUS);
+}
+
+const DUMPED_DESIGN: &str = r#"`timescale 1ns/1ns
+module leaf(input d, output q);
+  reg r;
+  assign q = ~d;
+  always @(d) r = d;
+endmodule
+module mid(input d, output q);
+  wire w;
+  leaf u1(.d(d), .q(w));
+  assign q = w;
+  generate if (1) begin : gi
+    reg [2:0] giv;
+    wire gq;
+    leaf u2(.d(w), .q(gq));
+    initial giv = 3'd5;
+  end endgenerate
+endmodule
+module tb;
+  reg d;
+  wire q;
+  integer k;
+  real x;
+  mid dut(.d(d), .q(q));
+  task t;
+    reg [3:0] tv;
+    tv = 4'd3;
+  endtask
+  function [1:0] f;
+    input [1:0] a;
+    f = a + 1;
+  endfunction
+  initial begin : blk
+    reg [2:0] bv;
+    bv = 1;
+    k = f(2'd1);
+    x = 0.5;
+    $dumpfile("work/DUMP.vcd");
+    CALLS
+    d = 0; #1 d = 1; bv = 2; #1 t; #1 $finish;
+  end
+endmodule
+"#;
+
+/// A whole-design dump lists each scope's nets, variables and integers and
+/// reals, then its functions, generate blocks, instances, named blocks and
+/// tasks, as Icarus Verilog does: every port, an instance inside a generate
+/// block, a named block's variable, and a function without its result.
+/// Icarus differs twice: it gives a real width 1, and lists `u2`'s ports in
+/// the order its runtime links them rather than by name.
+#[test]
+fn a_whole_design_dump_lists_every_scope_as_icarus_does() {
+    const EXPECTED: &str = r#"$scope module tb $end
+$var wire 1 ! q $end
+$var reg 1 " d $end
+$var integer 32 # k [31:0] $end
+$var real 64 $ x $end
+$scope function f $end
+$var reg 2 % a [1:0] $end
+$upscope $end
+$scope module dut $end
+$var wire 1 " d $end
+$var wire 1 ! q $end
+$var wire 1 & w $end
+$scope begin gi $end
+$var wire 1 ' gq $end
+$var reg 3 ( giv [2:0] $end
+$scope module u2 $end
+$var wire 1 & d $end
+$var wire 1 ' q $end
+$var reg 1 ) r $end
+$upscope $end
+$upscope $end
+$scope module u1 $end
+$var wire 1 " d $end
+$var wire 1 & q $end
+$var reg 1 * r $end
+$upscope $end
+$upscope $end
+$scope begin blk $end
+$var reg 3 + bv [2:0] $end
+$upscope $end
+$scope task t $end
+$var reg 4 , tv [3:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+"#;
+    let directory = run_directory("dump-whole");
+    let source = DUMPED_DESIGN
+        .replace("DUMP", "whole")
+        .replace("CALLS", "$dumpvars(0, tb);");
+    let report = bench_in(&directory, &source, false);
+    assert_eq!(dump_header(&written(&report, "work/whole.vcd")), EXPECTED);
+}
+
+/// A variable an earlier argument named is not listed again when its scope is
+/// dumped, and one whose scope or self an earlier argument dumped is skipped
+/// with a warning, as Icarus Verilog does it.
+#[test]
+fn a_dump_lists_a_named_variable_once() {
+    const ICARUS: &str = r#"$scope module tb $end
+$scope module dut $end
+$var wire 1 ! d $end
+$upscope $end
+$upscope $end
+$scope module tb $end
+$scope module dut $end
+$scope module u1 $end
+$var reg 1 " r $end
+$upscope $end
+$upscope $end
+$upscope $end
+$scope module tb $end
+$scope module dut $end
+$scope module u1 $end
+$var wire 1 ! d $end
+$var wire 1 # q $end
+$upscope $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+"#;
+    let directory = run_directory("dump-once");
+    let source = DUMPED_DESIGN.replace("DUMP", "once").replace(
+        "CALLS",
+        "$dumpvars(1, tb.dut.d, tb.dut.u1.r); $dumpvars(0, tb.dut.u1); $dumpvars(0, tb.dut.d);",
+    );
+    let report = bench_in(&directory, &source, false);
+    assert_eq!(dump_header(&written(&report, "work/once.vcd")), ICARUS);
+    let skipped = warnings(&report);
+    assert_eq!(skipped.len(), 1, "{skipped:?}");
+    assert!(skipped[0].contains("`tb.dut.d`"), "{skipped:?}");
+}
+
 /// A write that would leave the run directory fails as
 /// section 17.2.1 prescribes, with a located warning; the run may lift the
 /// confinement.

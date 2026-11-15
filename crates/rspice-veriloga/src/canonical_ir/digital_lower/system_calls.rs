@@ -59,11 +59,24 @@ pub(super) struct CallTables {
     /// The module instance each hierarchical scope argument names, by the
     /// referring module scope and the parser's symbol.
     pub scope_references: Arc<HashMap<(DigitalScopeId, SmolStr), DigitalScopeId>>,
+    /// The other scopes hierarchical scope arguments name, by full path:
+    /// generate blocks, named blocks, tasks and functions.
+    pub scope_paths: Arc<HashMap<(DigitalScopeId, SmolStr), SmolStr>>,
+    /// The joined ports hierarchical reference arguments name, as indices
+    /// into the plan's port aliases.
+    pub alias_references: Arc<HashMap<(DigitalScopeId, SmolStr), u32>>,
+    /// Every generate block's scope, by full path.
+    pub generate_scopes: Arc<HashMap<SmolStr, DigitalScopeId>>,
     /// The source's other top-level modules, which a scope argument may name
     /// by their names alone (`$printtimescale(othertop)`).
     pub top_levels: Arc<HashMap<SmolStr, crate::time_scale::ModuleTimeScale>>,
     /// The other top-level modules' scopes this process named first, by path.
     pub external_scopes: Vec<(SmolStr, DigitalScopeId)>,
+    /// Scope arguments that name a scope another process may open.
+    pub pending_scopes: Vec<PendingScope>,
+    /// The compiled root's path, and whether the design calls `$dumpvars`.
+    pub root: SmolStr,
+    pub dumps: bool,
     /// `disable` lowering: the names some `disable` targets, the disabled
     /// named blocks around the statement being lowered, and the routine
     /// being lowered.
@@ -81,7 +94,15 @@ pub(super) struct PlanCalls {
     pub overrides: Vec<super::super::digital::DigitalOverride>,
     pub module_scopes: Arc<HashMap<SmolStr, DigitalScopeId>>,
     pub scope_references: Arc<HashMap<(DigitalScopeId, SmolStr), DigitalScopeId>>,
+    pub scope_paths: Arc<HashMap<(DigitalScopeId, SmolStr), SmolStr>>,
+    pub alias_references: Arc<HashMap<(DigitalScopeId, SmolStr), u32>>,
+    pub generate_scopes: Arc<HashMap<SmolStr, DigitalScopeId>>,
     pub top_levels: Arc<HashMap<SmolStr, crate::time_scale::ModuleTimeScale>>,
+    /// Scope arguments resolved once every scope exists.
+    pub pending_scopes: Vec<PendingScope>,
+    /// Whether the design calls `$dumpvars`, so that a named block's
+    /// variables keep storage a dump can follow.
+    pub dumps: bool,
     /// The scopes that stand for other top-level modules' instances, which
     /// this plan names but does not hold.
     pub external_scopes: Vec<DigitalScopeId>,
@@ -123,6 +144,26 @@ impl PlanCalls {
         }
     }
 
+    /// A generate block's scope (IEEE 1364-2005 section 12.4) in `parent`.
+    pub fn add_generate_scope(
+        &mut self,
+        parent: DigitalScopeId,
+        path: SmolStr,
+        module: SmolStr,
+        time_scale: crate::time_scale::ModuleTimeScale,
+    ) {
+        let id = DigitalScopeId(self.scopes.len() as u32);
+        self.scopes.push(DigitalScope {
+            id,
+            parent: Some(parent),
+            path: path.clone(),
+            module,
+            kind: DigitalScopeKind::Generate,
+            time_scale,
+        });
+        Arc::make_mut(&mut self.generate_scopes).insert(path, id);
+    }
+
     /// The scope standing for an instance of another top-level module: the
     /// module itself when `path` is its name. Linking keeps its path.
     pub fn external_scope(
@@ -153,6 +194,15 @@ impl PlanCalls {
             stack: scope.cloned().into_iter().collect(),
             module_scopes: Arc::clone(&self.module_scopes),
             scope_references: Arc::clone(&self.scope_references),
+            scope_paths: Arc::clone(&self.scope_paths),
+            alias_references: Arc::clone(&self.alias_references),
+            generate_scopes: Arc::clone(&self.generate_scopes),
+            root: self
+                .scopes
+                .first()
+                .map(|scope| scope.path.clone())
+                .unwrap_or_default(),
+            dumps: self.dumps,
             top_levels: Arc::clone(&self.top_levels),
             threads: super::disable::ThreadTables::new(Arc::clone(&self.disabled)),
             ..Default::default()
@@ -172,6 +222,7 @@ impl PlanCalls {
             self.external_scopes.push(id);
         }
         self.sites.extend(tables.sites);
+        self.pending_scopes.extend(tables.pending_scopes);
         self.observers.extend(tables.observers);
         self.overrides.extend(tables.overrides);
         self.pending_disables
@@ -179,6 +230,44 @@ impl PlanCalls {
                 pending.owner = Some(owner);
                 pending
             }));
+    }
+}
+
+/// A scope argument naming a scope that may not exist yet where the call is
+/// lowered: argument `position` of call `site`, and the scope's full path.
+pub(super) struct PendingScope {
+    site: DigitalSystemCallId,
+    position: usize,
+    path: SmolStr,
+    span: Span,
+}
+
+/// Point each pending scope argument at its scope, which every process and
+/// routine has opened by now.
+pub(super) fn resolve_scopes(
+    sites: &mut [DigitalSystemCall],
+    scopes: &[DigitalScope],
+    pending: Vec<PendingScope>,
+    diagnostics: &mut Vec<DigitalLoweringDiagnostic>,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let mut by_path: HashMap<&str, DigitalScopeId> = HashMap::new();
+    for scope in scopes {
+        by_path.entry(scope.path.as_str()).or_insert(scope.id);
+    }
+    for pending in pending {
+        let argument = sites
+            .get_mut(pending.site.0 as usize)
+            .and_then(|site| site.arguments.get_mut(pending.position));
+        match (by_path.get(pending.path.as_str()), argument) {
+            (Some(&id), Some(argument)) => *argument = DigitalSystemArgument::Scope(id),
+            _ => diagnostics.push(DigitalLoweringDiagnostic::invariant(
+                format!("scope `{}` has no lowered scope", pending.path),
+                pending.span.into(),
+            )),
+        }
     }
 }
 
@@ -240,6 +329,27 @@ impl ProcessLowerer<'_> {
             time_scale: parent.time_scale,
         });
         Some(id)
+    }
+
+    /// Enter a generate block's scope, made before any process was lowered.
+    pub(super) fn enter_generate_scope(&mut self, name: &SmolStr) {
+        let Some(parent) = self.calls.stack.last().cloned() else {
+            return;
+        };
+        let path: SmolStr = format!("{}.{name}", parent.path).into();
+        match self.calls.generate_scopes.get(&path).copied() {
+            Some(id) => self.calls.stack.push(ScopeFrame {
+                id,
+                path,
+                module: parent.module,
+                cell: parent.cell,
+                name: name.clone(),
+                time_scale: parent.time_scale,
+            }),
+            None => {
+                self.enter_scope(name, DigitalScopeKind::Generate);
+            }
+        }
     }
 
     pub(super) fn leave_named_scope(&mut self) {
@@ -427,11 +537,13 @@ impl ProcessLowerer<'_> {
     }
 
     /// A reference argument: a signal, or a module instance or block scope.
+    /// It is argument `position` of call `site`.
     fn reference_argument(
         &mut self,
         argument: &Expression,
         scope: &ScopeFrame,
         call: &SystemFunction,
+        (site, position): (DigitalSystemCallId, usize),
     ) -> DigitalSystemArgument {
         let Expression::Identifier(identifier) = argument else {
             if !matches!(argument, Expression::NullArgument(_)) {
@@ -456,6 +568,30 @@ impl ProcessLowerer<'_> {
             // `$dumpvars(0, top.u1)`: resolved during elaboration.
             return DigitalSystemArgument::Scope(id);
         }
+        let dump =
+            DigitalSystemCallKind::from_name(&call.name) == Some(DigitalSystemCallKind::Dumpvars);
+        if dump && let Some(path) = self.calls.scope_paths.get(&named) {
+            // `$dumpvars(0, top.b)`: a generate block, named block, task or
+            // function (IEEE 1364-2005 section 18.1.2), whose scope the
+            // process that opens it makes.
+            self.calls.pending_scopes.push(PendingScope {
+                site,
+                position,
+                path: path.clone(),
+                span: identifier.span,
+            });
+            return DigitalSystemArgument::Scope(scope.id);
+        }
+        if dump && crate::ast::is_reference_symbol(&identifier.name) {
+            // Section 18.1.2 dumps such a variable under the scopes of its
+            // own path; a port joined to another scope's net keeps its own.
+            if let Some(&alias) = self.calls.alias_references.get(&named) {
+                return DigitalSystemArgument::Alias(alias);
+            }
+            if let Some(signal) = self.resolved_signal(&identifier.name) {
+                return DigitalSystemArgument::Signal(signal);
+            }
+        }
         if DigitalSystemCallKind::from_name(&call.name)
             == Some(DigitalSystemCallKind::PrintTimeScale)
             && crate::ast::is_reference_symbol(&identifier.name)
@@ -468,8 +604,6 @@ impl ProcessLowerer<'_> {
             return DigitalSystemArgument::Empty;
         }
         if crate::ast::is_reference_symbol(&identifier.name) {
-            // IEEE 1364-2005 section 18.1.2 dumps such a signal under the
-            // scopes of its own path, which the dump writer does not lay out.
             self.error(
                 format!(
                     "`{}` of a hierarchically named signal is not supported yet",
@@ -621,7 +755,8 @@ impl ProcessLowerer<'_> {
                     arguments.push(argument);
                 }
                 DigitalArgumentUse::Reference => {
-                    let argument = self.reference_argument(argument, &scope, call);
+                    let argument =
+                        self.reference_argument(argument, &scope, call, (site, arguments.len()));
                     arguments.push(argument);
                 }
                 DigitalArgumentUse::ArrayOutput => {

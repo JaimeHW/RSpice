@@ -657,6 +657,13 @@ impl CanonicalDigitalPlan {
                 ));
             }
         }
+        if self
+            .signal_aliases
+            .iter()
+            .any(|alias| self.signal(alias.signal).is_none())
+        {
+            return Err(error("a digital port alias names an undeclared signal"));
+        }
         let owners = self
             .processes
             .iter()
@@ -1717,6 +1724,13 @@ impl CanonicalDigitalPlan {
                     DigitalSystemArgument::Signal(signal) => {
                         if self.signal(*signal).is_none() {
                             return Err(error("digital system call names an undeclared signal"));
+                        }
+                    }
+                    DigitalSystemArgument::Alias(alias) => {
+                        if *alias as usize >= self.signal_aliases.len() {
+                            return Err(error(
+                                "digital system call names an undeclared port alias",
+                            ));
                         }
                     }
                     DigitalSystemArgument::RealTime { .. } => {

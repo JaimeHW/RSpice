@@ -84,6 +84,8 @@ impl<'a> ConnectionShapes<'a> {
             scopes: Vec::new(),
             static_scopes: HashMap::new(),
             static_local_count: 0,
+            block_path: Vec::new(),
+            named_locals: Vec::new(),
         };
         let shape = expressions::shape(&lowerer, expression);
         (!shape.real).then_some(shape.width)

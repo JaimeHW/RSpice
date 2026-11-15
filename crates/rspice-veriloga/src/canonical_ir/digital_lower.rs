@@ -546,6 +546,7 @@ fn lower_with_analog_variables(
         .map(|signal| signal.name.as_str())
         .collect();
     let mut real_aliases = Vec::new();
+    let mut signal_aliases = Vec::new();
     let mut frame_signal_ids = Vec::with_capacity(digital.instances.len());
     for instance in &digital.instances {
         let mut ids = vec![DigitalSignalId::new(0); instance.signals.len()];
@@ -604,6 +605,14 @@ fn lower_with_analog_variables(
                     id
                 }
             };
+            if !own {
+                // A port its connection joined to another scope's net, which
+                // still has its own name in the instance (section 12.3.10).
+                signal_aliases.push(super::digital::DigitalSignalAlias {
+                    signal: id,
+                    name: format!("{}.{}", instance.path, signal.declared.name).into(),
+                });
+            }
             ids[index] = id;
         }
         for (index, signal) in instance.signals.iter().enumerate() {
@@ -943,6 +952,21 @@ fn lower_with_analog_variables(
                 }),
         )),
         top_levels: std::sync::Arc::new(top_levels),
+        // A dump may list a named block's variables, which then keep storage.
+        dumps: std::iter::once((&digital.processes, &digital.routines))
+            .chain(
+                digital
+                    .instances
+                    .iter()
+                    .map(|instance| (&instance.processes, &instance.routines)),
+            )
+            .any(|(processes, routines)| {
+                processes
+                    .iter()
+                    .map(|process| &process.body)
+                    .chain(routines.iter().map(|routine| &routine.routine.body))
+                    .any(local_storage::calls_dumpvars)
+            }),
         ..PlanCalls::default()
     };
     // A library binding's root is known by its `library.cell` (`%l`).
@@ -958,26 +982,54 @@ fn lower_with_analog_variables(
         root_name.into(),
         digital.time_scale,
     );
+    // Each frame's generate blocks are scopes (section 12.4), made right after
+    // the frame's own so that an instance inside one finds it as its parent.
+    let add_generate_scopes = |calls: &mut PlanCalls, frame: &ScopeFrame, blocks: &[SmolStr]| {
+        for block in blocks {
+            let parent = block
+                .rsplit_once('.')
+                .and_then(|(above, _)| {
+                    calls
+                        .generate_scopes
+                        .get(format!("{}.{above}", frame.path).as_str())
+                        .copied()
+                })
+                .unwrap_or(frame.id);
+            calls.add_generate_scope(
+                parent,
+                format!("{}.{block}", frame.path).into(),
+                frame.module.clone(),
+                frame.time_scale,
+            );
+        }
+    };
+    add_generate_scopes(&mut calls, &root_scope, &digital.generate_blocks);
     let frame_scope_frames: Vec<ScopeFrame> = digital
         .instances
         .iter()
         .map(|instance| {
             let path: SmolStr = format!("{root_name}.{}", instance.path).into();
-            let parent = path
-                .rsplit_once('.')
-                .and_then(|(parent, _)| calls.module_scopes.get(parent).copied());
+            let parent = path.rsplit_once('.').and_then(|(parent, _)| {
+                calls
+                    .module_scopes
+                    .get(parent)
+                    .or_else(|| calls.generate_scopes.get(parent))
+                    .copied()
+            });
             let name = instance
                 .path
                 .rsplit_once('.')
                 .map_or(instance.path.clone(), |(_, name)| name.into());
-            calls.add_module_scope(
+            let frame = calls.add_module_scope(
                 parent,
                 path,
                 instance.module.clone(),
                 instance.cell.clone(),
                 name,
                 instance.time_scale,
-            )
+            );
+            add_generate_scopes(&mut calls, &frame, &instance.generate_blocks);
+            frame
         })
         .collect();
     calls.scope_references = std::sync::Arc::new(scope_references(
@@ -985,6 +1037,7 @@ fn lower_with_analog_variables(
         root_name,
         &root_scope,
         &frame_scope_frames,
+        &signal_aliases,
         &mut calls,
     ));
     // Tasks and functions, numbered per scope before any body is lowered so
@@ -1219,6 +1272,12 @@ fn lower_with_analog_variables(
         &mut plan_routines,
         &calls.scopes,
         std::mem::take(&mut calls.pending_disables),
+        &mut diagnostics,
+    );
+    system_calls::resolve_scopes(
+        &mut calls.sites,
+        &calls.scopes,
+        std::mem::take(&mut calls.pending_scopes),
         &mut diagnostics,
     );
     overrides::subscribe_routine_reads(
@@ -1551,6 +1610,7 @@ fn lower_with_analog_variables(
         arrays,
         bit_aliases,
         real_aliases,
+        signal_aliases,
         signals,
         processes,
         drivers,
@@ -1999,6 +2059,8 @@ fn lower_continuous_assign(
         scopes: Vec::new(),
         static_scopes: HashMap::new(),
         static_local_count: 0,
+        block_path: Vec::new(),
+        named_locals: Vec::new(),
     };
 
     let delay = match &assignment.assignment.delay {
@@ -2394,6 +2456,8 @@ fn lower_process(
         scopes: Vec::new(),
         static_scopes: HashMap::new(),
         static_local_count: 0,
+        block_path: Vec::new(),
+        named_locals: Vec::new(),
     };
 
     lowerer.process = Some(id);
@@ -2401,7 +2465,7 @@ fn lower_process(
     // written in is a scope, which `%m` names: `main.L[0].genblk1`.
     if let Some(path) = &process.generate_scope {
         for name in path.split('.') {
-            lowerer.enter_scope(&SmolStr::from(name), DigitalScopeKind::Block);
+            lowerer.enter_generate_scope(&SmolStr::from(name));
         }
     }
     let kind = match process.kind {
@@ -2738,6 +2802,12 @@ struct ProcessLowerer<'a> {
     static_scopes: HashMap<Span, Vec<DigitalLocalId>>,
     /// Compiler-generated loop counters follow these persistent declarations.
     static_local_count: usize,
+    /// The named blocks around the declarations being prepared, outermost
+    /// first.
+    block_path: Vec<SmolStr>,
+    /// The variables of named blocks a dump can list, by hierarchical name
+    /// below the compiled root (`blk.v`); empty unless the design dumps.
+    named_locals: Vec<(DigitalLocalId, SmolStr)>,
 }
 
 impl ProcessLowerer<'_> {
@@ -3100,15 +3170,54 @@ impl ProcessLowerer<'_> {
     /// Allocate and initialize static declarations before lowering control
     /// flow. Lexical visibility is restored separately when lowering each
     /// block; leaving that scope must not end the declaration's lifetime.
+    /// Name the variables declared from `first` on, in the named block
+    /// innermost in [`Self::block_path`], for a design that dumps: a dump
+    /// lists them (IEEE 1364-2005 section 18.1.2), so each keeps storage.
+    fn name_block_locals(&mut self, first: usize) {
+        if !self.calls.dumps {
+            return;
+        }
+        let frame = self
+            .calls
+            .stack
+            .last()
+            .map_or("", |frame| frame.path.as_str());
+        let mut base = frame
+            .strip_prefix(self.calls.root.as_str())
+            .map_or("", |rest| rest.trim_start_matches('.'))
+            .to_owned();
+        for block in &self.block_path {
+            if !base.is_empty() {
+                base.push('.');
+            }
+            base.push_str(block);
+        }
+        for id in first..self.locals.len() {
+            let local = &self.locals[id];
+            if let (Some(name), None) = (&local.name, &local.array) {
+                self.named_locals
+                    .push((DigitalLocalId::from(id), format!("{base}.{name}").into()));
+            }
+        }
+    }
+
     fn initialize_static_locals(&mut self, entry: BlockId, statement: &DigitalStatement) {
         match statement {
             DigitalStatement::Block(block) | DigitalStatement::Fork(block) => {
                 self.scopes.push(Vec::new());
+                self.block_path.extend(block.name.clone());
+                let first = self.locals.len();
                 self.declare_block_locals(entry, block);
+                if block.name.is_some() {
+                    self.name_block_locals(first);
+                }
                 let scope = self.scopes.last().cloned().unwrap_or_default();
                 self.static_scopes.insert(block.span, scope);
                 for child in &block.statements {
                     self.initialize_static_locals(entry, child);
+                }
+                if block.name.is_some() {
+                    self.block_path.pop();
                 }
                 self.scopes.pop();
             }
@@ -6620,12 +6729,15 @@ fn collect_expression_reads(expression: &Expression, reads: &mut BTreeSet<String
 
 /// The module instance scope each hierarchical scope argument of the root
 /// and its instance frames names. The paths are below the compiled root; an
-/// empty path names the root itself.
+/// empty path names the root itself. The other scopes such arguments name go
+/// to `calls.scope_paths` by full path, and the joined ports reference
+/// arguments name to `calls.alias_references`.
 fn scope_references(
     digital: &AnalyzedDigital,
     root_name: &str,
     root_scope: &ScopeFrame,
     frames: &[ScopeFrame],
+    aliases: &[super::digital::DigitalSignalAlias],
     calls: &mut PlanCalls,
 ) -> HashMap<(DigitalScopeId, SmolStr), DigitalScopeId> {
     let full = |root: &str, path: &str| -> SmolStr {
@@ -6636,10 +6748,18 @@ fn scope_references(
         }
     };
     let mut found = HashMap::new();
+    let mut paths = HashMap::new();
+    let mut joined = HashMap::new();
+    let alias_index: HashMap<&str, u32> = aliases
+        .iter()
+        .enumerate()
+        .map(|(index, alias)| (alias.name.as_str(), index as u32))
+        .collect();
     let frames = std::iter::once((
         root_scope,
         &digital.scope_references,
         &digital.top_level_references,
+        &digital.signal_references,
     ))
     .chain(
         frames
@@ -6650,13 +6770,30 @@ fn scope_references(
                     frame,
                     &instance.scope_references,
                     &instance.top_level_references,
+                    &instance.signal_references,
                 )
             }),
     );
-    for (frame, references, top_levels) in frames {
+    for (frame, references, top_levels, signals) in frames {
         for (symbol, reference) in references {
-            if let Some(&target) = calls.module_scopes.get(&full(root_name, &reference.path)) {
-                found.insert((frame.id, symbol.clone()), target);
+            let path = full(root_name, &reference.path);
+            match calls.module_scopes.get(&path) {
+                Some(&target) => {
+                    found.insert((frame.id, symbol.clone()), target);
+                }
+                None => {
+                    paths.insert((frame.id, symbol.clone()), path);
+                }
+            }
+        }
+        for (symbol, reference) in signals {
+            let name = if reference.path.is_empty() {
+                reference.name.to_string()
+            } else {
+                format!("{}.{}", reference.path, reference.name)
+            };
+            if let Some(&alias) = alias_index.get(name.as_str()) {
+                joined.insert((frame.id, symbol.clone()), alias);
             }
         }
         for (symbol, reference) in top_levels {
@@ -6667,6 +6804,8 @@ fn scope_references(
             }
         }
     }
+    calls.scope_paths = std::sync::Arc::new(paths);
+    calls.alias_references = std::sync::Arc::new(joined);
     found
 }
 

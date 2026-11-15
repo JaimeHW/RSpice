@@ -762,6 +762,7 @@ impl DigitalElaborator<'_> {
             signals,
             processes: child.digital.processes.clone(),
             routines: child.digital.routines.clone(),
+            generate_blocks: child.digital.generate_blocks.clone(),
             routine_names: child.digital.routine_names.clone(),
             signal_references: child
                 .digital

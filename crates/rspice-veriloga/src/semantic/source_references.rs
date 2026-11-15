@@ -345,6 +345,20 @@ impl Resolver {
                     name: terminal.name.clone(),
                     index: None,
                 };
+                // A scope named whole, as a scope argument names one
+                // (`$dumpvars(1, top.b)`, IEEE 1364-2005 section 18.1.2): no
+                // module instance, so the call that takes it decides what
+                // it may be. It is recorded by its path.
+                let generate = match &terminal.index {
+                    None => Some(block.clone()),
+                    Some(index) => {
+                        self.constant_index(owner, index)
+                            .map(|index| HierarchicalScopeKey {
+                                name: terminal.name.clone(),
+                                index: Some(index),
+                            })
+                    }
+                };
                 let name = match self.terminal(target, &scope, &reference) {
                     Ok(name) => name,
                     Err(_)
@@ -354,15 +368,46 @@ impl Resolver {
                                 Some(local::LocalScope::Block { .. })
                             ) =>
                     {
-                        // A named block named whole, as a scope argument names
-                        // one (`$dumpvars(1, top.b)`): no module instance, so
-                        // the call that takes it decides what it may be.
+                        let path = self.scope_path(owner, target, &scope, &block);
+                        self.named_scope(owner, symbol, path);
+                        self.active.remove(&key);
+                        self.resolved.insert(key);
+                        return Ok(());
+                    }
+                    Err(_)
+                        if generate.as_ref().is_some_and(|generate| {
+                            self.frames[target].source.hierarchical_scopes.contains_key(
+                                &[scope.as_slice(), std::slice::from_ref(generate)].concat(),
+                            )
+                        }) =>
+                    {
+                        // A generate block (section 12.4).
+                        let generate = generate.expect("a generate block");
+                        let path = self.scope_path(owner, target, &scope, &generate);
+                        self.named_scope(owner, symbol, path);
                         self.active.remove(&key);
                         self.resolved.insert(key);
                         return Ok(());
                     }
                     Err(error) => return Err(error),
                 };
+                if terminal.index.is_none()
+                    && self.frames[target]
+                        .source
+                        .digital_routines
+                        .iter()
+                        .any(|routine| routine.name == name)
+                {
+                    // A task or function, which a call enables and a scope
+                    // argument names; a generate block's is named with its
+                    // scope already.
+                    let routine = HierarchicalScopeKey {
+                        name: name.clone(),
+                        index: None,
+                    };
+                    let path = self.scope_path(owner, target, &[], &routine);
+                    self.named_scope(owner, symbol, path);
+                }
                 if let Some(&ordinal) = self.frames[target].instances.get(&name)
                     && terminal.index.is_none()
                 {
@@ -394,6 +439,44 @@ impl Resolver {
         self.active.remove(&key);
         self.resolved.insert(key);
         Ok(())
+    }
+
+    /// The path of scope `last` below generate scope `scope` of `target`,
+    /// as `owner`'s scope references are recorded.
+    fn scope_path(
+        &self,
+        owner: usize,
+        target: usize,
+        scope: &[HierarchicalScopeKey],
+        last: &HierarchicalScopeKey,
+    ) -> SmolStr {
+        let mut path = self.reference_path(owner, target).to_string();
+        for key in scope.iter().chain([last]) {
+            if !path.is_empty() {
+                path.push('.');
+            }
+            path.push_str(&key.name);
+            if let Some(index) = key.index {
+                path.push_str(&format!("[{index}]"));
+            }
+        }
+        path.into()
+    }
+
+    /// Record that `owner`'s `symbol` names the scope at `path`.
+    fn named_scope(&mut self, owner: usize, symbol: &SmolStr, path: SmolStr) {
+        self.frames[owner]
+            .source
+            .foreign_scopes
+            .insert(symbol.clone(), path);
+    }
+
+    /// A generate block's index as `owner` writes it, a constant expression
+    /// there (IEEE 1364-2005 section 12.5).
+    fn constant_index(&self, owner: usize, index: &Expression) -> Option<i64> {
+        let source = &self.frames[owner].source;
+        let constants = DigitalConstants::from_module(source);
+        super::node_vectors::integer(index, &constants, source.time_scale).ok()
     }
 
     fn fresh_import(&mut self, owner: usize) -> SmolStr {
