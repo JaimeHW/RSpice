@@ -378,7 +378,8 @@ impl RSpiceApp {
                 automation_runtime_project_id,
             },
             cloud: crate::workbench::live_session::CloudHandles {
-                account: crate::services::cloud_account::CloudAccountService::unconfigured(),
+                account:
+                    rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),
                 live_session: crate::workbench::live_session::LiveSessionEngine::default(),
             },
             // A test opens no real pack store: doing so would make every test
@@ -547,7 +548,7 @@ impl RSpiceApp {
                 automation_runtime_project_id,
             },
             cloud: crate::workbench::live_session::CloudHandles {
-                account: crate::services::cloud_account::CloudAccountService::new(Some(
+                account: rspice_app_cloud::services::cloud_account::CloudAccountService::new(Some(
                     cc.egui_ctx.clone(),
                 )),
                 live_session: crate::workbench::live_session::LiveSessionEngine::default(),
@@ -558,7 +559,7 @@ impl RSpiceApp {
             // fetches through the cloud's transports, the only network a
             // running application has.
             model_hub: crate::services::model_hub::ModelHubService::open(
-                &crate::services::cloud_account::model_hub_transport::CloudModelHubTransportProvider,
+                &rspice_app_cloud::services::cloud_account::model_hub_transport::CloudModelHubTransportProvider,
             ),
             file_workflow_io: Box::new(
                 crate::io::NativeFileWorkflowIo,

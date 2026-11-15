@@ -2,12 +2,12 @@
 //! what an imported model discloses, the dialog the command opens, and a
 //! failure said once its dialog has closed.
 
-use crate::services::cloud_account::{
-    CLOUD_PUBLISHING_FEATURE, CloudAccountAvailability, PublishState,
-};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::feature::PublicationDraft;
+use rspice_app_cloud::services::cloud_account::{
+    CLOUD_PUBLISHING_FEATURE, CloudAccountAvailability, PublishState,
+};
 use rspice_app_cloud::workbench::app::dialogs::publish_web::*;
 
 /// What a review build reads, lent from the whole state.
@@ -56,11 +56,11 @@ fn retained_import_disclosure_only_applies_when_the_netlist_is_included() {
 /// credits the signed-in account.
 #[test]
 fn publish_to_web_opens_its_dialog_over_a_review_build_of_the_project() {
-    use crate::services::cloud_account::{
+    use crate::workbench::cloud::commands::CloudCommand;
+    use rspice_app_cloud::services::cloud_account::{
         CloudAccountService, CloudSessionPhase, CloudSessionSnapshot, EntitlementSummary,
         PrincipalSummary,
     };
-    use crate::workbench::cloud::commands::CloudCommand;
 
     let mut app = RSpiceApp::test_instance();
     app.cloud.account = CloudAccountService::with_snapshot(
@@ -93,8 +93,8 @@ fn publish_to_web_opens_its_dialog_over_a_review_build_of_the_project() {
 /// the open dialog already showed is not said again.
 #[test]
 fn a_publish_that_fails_after_its_dialog_closed_is_reported_once() {
-    use crate::services::cloud_account::{CloudAccountService, CloudSessionSnapshot};
     use crate::ui::widgets::ToastKind;
+    use rspice_app_cloud::services::cloud_account::{CloudAccountService, CloudSessionSnapshot};
 
     let failed = |message: &str| {
         CloudAccountService::with_snapshot(

@@ -348,7 +348,7 @@ fn test_app() -> RSpiceApp {
             automation_runtime_project_id,
         },
         cloud: crate::workbench::live_session::CloudHandles {
-            account: crate::services::cloud_account::CloudAccountService::unconfigured(),
+            account: rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),
             live_session: crate::workbench::live_session::LiveSessionEngine::default(),
         },
         model_hub: crate::services::model_hub::ModelHubService::unavailable(

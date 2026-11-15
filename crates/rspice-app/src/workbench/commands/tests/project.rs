@@ -365,7 +365,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
     app.state.workbench.workspace = Workspace::Project;
     assert_eq!(
         app.cloud.account.availability(),
-        crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild
+        rspice_app_cloud::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild
     );
     assert!(!app.command_key_enabled(publish.key()));
     assert_eq!(

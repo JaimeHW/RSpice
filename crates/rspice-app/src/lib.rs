@@ -102,7 +102,6 @@ pub(crate) mod services {
     //! Backend services for the RSpice UI application.
     //! Contains specialized processing and analysis utilities.
 
-    pub(crate) use rspice_app_cloud::services::cloud_account;
     #[cfg(test)]
     mod drc_tests;
     pub(crate) use rspice_app_cloud::services::license;

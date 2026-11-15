@@ -1654,7 +1654,7 @@ fn a_build_without_cloud_endpoints_leaves_out_live_session_and_publish() {
     let app = title_test_app();
     assert_eq!(
         app.cloud.account.availability(),
-        crate::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild,
+        rspice_app_cloud::services::cloud_account::CloudAccountAvailability::UnconfiguredBuild,
         "the test build pins no cloud endpoints"
     );
     for command in [CloudCommand::LiveSession, CloudCommand::PublishToWeb] {

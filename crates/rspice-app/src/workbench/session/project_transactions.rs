@@ -1440,9 +1440,9 @@ pub(crate) fn start_local_safe_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::cloud_account::CloudAccountService;
     use crate::workbench::framework::requests::LiveMirrorEntry;
     use crate::workbench::live_session::LiveSessionEngine;
+    use rspice_app_cloud::services::cloud_account::CloudAccountService;
 
     /// A close-to-mirror transaction that outlives its session leaves the
     /// reader where every project close does: on the no-project landing.

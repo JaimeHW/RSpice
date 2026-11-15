@@ -2,14 +2,14 @@
 //! and closes back from, the actions it offers, and what a signed-in
 //! console paints.
 
-use crate::services::cloud_account::{
-    CloudAccountAvailability, CloudSessionPhase, CloudSessionSnapshot, EntitlementSummary,
-    LeaseSummary, NativeLicenseSummary, PrincipalSummary,
-};
 use crate::services::license::LicenseInfo;
 use crate::workbench::account_organization::*;
 use crate::workbench::{
     AppState, BrowserHistoryEffect, RSpiceApp, RouteTransitionSource, SurfaceId, SurfaceRoute,
+};
+use rspice_app_cloud::services::cloud_account::{
+    CloudAccountAvailability, CloudSessionPhase, CloudSessionSnapshot, EntitlementSummary,
+    LeaseSummary, NativeLicenseSummary, PrincipalSummary,
 };
 
 /// The console's parts in `app`.
@@ -239,10 +239,11 @@ fn signed_in_app() -> RSpiceApp {
 #[cfg(not(target_arch = "wasm32"))]
 fn signed_in_app_with(snapshot: CloudSessionSnapshot) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.cloud.account = crate::services::cloud_account::CloudAccountService::with_snapshot(
-        CloudAccountAvailability::Native,
-        snapshot,
-    );
+    app.cloud.account =
+        rspice_app_cloud::services::cloud_account::CloudAccountService::with_snapshot(
+            CloudAccountAvailability::Native,
+            snapshot,
+        );
     app.state.cloud.license = Some(sample_license());
     app.state
         .workbench
