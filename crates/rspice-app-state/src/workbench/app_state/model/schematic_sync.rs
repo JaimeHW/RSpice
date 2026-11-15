@@ -9,8 +9,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{CellViewRef, View, ViewType};
 use crate::workbench::app_state::design_history::DesignManagementHistoryEntry;
 use rspice_design::symbol::generated::{
-    GENERATED_PORTS_KEY, GENERATED_SYMBOL_VIEW, decode_ports, is_generated_symbol,
-    store_generated_symbol,
+    GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
 };
 use rspice_ui_kit::accessibility::counted;
 use std::collections::BTreeMap;
@@ -229,10 +228,14 @@ impl Model {
     }
 
     /// Keep the active cell's generated "symbol" view in step with its
-    /// schematic interface — created when ports exist, refreshed when they
-    /// change, removed when the last port goes. A hand-authored symbol
-    /// view (no `generated` marker) is never touched: the user owns it, and
-    /// neither is anything in a read-only library.
+    /// schematic interface — created when ports exist and refreshed when they
+    /// change. A hand-authored symbol view (no `generated` marker) is never
+    /// touched: the user owns it, and neither is anything in a read-only
+    /// library.
+    ///
+    /// No view goes by itself. When the last port goes the symbol stays as it
+    /// was drawn: its pins are then the ones the pin checks report as not in
+    /// the schematic, and a port that comes back is drawn into it again.
     fn sync_generated_symbol_view(&mut self) {
         let reference = self.workspace.content.active_view.clone();
         if !reference.view.eq_ignore_ascii_case("schematic") {
@@ -251,22 +254,6 @@ impl Model {
         let ports = self.schematic.interface_ports();
 
         if ports.is_empty() {
-            // Only a symbol that had ports goes with the last of them. One
-            // made while the schematic had none, as Create symbol makes on a
-            // new cell, already stands for the empty interface and stays.
-            let had_ports = existing_symbol.as_ref().is_some_and(|view| {
-                is_generated_symbol(view)
-                    && view
-                        .metadata
-                        .get(GENERATED_PORTS_KEY)
-                        .is_some_and(|recorded| !decode_ports(recorded).is_empty())
-            });
-            if !had_ports {
-                return;
-            }
-            if let Some(mut library) = self.library_manager.edit_library(&reference.library) {
-                library.remove_view(&reference.cell, GENERATED_SYMBOL_VIEW);
-            }
             return;
         }
 
