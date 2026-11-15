@@ -17,6 +17,7 @@ use crate::workbench::app::actions::hierarchy_net_highlight::NetCarry;
 use crate::workbench::app_state::Model;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use rspice_app_runs::workbench::slots::runs::RunsState;
+use rspice_app_workbench::workbench::chrome::document_bar::record_active_document;
 use rspice_design::drc::DrcSeverity;
 use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 
@@ -54,9 +55,7 @@ impl NavigationParts<'_> {
         }
         sync_active_schematic(self.model, self.wb);
         if self.model.workspace.content.active_view == reference {
-            self.wb
-                .documents
-                .activate(WorkspaceDocumentId::CellView(reference));
+            record_active_document(self.wb, &WorkspaceDocumentId::CellView(reference));
             return;
         }
         let Some(view_type) = self.model.cell_view_type(&reference) else {
@@ -68,9 +67,10 @@ impl NavigationParts<'_> {
         self.model
             .workspace
             .activate_view(reference.clone(), view_type);
-        self.wb
-            .documents
-            .activate(WorkspaceDocumentId::CellView(reference.clone()));
+        // The tab strip shows the view in front as the window's active
+        // document, whichever way it was opened, so its tab is the one
+        // marked and every other tab still opens its own view.
+        record_active_document(self.wb, &WorkspaceDocumentId::CellView(reference.clone()));
         self.model.library_manager.select_view(
             &reference.library,
             &reference.cell,
