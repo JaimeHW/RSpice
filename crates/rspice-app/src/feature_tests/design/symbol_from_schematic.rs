@@ -453,6 +453,7 @@ fn the_pin_check_names_each_port_change_and_update_pins_answers_it() {
         &inputs.interface,
         None,
         &symbol,
+        replay.app.state.model.symbol_contract_source(&symbol),
     )
     .violations()
     .iter()
