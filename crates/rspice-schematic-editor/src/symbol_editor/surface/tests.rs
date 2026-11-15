@@ -67,14 +67,19 @@ fn generation_button_returns_its_source_only_when_enabled() {
     }];
     for enabled in [false, true] {
         let mut request = None;
-        click_label("Generate from schematic", |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                if let Some(emitted) =
-                    empty_generate_state(ui, &source, &ports, enabled, "schematic")
-                {
-                    request = Some(emitted);
-                }
-            });
+        click_label("Generate from schematic", |ui| {
+            let canvas = ui.max_rect();
+            if let Some(emitted) = generate_overlay(
+                ui.ctx(),
+                canvas,
+                &source,
+                &ports,
+                enabled,
+                "schematic",
+                true,
+            ) {
+                request = Some(emitted);
+            }
         });
         assert_eq!(request.is_some(), enabled);
         if let Some(request) = request {
@@ -82,6 +87,85 @@ fn generation_button_returns_its_source_only_when_enabled() {
             assert_eq!(request.action, SymbolSurfaceAction::GenerateFromSchematic);
         }
     }
+}
+
+/// The way to a first drawing lies on the canvas and takes none of its
+/// room, so the canvas stands where it stood whether the card is up or not.
+/// Once the symbol has a drawing the card fades and takes no input, so the
+/// press that drew the first shape lands on the canvas, not on it. It was a
+/// band above the canvas: the first shape took the band away and the canvas
+/// jumped up by its height.
+#[test]
+fn the_generate_overlay_takes_no_room_and_fades_without_input() {
+    let source = SymbolRequestSource {
+        project: rspice_vocabulary::product::ProjectId::new(),
+        document: CellViewRef::new("work", "amp", "symbol"),
+        occurrence: None,
+        design_epoch: 0,
+        document_epoch: 0,
+        library_revision: 0,
+        window: 1,
+    };
+    let ports = [PortSpec {
+        name: "IN".to_owned(),
+        direction: rspice_design_model::port::PortDirection::In,
+    }];
+    let ctx = egui::Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    let frame = |shown: bool, time: f64, events: Vec<egui::Event>| {
+        let mut canvas = Rect::NOTHING;
+        let mut request = None;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1000.0, 750.0))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click());
+                canvas = rect;
+                request =
+                    generate_overlay(ui.ctx(), rect, &source, &ports, true, "schematic", shown);
+            },
+        );
+        let button = output
+            .shapes
+            .iter()
+            .find_map(|shape| text_rect(&shape.shape, "Generate from schematic"));
+        (canvas, button, request)
+    };
+    // An area sizes itself unseen on its first frame.
+    frame(true, 0.0, Vec::new());
+    let (with_card, button, _) = frame(true, 0.02, Vec::new());
+    let button = button.expect("the card is painted while the symbol has no drawing");
+    assert!(
+        with_card.contains_rect(button),
+        "the card lies on the canvas: {button:?} in {with_card:?}"
+    );
+    let press = |pressed| egui::Event::PointerButton {
+        pos: button.center(),
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    // The first shape is drawn: the card starts to fade from this frame.
+    let (fading, still_painted, request) = frame(
+        false,
+        0.05,
+        vec![egui::Event::PointerMoved(button.center()), press(true)],
+    );
+    assert_eq!(fading, with_card, "the canvas stands where it stood");
+    assert!(
+        still_painted.is_some(),
+        "the card fades rather than vanishing"
+    );
+    assert!(request.is_none());
+    let (_, _, request) = frame(false, 0.1, vec![press(false)]);
+    assert!(request.is_none(), "a fading card takes no click");
+    let (gone, painted, _) = frame(false, 1.0, Vec::new());
+    assert_eq!(gone, with_card);
+    assert!(painted.is_none(), "the card has faded: {painted:?}");
 }
 
 /// A symbol that matches, or that defines the interface itself, has nothing

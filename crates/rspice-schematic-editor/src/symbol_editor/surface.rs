@@ -227,47 +227,84 @@ pub fn read_only_banner(
     requested
 }
 
-pub fn empty_generate_state(
-    ui: &mut Ui,
+/// How long the way to a first drawing takes to fade once the symbol has one.
+const GENERATE_OVERLAY_FADE_SECONDS: f32 = 0.25;
+
+/// Room between the canvas's top edge and the way to a first drawing.
+const GENERATE_OVERLAY_INSET: f32 = 24.0;
+
+/// The way to a first drawing, while the symbol has none: a card lying on
+/// the canvas `canvas`, near its top, that offers to generate the symbol
+/// from `contract_source`.
+///
+/// It is an overlay rather than a band laid out above the canvas, so it
+/// takes no room from it: when `shown` turns false, because a shape was
+/// drawn or a pin placed, the card fades where it stands and neither the
+/// canvas nor its view of the symbol moves. While it fades it takes no
+/// input, so the press that drew the first shape is never caught by it.
+pub fn generate_overlay(
+    ctx: &egui::Context,
+    canvas: Rect,
     source: &SymbolRequestSource,
     ports: &[PortSpec],
     can_generate: bool,
     contract_source: &str,
+    shown: bool,
 ) -> Option<SymbolSurfaceRequest> {
-    let t = Tokens::get(ui.ctx());
+    let id = egui::Id::new(("symbol-editor.generate-overlay", &source.document));
+    let opacity = ctx.animate_bool_with_time(id, shown, GENERATE_OVERLAY_FADE_SECONDS);
+    if opacity <= 0.0 {
+        return None;
+    }
+    let t = Tokens::get(ctx);
     let c = t.color;
     let mut requested = None;
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), 96.0),
-        egui::Layout::top_down(egui::Align::Center),
-        |ui| {
-            ui.add_space(14.0);
-            ui.label(
-                egui::RichText::new("No symbol drawn yet")
-                    .font(theme::sans(tokens::FS_3, FontWeight::Medium))
-                    .color(c.text),
-            );
-            ui.label(
-                egui::RichText::new(format!(
-                    "Generate from {contract_source} draws a body with all {} ports placed.",
-                    ports.len()
-                ))
-                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                .color(c.text_faint),
-            );
-            ui.add_space(8.0);
-            if Button::new(&format!("Generate from {contract_source}"))
-                .enabled(can_generate)
-                .show(ui)
-                .clicked()
-            {
-                requested = Some(SymbolSurfaceRequest {
-                    source: source.clone(),
-                    action: SymbolSurfaceAction::GenerateFromSchematic,
+    egui::Area::new(id)
+        .order(egui::Order::Middle)
+        .pivot(Align2::CENTER_TOP)
+        .fixed_pos(canvas.center_top() + vec2(0.0, GENERATE_OVERLAY_INSET))
+        .constrain_to(canvas)
+        .interactable(shown)
+        .show(ctx, |ui| {
+            ui.set_opacity(opacity);
+            egui::Frame::new()
+                .fill(c.bg_panel)
+                .stroke(Stroke::new(1.0, c.border))
+                .corner_radius(t.radius_lg)
+                .inner_margin(egui::Margin::symmetric(18, 14))
+                .shadow(t.shadow())
+                .show(ui, |ui| {
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new("No symbol drawn yet")
+                                .font(theme::sans(tokens::FS_3, FontWeight::Medium))
+                                .color(c.text),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Generate from {contract_source} draws a body with all {} ports placed.",
+                                ports.len()
+                            ))
+                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                            .color(c.text_faint),
+                        );
+                        ui.add_space(8.0);
+                        if Button::new(&format!("Generate from {contract_source}"))
+                            .enabled(can_generate && shown)
+                            .show(ui)
+                            .clicked()
+                        {
+                            requested = Some(SymbolSurfaceRequest {
+                                source: source.clone(),
+                                action: SymbolSurfaceAction::GenerateFromSchematic,
+                            });
+                        }
+                    });
                 });
-            }
-        },
-    );
+        });
+    if opacity < 1.0 {
+        ctx.request_repaint();
+    }
     requested
 }
 

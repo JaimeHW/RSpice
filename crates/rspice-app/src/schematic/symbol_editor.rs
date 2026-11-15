@@ -84,26 +84,6 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
     {
         apply_surface_request(canvas, request);
     }
-    if document.body.is_empty()
-        && !ports.is_empty()
-        && let Some(request) = surface::empty_generate_state(
-            ui,
-            &source,
-            &ports,
-            !canvas.model.active_view_read_only(),
-            canvas
-                .model
-                .symbol_contract_source(&canvas.model.workspace.content.active_view),
-        )
-    {
-        if !apply_surface_request(canvas, request) {
-            return;
-        }
-        document = canvas
-            .model
-            .load_active_symbol_document()
-            .unwrap_or_else(|_| SymbolDocument::generated_from_ports(&ports));
-    }
 
     interaction::bind_active_canvas(&mut canvas.parts());
     // The stage is full-bleed: tools live in the workspace toolbar, the pin
@@ -214,6 +194,24 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
         interface_source,
         stage,
     );
+    // The way to a first drawing lies on the canvas until a shape is drawn
+    // or a pin placed, then fades where it stands: it takes no room the
+    // canvas would get back, so the drawing never jumps.
+    let undrawn =
+        document.body.is_empty() && document.pins.iter().all(|pin| pin.position.is_none());
+    if !ports.is_empty()
+        && let Some(request) = surface::generate_overlay(
+            ui.ctx(),
+            viewport.rect,
+            &source,
+            &ports,
+            !canvas.model.active_view_read_only(),
+            canvas.model.symbol_contract_source(reference),
+            undrawn,
+        )
+    {
+        apply_surface_request(canvas, request);
+    }
     // After the canvas has taken the keyboard for the click that opened it.
     interaction::show_text_entry(ui.ctx(), &mut canvas.parts(), viewport);
     interaction::show_pin_name_entry(ui.ctx(), &mut canvas.parts(), viewport, &document);
