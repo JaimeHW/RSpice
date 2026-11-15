@@ -2184,35 +2184,68 @@ impl CircuitData {
         self.stamp_behavioral_sources(matrix, rhs, solution, time)?;
         #[cfg(feature = "veriloga-builtins-base")]
         {
-            let generated_analysis = match _analysis {
-                crate::xspice::AnalysisType::Ac => {
-                    crate::device::veriloga_builtins::GeneratedAnalysisKind::Ac
-                }
-                crate::xspice::AnalysisType::Transient => {
-                    crate::device::veriloga_builtins::GeneratedAnalysisKind::Tran
-                }
-                crate::xspice::AnalysisType::Noise => {
-                    crate::device::veriloga_builtins::GeneratedAnalysisKind::Noise
-                }
-                _ => crate::device::veriloga_builtins::GeneratedAnalysisKind::Dc,
-            };
             let num_nodes = self.num_nodes;
-            let simparams = self.generated_simulation_parameters;
+            let request = self.generated_evaluation_request(_analysis, _evaluation_mode);
             self.generated_veriloga_devices_mut()
-                .stamp_all_with_mode(
-                    matrix,
-                    rhs,
-                    solution,
-                    num_nodes,
-                    crate::device::veriloga_builtins::GeneratedEvaluationRequest {
-                        analysis: generated_analysis,
-                        simparams,
-                        evaluation_mode: _evaluation_mode,
-                    },
-                )
+                .stamp_all_with_mode(matrix, rhs, solution, num_nodes, request)
                 .map_err(generated_veriloga_stamp_error)?;
         }
         Ok(())
+    }
+
+    /// Stamp the generated Verilog-A instances in correction form, as
+    /// [`Self::stamp_behavioral_with_generated_mode`] stamps them in companion
+    /// form: `correction` already holds the Newton correction `b - A*x` of the
+    /// rest of the system, each instance adds its physical residual `-F(x)`
+    /// to it, and its Jacobian reaches `matrix` only now. A module's large
+    /// conductance across nearly equal voltages, VBIC's 1 mOhm parasitic
+    /// base floor among them, then carries its small current as the model
+    /// computed it, where its companion `J*x - I` would leave the rounding of
+    /// `J*x` in the residual.
+    pub(crate) fn stamp_generated_veriloga_physical(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        correction: &mut [Value],
+        solution: &[Value],
+        _analysis: crate::xspice::AnalysisType,
+        _evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
+    ) -> Result<(), StampError> {
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            let num_nodes = self.num_nodes;
+            let request = self.generated_evaluation_request(_analysis, _evaluation_mode);
+            self.generated_veriloga_devices_mut()
+                .stamp_all_physical_with_mode(matrix, correction, solution, num_nodes, request)
+                .map_err(generated_veriloga_stamp_error)?;
+        }
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let _ = (matrix, correction, solution);
+        Ok(())
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    fn generated_evaluation_request(
+        &self,
+        analysis: crate::xspice::AnalysisType,
+        evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
+    ) -> crate::device::veriloga_builtins::GeneratedEvaluationRequest {
+        let analysis = match analysis {
+            crate::xspice::AnalysisType::Ac => {
+                crate::device::veriloga_builtins::GeneratedAnalysisKind::Ac
+            }
+            crate::xspice::AnalysisType::Transient => {
+                crate::device::veriloga_builtins::GeneratedAnalysisKind::Tran
+            }
+            crate::xspice::AnalysisType::Noise => {
+                crate::device::veriloga_builtins::GeneratedAnalysisKind::Noise
+            }
+            _ => crate::device::veriloga_builtins::GeneratedAnalysisKind::Dc,
+        };
+        crate::device::veriloga_builtins::GeneratedEvaluationRequest {
+            analysis,
+            simparams: self.generated_simulation_parameters,
+            evaluation_mode,
+        }
     }
 
     /// Check if all nonlinear devices have converged

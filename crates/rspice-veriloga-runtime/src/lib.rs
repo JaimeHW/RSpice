@@ -1919,6 +1919,12 @@ pub struct GeneratedStamper<'a> {
     /// an unknown the solver handed back as well as from the device's own
     /// arithmetic.
     saw_non_finite_rhs: bool,
+    /// The right-hand side receives the device's physical residual rather
+    /// than its companion; see [`Self::with_physical_rhs`].
+    physical_rhs: bool,
+    /// The iterate a physical right-hand side is formed at, when the model is
+    /// evaluated at another point.
+    physical_iterate: Option<&'a [Value]>,
 }
 
 impl<'a> GeneratedStamper<'a> {
@@ -1960,7 +1966,30 @@ impl<'a> GeneratedStamper<'a> {
             voltages,
             saw_non_finite_matrix: false,
             saw_non_finite_rhs: false,
+            physical_rhs: false,
+            physical_iterate: None,
         }
+    }
+
+    /// Write the device's physical residual to the right-hand side instead
+    /// of its companion: each contribution adds its own value where the
+    /// companion adds `value - J*x`, and a branch's linear incidence adds the
+    /// branch current and voltage it imposes. The right-hand side is then the
+    /// device's share of the Newton correction `-F(x)`, while the matrix
+    /// still receives the Jacobian. A large conductance across nearly equal
+    /// voltages carries its small current exactly, rather than as the
+    /// rounding left by `J*x`; the caller forms the rest of the correction
+    /// before this device's Jacobian reaches the matrix.
+    ///
+    /// `iterate` is the point the correction is formed at when the model is
+    /// evaluated at another one (an `OFF` instance's cut-off anchor). Each
+    /// contribution is then carried along its tangent from the evaluation
+    /// point to the iterate.
+    #[inline]
+    pub fn with_physical_rhs(mut self, iterate: Option<&'a [Value]>) -> Self {
+        self.physical_rhs = true;
+        self.physical_iterate = iterate;
+        self
     }
 
     /// Construct a static stamper that also observes exact device-local
@@ -1987,6 +2016,8 @@ impl<'a> GeneratedStamper<'a> {
             voltages,
             saw_non_finite_matrix: false,
             saw_non_finite_rhs: false,
+            physical_rhs: false,
+            physical_iterate: None,
         }
     }
 
@@ -2004,6 +2035,8 @@ impl<'a> GeneratedStamper<'a> {
             voltages,
             saw_non_finite_matrix: false,
             saw_non_finite_rhs: false,
+            physical_rhs: false,
+            physical_iterate: None,
         }
     }
 
@@ -2028,6 +2061,7 @@ impl<'a> GeneratedStamper<'a> {
         }
 
         let needs_rhs = self.rhs.is_some();
+        let offsets_rhs = needs_rhs && self.rhs_reads_linearization_point();
         let mut equivalent = value;
         let width = cache.axis_count();
         let slots_ready = width != 0 && cache.slots.len() == width * width;
@@ -2043,8 +2077,8 @@ impl<'a> GeneratedStamper<'a> {
             let Some(col_axis) = cache.node_axis(node) else {
                 continue;
             };
-            if needs_rhs {
-                equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+            if offsets_rhs {
+                equivalent -= derivative * self.rhs_linearization_value_cached(cache, col_axis);
             }
             self.add_current_derivative_axis_pair_cached(
                 cache,
@@ -2068,8 +2102,8 @@ impl<'a> GeneratedStamper<'a> {
             let Some(col_axis) = cache.branch_axis(branch) else {
                 continue;
             };
-            if needs_rhs {
-                equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+            if offsets_rhs {
+                equivalent -= derivative * self.rhs_linearization_value_cached(cache, col_axis);
             }
             self.add_current_derivative_axis_pair_cached(
                 cache,
@@ -2121,11 +2155,19 @@ impl<'a> GeneratedStamper<'a> {
         let Some(branch_axis) = self.branch_axis_local(branch_index) else {
             return;
         };
-        if let Some(pos_axis) = pos.and_then(|node| self.node_axis_local(node)) {
+        let pos_axis = pos.and_then(|node| self.node_axis_local(node));
+        let neg_axis = neg.and_then(|node| self.node_axis_local(node));
+        if let Some(pos_axis) = pos_axis {
             self.add_real_axis(branch_axis, pos_axis, 1.0);
         }
-        if let Some(neg_axis) = neg.and_then(|node| self.node_axis_local(node)) {
+        if let Some(neg_axis) = neg_axis {
             self.add_real_axis(branch_axis, neg_axis, -1.0);
+        }
+        if self.physical_rhs {
+            let cache = self.cache;
+            let voltage = pos_axis.map_or(0.0, |axis| self.iterate_value_cached(cache, axis))
+                - neg_axis.map_or(0.0, |axis| self.iterate_value_cached(cache, axis));
+            self.add_potential_rhs_axis_cached(cache, branch_axis, -voltage);
         }
     }
 
@@ -2144,11 +2186,18 @@ impl<'a> GeneratedStamper<'a> {
         };
         let branch_current = multiplicity * self.branch_value_local(branch_index);
         self.observe_terminal_current_pair(pos, neg, branch_current);
-        if let Some(pos_axis) = pos.and_then(|node| self.node_axis_local(node)) {
+        let pos_axis = pos.and_then(|node| self.node_axis_local(node));
+        let neg_axis = neg.and_then(|node| self.node_axis_local(node));
+        if let Some(pos_axis) = pos_axis {
             self.add_real_axis(pos_axis, branch_axis, multiplicity);
         }
-        if let Some(neg_axis) = neg.and_then(|node| self.node_axis_local(node)) {
+        if let Some(neg_axis) = neg_axis {
             self.add_real_axis(neg_axis, branch_axis, -multiplicity);
+        }
+        if self.physical_rhs {
+            let cache = self.cache;
+            let current = multiplicity * self.iterate_value_cached(cache, branch_axis);
+            self.add_current_rhs_axis_pair_cached(cache, pos_axis, neg_axis, current);
         }
     }
 
@@ -2162,6 +2211,11 @@ impl<'a> GeneratedStamper<'a> {
     pub fn stamp_inactive_potential_branch_local(&mut self, branch_index: usize) {
         if let Some(branch_axis) = self.branch_axis_local(branch_index) {
             self.add_real_axis(branch_axis, branch_axis, 1.0);
+            if self.physical_rhs {
+                let cache = self.cache;
+                let current = self.iterate_value_cached(cache, branch_axis);
+                self.add_potential_rhs_axis_cached(cache, branch_axis, -current);
+            }
         }
     }
 
@@ -2179,6 +2233,7 @@ impl<'a> GeneratedStamper<'a> {
         let Some(row_axis) = cache.branch_axis(branch_index) else {
             return;
         };
+        let offsets_rhs = self.rhs_reads_linearization_point();
         let mut equivalent = value;
         let width = cache.axis_count();
         let slots_ready = width != 0 && cache.slots.len() == width * width;
@@ -2193,7 +2248,9 @@ impl<'a> GeneratedStamper<'a> {
             let Some(col_axis) = cache.node_axis(node) else {
                 continue;
             };
-            equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+            if offsets_rhs {
+                equivalent -= derivative * self.rhs_linearization_value_cached(cache, col_axis);
+            }
             self.add_real_axis_cached(cache, slots_ready, width, row_axis, col_axis, -derivative);
         }
         for (branch, derivative) in branch_derivative_indices
@@ -2207,7 +2264,9 @@ impl<'a> GeneratedStamper<'a> {
             let Some(col_axis) = cache.branch_axis(branch) else {
                 continue;
             };
-            equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+            if offsets_rhs {
+                equivalent -= derivative * self.rhs_linearization_value_cached(cache, col_axis);
+            }
             self.add_real_axis_cached(cache, slots_ready, width, row_axis, col_axis, -derivative);
         }
         self.add_potential_rhs_axis_cached(cache, row_axis, equivalent);
@@ -2273,6 +2332,39 @@ impl<'a> GeneratedStamper<'a> {
             .axis_matrix_index(axis)
             .and_then(|index| self.voltages.get(index).copied())
             .unwrap_or(0.0)
+    }
+
+    /// The unknown at the iterate a physical right-hand side is formed at.
+    #[inline]
+    fn iterate_value_cached(&self, cache: &GeneratedStaticStampCache, axis: usize) -> Value {
+        let iterate = self.physical_iterate.unwrap_or(self.voltages);
+        cache
+            .axis_matrix_index(axis)
+            .and_then(|index| iterate.get(index).copied())
+            .unwrap_or(0.0)
+    }
+
+    /// Whether a contribution's right-hand side subtracts `J` times an
+    /// offset: the companion's whole linearization point, or a physical
+    /// residual's step from the evaluation point to its iterate.
+    #[inline]
+    fn rhs_reads_linearization_point(&self) -> bool {
+        !self.physical_rhs || self.physical_iterate.is_some()
+    }
+
+    /// The offset [`Self::rhs_reads_linearization_point`] multiplies by `J`.
+    #[inline]
+    fn rhs_linearization_value_cached(
+        &self,
+        cache: &GeneratedStaticStampCache,
+        axis: usize,
+    ) -> Value {
+        let evaluated = self.axis_value_cached(cache, axis);
+        if self.physical_rhs {
+            evaluated - self.iterate_value_cached(cache, axis)
+        } else {
+            evaluated
+        }
     }
 
     #[inline]

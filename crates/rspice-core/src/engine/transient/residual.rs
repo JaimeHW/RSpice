@@ -1438,11 +1438,14 @@ impl Engine {
 
     /// Whether the transient Newton solves for corrections against directly
     /// assembled physical currents. Promoted BJTs always do, and so does a
-    /// centered linear capacitor.
+    /// centered linear capacitor, and so do generated Verilog-A devices where
+    /// [`Self::generated_rows_are_physical`] says so.
     pub(super) fn requires_transient_correction_form(
+        &self,
         circuit: &crate::circuit::CircuitData,
     ) -> bool {
         Self::requires_vbic_correction_form(circuit)
+            || self.generated_rows_are_physical(circuit)
             || circuit
                 .capacitors
                 .stamps
@@ -1453,6 +1456,76 @@ impl Engine {
                         && circuit.capacitors.value_expression(index).is_none()
                         && stamp.pp.row != stamp.nn.row
                 })
+    }
+
+    /// Whether the transient takes generated Verilog-A rows from the devices'
+    /// physical residuals ([`CircuitData::stamp_generated_veriloga_physical`])
+    /// rather than their companions. The Xyce dialect does: Xyce sums F from
+    /// the device loads, and its OneStep trapezoid adds half the previous
+    /// step's F-B to the next residual (N_TIA_OneStep.C:247-251). A companion
+    /// J*x-I across a module's milliohm branch rounds that branch's picoamperes
+    /// to J*|x|*eps, and OneStep would inject the rounding, with alternating
+    /// sign, into every later step of a circuit that holds such a node on
+    /// picosiemens.
+    ///
+    /// [`CircuitData::stamp_generated_veriloga_physical`]: crate::circuit::CircuitData::stamp_generated_veriloga_physical
+    pub(super) fn generated_rows_are_physical(
+        &self,
+        circuit: &crate::circuit::CircuitData,
+    ) -> bool {
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            self.config.spice_dialect == SpiceDialect::Xyce
+                && circuit.has_generated_veriloga_devices()
+        }
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        {
+            let _ = circuit;
+            false
+        }
+    }
+
+    /// Add the generated Verilog-A rows to a transient Newton correction from
+    /// the devices' physical residuals, once the rest of the correction has
+    /// been formed. OneStep order 2 halves the static DAE these stamps carry,
+    /// as the companion assembly halves its whole nonlinear pass.
+    fn stamp_generated_veriloga_correction(
+        circuit: &mut crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        correction: &mut [Value],
+        solution: &[Value],
+        evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
+        xyce_one_step_order2: bool,
+    ) -> Result<(), SimulationError> {
+        if !xyce_one_step_order2 {
+            return circuit
+                .stamp_generated_veriloga_physical(
+                    matrix,
+                    correction,
+                    solution,
+                    crate::xspice::AnalysisType::Transient,
+                    evaluation_mode,
+                )
+                .map_err(SimulationError::from);
+        }
+        let before_values = matrix.values_mut().to_vec();
+        let mut generated = vec![0.0; correction.len()];
+        circuit
+            .stamp_generated_veriloga_physical(
+                matrix,
+                &mut generated,
+                solution,
+                crate::xspice::AnalysisType::Transient,
+                evaluation_mode,
+            )
+            .map_err(SimulationError::from)?;
+        for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
+            *value = before + 0.5 * (*value - before);
+        }
+        for (value, generated) in correction.iter_mut().zip(generated) {
+            *value += 0.5 * generated;
+        }
+        Ok(())
     }
 
     /// Test the nonlinear residual with the active transient solver's native
@@ -1617,6 +1690,7 @@ impl Engine {
         mut correction_rhs: Option<&mut Vec<Value>>,
     ) -> Result<(), SimulationError> {
         let defer_promoted = correction_rhs.is_some();
+        let generated_physical = defer_promoted && self.generated_rows_are_physical(circuit);
         let num_nodes = circuit.num_nodes();
         let used_diode_attempt_cache = extra_diag_gmin == 0.0
             && !ctx.xyce_one_step_order2
@@ -1989,16 +2063,23 @@ impl Engine {
                     .stamp_nonlinear(matrix, rhs, solution)
                     .map_err(SimulationError::from)?;
             }
-            circuit
-                .stamp_behavioral_with_generated_mode(
-                    matrix,
-                    rhs,
-                    solution,
-                    time,
-                    crate::xspice::AnalysisType::Transient,
-                    evaluation_mode,
-                )
-                .map_err(SimulationError::from)?;
+            if generated_physical {
+                // The generated rows join the correction once it is formed.
+                circuit
+                    .stamp_behavioral_sources(matrix, rhs, solution, time)
+                    .map_err(SimulationError::from)?;
+            } else {
+                circuit
+                    .stamp_behavioral_with_generated_mode(
+                        matrix,
+                        rhs,
+                        solution,
+                        time,
+                        crate::xspice::AnalysisType::Transient,
+                        evaluation_mode,
+                    )
+                    .map_err(SimulationError::from)?;
+            }
             if let Some((before_values, before_rhs)) = static_nonlinear_snapshot {
                 for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
                     *value = before + 0.5 * (*value - before);
@@ -2102,6 +2183,16 @@ impl Engine {
                 |index| phase.trial(index, time),
                 ctx.xyce_one_step_order2,
             )?;
+            if generated_physical {
+                Self::stamp_generated_veriloga_correction(
+                    circuit,
+                    matrix,
+                    correction,
+                    solution,
+                    evaluation_mode,
+                    ctx.xyce_one_step_order2,
+                )?;
+            }
         }
         circuit
             .capacitors
@@ -2719,8 +2810,11 @@ impl Engine {
         // carrying picoamperes: its absolute companion J*x-I rounds that
         // current to J*|x|*eps, which OneStep's history would then inject into
         // every later step. Take its rows physically, as the Newton correction
-        // does, and the rest of the residual in double-double.
+        // does, and the rest of the residual in double-double. Generated
+        // Verilog-A rows are taken the same way wherever the Newton correction
+        // takes them physically.
         let vbic_correction = Self::requires_vbic_correction_form(circuit);
+        let generated_physical = self.generated_rows_are_physical(circuit);
         matrix.with_probe_values(|probe, probe_rhs| {
             Self::stamp_nodal_gmin(circuit, probe, baseline_diag_gmin.max(0.0));
             circuit.stamp_transient_linear_direct(probe, probe_rhs);
@@ -2740,15 +2834,21 @@ impl Engine {
                 circuit
                     .try_stamp_static_dae_nonlinear(probe, probe_rhs, solution, vbic_correction)
                     .map_err(SimulationError::from)?;
-                circuit
-                    .stamp_behavioral_static_dae_probe(
-                        probe,
-                        probe_rhs,
-                        solution,
-                        time,
-                        crate::xspice::AnalysisType::Transient,
-                    )
-                    .map_err(SimulationError::from)?;
+                if generated_physical {
+                    circuit
+                        .stamp_behavioral_sources(probe, probe_rhs, solution, time)
+                        .map_err(SimulationError::from)?;
+                } else {
+                    circuit
+                        .stamp_behavioral_static_dae_probe(
+                            probe,
+                            probe_rhs,
+                            solution,
+                            time,
+                            crate::xspice::AnalysisType::Transient,
+                        )
+                        .map_err(SimulationError::from)?;
+                }
             } else {
                 circuit
                     .stamp_behavioral_sources(probe, probe_rhs, solution, time)
@@ -2762,14 +2862,29 @@ impl Engine {
                 // event-driven models at the breakpoint.
                 circuit.stamp_xspice_static_residual(solution, probe_rhs);
             }
-            let mut residual = if vbic_correction {
+            let mut residual = if vbic_correction || generated_physical {
                 let mut correction = Vec::with_capacity(probe_rhs.len());
                 probe
                     .correction_rhs_into(probe_rhs, solution, &mut correction)
                     .map_err(|error| SimulationError::Circuit(error.to_string()))?;
                 // The probe matrix has been read; only the promoted rows'
                 // right-hand side remains.
-                circuit.stamp_promoted_vbic_correction_rhs(&mut correction, solution);
+                if vbic_correction {
+                    circuit.stamp_promoted_vbic_correction_rhs(&mut correction, solution);
+                }
+                if generated_physical {
+                    // The Jacobians this stamp adds to the read probe are
+                    // discarded with it.
+                    circuit
+                        .stamp_generated_veriloga_physical(
+                            probe,
+                            &mut correction,
+                            solution,
+                            crate::xspice::AnalysisType::Transient,
+                            crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticDaeProbe,
+                        )
+                        .map_err(SimulationError::from)?;
+                }
                 // The correction is -(A*x-b); the history is A*x-b.
                 for value in &mut correction {
                     *value = -*value;
@@ -2809,7 +2924,7 @@ impl Engine {
             return Ok(false);
         }
 
-        let direct = Self::requires_transient_correction_form(circuit);
+        let direct = self.requires_transient_correction_form(circuit);
         let refresh_nonlinear = !circuit.has_classic_mos_only_transient_nonlinearity();
         if let Some(cache) = classic_mos_cache {
             require_cached_source_side(cache.attempt_source_side, ctx.source_time_side)?;
@@ -4376,7 +4491,7 @@ Q1 c b 0 QN
         let mut vbic_snapshot_cache = Vec::new();
         // The transient forms the direct correction alongside the assembly
         // where the circuit needs it; the next solve reads that too.
-        let correction_form = Engine::requires_transient_correction_form(&circuit);
+        let correction_form = engine.requires_transient_correction_form(&circuit);
         let bits = |values: &[Value]| {
             values
                 .iter()

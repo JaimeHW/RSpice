@@ -863,6 +863,32 @@ impl BuiltinVerilogADevices {
         self.stamp_all_with_task_recording(matrix, rhs, voltages, num_nodes, request, record_tasks)
     }
 
+    /// [`Self::stamp_all_with_mode`] in correction form: `correction` already
+    /// holds the Newton correction `b - A*x` of the rest of the system, and
+    /// each instance adds its physical residual `-F(x)` to it while its
+    /// Jacobian reaches `matrix` (see
+    /// [`rspice_veriloga_runtime::GeneratedStamper::with_physical_rhs`]).
+    #[doc(hidden)]
+    pub fn stamp_all_physical_with_mode(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        correction: &mut [Value],
+        voltages: &[Value],
+        num_nodes: usize,
+        request: GeneratedEvaluationRequest,
+    ) -> Result<(), GeneratedVerilogAEvaluationError> {
+        let record_tasks = request.evaluation_mode == GeneratedEvaluationMode::NewtonLimited;
+        self.stamp_all_in_form(
+            matrix,
+            correction,
+            voltages,
+            num_nodes,
+            request,
+            record_tasks,
+            true,
+        )
+    }
+
     #[doc(hidden)]
     pub fn has_point_analog_tasks(&self) -> bool {
         self.devices
@@ -881,6 +907,28 @@ impl BuiltinVerilogADevices {
         request: GeneratedEvaluationRequest,
         record_tasks: bool,
     ) -> Result<(), GeneratedVerilogAEvaluationError> {
+        self.stamp_all_in_form(
+            matrix,
+            rhs,
+            voltages,
+            num_nodes,
+            request,
+            record_tasks,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn stamp_all_in_form(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        num_nodes: usize,
+        request: GeneratedEvaluationRequest,
+        record_tasks: bool,
+        physical_rhs: bool,
+    ) -> Result<(), GeneratedVerilogAEvaluationError> {
         let request = GeneratedEvaluationRequest {
             analysis: self
                 .operating_point_analysis_override
@@ -891,7 +939,15 @@ impl BuiltinVerilogADevices {
         self.fill_evaluation_key(&mut key, voltages, num_nodes, request, record_tasks);
         for device in self.devices.get_mut() {
             device
-                .stamp_with_task_recording(matrix, rhs, voltages, num_nodes, request, record_tasks)
+                .stamp_in_form(
+                    matrix,
+                    rhs,
+                    voltages,
+                    num_nodes,
+                    request,
+                    record_tasks,
+                    physical_rhs,
+                )
                 .map_err(|source| GeneratedVerilogAEvaluationError {
                     instance_name: device.instance_name.clone(),
                     model_name: device.model_name,
@@ -2542,6 +2598,31 @@ impl BuiltinVerilogAInstance {
         request: GeneratedEvaluationRequest,
         record_tasks: bool,
     ) -> Result<(), GeneratedEvaluationError> {
+        self.stamp_in_form(
+            matrix,
+            rhs,
+            voltages,
+            num_nodes,
+            request,
+            record_tasks,
+            false,
+        )
+    }
+
+    /// Evaluate and stamp; `physical_rhs` writes the instance's physical
+    /// residual to `rhs` in place of its companion (see
+    /// [`rspice_veriloga_runtime::GeneratedStamper::with_physical_rhs`]).
+    #[allow(clippy::too_many_arguments)]
+    fn stamp_in_form(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        num_nodes: usize,
+        request: GeneratedEvaluationRequest,
+        record_tasks: bool,
+        physical_rhs: bool,
+    ) -> Result<(), GeneratedEvaluationError> {
         let GeneratedEvaluationRequest {
             analysis,
             simparams,
@@ -2560,6 +2641,9 @@ impl BuiltinVerilogAInstance {
         // the tangent plane the matrix receives is the device's own at that
         // state, exactly as a native junction device's first load is.
         let initial_off_anchor = self.initial_off_anchor(voltages, num_nodes, evaluation_mode);
+        // A physical residual is formed at the solver's iterate even where
+        // the model is linearized at its anchor.
+        let physical_iterate = initial_off_anchor.is_some().then_some(voltages);
         let voltages = initial_off_anchor.as_deref().unwrap_or(voltages);
         let ctx = GeneratedEvalContext::with_analysis_step_simparams_and_mode(
             voltages,
@@ -2604,6 +2688,9 @@ impl BuiltinVerilogAInstance {
                 voltages,
                 self.static_stamp_cache.as_ref(),
             );
+            if physical_rhs {
+                stamper = stamper.with_physical_rhs(physical_iterate);
+            }
             self.kind.stamp(&ctx, &mut stamper);
             stamper.non_finite_contribution()
         } else {
@@ -2623,6 +2710,9 @@ impl BuiltinVerilogAInstance {
                 self.static_stamp_cache.as_ref(),
                 currents,
             );
+            if physical_rhs {
+                stamper = stamper.with_physical_rhs(physical_iterate);
+            }
             self.kind.stamp(&ctx, &mut stamper);
             let non_finite = stamper.non_finite_contribution();
             if !self.merged_terminal_currents.is_empty() {

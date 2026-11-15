@@ -7113,7 +7113,7 @@ impl Engine {
         let mut new_solution = solution.clone();
         let mut linear_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::with_capacity(size);
-        let uses_direct_device_correction = Self::requires_transient_correction_form(&circuit);
+        let uses_direct_device_correction = self.requires_transient_correction_form(&circuit);
         // A candidate the residual proof turns away takes one more Newton
         // iteration at that same point. Where the proof's stamp is the one
         // that iteration would build, it is kept instead of built twice.
