@@ -262,7 +262,7 @@ impl RSpiceApp {
         &mut self,
     ) -> Result<crate::product::ObjectRevision, String> {
         let state = &mut self.state;
-        crate::workbench::documents::model_editor::save_open_candidate(
+        rspice_app_models::workbench::documents::model_editor::save_open_candidate(
             &mut state.models.model_editor_parts(
                 &mut state.model,
                 &mut state.workbench,

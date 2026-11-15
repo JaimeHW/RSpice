@@ -24,7 +24,6 @@ use crate::state::{SimulationPage, VerificationPage};
 use crate::ui::Theme;
 use crate::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::model_editor::ModelEditorRecoveryDraft;
 use crate::workbench::lifecycle::window_session::WindowSessionRegistry;
 use crate::workbench::models::workspace_state::ModelsWorkbenchViewState;
 use crate::workbench::preferences::UserPreferences;
@@ -39,6 +38,7 @@ use crate::workbench::state::{
     default_console_height, default_inspector_width, default_navigator_width,
 };
 use crate::workbench::{SurfaceNavigation, WorkspacePreset};
+use rspice_app_models::workbench::documents::model_editor::ModelEditorRecoveryDraft;
 
 /// What a session keeps of the document engines' session state, which the
 /// workbench and the design, results, platform and settings slots hold.

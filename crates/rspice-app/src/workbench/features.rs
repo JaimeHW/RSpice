@@ -29,10 +29,10 @@ use crate::workbench::models::ModelsFeature;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::settings::SettingsFeature;
-use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::simulate::SimulateFeature;
 use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
+use rspice_app_sheets::workbench::sheets::SheetsFeature;
 
 /// A feature the shell registers: its registry, and its contexts borrowed
 /// from the application.
@@ -707,7 +707,7 @@ mod tests {
                 .iter()
                 .filter(|key| spec(**key).is_some())
                 .count(),
-            crate::workbench::sheets::commands::SheetsCommand::ALL.len()
+            rspice_app_sheets::workbench::sheets::commands::SheetsCommand::ALL.len()
                 + crate::workbench::settings::commands::SettingsCommand::ALL.len()
                 + rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand::LISTED.len()
                 + crate::workbench::results::commands::ResultsCommand::ALL.len()

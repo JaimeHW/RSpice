@@ -22,10 +22,10 @@ use crate::workbench::layout::LayoutSpec;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
-use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
     ALL_MENUS, ApplicationMenu, file_menu_shows_exit, menu_popup_height_for_viewport,
     shortcut_for_occurrence,

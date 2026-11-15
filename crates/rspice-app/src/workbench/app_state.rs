@@ -145,7 +145,7 @@ impl AppState {
     #[cfg(test)]
     pub(crate) fn model_editor_parts(
         &mut self,
-    ) -> crate::workbench::documents::model_editor::ModelEditorParts<'_> {
+    ) -> rspice_app_models::workbench::documents::model_editor::ModelEditorParts<'_> {
         self.models
             .model_editor_parts(&mut self.model, &mut self.workbench, &self.platform)
     }

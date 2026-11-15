@@ -8,9 +8,9 @@ use crate::workbench::app::select_all_schematic_objects;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::feature::harness::FeatureHarness;
-use crate::workbench::sheets::commands::SheetsCommand;
-use crate::workbench::sheets::*;
 use crate::workbench::state::Workspace;
+use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
+use rspice_app_sheets::workbench::sheets::*;
 
 const SHEET_COMMANDS: [SheetsCommand; 4] = [
     SheetsCommand::NextSheet,

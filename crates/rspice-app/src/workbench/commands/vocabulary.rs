@@ -28,11 +28,11 @@ use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
-use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
+use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 // `CommandPalette` is the feature's name, the same one the shortcut

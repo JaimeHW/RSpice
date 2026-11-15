@@ -47,7 +47,6 @@ use crate::workbench::models::ModelsFeature;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::ResultsFeature;
-use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
@@ -55,6 +54,7 @@ use crate::workbench::{AppState, MessageId, RSpiceApp};
 use menus::{APPLICATION_MENU, COMPACT_MENU, application_menu_entries};
 use rspice_app_code::workbench::code::{CodeFeature, SOURCE_EDITOR_MENU};
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
+use rspice_app_sheets::workbench::sheets::SheetsFeature;
 use rspice_app_workbench::workbench::app::dialogs::confirmation::ConfirmationHost;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
     self, ApplicationMenu,
@@ -407,7 +407,6 @@ impl Host for RSpiceApp {
             // The toolbar's lane: the tools of whoever its scope names.
             Point::Toolbar(ToolbarSlot::Tools(scope), layout) => {
                 use crate::workbench::chrome::toolbar::feature_tools;
-                use crate::workbench::chrome::toolbar::models::{model_editor_tools, models_tools};
                 use crate::workbench::chrome::toolbar::{context_separator, toolbar_icon_command};
                 use crate::workbench::design::DesignFeature;
                 use crate::workbench::design::toolbar::{
@@ -415,6 +414,9 @@ impl Host for RSpiceApp {
                 };
                 use rspice_app_code::workbench::code::toolbar::{
                     NETLIST_TOOLBAR, VERILOGA_TOOLBAR,
+                };
+                use rspice_app_models::workbench::chrome::toolbar::models::{
+                    model_editor_tools, models_tools,
                 };
                 use rspice_app_project::workbench::chrome::toolbar::project::{
                     no_project_tools, project_tools,
@@ -1060,8 +1062,8 @@ impl DocumentHost for AppState {
 
     fn workspace_documents(&self, workspace: Workspace) -> Vec<WorkspaceDocument> {
         use crate::workbench::chrome::document_bar::design::design_documents;
-        use crate::workbench::chrome::document_bar::models::models_documents;
         use rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents;
+        use rspice_app_models::workbench::chrome::document_bar::models::models_documents;
         use rspice_app_project::workbench::chrome::document_bar::project::project_documents;
         use rspice_app_results::workbench::chrome::document_bar::results::result_documents;
         use rspice_app_simulate::workbench::chrome::document_bar::simulate::{

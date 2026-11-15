@@ -50,21 +50,17 @@ pub(crate) mod browser {
     pub(crate) use rspice_app_services::workbench::browser::file_import;
 }
 pub(crate) mod chrome {
-    pub(crate) use rspice_app_sheets::workbench::chrome::sheet_strip;
     pub(crate) mod document_bar {
         pub(crate) mod design;
-        pub(in crate::workbench) use rspice_app_models::workbench::chrome::document_bar::models;
     }
     pub(crate) mod status_bar {
         pub(crate) mod design;
-        pub(crate) use rspice_app_sheets::workbench::chrome::status_bar::sheets;
         pub(in crate::workbench) mod shell;
     }
     pub(crate) mod title_bar {
         pub(in crate::workbench) mod design;
     }
     pub(crate) mod toolbar {
-        pub(in crate::workbench) use rspice_app_models::workbench::chrome::toolbar::models;
         pub use rspice_app_workbench::workbench::chrome::toolbar::*;
     }
 }
@@ -88,7 +84,6 @@ pub(crate) mod docks {
 pub(crate) mod documents {
     pub(crate) use rspice_app_code::workbench::documents::code_workspace;
     pub(crate) use rspice_app_code::workbench::documents::netlist_document;
-    pub(crate) use rspice_app_models::workbench::documents::model_editor;
     pub(crate) use rspice_app_results::workbench::documents::result_document;
 }
 // The bundled circuits Help's Examples dialog opens as projects are model
@@ -140,7 +135,6 @@ pub(crate) mod session {
     pub(crate) mod project_transactions;
 }
 pub(crate) use rspice_app_settings::workbench::settings;
-pub(crate) use rspice_app_sheets::workbench::sheets;
 pub(crate) mod shell_host;
 pub(crate) use rspice_app_simulate::workbench::simulate;
 pub(crate) mod slots;

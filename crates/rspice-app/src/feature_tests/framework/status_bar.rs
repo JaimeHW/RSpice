@@ -10,7 +10,6 @@ use crate::workbench::app_state::diagnostic_store::listing::DiagnosticCounts;
 use crate::workbench::chrome::status_bar::design::{
     design_engineering_context, schematic_cursor_summary, selection_summary,
 };
-use crate::workbench::chrome::status_bar::sheets::sheet_position_summary;
 use crate::workbench::framework::host::StatusMark;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
@@ -21,6 +20,7 @@ use rspice_app_runs::simulation::status::EngineAvailability;
 use rspice_app_runs::simulation::status::{
     preflight_status, simulation_engine_status, simulation_progress_percent,
 };
+use rspice_app_sheets::workbench::chrome::status_bar::sheets::sheet_position_summary;
 use rspice_app_workbench::workbench::chrome::status_bar::*;
 
 /// The counts the bar states, read as the page reads them.

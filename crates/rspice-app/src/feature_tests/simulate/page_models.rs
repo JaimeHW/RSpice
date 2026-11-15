@@ -341,7 +341,7 @@ fn gate_totals_equal_the_sum_over_the_workspace_summaries() {
         .model_library_manager
         .create_project_model("owned-models", &definition)
         .expect("create project model");
-    crate::workbench::documents::model_editor::open_project_model(
+    rspice_app_models::workbench::documents::model_editor::open_project_model(
         &mut app.state.model_editor_parts(),
         "owned-models",
         "nch_gated",

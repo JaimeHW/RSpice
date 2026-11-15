@@ -31,8 +31,8 @@ use super::framework::requests::{
     self, ExportCsv, ExportResultQuantities, FullScreen, OpenProducingPlan, Outbox, WindowFrame,
 };
 use super::layout::LayoutSpec;
-use super::sheets::SheetsFeature;
 use super::*;
+use rspice_app_sheets::workbench::sheets::SheetsFeature;
 
 pub(in crate::workbench) mod dialog_order;
 
@@ -72,7 +72,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         viewport.y,
         app.state.workbench.coarse_pointer,
         rspice_app_workbench::workbench::chrome::document_bar::is_visible(app),
-        chrome::sheet_strip::is_visible(&app.state.model),
+        rspice_app_sheets::workbench::chrome::sheet_strip::is_visible(&app.state.model),
         app.state.platform.project_lifecycle.is_open(),
         context_docks_enabled,
         &app.state.workbench,
@@ -877,7 +877,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
         viewport.y,
         app.state.workbench.coarse_pointer,
         rspice_app_workbench::workbench::chrome::document_bar::is_visible(app),
-        chrome::sheet_strip::is_visible(&app.state.model),
+        rspice_app_sheets::workbench::chrome::sheet_strip::is_visible(&app.state.model),
         app.state.platform.project_lifecycle.is_open(),
         context_docks_enabled,
         &app.state.workbench,
