@@ -896,6 +896,92 @@ fn a_manual_decks_sealed_hdl_runs_in_the_worker() {
     assert_sealed_clock_runs_in_the_worker(11, &deck, runtimes);
 }
 
+/// A module whose parameter default is an expression of another parameter
+/// evaluates that default on its browser JIT model, which the worker installs
+/// only after the preparation. The build the preparation makes to find the
+/// run's models evaluates no model, so it dispatches nothing; the run, once
+/// its models are installed, elaborates the default and drives `q` with it.
+#[wasm_bindgen_test]
+fn a_preparation_dispatches_nothing_before_the_worker_installs_its_models() {
+    const SOURCE: &str = "`include \"disciplines.vams\"\nmodule src(q);\n  inout q;\n  \
+                          electrical q;\n  parameter real r = 500.0;\n  \
+                          parameter real i0 = 1.0 / r;\n  analog I(q) <+ -i0;\nendmodule\n";
+    let (deck, runtimes) =
+        deck_with_sealed_module("Worker default", &[("src.va", SOURCE)], &["src.va"], "src");
+    let mut request = worker_request_json(
+        24,
+        serde_json::json!({"Transient": {
+            "stop_time": 10e-9, "step_time": 1e-10, "start_time": 0.0,
+            "max_timestep": 1e-10, "uic": false
+        }}),
+        &deck,
+    );
+    request["request"]["request"]["project_veriloga_runtimes"] = runtimes;
+    let dispatched = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let counter = std::rc::Rc::clone(&dispatched);
+    let counting = Closure::<dyn Fn(String, String, u32) -> i32>::new(
+        move |_cache_key: String, _export: String, _frame_offset: u32| {
+            counter.set(counter.get() + 1);
+            -1
+        },
+    );
+    rspice_worker::install_rspice_ui_wasm_jit_dispatcher(
+        counting
+            .as_ref()
+            .unchecked_ref::<js_sys::Function>()
+            .clone(),
+    );
+    counting.forget();
+    let preparation = rspice_worker::prepare_rspice_ui_wasm_jit_request(
+        js_sys::JSON::parse(&request.to_string()).unwrap(),
+    )
+    .expect("the request prepares for the JIT");
+    let errors = property(&preparation, "errors")
+        .dyn_into::<js_sys::Array>()
+        .unwrap();
+    assert_eq!(errors.length(), 0, "{:?}", errors.to_vec());
+    assert_eq!(
+        dispatched.get(),
+        0,
+        "the preparation evaluated a model before the worker installed it"
+    );
+    rspice_worker::cancel_prepared_rspice_ui_wasm_jit_request(
+        property(&preparation, "dispatchToken").as_f64().unwrap() as u32,
+    )
+    .unwrap();
+
+    let dispatch_token = install_wasm_jit_models(&request);
+    let response = rspice_worker::run_prepared_rspice_ui_wasm_jit_request(dispatch_token)
+        .expect("a prepared request is answered");
+    let response = structured_clone(&response);
+    let buffers = js_sys::Reflect::get(&response, &"buffers".into())
+        .unwrap()
+        .dyn_into::<js_sys::Array>()
+        .unwrap();
+    let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
+        js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+    )
+    .unwrap();
+    let transient = &metadata["outcome"]["Success"]["Transient"];
+    let v_q = transient["waveforms"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{metadata}"))
+        .iter()
+        .find(|trace| {
+            trace["y_unit"] == "V"
+                && trace["name"]
+                    .as_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case("q"))
+        })
+        .unwrap_or_else(|| panic!("no node voltage q: {metadata}"));
+    let v_q = transferred_series(&buffers, &v_q["y_values"]).to_vec();
+    let last = *v_q.last().expect("V(q) has samples");
+    assert!(
+        (last - 2.0).abs() < 1e-9,
+        "the default 1/r drives 2 mA into 1 kΩ: V(q) = {last}"
+    );
+}
+
 /// Two files compiled as one unit, one reading its half period from a local
 /// header, run in the worker from the sealed bytes alone: `top` in one file
 /// instantiates `leaf` from another, whose `` `include "half.vh" `` the

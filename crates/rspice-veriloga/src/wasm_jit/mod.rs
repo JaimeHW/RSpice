@@ -35,6 +35,8 @@ pub(crate) use executable::{WasmJitExecutable, WasmJitExecutableEntry};
 #[cfg(target_arch = "wasm32")]
 pub(crate) use run_models::admit as admit_browser_model;
 #[cfg(target_arch = "wasm32")]
+pub(crate) use run_models::collecting as collecting_browser_models;
+#[cfg(target_arch = "wasm32")]
 pub use run_models::{collect_browser_models, with_browser_run_models};
 #[cfg(target_arch = "wasm32")]
 pub use runtime::{

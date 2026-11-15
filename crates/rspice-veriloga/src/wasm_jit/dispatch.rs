@@ -26,6 +26,7 @@ pub(crate) fn dispatch_model_entry(
     export_name: &str,
     frame_offset: u32,
 ) -> Result<i32, String> {
+    super::run_models::refuse_while_collecting(cache_key, export_name)?;
     BROWSER_DISPATCHER.with(|slot| {
         let slot = slot.borrow();
         let dispatcher = slot

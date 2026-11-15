@@ -3850,6 +3850,9 @@ impl VerilogADevice {
     /// Failure preserves the runtime state at entry, including previously
     /// assigned overrides, so callers can correct an override and retry.
     pub fn try_resolve_parameter_defaults(&mut self) -> Result<(), VmError> {
+        if Self::collecting_browser_models() {
+            return Ok(());
+        }
         let previous = self.context.clone();
         if let Err(error) = self.resolve_parameter_defaults_inner() {
             self.context = previous;
@@ -3954,6 +3957,17 @@ impl VerilogADevice {
             native.as_ref(),
             NativeValueEntry::ParameterDefault(index),
         )
+    }
+
+    /// Whether this device is built while the browser collects the models a
+    /// run asks for, before the worker has installed any: such a device is
+    /// discarded, and evaluates nothing
+    /// ([`collect_browser_models`](crate::wasm_jit::collect_browser_models)).
+    fn collecting_browser_models() -> bool {
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        return crate::wasm_jit::collecting_browser_models();
+        #[cfg(not(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32")))]
+        false
     }
 
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
@@ -5545,7 +5559,9 @@ impl VerilogADevice {
 
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
     fn try_refresh_static_conditions(&mut self) -> Result<(), VmError> {
-        if !self.context.analysis_initialized && self.has_initialization() {
+        if (!self.context.analysis_initialized && self.has_initialization())
+            || Self::collecting_browser_models()
+        {
             return Ok(());
         }
         let model = &self.model;

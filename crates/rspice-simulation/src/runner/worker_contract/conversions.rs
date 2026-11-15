@@ -534,6 +534,9 @@ struct PendingWasmJitRequest {
     /// The run's sources, installed by the preparation and held until the run
     /// ends, so the run's own install finds every one where it left them.
     _sources: Option<rspice_core::HeldVerilogASources>,
+    /// Why the build that collects the run's models could not: a model it
+    /// asked to evaluate before the worker installed it. The run is refused.
+    collection_refusal: Option<String>,
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
@@ -637,13 +640,24 @@ pub fn prepare_wasm_jit_request_value(
         .map(|artifact| artifact.cache_key.clone())
         .collect();
     // A run refused for an unqualified runtime builds nothing.
+    let mut collection_refusal = None;
     if sources.is_some() && unqualified.is_empty() && !request.project_veriloga_runtimes.is_empty()
     {
-        for model in discover_wasm_jit_models(&request) {
-            if installed.insert(model.cache_key().to_owned()) {
-                preparation.artifacts.push(
-                    crate::project_veriloga::worker::WasmJitWorkerArtifact::from_compiled(&model),
-                );
+        match discover_wasm_jit_models(&request) {
+            Ok(models) => {
+                for model in models {
+                    if installed.insert(model.cache_key().to_owned()) {
+                        preparation.artifacts.push(
+                            crate::project_veriloga::worker::WasmJitWorkerArtifact::from_compiled(
+                                &model,
+                            ),
+                        );
+                    }
+                }
+            }
+            Err(refusal) => {
+                preparation.errors.push(refusal.clone());
+                collection_refusal = Some(refusal);
             }
         }
     }
@@ -656,6 +670,7 @@ pub fn prepare_wasm_jit_request_value(
             unqualified,
             installed,
             _sources: sources,
+            collection_refusal,
         });
     });
     Ok(value)
@@ -696,7 +711,14 @@ pub fn run_prepared_wasm_jit_request_value(
             runtime.source.as_str(),
             runtime.reason.as_str(),
         )
-    }));
+    }))
+    .or_else(|| {
+        pending.collection_refusal.as_ref().map(|refusal| {
+            SimulationError::CircuitError(format!(
+                "The browser could not find the Verilog-A models this run needs: {refusal}"
+            ))
+        })
+    });
     match refusal {
         Some(refusal) => worker_response_transport_value(
             WorkerResponse::from_result_for_transfer(pending.request.id, Err(refusal)),
@@ -717,12 +739,16 @@ pub fn run_prepared_wasm_jit_request_value(
 /// structural parameter a sweep changes, say) is refused when it builds that
 /// device ([`rspice_veriloga::wasm_jit::with_browser_run_models`]). The
 /// caller holds the request's Verilog-A sources installed.
+///
+/// The worker installs the models after this build, so it evaluates none of
+/// them; a dispatch it asks for anyway is refused, and is this build's error.
+/// Any other failure of the build is the run's to report when it builds.
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 fn discover_wasm_jit_models(
     request: &WorkerRequest,
-) -> Vec<Arc<rspice_veriloga::wasm_jit::WasmJitModelArtifact>> {
+) -> Result<Vec<Arc<rspice_veriloga::wasm_jit::WasmJitModelArtifact>>, String> {
     let Ok(_data_files) = request.data_files.hold(request.execution_limits) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     // The run reads its source already expanded, as here.
     let mut limits = request.execution_limits;
@@ -731,15 +757,15 @@ fn discover_wasm_jit_models(
         .with_resource_limits(limits)
         .with_measurement_references(request.measurement_references.clone());
     let simulation = super::super::SimulationRequest::from(request.request.clone());
-    let ((), models) = rspice_veriloga::wasm_jit::collect_browser_models(|| {
+    rspice_veriloga::wasm_jit::collect_browser_models(|| {
         bridge.build_circuit_once(
             &simulation,
             &request.netlist,
             request.source_path.as_deref().map(std::path::Path::new),
             request.environment.clone(),
         );
-    });
-    models
+    })
+    .map(|((), models)| models)
 }
 
 /// Discard a prepared request only when the caller presents its exact token.
