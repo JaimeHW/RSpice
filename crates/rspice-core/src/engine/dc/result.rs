@@ -1,6 +1,8 @@
 //! Complete DC sweep coordinates shared by direct and control execution.
 
-use super::{DcSweepPointResult, Engine, SimulationError, bounded_dc_sweep_points};
+use super::{
+    DcSweepLinearization, DcSweepPointResult, Engine, SimulationError, bounded_dc_sweep_points,
+};
 use crate::netlist::{DcSecondSweep, DcSweepSpec};
 use crate::{AbortSignal, Netlist, Value};
 
@@ -58,6 +60,22 @@ impl Engine {
         outer: Option<&DcSecondSweep>,
         abort: &dyn AbortSignal,
     ) -> Result<DcSweepResult, SimulationError> {
+        self.run_dc_analysis_with_linearization_and_abort(
+            netlist, source, primary, outer, None, abort,
+        )
+    }
+
+    /// [`Self::run_dc_analysis_with_abort`], with `linearize` run against
+    /// every converged point before it is accepted.
+    pub(in crate::engine) fn run_dc_analysis_with_linearization_and_abort(
+        &self,
+        netlist: &Netlist,
+        source: &str,
+        primary: &DcSweepSpec,
+        outer: Option<&DcSecondSweep>,
+        linearize: Option<DcSweepLinearization<'_, '_>>,
+        abort: &dyn AbortSignal,
+    ) -> Result<DcSweepResult, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
         let mut axes = Vec::with_capacity(2);
         if let Some(outer) = outer {
@@ -79,8 +97,9 @@ impl Engine {
         let mut config = engine.config().clone();
         config.resource_limits.max_result_values -= axis_values;
         let bounded = engine.try_resolved_with_config(config)?;
-        let points = bounded
-            .run_dc_sweep2_spec_with_report_and_abort(netlist, source, primary, outer, abort)?;
+        let points = bounded.run_dc_sweep2_spec_with_linearization_and_abort(
+            netlist, source, primary, outer, linearize, abort,
+        )?;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }

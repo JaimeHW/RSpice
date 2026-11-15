@@ -459,25 +459,43 @@ pub(super) fn write_dc_op_output(
     .map_err(|error| map_atomic_output_error(path, error))
 }
 
+/// Run a `.DC` card. When it is the sweep the deck's Xyce `.SENS` study
+/// reads and that study has yet to run, the study is read from this same
+/// sweep and kept for its card.
 pub(super) fn run_dc_sweep(
     ctx: &RunContext<'_>,
+    card: &rspice_core::netlist::AnalysisCommand,
     source: &str,
     spec: &rspice_core::netlist::DcSweepSpec,
     sweep2: Option<&rspice_core::netlist::DcSecondSweep>,
 ) -> Result<(), CliError> {
-    let result = ctx
-        .engine
-        .run_dc_analysis_with_abort(
+    let result = match super::frequency::xyce_sensitivity_cards_reading(ctx, card) {
+        Some(cards) => ctx
+            .engine
+            .run_dc_analysis_with_xyce_sensitivity_and_abort(
+                ctx.netlist,
+                source,
+                spec,
+                sweep2,
+                &cards,
+                &crate::abort::ProcessAbort,
+            )
+            .map(|(result, study)| {
+                ctx.retain_xyce_dc_sensitivity(study);
+                result
+            }),
+        None => ctx.engine.run_dc_analysis_with_abort(
             ctx.netlist,
             source,
             spec,
             sweep2,
             &crate::abort::ProcessAbort,
-        )
-        .map_err(|source| CliError::CoreSimulationError {
-            source,
-            analysis: Some("DC Sweep".to_string()),
-        })?;
+        ),
+    }
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("DC Sweep".to_string()),
+    })?;
     finish_dc_sweep_result(ctx, source, &result)
 }
 

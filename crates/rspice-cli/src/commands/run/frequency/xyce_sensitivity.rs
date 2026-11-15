@@ -18,9 +18,52 @@ pub(in crate::commands::run) fn is_xyce_sensitivity(
         && matches!(card, AnalysisCommand::Sensitivity { ac_sweep: None, .. })
 }
 
+/// The analysis whose sensitivities a Xyce `.SENS` deck asks for and that
+/// are not computed here: Xyce differentiates the deck's one analysis, and a
+/// transient or AC deck asks for transient or AC sensitivities.
+fn uncomputed_sensitivity_analysis(ctx: &RunContext<'_>) -> Option<&'static str> {
+    ctx.netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::Tran { .. } => Some("transient"),
+            AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => Some("AC"),
+            AnalysisCommand::Hb { .. } => Some("harmonic-balance"),
+            AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => Some("noise"),
+            _ => None,
+        })
+}
+
+/// The deck's Xyce `.SENS` objective cards when the study will read its
+/// derivatives from `dc_card`'s sweep and has not run yet: `dc_card` is the
+/// deck's first `.DC` card, the one the study sweeps, and comes before the
+/// study's first card.
+pub(in crate::commands::run) fn xyce_sensitivity_cards_reading<'n>(
+    ctx: &RunContext<'n>,
+    dc_card: &AnalysisCommand,
+) -> Option<Vec<&'n AnalysisCommand>> {
+    let analyses = &ctx.netlist.analyses;
+    let first_dc = analyses
+        .iter()
+        .position(|card| matches!(card, AnalysisCommand::Dc { .. }))?;
+    let first_study = analyses
+        .iter()
+        .position(|card| is_xyce_sensitivity(ctx, card))?;
+    (std::ptr::eq(&analyses[first_dc], dc_card)
+        && first_dc < first_study
+        && uncomputed_sensitivity_analysis(ctx).is_none())
+    .then(|| {
+        analyses
+            .iter()
+            .filter(|card| is_xyce_sensitivity(ctx, card))
+            .collect()
+    })
+}
+
 /// Run every objective of the deck's Xyce `.SENS` study at its first
 /// objective card, and publish the one table Xyce writes. Each later
-/// objective card only takes its planned identity.
+/// objective card only takes its planned identity. When the deck's `.DC`
+/// card already read the study from its sweep, that study is published.
 pub(in crate::commands::run) fn run_xyce_sensitivity(
     ctx: &RunContext<'_>,
     card: &AnalysisCommand,
@@ -38,20 +81,7 @@ pub(in crate::commands::run) fn run_xyce_sensitivity(
     {
         return Ok(());
     }
-    // Xyce differentiates the deck's one analysis: a transient or AC deck asks
-    // for transient or AC sensitivities, which are not computed here.
-    if let Some(analysis) = ctx
-        .netlist
-        .analyses
-        .iter()
-        .find_map(|analysis| match analysis {
-            AnalysisCommand::Tran { .. } => Some("transient"),
-            AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => Some("AC"),
-            AnalysisCommand::Hb { .. } => Some("harmonic-balance"),
-            AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => Some("noise"),
-            _ => None,
-        })
-    {
+    if let Some(analysis) = uncomputed_sensitivity_analysis(ctx) {
         crate::console::diagnostic_line(format_args!(
             "Warning: .SENS in a {analysis} deck asks for {analysis} sensitivities, which are \
              not computed; the .SENS card is skipped"
@@ -61,10 +91,15 @@ pub(in crate::commands::run) fn run_xyce_sensitivity(
     if !ctx.quiet {
         crate::console::line(format_args!("Running Sensitivity analysis"))?;
     }
-    let points = ctx
-        .engine
-        .run_sensitivity_dc_sweep_with_abort(ctx.netlist, &cards, &crate::abort::ProcessAbort)
-        .map_err(|source| super::map_frequency_error(ctx, "Sensitivity", source))?;
+    let points = match ctx.take_xyce_dc_sensitivity() {
+        Some(study) => study,
+        None => ctx.engine.run_sensitivity_dc_sweep_with_abort(
+            ctx.netlist,
+            &cards,
+            &crate::abort::ProcessAbort,
+        ),
+    }
+    .map_err(|source| super::map_frequency_error(ctx, "Sensitivity", source))?;
     let operating_points = points
         .iter()
         .map(|point| (point.sweep_value, point.result.clone()))

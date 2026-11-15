@@ -17,6 +17,10 @@ use super::naming::{
 };
 use super::*;
 
+/// A Xyce `.SENS` study's points, or the error that refused it.
+pub(super) type XyceDcSensitivity =
+    Result<Vec<rspice_core::engine::DcSweepSensitivityPoint>, rspice_core::engine::SimulationError>;
+
 pub(super) struct RunContext<'a> {
     pub(super) engine: &'a Engine,
     pub(super) netlist: &'a Netlist,
@@ -104,6 +108,10 @@ pub(super) struct RunContext<'a> {
     /// analysis's own result, so the deck route retains it instead of solving
     /// the large-signal problem a second time for every dependent card.
     periodic: std::cell::RefCell<PeriodicOperatingPoints>,
+    /// The deck's Xyce `.SENS` study, read by its `.DC` card from the sweep
+    /// that card ran, as Xyce reads it: the `.SENS` card takes it instead of
+    /// sweeping the deck a second time.
+    xyce_dc_sensitivity: std::cell::RefCell<Option<XyceDcSensitivity>>,
     /// Zero-based ordinal assigned to authored transient cards as they enter
     /// the physical-analysis dispatcher.
     next_transient_ordinal: std::cell::Cell<u32>,
@@ -334,6 +342,7 @@ impl<'a> RunContext<'a> {
             outputs: std::cell::RefCell::new(Vec::new()),
             retained_transients: std::cell::RefCell::new(Vec::new()),
             periodic: std::cell::RefCell::default(),
+            xyce_dc_sensitivity: std::cell::RefCell::default(),
             next_transient_ordinal: std::cell::Cell::new(0),
             next_fourier_ordinal: std::cell::Cell::new(0),
             transient_state: std::cell::RefCell::new(None),
@@ -604,6 +613,16 @@ impl<'a> RunContext<'a> {
     /// Borrow the periodic operating points this run has retained.
     pub(super) fn periodic(&self) -> std::cell::Ref<'_, PeriodicOperatingPoints> {
         self.periodic.borrow()
+    }
+
+    /// Keep the Xyce `.SENS` study the `.DC` card read from its sweep.
+    pub(super) fn retain_xyce_dc_sensitivity(&self, study: XyceDcSensitivity) {
+        *self.xyce_dc_sensitivity.borrow_mut() = Some(study);
+    }
+
+    /// The Xyce `.SENS` study the `.DC` card read, once.
+    pub(super) fn take_xyce_dc_sensitivity(&self) -> Option<XyceDcSensitivity> {
+        self.xyce_dc_sensitivity.borrow_mut().take()
     }
 
     pub(super) fn retain_qpss(
@@ -990,6 +1009,7 @@ impl<'a> RunContext<'a> {
                 restart,
             } => basic::run_dc_sweep(
                 self,
+                analysis,
                 source,
                 &rspice_core::netlist::DcSweepSpec {
                     start: *start,
