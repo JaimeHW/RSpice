@@ -6135,6 +6135,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-results-store"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "lz4_flex 0.13.1",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "rspice-results-ui"
 version = "0.1.0"
 dependencies = [

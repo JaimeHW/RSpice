@@ -47,6 +47,7 @@ members = [
     "crates/rspice-results-ui",
     "crates/rspice-vocabulary",
     "crates/rspice-results",
+    "crates/rspice-results-store",
     "crates/rspice-units",
     "crates/rspice-hardcopy-contract",
     "crates/rspice-hardcopy",

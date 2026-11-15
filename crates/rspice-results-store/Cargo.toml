@@ -1,0 +1,19 @@
+[package]
+name = "rspice-results-store"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# The block codec and the frame checksum. Both versions are pinned to the ones
+# already in Cargo.lock: the store's bytes are part of its identity, and LZ4's
+# output is only deterministic for one encoder version.
+lz4_flex = { version = "=0.13.1", default-features = false, features = ["std", "checked-decode"] }
+crc32fast = "=1.5.0"
+# The logical digest, as rspice-results hashes its own.
+sha2.workspace = true
