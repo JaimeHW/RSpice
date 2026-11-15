@@ -1057,6 +1057,7 @@ mod state_recovery;
 mod state_transmission_lines;
 mod step_control;
 mod step_proposal;
+mod switch_crossing;
 use step_proposal::{
     PhysicalStepWindow, StepProposal, XYCE_FINISH_TOLERANCE, canonical_transient_step_time,
     canonical_transient_step_time_with_device_event, fit_physical_event_approach,
@@ -6374,7 +6375,7 @@ impl Engine {
         let segment_from_image = locked_grid.is_some() && image.is_some();
         let splits_switch_thresholds =
             segment_from_image && (!circuit.vswitches.is_empty() || !circuit.iswitches.is_empty());
-        let mut locked_switch_split: Option<Value> = None;
+        let mut crossing_search: Option<switch_crossing::SwitchCrossingSearch> = None;
         let tstop = match locked_grid.as_ref().and_then(|grid| grid.last()) {
             Some(&last) => last.min(tstop),
             None => tstop,
@@ -8032,12 +8033,13 @@ impl Engine {
                     {
                         step_target = step_target.min(breakpoint);
                     }
-                    // The cut is taken as found: the helper keeps it a floor
-                    // inside the step it was found in, and a tolerance wider
-                    // than that floor would refuse it and solve the same
-                    // step again.
+                    // The cut is taken as found: the search keeps it inside
+                    // the bracket it was found in, and a tolerance wider than
+                    // the bracket would refuse it and solve the same step
+                    // again.
                     if let Some(split) =
-                        locked_switch_split.filter(|split| *split > t && *split < step_target)
+                        switch_crossing::SwitchCrossingSearch::target(crossing_search.as_ref(), t)
+                            .filter(|split| *split < step_target)
                     {
                         step_target = split;
                     }
@@ -11006,19 +11008,19 @@ impl Engine {
             // finite source jump cannot satisfy that estimate at any smaller dt.
             let candidate_model_discontinuity =
                 reject_for_veriloga_event_refinement!(&new_solution, step_time, middle_phase_start);
+            // Each candidate of the search solves the same step to another
+            // end; none is a recovery, so none counts against the step's
+            // retries.
             if splits_switch_thresholds
                 && !locked_replay_hidden_attempt
-                && let Some(split) = Self::locked_switch_split(
+                && switch_crossing::SwitchCrossingSearch::advance(
+                    &mut crossing_search,
                     &circuit,
-                    &solution,
-                    &new_solution,
-                    (t, step_time),
+                    (t, &solution),
+                    (step_time, &new_solution),
                     timestep.hard_min_dt().max(1.0e-9 * dt),
-                )
+                ) == switch_crossing::SwitchCrossingStep::Retry
             {
-                locked_switch_split = Some(split);
-                retry_count += 1;
-                event_refinement_retries = event_refinement_retries.saturating_add(1);
                 self.record_convergence(|quality| quality.record_timestep_reduction());
                 trap_order = Self::trapezoidal_order_after_timestep_control_reject(step_trap_order);
                 restore_rejected_transient_nonlinear_state!();

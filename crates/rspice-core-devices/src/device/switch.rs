@@ -1282,42 +1282,43 @@ impl VoltageSwitch {
         )
     }
 
-    /// Where the step from `accepted` to `candidate` carries the control
-    /// across the threshold that changes the state the switch held at the
-    /// accepted point, as a fraction of the step on the control's linear
-    /// interpolant. The interpolant ends at the control of the step's
-    /// solution with the accepted state where one crossed: that is the path
-    /// the control takes until the switch changes, and a switch that drives
-    /// its own control moves it once changed. A run on a locked mesh cuts
-    /// the step there, so the switch changes at its crossing rather than at
-    /// whichever mesh point follows it. `None` when the control keeps the
-    /// held state over the step, and for a smooth or curve switch, whose
-    /// transition is resolved by what it drives.
+    /// The control at `solution`, as the search for a crossing inside a
+    /// locked step reads it, or `None` for a smooth or curve switch, whose
+    /// transition is resolved by what it drives. At a `candidate` of the step
+    /// it is the control of the step's solution with the accepted state
+    /// where one crossed: that is the path the control takes until the
+    /// switch changes, and a switch that drives its own control moves it
+    /// once changed.
     #[doc(hidden)]
-    pub fn threshold_crossing_fraction(
-        &self,
-        accepted: &[Value],
-        candidate: &[Value],
-    ) -> Option<Value> {
+    pub fn crossing_control(&self, solution: &[Value], candidate: bool) -> Option<Value> {
         if !self.is_ideal() {
             return None;
         }
-        let control = |solution: &[Value]| {
-            let voltage = |node: NodeId| {
-                if node == 0 {
-                    0.0
-                } else {
-                    solution.get(node - 1).copied().unwrap_or(Value::NAN)
-                }
-            };
-            voltage(self.ctrl_pos) - voltage(self.ctrl_neg)
+        let voltage = |node: NodeId| {
+            if node == 0 {
+                0.0
+            } else {
+                solution.get(node - 1).copied().unwrap_or(Value::NAN)
+            }
         };
+        let control = voltage(self.ctrl_pos) - voltage(self.ctrl_neg);
+        Some(match self.witness.carried {
+            Some(carried) if candidate => carried,
+            _ => control,
+        })
+    }
+
+    /// Where the control's chord from `from` to `to` crosses the threshold
+    /// that changes the state the switch held at the accepted point, as a
+    /// fraction of the chord. `None` when the chord keeps the held state.
+    #[doc(hidden)]
+    pub fn crossing_fraction(&self, from: Value, to: Value) -> Option<Value> {
         ideal_threshold_crossing(
             self.accepted_state.unwrap_or(self.state),
             self.vt,
             self.vh,
-            control(accepted),
-            self.witness.carried.unwrap_or_else(|| control(candidate)),
+            from,
+            to,
         )
     }
 
@@ -2028,26 +2029,27 @@ impl CurrentSwitch {
         )
     }
 
-    /// The fraction of the step from `accepted` to `candidate` at which the
-    /// control current crosses the threshold that changes the held state;
-    /// see [`VoltageSwitch::threshold_crossing_fraction`].
+    /// See [`VoltageSwitch::crossing_control`].
     #[doc(hidden)]
-    pub fn threshold_crossing_fraction(
-        &self,
-        accepted: &[Value],
-        candidate: &[Value],
-    ) -> Option<Value> {
+    pub fn crossing_control(&self, solution: &[Value], candidate: bool) -> Option<Value> {
         if !self.is_ideal() {
             return None;
         }
+        Some(match self.witness.carried {
+            Some(carried) if candidate => carried,
+            _ => self.control_current(solution),
+        })
+    }
+
+    /// See [`VoltageSwitch::crossing_fraction`].
+    #[doc(hidden)]
+    pub fn crossing_fraction(&self, from: Value, to: Value) -> Option<Value> {
         ideal_threshold_crossing(
             self.accepted_state.unwrap_or(self.state),
             self.it,
             self.ih,
-            self.control_current(accepted),
-            self.witness
-                .carried
-                .unwrap_or_else(|| self.control_current(candidate)),
+            from,
+            to,
         )
     }
 

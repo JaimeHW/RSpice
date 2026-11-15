@@ -948,6 +948,64 @@ c2 x 0 300p
     }
 }
 
+/// The sampler's period map is smooth through its switch's crossings, and
+/// its orbit certifies. The cut that dates a crossing inside a locked step
+/// once accepted every candidate short of it, each a solver floor closer:
+/// trapezoid steps that long turned roundoff into the derivative history, the
+/// map moved by 5e-8 V between starts 1e-5 V apart, and the orbit's
+/// linearization missed its directions by 1.76e-4. A bracketed search now
+/// accepts only the end that dates the change, so the map's second
+/// difference over those starts is the roundoff of its first.
+#[test]
+fn the_samplers_period_map_is_smooth_through_its_crossings() {
+    let deck = "sampler
+vin in 0 sin(0 1 1meg)
+r1 in c 1k
+c1 c 0 300p
+vb b 0 dc 1
+s1 b x c 0 swm
+r2 x 0 2k
+c2 x 0 300p
+.model swm sw vt=0.2 vh=0.05 ron=1k roff=1e9
+.end
+";
+    let config = PssConfig::new(1.0e6).with_tstab(5.0e-6);
+    let netlist = Netlist::parse(deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let point = engine
+        .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
+        .expect("the sampler's orbit certifies");
+    assert!(point.is_event_orbit());
+    let prepared = engine
+        .prepare_event_orbit(&netlist, &config, None, &NoAbort)
+        .expect("the orbit stabilizes");
+    let orbit = prepared.orbit(&netlist, &config, &NoAbort);
+    let (image, mesh) = (&prepared.image, &prepared.mesh);
+    let z = prepared.basis.read(image).expect("coordinates");
+    let names = prepared.basis.names();
+    let coordinate = |name: &str| {
+        names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("{name} in {names:?}"))
+    };
+    let (c, x) = (coordinate("event:V(C)"), coordinate("event:V(X)"));
+    let end = |offset: Value| {
+        let mut trial = z.clone();
+        trial[c] += offset;
+        orbit
+            .traverse(image, &trial, mesh)
+            .expect("one period of the map")
+            .z_end[x]
+    };
+    let base = end(0.0);
+    let (first, second) = (end(1.0e-5) - base, end(2.0e-5) - base);
+    assert!(
+        (second - 2.0 * first).abs() <= 1.0e-4 * first.abs(),
+        "the map's response to 1e-5 V and 2e-5 V at V(c): {first:e}, {second:e}"
+    );
+}
+
 /// A switch across its own control node: `s1 a 0 a 0` closes where the RC
 /// at `a` rises through VT + VH = 1.2 V and, closed, holds `a` inside its band
 /// until it falls below VT − VH = 0.8 V. Its iterates once alternated between

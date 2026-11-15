@@ -2895,31 +2895,6 @@ impl Engine {
         voltage_limits.chain(current_limits).reduce(Value::min)
     }
 
-    /// Where a locked step is cut so an ideal switch changes at its own
-    /// crossing: the earliest instant the controls' linear interpolants over
-    /// `step` cross the thresholds their accepted states change at, aimed
-    /// `floor` past it so the switch has changed where the step ends. `None`
-    /// when no switch crosses, or crosses within `floor` of the step's end,
-    /// which already dates the change.
-    pub(super) fn locked_switch_split(
-        circuit: &crate::circuit::CircuitData,
-        accepted_solution: &[Value],
-        candidate_solution: &[Value],
-        step: (Value, Value),
-        floor: Value,
-    ) -> Option<Value> {
-        let (t, step_time) = step;
-        let voltage = circuit.vswitches.iter().filter_map(|switch| {
-            switch.threshold_crossing_fraction(accepted_solution, candidate_solution)
-        });
-        let current = circuit.iswitches.iter().filter_map(|switch| {
-            switch.threshold_crossing_fraction(accepted_solution, candidate_solution)
-        });
-        let fraction = voltage.chain(current).reduce(Value::min)?;
-        let split = t + fraction * (step_time - t) + floor;
-        (split > t + floor && split < step_time - floor).then_some(split)
-    }
-
     #[inline]
     pub(super) fn min_truncation_limit(
         first: Option<Value>,
