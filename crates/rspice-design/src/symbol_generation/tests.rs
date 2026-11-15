@@ -278,7 +278,10 @@ fn a_generated_block_body_is_a_rectangle_and_a_triangle_is_not() {
         block.body_outline()[0],
         (rectangle_corners(min, max).to_vec(), true)
     );
-    assert_eq!(shapes.len(), block.body_outline().len());
+    // The shapes are the artwork the document stores: the clock wedge the
+    // outline draws is the clock pin's own style, not a shape of the body.
+    assert_eq!(shapes.len(), block.artwork_outline().len());
+    assert_eq!(block.body_outline().len(), shapes.len() + 1);
 
     let amplifier = generate_symbol(&[
         spec("inp", PortDirection::In),
