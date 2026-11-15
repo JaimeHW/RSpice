@@ -16,7 +16,7 @@ const B1000: u32 = 7;
 const EVENT_SIGNALS: [u32; 6] = [LOGIC, REAL, BUS, WIDE, B128, B1000];
 
 /// An analog signal between event signals of every kind, so ids and slots differ.
-fn event_schema() -> Schema {
+pub(crate) fn event_schema() -> Schema {
     Schema {
         x: Axis {
             name: "time".into(),
@@ -36,10 +36,10 @@ fn event_schema() -> Schema {
 }
 
 /// What one step of a run pushes: a row, then the changes committed in it.
-struct Step {
-    x: f64,
-    values: [f64; 3],
-    changes: Vec<EventChange>,
+pub(crate) struct Step {
+    pub(crate) x: f64,
+    pub(crate) values: [f64; 3],
+    pub(crate) changes: Vec<EventChange>,
 }
 
 /// Random bits of a `width`-bit bus; each byte is nonzero with probability one in `sparse`.
@@ -102,7 +102,7 @@ fn change(rng: &mut Rng, signal: u32, time: f64, sequence: u32) -> EventChange {
 
 /// `rows` steps with events on every signal, a burst of more than two frames of one signal inside
 /// one chunk, and `tail` changes after the last row (an events-only stretch).
-fn run(rows: usize, tail: usize, seed: u64) -> (Vec<Step>, Vec<EventChange>) {
+pub(crate) fn run(rows: usize, tail: usize, seed: u64) -> (Vec<Step>, Vec<EventChange>) {
     let mut rng = Rng(seed);
     let mut steps = Vec::with_capacity(rows);
     let mut t = 0.0;

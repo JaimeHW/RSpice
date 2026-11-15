@@ -111,6 +111,16 @@ impl Batch {
         self.first_row = first_row;
         self.rows = 0;
     }
+
+    /// Copy `other`'s rows into this buffer of the same shape.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn copy_from(&mut self, other: &Batch) {
+        self.first_row = other.first_row;
+        self.rows = other.rows;
+        self.x[..other.rows].copy_from_slice(&other.x[..other.rows]);
+        let values = other.rows * other.slots;
+        self.values[..values].copy_from_slice(&other.values[..values]);
+    }
 }
 
 /// One analog signal's place in the row.
@@ -121,6 +131,7 @@ pub(crate) struct AnalogColumn {
 }
 
 /// What the encoder derives once from the schema.
+#[derive(Clone)]
 pub(crate) struct Layout {
     pub(crate) slots: usize,
     pub(crate) chunk_rows: usize,
