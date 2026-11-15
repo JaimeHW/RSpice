@@ -2,7 +2,8 @@
 //!
 //! User-defined `.FUNC` calls and scalar `.PARAM` references are expanded here,
 //! while circuit-state probes such as `V(...)` and `I(...)` remain symbolic for
-//! the behavioral compiler and final circuit binding pass.
+//! the behavioral compiler and final circuit binding pass. A `.FUNC` formal
+//! written as a probe operand binds to the node or device the call names.
 
 use super::{
     BinOpKind, Expr as NetExpr, ParamContext, ParameterResolutionError, ParameterResolver,
@@ -1466,7 +1467,14 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                         MAX_EXPANDED_EXPRESSION_NODES - expanded_nodes,
                         self.abort,
                     )?;
-                    let substituted = substitute_function_args(&body_ast, &bindings);
+                    let mut probe_operands = ProbeOperandBinder {
+                        function: &func_name,
+                        bindings: &bindings,
+                        probe_protector: self.probe_protector,
+                        params: self.params,
+                        abort: self.abort,
+                    };
+                    let substituted = substitute_function_args(&body_ast, &mut probe_operands)?;
                     substituted
                         .ensure_stack_safe_depth()
                         .map_err(|error| error.to_string())?;
@@ -1694,6 +1702,19 @@ impl ProbeProtector {
             protected.push(self.placeholder_for(part));
         }
         Some(protected.join(","))
+    }
+
+    /// The text a probe placeholder stands for.
+    fn original(&self, placeholder: &str) -> Option<&str> {
+        let index = placeholder
+            .strip_prefix("__RSPICE_PROBE_REF_")?
+            .strip_suffix("__")?
+            .parse::<usize>()
+            .ok()?;
+        self.replacements
+            .get(index)
+            .filter(|(stored, _)| stored == placeholder)
+            .map(|(_, original)| original.as_str())
     }
 
     fn placeholder_for(&mut self, original: &str) -> String {
@@ -2016,23 +2037,105 @@ fn ensure_function_substitution_fits(
     Ok(())
 }
 
-fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> NetExpr {
-    match expr {
+/// The actual arguments of one `.FUNC` call. A formal written as a probe
+/// operand (`V(x)`, `V(x,y)` or `I(x)`) binds to the node or device the call
+/// names, as LTspice does.
+///
+/// The actual argument names the node by its parameter value when it has one
+/// (`.PARAM p=3` makes `f(p)` read `V(3)`), and otherwise by its own spelling.
+/// The binding is made once while the call is expanded, so the prepared
+/// expression reads the node directly and a call costs no more than writing
+/// the probe out. An actual argument that names nothing, such as `1+2`, is
+/// refused: reading the formal's own spelling as a node instead, as ngspice
+/// and Xyce do, would silently read a different node.
+struct ProbeOperandBinder<'b> {
+    function: &'b str,
+    bindings: &'b HashMap<String, NetExpr>,
+    probe_protector: &'b mut ProbeProtector,
+    params: &'b ParamContext,
+    abort: &'b dyn AbortSignal,
+}
+
+impl ProbeOperandBinder<'_> {
+    fn bind(
+        &mut self,
+        probe: &str,
+        operand: &NetExpr,
+    ) -> Result<NetExpr, BehavioralPreparationError> {
+        let NetExpr::Param(placeholder) = operand else {
+            return Ok(operand.clone());
+        };
+        let Some(formal) = self.probe_protector.original(placeholder) else {
+            return Ok(operand.clone());
+        };
+        let Some(actual) = self.bindings.get(&formal.to_ascii_uppercase()) else {
+            return Ok(operand.clone());
+        };
+        match self.operand_name(actual) {
+            Some(name) => Ok(NetExpr::Param(self.probe_protector.placeholder_for(&name))),
+            None => {
+                let formal = formal.to_string();
+                let actual = self
+                    .probe_protector
+                    .restore_with_abort(&serialize_expr(actual), self.abort)?;
+                Err(format!(
+                    ".FUNC {function} reads its argument '{formal}' as a node or device name in \
+                     {probe}({formal}), but the call passes '{actual}', which names neither",
+                    function = self.function,
+                )
+                .into())
+            }
+        }
+    }
+
+    fn operand_name(&self, actual: &NetExpr) -> Option<String> {
+        match actual {
+            NetExpr::Param(name) => {
+                if let Some(original) = self.probe_protector.original(name) {
+                    return Some(original.to_string());
+                }
+                if let Some(value) = self.params.get(name) {
+                    return integral_node_name(value);
+                }
+                is_simple_probe_reference(name).then(|| name.clone())
+            }
+            NetExpr::Number(value) => integral_node_name(*value),
+            _ => None,
+        }
+    }
+}
+
+/// The node a numeric actual argument names: SPICE node names may be
+/// non-negative integers, and no other number spells one.
+fn integral_node_name(value: Value) -> Option<String> {
+    const LARGEST_EXACT_INTEGER: Value = 9_007_199_254_740_992.0;
+    (value.is_finite() && value >= 0.0 && value.fract() == 0.0 && value <= LARGEST_EXACT_INTEGER)
+        .then(|| format!("{}", value as u64))
+}
+
+/// The body with each formal replaced by its actual argument; a formal read
+/// as a probe operand is bound by `probe_operands`.
+fn substitute_function_args(
+    expr: &NetExpr,
+    probe_operands: &mut ProbeOperandBinder<'_>,
+) -> Result<NetExpr, BehavioralPreparationError> {
+    Ok(match expr {
         NetExpr::Number(v) => NetExpr::Number(*v),
         NetExpr::ComplexNumber(v) => NetExpr::Number(v.re),
         NetExpr::StringLiteral(value) => NetExpr::StringLiteral(value.clone()),
-        NetExpr::Param(name) => args
+        NetExpr::Param(name) => probe_operands
+            .bindings
             .get(&name.to_ascii_uppercase())
             .cloned()
             .unwrap_or_else(|| NetExpr::Param(name.clone())),
         NetExpr::UnaryOp { op, operand } => NetExpr::UnaryOp {
             op: *op,
-            operand: Box::new(substitute_function_args(operand, args)),
+            operand: Box::new(substitute_function_args(operand, probe_operands)?),
         },
         NetExpr::BinOp { op, left, right } => NetExpr::BinOp {
             op: *op,
-            left: Box::new(substitute_function_args(left, args)),
-            right: Box::new(substitute_function_args(right, args)),
+            left: Box::new(substitute_function_args(left, probe_operands)?),
+            right: Box::new(substitute_function_args(right, probe_operands)?),
         },
         NetExpr::FnCall {
             name,
@@ -2040,15 +2143,18 @@ fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> 
         } => NetExpr::FnCall {
             name: name.clone(),
             args: if is_circuit_probe(name) {
-                fn_args.clone()
+                fn_args
+                    .iter()
+                    .map(|operand| probe_operands.bind(name, operand))
+                    .collect::<Result<_, _>>()?
             } else {
                 fn_args
                     .iter()
-                    .map(|a| substitute_function_args(a, args))
-                    .collect()
+                    .map(|a| substitute_function_args(a, probe_operands))
+                    .collect::<Result<_, _>>()?
             },
         },
-    }
+    })
 }
 
 /// Whether `left (inner) op` reads back as the same tree without parentheses

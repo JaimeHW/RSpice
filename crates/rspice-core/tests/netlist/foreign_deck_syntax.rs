@@ -2614,3 +2614,80 @@ fn a_level_2010_mosfet_is_refused_by_name() {
         .expect_err("no native LEVEL=2010");
     assert!(refusal.to_string().contains("LEVEL=2010"), "{refusal}");
 }
+
+// A .func formal read as a probe operand binds to the node or device the call
+// names, at top level and inside a subcircuit; a parameter's value names the
+// node (p=3 reads V(3)). LTspice 17.2.4 on this deck: V(out1..out6) = 3, 3,
+// -0.25, 4, 1.5, 3.25; ngspice-46 gives the same on the deck with each call
+// written out (it reads V(x) in a body as the node x itself).
+#[test]
+fn function_arguments_name_the_nodes_and_devices_their_body_probes() {
+    let netlist = parse(
+        "* .func arguments that name nodes and devices
+.func fv(x) {v(x)*2}
+.func fd(x,y) {v(x,y)*3}
+.func fi(d) {i(d)*1000}
+.func fn(x) {fv(x)+1}
+.param p=3
+V1 n1 0 1.5
+V2 n2 0 0.5
+Rl n2 0 2k
+V3 3 0 0.75
+B1 out1 0 V=fv(n1)
+R1 out1 0 1k
+B2 out2 0 V=fd(n1,n2)
+R2 out2 0 1k
+B3 out3 0 V=fi(V2)
+R3 out3 0 1k
+B4 out4 0 V=fn(n1)
+R4 out4 0 1k
+B5 out5 0 V=fv(p)
+R5 out5 0 1k
+X1 n1 out6 dbl
+.subckt dbl in out
+Vs mid 0 0.25
+B1 out 0 V=fv(in)+fv(mid)+fi(Vs)
+R1 out 0 1k
+Rm mid 0 1k
+.ends
+.op
+.end
+",
+    );
+    for (node, want) in [
+        ("out1", 3.0),
+        ("out2", 3.0),
+        ("out3", -0.25),
+        ("out4", 4.0),
+        ("out5", 1.5),
+        ("out6", 3.25),
+    ] {
+        assert_close(
+            &format!("V({node})"),
+            op_voltage(&netlist, node),
+            want,
+            1e-9,
+        );
+    }
+
+    let netlist = parse(
+        "* an argument that names no node
+.func fv(x) {v(x)*2}
+V1 n1 0 1
+B1 out 0 V=fv(1+2)
+R1 out 0 1k
+.op
+.end
+",
+    );
+    let refusal = Engine::default()
+        .run_dc_op(&netlist)
+        .expect_err("1+2 names no node");
+    assert!(
+        refusal.to_string().contains(
+            ".FUNC FV reads its argument 'x' as a node or device name in V(x), but the call \
+             passes '(1+2)', which names neither"
+        ),
+        "{refusal}"
+    );
+}

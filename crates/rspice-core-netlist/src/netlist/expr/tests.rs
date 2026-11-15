@@ -847,6 +847,47 @@ fn behavioral_preparation_expands_functions_without_substituting_probe_names() {
 }
 
 #[test]
+fn a_function_formal_read_as_a_probe_operand_binds_to_the_node_the_call_names() {
+    let mut ctx = ParamContext::new();
+    ctx.set("p", 3.0);
+    ctx.define_function("fv", vec!["x".to_string()], "v(x)*2");
+    ctx.define_function("fd", vec!["x".to_string(), "y".to_string()], "v(x,y)*3");
+    ctx.define_function("fi", vec!["d".to_string()], "i(d)*1000");
+    ctx.define_function("fn", vec!["x".to_string()], "fv(x)+1");
+    ctx.define_function("fk", vec!["x".to_string(), "k".to_string()], "v(x)*k");
+
+    for (call, expected) in [
+        ("fv(n1)", "(V(n1)*2)"),
+        ("fd(n1,n2)", "(V(n1,n2)*3)"),
+        ("fi(V2)", "(I(V2)*1000)"),
+        ("fn(n1)", "((V(n1)*2)+1)"),
+        ("fk(n1,4)", "(V(n1)*4)"),
+        // A numeric node name, and a parameter's value naming one, as LTspice.
+        ("fv(3)", "(V(3)*2)"),
+        ("fv(p)", "(V(3)*2)"),
+        // A node that shares the formal's spelling is not read in its place.
+        ("fv(x2)", "(V(x2)*2)"),
+    ] {
+        let prepared = prepare_behavioral_expression(call, &ctx)
+            .unwrap_or_else(|error| panic!("{call} prepares: {error}"));
+        assert_eq!(
+            prepared.to_ascii_uppercase(),
+            expected.to_ascii_uppercase(),
+            "{call}"
+        );
+    }
+
+    for call in ["fv(1+2)", "fv(2.5)", "fv(v(n1))"] {
+        let error = prepare_behavioral_expression(call, &ctx).expect_err(call);
+        assert!(
+            error.contains("reads its argument 'x' as a node or device name")
+                && error.contains("which names neither"),
+            "{call}: {error}"
+        );
+    }
+}
+
+#[test]
 fn xyce_i0_user_function_is_not_a_current_probe_accessor() {
     let options = crate::netlist::NetlistParseOptions {
         expression_dialect: ExpressionDialect::Xyce,
