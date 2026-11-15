@@ -602,6 +602,49 @@ fn a_symbol_from_the_library_keeps_its_pins_and_model_file() {
     assert_eq!(imported.directives[0].text, ".tran 1m");
 }
 
+/// An imported symbol looks as the tool it came from drew it: its pins are
+/// bare connection points that draw no lead or mark of their own, on the
+/// edges the drawing puts them, and the drawing is its artwork unchanged.
+#[test]
+fn an_imported_symbols_pins_draw_nothing_over_its_drawing() {
+    use crate::symbol::pin_drawing;
+    use rspice_design_model::symbol_pin::SymbolPinSide;
+    let drawing = parse_asc(
+        "Version 4\nSHEET 1 800 600\n\
+         WIRE 32 48 -64 48\nWIRE 32 80 -64 80\nWIRE 192 64 96 64\n\
+         FLAG -64 48 inp\nFLAG -64 80 inn\nFLAG 192 64 out\n\
+         SYMBOL amp 64 64 R0\nSYMATTR InstName U1\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let symbol = &imported.cells[0].symbol;
+    assert_eq!(symbol.body.len(), 3, "the three lines the drawing has");
+    let sides = symbol
+        .pins
+        .iter()
+        .map(|pin| (pin.name.as_str(), pin.side))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sides,
+        [
+            ("IN+", SymbolPinSide::Left),
+            ("IN-", SymbolPinSide::Left),
+            ("OUT", SymbolPinSide::Right),
+        ]
+    );
+    for pin in &symbol.pins {
+        assert_eq!(pin.length, 0, "{}", pin.name);
+        let tip = pin.position.expect("an imported pin has a place");
+        let drawn = pin_drawing(tip, pin.side, pin.length, pin.style);
+        assert_eq!(
+            (drawn.lead, drawn.bubble, drawn.wedge),
+            (None, None, None),
+            "{} draws over the drawing",
+            pin.name
+        );
+    }
+}
+
 #[test]
 fn a_symbol_with_no_definition_is_a_box_and_a_refusal() {
     let drawing =
