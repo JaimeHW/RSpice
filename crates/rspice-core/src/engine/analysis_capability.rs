@@ -485,6 +485,22 @@ const fn pstb_admissible_veriloga() -> CellSupport {
     }
 }
 
+const PSTB_GENERATED_EVIDENCE: &[&str] = &[
+    "tests/generated/generated_hb.rs::pstb_reads_a_generated_resistors_rl_as_its_native_twins",
+    "tests/generated/generated_hb.rs::pstb_reads_a_generated_diodes_junction_as_its_native_twins",
+];
+
+/// PSTB takes the generated compact models PSS takes, through the monodromy
+/// of the orbit shooting solves.
+const fn pstb_admissible_generated() -> CellSupport {
+    CellSupport::Restricted {
+        gate: InstanceGate::HbAdmissibleVerilogA,
+        token: PSS_VERILOGA_OPERATOR,
+        condition: "every generated compact model PSS admits, read through the monodromy of the orbit shooting solves: its charges are coordinates of the period map from the state the period starts at",
+        evidence: PSTB_GENERATED_EVIDENCE,
+    }
+}
+
 /// The native and XSPICE analog devices PSS and the analyses on its orbit
 /// take: what their declared periodic contracts admit, and on a driven orbit
 /// the voltage- and current-controlled switches native shooting does not
@@ -704,6 +720,7 @@ pub const fn capability_cell(
             F::VerilogAGenerated if matches!(analysis, A::Pnoise) => {
                 carrier_admits_veriloga_noise(true)
             }
+            F::VerilogAGenerated if matches!(analysis, A::Pstb) => pstb_admissible_generated(),
             F::VerilogAGenerated => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, true),
@@ -743,7 +760,6 @@ const fn periodic_veriloga_reason(analysis: CapabilityAnalysis, generated: bool)
             "runtime Verilog-A devices without exact HB charge/noise capability metadata"
         }
         (A::Hb | A::QuasiPeriodic, true) => "generated Verilog-A compact-model equations",
-        (A::Pss | A::Pstb, true) => "generated Verilog-A integration state",
         (A::Envelope, false) => "Verilog-A integration state is not part of an envelope",
         (A::Envelope, true) => "generated Verilog-A integration state",
         (_, false) => "runtime Verilog-A equations have no periodic small-signal formulation",

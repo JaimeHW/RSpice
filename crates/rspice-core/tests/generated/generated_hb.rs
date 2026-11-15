@@ -1343,3 +1343,120 @@ fn a_generated_resistor_mixes_its_native_twins_sidebands_on_a_shooting_carrier()
         "the pumped diode must convert into the first sidebands: {native:?}"
     );
 }
+
+/// The PSTB multipliers of `deck`'s orbit read at inductor `probe`, largest
+/// first.
+#[cfg(any(
+    feature = "veriloga-model-r2-cmc",
+    feature = "veriloga-model-diode-cmc"
+))]
+fn pstb_multipliers(deck: &str, config: PssConfig, probe: &str) -> Vec<Complex64> {
+    let netlist = Netlist::parse(deck).expect("parse");
+    let point = engine()
+        .run_pss_operating_point_with_abort(&netlist, config, &rspice_core::NoAbort)
+        .unwrap_or_else(|error| panic!("PSS must solve: {error}\n{deck}"));
+    let card = rspice_core::netlist::PstbCard {
+        probe_instance: probe.to_owned(),
+        max_harmonics: 4,
+        stability_threshold: 1.0 + 1e-6,
+        detect_subharmonics: true,
+    };
+    let stability = engine()
+        .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &rspice_core::NoAbort)
+        .unwrap_or_else(|error| panic!("PSTB must run: {error}\n{deck}"));
+    let mut multipliers: Vec<Complex64> = stability
+        .result
+        .multipliers
+        .iter()
+        .map(|mode| mode.value)
+        .collect();
+    multipliers.sort_by(|a, b| b.norm().total_cmp(&a.norm()));
+    assert!(
+        !point
+            .shooting_state_basis()
+            .first()
+            .is_some_and(|name| name.starts_with("event:")),
+        "native shooting solves {deck}"
+    );
+    multipliers
+}
+
+/// PSTB reads a generated compact model's charges where shooting carries
+/// them. The generated R2_CMC is the native resistor of its value, so an RL
+/// through either maps a current deviation over the period by
+/// exp(−T·R/L) = exp(−1) at R = 100 Ω, L = 100 µH.
+#[cfg(feature = "veriloga-model-r2-cmc")]
+#[test]
+fn pstb_reads_a_generated_resistors_rl_as_its_native_twins() {
+    let deck = |resistor: &str| {
+        format!("* pstb of an RL\nV1 in 0 SIN(0 1 1meg)\n{resistor}\nL1 a 0 100u\n.end\n")
+    };
+    let config = || {
+        PssConfig::new(F0)
+            .with_points_per_period(512)
+            .with_tolerance(1e-9)
+    };
+    let native = pstb_multipliers(&deck("R1 in a 100"), config(), "L1");
+    let generated = pstb_multipliers(&deck("XR1 in a r2_cmc r=100"), config(), "L1");
+    let expected = (-1.0_f64).exp();
+    eprintln!("RL: R2_CMC {generated:?}, native {native:?}, exp(-1) = {expected}");
+    assert_eq!(generated.len(), 1, "{generated:?}");
+    assert!(
+        (generated[0].re / expected - 1.0).abs() <= 1.0e-4,
+        "{generated:?}"
+    );
+    for (a, b) in generated.iter().zip(&native) {
+        assert!((a - b).norm() <= 1.0e-9, "R2_CMC {a} against native {b}");
+    }
+}
+
+/// PSTB reads the generated DIODE_CMC's junction charge where native
+/// shooting carries it. Held in reverse bias (V(b) between −1.5 and −0.5 V)
+/// behind R1 = 10 kΩ, the junction is its depletion capacitance
+/// `CJORBOT·AB·(1 − V/VBIRBOT)^(−PBOT)`, 1 nF at zero bias with a 1 mm²
+/// bottom area, no edges and the reference temperature the circuit's; its
+/// currents there are below a nanoampere against the milliamperes that
+/// charge it. The native twin is the SPICE diode with that capacitance law,
+/// CJO = 1 nF, VJ = 1 V, M = 0.5, and the same saturation current, whose
+/// multiplier exp(∮∂f/∂v dt) over the RC's orbit is 0.868124; a probe loop
+/// beside them adds the RL's exp(−1). DIODE_CMC's junction reads 0.869087
+/// there, 1.1e-3 above its twin: its charge function is not the SPICE law to
+/// a part in a thousand. The spectra agree to 2e-3.
+#[cfg(feature = "veriloga-model-diode-cmc")]
+#[test]
+fn pstb_reads_a_generated_diodes_junction_as_its_native_twins() {
+    let deck = |junction: &str| {
+        format!(
+            "* pstb of a reverse-biased junction\nV1 in 0 SIN(-1 0.5 1meg)\nR1 in b 10k\n\
+             {junction}\nV2 p 0 SIN(0 1 1meg)\nR2 p q 100\nL2 q 0 100u\n.end\n"
+        )
+    };
+    let config = || {
+        PssConfig::new(F0)
+            .with_points_per_period(512)
+            .with_tolerance(1e-9)
+    };
+    let native = pstb_multipliers(
+        &deck("D1 b 0 dj\n.model dj d is=1e-18 cjo=1n vj=1 m=0.5"),
+        config(),
+        "L2",
+    );
+    let generated = pstb_multipliers(
+        &deck("D9 b 0 dcm ab=1e-6 ls=0 lg=0\n.model dcm diode_cmc trj=27"),
+        config(),
+        "L2",
+    );
+    eprintln!("junction: DIODE_CMC {generated:?}, native {native:?}");
+    assert_eq!(generated.len(), 2, "{generated:?}");
+    assert_eq!(native.len(), 2, "{native:?}");
+    assert!(
+        (generated[1].re / (-1.0_f64).exp() - 1.0).abs() <= 1.0e-4,
+        "{generated:?}"
+    );
+    for (a, b) in generated.iter().zip(&native) {
+        assert!(
+            (a - b).norm() <= 2.0e-3 * b.norm(),
+            "DIODE_CMC {a} against native {b}"
+        );
+    }
+}
