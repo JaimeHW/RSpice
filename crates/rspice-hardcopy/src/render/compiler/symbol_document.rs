@@ -5,11 +5,10 @@
 //! instance can never carry different artwork from the printed master.
 //!
 //! Authored text is one of the body's shapes, so it prints with the artwork
-//! it letters. The scene sets a run along its reading, across or upward, which
-//! is why an orientation that carries a run across its reading centres it on
-//! its anchor instead.
+//! it letters, hung off its anchor as the canvas hangs it.
 
 use super::*;
+use rspice_design::schematic::label_layout::{LayoutPoint, PlacedText};
 
 impl SemanticSceneCompiler<'_> {
     /// What an imported wire draws in place of a line: strokes in the
@@ -90,8 +89,8 @@ impl SemanticSceneCompiler<'_> {
         // The symbol is held by its origin: an instance stands that point on
         // its position, as the canvas and the wires it connects do.
         let held = |point: SchematicPoint| point - symbol.origin;
-        let convert = |this: &Self, point: SchematicPoint| {
-            let world = if let Some(component) = component {
+        let world = |point: SchematicPoint| {
+            if let Some(component) = component {
                 let local = component.transform_point(held(point));
                 SchematicPoint::new(
                     component.pos.x.saturating_add(local.x),
@@ -99,9 +98,9 @@ impl SemanticSceneCompiler<'_> {
                 )
             } else {
                 held(point)
-            };
-            this.schematic_point(world)
+            }
         };
+        let convert = |this: &Self, point: SchematicPoint| this.schematic_point(world(point));
         for shape in &symbol.body {
             let style = shape.style().unwrap_or_default();
             let stroke = styled_print_stroke(body_stroke, style);
@@ -221,14 +220,12 @@ impl SemanticSceneCompiler<'_> {
                     align,
                     rotation,
                 } => {
-                    let origin = convert(self, *anchor)?;
-                    self.add_text_placed(
-                        origin,
+                    self.placed_lines(
+                        placed_run(world(*anchor), *align, *rotation, component),
                         text,
                         SceneFont::Monospace,
-                        u64::from(size.height().unsigned_abs()) * SCHEMATIC_UNIT_UM as u64,
+                        size.height() as f32,
                         body_stroke.color,
-                        placed_run(*align, *rotation, component),
                     )?;
                 }
                 // An instance letters its own value of the parameter, or the
@@ -252,14 +249,12 @@ impl SemanticSceneCompiler<'_> {
                     if !*shown || value.is_empty() {
                         continue;
                     }
-                    let origin = convert(self, *anchor)?;
-                    self.add_text_placed(
-                        origin,
+                    self.placed_lines(
+                        placed_run(world(*anchor), *align, *rotation, component),
                         &rspice_design::symbol::symbol_label_text(parameter, &value),
                         SceneFont::Monospace,
-                        u64::from(size.height().unsigned_abs()) * SCHEMATIC_UNIT_UM as u64,
+                        size.height() as f32,
                         body_stroke.color,
-                        placed_run(*align, *rotation, component),
                     )?;
                 }
             }
@@ -355,36 +350,32 @@ impl SemanticSceneCompiler<'_> {
     }
 }
 
+/// How a run of the symbol's lettering hangs off its world `anchor` once
+/// `component` (if any) has carried it: as the canvas hangs it, a run read
+/// upward hung upright and turned a quarter counter-clockwise about its
+/// anchor.
+fn placed_run(
+    anchor: SchematicPoint,
+    align: SymbolTextAlign,
+    rotation: SymbolTextRotation,
+    component: Option<&Component>,
+) -> PlacedText {
+    let placement = align.placement(rotation, |point| {
+        component.map_or(point, |c| c.transform_point(point))
+    });
+    let (horizontal, vertical) = rspice_design::symbol::symbol_text_hang(placement, rotation);
+    PlacedText {
+        anchor: LayoutPoint::new(anchor.x as f32, anchor.y as f32),
+        horizontal,
+        vertical,
+        upward: matches!(rotation, SymbolTextRotation::R90),
+    }
+}
+
 /// `stroke` weighted and broken as `style` says. A whole line keeps the
 /// pattern the print mapping gave the body's layer; a broken one is broken
 /// in symbol units, so the pattern keeps its proportion against the body on
 /// every page size, as it does on screen.
-/// Where the scene sets a run from and which way it reads, once `component`
-/// (if any) has carried it. The scene sets a run along its reading only, so
-/// an orientation that carried the run across that reading centres it
-/// instead of hanging it off a side the print cannot express.
-fn placed_run(
-    align: SymbolTextAlign,
-    rotation: SymbolTextRotation,
-    component: Option<&Component>,
-) -> (TextAnchor, SceneTextRotation) {
-    let placement = align.placement(rotation, |point| {
-        component.map_or(point, |c| c.transform_point(point))
-    });
-    let placed = match (rotation, placement) {
-        (SymbolTextRotation::R0, SymbolTextPlacement::After)
-        | (SymbolTextRotation::R90, SymbolTextPlacement::Above) => TextAnchor::Start,
-        (SymbolTextRotation::R0, SymbolTextPlacement::Before)
-        | (SymbolTextRotation::R90, SymbolTextPlacement::Below) => TextAnchor::End,
-        _ => TextAnchor::Middle,
-    };
-    let turn = match rotation {
-        SymbolTextRotation::R0 => SceneTextRotation::Upright,
-        SymbolTextRotation::R90 => SceneTextRotation::CounterClockwise90,
-    };
-    (placed, turn)
-}
-
 fn styled_print_stroke(stroke: StrokeStyle, style: SymbolStyle) -> StrokeStyle {
     let scaled = (stroke.width.micrometres() as f64 * f64::from(style.stroke.scale())).round();
     let width = Length::from_micrometres((scaled as u64).max(1));

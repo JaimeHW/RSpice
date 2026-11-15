@@ -97,6 +97,60 @@ fn a_placed_parts_labels_print_its_own_values() {
     );
 }
 
+/// The symbol's own lettering hangs off its anchor as the canvas hangs it:
+/// centred across its reading, and hung below its anchor once a quarter turn
+/// carries a run that read across to read down.
+#[test]
+fn a_placed_symbols_lettering_hangs_off_its_anchor_as_the_canvas_hangs_it() {
+    use rspice_design::schematic::label_layout::text_baselines;
+    use rspice_design::symbol::{SymbolTextAlign, SymbolTextRotation, SymbolTextSize};
+
+    let mut symbol = cell_symbol();
+    symbol.body.extend([
+        SymbolShape::Text {
+            anchor: SchematicPoint::new(10, 0),
+            text: "AMP".to_owned(),
+            size: SymbolTextSize::Normal,
+            align: SymbolTextAlign::Left,
+            rotation: SymbolTextRotation::R0,
+        },
+        SymbolShape::Label {
+            anchor: SchematicPoint::new(-30, 50),
+            parameter: "W".to_owned(),
+            default: "1u".to_owned(),
+            size: SymbolTextSize::Normal,
+            align: SymbolTextAlign::Left,
+            rotation: SymbolTextRotation::R0,
+            shown: true,
+        },
+    ]);
+    let printed = |component: Component| {
+        let mut printed = sheet(Vec::new());
+        printed.components.push(SemanticComponent {
+            symbol_source: Some(SemanticSymbolSource::Authored),
+            component,
+            resolved_symbol: Some(symbol.clone()),
+        });
+        compile(&printed)
+    };
+    let baseline = |y: f32, edge| text_baselines(y, edge, 9.0, 1).next().unwrap();
+    let size = 9 * UM as u64;
+
+    let upright = printed(part(1, ComponentType::CellInstance, (0, 0), "X1", "amp"));
+    let (x, y) = upright.at(10.0, f64::from(baseline(0.0, TextEdge::Center)));
+    assert_eq!(upright.text("AMP"), (x, y, TextAnchor::Start, size));
+    let (x, y) = upright.at(-30.0, f64::from(baseline(50.0, TextEdge::Center)));
+    assert_eq!(upright.text("W=1u"), (x, y, TextAnchor::Start, size));
+
+    // A quarter turn carries the run to read down from (0, 10): the canvas
+    // hangs it below its anchor, centred on it.
+    let turned = printed(
+        part(2, ComponentType::CellInstance, (200, 0), "X2", "amp").with_rotation(Rotation::R90),
+    );
+    let (x, y) = turned.at(200.0, f64::from(baseline(10.0, TextEdge::Start)));
+    assert_eq!(turned.text("AMP"), (x, y, TextAnchor::Middle, size));
+}
+
 fn semantic(component: Component) -> SemanticComponent {
     let resolved_symbol = (component.kind == ComponentType::CellInstance).then(cell_symbol);
     SemanticComponent {

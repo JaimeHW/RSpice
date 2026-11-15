@@ -25,7 +25,7 @@ use rspice_design::{
     symbol::{
         SymbolCurve, SymbolDash, SymbolDocument, SymbolFill, SymbolShape, SymbolStyle,
         SymbolTextAlign, SymbolTextPlacement, SymbolTextRotation, rectangle_corners,
-        symbol_label_text, symbol_text_bounds,
+        symbol_label_text, symbol_text_bounds, symbol_text_hang,
     },
     symbol_generation::fit_pin_name,
 };
@@ -282,22 +282,11 @@ fn symbol_text_align(
     )
 }
 
-/// How a run reading `rotation`'s way hangs off its anchor to land at
-/// `placement`. A run read upward is hung upright and then turned a quarter
-/// counter-clockwise about its anchor, so its upright hang is the one that
-/// turn carries to `placement`.
+/// egui's spelling of how a run reading `rotation`'s way hangs off its
+/// anchor to land at `placement`: the hang print gives it too.
 pub(crate) fn text_hang(placement: SymbolTextPlacement, rotation: SymbolTextRotation) -> Align2 {
-    match (rotation, placement) {
-        (_, SymbolTextPlacement::On) => Align2::CENTER_CENTER,
-        (SymbolTextRotation::R0, SymbolTextPlacement::After) => Align2::LEFT_CENTER,
-        (SymbolTextRotation::R0, SymbolTextPlacement::Before) => Align2::RIGHT_CENTER,
-        (SymbolTextRotation::R0, SymbolTextPlacement::Below) => Align2::CENTER_TOP,
-        (SymbolTextRotation::R0, SymbolTextPlacement::Above) => Align2::CENTER_BOTTOM,
-        (SymbolTextRotation::R90, SymbolTextPlacement::Above) => Align2::LEFT_CENTER,
-        (SymbolTextRotation::R90, SymbolTextPlacement::Below) => Align2::RIGHT_CENTER,
-        (SymbolTextRotation::R90, SymbolTextPlacement::After) => Align2::CENTER_TOP,
-        (SymbolTextRotation::R90, SymbolTextPlacement::Before) => Align2::CENTER_BOTTOM,
-    }
+    let (horizontal, vertical) = symbol_text_hang(placement, rotation);
+    super::drawing::text_align(horizontal, vertical)
 }
 
 /// Paints a run of authored glyphs hung off `at` as `hang` says, read left

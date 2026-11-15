@@ -48,7 +48,7 @@ use rspice_design::schematic::{
 };
 use rspice_design::symbol::{
     SymbolCurve, SymbolDash, SymbolDocument, SymbolShape, SymbolStyle, SymbolTextAlign,
-    SymbolTextPlacement, SymbolTextRotation, rectangle_corners,
+    SymbolTextRotation, rectangle_corners,
 };
 use rspice_design::symbol_artwork::{PathCommand, SymbolLibrary};
 use rspice_design_model::Point as SchematicPoint;

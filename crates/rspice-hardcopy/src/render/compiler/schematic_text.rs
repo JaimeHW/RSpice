@@ -68,7 +68,7 @@ impl SemanticSceneCompiler<'_> {
             &text.text,
             text.class.font(),
             text.size_world(),
-            text.class.ink(),
+            SemanticColor::Exact(text.class.ink()),
         )
     }
 
@@ -87,7 +87,7 @@ impl SemanticSceneCompiler<'_> {
                     line,
                     class.font(),
                     note.lettered_size_world(),
-                    class.ink(),
+                    SemanticColor::Exact(class.ink()),
                 )?;
             }
         }
@@ -96,13 +96,13 @@ impl SemanticSceneCompiler<'_> {
 
     /// `text` hung off its anchor, each line on the baseline the canvas sets
     /// it on.
-    fn placed_lines(
+    pub(super) fn placed_lines(
         &mut self,
         placed: PlacedText,
         text: &str,
         font: SceneFont,
         size: f32,
-        ink: Rgb8,
+        ink: SemanticColor,
     ) -> Result<(), HardcopyRenderError> {
         let anchor = match placed.horizontal {
             TextEdge::Start => TextAnchor::Start,
@@ -134,7 +134,7 @@ impl SemanticSceneCompiler<'_> {
                 line,
                 font,
                 world_um(size).unsigned_abs(),
-                SemanticColor::Exact(ink),
+                ink,
                 (anchor, rotation),
             )?;
         }
@@ -167,7 +167,13 @@ impl SemanticSceneCompiler<'_> {
             } else {
                 (fit_pin_name(&pin.name), SceneFont::Monospace)
             };
-            self.placed_lines(placed, &name, font, document.pin_name_world(), VALUE_INK)?;
+            self.placed_lines(
+                placed,
+                &name,
+                font,
+                document.pin_name_world(),
+                SemanticColor::Exact(VALUE_INK),
+            )?;
         }
         Ok(())
     }

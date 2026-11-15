@@ -29,6 +29,7 @@ pub use rspice_design_model::symbol_geometry::{
 };
 
 use crate::library::View;
+use crate::schematic::label_layout::TextEdge;
 use crate::symbol_generation::{GeneratedSymbol, PinLabel, PinMark, generate_symbol_with_roles};
 use rspice_design_model::{
     Point,
@@ -294,6 +295,28 @@ fn default_pin_side(direction: PortDirection, position: Option<Point>) -> Symbol
         PortDirection::In => SymbolPinSide::Left,
         PortDirection::Out | PortDirection::InOut => SymbolPinSide::Right,
         PortDirection::Supply => SymbolPinSide::Top,
+    }
+}
+
+/// How a run of symbol text reading `rotation`'s way hangs off its anchor to
+/// land at `placement`, as the label layout's horizontal and vertical edges.
+/// A run read upward is hung upright and then turned a quarter
+/// counter-clockwise about its anchor, so its upright hang is the one that
+/// turn carries to `placement`. The canvas and print both hang a symbol's
+/// lettering by this.
+pub fn symbol_text_hang(
+    placement: SymbolTextPlacement,
+    rotation: SymbolTextRotation,
+) -> (TextEdge, TextEdge) {
+    use SymbolTextPlacement::{Above, After, Before, Below, On};
+    use SymbolTextRotation::{R0, R90};
+    use TextEdge::{Center, End, Start};
+    match (rotation, placement) {
+        (_, On) => (Center, Center),
+        (R0, After) | (R90, Above) => (Start, Center),
+        (R0, Before) | (R90, Below) => (End, Center),
+        (R0, Below) | (R90, After) => (Center, Start),
+        (R0, Above) | (R90, Before) => (Center, End),
     }
 }
 
