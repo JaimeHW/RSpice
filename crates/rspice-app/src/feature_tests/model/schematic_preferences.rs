@@ -4,7 +4,7 @@
 use crate::state::{Point, WireRoutingMode};
 use crate::workbench::ChoicePreference;
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::schematic_preferences::{
+use rspice_app_state::workbench::app_state::schematic_preferences::{
     ANY_ANGLE_ROUTING, MANUAL_JUNCTION_DOTS, SELECTION_CROSSING,
 };
 

@@ -29,8 +29,6 @@ mod model_access;
 mod run_access;
 pub(crate) use rspice_app_runs::workbench::app_state::run_preflight;
 mod schematic_drag;
-#[cfg(test)]
-pub(crate) use rspice_app_state::workbench::app_state::schematic_preferences;
 pub(crate) mod services_access;
 pub(crate) mod session;
 pub(in crate::workbench) use rspice_app_state::workbench::app_state::sim_setup;
@@ -75,8 +73,6 @@ pub(crate) use session::shortcuts::{
     request_engineering_canvas_focus, return_engineering_canvas_focus, runtime_command_platform,
 };
 pub(crate) use session::state_init::default_model_library_manager;
-#[cfg(test)]
-pub(crate) use session::state_init::restore_session_model_library_manager;
 pub use sim_setup::SimSetupState;
 #[cfg(test)]
 pub use sim_setup::TranSetup;

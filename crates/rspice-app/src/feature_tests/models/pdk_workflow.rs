@@ -129,10 +129,11 @@ fn startup_service_hydrates_persisted_sources_without_dirtying_a_closed_project(
     config.add_library_path(root.to_string_lossy().into_owned());
 
     state.model.pdk_config = config;
-    let (manager, loaded) = crate::workbench::app_state::restore_session_model_library_manager(
-        &mut state.model.pdk_config,
-    )
-    .expect("startup configured source hydration");
+    let (manager, loaded) =
+        rspice_app_state::workbench::workspace::restore_session_model_library_manager(
+            &mut state.model.pdk_config,
+        )
+        .expect("startup configured source hydration");
     state.model.model_library_manager = manager;
     assert_eq!(loaded, 1);
     assert!(

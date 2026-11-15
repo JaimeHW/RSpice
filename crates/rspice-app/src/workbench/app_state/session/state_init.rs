@@ -7,9 +7,8 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::preferences_file::PreferencesStore;
 use crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
-pub(crate) use rspice_app_state::workbench::workspace::{
-    default_model_library_manager, restore_session_model_library_manager,
-};
+pub(crate) use rspice_app_state::workbench::workspace::default_model_library_manager;
+use rspice_app_state::workbench::workspace::restore_session_model_library_manager;
 
 impl AppState {
     /// The state a launch starts from: the stored session, with the
