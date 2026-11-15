@@ -7,7 +7,7 @@
 
 use crate::state::{ComponentType, Point};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::actions::tuning_staging::stage_component_tuning;
+use rspice_app_simulate::workbench::app::actions::tuning_staging::stage_component_tuning;
 
 #[test]
 fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {

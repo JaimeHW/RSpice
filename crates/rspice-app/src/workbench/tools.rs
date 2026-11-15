@@ -7,6 +7,4 @@
 
 pub(crate) use rspice_app_project::workbench::tools::examples_browser;
 pub(crate) use rspice_app_project::workbench::tools::project_launcher;
-#[cfg(test)]
-pub(crate) use rspice_app_simulate::workbench::tools::jobs_manager;
 pub(crate) use rspice_app_workbench::workbench::tools::notification_center;

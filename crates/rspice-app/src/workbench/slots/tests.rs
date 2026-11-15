@@ -9,7 +9,6 @@ use super::*;
 use crate::workbench::app::HelpCenterPage;
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState;
-use crate::workbench::app::dialogs::plan_removal::PlanRemovalTarget;
 use crate::workbench::app::dialogs::replace_instance::ReplaceInstanceOpen;
 use crate::workbench::app::dialogs::selection::commands::floating::{
     FloatingPaste, FloatingPasteOrigin,
@@ -19,6 +18,7 @@ use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::menu_bar::DatasetExportPicker;
 use crate::workbench::project::workspace_state::LibraryDeletionTarget;
+use rspice_app_simulate::workbench::app::dialogs::plan_removal::PlanRemovalTarget;
 use rspice_schematic_editor::object_properties::ObjectPropertiesDraft;
 
 fn edit_authority() -> SchematicEditAuthority {

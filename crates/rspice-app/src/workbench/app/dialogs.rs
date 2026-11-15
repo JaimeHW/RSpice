@@ -25,8 +25,6 @@ pub(crate) use rspice_app_code::workbench::app::dialogs::library;
 pub(crate) mod object_properties;
 pub(crate) mod placement;
 pub(crate) use rspice_app_project::workbench::app::dialogs::project;
-#[cfg(test)]
-pub(in crate::workbench) use rspice_app_simulate::workbench::app::dialogs::plan_removal;
 pub(crate) mod property_dialog;
 pub(crate) mod replace_instance;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::review_primitives;

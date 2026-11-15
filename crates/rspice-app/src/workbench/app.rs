@@ -132,8 +132,6 @@ pub(crate) use dialogs::symbol_definition::{
 
 pub(crate) use dialogs::hardcopy::HardcopyWorkflow;
 
-#[cfg(test)]
-pub(crate) use dialogs::plan_removal::PlanRemovalTarget;
 pub(crate) use dialogs::state::HelpCenterPage;
 
 /// Test-only: the command tests read the rename target back, and the dialog

@@ -735,7 +735,9 @@ fn the_plan_transaction_refuses_a_blocked_removal_and_names_the_analyses() {
     // analysis: the modal's answer reaches the transaction, and the
     // transaction is what refuses it.
     app.state.simulate.plan_removal_review.open(
-        crate::workbench::app::PlanRemovalTarget::Analysis(prerequisite),
+        rspice_app_simulate::workbench::app::dialogs::plan_removal::PlanRemovalTarget::Analysis(
+            prerequisite,
+        ),
         "Bias point".to_owned(),
         Vec::new(),
     );
@@ -783,7 +785,10 @@ fn a_registry_only_takes_the_answer_it_staged() {
     let plan = plan_id(&app.state.model);
     let variable = crate::product::DesignVariableId::new();
     app.state.simulate.plan_removal_review.open(
-        crate::workbench::app::PlanRemovalTarget::Variable { plan, id: variable },
+        rspice_app_simulate::workbench::app::dialogs::plan_removal::PlanRemovalTarget::Variable {
+            plan,
+            id: variable,
+        },
         "vref".to_owned(),
         Vec::new(),
     );
