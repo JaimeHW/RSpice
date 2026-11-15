@@ -707,12 +707,11 @@ impl ParamContext {
                 .or_else(|| self.params.get(key).copied().map(ComplexValue::from));
         }
         if self.has_global_binding_key(key) {
-            return self.global_complex_params.get(key).copied().or_else(|| {
-                self.global_params
-                    .get(key)
-                    .copied()
-                    .map(ComplexValue::from)
-            });
+            return self
+                .global_complex_params
+                .get(key)
+                .copied()
+                .or_else(|| self.global_params.get(key).copied().map(ComplexValue::from));
         }
         self.get(key).map(ComplexValue::from)
     }
