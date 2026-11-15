@@ -468,6 +468,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::GridSnapRouting.key(),
     SheetsCommand::DrawingSheetLayers.key(),
     DesignCommand::VisibilityOptions.key(),
+    DesignCommand::SymbolPlacedPreview.key(),
     Command::ToggleFullScreen.key(),
     DesignCommand::EngineeringTableView.key(),
     Command::ToggleNavigator.key(),

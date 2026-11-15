@@ -41,8 +41,10 @@ use session::{SymbolEditorSession, SymbolGridSpacing, SymbolTool};
 const PIN_HIT_RADIUS: f32 = 10.0;
 const PREVIEW_TILE_MAX_WIDTH: f32 = 240.0;
 const PREVIEW_TILE_MAX_HEIGHT: f32 = 168.0;
-const PREVIEW_TILE_MIN_WIDTH: f32 = 168.0;
 const PREVIEW_TILE_MIN_HEIGHT: f32 = 118.0;
+/// How many preview columns wide a canvas is before it gives one up: below
+/// this the drawing needs the room more than the preview does.
+const PREVIEW_CANVAS_PER_COLUMN: f32 = 3.0;
 const PREVIEW_TILE_MARGIN: f32 = 12.0;
 const PREVIEW_TILE_HEADER: f32 = 26.0;
 const PREVIEW_FIT_PADDING: f32 = 10.0;
@@ -206,15 +208,56 @@ pub fn draw_canvas(
     editor: &SymbolEditorMetadata,
     ports: &[PortSpec],
     session: &SymbolEditorSession,
-    reference: &CellViewRef,
 ) {
     let t = Tokens::get(ui.ctx());
     let painter = ui.painter_at(viewport.rect);
     painter.rect_filled(viewport.rect, 0.0, t.color.canvas_bg);
     draw_in_place(&painter, viewport, document, editor, ports, session);
-    if session.preview_as_placed {
-        draw_preview_tile(ui, viewport.rect, document, ports, reference, &t);
+}
+
+/// How much of a symbol canvas `width` wide the placed preview keeps for
+/// itself: a column at the canvas's right edge, the tile and its margins
+/// wide, or nothing where the canvas is too narrow to give a column up.
+///
+/// The preview has room of its own rather than floating over the drawing,
+/// so no zoom or pan can put any of the drawing under it.
+pub fn preview_column_width(width: f32) -> f32 {
+    let column = PREVIEW_TILE_MAX_WIDTH + PREVIEW_TILE_MARGIN * 2.0;
+    if width >= column * PREVIEW_CANVAS_PER_COLUMN {
+        column
+    } else {
+        0.0
     }
+}
+
+/// The placed preview in its own `column` beside the drawing: canvas ground
+/// under a rule that parts it from the drawing, and the tile at its foot.
+pub fn draw_preview_column(
+    ui: &mut Ui,
+    column: Rect,
+    document: &SymbolDocument,
+    ports: &[PortSpec],
+    reference: &CellViewRef,
+) {
+    if column.width() <= 0.0 {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    let painter = ui.painter_at(column);
+    painter.rect_filled(column, 0.0, t.color.canvas_bg);
+    painter.vline(
+        column.left() + 0.5,
+        column.y_range(),
+        Stroke::new(1.0, t.color.border),
+    );
+    draw_preview_tile(
+        ui,
+        preview_tile_rect(column),
+        document,
+        ports,
+        reference,
+        &t,
+    );
 }
 
 /// Every editable layer of the symbol — grid, artwork, pins, labels, the
@@ -809,13 +852,12 @@ fn draw_labels(
 
 fn draw_preview_tile(
     ui: &mut Ui,
-    canvas: Rect,
+    rect: Rect,
     document: &SymbolDocument,
     ports: &[PortSpec],
     reference: &CellViewRef,
     t: &Tokens,
 ) {
-    let rect = preview_tile_rect(canvas);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, t.radius_lg, t.color.bg_panel);
     painter.rect_stroke(
@@ -833,18 +875,18 @@ fn draw_preview_tile(
         header.bottom() - 0.5,
         Stroke::new(1.0, t.color.border),
     );
-    painter.text(
-        header.left_center() + vec2(8.0, 0.0),
-        Align2::LEFT_CENTER,
-        "AS PLACED - 100%",
-        theme::mono(10.0, FontWeight::Regular),
-        t.color.text_faint,
-    );
     let body = Rect::from_min_max(
         pos2(rect.left(), rect.top() + PREVIEW_TILE_HEADER),
         rect.max,
     );
     let viewport = preview_viewport_for_tile(body, document);
+    painter.text(
+        header.left_center() + vec2(8.0, 0.0),
+        Align2::LEFT_CENTER,
+        preview_scale_label(viewport.zoom),
+        theme::mono(10.0, FontWeight::Regular),
+        t.color.text_faint,
+    );
     let mut binding = LibraryCellInstance::new(&reference.library, &reference.cell, "schematic");
     binding.bind_interface(ports);
     let mut component =
@@ -892,17 +934,21 @@ pub fn draw_document_preview(
     );
 }
 
-fn preview_tile_rect(canvas: Rect) -> Rect {
-    let available_width = (canvas.width() - PREVIEW_TILE_MARGIN * 2.0).max(96.0);
-    let available_height = (canvas.height() - PREVIEW_TILE_MARGIN * 2.0).max(96.0);
-    let width = PREVIEW_TILE_MAX_WIDTH
-        .min(available_width)
-        .max(PREVIEW_TILE_MIN_WIDTH.min(available_width));
+/// The preview's header: the scale the tile draws the symbol at, in the
+/// status bar's terms, where 100% is a schematic at 100%.
+fn preview_scale_label(zoom: f32) -> String {
+    format!("AS PLACED \u{b7} {}%", (zoom * 100.0).round())
+}
+
+/// The tile, at the foot of the preview's own `column`.
+fn preview_tile_rect(column: Rect) -> Rect {
+    let width = (column.width() - PREVIEW_TILE_MARGIN * 2.0).max(0.0);
+    let available_height = (column.height() - PREVIEW_TILE_MARGIN * 2.0).max(0.0);
     let height = PREVIEW_TILE_MAX_HEIGHT
         .min(available_height)
         .max(PREVIEW_TILE_MIN_HEIGHT.min(available_height));
     Rect::from_min_size(
-        canvas.right_bottom() - vec2(width + PREVIEW_TILE_MARGIN, height + PREVIEW_TILE_MARGIN),
+        column.right_bottom() - vec2(width + PREVIEW_TILE_MARGIN, height + PREVIEW_TILE_MARGIN),
         vec2(width, height),
     )
 }

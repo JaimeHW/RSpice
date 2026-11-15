@@ -17,7 +17,9 @@ use crate::workbench::app::{
 use rspice_schematic_editor::symbol_editor::surface::{
     self, SymbolSurfaceAction, SymbolSurfaceRequest,
 };
-use rspice_schematic_editor::symbol_editor::{draw_canvas, paint_zoom_box, update_viewport};
+use rspice_schematic_editor::symbol_editor::{
+    draw_canvas, draw_preview_column, paint_zoom_box, preview_column_width, update_viewport,
+};
 
 pub(crate) fn symbol_canvas_accessibility_label(
     document: &SymbolDocument,
@@ -91,11 +93,24 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
     // the canvas keeps the whole document area.
     let stage = ui.available_rect_before_wrap();
     let height = ui.available_height();
+    // The placed preview, in its own view only, keeps a column of its own
+    // beside the drawing, so no zoom or pan puts the drawing under it.
+    let preview_width = if canvas.design.symbol.editor.preview_as_placed
+        && canvas.design.symbol.in_place.is_none()
+    {
+        preview_column_width(ui.available_width())
+    } else {
+        0.0
+    };
     let viewport = ui
         .horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            let canvas_size = vec2(ui.available_width().max(180.0), height);
+            let canvas_size = vec2((ui.available_width() - preview_width).max(180.0), height);
             let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
+            let preview_column = (preview_width > 0.0).then(|| {
+                ui.allocate_exact_size(vec2(preview_width, height), Sense::hover())
+                    .0
+            });
             let navigation = canvas.model.preferences.canvas_navigation();
             // A Space or Alt pan, or the armed zoom box, holds the primary
             // drag; the tools act on none of it.
@@ -145,8 +160,16 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
                     &editor,
                     &ports,
                     &canvas.design.symbol.editor,
-                    &canvas.model.workspace.content.active_view,
                 ),
+            }
+            if let Some(column) = preview_column {
+                draw_preview_column(
+                    ui,
+                    column,
+                    &document,
+                    &ports,
+                    &canvas.model.workspace.content.active_view,
+                );
             }
             paint_zoom_box(ui, &canvas.design.symbol.editor, viewport);
             // The canvas takes keyboard focus on every press for its shortcuts, so

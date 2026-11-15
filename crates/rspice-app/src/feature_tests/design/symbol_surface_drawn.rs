@@ -1,5 +1,5 @@
 //! The symbol canvas's surroundings drawn through a whole application: the
-//! way to a first drawing.
+//! way to a first drawing, and the placed preview beside the drawing.
 
 use egui::accesskit::Role;
 use egui::{FullOutput, Rect, pos2};
@@ -9,6 +9,7 @@ use crate::feature_tests::replay::{Replay, only};
 use crate::state::{Point, SymbolShape};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::actions::workspace::tests::state_with_amp_symbol_pin;
+use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
 
 /// The amp whose schematic declares IN; its symbol has the pin, unplaced,
@@ -107,4 +108,45 @@ fn the_first_shape_fades_the_generate_card_and_the_canvas_stays_put() {
         (zoom, pan),
         "the view did not move"
     );
+}
+
+/// Shown from View, the placed preview keeps a column of its own beside
+/// the canvas rather than floating over the drawing, and its header states
+/// the scale it really draws at; hidden again, the canvas takes the column
+/// back. It used to sit over the canvas's corner, under which the drawing
+/// could pan, and to read 100% whatever it drew at.
+#[test]
+fn the_placed_preview_stands_beside_the_drawing_and_states_its_scale() {
+    let mut replay = Replay::of(amp(true));
+    replay.frames(Vec::new());
+    let alone = canvas(&replay.frame(Vec::new()));
+    assert!(painted(&replay.frame(Vec::new()), "AS PLACED").is_none());
+
+    replay
+        .app
+        .execute_command_key(DesignCommand::SymbolPlacedPreview.key());
+    assert!(replay.app.state.design.symbol.editor.preview_as_placed);
+    replay.frames(Vec::new());
+    let shown = replay.frame(Vec::new());
+    let beside = canvas(&shown);
+    let (header, at) = painted(&shown, "AS PLACED").expect("the preview is drawn");
+    assert!(
+        at.left() >= beside.right(),
+        "the preview stands beside the canvas: {at:?} right of {beside:?}"
+    );
+    assert!(beside.width() < alone.width());
+    let scale = header
+        .strip_prefix("AS PLACED \u{b7} ")
+        .and_then(|rest| rest.strip_suffix('%'))
+        .and_then(|number| number.parse::<f32>().ok())
+        .unwrap_or_else(|| panic!("the header states a scale: {header:?}"));
+    assert!(scale > 0.0);
+
+    replay
+        .app
+        .execute_command_key(DesignCommand::SymbolPlacedPreview.key());
+    replay.frames(Vec::new());
+    let hidden = replay.frame(Vec::new());
+    assert!(painted(&hidden, "AS PLACED").is_none());
+    assert_eq!(canvas(&hidden), alone, "the canvas takes the column back");
 }

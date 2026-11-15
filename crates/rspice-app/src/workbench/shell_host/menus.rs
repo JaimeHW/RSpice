@@ -363,6 +363,10 @@ const VIEW_MENU: &[MenuEntry] = &[
     Separator,
     MenuEntry::submenu("Grid", GRID_MENU).access('G'),
     design(DesignCommand::VisibilityOptions).access('D'),
+    MenuEntry::Only(
+        MenuContext::SymbolView,
+        &[design(DesignCommand::SymbolPlacedPreview).access('A')],
+    ),
     Separator,
     command_as(Command::ToggleNavigator, "Navigator").access('N'),
     command_as(Command::ToggleInspector, "Inspector").access('E'),

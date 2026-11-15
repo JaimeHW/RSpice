@@ -246,9 +246,10 @@ impl CommandSet for DesignCommand {
     ///
     /// The symbol canvas's tools and its save need an editable symbol in
     /// front; a pin turn also needs one pin selected alone, and the contract
-    /// update an interface to reconcile with. Editing a symbol in place
-    /// needs a schematic in front and an instance whose symbol can be, and
-    /// names what it lacks; leaving needs a symbol edited in place in front.
+    /// update an interface to reconcile with; the placed preview a symbol in
+    /// front. Editing a symbol in place needs a schematic in front and an
+    /// instance whose symbol can be, and names what it lacks; leaving needs
+    /// a symbol edited in place in front.
     fn availability(self, reads: &Reads<'_, DesignFeature>) -> CommandAvailability {
         let schematic = schematic_editor(reads);
         let selected = reads.state.selected_stimulus_definition.is_some();
@@ -469,6 +470,9 @@ impl CommandSet for DesignCommand {
             Self::SymbolUpdatePinsFromContract => (!editable_symbol(reads)
                 || active_symbol_ports(reads.model).is_empty())
             .then_some("command is unavailable in this context"),
+            Self::SymbolPlacedPreview => {
+                (!routed::symbol_editor(reads.wb.workspace, reads.model)).then_some("open a symbol")
+            }
             Self::EditSymbolInPlace => match selected_symbol_in_place_target(reads.model) {
                 Ok(_) if schematic => None,
                 Ok(_) => Some("select one instance"),
@@ -554,6 +558,9 @@ impl CommandSet for DesignCommand {
             }
             Self::SetStandardValueSeries(series) => {
                 return Some(reads.model.workspace.content.standard_value_series == series);
+            }
+            Self::SymbolPlacedPreview => {
+                return Some(reads.state.symbol.editor.preview_as_placed);
             }
             _ => return None,
         };
@@ -940,6 +947,10 @@ impl CommandSet for DesignCommand {
                 {
                     Ok(text) | Err(text) => cx.wb.prompt(text),
                 }
+            }
+            Self::SymbolPlacedPreview => {
+                let preview = &mut cx.state.symbol.editor.preview_as_placed;
+                *preview = !*preview;
             }
             Self::EditSymbolInPlace => {
                 navigation(cx).edit_selected_symbol_in_place();

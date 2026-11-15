@@ -212,6 +212,8 @@ pub(crate) enum DesignCommand {
     /// Bring the symbol's pins back into agreement with the interface its
     /// schematic declares.
     SymbolUpdatePinsFromContract,
+    /// Show or hide the placed preview beside the symbol canvas.
+    SymbolPlacedPreview,
     /// Edit the selected instance's symbol master where the instance stands
     /// on its parent schematic.
     EditSymbolInPlace,
@@ -399,7 +401,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 97] = [
+    pub(crate) const ALL: [Self; 98] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -495,6 +497,7 @@ impl DesignCommand {
         Self::SymbolPolygonTool,
         Self::SymbolTextTool,
         Self::SymbolUpdatePinsFromContract,
+        Self::SymbolPlacedPreview,
         Self::EditSymbolInPlace,
         Self::ExitSymbolInPlace,
     ];
@@ -603,6 +606,7 @@ impl DesignCommand {
             Self::SymbolPolygonTool => CommandKey::new("symbol-polygon-tool"),
             Self::SymbolTextTool => CommandKey::new("symbol-text-tool"),
             Self::SymbolUpdatePinsFromContract => CommandKey::new("update-pins-from-contract"),
+            Self::SymbolPlacedPreview => CommandKey::new("symbol-placed-preview"),
             Self::EditSymbolInPlace => CommandKey::new("edit-symbol-in-place"),
             Self::ExitSymbolInPlace => CommandKey::new("exit-symbol-in-place"),
         }
@@ -1024,6 +1028,9 @@ impl DesignCommand {
                 symbol_canvas,
                 NONE,
             ),
+            Self::SymbolPlacedPreview => {
+                ("Preview as placed", "View", palette, symbol_canvas, NONE)
+            }
             Self::EditSymbolInPlace => ("Edit symbol in place", "Design", palette, design, NONE),
             Self::ExitSymbolInPlace => (
                 "Return to parent schematic",
