@@ -617,6 +617,9 @@ fn event_pnoise_samples_the_switched_capacitor_kt_over_c() {
 struct Monodromies {
     exact: Vec<Vec<Value>>,
     differenced: Vec<Vec<Value>>,
+    /// `Φ` by central differences of the map, when asked for: their error is
+    /// second order in the step where the forward differences' is first.
+    central: Option<Vec<Vec<Value>>>,
     /// The seconds the recurrence and the differences took.
     seconds: (f64, f64),
     /// Where the period starts.
@@ -638,6 +641,12 @@ impl Monodromies {
 }
 
 fn both_monodromies(deck: &str, config: &PssConfig) -> Monodromies {
+    monodromies(deck, config, None)
+}
+
+/// [`both_monodromies`], with central differences of relative step
+/// `central` beside them when given.
+fn monodromies(deck: &str, config: &PssConfig, central: Option<Value>) -> Monodromies {
     let netlist = Netlist::parse(deck).expect("the deck parses");
     let engine = Engine::new(SimulationConfig::default());
     let prepared = engine
@@ -661,9 +670,32 @@ fn both_monodromies(deck: &str, config: &PssConfig) -> Monodromies {
     let differenced = orbit
         .finite_difference_jacobian(image, &z, &base, mesh)
         .expect("the differences run");
+    let central = central.map(|relative| {
+        let n = z.len();
+        let mut phi = vec![vec![0.0; n]; n];
+        for column in 0..n {
+            let step = relative * prepared.basis.unit(column).scale(z[column]);
+            let end = |sign: Value| {
+                let mut trial = z.clone();
+                trial[column] += sign * step;
+                let traversal = orbit.traverse(image, &trial, mesh).expect("one period");
+                assert_eq!(
+                    super::newton::signature(&traversal.events),
+                    super::newton::signature(&base.events)
+                );
+                traversal.z_end
+            };
+            let (after, before) = (end(1.0), end(-1.0));
+            for (row, values) in phi.iter_mut().enumerate() {
+                values[column] = (after[row] - before[row]) / (2.0 * step);
+            }
+        }
+        phi
+    });
     Monodromies {
         exact,
         differenced,
+        central,
         seconds: (exact_seconds, clock.elapsed().as_secs_f64()),
         start: image.time,
         names: prepared.basis.names().to_vec(),
@@ -731,51 +763,94 @@ fn the_recurrence_meets_the_differenced_period_map_of_the_switched_capacitor_twi
     );
 }
 
-/// A smooth orbit: a diode charging an RC through 2 kΩ, whose junction
-/// conductance changes over the period by eleven decades. Forward differences carry the
-/// map's curvature over their 1e-4 step; the recurrence is the derivative
-/// itself. A junction charge is a history the segment carries over from its
-/// image, so a diode that stores one keeps the differences.
+/// A smooth orbit: a diode with junction charge (CJO = 2 pF) charging an
+/// RC through 2 kΩ, whose junction conductance changes over the period by
+/// eleven decades. A segment evaluates the junction's charge at the iterate
+/// it starts from, as it does a capacitor's, so the recurrence is the
+/// derivative of the map. Forward differences carry the map's curvature over
+/// their 1e-4 step, 4.2e-6 of the largest entry; central differences, whose
+/// error is second order in their 1e-5 step, meet the recurrence to 1e-10.
 #[test]
-fn the_recurrence_meets_the_differenced_period_map_of_a_diode_rc() {
+fn the_recurrence_meets_the_differenced_period_map_of_a_diode_with_junction_charge() {
     let deck = "diode rc
 vin in 0 sin(0 2 1meg)
 r0 in d 2k
 d1 d out dmod
 r1 out 0 10k
 c1 out 0 1n
-.model dmod d is=1e-14
+.model dmod d is=1e-14 cjo=2p
 .end
 ";
     let config = PssConfig::new(1.0e6).with_tstab(5.0e-6);
-    let charged = Netlist::parse(&deck.replace("is=1e-14", "is=1e-14 cjo=2p")).unwrap();
+    let netlist = Netlist::parse(deck).unwrap();
     let engine = Engine::new(SimulationConfig::default());
     let prepared = engine
-        .prepare_event_orbit(&charged, &config, None, &NoAbort)
+        .prepare_event_orbit(&netlist, &config, None, &NoAbort)
         .expect("the orbit stabilizes");
     assert!(
-        !prepared
-            .orbit(&charged, &config, &NoAbort)
+        prepared
+            .orbit(&netlist, &config, &NoAbort)
             .admits_variational(&prepared.image),
-        "a junction charge is a history the recurrence does not take"
+        "a junction charge is taken from the segment's start"
     );
-    let Monodromies {
-        exact,
-        differenced,
-        seconds: (fast, slow),
-        ..
-    } = both_monodromies(deck, &config);
-    let (worst, at) = worst_relative(&exact, &differenced);
+    let monodromies = monodromies(deck, &config, Some(1.0e-5));
+    let central = monodromies.central.as_deref().expect("central differences");
+    let (forward, at) = worst_relative(&monodromies.exact, &monodromies.differenced);
+    let (second_order, central_at) = worst_relative(&monodromies.exact, central);
     let (exact_mu, differenced_mu) = (
-        dominant_multiplier(&exact),
-        dominant_multiplier(&differenced),
+        dominant_multiplier(&monodromies.exact),
+        dominant_multiplier(&monodromies.differenced),
     );
     eprintln!(
-        "diode RC: worst |exact - FD| = {worst:e} of the largest entry at {at:?}; \
-         multipliers {exact_mu} and {differenced_mu}; {fast:.3} s against {slow:.3} s"
+        "diode RC with junction charge: |exact - forward| = {forward:e} at {at:?}, \
+         |exact - central| = {second_order:e} at {central_at:?}; multipliers {exact_mu} and \
+         {differenced_mu}"
     );
-    assert!(worst <= 1.0e-4, "worst relative miss {worst:e} at {at:?}");
-    assert!((exact_mu - differenced_mu).norm() <= 1.0e-4 * differenced_mu.norm().max(1.0e-3));
+    assert!(
+        forward <= 1.0e-5,
+        "worst relative miss {forward:e} at {at:?}"
+    );
+    assert!(
+        second_order <= 1.0e-8,
+        "worst relative miss {second_order:e} at {central_at:?}"
+    );
+    assert!((exact_mu - differenced_mu).norm() <= 1.0e-5 * differenced_mu.norm());
+}
+
+/// A BSIM4 common-source stage with the model's default gate and junction
+/// charges, its sine on the gate and 100 pF on the drain: the segment
+/// re-takes every one of the model's charges from the iterate it starts
+/// from, so the recurrence covers it. The forward differences miss by 1.1e-4
+/// of the largest entry, their own error; central differences meet the
+/// recurrence to 1.5e-9.
+#[test]
+fn the_recurrence_meets_the_differenced_period_map_of_a_bsim4_stage_with_gate_charge() {
+    let deck = "bsim4 stage
+vdd vdd 0 dc 1.2
+vin g 0 sin(0.7 0.3 1meg)
+m1 d g 0 0 nmod w=1u l=0.1u
+rd vdd d 5k
+cl d 0 100p
+.model nmod nmos level=54
+.end
+";
+    let config = PssConfig::new(1.0e6).with_tstab(5.0e-6);
+    let monodromies = monodromies(deck, &config, Some(1.0e-5));
+    let central = monodromies.central.as_deref().expect("central differences");
+    let (forward, at) = worst_relative(&monodromies.exact, &monodromies.differenced);
+    let (second_order, central_at) = worst_relative(&monodromies.exact, central);
+    eprintln!(
+        "BSIM4 stage: |exact - forward| = {forward:e} at {at:?}, |exact - central| = \
+         {second_order:e} at {central_at:?}"
+    );
+    assert!(
+        forward <= 1.0e-3,
+        "worst relative miss {forward:e} at {at:?}"
+    );
+    assert!(
+        second_order <= 1.0e-7,
+        "worst relative miss {second_order:e} at {central_at:?}"
+    );
 }
 
 /// A switch a state controls: the RC at `c` (R1·C1 = 300 ns) sets when S1

@@ -632,24 +632,39 @@ impl CircuitData {
             }
     }
 
-    /// Whether every charge the circuit stores is re-taken from a transient
-    /// segment's starting solution, as capacitors', inductors' and their
-    /// couplings' are: no device keeps a charge of its own between steps (a
-    /// junction or diffusion charge, a core's magnetization, a model's
-    /// integrator or event state). Switches, diodes without charge storage
-    /// and behavioral sources keep none.
-    pub(crate) fn has_no_device_charge_history(&self) -> bool {
-        let models = true;
+    /// Whether a transient segment takes every charge the circuit stores
+    /// from its starting solution. Capacitors', inductors' and their
+    /// couplings' histories are written from it, and so is every native
+    /// semiconductor's: a run's start evaluates each junction, diffusion and
+    /// gate charge at the solution it starts from, as a fresh run does, so a
+    /// segment from a shooting iterate integrates the iterate's charges and
+    /// none carried over from the image the iterate was written into. A
+    /// device whose state is a coordinate of its own or that the start leaves
+    /// as the image held it does not: a Verilog-A or code model's integrator
+    /// and event state, a core's magnetization, a memristor's internal state,
+    /// a thermal resistor's temperature, and the B3SOI FD/PD and EKV3 models,
+    /// which keep their charges and limiter state inside the device.
+    pub(crate) fn segment_takes_every_charge_from_its_start(&self) -> bool {
+        let semiconductors = self.b3soi_fd.is_empty()
+            && self.b3soi_pd.is_empty()
+            && self.ekv3s.is_empty()
+            && self.resistors.thermal.iter().all(Option::is_none);
+        let models = self.xyce_memristors.is_empty()
+            && self.jiles_atherton_inductors.is_empty()
+            && self.xyce_core_groups.is_empty()
+            && !self.has_xspice_devices();
         #[cfg(feature = "veriloga-builtins-base")]
         let models = models && !self.has_generated_veriloga_devices();
         #[cfg(feature = "veriloga")]
         let models = models && !self.has_veriloga_devices() && !self.has_mixed_signal_hosts();
-        models && self.has_no_native_device_charge_history()
+        semiconductors && models
     }
 
-    /// Whether no native device keeps a charge of its own between steps, as
-    /// [`Self::has_no_device_charge_history`] reads them: Verilog-A models
-    /// are left to the caller.
+    /// Whether no native device keeps a charge of its own between steps (a
+    /// junction or diffusion charge, a core's magnetization, an XSPICE
+    /// model's state). Switches, diodes without charge storage and
+    /// behavioral sources keep none; Verilog-A models are left to the
+    /// caller.
     pub(crate) fn has_no_native_device_charge_history(&self) -> bool {
         let semiconductors = self
             .diodes

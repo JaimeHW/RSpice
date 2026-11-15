@@ -27,19 +27,22 @@
 //! fixed by its source, `∇g·δx_τ = 0`, and its saltation vanishes.
 //!
 //! **Scope.** The recurrence is the map's exact derivative where every
-//! charge the circuit stores is one a segment re-takes from its starting
-//! solution (capacitors, inductors and their couplings) and the small-signal
-//! operator linearizes what the transient integrates on the step's companion
-//! coefficients. A device that keeps a charge of its own between steps (a
-//! junction's, which a segment carries over from its image unchanged; a
-//! Verilog-A module's integrator slots, retained variables and events, which
-//! are coordinates of their own), a stamp that is not `G + jωC`, the Xyce
-//! dialect's one-step integration, or a step that arrives without its
-//! coefficients keeps the finite-difference columns, and a recurrence the
-//! orbit's seeded directions do not confirm gives way to them. A switch a
-//! state controls is one: the transient's split step ends just past its
-//! crossing, and that step's trapezoid carries only part of the saltation
-//! into the discrete map the directions measure.
+//! charge the circuit stores is one a segment takes from its starting
+//! solution and the small-signal operator linearizes what the transient
+//! integrates on the step's companion coefficients. Capacitors, inductors,
+//! their couplings and the native semiconductors' junction, diffusion and
+//! gate charges are: a run's start evaluates each of them at the solution it
+//! starts from, so a segment from an iterate integrates the iterate's
+//! charges. A device whose state is a coordinate of its own or that the
+//! start leaves as the image held it (a Verilog-A module's integrator slots,
+//! retained variables and events; a code model; a core, a memristor, a
+//! thermal resistor; the B3SOI FD/PD and EKV3 models), a stamp that is not
+//! `G + jωC`, the Xyce dialect's one-step integration, or a step that arrives
+//! without its coefficients keeps the finite-difference columns, and a
+//! recurrence the orbit's seeded directions do not confirm gives way to
+//! them. A switch a state controls is one: the transient's split step ends
+//! just past its crossing, and that step's trapezoid carries only part of the
+//! saltation into the discrete map the directions measure.
 
 use std::cell::RefCell;
 
@@ -203,7 +206,7 @@ impl Orbit<'_> {
     pub(super) fn admits_variational(&self, image: &CapturedTransientState) -> bool {
         self.engine.config.spice_dialect != crate::SpiceDialect::Xyce
             && self.basis.dimension() == image.solution.len()
-            && image.circuit.has_no_device_charge_history()
+            && image.circuit.segment_takes_every_charge_from_its_start()
     }
 
     /// `Φ` at `z` by the variational recurrence of one traversal over `mesh`,
