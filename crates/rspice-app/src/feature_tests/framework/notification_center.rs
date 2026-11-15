@@ -12,11 +12,11 @@ use crate::ui::widgets::{
     MirroredEntry, NotificationAction, NotificationCategory, ToastKind, Toasts,
 };
 use crate::workbench::browser::background_alerts::BackgroundAlerts;
-use crate::workbench::chrome::title_bar;
 use crate::workbench::state::{ConsolePage, NotificationFilter};
 use crate::workbench::tools::notification_center::*;
 use crate::workbench::{AppState, RSpiceApp};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+use rspice_app_workbench::workbench::chrome::title_bar;
 
 mod raster;
 

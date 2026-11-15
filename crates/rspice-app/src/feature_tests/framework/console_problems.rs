@@ -18,9 +18,9 @@ use crate::workbench::app_state::diagnostic_store::listing::{DiagnosticRow, RowS
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
 };
-use crate::workbench::docks::console::problems::arrange::{Arrangement, Line};
-use crate::workbench::docks::console::problems::*;
-use crate::workbench::docks::console::{CONSOLE_CELL_INSET, CONSOLE_ROW_MIN_HEIGHT};
+use rspice_app_workbench::workbench::docks::console::problems::arrange::{Arrangement, Line};
+use rspice_app_workbench::workbench::docks::console::problems::*;
+use rspice_app_workbench::workbench::docks::console::{CONSOLE_CELL_INSET, CONSOLE_ROW_MIN_HEIGHT};
 use rspice_app_workbench::workbench::state::problems_view::{
     ProblemColumn, ProblemGrouping, ProblemsView,
 };

@@ -337,11 +337,11 @@ const EDITED_DECK: &str = "* owned deck\nV1 out 0 2\nR1 out 0 1k\n.op\n.end\n";
 #[cfg(not(target_arch = "wasm32"))]
 fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
     use crate::state::{Point, Wire};
-    use crate::workbench::documents::CodeSourceFileAction;
     use crate::workbench::documents::netlist_document::{
         begin_netlist_lifecycle_action_in, commit_netlist_lifecycle_action,
     };
     use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+    use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
 
     let mut app = RSpiceApp::test_instance();
     begin_netlist_lifecycle_action_in(

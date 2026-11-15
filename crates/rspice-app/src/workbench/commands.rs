@@ -331,23 +331,33 @@ impl Command {
                 crate::workbench::app::WindowWorkflow::MonitorRecovery,
             ),
             Self::PreviousDocument => {
-                crate::workbench::chrome::document_bar::cycle_document(&mut app.state, true);
+                rspice_app_workbench::workbench::chrome::document_bar::cycle_document(
+                    &mut app.state,
+                    true,
+                );
             }
             Self::NextDocument => {
-                crate::workbench::chrome::document_bar::cycle_document(&mut app.state, false);
+                rspice_app_workbench::workbench::chrome::document_bar::cycle_document(
+                    &mut app.state,
+                    false,
+                );
             }
             Self::NextPane => app.state.workbench.pane_focus.request(PaneStep::Next),
             Self::PreviousPane => app.state.workbench.pane_focus.request(PaneStep::Previous),
             Self::CloseOtherDocuments => {
                 let count =
-                    crate::workbench::chrome::document_bar::close_other_documents(&mut app.state);
+                    rspice_app_workbench::workbench::chrome::document_bar::close_other_documents(
+                        &mut app.state,
+                    );
                 app.state.prompt(format!(
                     "Closed {count} other document tab(s); the project data is kept."
                 ));
             }
             Self::CloseAllDocuments => {
                 let count =
-                    crate::workbench::chrome::document_bar::close_all_documents(&mut app.state);
+                    rspice_app_workbench::workbench::chrome::document_bar::close_all_documents(
+                        &mut app.state,
+                    );
                 app.state.prompt(format!(
                     "Closed {count} document tab(s); the project data is kept."
                 ));

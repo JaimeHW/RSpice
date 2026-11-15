@@ -8,9 +8,6 @@ use crate::state::SimulationPage;
 use crate::state::VerificationPage;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::ResultViewer;
-use crate::workbench::chrome::title_bar::application_menus::ApplicationMenu;
-use crate::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
-use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
 use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
@@ -24,6 +21,9 @@ use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_workbench::workbench::chrome::title_bar::application_menus::ApplicationMenu;
+use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
+use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
 
 /// The command's row under the vocabulary's label.
 const fn command(command: Command) -> MenuEntry {

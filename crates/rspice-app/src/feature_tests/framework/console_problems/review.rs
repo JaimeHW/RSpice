@@ -144,8 +144,12 @@ fn nothing_in_the_dock_is_cut_at_any_height() {
         for _ in 0..3 {
             output = Some(
                 ctx.run_ui(crate::ui::raster::display_input(size, 1.0), |ui| {
-                    crate::workbench::docks::synchronize_panel_memory(ui.ctx(), &app, layout);
-                    crate::workbench::docks::show_console(ui, &mut app, layout);
+                    rspice_app_workbench::workbench::docks::synchronize_panel_memory(
+                        ui.ctx(),
+                        &app,
+                        layout,
+                    );
+                    rspice_app_workbench::workbench::docks::show_console(ui, &mut app, layout);
                 }),
             );
         }
@@ -153,7 +157,8 @@ fn nothing_in_the_dock_is_cut_at_any_height() {
         for clipped in &output.expect("the dock was drawn").shapes {
             walk(&clipped.shape, clipped.clip_rect, &mut drawn);
         }
-        let inset = height - crate::workbench::docks::console::CONSOLE_BODY_PADDING_BOTTOM;
+        let inset =
+            height - rspice_app_workbench::workbench::docks::console::CONSOLE_BODY_PADDING_BOTTOM;
         let mut remedy_shown = false;
         let mut whole: Vec<&str> = Vec::new();
         for (what, rect, clip) in &drawn {

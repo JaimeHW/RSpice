@@ -5,8 +5,10 @@
 use super::*;
 use crate::state::GridStyle;
 use crate::state::command_catalog::CommandPlatform;
-use crate::workbench::chrome::title_bar::application_menus::{access_key_index, access_keys_apply};
 use egui::os::OperatingSystem;
+use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
+    access_key_index, access_keys_apply,
+};
 
 /// Rows that go without an access key, each because its menu has no letter
 /// left to give it (see the menu's own note): a command's row by its id, a

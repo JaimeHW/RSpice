@@ -3,12 +3,12 @@
 //! the working deck.
 
 use crate::workbench::AppState;
-use crate::workbench::documents::CodeSourceFileAction;
 use crate::workbench::documents::netlist_document::fixtures::seed_owned_dependency;
 use crate::workbench::documents::netlist_document::{
     ActiveNetlistDocument, active_netlist_source_is_editable_in, begin_netlist_lifecycle_action_in,
     close_run_deck_snapshot, commit_netlist_lifecycle_action, open_run_deck_snapshot_in,
 };
+use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
 
 #[test]
 fn first_top_deck_is_authored_without_a_synthetic_generated_baseline() {

@@ -73,7 +73,7 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
 
 fn chrome_rows(ui: &mut Ui, app: &mut RSpiceApp) {
     let layout = LayoutSpec::resolve(VIEWPORT.x, VIEWPORT.y, &app.state.workbench);
-    crate::workbench::chrome::document_bar::show(ui, app, layout);
+    rspice_app_workbench::workbench::chrome::document_bar::show(ui, app, layout);
     show(ui, strip(&mut app.state), layout);
 }
 

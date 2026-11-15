@@ -779,7 +779,7 @@ impl RSpiceApp {
         let drawer = self.state.workbench.drawer;
         let console_maximized = self.state.workbench.console_maximized;
         let active_document =
-            crate::workbench::chrome::document_bar::active_document_id(&self.state);
+            rspice_app_workbench::workbench::chrome::document_bar::active_document_id(&self.state);
         if let Some(window_state) = self.state.workbench.window_session.state_mut(window) {
             window_state.workspace = workspace;
             window_state.route = route;
@@ -823,7 +823,7 @@ impl RSpiceApp {
             // This is a temporary rendering projection, not user navigation.
             // The gesture remains owned by its original window and document.
             let drag = self.state.design.set_gesture_aside();
-            let _ = crate::workbench::chrome::document_bar::activate_document_by_id(
+            let _ = rspice_app_workbench::workbench::chrome::document_bar::activate_document_by_id(
                 &mut self.state,
                 &document,
             );

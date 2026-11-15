@@ -139,7 +139,9 @@ impl Studio {
                             // resolves it, so the panel this presses is the
                             // panel the product draws.
                             let layout = LayoutSpec::resolve(size.0, size.1, &app.state.workbench);
-                            crate::workbench::docks::show_navigator(root, app, layout);
+                            rspice_app_workbench::workbench::docks::show_navigator(
+                                root, app, layout,
+                            );
                         }
                         show_on_stage(root, app);
                     });

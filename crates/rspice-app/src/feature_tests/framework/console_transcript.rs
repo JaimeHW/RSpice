@@ -7,13 +7,13 @@ use crate::diagnostics::{LogAnchor, LogBuffer, LogSeverity, LogSource};
 use crate::state::SimulationRun;
 use crate::ui::widgets::NotificationAction;
 use crate::ui::widgets::PROBLEM_MARK_ADVANCE as CONSOLE_MARK_GUTTER;
-use crate::workbench::docks::console::transcript::lines::{Rows, Source};
-use crate::workbench::docks::console::transcript::*;
-use crate::workbench::docks::console::{CONSOLE_COLUMN_GAP, CONSOLE_ROW_MIN_HEIGHT};
 use crate::workbench::state::{
     ConsoleChannel, ConsolePage, ConsoleReveal, ConsoleSelection, ConsoleView,
 };
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_workbench::workbench::docks::console::transcript::lines::{Rows, Source};
+use rspice_app_workbench::workbench::docks::console::transcript::*;
+use rspice_app_workbench::workbench::docks::console::{CONSOLE_COLUMN_GAP, CONSOLE_ROW_MIN_HEIGHT};
 use rspice_vocabulary::run_log::{RunLog, RunLogLine};
 
 const SIZE: egui::Vec2 = egui::vec2(900.0, 600.0);

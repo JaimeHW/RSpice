@@ -5,11 +5,11 @@
 use crate::diagnostics::LogAnchor;
 use crate::diagnostics::LogSource;
 use crate::state::SimulationRun;
-use crate::workbench::docks::console::log_anchor::*;
-use crate::workbench::docks::console::transcript::console;
 use crate::workbench::state::{ConsoleChannel, ConsoleView};
 use crate::workbench::{AppState, RSpiceApp};
 use egui::Vec2;
+use rspice_app_workbench::workbench::docks::console::log_anchor::*;
+use rspice_app_workbench::workbench::docks::console::transcript::console;
 
 /// Where the console painted the row whose message contains `needle`.
 ///

@@ -20,6 +20,7 @@ use crate::workbench::results::ResultsFeature;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::session::project_transactions::{open_confirmed, request_example};
 use crate::workbench::state::pane_focus::Pane;
+use rspice_app_workbench::workbench::{docks, surfaces};
 
 // The shell's submodules and re-exports, as this code saw them when it lived
 // in `workbench.rs` itself.
@@ -69,7 +70,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         viewport.x,
         viewport.y,
         app.state.workbench.coarse_pointer,
-        chrome::document_bar::is_visible(app),
+        rspice_app_workbench::workbench::chrome::document_bar::is_visible(app),
         chrome::sheet_strip::is_visible(&app.state.model),
         app.state.platform.project_lifecycle.is_open(),
         context_docks_enabled,
@@ -119,18 +120,18 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // before the document strip and console so both rows remain confined to
     // the center stack exactly as in the mockup grid.
     if layout.show_status_bar {
-        chrome::status_bar::show(root, app, layout);
+        rspice_app_workbench::workbench::chrome::status_bar::show(root, app, layout);
     }
     if layout.show_phone_navigation {
-        chrome::phone_navigation::show(root, app, layout);
+        rspice_app_workbench::workbench::chrome::phone_navigation::show(root, app, layout);
     }
-    chrome::title_bar::show(root, app, layout);
+    rspice_app_workbench::workbench::chrome::title_bar::show(root, app, layout);
     chrome::toolbar::show(root, app, layout);
     // egui allocates same-edge side panels from the outside inward in call
     // order. Reserve the canonical 51 px activity rail first, then place the
     // navigator between that rail and the active document surface.
     if layout.show_activity_rail {
-        chrome::activity_rail::show(root, app);
+        rspice_app_workbench::workbench::chrome::activity_rail::show(root, app);
     }
     if layout.show_navigator_dock {
         docks::show_navigator(root, app, layout);
@@ -138,7 +139,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     if layout.show_inspector_dock {
         docks::show_inspector(root, app, layout);
     }
-    chrome::document_bar::show(root, app, layout);
+    rspice_app_workbench::workbench::chrome::document_bar::show(root, app, layout);
     // The sheet strip hangs from the document row: allocated after it, so the
     // sheets of a drawing read beneath the document that owns them.
     SheetsFeature::show_sheet_strip(&mut features::cx::<SheetsFeature>(app), root, layout);
@@ -868,7 +869,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
         viewport.x,
         viewport.y,
         app.state.workbench.coarse_pointer,
-        chrome::document_bar::is_visible(app),
+        rspice_app_workbench::workbench::chrome::document_bar::is_visible(app),
         chrome::sheet_strip::is_visible(&app.state.model),
         app.state.platform.project_lifecycle.is_open(),
         context_docks_enabled,
@@ -882,15 +883,15 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     );
 
     if layout.show_status_bar {
-        chrome::status_bar::show(root, app, layout);
+        rspice_app_workbench::workbench::chrome::status_bar::show(root, app, layout);
     }
     if layout.show_phone_navigation {
-        chrome::phone_navigation::show(root, app, layout);
+        rspice_app_workbench::workbench::chrome::phone_navigation::show(root, app, layout);
     }
-    chrome::title_bar::show(root, app, layout);
+    rspice_app_workbench::workbench::chrome::title_bar::show(root, app, layout);
     chrome::toolbar::show(root, app, layout);
     if layout.show_activity_rail {
-        chrome::activity_rail::show(root, app);
+        rspice_app_workbench::workbench::chrome::activity_rail::show(root, app);
     }
     if layout.show_navigator_dock {
         docks::show_navigator(root, app, layout);
@@ -898,7 +899,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     if layout.show_inspector_dock {
         docks::show_inspector(root, app, layout);
     }
-    chrome::document_bar::show(root, app, layout);
+    rspice_app_workbench::workbench::chrome::document_bar::show(root, app, layout);
     SheetsFeature::show_sheet_strip(&mut features::cx::<SheetsFeature>(app), root, layout);
     docks::show_console(root, app, layout);
 

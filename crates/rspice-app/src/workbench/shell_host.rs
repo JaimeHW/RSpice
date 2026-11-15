@@ -28,8 +28,6 @@ use crate::workbench::app::ConfirmationResponse;
 use crate::workbench::app::dialogs::confirmation::ConfirmationHost;
 use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::app_state::{Model, PlatformState};
-use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
-use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
 use crate::workbench::cloud::CloudFeature;
 use crate::workbench::code::{CodeFeature, SOURCE_EDITOR_MENU};
 use crate::workbench::commands::vocabulary::{
@@ -58,6 +56,10 @@ use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 use menus::{APPLICATION_MENU, COMPACT_MENU, application_menu_entries};
+use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
+    self, ApplicationMenu,
+};
+use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
 
 /// A route whose surface brings its own toolbar, in place of its
 /// workspace's.
@@ -797,7 +799,7 @@ impl Host for RSpiceApp {
 
     fn menu_place(&self, key: CommandKey) -> Option<crate::workbench::framework::host::MenuPlace> {
         application_menus::ALL_MENUS.into_iter().find_map(|menu| {
-            crate::workbench::chrome::title_bar::menu_entries::submenu_of(
+            rspice_app_workbench::workbench::chrome::title_bar::menu_entries::submenu_of(
                 application_menu_entries(menu),
                 key,
             )
@@ -1159,8 +1161,9 @@ impl DocumentHost for AppState {
             // A cell view closes as the view that shows, so it is brought
             // forward first.
             WorkspaceDocumentId::CellView(_) => Some(
-                crate::workbench::chrome::document_bar::activate_document_by_id(state, document)
-                    && state.close_active_document(),
+                rspice_app_workbench::workbench::chrome::document_bar::activate_document_by_id(
+                    state, document,
+                ) && state.close_active_document(),
             ),
             WorkspaceDocumentId::NetlistDependency { .. } => {
                 crate::workbench::chrome::document_bar::code::close_netlist_dependency(

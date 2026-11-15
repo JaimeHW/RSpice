@@ -13,12 +13,6 @@ use crate::ui::panels::WorkbenchIcon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens;
 use crate::workbench::RSpiceApp;
-use crate::workbench::chrome::title_bar::application_menus::{
-    ALL_MENUS, ApplicationMenu, file_menu_shows_exit, menu_popup_height_for_viewport,
-    shortcut_for_occurrence,
-};
-use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_rows};
-use crate::workbench::chrome::title_bar::*;
 use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::{Command, command_registry};
@@ -32,6 +26,12 @@ use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
+    ALL_MENUS, ApplicationMenu, file_menu_shows_exit, menu_popup_height_for_viewport,
+    shortcut_for_occurrence,
+};
+use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_rows};
+use rspice_app_workbench::workbench::chrome::title_bar::*;
 
 mod access_keys;
 #[cfg(not(target_arch = "wasm32"))]

@@ -6,8 +6,8 @@
 use crate::state::ProjectSourceLanguage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::code_workspace::{self, CodeWorkspacePage};
-use crate::workbench::surfaces::{register_results_split_region, split_stage_rects};
 use egui::Context;
+use rspice_app_workbench::workbench::surfaces::{register_results_split_region, split_stage_rects};
 
 #[test]
 fn search_shortcut_handoff_preserves_the_source_editor() {
@@ -182,7 +182,7 @@ fn render_page(ctx: &Context, app: &mut RSpiceApp, events: Vec<egui::Event>) {
         },
         |ui| {
             app.handle_shortcuts(ui);
-            crate::workbench::surfaces::show(ui, app);
+            rspice_app_workbench::workbench::surfaces::show(ui, app);
             app.render_frame_dialogs(ui);
         },
     );

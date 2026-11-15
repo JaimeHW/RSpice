@@ -516,7 +516,8 @@ fn legal_text(source: &'static str) -> std::borrow::Cow<'static, str> {
 }
 
 fn export_support_bundle(app: &mut RSpiceApp, include_session_log: bool) {
-    let documents = crate::workbench::chrome::document_bar::document_descriptors(&app.state);
+    let documents =
+        rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(&app.state);
     let logs = if include_session_log {
         support_bundle_log(&app.state, crate::diagnostics::home_directory().as_deref())
     } else {

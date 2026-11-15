@@ -58,14 +58,11 @@ pub(crate) mod browser {
 }
 pub(crate) mod chrome {
     pub(crate) use rspice_app_sheets::workbench::chrome::sheet_strip;
-    pub use rspice_app_workbench::workbench::chrome::*;
     pub(crate) mod activity_rail {
         pub(in crate::workbench) use rspice_app_results::workbench::chrome::activity_rail::results;
-        pub use rspice_app_workbench::workbench::chrome::activity_rail::*;
     }
     pub(crate) mod document_bar {
         pub(crate) use rspice_app_code::workbench::chrome::document_bar::code;
-        pub use rspice_app_workbench::workbench::chrome::document_bar::*;
         pub(crate) mod design;
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::document_bar::models;
         pub(in crate::workbench) use rspice_app_project::workbench::chrome::document_bar::project;
@@ -73,7 +70,6 @@ pub(crate) mod chrome {
         pub(in crate::workbench) use rspice_app_simulate::workbench::chrome::document_bar::simulate;
     }
     pub(crate) mod status_bar {
-        pub use rspice_app_workbench::workbench::chrome::status_bar::*;
         pub(crate) mod design;
         pub(crate) use rspice_app_results::workbench::chrome::status_bar::results;
         pub(crate) use rspice_app_sheets::workbench::chrome::status_bar::sheets;
@@ -81,7 +77,6 @@ pub(crate) mod chrome {
     }
     pub(crate) mod title_bar {
         pub(in crate::workbench) use rspice_app_code::workbench::chrome::title_bar::code;
-        pub use rspice_app_workbench::workbench::chrome::title_bar::*;
         pub(in crate::workbench) mod design;
     }
     pub(crate) mod toolbar {
@@ -102,7 +97,6 @@ pub(crate) use rspice_ui_kit::panels as design_system;
 mod dispatch;
 pub(crate) mod docks {
     pub(crate) use navigator::stimulus_browser_state::StimulusBrowserState;
-    pub use rspice_app_workbench::workbench::docks::*;
     pub(crate) mod inspector {
         pub use rspice_app_workbench::workbench::docks::inspector::*;
     }
@@ -120,8 +114,6 @@ pub(crate) mod documents {
     pub(crate) use rspice_app_code::workbench::documents::virtual_text_editor;
     pub(crate) use rspice_app_models::workbench::documents::model_editor;
     pub(crate) use rspice_app_results::workbench::documents::result_document;
-    #[cfg(test)]
-    pub use rspice_app_workbench::workbench::documents::*;
 }
 // The bundled circuits Help's Examples dialog opens as projects are model
 // logic in `rspice_app_state::workbench::examples`. The test fixtures beside
@@ -187,7 +179,6 @@ pub(crate) mod surfaces {
     pub(crate) use rspice_app_project::workbench::surfaces::library_cellview_manager;
     pub(crate) use rspice_app_project::workbench::surfaces::project;
     pub(crate) use rspice_app_simulate::workbench::surfaces::simulate;
-    pub use rspice_app_workbench::workbench::surfaces::*;
     pub(crate) mod stimulus;
     pub(crate) use rspice_app_code::workbench::surfaces::veriloga;
     pub(crate) use rspice_app_simulate::workbench::surfaces::verify;

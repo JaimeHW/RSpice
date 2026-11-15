@@ -2,7 +2,6 @@
 //! code feature reads, and the rows a page's context reads once it has drawn.
 
 use crate::state::command_catalog::CommandPlatform;
-use crate::workbench::chrome::title_bar::menu_entries::{menu_keys, resolve_menu_rows};
 use crate::workbench::code::CodeFeature;
 use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 use crate::workbench::documents::netlist_document::{
@@ -17,6 +16,9 @@ use crate::workbench::surfaces::netlist::source_menu::SourceMenuLookup;
 use crate::workbench::surfaces::netlist::{prepare_workspace, show_prepared};
 use crate::workbench::{RSpiceApp, features};
 use egui::os::OperatingSystem;
+use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{
+    menu_keys, resolve_menu_rows,
+};
 
 /// The commands the code feature declares its menus read are the source
 /// editor menu's, in its order.

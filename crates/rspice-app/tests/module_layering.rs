@@ -888,7 +888,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     ("documents/model_editor", "models"),
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
-    ("commands", "chrome"),
     ("commands", "menu_bar"),
     ("surfaces", "preflight"),
     // The shell's own persisted state reaching up into the window session.

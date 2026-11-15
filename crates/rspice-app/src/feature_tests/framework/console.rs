@@ -13,11 +13,11 @@ use crate::workbench::app_state::diagnostic_store::DiagnosticOwner;
 use crate::workbench::app_state::diagnostic_store::listing::listing;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::commands::DesignCommand;
-use crate::workbench::docks::console::problems::active_problem_count;
-use crate::workbench::docks::console::*;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::{ConsolePage, WorkbenchSession};
+use rspice_app_workbench::workbench::docks::console::problems::active_problem_count;
+use rspice_app_workbench::workbench::docks::console::*;
 use rspice_design::drc::DrcResult;
 
 /// Every producer the store holds evidence for puts a real finding on the
@@ -456,7 +456,7 @@ fn an_empty_page_starts_where_its_first_row_would() {
                         760.0,
                         &app.state.workbench,
                     );
-                    crate::workbench::docks::console::show(ui, &mut app, layout);
+                    rspice_app_workbench::workbench::docks::console::show(ui, &mut app, layout);
                 },
             )
         };
@@ -1082,7 +1082,7 @@ fn a_press_on_a_collapsed_docks_tab_opens_it_on_that_page() {
                 events,
                 ..Default::default()
             },
-            |ui| crate::workbench::docks::console::show(ui, &mut app, layout),
+            |ui| rspice_app_workbench::workbench::docks::console::show(ui, &mut app, layout),
         );
         let open = LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench).show_console_body;
         (output, app.state.workbench.console_page, open)
@@ -1187,7 +1187,7 @@ fn a_pages_toolbar_stands_on_the_panel_fill_above_the_well() {
         let mut palette = None;
         let canvas = crate::ui::raster::render(size, |ui, _| {
             palette = Some(Tokens::get(ui.ctx()).color);
-            crate::workbench::docks::console::show(ui, &mut app, layout);
+            rspice_app_workbench::workbench::docks::console::show(ui, &mut app, layout);
         });
         let palette = palette.expect("a pass ran");
         // Beside the controls, past the last of them; then well under them.
@@ -1292,7 +1292,7 @@ fn console_dock_output(app: &mut RSpiceApp, width: f32) -> egui::FullOutput {
                 )),
                 ..Default::default()
             },
-            |ui| crate::workbench::docks::console::show(ui, app, layout),
+            |ui| rspice_app_workbench::workbench::docks::console::show(ui, app, layout),
         ));
     }
     output.expect("three passes ran")

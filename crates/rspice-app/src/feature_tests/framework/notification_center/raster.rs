@@ -118,7 +118,7 @@ fn raster(case: &Case) -> Canvas {
             seeded = true;
         }
         let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
-        crate::workbench::chrome::title_bar::show(ui, &mut app, layout);
+        rspice_app_workbench::workbench::chrome::title_bar::show(ui, &mut app, layout);
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(background))
             .show(ui, |_| {});

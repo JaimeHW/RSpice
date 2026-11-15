@@ -2,7 +2,7 @@
 
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
 use crate::workbench::RSpiceApp;
-use crate::workbench::docks::console::active_measurement_rows;
+use rspice_app_workbench::workbench::docks::console::active_measurement_rows;
 
 /// A frequency response whose margins the Bode extraction can read.
 ///

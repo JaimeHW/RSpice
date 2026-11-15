@@ -82,21 +82,25 @@ impl Command {
             }
             Self::NewApplicationWindow => true,
             Self::DetachDocument => {
-                crate::workbench::chrome::document_bar::document_descriptors(state)
+                rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(state)
                     .iter()
                     .any(|document| document.open && document.active)
             }
             Self::MoveDocumentToWindow => {
                 state.workbench.window_session.windows().count() > 1
-                    && crate::workbench::chrome::document_bar::document_descriptors(state)
-                        .iter()
-                        .any(|document| document.open && document.active)
+                    && rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(
+                        state,
+                    )
+                    .iter()
+                    .any(|document| document.open && document.active)
             }
             Self::ReattachDocument => {
                 !state.workbench.window_session.current().is_primary()
-                    && crate::workbench::chrome::document_bar::document_descriptors(state)
-                        .iter()
-                        .any(|document| document.open && document.active)
+                    && rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(
+                        state,
+                    )
+                    .iter()
+                    .any(|document| document.open && document.active)
             }
             Self::ConsolidateWindows | Self::MonitorRecovery => !state
                 .workbench
@@ -104,19 +108,19 @@ impl Command {
                 .secondary_window_ids()
                 .is_empty(),
             Self::PreviousDocument | Self::NextDocument => {
-                crate::workbench::chrome::document_bar::document_descriptors(state)
+                rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(state)
                     .iter()
                     .filter(|document| document.open)
                     .count()
                     > 1
             }
             Self::CloseOtherDocuments => {
-                crate::workbench::chrome::document_bar::document_descriptors(state)
+                rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(state)
                     .iter()
                     .any(|document| document.open && document.closable && !document.active)
             }
             Self::CloseAllDocuments => {
-                crate::workbench::chrome::document_bar::document_descriptors(state)
+                rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(state)
                     .iter()
                     .any(|document| document.open && document.closable)
             }
