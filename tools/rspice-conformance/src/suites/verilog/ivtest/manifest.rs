@@ -16,7 +16,9 @@
 //! A `deviation` row is written by hand, never by a run: the test expects
 //! what an IEEE clause does not give, and its detail cites that clause. A run
 //! that fails such a test keeps the row (see [`accept_deviations`]); one that
-//! passes it, or stops running it, moves it like any other row.
+//! passes it, or stops running it, moves it like any other row. A `racy` row
+//! may cite by hand the clause that leaves its order open; a run that finds it
+//! racy again keeps that detail.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -204,19 +206,26 @@ pub fn ratchet(recorded: &[Row], observed: &[Row], complete: bool) -> Vec<Drift>
 
 /// Keep the manifest's deviations: an observed failure of a test the manifest
 /// records as a `deviation` is that deviation, with the recorded detail that
-/// cites its clause.
+/// cites its clause. A test still racy keeps a recorded detail that cites the
+/// clause leaving its order open.
 pub fn accept_deviations<'a>(recorded: &[Row], observed: impl IntoIterator<Item = &'a mut Row>) {
-    let deviations: BTreeMap<&str, &Row> = recorded
+    let cited: BTreeMap<&str, &Row> = recorded
         .iter()
-        .filter(|row| row.outcome == Outcome::Deviation)
+        .filter(|row| {
+            row.outcome == Outcome::Deviation
+                || (row.outcome == Outcome::Racy && row.detail.contains('§'))
+        })
         .map(|row| (row.name.as_str(), row))
         .collect();
     for row in observed {
-        if row.outcome == Outcome::Fail
-            && let Some(deviation) = deviations.get(row.name.as_str())
+        let Some(cited) = cited.get(row.name.as_str()) else {
+            continue;
+        };
+        if (row.outcome == Outcome::Fail && cited.outcome == Outcome::Deviation)
+            || (row.outcome == Outcome::Racy && cited.outcome == Outcome::Racy)
         {
-            row.outcome = Outcome::Deviation;
-            row.detail.clone_from(&deviation.detail);
+            row.outcome.clone_from(&cited.outcome);
+            row.detail.clone_from(&cited.detail);
         }
     }
 }
@@ -347,5 +356,21 @@ mod tests {
         assert!(matches!(&drift[0], Drift::Changed { name, .. } if name == "fixed"));
         assert!(matches!(&drift[1], Drift::Regressed { name, .. } if name == "broken"));
         assert!(record(&recorded, &observed, true).contains(&deviation));
+    }
+
+    #[test]
+    fn a_racy_row_keeps_the_clause_it_cites() {
+        let clause = "IEEE 1364-2005 §11.4.2: two processes wake on one edge in either order";
+        let mut cited = row("cited", Outcome::Racy);
+        cited.detail = clause.to_owned();
+        let recorded = vec![cited.clone(), row("plain", Outcome::Racy)];
+        let mut observed = vec![row("cited", Outcome::Racy), row("plain", Outcome::Racy)];
+        observed[1].detail = "passes in source order only".to_owned();
+        accept_deviations(&recorded, &mut observed);
+        assert_eq!(observed[0], cited);
+        assert_eq!(observed[1].detail, "passes in source order only");
+        let mut fixed = vec![row("cited", Outcome::Pass)];
+        accept_deviations(&recorded, &mut fixed);
+        assert_eq!(fixed[0].outcome, Outcome::Pass);
     }
 }

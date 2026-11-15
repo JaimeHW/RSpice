@@ -712,7 +712,7 @@ parameter_override_invalid5	vlg	ce	L4	pass	language error: Semantic error: Undec
 parameter_override_invalid6	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam i_a.B` assigns `B`, a `localparam` of module `a`; IEEE 1364-2005 section 12.2 lets no override reach a local param...
 patch1268	vlg	passed	L1	pass	PASSED
 pca1	vlg	passed	L1	pass	PASSED
-pic	vlg	gold	L5	racy	passes in reverse order only; differs from the gold file at line 3 (200 lines against 200)
+pic	vlg	gold	L5	racy	IEEE 1364-2005 §11.4.2: at the reset edge two `always @(posedge clk)` processes write `portb` and `portc`, and active events run in any order, so `portc` and `portb` change, and print, in either order at time 50; Icarus wakes the last waiter first and prints `portc` first; the rest of the output matches the gold
 port-test2	vlg	passed	L1	fail	compile error: Parse error: Expected port name, found ','
 port-test3	vlg	ce	L1	pass	language error: Semantic error: Port 'data' is declared both `inout` and `reg`; IEEE 1364-2005 section 12.3.3 lets only an output port be a variable
 port-test4a	vlg	ce	L1	pass	language error: Parse error: Expected port name, found ')'
