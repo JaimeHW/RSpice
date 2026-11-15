@@ -19,3 +19,4 @@ mod ltspice_state_machine;
 mod modulated_sources;
 mod pwl_path_resolution;
 mod transient_source_events;
+mod wav_file_sources;

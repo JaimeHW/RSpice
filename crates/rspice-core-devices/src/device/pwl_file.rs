@@ -752,29 +752,24 @@ pub fn load_wav_with_limits<P: AsRef<Path>>(
 
     let max_val = format.normalization_scale;
 
-    // Match the historical one-million-point cap without first materializing
-    // every sample. This avoids a large transient allocation for long audio.
-    const MAX_WAV_POINTS: usize = 1_000_000;
-    let sample_stride = if num_samples > MAX_WAV_POINTS {
-        num_samples / MAX_WAV_POINTS + 1
-    } else {
-        1
-    };
-    let retained_points = num_samples.div_ceil(sample_stride);
+    // Every sample is kept, as LTspice plays a whole wavefile: dropping
+    // samples to fit a count would alias the recording. The file's size is
+    // bounded by the external-data policy; the table by the allocator.
     crate::resource::ResourceLimitError::ensure(
         crate::resource::ResourceKind::ExternalDataValues,
-        retained_points.saturating_mul(2),
+        num_samples.saturating_mul(2),
         resource_limits.max_external_data_values,
     )?;
     let mut points = Vec::new();
-    points.try_reserve_exact(retained_points).map_err(|error| {
+    points.try_reserve_exact(num_samples).map_err(|error| {
         PwlFileError::WavError(format!(
-            "unable to reserve {retained_points} WAV points: {error}"
+            "unable to reserve {num_samples} WAV points ({} bytes): {error}",
+            num_samples.saturating_mul(std::mem::size_of::<(f64, f64)>())
         ))
     })?;
     let sample_period = 1.0 / format.sample_rate as f64;
 
-    for i in (0..num_samples).step_by(sample_stride) {
+    for i in 0..num_samples {
         let time = i as f64 * sample_period;
         let offset = i * frame_bytes as usize;
 
@@ -1156,6 +1151,44 @@ mod tests {
         assert_eq!(points[1].1, 0.0);
         assert!((points[2].0 - 2.0 / 8_000.0).abs() < 1e-15);
         assert!((points[2].1 - 127.0 / 128.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn a_wav_file_past_a_million_samples_keeps_every_sample() {
+        let samples = 1_200_000usize;
+        let mut data = Vec::with_capacity(samples * 2);
+        for index in 0..samples {
+            let sample = if index % 2 == 0 { i16::MAX } else { -i16::MAX };
+            data.extend_from_slice(&sample.to_le_bytes());
+        }
+        let path = write_temp_wav("long", &pcm_wav_bytes(1, 48_000, 16, &data));
+        let points = load_wav_with_limits(&path, crate::resource::ResourceLimits::default())
+            .expect("a 1.2-million-sample recording loads");
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(points.len(), samples);
+        let full_scale = f64::from(i16::MAX) / 32768.0;
+        for index in [0, 1, 999_999, 1_000_000, 1_000_001, samples - 1] {
+            let (time, value) = points[index];
+            assert_eq!(time, index as f64 * (1.0 / 48_000.0));
+            let expected = if index % 2 == 0 {
+                full_scale
+            } else {
+                -full_scale
+            };
+            assert_eq!(value, expected, "sample {index}");
+        }
+    }
+
+    #[test]
+    fn a_wav_file_larger_than_the_data_policy_is_refused_before_it_is_tabled() {
+        let path = write_temp_wav("policy", &pcm_wav_bytes(1, 8_000, 8, &[128; 64]));
+        let limits = crate::resource::ResourceLimits::default()
+            .with(|limits| limits.max_external_data_values = 100);
+        let error = load_wav_with_limits(&path, limits)
+            .expect_err("64 samples are 128 values, above a 100-value policy");
+        let _ = fs::remove_file(&path);
+        assert!(matches!(error, PwlFileError::ResourceLimit(_)), "{error:?}");
     }
 
     #[test]
