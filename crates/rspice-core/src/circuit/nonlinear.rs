@@ -660,18 +660,15 @@ impl CircuitData {
         semiconductors && models
     }
 
-    /// Whether no native device keeps a charge of its own between steps (a
-    /// junction or diffusion charge, a core's magnetization, an XSPICE
-    /// model's state). Switches, diodes without charge storage and
-    /// behavioral sources keep none; Verilog-A models are left to the
-    /// caller.
-    pub(crate) fn has_no_native_device_charge_history(&self) -> bool {
-        let semiconductors = self
-            .diodes
-            .devices
-            .iter()
-            .all(|diode| !diode.has_charge_storage())
-            && self.bjts.is_empty()
+    /// Whether native shooting's period start takes every charge a native
+    /// device stores from the solution it starts from. A junction diode's is:
+    /// the start resets each junction's bias and charge from that solution
+    /// and restarts its integration. Every other semiconductor family, a
+    /// core's magnetization, a memristor's state and an XSPICE model's keep
+    /// histories the start is not shown to re-take. Switches and behavioral
+    /// sources keep none; Verilog-A models are left to the caller.
+    pub(crate) fn shooting_takes_every_native_charge_from_its_start(&self) -> bool {
+        let semiconductors = self.bjts.is_empty()
             && self.mosfets.is_empty()
             && self.b3soi.is_empty()
             && self.b3soi_fd.is_empty()

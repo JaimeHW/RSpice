@@ -24,11 +24,12 @@
 //! **Scope.** It is the map's exact derivative where every charge the circuit
 //! stores is a function of the solution the step integrates on its own
 //! companion coefficients: capacitors and generated compact models, whose
-//! `ddt` operands the forest's coordinates fix, beside resistive devices,
-//! charge-free diodes and sources. A circuit with a native device that keeps
-//! a charge history of its own (a junction diode with charge, a BJT, JFET,
-//! MOSFET or BSIM/EKV/SOI/VDMOS model, a magnetic core, a memristor, an
-//! XSPICE model), an inductor, a capacitor expression, a switch, a line, a
+//! `ddt` operands the forest's coordinates fix, and junction diodes, whose
+//! bias and charge the period's start resets from its solution, beside
+//! resistive devices and sources. A circuit with a native device whose charge
+//! history the start is not shown to re-take (a BJT, JFET, MOSFET or
+//! BSIM/EKV/SOI/VDMOS model, a magnetic core, a memristor, an XSPICE model),
+//! an inductor, a capacitor expression, a switch, a line, a
 //! behavioral source or a runtime Verilog-A module, or a basis with a winding
 //! current, an integral, a delayed wave, a descriptor or amplifier
 //! constraints, keeps the central-difference columns, as does one whose
@@ -73,7 +74,7 @@ fn admits_variational(circuit: &CircuitData) -> bool {
     let runtime = true;
     capacitors
         && runtime
-        && circuit.has_no_native_device_charge_history()
+        && circuit.shooting_takes_every_native_charge_from_its_start()
         && circuit.inductors.is_empty()
         && circuit.tlines.is_empty()
         && circuit.vswitches.is_empty()
