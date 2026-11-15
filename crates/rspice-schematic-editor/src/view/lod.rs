@@ -152,7 +152,7 @@ pub fn diamond_half_pt(zoom: f32) -> f32 {
 
 /// The side of an open pin's square mark, in points.
 pub fn open_pin_side_pt(zoom: f32) -> f32 {
-    mark_pt(3.0, 4.0, 7.0, zoom)
+    mark_pt(drawing_metrics::OPEN_PIN_SIDE_WORLD, 4.0, 7.0, zoom)
 }
 
 /// The outline of a mark (an open-pin square, a greeked connector tab): one

@@ -24,8 +24,9 @@ use rspice_design::{
     },
     symbol::{
         SymbolCurve, SymbolDash, SymbolDocument, SymbolFill, SymbolShape, SymbolStyle,
-        SymbolTextAlign, SymbolTextPlacement, SymbolTextRotation, arrow_corners, rectangle_corners,
-        symbol_label_text, symbol_text_bounds, symbol_text_hang,
+        SymbolTextAlign, SymbolTextPlacement, SymbolTextRotation, arrow_corners,
+        pin_direction_mark, rectangle_corners, symbol_label_text, symbol_text_bounds,
+        symbol_text_hang,
     },
     symbol_generation::fit_pin_name,
 };
@@ -538,10 +539,10 @@ fn to_screen_symbol(
     to_screen(origin, scale, component, symbol.effective_point(point))
 }
 
-/// Signal-flow arrow on a pin's lead: an input points into the body it
-/// drives, an output points out toward the net it drives. The mark is drawn
-/// in symbol units so it holds its proportion at every zoom.
-fn draw_direction_mark(
+/// Signal-flow arrow on a pin's lead, from the corners print draws it by.
+/// The mark is drawn in symbol units so it holds its proportion at every
+/// zoom.
+pub(crate) fn draw_direction_mark(
     painter: &Painter,
     terminal: Pos2,
     inner: Pos2,
@@ -549,39 +550,20 @@ fn draw_direction_mark(
     scale: f32,
     color: Color32,
 ) {
-    if !matches!(direction, PortDirection::In | PortDirection::Out) {
+    let Some(corners) = pin_direction_mark(
+        [terminal.x, terminal.y],
+        [inner.x, inner.y],
+        direction,
+        scale,
+    ) else {
         return;
-    }
-    let lead = inner - terminal;
-    let inward = lead.normalized();
-    if !inward.is_finite() {
-        return;
-    }
-    // Keep the whole mark on the lead, however long the lead is.
-    let length = (MARK_LENGTH * scale).min(lead.length() * 0.5);
-    let base_offset = (lead.length() - length) * 0.5;
-    let (tip, base) = if direction == PortDirection::In {
-        (
-            terminal + inward * (base_offset + length),
-            terminal + inward * base_offset,
-        )
-    } else {
-        (
-            terminal + inward * base_offset,
-            terminal + inward * (base_offset + length),
-        )
     };
-    let across = vec2(-inward.y, inward.x) * (MARK_HALF_WIDTH * scale);
     painter.add(Shape::convex_polygon(
-        vec![tip, base + across, base - across],
+        corners.map(|[x, y]| Pos2::new(x, y)).to_vec(),
         color,
         Stroke::NONE,
     ));
 }
-
-/// Direction-mark extents in symbol units.
-const MARK_LENGTH: f32 = 5.0;
-const MARK_HALF_WIDTH: f32 = 2.0;
 
 /// `curve` as it stands on the sheet relative to `component`: the instance's
 /// own transform applied to unrounded points, so a curve never meets the

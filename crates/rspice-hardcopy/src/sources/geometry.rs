@@ -825,6 +825,7 @@ mod drawing_sheet_geometry_tests {
             net_labels: Vec::new(),
             design_notes: Vec::new(),
             documentation_shapes: vec![arc],
+            open_terminals: Vec::new(),
         };
         let bounds = schematic_bounds(&schematic).unwrap();
         assert_eq!(

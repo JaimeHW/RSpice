@@ -277,6 +277,14 @@ impl SemanticSceneCompiler<'_> {
                     to: convert(self, to)?,
                     stroke: body_stroke,
                 });
+                // An input's or an output's arrow on its lead, as the canvas
+                // draws it.
+                let fill = self.mapped_fill(
+                    PrintObjectKind::Layer,
+                    body_stable_id,
+                    Some(SceneFill::solid(body_stroke.color)),
+                );
+                self.pin_direction_mark(world(from), world(to), pin.direction, body_stroke, fill)?;
             }
             if let Some((centre, radius)) = drawing.bubble {
                 self.primitives.push(ScenePrimitive::Circle {
@@ -299,14 +307,12 @@ impl SemanticSceneCompiler<'_> {
                     fill: None,
                 });
             }
-            let position = convert(self, position)?;
-            self.primitives.push(ScenePrimitive::Circle {
-                center: position,
-                radius: Length::from_micrometres(500),
-                stroke: Some(pin_stroke),
-                fill: None,
-            });
+            // Printed alone, every pin is one nothing meets, and carries the
+            // square the editor draws on its terminal; a placed part's open
+            // pins are the sheet's to mark.
             if component.is_none() {
+                self.open_pin_mark(world(position), pin_stroke)?;
+                let position = convert(self, position)?;
                 let (dx, dy) = crate::sources::SYMBOL_VIEW_PIN_NAME_OFFSET_UM;
                 let label = self.offset_scene_point(position, dx, dy)?;
                 self.add_text(

@@ -461,6 +461,11 @@ impl<'a> SemanticSceneCompiler<'a> {
             }
             self.instance_labels(semantic)?;
         }
+        // A pin nothing meets carries the canvas's hollow square, outlined in
+        // the part's ink; a connected pin carries none.
+        for terminal in &schematic.open_terminals {
+            self.open_pin_mark(*terminal, component_stroke)?;
+        }
 
         let annotation_stroke = self.mapped_stroke(
             PrintObjectKind::Layer,

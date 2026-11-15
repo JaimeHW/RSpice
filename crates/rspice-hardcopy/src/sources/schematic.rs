@@ -308,7 +308,9 @@ pub fn resolve_schematic_source(
         net_labels: Vec::new(),
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
+        open_terminals: Vec::new(),
     };
+    let open_terminals = sheet_open_terminals(&source, &object_is_in_scope);
     for component in &source.schematic.document().components {
         if !object_is_in_scope(component.id) {
             continue;
@@ -323,6 +325,12 @@ pub fn resolve_schematic_source(
         }
         let (resolved_symbol, symbol_source) =
             resolve_component_symbol(component, source.symbol_resolver)?;
+        semantic.open_terminals.extend(
+            open_terminals
+                .iter()
+                .filter(|(id, _)| *id == component.id)
+                .map(|(_, terminal)| *terminal),
+        );
         semantic.components.push(SemanticComponent {
             component: component.clone(),
             resolved_symbol,
@@ -470,6 +478,45 @@ pub fn resolve_schematic_source(
         source.scope,
         HardcopySemanticDocument::Schematic(Box::new(semantic)),
         bounds,
+    )
+}
+
+/// The terminals on the printed sheet that nothing meets, by the judgement
+/// the canvas marks them with: the sheet's own objects, each instance's pins
+/// resolved through the symbols it draws, and a net name never deciding
+/// whether anything meets a pin.
+fn sheet_open_terminals(
+    source: &SchematicHardcopySource<'_>,
+    object_is_in_scope: &impl Fn(u64) -> bool,
+) -> Vec<(u64, Point)> {
+    use rspice_design::schematic::document::SchematicDocument;
+    let document = source.schematic.document();
+    fn kept<T: Clone>(objects: &[T], id: impl Fn(&T) -> u64, keep: impl Fn(u64) -> bool) -> Vec<T> {
+        objects
+            .iter()
+            .filter(|object| keep(id(object)))
+            .cloned()
+            .collect()
+    }
+    let sheet = SchematicDocument {
+        components: kept(&document.components, |object| object.id, object_is_in_scope),
+        wires: kept(&document.wires, |object| object.id, object_is_in_scope),
+        buses: kept(&document.buses, |object| object.id, object_is_in_scope),
+        bus_taps: kept(&document.bus_taps, |object| object.id, object_is_in_scope),
+        net_labels: kept(&document.net_labels, |object| object.id, object_is_in_scope),
+        junctions: kept(&document.junctions, |object| object.id, object_is_in_scope),
+        grid_size: document.grid_size,
+        document_policy: document.document_policy,
+        ..Default::default()
+    };
+    rspice_design::connectivity::open_terminals(
+        &sheet,
+        |binding| {
+            source
+                .symbol_resolver
+                .and_then(|resolver| resolver.resolve_binding(binding))
+        },
+        |_| None,
     )
 }
 

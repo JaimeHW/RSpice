@@ -1622,37 +1622,15 @@ fn draw_direction_mark(
     let Some((tip, end)) = lead else {
         return;
     };
-    let terminal = viewport.world_to_screen(tip);
-    let inner = viewport.world_to_screen(end);
-    let lead = inner - terminal;
-    let inward = lead.normalized();
-    if !inward.is_finite() {
-        return;
-    }
-    let length = (MARK_LENGTH * viewport.zoom).min(lead.length() * 0.5);
-    let base_offset = (lead.length() - length) * 0.5;
-    let (tip, base) = if direction == PortDirection::In {
-        (
-            terminal + inward * (base_offset + length),
-            terminal + inward * base_offset,
-        )
-    } else {
-        (
-            terminal + inward * base_offset,
-            terminal + inward * (base_offset + length),
-        )
-    };
-    let across = vec2(-inward.y, inward.x) * (MARK_HALF_WIDTH * viewport.zoom);
-    painter.add(Shape::convex_polygon(
-        vec![tip, base + across, base - across],
+    crate::view::resolved_symbol_render::draw_direction_mark(
+        painter,
+        viewport.world_to_screen(tip),
+        viewport.world_to_screen(end),
+        direction,
+        viewport.zoom,
         color,
-        Stroke::NONE,
-    ));
+    );
 }
-
-/// Direction-mark extents in symbol units.
-const MARK_LENGTH: f32 = 5.0;
-const MARK_HALF_WIDTH: f32 = 2.0;
 
 /// An arrowhead in symbol units, so it keeps its size against the body at
 /// every zoom and is the mark a placed part and its print draw.

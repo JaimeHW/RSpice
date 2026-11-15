@@ -14,3 +14,5 @@ pub const BUS_TAP_WIDTH_WORLD: f32 = 2.0;
 pub const SYMBOL_WIDTH_WORLD: f32 = 1.0;
 /// A junction dot's radius.
 pub const JUNCTION_RADIUS_WORLD: f32 = 1.5;
+/// The side of the hollow square that marks a pin nothing meets.
+pub const OPEN_PIN_SIDE_WORLD: f32 = 3.0;

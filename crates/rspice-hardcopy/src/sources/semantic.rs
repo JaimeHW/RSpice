@@ -25,6 +25,7 @@ use rspice_design::schematic::{
     wire::Wire,
 };
 use rspice_design::symbol::SymbolDocument;
+use rspice_design_model::Point;
 use rspice_design_model::design_management::{
     DrawingSheetTitleFieldId, SchematicSheetFormat, SheetPageNumbering,
 };
@@ -164,6 +165,12 @@ pub struct SemanticSchematic {
     pub net_labels: Vec<NetLabel>,
     pub design_notes: Vec<DesignNote>,
     pub documentation_shapes: Vec<DocumentationShape>,
+    /// Each printed part's terminals that nothing meets, where the canvas
+    /// marks them with a hollow square. Judged on the whole sheet, as the
+    /// canvas judges them, so a selection prints the marks its parts carry
+    /// on screen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open_terminals: Vec<Point>,
 }
 
 const fn default_schematic_grid_pitch_units() -> i32 {

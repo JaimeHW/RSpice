@@ -201,6 +201,72 @@ impl SemanticSceneCompiler<'_> {
         Ok(())
     }
 
+    /// The hollow square the canvas marks a pin nothing meets with, centred
+    /// on its `terminal` and outlined in `stroke`.
+    pub(super) fn open_pin_mark(
+        &mut self,
+        terminal: SchematicPoint,
+        stroke: StrokeStyle,
+    ) -> Result<(), HardcopyRenderError> {
+        let half = drawing_metrics::OPEN_PIN_SIDE_WORLD / 2.0;
+        let (x, y) = (terminal.x as f32, terminal.y as f32);
+        let points = [(-half, -half), (half, -half), (half, half), (-half, half)]
+            .into_iter()
+            .map(|(dx, dy)| self.layout_point(LayoutPoint::new(x + dx, y + dy)))
+            .collect::<Result<_, _>>()?;
+        self.primitives.push(ScenePrimitive::Polyline {
+            points,
+            closed: true,
+            stroke: StrokeStyle {
+                pattern: StrokePattern::Solid,
+                exact_dash: None,
+                exact_dot_spacing: None,
+                ..stroke
+            },
+            fill: None,
+        });
+        Ok(())
+    }
+
+    /// The signal-flow arrow on a pin's lead from `terminal` to `inner`, in
+    /// world units, where the canvas draws it: filled in `stroke`'s ink.
+    pub(super) fn pin_direction_mark(
+        &mut self,
+        terminal: SchematicPoint,
+        inner: SchematicPoint,
+        direction: rspice_design_model::port::PortDirection,
+        stroke: StrokeStyle,
+        fill: Option<SceneFill>,
+    ) -> Result<(), HardcopyRenderError> {
+        let world = |point: SchematicPoint| [point.x as f32, point.y as f32];
+        let Some(corners) = rspice_design::symbol::pin_direction_mark(
+            world(terminal),
+            world(inner),
+            direction,
+            1.0,
+        ) else {
+            return Ok(());
+        };
+        let points = corners
+            .into_iter()
+            .map(|[x, y]| self.layout_point(LayoutPoint::new(x, y)))
+            .collect::<Result<_, _>>()?;
+        self.primitives.push(ScenePrimitive::Polyline {
+            points,
+            closed: true,
+            // A hairline in the fill's ink, so the mark is its own size.
+            stroke: StrokeStyle {
+                width: Length::from_micrometres(25),
+                pattern: StrokePattern::Solid,
+                exact_dash: None,
+                exact_dot_spacing: None,
+                ..stroke
+            },
+            fill,
+        });
+        Ok(())
+    }
+
     /// A port's direction arrow over its body, turned and mirrored with the
     /// symbol variant the body was drawn from, as the canvas draws it.
     pub(super) fn port_direction_marks(

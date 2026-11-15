@@ -478,6 +478,7 @@ fn resolved_blank_schematic_with_identity(
         net_labels: Vec::new(),
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
+        open_terminals: Vec::new(),
     };
     let digest = rspice_hardcopy_contract::sources::canonical_digest(
         b"rspice-hardcopy-blank-schematic-sheet-v1",
@@ -1184,6 +1185,82 @@ fn a_symbol_whose_origin_moved_prints_the_same_drawing() {
         held_at(SchematicPoint::new(25, -15)),
         held_at(SchematicPoint::origin())
     );
+}
+
+/// A symbol printed alone marks each pin as its editor does: the hollow
+/// square on every terminal, since nothing meets any of them, an input's
+/// arrow on its lead, and no ring on any terminal.
+#[test]
+fn a_printed_symbol_marks_its_pins_as_its_editor_does() {
+    use rspice_design_model::{port::PortDirection, symbol_pin::SymbolPinSide};
+
+    let document = SymbolDocument {
+        pins: vec![
+            rspice_design::symbol::SymbolPin::new(
+                "IN",
+                PortDirection::In,
+                Some(SchematicPoint::new(-40, 0)),
+            )
+            .with_side(SymbolPinSide::Left),
+            rspice_design::symbol::SymbolPin::new(
+                "B",
+                PortDirection::InOut,
+                Some(SchematicPoint::new(40, 0)),
+            )
+            .with_side(SymbolPinSide::Right),
+        ],
+        body: vec![SymbolShape::Rectangle {
+            min: SchematicPoint::new(-20, -15),
+            max: SchematicPoint::new(20, 15),
+            style: Default::default(),
+        }],
+        ..SymbolDocument::default()
+    };
+    let source = resolve_symbol_document(
+        HardcopySourceIdentity::try_new(
+            "test-symbol",
+            HardcopyDocumentId::try_from_uuid(Uuid::from_u128(77)).unwrap(),
+            ObjectRevision::INITIAL,
+            "Comparator symbol",
+        )
+        .unwrap(),
+        document,
+        HardcopyScope::ActiveDocument,
+    )
+    .unwrap();
+    let plan = plan_for_resolved(&source, OutputFormat::SvgVector);
+    let scene = scene_from_resolved(
+        &source,
+        source.default_print_mapping(),
+        plan.setup().schematic(),
+        resolved_metadata(),
+    )
+    .unwrap();
+    let side = 3 * SCHEMATIC_UNIT_UM as u64;
+    let (mut squares, mut arrows) = (0, 0);
+    for primitive in scene.primitives() {
+        match primitive {
+            ScenePrimitive::Polyline {
+                points,
+                closed: true,
+                fill: None,
+                ..
+            } if points.len() == 4
+                && points[1].x.micrometres() - points[0].x.micrometres() == side =>
+            {
+                squares += 1;
+            }
+            ScenePrimitive::Polyline {
+                points,
+                closed: true,
+                fill: Some(_),
+                ..
+            } if points.len() == 3 => arrows += 1,
+            ScenePrimitive::Circle { .. } => panic!("no ring on a terminal: {primitive:?}"),
+            _ => {}
+        }
+    }
+    assert_eq!((squares, arrows), (2, 1));
 }
 
 /// A shape's style reaches the page: its weight scales the body's stroke, a

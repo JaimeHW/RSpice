@@ -1536,9 +1536,9 @@ pub fn draw_hover_halo(painter: &Painter, viewport: &Viewport, points: &[Point],
 
 /// An instance's open pins: a hollow square centred on each terminal nothing
 /// meets, 3 wu a side held between 4 and 7 pt, outlined 1 pt in the
-/// instance's own stroke colour. A connected pin has no mark. It is an
-/// editing aid, so only the scene draws it: never a ghost, an export or a
-/// print.
+/// instance's own stroke colour. A connected pin has no mark. A ghost never
+/// draws it; print draws the same square, so the page shows what the window
+/// shows.
 pub fn draw_open_pin_marks(
     painter: &Painter,
     viewport: &Viewport,

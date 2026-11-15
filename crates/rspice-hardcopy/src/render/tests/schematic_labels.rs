@@ -258,6 +258,7 @@ fn sheet(components: Vec<Component>) -> SemanticSchematic {
         net_labels: Vec::new(),
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
+        open_terminals: Vec::new(),
     }
 }
 
@@ -662,6 +663,96 @@ fn a_placed_symbol_prints_each_pins_lead_and_the_mark_of_its_style() {
     );
 }
 
+/// A placed part's pins print the marks the canvas draws on them: an input's
+/// and an output's arrow on its lead, where the canvas puts it, the hollow
+/// square on a pin nothing meets and on no other, and no ring on every
+/// terminal.
+#[test]
+fn a_placed_part_prints_the_pin_marks_the_canvas_draws() {
+    let mut symbol = cell_symbol();
+    symbol.pins = vec![
+        SymbolPin::new("IN", PortDirection::In, Some(SchematicPoint::new(-50, 0)))
+            .with_side(SymbolPinSide::Left),
+        SymbolPin::new("OUT", PortDirection::Out, Some(SchematicPoint::new(50, 0)))
+            .with_side(SymbolPinSide::Right),
+        SymbolPin::new(
+            "BIAS",
+            PortDirection::InOut,
+            Some(SchematicPoint::new(0, 40)),
+        )
+        .with_side(SymbolPinSide::Bottom),
+    ];
+    let mut printed = sheet(Vec::new());
+    printed.components.push(SemanticComponent {
+        symbol_source: Some(SemanticSymbolSource::Authored),
+        component: part(2, ComponentType::CellInstance, (40, 40), "", ""),
+        resolved_symbol: Some(symbol),
+    });
+    printed.open_terminals = vec![SchematicPoint::new(90, 40)];
+    let compiled = compile(&printed);
+    let um = |point: &ScenePoint| (point.x.micrometres() as i64, point.y.micrometres() as i64);
+    let closed = |filled: bool| {
+        compiled
+            .primitives
+            .iter()
+            .filter_map(|primitive| match primitive {
+                ScenePrimitive::Polyline {
+                    points,
+                    closed: true,
+                    fill,
+                    ..
+                } if fill.is_some() == filled => Some(points.iter().map(um).collect::<Vec<_>>()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let canvas_mark = |terminal: (f32, f32), inner: (f32, f32), direction| {
+        rspice_design::symbol::pin_direction_mark(
+            [terminal.0, terminal.1],
+            [inner.0, inner.1],
+            direction,
+            1.0,
+        )
+        .unwrap()
+        .map(|[x, y]| compiled.at(f64::from(x), f64::from(y)))
+        .to_vec()
+    };
+    let arrows = closed(true);
+    assert_eq!(
+        arrows,
+        [
+            canvas_mark((-10.0, 40.0), (10.0, 40.0), PortDirection::In),
+            canvas_mark((90.0, 40.0), (70.0, 40.0), PortDirection::Out),
+        ],
+        "an inout pin carries no arrow"
+    );
+    let squares = closed(false)
+        .into_iter()
+        .filter(|points| points.len() == 4 && points[0].1 == points[1].1)
+        .filter(|points| points[1].0 - points[0].0 == 3 * UM)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        squares,
+        [vec![
+            compiled.at(88.5, 38.5),
+            compiled.at(91.5, 38.5),
+            compiled.at(91.5, 41.5),
+            compiled.at(88.5, 41.5),
+        ]],
+        "only the pin nothing meets is marked"
+    );
+    assert!(
+        !compiled.primitives.iter().any(|primitive| matches!(
+            primitive,
+            ScenePrimitive::Circle {
+                stroke: Some(stroke),
+                ..
+            } if stroke.color == SemanticColor::Accent
+        )),
+        "no ring stands on every terminal"
+    );
+}
+
 /// A symbol that keeps its name or its value off its instances prints a
 /// placed part without it, as the canvas draws the part.
 #[test]
@@ -867,18 +958,11 @@ fn a_placed_part_prints_held_by_its_symbols_origin() {
             _ => None,
         })
         .expect("the pin's lead prints");
-    assert_eq!(lead, (compiled.at(-20.0, 60.0), compiled.at(0.0, 60.0)));
-    let terminal = compiled
-        .primitives
-        .iter()
-        .find_map(|primitive| match primitive {
-            ScenePrimitive::Circle { center, radius, .. } if radius.micrometres() == 500 => {
-                Some(um(center))
-            }
-            _ => None,
-        })
-        .expect("the pin's terminal prints");
-    assert_eq!(terminal, compiled.at(-20.0, 60.0), "where the wire ends");
+    assert_eq!(
+        lead,
+        (compiled.at(-20.0, 60.0), compiled.at(0.0, 60.0)),
+        "the lead's tip stands where the wire ends"
+    );
 }
 
 fn line_widths(compiled: &Compiled) -> BTreeSet<u64> {

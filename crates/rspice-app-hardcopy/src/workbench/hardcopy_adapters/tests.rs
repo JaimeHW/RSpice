@@ -230,6 +230,7 @@ fn the_canvas_and_the_plot_letter_a_title_in_any_script_alike() {
         net_labels: Vec::new(),
         design_notes: Vec::new(),
         documentation_shapes: Vec::new(),
+        open_terminals: Vec::new(),
     };
     let digest =
         rspice_hardcopy_contract::sources::canonical_digest(b"rspice-title-scripts", &semantic)

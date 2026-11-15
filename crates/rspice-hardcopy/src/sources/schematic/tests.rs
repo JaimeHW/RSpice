@@ -354,6 +354,59 @@ fn authored_cell_symbol_is_frozen_into_the_semantic_source() {
     );
 }
 
+/// A printed part carries the open-pin marks the canvas draws on it: each
+/// terminal nothing on the sheet meets, judged on the whole sheet, so a wire
+/// left out of a selection still closes the pin it meets.
+#[test]
+fn a_printed_part_marks_the_pins_nothing_on_its_sheet_meets() {
+    let resistor = Component::new(3, ComponentType::Resistor, Point::new(0, 0));
+    let terminals = resistor
+        .terminal_positions()
+        .into_iter()
+        .map(|(_, point)| point)
+        .collect::<Vec<_>>();
+    assert_eq!(terminals.len(), 2);
+    let mut document = SchematicDocument::default();
+    document.components.push(resistor);
+    document.wires.push(Wire::segment(
+        9,
+        terminals[0],
+        terminals[0] + Point::new(0, -40),
+    ));
+    let schematic = Schematic::from_document(document);
+    let print = |scope: HardcopyScope,
+                 selection: &rspice_design::schematic::selection::Selection| {
+        let resolved = resolve_schematic_source(SchematicHardcopySource {
+            identity: identity("schematic"),
+            schematic: &schematic,
+            selection: SchematicHardcopySelection::capture(selection, &scope),
+            expected_topology_version: schematic.topology_version(),
+            symbol_resolver: None,
+            sheet_catalog: None,
+            sheet_id: None,
+            project_default_drawing_sheet: None,
+            project_title_block_field_values: None,
+            scope,
+        })
+        .unwrap();
+        let HardcopySemanticDocument::Schematic(semantic) = resolved.semantic_document() else {
+            panic!("expected schematic")
+        };
+        semantic.open_terminals.clone()
+    };
+    let mut selection = rspice_design::schematic::selection::Selection::default();
+    assert_eq!(
+        print(HardcopyScope::CurrentSheet, &selection),
+        [terminals[1]]
+    );
+    selection.components.insert(3);
+    assert_eq!(
+        print(HardcopyScope::Selection, &selection),
+        [terminals[1]],
+        "the wire the selection leaves out still meets its pin"
+    );
+}
+
 #[test]
 fn stale_schematic_authority_is_rejected_before_digesting() {
     let schematic = Schematic::default();
