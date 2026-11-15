@@ -315,6 +315,7 @@ impl Engine {
         } else if !netlist.params.has_any_parameter_binding(parameter) {
             Some("the parameter has no binding to replay")
         } else if !netlist.ast_overlay().device_parameters.is_empty()
+            || !netlist.ast_overlay().device_waveforms.is_empty()
             || !netlist.ast_overlay().model_parameters.is_empty()
             || !netlist.ast_overlay().terminal_current_probes.is_empty()
             || netlist.ast_overlay().control_options.is_some()

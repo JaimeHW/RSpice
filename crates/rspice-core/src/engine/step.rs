@@ -1857,6 +1857,75 @@ impl Engine {
         }
     }
 
+    /// Give an independent source `waveform` as its transient function, in
+    /// place of the one it has, keeping its DC and AC values.
+    pub(in crate::engine) fn set_source_waveform(
+        kind: &mut ElementKind,
+        waveform: SourceSpec,
+    ) -> Result<(), SimulationError> {
+        fn replaced(spec: SourceSpec, waveform: SourceSpec) -> SourceSpec {
+            match spec {
+                SourceSpec::Distortion { inner, f1, f2 } => SourceSpec::Distortion {
+                    inner: Box::new(replaced(*inner, waveform)),
+                    f1,
+                    f2,
+                },
+                SourceSpec::RfPort { inner, port } => SourceSpec::RfPort {
+                    inner: Box::new(replaced(*inner, waveform)),
+                    port,
+                },
+                SourceSpec::Dc(dc_value) | SourceSpec::DcTransient { dc_value, .. } => {
+                    SourceSpec::DcTransient {
+                        dc_value,
+                        transient: Box::new(waveform),
+                    }
+                }
+                SourceSpec::Ac { magnitude, phase } => SourceSpec::AcTransient {
+                    ac_magnitude: magnitude,
+                    ac_phase: phase,
+                    transient: Box::new(waveform),
+                },
+                SourceSpec::AcTransient {
+                    ac_magnitude,
+                    ac_phase,
+                    ..
+                } => SourceSpec::AcTransient {
+                    ac_magnitude,
+                    ac_phase,
+                    transient: Box::new(waveform),
+                },
+                SourceSpec::DcAc {
+                    dc_value,
+                    ac_magnitude,
+                    ac_phase,
+                }
+                | SourceSpec::DcAcTransient {
+                    dc_value,
+                    ac_magnitude,
+                    ac_phase,
+                    ..
+                } => SourceSpec::DcAcTransient {
+                    dc_value,
+                    ac_magnitude,
+                    ac_phase,
+                    transient: Box::new(waveform),
+                },
+                // A bare waveform: its first value is the source's DC value,
+                // and the new waveform's is too.
+                _ => waveform,
+            }
+        }
+        match kind {
+            ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                *spec = replaced(std::mem::replace(spec, SourceSpec::Dc(0.0)), waveform);
+                Ok(())
+            }
+            _ => Err(SimulationError::Circuit(
+                "a waveform belongs to an independent voltage or current source".to_string(),
+            )),
+        }
+    }
+
     fn set_source_step_value(
         spec: &mut SourceSpec,
         param_name: Option<&str>,

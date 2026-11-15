@@ -1185,6 +1185,46 @@ impl ControlCircuit {
         } else {
             (target, named)
         };
+        // A vector value sets a source's waveform: ngspice's vsrcpar and
+        // isrcpar give the source the function the parameter names, the
+        // vector its coefficients (spicelib/devices/vsrc/vsrcpar.c:79
+        // VSRC_PULSE and the cases after it), and keep its DC and AC values;
+        // com_alter_common reads the bracketed words (frontend/device.c:1386).
+        let waveform = match value.strip_prefix('[') {
+            Some(values) => {
+                let values = values
+                    .strip_suffix(']')
+                    .ok_or_else(|| command_error(line, "unterminated alter value vector"))?;
+                let function = parameter
+                    .and_then(|parameter| {
+                        WAVEFORM_FUNCTIONS
+                            .iter()
+                            .find(|(known, _)| parameter.eq_ignore_ascii_case(known))
+                    })
+                    .map(|(_, function)| *function)
+                    .ok_or_else(|| {
+                        command_error(
+                            line,
+                            format!(
+                                "a vector value sets a source waveform; `{}` names none",
+                                parameter.unwrap_or_default()
+                            ),
+                        )
+                    })?;
+                let values = values
+                    .split_whitespace()
+                    .map(|value| {
+                        scalar(value, variables, line, abort).map(|value| format!("{value:?}"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let text = format!("{function}({})", values.join(" "));
+                Some(
+                    crate::netlist::parse_source_spec_text(&text, line, &self.netlist.params)
+                        .map_err(|error| command_error(line, format!("alter {name}: {error}")))?,
+                )
+            }
+            None => None,
+        };
         let element = self
             .netlist
             .elements
@@ -1192,46 +1232,24 @@ impl ControlCircuit {
             .find(|element| element.name.eq_ignore_ascii_case(name))
             .ok_or_else(|| command_error(line, format!("alter target '{name}' was not found")))?;
         let mut candidate = element.kind.clone();
-        let mut changes = Vec::new();
-        if parameter.is_some_and(|parameter| parameter.eq_ignore_ascii_case("sin")) {
-            let values = value
-                .strip_prefix('[')
-                .and_then(|body| body.strip_suffix(']'))
-                .ok_or_else(|| {
-                    command_error(line, "SIN alteration requires a bracketed value vector")
-                })?;
-            let values = values
-                .split_whitespace()
-                .map(|value| scalar(value, variables, line, abort))
-                .collect::<Result<Vec<_>, _>>()?;
-            if !(3..=6).contains(&values.len()) {
-                return Err(command_error(line, "SIN alteration requires offset, amplitude, frequency and up to three optional values").into());
-            }
-            for (index, parameter) in ["VO", "VA", "FREQ", "TD", "THETA", "PHASE"]
-                .iter()
-                .enumerate()
-            {
-                let value = values.get(index).copied().unwrap_or(0.0);
-                Engine::apply_device_step_value(&mut candidate, Some(parameter), value)
-                    .map_err(|error| simulation_error(line, error))?;
-                let canonical = Engine::canonical_device_parameter(&candidate, Some(parameter));
-                changes.push((canonical, value));
-            }
-        } else {
-            let value = scalar(value, variables, line, abort)?;
-            let canonical = Engine::canonical_device_parameter(&candidate, parameter);
-            Engine::apply_device_step_value(&mut candidate, Some(&canonical), value)
-                .map_err(|error| simulation_error(line, error))?;
-            changes.push((canonical, value));
-        }
-        // Publish only after every field has validated and applied to a private
-        // candidate. The overlay keeps changes through later source replay.
-        element.kind = candidate;
         let element_name = element.name.to_ascii_uppercase();
-        for (parameter, value) in changes {
-            self.netlist
-                .retain_device_parameter((element_name.clone(), parameter), value);
+        if let Some(waveform) = waveform {
+            Engine::set_source_waveform(&mut candidate, waveform.clone())
+                .map_err(|error| simulation_error(line, error))?;
+            element.kind = candidate;
+            // The overlay keeps the waveform through later source replay.
+            self.netlist.retain_device_waveform(element_name, waveform);
+            return Ok(());
         }
+        let value = scalar(value, variables, line, abort)?;
+        let canonical = Engine::canonical_device_parameter(&candidate, parameter);
+        Engine::apply_device_step_value(&mut candidate, Some(&canonical), value)
+            .map_err(|error| simulation_error(line, error))?;
+        // Publish only after the value has validated and applied to a private
+        // candidate. The overlay keeps the change through later source replay.
+        element.kind = candidate;
+        self.netlist
+            .retain_device_parameter((element_name, canonical), value);
         Ok(())
     }
 
@@ -1650,6 +1668,20 @@ fn os_compiled() -> u8 {
         0
     }
 }
+
+/// The source parameters a vector value sets, each naming the waveform it
+/// gives the source (spicelib/devices/vsrc/vsrc.c, isrc/isrc.c).
+const WAVEFORM_FUNCTIONS: &[(&str, &str)] = &[
+    ("pulse", "PULSE"),
+    ("sine", "SIN"),
+    ("sin", "SIN"),
+    ("exp", "EXP"),
+    ("pwl", "PWL"),
+    ("sffm", "SFFM"),
+    ("am", "AM"),
+    ("trnoise", "TRNOISE"),
+    ("trrandom", "TRRANDOM"),
+];
 
 fn command_error(line: usize, message: impl Into<String>) -> ControlError {
     ControlError::new(line, ControlErrorKind::Host, message)

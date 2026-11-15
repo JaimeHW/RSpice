@@ -932,6 +932,9 @@ pub struct NetlistAstOverlay {
     /// Root parameter values retained across nested studies and source replay.
     pub parameters: BTreeMap<String, Value>,
     pub device_parameters: BTreeMap<(String, String), crate::Value>,
+    /// Transient waveforms a control script's `alter @source[pulse] = [...]`
+    /// gave a source, by source; replayed before `device_parameters`.
+    pub device_waveforms: BTreeMap<String, SourceSpec>,
     /// Model parameter values a control script's `altermod` set, by model
     /// card and parameter.
     pub model_parameters: BTreeMap<(String, String), crate::Value>,
@@ -1347,6 +1350,19 @@ impl Netlist {
     #[doc(hidden)]
     pub fn retain_device_parameter(&mut self, key: (String, String), value: Value) {
         self.ast_overlay.device_parameters.insert(key, value);
+    }
+
+    /// Retain the transient waveform the engine has given the source named
+    /// `device`. It replaces every waveform value retained for that source
+    /// before it; the source's DC and AC values stay retained.
+    #[doc(hidden)]
+    pub fn retain_device_waveform(&mut self, device: String, waveform: SourceSpec) {
+        self.ast_overlay
+            .device_parameters
+            .retain(|(name, parameter), _| {
+                name != &device || matches!(parameter.as_str(), "DC" | "AC" | "ACMAG" | "ACPHASE")
+            });
+        self.ast_overlay.device_waveforms.insert(device, waveform);
     }
 
     /// Retain one model parameter value the engine has applied to the model

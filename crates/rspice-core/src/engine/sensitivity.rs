@@ -778,6 +778,18 @@ impl Engine {
         if let Some((saves, requests)) = &overlay.output_selection {
             netlist.override_output_selection(saves.clone(), requests.clone());
         }
+        for (device_name, waveform) in &overlay.device_waveforms {
+            let element = netlist
+                .elements
+                .iter_mut()
+                .find(|element| element.name.eq_ignore_ascii_case(device_name))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "retained waveform of '{device_name}' no longer resolves after source replay"
+                    ))
+                })?;
+            Self::set_source_waveform(&mut element.kind, waveform.clone())?;
+        }
         for (index, ((device_name, parameter_name), value)) in
             overlay.device_parameters.iter().enumerate()
         {
