@@ -2,16 +2,33 @@
 
 use super::*;
 
+/// An element name as the first card that took it spelled it, the same name
+/// as any spelling of it in another ASCII case.
 #[derive(Debug, Clone)]
-struct ElementNameOrigin {
-    spelling: String,
-    line: usize,
+struct CaselessName(String);
+
+impl PartialEq for CaselessName {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq_ignore_ascii_case(&other.0)
+    }
+}
+
+impl Eq for CaselessName {}
+
+impl std::hash::Hash for CaselessName {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for byte in self.0.bytes() {
+            state.write_u8(byte.to_ascii_uppercase());
+        }
+        state.write_u8(0xff);
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct ElementNameRegistry {
-    /// Fx-hashed: every element of the deck is keyed here once.
-    origins: rustc_hash::FxHashMap<String, ElementNameOrigin>,
+    /// Fx-hashed: every element of the deck is keyed here once, with the
+    /// line of the card that took its name.
+    origins: rustc_hash::FxHashMap<CaselessName, usize>,
 }
 
 impl ElementNameRegistry {
@@ -27,26 +44,22 @@ impl ElementNameRegistry {
         line: usize,
     ) -> Result<(), ParseError> {
         for (index, element) in elements.iter().enumerate() {
-            let canonical_name = element.name.to_ascii_uppercase();
             let spelling = authored_name
                 .filter(|name| index == 0 && name.eq_ignore_ascii_case(&element.name))
                 .unwrap_or(&element.name);
-            match self.origins.entry(canonical_name) {
+            match self.origins.entry(CaselessName(spelling.to_owned())) {
                 std::collections::hash_map::Entry::Occupied(first) => {
                     return Err(ParseError::DuplicateName {
-                        canonical_name: first.key().clone(),
-                        first_name: first.get().spelling.clone(),
+                        canonical_name: first.key().0.to_ascii_uppercase(),
+                        first_name: first.key().0.clone(),
                         duplicate_name: spelling.to_string(),
                         scope: scope.to_string(),
-                        first_line: first.get().line,
+                        first_line: *first.get(),
                         duplicate_line: line,
                     });
                 }
                 std::collections::hash_map::Entry::Vacant(slot) => {
-                    slot.insert(ElementNameOrigin {
-                        spelling: spelling.to_string(),
-                        line,
-                    });
+                    slot.insert(line);
                 }
             }
         }
@@ -71,7 +84,7 @@ impl ElementNameRegistry {
 
     #[cfg(test)]
     pub(super) fn contains_canonical(&self, name: &str) -> bool {
-        self.origins.contains_key(name)
+        self.origins.contains_key(&CaselessName(name.to_owned()))
     }
 }
 
