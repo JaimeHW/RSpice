@@ -1139,9 +1139,10 @@ pub struct GeneratedPeriodicStructure {
     /// The circuit nodes, other than ground, that carry its state: those
     /// whose voltages its charges are functions of, and its private unknowns
     /// (a probed flow's current). A private unknown can be the current of a
-    /// branch whose arm moves with bias, so it may tie nodes the stamp pattern
-    /// alone cannot show tied; as a coordinate it keeps the period's start
-    /// solvable in either arm.
+    /// switch branch, which ties its nodes in its potential arm; the stamp
+    /// pattern holds both arms, and
+    /// [`BuiltinVerilogAInstance::periodic_structure_at_rest`] reads which
+    /// one the parameters choose.
     pub state_nodes: Vec<usize>,
     /// The bound source branches (1-based solution branch indices) whose
     /// equations the reactive stamp can write: each can store flux (an
@@ -1797,6 +1798,129 @@ impl BuiltinVerilogAInstance {
         }
         self.dynamic_charges_at(&solution, num_nodes, simparams)
             .is_none_or(|carrying| carrying.current != at_rest.current)
+    }
+
+    /// [`Self::periodic_structure`] at the instance's parameters, which
+    /// choose each switch branch's arm. A source current whose equation
+    /// reads the branch voltage and not the current itself, and which enters
+    /// only the nodes its branch joins, is a potential arm's: it ties those
+    /// nodes, and the period start solves it from theirs. A private unknown
+    /// in that arm leaves [`GeneratedPeriodicStructure::state_nodes`]: fixed
+    /// as a state, it would free the very voltage its equation holds. A bound
+    /// branch in its flow arm ties nothing (a thermal node a disabled
+    /// self-heating would ground keeps its capacitance's state). Probed at
+    /// zero bias on a copy, as [`Self::stores_flux`] is; a model that cannot
+    /// be evaluated there keeps the stamp pattern's reading.
+    #[doc(hidden)]
+    pub fn periodic_structure_at_rest(
+        &self,
+        matrix_size: usize,
+        num_nodes: usize,
+        simparams: GeneratedSimulationParameters,
+    ) -> GeneratedPeriodicStructure {
+        let mut structure = self.periodic_structure();
+        let Some(descriptor) = builtins::descriptor(self.model_name) else {
+            return structure;
+        };
+        // Each source current's solution column, with the private node it
+        // occupies (a bound branch occupies none).
+        let currents: Vec<(usize, Option<usize>)> = self
+            .branches
+            .iter()
+            .filter(|&&branch| branch > 0)
+            .map(|&branch| (num_nodes + branch - 1, None))
+            .chain(
+                self.non_electrical_node_indices()
+                    .map(|node| (node - 1, Some(node))),
+            )
+            .filter(|&(column, _)| column < matrix_size)
+            .collect();
+        if currents.is_empty() {
+            return structure;
+        }
+        let pattern = descriptor.stamp_pattern;
+        let axis = |local: usize| {
+            if local < descriptor.total_node_count {
+                self.nodes
+                    .get(local)
+                    .copied()
+                    .filter(|&node| node > 0)
+                    .map(|node| node - 1)
+            } else {
+                self.branches
+                    .get(local - descriptor.total_node_count)
+                    .copied()
+                    .filter(|&branch| branch > 0)
+                    .map(|branch| num_nodes + branch - 1)
+            }
+        };
+        let triplets: Vec<_> = pattern
+            .resistive
+            .iter()
+            .chain(pattern.dynamic)
+            .chain(pattern.reactive)
+            .filter_map(|&(row, column)| Some((axis(row)?, axis(column)?, 0.0)))
+            .filter(|&(row, column, _)| row < matrix_size && column < matrix_size)
+            .collect();
+        let Ok(mut matrix) = StaticMatrix::from_triplets(matrix_size, matrix_size, &triplets)
+        else {
+            return structure;
+        };
+        let mut probe = std::borrow::Cow::Borrowed(self);
+        let probe = probe.to_mut();
+        probe.link_static_stamps(&matrix, num_nodes);
+        let mut rhs = vec![0.0; matrix_size];
+        let voltages = vec![0.0; matrix_size];
+        if probe
+            .stamp_probe(
+                &mut matrix,
+                &mut rhs,
+                &voltages,
+                num_nodes,
+                GeneratedAnalysisKind::Dc,
+                simparams,
+            )
+            .is_err()
+        {
+            return structure;
+        }
+        // Per current: whether its own equation reads it, and the nodes it
+        // enters with unit sign (a probe of it elsewhere reads it at other
+        // weights, and a private node is no terminal).
+        let mut reads_itself = vec![false; currents.len()];
+        let mut enters: Vec<Vec<(usize, Value)>> = vec![Vec::new(); currents.len()];
+        for (row, column, value) in matrix.stored_entries() {
+            if value == 0.0 {
+                continue;
+            }
+            let Some(slot) = currents.iter().position(|&(current, _)| current == column) else {
+                continue;
+            };
+            if row == column {
+                reads_itself[slot] = true;
+            } else if row < num_nodes
+                && value.abs() == 1.0
+                && !currents.iter().any(|&(_, node)| node == Some(row + 1))
+            {
+                enters[slot].push((row + 1, value));
+            }
+        }
+        structure.ties.clear();
+        let mut sources = Vec::new();
+        for (slot, &(_, node)) in currents.iter().enumerate() {
+            if reads_itself[slot] {
+                continue;
+            }
+            let tie = match enters[slot][..] {
+                [(pos, _)] => (pos, 0),
+                [(pos, first), (neg, second)] if second == -first => (pos, neg),
+                _ => continue,
+            };
+            structure.ties.push(tie);
+            sources.extend(node);
+        }
+        structure.state_nodes.retain(|node| !sources.contains(node));
+        structure
     }
 
     /// Bound circuit node IDs occupied by private mathematical states.

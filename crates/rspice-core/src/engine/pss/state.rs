@@ -350,14 +350,22 @@ impl PssStateBasis {
                 add(pos, neg, ForestValue::Zero)?;
             }
         }
-        // A generated model's source branch fixes the difference of the nodes
-        // it ties (the model solves it from the rest of the state), so those
-        // nodes are one before any of them can take a coordinate.
+        // A generated model's source branch in its potential arm, the one its
+        // parameters choose, fixes the difference of the nodes it ties (the
+        // model solves it from the rest of the state), so those nodes are one
+        // before any of them can take a coordinate. In its flow arm it ties
+        // nothing: a self-heating model's thermal node keeps its state.
         #[cfg(feature = "veriloga-builtins-base")]
         let generated: Vec<_> = circuit
             .generated_veriloga_devices()
             .iter()
-            .map(|instance| instance.periodic_structure())
+            .map(|instance| {
+                instance.periodic_structure_at_rest(
+                    circuit.matrix_size(),
+                    circuit.num_nodes(),
+                    circuit.generated_simulation_parameters,
+                )
+            })
             .collect();
         #[cfg(feature = "veriloga-builtins-base")]
         for &(pos, neg) in generated.iter().flat_map(|structure| &structure.ties) {
@@ -488,9 +496,11 @@ impl PssStateBasis {
         // unknowns, so each is a coordinate unless a source, a source branch
         // of the model or another storage branch already fixes it. A node
         // that holds neither is solved at the period start. A private unknown
-        // stays a coordinate because a bias-dependent arm can make it a
-        // branch current (DIODE_CMC's probed junction current): left free,
-        // the start's consistency matrix is singular.
+        // in a potential arm is not among them: it is that source's current
+        // and ties its nodes above, as a bound source branch does (DIODE_CMC's
+        // zero series resistance, ASM-HEMT's collapsed field plates). Fixed
+        // instead, it frees the voltage its equation holds, and the start's
+        // consistency matrix is singular.
         #[cfg(feature = "veriloga-builtins-base")]
         for ((device, instance), structure) in circuit
             .generated_veriloga_devices()
