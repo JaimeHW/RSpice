@@ -16,8 +16,9 @@
 //! residual only through its own branch row, identically in the circuit as
 //! built and in each rebuilt one, so it cancels from every difference. A
 //! source sweep therefore builds them once for all its points, and each point
-//! assembles its residuals on fresh copies, which see the circuits exactly as
-//! their builds left them.
+//! assembles its residuals on the circuits as their builds left them: the
+//! residual restores every device state its assembly moves, and the one
+//! state it keeps, a BJT's first-load linearization, is set on a copy.
 
 use super::{
     AcSensitivityLocation, AcSensitivityTarget, Engine, SimulationError, sensitivity_trial,
@@ -163,8 +164,7 @@ impl UnknownLayout {
 /// A circuit built and prepared from one deck, on which the operating-point
 /// residual is assembled at a solution another circuit converged to.
 struct ResidualProbe {
-    /// As built and prepared. It is never assembled itself: every residual is
-    /// assembled on a copy.
+    /// As built and prepared, and as every residual leaves it.
     circuit: CircuitData,
     matrix: StaticMatrix,
 }
@@ -194,12 +194,22 @@ impl ResidualProbe {
         engine: &Engine,
         solution: &[Value],
     ) -> Result<Option<Vec<Value>>, SimulationError> {
-        let mut circuit = self.circuit.clone();
-        // This circuit never iterated to `solution`; a BJT must not answer
-        // for it with the first Newton load it still owes.
-        circuit.update_bjt_static_linearizations(solution);
+        // The residual restores every device state its assembly moves. A
+        // BJT is the exception: this circuit never iterated to `solution`,
+        // and the BJT must not answer for it with the first Newton load it
+        // still owes, so its static linearization is set first, and that
+        // stays with the device. It is set on a copy, which the next point
+        // does not see.
+        let mut copy;
+        let circuit = if self.circuit.bjts.devices.is_empty() {
+            &mut self.circuit
+        } else {
+            copy = self.circuit.clone();
+            copy.update_bjt_static_linearizations(solution);
+            &mut copy
+        };
         Ok(sensitivity_trial(engine.dc_operating_point_residual(
-            &mut circuit,
+            circuit,
             &mut self.matrix,
             solution,
         ))?
