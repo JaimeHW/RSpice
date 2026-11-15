@@ -124,13 +124,17 @@ pub(super) fn postpone_forward_reference(
     }
     let mut words = line.split_whitespace();
     words.next();
+    // One buffer for every name's declared spelling, not one string each.
+    let mut key = String::new();
     let names_unbound = urc_model_ahead
         || words.any(|word| {
             word.split(|c: char| !(c.is_alphanumeric() || c == '_'))
                 .filter(|name| name.starts_with(|c: char| c.is_alphabetic() || c == '_'))
                 .any(|name| {
-                    plan.declared.contains(&name.to_ascii_uppercase())
-                        && !state.params.has_any_parameter_binding(name)
+                    key.clear();
+                    key.push_str(name);
+                    key.make_ascii_uppercase();
+                    plan.declared.contains(&key) && !state.params.has_any_parameter_binding(name)
                 })
         });
     if names_unbound {
