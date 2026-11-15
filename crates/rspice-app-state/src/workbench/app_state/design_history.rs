@@ -891,6 +891,23 @@ impl Model {
             .is_some_and(|(undone, committed)| committed > undone)
     }
 
+    /// [`Self::project_redo_sequence`] as Redo arbitrates it: none once a
+    /// newer step replaced it, which [`Self::retire_replaced_redo_steps`]
+    /// drops before the step is taken.
+    pub fn live_project_redo_sequence(&self) -> Option<UndoSequence> {
+        self.project_redo_sequence()
+            .filter(|_| !self.project_redo_is_replaced())
+    }
+
+    /// The active schematic's next redo step in the global order as Redo
+    /// arbitrates it: none once a newer project step replaced it.
+    pub fn live_schematic_redo_sequence(&self) -> Option<UndoSequence> {
+        self.schematic
+            .history()
+            .redo_sequence()
+            .filter(|_| !self.schematic_redo_is_replaced())
+    }
+
     /// Whether the project committed a transaction after the active
     /// schematic's next redo step was undone.
     fn schematic_redo_is_replaced(&self) -> bool {

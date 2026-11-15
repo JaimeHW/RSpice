@@ -3,7 +3,9 @@
 use super::*;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::ViewType;
-use crate::workbench::app::actions::workspace::{HistoryStepParts, take_history_step};
+use crate::workbench::app::actions::workspace::{
+    HistoryStepParts, project_step_comes_first, take_history_step,
+};
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::framework::feature::ModelsPort;
@@ -67,23 +69,30 @@ pub(crate) fn menu_label(command: Command, app: &RSpiceApp) -> std::borrow::Cow<
 
 /// The name of the step Undo (`undo`) or Redo would take, where that step
 /// is the schematic or symbol editor's own: their histories name each step.
-/// The netlist page's and the project's histories do not.
+/// The netlist page's and the project's histories do not, so a step either
+/// of them takes first leaves the row unnamed. A project step older than the
+/// drawing's does not: the command takes the drawing's step, and says so.
 fn drawing_step_name(app: &RSpiceApp, undo: bool) -> Option<&str> {
     let state = &app.state;
-    let elsewhere = if undo {
-        (netlist_page_is_visible(state)
-            && crate::workbench::documents::netlist_document::can_undo_netlist_edit(
+    let netlist = netlist_page_is_visible(state)
+        && if undo {
+            crate::workbench::documents::netlist_document::can_undo_netlist_edit(
                 &state.code.netlist,
-            ))
-            || state.model.can_undo_project_design()
+            )
+        } else {
+            crate::workbench::documents::netlist_document::can_redo_netlist_edit(
+                &state.code.netlist,
+            )
+        };
+    let direction = if undo {
+        HistoryDirection::Undo
     } else {
-        (netlist_page_is_visible(state)
-            && crate::workbench::documents::netlist_document::can_redo_netlist_edit(
-                &state.code.netlist,
-            ))
-            || state.model.can_redo_project_design()
+        HistoryDirection::Redo
     };
-    if elsewhere || state.workbench.active_source_editor.is_some() {
+    if netlist
+        || state.workbench.active_source_editor.is_some()
+        || project_step_comes_first(&state.model, &state.design.symbol, direction)
+    {
         return None;
     }
     if active_symbol_editor(app) {

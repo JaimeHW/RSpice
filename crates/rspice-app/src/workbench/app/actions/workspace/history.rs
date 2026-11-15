@@ -367,6 +367,32 @@ fn project_step_is_newer(project: Option<UndoSequence>, document: Option<UndoSeq
     }
 }
 
+/// Whether Undo or Redo `direction` reaches for the project history's step
+/// before the active document's, as [`take_step`] arbitrates once the redo
+/// steps a newer edit replaced are retired. Nothing changes here: the Edit
+/// menu asks it to name the step the command will take.
+pub(crate) fn project_step_comes_first(
+    model: &Model,
+    symbol: &SymbolUiState,
+    direction: HistoryDirection,
+) -> bool {
+    let (project, document) = match direction {
+        HistoryDirection::Undo => (
+            model.project_undo_sequence(),
+            document_sequence(model, symbol, direction),
+        ),
+        HistoryDirection::Redo => (
+            model.live_project_redo_sequence(),
+            if model.workspace.content.active_view_type() == Some(ViewType::Symbol) {
+                document_sequence(model, symbol, direction)
+            } else {
+                model.live_schematic_redo_sequence()
+            },
+        ),
+    };
+    project_step_is_newer(project, document)
+}
+
 /// Undo the newest project design step, if one can be taken; `None` when
 /// there is none to take.
 // Application half of a model operation; it becomes a request.

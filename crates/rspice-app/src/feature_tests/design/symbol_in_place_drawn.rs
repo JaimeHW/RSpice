@@ -744,6 +744,56 @@ fn saving_the_symbol_view_writes_the_sheet_its_pin_move_rewired() {
     assert_eq!(fixture.saved_wire_end(&reopened), Point::new(60, 100));
 }
 
+/// Undo names the symbol's step whenever it is the one Undo takes back, a
+/// project step older than it notwithstanding: the row reads "Undo move pin A",
+/// and choosing it puts the pin back, the project step still to undo.
+#[test]
+fn undo_names_the_symbol_step_over_an_older_project_step() {
+    use crate::workbench::framework::command_registry::ids;
+    use crate::workbench::framework::host::Host;
+
+    let mut fixture = InPlace::new();
+    let state = &mut fixture.replay.app.state;
+    let instance = state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == fixture.instance)
+        .cloned()
+        .expect("the placed amp");
+    assert!(
+        state
+            .model
+            .rename_component_transaction(&instance, "X7".to_owned())
+            .expect("the rename commits")
+    );
+    let project_step = state.model.project_undo_sequence();
+    assert!(project_step.is_some(), "a rename is a project step");
+    fixture.enter();
+    fixture.drag(Point::new(60, 70), Point::new(60, 100));
+    assert_eq!(fixture.pin_a(), Some(Point::new(-40, 20)));
+    assert_eq!(
+        Host::menu_label(&fixture.replay.app, ids::UNDO),
+        "Undo move pin A"
+    );
+
+    fixture
+        .replay
+        .key(egui::Key::Z, crate::feature_tests::replay::PRIMARY);
+    assert_eq!(
+        fixture.pin_a(),
+        Some(Point::new(-40, -10)),
+        "the pin is back"
+    );
+    assert_eq!(
+        fixture.replay.app.state.model.project_undo_sequence(),
+        project_step,
+        "the rename is still to undo"
+    );
+}
+
 /// An instance whose cell has a symbol and no schematic master opens Descend
 /// with options too, its symbol in place the one way in, stated rather than
 /// offered as a choice of one; the form commits to the in-place edit.
