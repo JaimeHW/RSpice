@@ -838,6 +838,15 @@ pub trait CodeModel: Send + Sync {
         Vec::new()
     }
 
+    /// The expressions the model evaluates against node voltages by name,
+    /// such as a noise density written as one. A node one of them reads is
+    /// read as a voltage, so it is an analog node whatever else connects it.
+    /// The default is a model without such expressions.
+    #[doc(hidden)]
+    fn expressions(&self) -> Vec<&crate::expr::CompiledExpr> {
+        Vec::new()
+    }
+
     /// Whether the real output `port` is a receiving converter's sample of
     /// its node, which drives the HDL net it meets only while none of the
     /// net's own drivers has produced a value. The circuit tells the model

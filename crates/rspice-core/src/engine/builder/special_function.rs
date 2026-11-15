@@ -348,6 +348,13 @@ impl OtaModel {
 }
 
 impl CodeModel for OtaModel {
+    fn expressions(&self) -> Vec<&CompiledExpr> {
+        [&self.en, &self.in_, &self.incm]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
     fn name(&self) -> &str {
         "OTA"
     }

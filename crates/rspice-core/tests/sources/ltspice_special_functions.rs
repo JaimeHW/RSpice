@@ -707,6 +707,51 @@ A1 i 0 0 0 0 0 o 0 OTA G=1m Rout=1k en=1n+4m*I(R8) enk=0 Linear Vhigh=100 Vlow=-
     }
 }
 
+/// A noise density that reads a digital net reads its bridged voltage at the
+/// operating point, though nothing else reads the net as a voltage.
+///
+/// The density's node references were missing from the nodes analog devices
+/// read, so the inverter's output got no bridge and the density read 0 V
+/// there: `en` was 1 nV/√Hz, where a twin whose B source also reads the net
+/// gave 4.3 nV/√Hz.
+#[test]
+fn an_ota_noise_density_reads_the_digital_net_it_names() {
+    const DECK: &str = "\
+V1 in 0 0 AC 1
+Vzero azero 0 0
+Abr [azero] [dlow] adcb
+.model adcb adc_bridge(in_low=0.5 in_high=0.5)
+Ainv dlow dhigh inv1
+.model inv1 d_inverter
+A1 0 in 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k en={1n*(1+v(dhigh))}
+";
+    let alone = device_noise_density(
+        &format!("* only the density reads dhigh\n{DECK}.end\n"),
+        "A1",
+        "en",
+        &[1e3],
+    );
+    let twin = device_noise_density(
+        &format!("* a B source reads dhigh too\n{DECK}Bx x 0 V={{v(dhigh)}}\nRx x 0 1\n.end\n"),
+        "A1",
+        "en",
+        &[1e3],
+    );
+    // The density reaches the output through G·Rout = 10, and the bridge
+    // drives the inverter's high output to 3.3 V.
+    assert!(
+        (twin[0] - 10.0 * 4.3e-9).abs() <= 1e-15,
+        "en with a B source reading dhigh too: {:e}",
+        twin[0]
+    );
+    assert!(
+        (alone[0] - twin[0]).abs() <= 1e-15,
+        "en with nothing else reading dhigh: {:e} against {:e}",
+        alone[0],
+        twin[0]
+    );
+}
+
 #[test]
 fn flip_flops_and_counters_hold_their_initial_state_in_the_operating_point() {
     let deck = "* sequential operating points

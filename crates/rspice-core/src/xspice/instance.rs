@@ -1457,6 +1457,11 @@ impl XspiceInstance {
         self.model.port_noise_currents(&self.context)
     }
 
+    /// See [`super::CodeModel::expressions`].
+    pub(crate) fn expressions(&self) -> Vec<&crate::expr::CompiledExpr> {
+        self.model.expressions()
+    }
+
     /// See [`super::CodeModel::receives_real_output`].
     #[cfg(feature = "veriloga")]
     #[doc(hidden)]

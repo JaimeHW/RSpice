@@ -1496,6 +1496,38 @@ impl CircuitData {
         &self.generic_switches
     }
 
+    /// Every compiled expression the circuit evaluates against node
+    /// voltages: behavioral sources (behavioral R and L and the E and G
+    /// VALUE, TABLE, POLY, LAPLACE and FREQ forms among them), expression-
+    /// controlled switches, capacitor values that read the solution, and the
+    /// expressions code models hold, such as an OTA's noise densities. A node
+    /// any of them reads is read as a voltage.
+    pub(crate) fn expressions(&self) -> impl Iterator<Item = &crate::expr::CompiledExpr> {
+        self.behavioral_sources
+            .voltage_sources
+            .iter()
+            .map(|source| &*source.program)
+            .chain(
+                self.behavioral_sources
+                    .current_sources
+                    .iter()
+                    .map(|source| &*source.program),
+            )
+            .chain(self.generic_switches.iter().map(|switch| &switch.program))
+            .chain(
+                self.capacitors
+                    .value_expressions
+                    .iter()
+                    .flatten()
+                    .map(|capacitor| &capacitor.program),
+            )
+            .chain(
+                self.xspice_instances
+                    .iter()
+                    .flat_map(|instance| instance.expressions()),
+            )
+    }
+
     /// Borrow one canonical name without cloning and sorting the whole namespace.
     pub(crate) fn node_name_by_id(&self, id: NodeId) -> Option<&str> {
         if id == 0 {

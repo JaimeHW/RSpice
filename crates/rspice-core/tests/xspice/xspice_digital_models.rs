@@ -4846,6 +4846,109 @@ c1 c 0 c={1n+1n*v(dosc)}
     }
 }
 
+/// Every element that reads a node voltage through an expression reads a
+/// digital output nothing else reads through the bridge any analog reader
+/// gets, and follows the clock as its closed form says: behavioral sources,
+/// the E and G VALUE, TABLE, POLY, LAPLACE and FREQ forms, a behavioral
+/// resistor, a source whose value is an expression, and an
+/// expression-controlled switch inside a subcircuit.
+#[test]
+fn every_expression_reader_follows_the_digital_output_it_reads() {
+    const CLOCK: &str = "\
+vc cntl 0 0.5
+aosc cntl dosc osc1
+.model osc1 d_osc(cntl_array=[0 1] freq_array=[1e6 1e6] duty_cycle=0.5 init_phase=0 rise_delay=1e-10 fall_delay=1e-10)
+";
+    const SWITCH: &str = "\
+vdd vdd 0 1
+rp vdd a 1k
+.subckt sw2 in n
+s1 n 0 swm control={v(in)}
+.ends
+x1 dosc a sw2
+.model swm sw ron=1 roff=1e9 on=0.6 off=0.4
+";
+    // Each reader's cards, and `V(a)` as a function of `V(dosc)`.
+    type Reader = (&'static str, &'static str, fn(f64) -> f64);
+    let readers: [Reader; 13] = [
+        ("B voltage", "b1 a 0 v={v(dosc)}\nrl a 0 1\n", |d| d),
+        ("B current", "b1 0 a i={v(dosc)}\nrl a 0 1\n", |d| d),
+        ("E VALUE", "e1 a 0 value={v(dosc)}\nrl a 0 1\n", |d| d),
+        (
+            "E TABLE",
+            "e1 a 0 table {v(dosc)} = (0,0) (1,1)\nrl a 0 1\n",
+            |d| d.clamp(0.0, 1.0),
+        ),
+        ("E POLY", "e1 a 0 poly(1) dosc 0 0 1\nrl a 0 1\n", |d| d),
+        ("G VALUE", "g1 0 a value={v(dosc)}\nrl a 0 1\n", |d| d),
+        (
+            "G TABLE",
+            "g1 0 a table {v(dosc)} = (0,0) (1,1)\nrl a 0 1\n",
+            |d| d.clamp(0.0, 1.0),
+        ),
+        ("G POLY", "g1 0 a poly(1) dosc 0 0 1\nrl a 0 1\n", |d| d),
+        // A 1 ns pole, settled long before each sample.
+        (
+            "E LAPLACE",
+            "e1 a 0 laplace {v(dosc)} = {1/(1+s*1n)}\nrl a 0 1\n",
+            |d| d,
+        ),
+        (
+            "E FREQ",
+            "e1 a 0 freq {v(dosc)} = (0 0 0) (1e12 0 0)\nrl a 0 1\n",
+            |d| d,
+        ),
+        (
+            "behavioral resistor",
+            "vdd vdd 0 1\nrp vdd a 1k\nr1 a 0 r={1k*(1+v(dosc))}\n",
+            |d| (1.0 + d) / (2.0 + d),
+        ),
+        ("source value", "v1 a 0 {v(dosc)}\nrl a 0 1\n", |d| d),
+        ("switch in a subcircuit", SWITCH, |d| {
+            if d > 0.5 {
+                1.0 / 1001.0
+            } else {
+                1.0e9 / (1.0e9 + 1.0e3)
+            }
+        }),
+    ];
+    for (reader, cards, closed_form) in readers {
+        let deck = format!("* {reader} reads the clock\n{CLOCK}{cards}.end\n");
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let result = Engine::default()
+            .run_tran(&netlist, 2.0e-6, 1.0e-8)
+            .unwrap_or_else(|error| panic!("{reader}: transient solves: {error}"));
+        let a = transient_node_series(&result, "a");
+        let dosc = transient_node_series(&result, "dosc");
+        // The clock is low over the first half period and high over the
+        // second.
+        for (time, high) in [
+            (0.25e-6, false),
+            (0.75e-6, true),
+            (1.25e-6, false),
+            (1.75e-6, true),
+        ] {
+            let index = result
+                .time
+                .iter()
+                .position(|&t| t >= time)
+                .expect("the run reaches the sample");
+            let d = dosc[index];
+            assert_eq!(
+                d > 1.0,
+                high,
+                "{reader}: the bridged clock at {time:e} s: {d}"
+            );
+            let expected = closed_form(d);
+            assert!(
+                (a[index] - expected).abs() <= 1e-6 * expected.abs().max(1.0),
+                "{reader}: V(a) at {time:e} s is {} against {expected} with V(dosc) {d}",
+                a[index]
+            );
+        }
+    }
+}
+
 //=============================================================================
 // The same rule at a solved DC point (R2.15 part C)
 //=============================================================================
