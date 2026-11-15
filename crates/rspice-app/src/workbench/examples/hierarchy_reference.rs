@@ -401,6 +401,7 @@ fn author_amp_symbol(state: &mut AppState, schematic: &CellViewRef, symbol: &Cel
         text: AMP_CELL.to_ascii_uppercase(),
         size: SymbolTextSize::Normal,
         align: SymbolTextAlign::Center,
+        rotation: Default::default(),
     });
     let metadata = SymbolEditorMetadata::for_document(&document);
 

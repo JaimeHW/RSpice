@@ -24,7 +24,7 @@ use rspice_vocabulary::product::ContentDigest;
 
 pub use rspice_design_model::symbol_geometry::{
     SymbolCurve, SymbolDash, SymbolFill, SymbolShape, SymbolStroke, SymbolStyle, SymbolTextAlign,
-    SymbolTextPlacement, SymbolTextSize, rectangle_corners, symbol_text_bounds,
+    SymbolTextPlacement, SymbolTextRotation, SymbolTextSize, rectangle_corners, symbol_text_bounds,
 };
 
 use crate::library::View;
@@ -1537,8 +1537,9 @@ fn shapes_bounds<'a>(shapes: impl IntoIterator<Item = &'a SymbolShape>) -> Optio
                 text,
                 size,
                 align,
+                rotation,
             } => {
-                let (min, max) = symbol_text_bounds(*anchor, text, *size, *align);
+                let (min, max) = symbol_text_bounds(*anchor, text, *size, *align, *rotation);
                 xs.extend([min.x, max.x]);
                 ys.extend([min.y, max.y]);
             }
@@ -1965,6 +1966,7 @@ mod validation_tests {
                 text: "gain stage".to_owned(),
                 size: SymbolTextSize::Normal,
                 align: SymbolTextAlign::Left,
+                rotation: Default::default(),
             }],
             ..SymbolDocument::default()
         };
@@ -2061,6 +2063,7 @@ mod validation_tests {
                 text: "AMP".to_owned(),
                 size: SymbolTextSize::Normal,
                 align: SymbolTextAlign::Left,
+                rotation: Default::default(),
             }],
             ..SymbolDocument::default()
         };
@@ -2079,6 +2082,7 @@ mod validation_tests {
                 text: "A\u{7}MP".to_owned(),
                 size: SymbolTextSize::Normal,
                 align: SymbolTextAlign::Left,
+                rotation: Default::default(),
             }],
             ..SymbolDocument::default()
         };

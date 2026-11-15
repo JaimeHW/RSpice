@@ -7,7 +7,10 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::inspector::symbol::*;
-use rspice_design::symbol::{SymbolDash, SymbolFill, SymbolStroke, SymbolStyle};
+use rspice_design::symbol::{
+    SymbolDash, SymbolFill, SymbolStroke, SymbolStyle, SymbolTextAlign, SymbolTextRotation,
+    SymbolTextSize,
+};
 use rspice_schematic_editor::symbol_editor::inspector::{self, SymbolInspectorRequest};
 use rspice_schematic_editor::symbol_editor::interaction::SymbolEditCapabilities;
 use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
@@ -534,6 +537,60 @@ fn a_style_row_restyles_every_selected_shape_as_one_undo_step() {
             .iter()
             .all(|style| style.fill == SymbolFill::None && style.dash == SymbolDash::Dotted)
     );
+}
+
+/// The Rotation row turns a selected text run to read upward, as one undo
+/// step named for it.
+#[test]
+fn the_rotation_row_turns_a_text_run_as_one_named_undo_step() {
+    let mut editor = Editor::new();
+    let key = editor.app.state.model.workspace.content.active_key();
+    let document = SymbolDocument {
+        body: vec![SymbolShape::Text {
+            anchor: Point::origin(),
+            text: "OTA".to_owned(),
+            size: SymbolTextSize::Normal,
+            align: SymbolTextAlign::Left,
+            rotation: SymbolTextRotation::R0,
+        }],
+        ..Default::default()
+    };
+    editor
+        .app
+        .state
+        .store_active_symbol_editor_bundle(
+            &document,
+            &SymbolEditorMetadata::for_document(&document),
+        )
+        .unwrap();
+    editor.app.state.design.symbol.editor.select_shape(0);
+    editor.pass(Vec::new());
+    assert_eq!(editor.values["Rotation"], "0\u{b0}");
+
+    editor.click("Rotation");
+    editor.pass(Vec::new());
+    editor.click("90\u{b0}");
+
+    let turned = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
+    assert!(
+        matches!(
+            &turned.body[0],
+            SymbolShape::Text {
+                rotation: SymbolTextRotation::R90,
+                ..
+            }
+        ),
+        "{:?}",
+        turned.body[0]
+    );
+    let history = &editor.app.state.design.symbol.history;
+    assert_eq!(history.undo_depth(&key), 1);
+    assert_eq!(history.undo_step(&key), Some("Rotate text"));
 }
 
 pub(crate) struct Editor {

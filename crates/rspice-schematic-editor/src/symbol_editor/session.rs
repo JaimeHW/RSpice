@@ -664,7 +664,8 @@ pub fn symbol_shape_bounds(
             text,
             size,
             align,
-        } => rspice_design::symbol::symbol_text_bounds(*anchor, text, *size, *align),
+            rotation,
+        } => rspice_design::symbol::symbol_text_bounds(*anchor, text, *size, *align, *rotation),
     }
 }
 
@@ -845,6 +846,7 @@ mod tests {
                     text: "AMP".to_owned(),
                     size: rspice_design::symbol::SymbolTextSize::Normal,
                     align: rspice_design::symbol::SymbolTextAlign::Center,
+                    rotation: Default::default(),
                 },
             ],
             ..SymbolDocument::default()
@@ -868,6 +870,7 @@ mod tests {
                 text: "AMP".to_owned(),
                 size: rspice_design::symbol::SymbolTextSize::Normal,
                 align: rspice_design::symbol::SymbolTextAlign::Left,
+                rotation: Default::default(),
             }],
             ..SymbolDocument::default()
         };
@@ -1004,6 +1007,7 @@ mod tests {
                 text: "+".to_owned(),
                 size: SymbolTextSize::Normal,
                 align: SymbolTextAlign::Center,
+                rotation: Default::default(),
             }),
             "Text \"+\""
         );

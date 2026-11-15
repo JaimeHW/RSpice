@@ -108,6 +108,7 @@ fn placing_text_puts_the_typed_text_at_the_anchor() {
             text: "GAIN".to_owned(),
             size: SymbolTextSize::default(),
             align: SymbolTextAlign::default(),
+            rotation: Default::default(),
         }]
     );
     assert!(session.text_draft.is_none());

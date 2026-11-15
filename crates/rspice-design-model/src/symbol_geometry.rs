@@ -61,9 +61,9 @@ impl SymbolTextAlign {
         }
     }
 
-    /// The alignment a horizontal mirror produces. Glyphs stay upright under
-    /// every transform, so a mirror can only move the run to the other side
-    /// of its anchor.
+    /// The alignment a mirror across the run produces. A run is never read
+    /// backward, so a mirror can only move it to the other side of its
+    /// anchor.
     pub const fn mirrored(self) -> Self {
         match self {
             Self::Left => Self::Right,
@@ -72,14 +72,19 @@ impl SymbolTextAlign {
         }
     }
 
-    /// Where the run sits once `orient` — the placed instance's own
-    /// transform — has carried its advance direction into world space.
+    /// Where a run reading `rotation`'s way sits once `orient` — the placed
+    /// instance's own transform — has carried its advance direction into
+    /// world space.
     ///
     /// The single owner of the rule, because every surface that draws
     /// authored text spells the answer differently and none of them may
     /// disagree about it.
-    pub fn placement(self, orient: impl Fn(Point) -> Point) -> SymbolTextPlacement {
-        let Some(step) = self.run_step() else {
+    pub fn placement(
+        self,
+        rotation: SymbolTextRotation,
+        orient: impl Fn(Point) -> Point,
+    ) -> SymbolTextPlacement {
+        let Some(step) = self.run_step(rotation) else {
             return SymbolTextPlacement::On;
         };
         let run = orient(step);
@@ -97,20 +102,60 @@ impl SymbolTextAlign {
     }
 
     /// The direction the run advances away from its anchor, or `None` when
-    /// it straddles the anchor and no orientation can move it off.
-    const fn run_step(self) -> Option<Point> {
+    /// it straddles the anchor and no orientation can move it off. A run
+    /// read upward starts at its anchor and climbs from it.
+    const fn run_step(self, rotation: SymbolTextRotation) -> Option<Point> {
+        match (self, rotation) {
+            (Self::Center, _) => None,
+            (Self::Left, SymbolTextRotation::R0) => Some(Point::new(1, 0)),
+            (Self::Right, SymbolTextRotation::R0) => Some(Point::new(-1, 0)),
+            (Self::Left, SymbolTextRotation::R90) => Some(Point::new(0, -1)),
+            (Self::Right, SymbolTextRotation::R90) => Some(Point::new(0, 1)),
+        }
+    }
+}
+
+/// Which way a text run reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolTextRotation {
+    /// Left to right.
+    #[default]
+    R0,
+    /// Bottom to top: the run turned a quarter counter-clockwise, as a label
+    /// set beside a column of pins reads.
+    R90,
+}
+
+impl SymbolTextRotation {
+    pub const ALL: [Self; 2] = [Self::R0, Self::R90];
+
+    pub const fn label(self) -> &'static str {
         match self {
-            Self::Left => Some(Point::new(1, 0)),
-            Self::Center => None,
-            Self::Right => Some(Point::new(-1, 0)),
+            Self::R0 => "0\u{b0}",
+            Self::R90 => "90\u{b0}",
+        }
+    }
+
+    pub fn is_r0(&self) -> bool {
+        *self == Self::R0
+    }
+
+    /// The other reading direction: what a quarter turn makes of a run,
+    /// since glyphs are never set upside down.
+    pub const fn turned(self) -> Self {
+        match self {
+            Self::R0 => Self::R90,
+            Self::R90 => Self::R0,
         }
     }
 }
 
 /// Which side of its anchor an oriented text run ends up on.
 ///
-/// Glyphs stay upright under every transform, so an orientation can only move
-/// the run around its anchor; this names where it landed.
+/// A run keeps its reading under every turn or mirror of a placed instance,
+/// so an orientation can only move the run around its anchor; this names
+/// where it landed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolTextPlacement {
     /// Straddling the anchor, wherever the instance is turned.
@@ -121,8 +166,9 @@ pub enum SymbolTextPlacement {
     Above,
 }
 
-/// The box a text run occupies in symbol units, vertically centred on its
-/// anchor.
+/// The box a text run occupies in symbol units, centred across its anchor:
+/// vertically for a run read left to right, horizontally for one read
+/// upward.
 ///
 /// The single owner of symbol type metrics. IBM Plex Mono advances 600/1000
 /// em, so a glyph of cap height `h` is `3h/5` wide; every renderer sets that
@@ -132,6 +178,7 @@ pub fn symbol_text_bounds(
     text: &str,
     size: SymbolTextSize,
     align: SymbolTextAlign,
+    rotation: SymbolTextRotation,
 ) -> (Point, Point) {
     let glyphs = i32::try_from(text.chars().count()).unwrap_or(i32::MAX);
     let span = glyphs.saturating_mul(size.height() * 3 / 5);
@@ -141,16 +188,29 @@ pub fn symbol_text_bounds(
         SymbolTextAlign::Right => (span, 0),
     };
     let half_height = size.height() / 2;
-    (
-        Point::new(
-            anchor.x.saturating_sub(before),
-            anchor.y.saturating_sub(half_height),
+    match rotation {
+        SymbolTextRotation::R0 => (
+            Point::new(
+                anchor.x.saturating_sub(before),
+                anchor.y.saturating_sub(half_height),
+            ),
+            Point::new(
+                anchor.x.saturating_add(after),
+                anchor.y.saturating_add(half_height),
+            ),
         ),
-        Point::new(
-            anchor.x.saturating_add(after),
-            anchor.y.saturating_add(half_height),
+        // Read upward, what follows the anchor is above it.
+        SymbolTextRotation::R90 => (
+            Point::new(
+                anchor.x.saturating_sub(half_height),
+                anchor.y.saturating_sub(after),
+            ),
+            Point::new(
+                anchor.x.saturating_add(half_height),
+                anchor.y.saturating_add(before),
+            ),
         ),
-    )
+    }
 }
 
 /// How heavy a shape's outline is, against the weight a renderer draws a
@@ -459,14 +519,17 @@ pub enum SymbolShape {
         radius: i32,
     },
     /// A run of authored glyphs. The anchor is geometry and moves with every
-    /// transform; the glyphs themselves stay upright and read left to right
-    /// however the shape or the instance is turned, which is what makes a
-    /// mirrored or rotated symbol still legible.
+    /// transform. The run reads left to right, or upward once turned a
+    /// quarter in the editor; on a placed instance it keeps that reading
+    /// however the instance is turned or mirrored, and only moves round its
+    /// anchor, which is what keeps a turned symbol legible.
     Text {
         anchor: Point,
         text: String,
         size: SymbolTextSize,
         align: SymbolTextAlign,
+        #[serde(default, skip_serializing_if = "SymbolTextRotation::is_r0")]
+        rotation: SymbolTextRotation,
     },
 }
 
@@ -553,6 +616,17 @@ impl SymbolShape {
             } => {
                 *rotation_quarters = (*rotation_quarters as i64 + 1).rem_euclid(4) as i32;
             }
+            // A quarter turn stands a run on end or lays it down. A run laid
+            // along +y would read downward, which no glyph does, so standing
+            // one up also moves it to the other side of its anchor.
+            SymbolShape::Text {
+                align, rotation, ..
+            } => {
+                if rotation.is_r0() {
+                    *align = align.mirrored();
+                }
+                *rotation = rotation.turned();
+            }
             _ => {}
         }
     }
@@ -573,10 +647,15 @@ impl SymbolShape {
             } => {
                 *rotation_quarters = (2 - *rotation_quarters).rem_euclid(4);
             }
-            // The anchor has already moved; the run has to change which side
-            // of it it hangs off, or a mirrored label lands across the body
-            // it was set beside.
-            SymbolShape::Text { align, .. } => *align = align.mirrored(),
+            // The anchor has already moved; a run read left to right has to
+            // change which side of it it hangs off, or a mirrored label lands
+            // across the body it was set beside. One read upward runs along
+            // the mirror and stays where it is.
+            SymbolShape::Text {
+                align,
+                rotation: SymbolTextRotation::R0,
+                ..
+            } => *align = align.mirrored(),
             _ => {}
         }
     }
@@ -597,6 +676,13 @@ impl SymbolShape {
             } => {
                 *rotation_quarters = (-*rotation_quarters).rem_euclid(4);
             }
+            // The mirror runs across a run read upward, which keeps reading
+            // upward from the moved anchor on the other side of it.
+            SymbolShape::Text {
+                align,
+                rotation: SymbolTextRotation::R90,
+                ..
+            } => *align = align.mirrored(),
             _ => {}
         }
     }
@@ -839,6 +925,7 @@ mod tests {
             text: "AMP".to_owned(),
             size: SymbolTextSize::Large,
             align: SymbolTextAlign::Right,
+            rotation: Default::default(),
         };
 
         let mut rotated = original.clone();
@@ -863,32 +950,198 @@ mod tests {
                 text: "AMP".to_owned(),
                 size: SymbolTextSize::Large,
                 align: SymbolTextAlign::Left,
+                rotation: Default::default(),
             },
             "one mirror moves the anchor and the side the run hangs off"
         );
     }
 
-    /// A quarter turn moves the anchor and nothing else: the glyphs stay
-    /// upright, so neither the alignment nor the size may follow it round.
+    /// A quarter turn carries a run round with the drawing: one read left to
+    /// right stands up to read upward, and one read upward lies down again.
+    /// The size never follows the turn, and four turns give the run back.
     #[test]
-    fn rotating_a_text_shape_moves_only_its_anchor() {
-        let mut shape = SymbolShape::Text {
-            anchor: Point::new(20, 5),
+    fn rotating_a_text_shape_turns_its_reading() {
+        let text = |anchor, align, rotation| SymbolShape::Text {
+            anchor,
             text: "OTA".to_owned(),
             size: SymbolTextSize::Small,
-            align: SymbolTextAlign::Left,
+            align,
+            rotation,
         };
+        let mut shape = text(
+            Point::new(20, 5),
+            SymbolTextAlign::Left,
+            SymbolTextRotation::R0,
+        );
 
         shape.rotate_cw();
-
+        // It read rightward from its anchor, so after the turn it lies below
+        // the anchor and reads up to it.
         assert_eq!(
             shape,
-            SymbolShape::Text {
-                anchor: Point::new(-5, 20),
-                text: "OTA".to_owned(),
-                size: SymbolTextSize::Small,
-                align: SymbolTextAlign::Left,
+            text(
+                Point::new(-5, 20),
+                SymbolTextAlign::Right,
+                SymbolTextRotation::R90
+            )
+        );
+        shape.rotate_cw();
+        assert_eq!(
+            shape,
+            text(
+                Point::new(-20, -5),
+                SymbolTextAlign::Right,
+                SymbolTextRotation::R0
+            )
+        );
+        shape.rotate_cw();
+        shape.rotate_cw();
+        assert_eq!(
+            shape,
+            text(
+                Point::new(20, 5),
+                SymbolTextAlign::Left,
+                SymbolTextRotation::R0
+            )
+        );
+    }
+
+    /// Turned or mirrored, a run covers exactly the box the same transform
+    /// carries its old box to, for every alignment and either reading: it
+    /// moves round its anchor with the rest of the drawing and is never read
+    /// downward or backward.
+    #[test]
+    fn a_turned_or_mirrored_run_covers_where_its_box_went() {
+        fn bounds(shape: &SymbolShape) -> (Point, Point) {
+            let SymbolShape::Text {
+                anchor,
+                text,
+                size,
+                align,
+                rotation,
+            } = shape
+            else {
+                unreachable!("only text is measured here");
+            };
+            symbol_text_bounds(*anchor, text, *size, *align, *rotation)
+        }
+        fn carried((min, max): (Point, Point), map: fn(Point) -> Point) -> (Point, Point) {
+            let (a, b) = (map(min), map(max));
+            (
+                Point::new(a.x.min(b.x), a.y.min(b.y)),
+                Point::new(a.x.max(b.x), a.y.max(b.y)),
+            )
+        }
+        type Transform = (&'static str, fn(&mut SymbolShape), fn(Point) -> Point);
+        let transforms: [Transform; 3] = [
+            ("turned", SymbolShape::rotate_cw, |p| Point::new(-p.y, p.x)),
+            ("mirrored", SymbolShape::mirror_h, |p| Point::new(-p.x, p.y)),
+            ("flipped", SymbolShape::mirror_v, |p| Point::new(p.x, -p.y)),
+        ];
+        for align in SymbolTextAlign::ALL {
+            for rotation in SymbolTextRotation::ALL {
+                let shape = SymbolShape::Text {
+                    anchor: Point::new(20, 5),
+                    text: "AMP".to_owned(),
+                    size: SymbolTextSize::Normal,
+                    align,
+                    rotation,
+                };
+                for (name, transform, map) in transforms {
+                    let mut moved = shape.clone();
+                    transform(&mut moved);
+                    assert_eq!(
+                        bounds(&moved),
+                        carried(bounds(&shape), map),
+                        "{align:?} {rotation:?} {name}"
+                    );
+                }
             }
+        }
+    }
+
+    /// A run read upward is measured up from its anchor when it starts
+    /// there, down from it when it ends there, and centred across it.
+    #[test]
+    fn a_run_read_upward_is_measured_along_its_reading() {
+        let up = |align| {
+            symbol_text_bounds(
+                Point::new(0, 0),
+                "AMP",
+                SymbolTextSize::Normal,
+                align,
+                SymbolTextRotation::R90,
+            )
+        };
+
+        assert_eq!(
+            up(SymbolTextAlign::Left),
+            (Point::new(-4, -15), Point::new(4, 0))
+        );
+        assert_eq!(
+            up(SymbolTextAlign::Right),
+            (Point::new(-4, 0), Point::new(4, 15))
+        );
+        assert_eq!(
+            up(SymbolTextAlign::Center),
+            (Point::new(-4, -7), Point::new(4, 7))
+        );
+    }
+
+    /// Where a run read upward lands on a placed instance: above its anchor
+    /// when it starts there, below when it ends there, and carried round the
+    /// anchor by the instance's turn.
+    #[test]
+    fn a_run_read_upward_lands_where_the_instance_carries_it() {
+        let upward = SymbolTextRotation::R90;
+        let still = |point: Point| point;
+        let turned = |point: Point| Point::new(-point.y, point.x);
+
+        assert_eq!(
+            SymbolTextAlign::Left.placement(upward, still),
+            SymbolTextPlacement::Above
+        );
+        assert_eq!(
+            SymbolTextAlign::Right.placement(upward, still),
+            SymbolTextPlacement::Below
+        );
+        assert_eq!(
+            SymbolTextAlign::Center.placement(upward, still),
+            SymbolTextPlacement::On
+        );
+        assert_eq!(
+            SymbolTextAlign::Left.placement(upward, turned),
+            SymbolTextPlacement::After
+        );
+        assert_eq!(
+            SymbolTextAlign::Left.placement(SymbolTextRotation::R0, still),
+            SymbolTextPlacement::After
+        );
+    }
+
+    /// A run read left to right is written as it always was; only a turned
+    /// one names its reading.
+    #[test]
+    fn only_a_turned_run_writes_its_reading() {
+        let text = |rotation| SymbolShape::Text {
+            anchor: Point::new(0, 0),
+            text: "A".to_owned(),
+            size: SymbolTextSize::Normal,
+            align: SymbolTextAlign::Left,
+            rotation,
+        };
+        let plain = serde_json::to_string(&text(SymbolTextRotation::R0)).unwrap();
+        let turned = serde_json::to_string(&text(SymbolTextRotation::R90)).unwrap();
+
+        assert!(!plain.contains("rotation"), "{plain}");
+        assert!(turned.contains(r#""rotation":"r90""#), "{turned}");
+        assert_eq!(
+            serde_json::from_str::<SymbolShape>(&turned).unwrap(),
+            text(SymbolTextRotation::R90)
+        );
+        assert_eq!(
+            serde_json::from_str::<SymbolShape>(&plain).unwrap(),
+            text(SymbolTextRotation::R0)
         );
     }
 
@@ -896,19 +1149,18 @@ mod tests {
     fn text_runs_are_measured_from_the_side_they_hang_off() {
         let anchor = Point::new(0, 0);
 
-        let left = symbol_text_bounds(anchor, "AMP", SymbolTextSize::Normal, SymbolTextAlign::Left);
-        let right = symbol_text_bounds(
-            anchor,
-            "AMP",
-            SymbolTextSize::Normal,
-            SymbolTextAlign::Right,
-        );
-        let centered = symbol_text_bounds(
-            anchor,
-            "AMP",
-            SymbolTextSize::Normal,
-            SymbolTextAlign::Center,
-        );
+        let across = |align| {
+            symbol_text_bounds(
+                anchor,
+                "AMP",
+                SymbolTextSize::Normal,
+                align,
+                SymbolTextRotation::R0,
+            )
+        };
+        let left = across(SymbolTextAlign::Left);
+        let right = across(SymbolTextAlign::Right);
+        let centered = across(SymbolTextAlign::Center);
 
         // Plex Mono at a 9-unit cap height advances 5 units per glyph.
         assert_eq!(left, (Point::new(0, -4), Point::new(15, 4)));

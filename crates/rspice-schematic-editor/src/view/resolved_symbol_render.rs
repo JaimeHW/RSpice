@@ -24,7 +24,8 @@ use rspice_design::{
     },
     symbol::{
         SymbolCurve, SymbolDash, SymbolDocument, SymbolFill, SymbolShape, SymbolStyle,
-        SymbolTextAlign, SymbolTextPlacement, rectangle_corners, symbol_text_bounds,
+        SymbolTextAlign, SymbolTextPlacement, SymbolTextRotation, rectangle_corners,
+        symbol_text_bounds,
     },
     symbol_generation::fit_pin_name,
 };
@@ -191,16 +192,18 @@ fn draw_symbol_body(
                 text,
                 size,
                 align,
+                rotation,
             } => {
                 let Some(font_size) =
                     lod::annotation_size(size.height() as f32, scale, painter.pixels_per_point())
                 else {
                     continue;
                 };
-                rspice_ui_kit::text::paint_text(
+                paint_symbol_text(
                     painter,
                     to_screen_symbol(origin, scale, component, symbol, *anchor),
-                    symbol_text_align(component, *align),
+                    symbol_text_align(component, *align, *rotation),
+                    *rotation,
                     text,
                     rspice_ui_kit::theme::mono(
                         font_size,
@@ -214,13 +217,53 @@ fn draw_symbol_body(
 }
 
 /// egui's spelling of where the instance's orientation put a text run.
-fn symbol_text_align(component: &Component, align: SymbolTextAlign) -> Align2 {
-    match align.placement(|point| component.transform_point(point)) {
-        SymbolTextPlacement::On => Align2::CENTER_CENTER,
-        SymbolTextPlacement::After => Align2::LEFT_CENTER,
-        SymbolTextPlacement::Before => Align2::RIGHT_CENTER,
-        SymbolTextPlacement::Below => Align2::CENTER_TOP,
-        SymbolTextPlacement::Above => Align2::CENTER_BOTTOM,
+fn symbol_text_align(
+    component: &Component,
+    align: SymbolTextAlign,
+    rotation: SymbolTextRotation,
+) -> Align2 {
+    text_hang(
+        align.placement(rotation, |point| component.transform_point(point)),
+        rotation,
+    )
+}
+
+/// How a run reading `rotation`'s way hangs off its anchor to land at
+/// `placement`. A run read upward is hung upright and then turned a quarter
+/// counter-clockwise about its anchor, so its upright hang is the one that
+/// turn carries to `placement`.
+pub(crate) fn text_hang(placement: SymbolTextPlacement, rotation: SymbolTextRotation) -> Align2 {
+    match (rotation, placement) {
+        (_, SymbolTextPlacement::On) => Align2::CENTER_CENTER,
+        (SymbolTextRotation::R0, SymbolTextPlacement::After) => Align2::LEFT_CENTER,
+        (SymbolTextRotation::R0, SymbolTextPlacement::Before) => Align2::RIGHT_CENTER,
+        (SymbolTextRotation::R0, SymbolTextPlacement::Below) => Align2::CENTER_TOP,
+        (SymbolTextRotation::R0, SymbolTextPlacement::Above) => Align2::CENTER_BOTTOM,
+        (SymbolTextRotation::R90, SymbolTextPlacement::Above) => Align2::LEFT_CENTER,
+        (SymbolTextRotation::R90, SymbolTextPlacement::Below) => Align2::RIGHT_CENTER,
+        (SymbolTextRotation::R90, SymbolTextPlacement::After) => Align2::CENTER_TOP,
+        (SymbolTextRotation::R90, SymbolTextPlacement::Before) => Align2::CENTER_BOTTOM,
+    }
+}
+
+/// Paints a run of authored glyphs hung off `at` as `hang` says, read left
+/// to right or, turned, upward.
+pub(crate) fn paint_symbol_text(
+    painter: &Painter,
+    at: Pos2,
+    hang: Align2,
+    rotation: SymbolTextRotation,
+    text: &str,
+    font: egui::FontId,
+    color: Color32,
+) {
+    match rotation {
+        SymbolTextRotation::R0 => {
+            rspice_ui_kit::text::paint_text(painter, at, hang, text, font, color);
+        }
+        SymbolTextRotation::R90 => {
+            super::drawing::paint_upward_text(painter, at, hang, text, font, color);
+        }
     }
 }
 
@@ -667,8 +710,9 @@ fn fold_symbol_artwork_points(symbol: &ResolvedCellSymbol, mut include: impl FnM
                 text,
                 size,
                 align,
+                rotation,
             } => {
-                let (min, max) = symbol_text_bounds(*anchor, text, *size, *align);
+                let (min, max) = symbol_text_bounds(*anchor, text, *size, *align, *rotation);
                 include(symbol.effective_point(min));
                 include(symbol.effective_point(max));
             }
@@ -752,6 +796,7 @@ mod tests {
                     text: text.to_owned(),
                     size: SymbolTextSize::Normal,
                     align,
+                    rotation: Default::default(),
                 }],
                 ..SymbolDocument::default()
             },
@@ -1012,6 +1057,56 @@ mod tests {
         };
         let (broken, _) = painted_span(&circle(dashed), top);
         assert!(broken > 0 && broken < ring, "{broken} of {ring}");
+    }
+
+    /// A run turned to read upward is drawn upward on an instance, standing
+    /// above the anchor it starts at, and keeps reading upward when the
+    /// instance is turned: it moves round its anchor and is never laid on
+    /// its back.
+    #[test]
+    fn a_run_read_upward_is_drawn_upward_on_a_turned_instance_too() {
+        let symbol = one_shape(SymbolShape::Text {
+            anchor: Point::origin(),
+            text: "AMP".to_owned(),
+            size: SymbolTextSize::Normal,
+            align: SymbolTextAlign::Left,
+            rotation: SymbolTextRotation::R90,
+        });
+        let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        let origin = pos2(160.0, 160.0);
+
+        let canvas = raster_instance(&component, &symbol, origin);
+        let above = egui::Rect::from_min_max(pos2(120.0, 40.0), pos2(200.0, 158.0));
+        let (covered, painted) = painted_pixels(&canvas, above);
+        assert!(covered > 0, "the asserted crop must be on the canvas");
+        assert!(
+            painted > 0,
+            "the run must stand above the anchor it starts at"
+        );
+        let (columns, rows) = painted_span(&canvas, above);
+        assert!(
+            rows > columns,
+            "read upward, the glyphs stack: {columns} columns by {rows} rows"
+        );
+        let right = egui::Rect::from_min_max(pos2(200.0, 120.0), pos2(320.0, 200.0));
+        assert_eq!(
+            painted_pixels(&canvas, right).1,
+            0,
+            "nothing may read rightward from the anchor"
+        );
+
+        // A quarter turn of the instance swings the run's start from above
+        // the anchor to its right; the glyphs still stack.
+        component.rotation = Rotation::R90;
+        let canvas = raster_instance(&component, &symbol, origin);
+        let beside = egui::Rect::from_min_max(pos2(162.0, 80.0), pos2(240.0, 240.0));
+        let (columns, rows) = painted_span(&canvas, beside);
+        assert!(
+            columns > 0 && rows > columns,
+            "the run must keep reading upward: {columns} columns by {rows} rows"
+        );
+        let left = egui::Rect::from_min_max(pos2(0.0, 80.0), pos2(156.0, 240.0));
+        assert_eq!(painted_pixels(&canvas, left).1, 0);
     }
 
     fn symbol_with_shifted_origin() -> ResolvedCellSymbol {

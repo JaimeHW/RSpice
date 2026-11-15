@@ -343,6 +343,7 @@ fn placing_text_is_one_edit_and_a_stale_request_places_nothing() {
             text: "GAIN".to_owned(),
             size: Default::default(),
             align: Default::default(),
+            rotation: Default::default(),
         })
     );
     assert_eq!(placed.body.len(), before.body.len() + 1);

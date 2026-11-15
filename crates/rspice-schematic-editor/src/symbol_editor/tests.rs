@@ -185,6 +185,147 @@ fn every_grid_pitch_lands_points_on_its_own_lattice() {
     }
 }
 
+/// A run turned to read upward is drawn upward on the canvas and picked
+/// where it is drawn: above the anchor it starts at, not to its right.
+#[test]
+fn the_canvas_draws_and_picks_a_run_read_upward() {
+    use rspice_design::symbol::{SymbolTextRotation, SymbolTextSize};
+
+    let viewport = SymbolViewport::new(
+        Rect::from_min_size(Pos2::ZERO, vec2(320.0, 320.0)),
+        4.0,
+        Vec2::ZERO,
+    );
+    // The anchor lands at (160, 160).
+    let document = |rotation| SymbolDocument {
+        body: vec![SymbolShape::Text {
+            anchor: Point::origin(),
+            text: "AMP".to_owned(),
+            size: SymbolTextSize::Normal,
+            align: SymbolTextAlign::Left,
+            rotation,
+        }],
+        ..SymbolDocument::default()
+    };
+    let canvas = |rotation| {
+        let document = document(rotation);
+        rspice_ui_kit::raster::render(vec2(320.0, 320.0), |ui, _| {
+            draw_body(
+                &ui.painter().clone(),
+                viewport,
+                &document,
+                Color32::from_rgb(255, 64, 64),
+                &Default::default(),
+                Color32::WHITE,
+            );
+        })
+    };
+    let painted = |canvas: &rspice_ui_kit::raster::Canvas, rect: Rect| {
+        canvas
+            .pixels_in(rect)
+            .filter(|pixel| *pixel != canvas.background())
+            .count()
+    };
+    let span = |canvas: &rspice_ui_kit::raster::Canvas, rect: Rect| {
+        let columns = (rect.left() as i32..rect.right() as i32)
+            .filter(|x| {
+                let strip = Rect::from_min_max(
+                    pos2(*x as f32, rect.top()),
+                    pos2(*x as f32 + 1.0, rect.bottom()),
+                );
+                painted(canvas, strip) > 0
+            })
+            .count();
+        let rows = (rect.top() as i32..rect.bottom() as i32)
+            .filter(|y| {
+                let strip = Rect::from_min_max(
+                    pos2(rect.left(), *y as f32),
+                    pos2(rect.right(), *y as f32 + 1.0),
+                );
+                painted(canvas, strip) > 0
+            })
+            .count();
+        (columns, rows)
+    };
+    let above = Rect::from_min_max(pos2(120.0, 40.0), pos2(200.0, 158.0));
+    let right = Rect::from_min_max(pos2(200.0, 120.0), pos2(320.0, 200.0));
+
+    let across = canvas(SymbolTextRotation::R0);
+    assert!(painted(&across, right) > 0);
+    let upward = canvas(SymbolTextRotation::R90);
+    assert_eq!(painted(&upward, right), 0, "nothing reads rightward");
+    let (columns, rows) = span(&upward, above);
+    assert!(
+        columns > 0 && rows > columns,
+        "read upward, the glyphs stack: {columns} columns by {rows} rows"
+    );
+
+    // Ten units above the anchor is on the run read upward and off the one
+    // read across; ten to its right the other way round.
+    let over = pos2(160.0, 120.0);
+    let beside = pos2(200.0, 160.0);
+    assert_eq!(
+        hit_shape(&document(SymbolTextRotation::R90), viewport, over),
+        Some(0)
+    );
+    assert_eq!(
+        hit_shape(&document(SymbolTextRotation::R90), viewport, beside),
+        None
+    );
+    assert_eq!(
+        hit_shape(&document(SymbolTextRotation::R0), viewport, beside),
+        Some(0)
+    );
+    assert_eq!(
+        hit_shape(&document(SymbolTextRotation::R0), viewport, over),
+        None
+    );
+}
+
+/// Rotating a selection turns a text run in it with the drawing, standing a
+/// run read across up to read upward.
+#[test]
+fn rotating_a_selection_turns_the_text_in_it() {
+    use super::commands::{SymbolEditAction, SymbolTransform, apply_edit};
+    use super::interaction::SymbolEditCapabilities;
+    use rspice_design::symbol::{SymbolTextRotation, SymbolTextSize};
+
+    let mut document = SymbolDocument {
+        body: vec![SymbolShape::Text {
+            anchor: Point::new(20, 0),
+            text: "OTA".to_owned(),
+            size: SymbolTextSize::Normal,
+            align: SymbolTextAlign::Left,
+            rotation: SymbolTextRotation::R0,
+        }],
+        ..SymbolDocument::default()
+    };
+    let mut metadata = SymbolEditorMetadata::for_document(&document);
+    let mut session = SymbolEditorSession::default();
+    session.select_shape(0);
+
+    let outcome = apply_edit(
+        &mut session,
+        &mut document,
+        Some(&mut metadata),
+        SymbolEditAction::Transform(SymbolTransform::Rotate),
+        SymbolEditCapabilities { edit: true },
+    );
+
+    assert!(outcome.changed);
+    assert!(
+        matches!(
+            &document.body[0],
+            SymbolShape::Text {
+                rotation: SymbolTextRotation::R90,
+                ..
+            }
+        ),
+        "{:?}",
+        document.body[0]
+    );
+}
+
 /// The canvas inks a shape in its style, as a placed instance does: a filled
 /// outline paints its inside, a dashed one leaves gaps along its length, a
 /// heavy one weighs more than a thin one. A filled shape is picked anywhere

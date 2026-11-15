@@ -1262,6 +1262,64 @@ fn a_styled_shape_prints_its_weight_dash_and_fill() {
     assert!(svg.contains("stroke-dasharray"), "{svg}");
 }
 
+/// A run turned to read upward prints turned, set from the end of it its
+/// alignment names, and the SVG export turns it the same way.
+#[test]
+fn a_run_read_upward_prints_turned() {
+    use rspice_design::symbol::{SymbolTextAlign, SymbolTextRotation, SymbolTextSize};
+
+    let print = |align, rotation| {
+        let source = resolved_symbol_with_body(vec![SymbolShape::Text {
+            anchor: SchematicPoint::new(0, 0),
+            text: "AMP".to_owned(),
+            size: SymbolTextSize::Normal,
+            align,
+            rotation,
+        }]);
+        let plan = plan_for_resolved(&source, OutputFormat::SvgVector);
+        let scene = scene_from_resolved(
+            &source,
+            source.default_print_mapping(),
+            plan.setup().schematic(),
+            resolved_metadata(),
+        )
+        .unwrap();
+        let publication = HardcopyRenderer::render(&plan, &scene).unwrap();
+        let svg = std::str::from_utf8(publication.single_part().unwrap().bytes())
+            .unwrap()
+            .to_owned();
+        let run = scene
+            .primitives()
+            .iter()
+            .find_map(|primitive| match primitive {
+                ScenePrimitive::Text {
+                    text,
+                    anchor,
+                    rotation,
+                    ..
+                } if text == "AMP" => Some((*anchor, *rotation)),
+                _ => None,
+            })
+            .expect("the run must print");
+        (run, svg)
+    };
+
+    let (upright, upright_svg) = print(SymbolTextAlign::Left, SymbolTextRotation::R0);
+    assert_eq!(upright, (TextAnchor::Start, SceneTextRotation::Upright));
+    let (turned, turned_svg) = print(SymbolTextAlign::Left, SymbolTextRotation::R90);
+    assert_eq!(
+        turned,
+        (TextAnchor::Start, SceneTextRotation::CounterClockwise90)
+    );
+    let (ending, _) = print(SymbolTextAlign::Right, SymbolTextRotation::R90);
+    assert_eq!(
+        ending,
+        (TextAnchor::End, SceneTextRotation::CounterClockwise90)
+    );
+    assert!(turned_svg.contains("rotate(-90 "), "{turned_svg}");
+    assert!(!upright_svg.contains("rotate(-90 "), "{upright_svg}");
+}
+
 #[test]
 fn schematic_inclusion_contract_gates_real_scene_primitives() {
     let source = resolved_blank_schematic(&SchematicSheetFormat::default());

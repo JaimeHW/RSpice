@@ -215,6 +215,7 @@ pub fn apply_edit(
                     text,
                     size: SymbolTextSize::default(),
                     align: SymbolTextAlign::default(),
+                    rotation: Default::default(),
                 });
                 if let Some(index) = document.body.len().checked_sub(1) {
                     session.select_shape(index);

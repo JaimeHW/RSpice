@@ -423,6 +423,7 @@ mod tests {
                 text: "VDD".to_owned(),
                 size: rspice_design::symbol::SymbolTextSize::Normal,
                 align: rspice_design::symbol::SymbolTextAlign::Center,
+                rotation: Default::default(),
             }),
             "Text \"VDD\""
         );

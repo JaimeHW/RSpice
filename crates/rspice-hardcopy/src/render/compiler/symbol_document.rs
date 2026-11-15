@@ -5,8 +5,9 @@
 //! instance can never carry different artwork from the printed master.
 //!
 //! Authored text is one of the body's shapes, so it prints with the artwork
-//! it letters. The scene sets a run horizontally only, which is why an
-//! orientation that stands one on end centres it on its anchor instead.
+//! it letters. The scene sets a run along its reading, across or upward, which
+//! is why an orientation that carries a run across its reading centres it on
+//! its anchor instead.
 
 use super::*;
 
@@ -209,19 +210,28 @@ impl SemanticSceneCompiler<'_> {
                     text,
                     size,
                     align,
+                    rotation,
                 } => {
                     let origin = convert(self, *anchor)?;
-                    // The scene places a run horizontally only, so an
-                    // orientation that stood it on end centres it instead of
-                    // hanging it off a side the print cannot express.
-                    let placed = match align
-                        .placement(|point| component.map_or(point, |c| c.transform_point(point)))
-                    {
-                        SymbolTextPlacement::After => TextAnchor::Start,
-                        SymbolTextPlacement::Before => TextAnchor::End,
-                        SymbolTextPlacement::On
-                        | SymbolTextPlacement::Below
-                        | SymbolTextPlacement::Above => TextAnchor::Middle,
+                    // The scene sets a run along its reading only, so an
+                    // orientation that carried the run across that reading
+                    // centres it instead of hanging it off a side the print
+                    // cannot express.
+                    let placement = align.placement(*rotation, |point| {
+                        component.map_or(point, |c| c.transform_point(point))
+                    });
+                    let placed = match (rotation, placement) {
+                        (SymbolTextRotation::R0, SymbolTextPlacement::After)
+                        | (SymbolTextRotation::R90, SymbolTextPlacement::Above) => {
+                            TextAnchor::Start
+                        }
+                        (SymbolTextRotation::R0, SymbolTextPlacement::Before)
+                        | (SymbolTextRotation::R90, SymbolTextPlacement::Below) => TextAnchor::End,
+                        _ => TextAnchor::Middle,
+                    };
+                    let turn = match rotation {
+                        SymbolTextRotation::R0 => SceneTextRotation::Upright,
+                        SymbolTextRotation::R90 => SceneTextRotation::CounterClockwise90,
                     };
                     self.add_text_placed(
                         origin,
@@ -229,7 +239,7 @@ impl SemanticSceneCompiler<'_> {
                         SceneFont::Monospace,
                         u64::from(size.height().unsigned_abs()) * SCHEMATIC_UNIT_UM as u64,
                         body_stroke.color,
-                        (placed, SceneTextRotation::Upright),
+                        (placed, turn),
                     )?;
                 }
             }

@@ -7,7 +7,7 @@ use rspice_design::symbol::edit::SymbolCommitIntent;
 use rspice_design::symbol::{
     MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, SymbolAttributeKind, SymbolDash,
     SymbolDocument, SymbolEditorMetadata, SymbolFill, SymbolPin, SymbolPinElectricalKind,
-    SymbolShape, SymbolStroke, SymbolStyle, SymbolTextAlign, SymbolTextSize,
+    SymbolShape, SymbolStroke, SymbolStyle, SymbolTextAlign, SymbolTextRotation, SymbolTextSize,
 };
 use rspice_design_model::{
     Point,
@@ -895,6 +895,7 @@ fn shape_section(
             text,
             size,
             align,
+            rotation,
         } => {
             if let Some(value) = text_row(
                 ui,
@@ -948,6 +949,27 @@ fn shape_section(
             {
                 record_once(edit, &before);
                 *align = picked;
+                changed = true;
+            }
+            let mut rotation_value = rotation.label().to_owned();
+            let rotation_options = SymbolTextRotation::ALL
+                .into_iter()
+                .map(|option| (option.label().to_owned(), option.label().to_owned()))
+                .collect::<Vec<_>>();
+            if property_row_combo(
+                ui,
+                "Rotation",
+                ("symbol-text-rotation", index),
+                &mut rotation_value,
+                &rotation_options,
+                true,
+            ) && let Some(picked) = SymbolTextRotation::ALL
+                .into_iter()
+                .find(|option| option.label() == rotation_value)
+            {
+                edit.undo_before
+                    .push((before.clone(), "Rotate text".to_owned()));
+                *rotation = picked;
                 changed = true;
             }
             changed |= coordinate_row(ui, edit, &before, "Anchor X", &mut anchor.x);

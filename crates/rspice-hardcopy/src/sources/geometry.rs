@@ -373,9 +373,11 @@ pub(super) fn include_symbol_document_bounds(
                 text,
                 size,
                 align,
+                rotation,
             } => {
-                let (min, max) =
-                    rspice_design::symbol::symbol_text_bounds(*anchor, text, *size, *align);
+                let (min, max) = rspice_design::symbol::symbol_text_bounds(
+                    *anchor, text, *size, *align, *rotation,
+                );
                 bounds.include(map(min));
                 bounds.include(map(max));
             }

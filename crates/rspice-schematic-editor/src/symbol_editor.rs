@@ -11,11 +11,12 @@ pub mod placement;
 pub mod session;
 pub mod surface;
 
+use crate::view::drawing::paint_upward_text;
 use crate::view::navigation::{
     CanvasNavigation, SCHEMATIC_ZOOM_MIN, ZoomRequest, apply_zoom_request, frame_world_rect,
     handle_viewport_navigation,
 };
-use crate::view::resolved_symbol_render::draw_resolved_symbol;
+use crate::view::resolved_symbol_render::{draw_resolved_symbol, text_hang};
 use crate::view::symbol_style::{broken_outline, inside_outline, paint_fill, styled_stroke};
 use egui::{Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2, pos2, vec2};
 use placement::SymbolPlacement;
@@ -28,8 +29,7 @@ use rspice_design::{
     symbol::{
         PinDrawing, SYMBOL_PIN_LENGTH, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolCurve,
         SymbolDash, SymbolDocument, SymbolEditorMetadata, SymbolFill, SymbolShape, SymbolStyle,
-        SymbolTextAlign, pin_drawing,
-        rectangle_corners,
+        SymbolTextAlign, SymbolTextRotation, pin_drawing, rectangle_corners,
     },
 };
 use rspice_design_model::{
@@ -535,7 +535,7 @@ fn draw_draft(
                 if !draft.text.is_empty() {
                     painter.text(
                         screen(draft.anchor),
-                        editor_text_align(viewport.placement, align),
+                        editor_text_align(viewport.placement, align, SymbolTextRotation::R0),
                         &draft.text,
                         theme::mono(
                             (size.height() as f32 * viewport.zoom).max(1.0),
@@ -731,17 +731,22 @@ fn draw_body(
                 text,
                 size,
                 align,
+                rotation,
             } => {
-                painter.text(
-                    viewport.world_to_screen(*anchor),
-                    editor_text_align(viewport.placement, *align),
-                    text,
-                    theme::mono(
-                        (size.height() as f32 * viewport.zoom).max(1.0),
-                        FontWeight::Regular,
-                    ),
-                    shape_color,
+                let at = viewport.world_to_screen(*anchor);
+                let hang = editor_text_align(viewport.placement, *align, *rotation);
+                let font = theme::mono(
+                    (size.height() as f32 * viewport.zoom).max(1.0),
+                    FontWeight::Regular,
                 );
+                match rotation {
+                    SymbolTextRotation::R0 => {
+                        painter.text(at, hang, text, font, shape_color);
+                    }
+                    SymbolTextRotation::R90 => {
+                        paint_upward_text(painter, at, hang, text, font, shape_color);
+                    }
+                }
             }
         }
     }
@@ -786,17 +791,17 @@ fn draw_curve(
 }
 
 /// How a text run hangs off its anchor once `placement` has turned the
-/// symbol: glyphs stay upright and the run moves around its anchor, by the
+/// symbol: the run keeps its reading and moves around its anchor, by the
 /// rule every placed instance is drawn with.
-fn editor_text_align(placement: SymbolPlacement, align: SymbolTextAlign) -> Align2 {
-    use rspice_design::symbol::SymbolTextPlacement;
-    match align.placement(|point| placement.orient(point)) {
-        SymbolTextPlacement::On => Align2::CENTER_CENTER,
-        SymbolTextPlacement::After => Align2::LEFT_CENTER,
-        SymbolTextPlacement::Before => Align2::RIGHT_CENTER,
-        SymbolTextPlacement::Below => Align2::CENTER_TOP,
-        SymbolTextPlacement::Above => Align2::CENTER_BOTTOM,
-    }
+fn editor_text_align(
+    placement: SymbolPlacement,
+    align: SymbolTextAlign,
+    rotation: SymbolTextRotation,
+) -> Align2 {
+    text_hang(
+        align.placement(rotation, |point| placement.orient(point)),
+        rotation,
+    )
 }
 
 fn draw_bbox_and_origin(
@@ -1294,9 +1299,10 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
             text,
             size,
             align,
+            rotation,
         } => {
             let (min, max) =
-                rspice_design::symbol::symbol_text_bounds(*anchor, text, *size, *align);
+                rspice_design::symbol::symbol_text_bounds(*anchor, text, *size, *align, *rotation);
             Rect::from_two_pos(viewport.world_to_screen(min), viewport.world_to_screen(max))
                 .expand(HIT_PX)
                 .contains(pos)
@@ -1509,9 +1515,11 @@ fn document_bounds(document: &SymbolDocument) -> (Point, Point) {
                 text,
                 size,
                 align,
+                rotation,
             } => {
-                let (min, max) =
-                    rspice_design::symbol::symbol_text_bounds(*anchor, text, *size, *align);
+                let (min, max) = rspice_design::symbol::symbol_text_bounds(
+                    *anchor, text, *size, *align, *rotation,
+                );
                 xs.extend([min.x, max.x]);
                 ys.extend([min.y, max.y]);
             }
