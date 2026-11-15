@@ -1046,3 +1046,100 @@ fn the_instance_menu_edits_its_symbol_in_place() {
     assert_eq!(session.instance_id, fixture.instance);
     assert_eq!((session.zoom, session.pan), (2.0, (60.0, 40.0)));
 }
+
+/// Escape lets go of a handle before it leaves the edit in place: a handle
+/// Stretch armed, and one being dragged, are each the canvas's to cancel
+/// first. With nothing held, Escape leaves.
+#[test]
+fn escape_lets_go_of_a_held_handle_before_it_leaves_in_place() {
+    use rspice_schematic_editor::symbol_editor::handles::{SymbolHandle, SymbolHandleRef};
+
+    let mut fixture = InPlace::new();
+    fixture.enter();
+    let active = |fixture: &InPlace| {
+        fixture
+            .replay
+            .app
+            .state
+            .model
+            .workspace
+            .content
+            .active_view
+            .clone()
+    };
+    let editor = &mut fixture.replay.app.state.design.symbol.editor;
+    editor.select_shape(0);
+    editor.stretch = Some(SymbolHandleRef {
+        shape: 0,
+        handle: SymbolHandle::Vertex(0),
+    });
+    fixture.replay.key(egui::Key::Escape, egui::Modifiers::NONE);
+    assert_eq!(
+        active(&fixture),
+        fixture.symbol,
+        "Escape let go of the stretch"
+    );
+    assert!(
+        fixture
+            .replay
+            .app
+            .state
+            .design
+            .symbol
+            .editor
+            .stretch
+            .is_none()
+    );
+
+    // The body's first corner, symbol (-20, -20), is sheet (80, 60).
+    fixture
+        .replay
+        .app
+        .state
+        .design
+        .symbol
+        .editor
+        .select_shape(0);
+    let corner = fixture.screen(Point::new(80, 60));
+    let button = |pressed| egui::Event::PointerButton {
+        pos: corner,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    fixture
+        .replay
+        .frame(vec![egui::Event::PointerMoved(corner), button(true)]);
+    fixture.replay.frame(vec![egui::Event::PointerMoved(
+        corner + egui::vec2(8.0, 0.0),
+    )]);
+    fixture.replay.frame(vec![egui::Event::PointerMoved(
+        corner + egui::vec2(20.0, 0.0),
+    )]);
+    assert!(
+        fixture
+            .replay
+            .app
+            .state
+            .design
+            .symbol
+            .editor
+            .dragging_handle
+            .is_some(),
+        "the corner's handle is being dragged"
+    );
+    fixture.replay.key(egui::Key::Escape, egui::Modifiers::NONE);
+    assert_eq!(
+        active(&fixture),
+        fixture.symbol,
+        "Escape let go of the drag"
+    );
+    fixture.replay.frames(vec![button(false)]);
+
+    fixture.replay.key(egui::Key::Escape, egui::Modifiers::NONE);
+    assert_eq!(
+        active(&fixture),
+        fixture.parent,
+        "with nothing held it leaves"
+    );
+}

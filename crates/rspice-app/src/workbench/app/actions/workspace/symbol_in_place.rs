@@ -299,6 +299,8 @@ pub(crate) fn symbol_in_place_canvas_idle(symbol: &SymbolUiState, model: &Model)
         && editor.dragging_shape.is_none()
         && editor.dragging_label.is_none()
         && editor.dragging_group.is_none()
+        && editor.dragging_handle.is_none()
+        && editor.stretch.is_none()
         && !editor.dragging_origin
 }
 
