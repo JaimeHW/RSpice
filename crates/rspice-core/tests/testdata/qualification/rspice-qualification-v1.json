@@ -1135,7 +1135,7 @@
       "suites": {
         "analytical": {
           "decks": 0,
-          "reference_captures": 26
+          "reference_captures": 27
         },
         "execution_iscas85": {
           "decks": 24,
