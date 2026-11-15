@@ -11,11 +11,11 @@ use crate::workbench::app::actions::workspace::{
     commit_pending_inspector_edit, deny_read_only_edit,
 };
 use crate::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState;
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::{
     binds_model_card, cell_instance_identity_sheet, compiled_parameter_sheet,
     instance_multiplicity_definition, states_compiled_parameters,
 };
-use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::state::WorkbenchSession;
 use rspice_core::xspice::{CodeModelRegistry, ParamSpec, ParamType};
 
@@ -638,19 +638,8 @@ pub(crate) struct PropertyFormParts<'a> {
 }
 
 /// Open the schematic component editor for `component_id`, populated from the
-/// component's registry sheet and current values. Refused on read-only
-/// views — the editor is an edit path.
-pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
-    let mut parts = state.design.property_form_parts();
-    open_property_editor_in(
-        &mut parts,
-        &mut state.model,
-        &mut state.workbench,
-        component_id,
-    );
-}
-
-/// [`open_property_editor`] over the forms, the model and the session.
+/// component's registry sheet and current values, over the forms, the model
+/// and the session. Refused on read-only views — the editor is an edit path.
 pub(crate) fn open_property_editor_in(
     parts: &mut PropertyFormParts<'_>,
     model: &mut Model,

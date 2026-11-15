@@ -341,7 +341,7 @@ impl RSpiceApp {
                     occurrence.as_ref(),
                     component_id,
                 );
-                crate::workbench::app::open_property_editor(&mut app.state, component_id);
+                app.state.open_property_editor(component_id);
             },
         );
         requests::drain(

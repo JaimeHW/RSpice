@@ -7,7 +7,6 @@ use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app::dialogs::property_dialog::{
     PropertyDialog, component_property_session_error,
 };
-use crate::workbench::app::open_property_editor;
 use crate::workbench::app_state::AppState;
 use rspice_design::schematic::document_policy::PropertyCommitPolicy;
 use rspice_schematic_editor::component_properties::ComponentPropertyDialogResult;
@@ -30,7 +29,7 @@ fn render_property_dialog(
     if let Some(DesignRequest::ReopenPropertyEditor(component_id)) =
         state.workbench.outbox.take::<DesignRequest>()
     {
-        open_property_editor(state, component_id);
+        state.open_property_editor(component_id);
     }
     result
 }
@@ -151,7 +150,7 @@ fn retained_component_properties_reject_changed_context_without_committing() {
             .design_notes
             .push(note.clone());
         state.model.schematic.init_undo_history();
-        open_property_editor(&mut state, 44);
+        state.open_property_editor(44);
         assert_eq!(
             state.design.tabbed_property_dialog.source,
             Some(crate::workbench::app::schematic_editor_request_source(
@@ -318,7 +317,7 @@ fn rendered_component_primary_commits_name_with_one_real_undo_record() {
     crate::ui::Theme::default().apply(&ctx);
     let mut state = state_with_resistor();
     let plan = add_current_output(&mut state);
-    open_property_editor(&mut state, 44);
+    state.open_property_editor(44);
     state
         .design
         .tabbed_property_dialog
@@ -408,7 +407,7 @@ fn rendered_property_commit_refusal_keeps_the_design_and_draft_intact() {
         .content
         .simulation_plan_payloads
         .clone();
-    open_property_editor(&mut state, 44);
+    state.open_property_editor(44);
     let opened_source = state.design.tabbed_property_dialog.source.clone();
     state
         .design
@@ -472,7 +471,7 @@ fn malformed_parameter_refusal_keeps_rendered_property_edits_and_references_isol
             .content
             .simulation_plan_payloads
             .clone();
-        open_property_editor(&mut state, 44);
+        state.open_property_editor(44);
         state
             .design
             .tabbed_property_dialog
@@ -524,7 +523,7 @@ fn component_dirty_escape_discards_the_isolated_draft() {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut state = state_with_resistor();
-    open_property_editor(&mut state, 44);
+    state.open_property_editor(44);
     state
         .design
         .tabbed_property_dialog
@@ -545,7 +544,7 @@ fn component_dirty_escape_discards_the_isolated_draft() {
 #[test]
 fn returning_to_the_same_view_cannot_reauthorize_an_old_dialog() {
     let mut state = state_with_resistor();
-    open_property_editor(&mut state, 44);
+    state.open_property_editor(44);
     let captured_epoch = state
         .design
         .tabbed_property_dialog
@@ -586,7 +585,7 @@ fn escape_closes_nested_model_browser_before_dirty_parent_dialog() {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut state = state_with_resistor();
-    open_property_editor(&mut state, 44);
+    state.open_property_editor(44);
     state
         .design
         .tabbed_property_dialog
@@ -611,7 +610,7 @@ fn first_parameter_editor_retains_invalid_source_across_repaints() {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut state = state_with_resistor();
-    open_property_editor(&mut state, 44);
+    state.open_property_editor(44);
     let original = state
         .design
         .tabbed_property_dialog
@@ -682,7 +681,7 @@ fn a_stored_partial_commit_setting_applies_edits_whole() {
         .document_mut_for_test()
         .document_policy
         .property_commit = PropertyCommitPolicy::ApplyValidFields;
-    open_property_editor(&mut state, 44);
+    state.open_property_editor(44);
     let opened_source = state.design.tabbed_property_dialog.source.clone();
     state
         .design

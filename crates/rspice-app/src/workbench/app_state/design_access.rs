@@ -10,6 +10,7 @@ use super::AppState;
 use super::waivers::{StoredWaiverEdit, WaiverTarget};
 use crate::diagnostics::LogAnchor;
 use crate::state::{CellViewRef, SchematicState, SymbolDocument};
+use crate::workbench::app::actions::property_edit::open_property_editor_in;
 use crate::workbench::app::actions::workspace::symbol_document::{
     record_symbol_edit, run_active_symbol_pin_checks, store_active_symbol_document,
 };
@@ -27,6 +28,17 @@ impl AppState {
             &self.design.schematic_snap,
             self.design.schematic_routing_mode,
         )
+    }
+
+    /// [`open_property_editor_in`] for the session.
+    pub(crate) fn open_property_editor(&mut self, component_id: u64) {
+        let mut parts = self.design.property_form_parts();
+        open_property_editor_in(
+            &mut parts,
+            &mut self.model,
+            &mut self.workbench,
+            component_id,
+        );
     }
 
     /// [`NavigationParts::navigate_to_log_anchor`] for the session.

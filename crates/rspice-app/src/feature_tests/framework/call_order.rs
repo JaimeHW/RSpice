@@ -513,7 +513,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         &[
             "|app, OpenPropertyEditor { component_id, occurrence, }|",
             "crate::workbench::app::actions::reveal::placed_instance(",
-            "crate::workbench::app::open_property_editor(&mut app.state, component_id);",
+            "app.state.open_property_editor(component_id);",
         ],
     ),
     (

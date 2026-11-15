@@ -130,7 +130,7 @@ fn malformed_parameter_text_retains_the_field_draft_until_raw_text_is_repaired()
 fn direct_property_dialog_open_captures_the_committed_inline_value() {
     let mut editor = Editor::new();
     editor.edit("Value", "12");
-    crate::workbench::app::open_property_editor(&mut editor.app.state, editor.id);
+    editor.app.state.open_property_editor(editor.id);
     assert_eq!(
         editor.app.state.model.schematic.document().components[0].value,
         "12"

@@ -161,8 +161,8 @@ pub(crate) use dialogs::stimulus_link::{
 pub(crate) use dialogs::window_session::{WindowSessionPage, WindowWorkflow, open_window_workflow};
 
 pub(crate) use actions::property_edit::{
-    PropertyFormParts, authoritative_component_property_sheet, open_property_editor,
-    open_selected_object_properties_in, selected_object_properties_available_in,
+    PropertyFormParts, authoritative_component_property_sheet, open_selected_object_properties_in,
+    selected_object_properties_available_in,
 };
 pub(crate) use actions::stimulus_placement::arm_placement_from_definition;
 

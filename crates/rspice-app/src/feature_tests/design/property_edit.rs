@@ -11,7 +11,7 @@ use crate::state::{
 };
 use crate::state::{ComponentType, MODEL_BOUND_SYMBOL_METADATA_KEY, PropertyValue};
 use crate::workbench::app::project_transactions::WholeStateValidation;
-use crate::workbench::app::{open_property_editor, selected_object_properties_available_in};
+use crate::workbench::app::selected_object_properties_available_in;
 use crate::workbench::app_state::AppState;
 
 fn model_bound_definition() -> ModelBoundSymbolDefinition {
@@ -162,7 +162,7 @@ fn validated_save_uses_each_masters_schema_without_borrowing_the_open_dialog() {
             state.design.tabbed_property_dialog.close();
             state.design.property_registry.clear_cell_instance_sheet();
             if let Some(owner) = owner {
-                open_property_editor(&mut state, owner);
+                state.open_property_editor(owner);
                 assert!(state.design.tabbed_property_dialog.open);
             }
             let original = state.model.schematic.document().components.clone();
@@ -235,7 +235,7 @@ fn placed_model_bound_instance_opens_its_authoritative_typed_form() {
         &state.design.property_registry,
         &state.model
     ));
-    open_property_editor(&mut state, 44);
+    state.open_property_editor(44);
 
     assert!(state.design.tabbed_property_dialog.open);
     assert_eq!(
@@ -306,7 +306,7 @@ fn a_plain_schematic_cell_gets_its_declared_parameters_and_a_typed_multiplicity(
         &state.design.property_registry,
         &state.model
     ));
-    open_property_editor(&mut state, 9);
+    state.open_property_editor(9);
     assert!(state.design.tabbed_property_dialog.open);
 
     let sheet = state
@@ -359,7 +359,7 @@ fn every_static_component_family_opens_its_registered_editor() {
             .components
             .push(component);
 
-        open_property_editor(&mut state, index as u64 + 1);
+        state.open_property_editor(index as u64 + 1);
 
         assert!(
             state.design.tabbed_property_dialog.open,
@@ -395,7 +395,7 @@ fn legacy_and_review_only_cells_get_isolated_identity_forms() {
         .editor
         .selection
         .select_only_component(1);
-    open_property_editor(&mut state, 1);
+    state.open_property_editor(1);
     assert!(state.design.tabbed_property_dialog.open);
     state.design.tabbed_property_dialog.close();
     assert!(
@@ -430,7 +430,7 @@ fn legacy_and_review_only_cells_get_isolated_identity_forms() {
         &state.design.property_registry,
         &state.model
     ));
-    open_property_editor(&mut state, 2);
+    state.open_property_editor(2);
     assert!(state.design.tabbed_property_dialog.open);
     let legacy_sheet = state
         .design
@@ -468,7 +468,7 @@ fn legacy_and_review_only_cells_get_isolated_identity_forms() {
         &state.design.property_registry,
         &state.model
     ));
-    open_property_editor(&mut state, 3);
+    state.open_property_editor(3);
     assert!(state.design.tabbed_property_dialog.open);
     let review_sheet = state
         .design

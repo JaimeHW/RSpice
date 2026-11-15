@@ -652,7 +652,7 @@ fn the_component_editor_opens_and_draws_in_the_frame() {
         .expect("the placed resistor")
         .name
         .clone();
-    crate::workbench::app::open_property_editor(&mut app.state, id);
+    app.state.open_property_editor(id);
     assert!(draws_dialog(&mut app, &format!("{name} properties")));
     assert!(app.state.design.tabbed_property_dialog.open);
 }
@@ -687,7 +687,7 @@ fn a_readoption_reopens_the_editor_in_the_frame_it_is_chosen() {
         .document_mut_for_test()
         .components
         .push(source);
-    crate::workbench::app::open_property_editor(&mut replay.app.state, 7);
+    replay.app.state.open_property_editor(7);
 
     replay.click("Re-adopt r2", Role::Button);
 
