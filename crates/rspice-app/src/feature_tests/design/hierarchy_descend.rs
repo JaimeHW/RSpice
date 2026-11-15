@@ -13,7 +13,8 @@ use crate::workbench::app_state::AppState;
 /// straight after one another.
 fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
     let request = descend_request(&state.design.descend_hierarchy, &state.model)?;
-    answer_descend_hierarchy(state, request);
+    state.design.descend_hierarchy.close();
+    answer_descend_hierarchy(state.navigation(), request);
     Ok(())
 }
 

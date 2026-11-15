@@ -11,10 +11,10 @@ use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::actions::workspace::symbol_in_place::selected_symbol_in_place_target;
 use crate::workbench::app::actions::workspace::{
-    hierarchical_edit_in_place_enabled, selected_hierarchy_master,
+    NavigationParts, hierarchical_edit_in_place_enabled, selected_hierarchy_master,
 };
 use crate::workbench::app::dialogs::design_request::DesignRequest;
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -219,14 +219,16 @@ pub(crate) fn descend_request(
     })
 }
 
-/// Carry out a checked Descend into hierarchy choice over the whole session,
-/// as the dialog once did in place: opening a view, descending and editing a
-/// symbol in place still reach the whole session.
-pub(crate) fn answer_descend_hierarchy(state: &mut AppState, request: DescendHierarchy) {
+/// Carry out a checked Descend into hierarchy choice over the navigation
+/// parts: open the view, descend into the instance or edit the symbol in
+/// place. The dialog is closed before.
+pub(crate) fn answer_descend_hierarchy(
+    mut navigation: NavigationParts<'_>,
+    request: DescendHierarchy,
+) {
     match request {
         DescendHierarchy::EditSymbolInPlace => {
-            state.design.descend_hierarchy.close();
-            state.navigation().edit_selected_symbol_in_place();
+            navigation.edit_selected_symbol_in_place();
         }
         DescendHierarchy::Open {
             edit_mode,
@@ -235,16 +237,14 @@ pub(crate) fn answer_descend_hierarchy(state: &mut AppState, request: DescendHie
         } => {
             match edit_mode {
                 HierarchyDescendEditMode::EditInPlace => {
-                    state
-                        .navigation()
-                        .descend_into_instance(Some(instance), reference);
+                    navigation.descend_into_instance(Some(instance), reference);
                 }
                 HierarchyDescendEditMode::OpenIsolated => {
-                    state.open_workspace_view(reference);
+                    navigation.open_workspace_view(reference);
                 }
                 HierarchyDescendEditMode::ReadOnlyReference => {
-                    state.open_workspace_view(reference);
-                    state
+                    navigation.open_workspace_view(reference);
+                    navigation
                         .model
                         .workspace
                         .content
@@ -252,8 +252,9 @@ pub(crate) fn answer_descend_hierarchy(state: &mut AppState, request: DescendHie
                 }
                 HierarchyDescendEditMode::EditSymbolInPlace => {}
             }
-            state.design.descend_hierarchy.close();
-            state.prompt("Descended into the instance; the parent's unsaved changes are kept.");
+            navigation
+                .wb
+                .prompt("Descended into the instance; the parent's unsaved changes are kept.");
         }
     }
 }

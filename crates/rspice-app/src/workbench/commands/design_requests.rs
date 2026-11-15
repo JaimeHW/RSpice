@@ -90,7 +90,10 @@ impl RSpiceApp {
     /// itself once it sits on its own parts.
     pub(crate) fn answer_design_request(&mut self, request: DesignRequest) {
         match request {
-            DesignRequest::Descend(choice) => answer_descend_hierarchy(&mut self.state, choice),
+            DesignRequest::Descend(choice) => {
+                self.state.design.descend_hierarchy.close();
+                answer_descend_hierarchy(self.state.navigation(), choice);
+            }
             DesignRequest::ReopenPropertyEditor(component_id) => {
                 self.state.open_property_editor(component_id);
             }
