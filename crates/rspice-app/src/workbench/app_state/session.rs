@@ -1,7 +1,6 @@
 //! Session lifecycle: autosave, serialization, and device-local persistence.
 
 pub(in crate::workbench) use rspice_app_models::workbench::app_state::session::pdk_settings;
-pub(in crate::workbench) use rspice_app_results::workbench::app_state::session::calculator;
 pub(in crate::workbench) mod preference_runtime;
 pub(crate) use rspice_app_settings::workbench::app_state::session::preferences_file;
 pub(in crate::workbench) mod serialization;

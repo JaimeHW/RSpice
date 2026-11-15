@@ -124,7 +124,7 @@ fn a_result_export_that_fails_is_toasted() {
 #[test]
 fn event_source_vcd_export_reimport_keeps_levels_and_marks_canonical_strengths() {
     use crate::state::{ResultImportFormat, SimulationRunLifecycle};
-    use crate::workbench::workflows::result_import_workflow::{
+    use rspice_app_results::workbench::workflows::result_import_workflow::{
         commit_result_import_draft, stage_imported_result_dataset,
     };
     let points = [0_u8, 3, 6, 9, 1, 4, 7, 10, 2, 5, 8, 11, 12]

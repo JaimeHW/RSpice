@@ -4,7 +4,7 @@ use crate::state::ResultImportFormat;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::test_fixtures::generated_fst;
-use crate::workbench::workflows::result_import_workflow::{
+use rspice_app_results::workbench::workflows::result_import_workflow::{
     commit_result_import_draft, stage_imported_result_dataset,
 };
 

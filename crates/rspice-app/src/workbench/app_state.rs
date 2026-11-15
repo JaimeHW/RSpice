@@ -37,7 +37,6 @@ mod stack_budget;
 #[cfg(test)]
 mod technology_demand_tests;
 mod transaction;
-pub(crate) use rspice_app_results::workbench::app_state::viewer_capabilities;
 pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
 use crate::services::recent_files::RecentKind;

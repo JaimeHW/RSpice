@@ -9,7 +9,7 @@ use crate::state::SimulationRunLifecycle;
 use crate::state::SimulationRunProvenance;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::import::ResultImportStage;
-use crate::workbench::workflows::result_import_workflow::*;
+use rspice_app_results::workbench::workflows::result_import_workflow::*;
 
 fn loaded_project_state() -> AppState {
     let mut state = AppState::default();
