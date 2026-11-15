@@ -3,11 +3,13 @@
 //!
 //! Each function is the call the canvas makes once a gesture lands: a click
 //! with a placement or junction tool armed, Enter on an armed Move or
-//! Stretch, the frames of a drag on a selected part. A test that calls these
-//! runs the edit the user's gesture runs, without painting a canvas.
+//! Stretch, the frames of a drag on a selected part. Each takes the canvas
+//! frame a pass draws over, and each step its own parts, as the canvas does.
+//! A test that calls these runs the edit the user's gesture runs, without
+//! painting a canvas.
 
 use super::{
-    AppState, interaction, move_interaction, schematic_symbol_context, selection_drag,
+    CanvasFrame, interaction, move_interaction, schematic_symbol_context, selection_drag,
     stretch_interaction,
 };
 use crate::state::{ComponentType, Point};
@@ -16,44 +18,48 @@ use rspice_schematic_editor::view::selection_drag::SelectionDragAction;
 
 /// A click with the placement tool for `component_type` armed, landing at
 /// `at` on the grid.
-pub(crate) fn place_component(state: &mut AppState, component_type: ComponentType, at: Point) {
-    interaction::place_component(&mut state.canvas_parts(), component_type, at);
+pub(crate) fn place_component(
+    frame: &mut CanvasFrame<'_>,
+    component_type: ComponentType,
+    at: Point,
+) {
+    interaction::place_component(&mut frame.parts(), component_type, at);
 }
 
 /// A click with the junction tool at `at`: it adds a dot where two
 /// conductors meet, or takes away the one already there.
-pub(crate) fn click_junction(state: &mut AppState, at: Point) {
-    interaction::handle_junction_click(&mut state.canvas_parts(), at);
+pub(crate) fn click_junction(frame: &mut CanvasFrame<'_>, at: Point) {
+    interaction::handle_junction_click(&mut frame.parts(), at);
 }
 
 /// Enter on an armed Move whose preview stands at its current delta.
-pub(crate) fn commit_move(state: &mut AppState) {
-    let symbols = schematic_symbol_context(state);
-    move_interaction::commit_armed_move_selection(&mut state.canvas_parts(), &symbols);
+pub(crate) fn commit_move(frame: &mut CanvasFrame<'_>) {
+    let symbols = schematic_symbol_context(&*frame.model);
+    move_interaction::commit_armed_move_selection(&mut frame.parts(), &symbols);
 }
 
 /// Enter on an armed Stretch whose preview stands at its current delta.
-pub(crate) fn commit_stretch(state: &mut AppState) {
-    let symbols = schematic_symbol_context(state);
-    stretch_interaction::commit_armed_stretch_selection(&mut state.canvas_parts(), &symbols);
+pub(crate) fn commit_stretch(frame: &mut CanvasFrame<'_>) {
+    let symbols = schematic_symbol_context(&*frame.model);
+    stretch_interaction::commit_armed_stretch_selection(&mut frame.parts(), &symbols);
 }
 
 /// Press on `target` at `from`, drag through each of `steps` (offsets from
 /// `from`, one frame each) and release: one whole drag of the selection.
 pub(crate) fn drag_selection(
-    state: &mut AppState,
+    frame: &mut CanvasFrame<'_>,
     ctx: &egui::Context,
     target: PointerTarget,
     from: Point,
     steps: &[Point],
 ) {
-    let symbols = schematic_symbol_context(state);
+    let symbols = schematic_symbol_context(&*frame.model);
     let begin = SelectionDragAction::BeginSelection {
         target,
         position: from,
     };
-    selection_drag::dispatch(&mut state.canvas_parts(), ctx, &symbols, begin);
-    let Some(operation_id) = state.model.schematic.pending_operation_id() else {
+    selection_drag::dispatch(&mut frame.parts(), ctx, &symbols, begin);
+    let Some(operation_id) = frame.model.schematic.pending_operation_id() else {
         return;
     };
     let mut last = from;
@@ -65,9 +71,9 @@ pub(crate) fn drag_selection(
             delta: Point::new(position.x - last.x, position.y - last.y),
             position,
         };
-        selection_drag::dispatch(&mut state.canvas_parts(), ctx, &symbols, movement);
+        selection_drag::dispatch(&mut frame.parts(), ctx, &symbols, movement);
         last = position;
     }
     let finish = SelectionDragAction::Finish { operation_id };
-    selection_drag::dispatch(&mut state.canvas_parts(), ctx, &symbols, finish);
+    selection_drag::dispatch(&mut frame.parts(), ctx, &symbols, finish);
 }

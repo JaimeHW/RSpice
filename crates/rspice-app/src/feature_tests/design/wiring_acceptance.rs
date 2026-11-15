@@ -163,7 +163,7 @@ impl Bench {
             .map(|part| part.id)
             .collect::<BTreeSet<_>>();
         state.model.schematic.session.editor.preview_rotation = rotation;
-        gesture_commits::place_component(state, kind, at);
+        gesture_commits::place_component(&mut state.canvas_frame(), kind, at);
         state.model.schematic.session.editor.preview_rotation = Rotation::R0;
         self.end_frame();
         self.app
@@ -180,7 +180,7 @@ impl Bench {
 
     /// A click with the junction tool.
     pub(super) fn click_junction(&mut self, at: Point) {
-        gesture_commits::click_junction(&mut self.app.state, at);
+        gesture_commits::click_junction(&mut self.app.state.canvas_frame(), at);
         self.end_frame();
     }
 
@@ -204,7 +204,7 @@ impl Bench {
         );
         if state.design.move_selection.armed {
             state.design.move_selection.canvas.preview_delta = delta;
-            gesture_commits::commit_move(state);
+            gesture_commits::commit_move(&mut state.canvas_frame());
         }
         self.end_frame();
     }
@@ -223,7 +223,7 @@ impl Bench {
         );
         if state.design.stretch_selection.armed {
             state.design.stretch_selection.canvas.gesture.preview_delta = delta;
-            gesture_commits::commit_stretch(state);
+            gesture_commits::commit_stretch(&mut state.canvas_frame());
         }
         self.end_frame();
     }
@@ -264,7 +264,13 @@ impl Bench {
     /// and release at the last.
     pub(super) fn drag(&mut self, target: PointerTarget, from: Point, steps: &[Point]) {
         let ctx = self.ctx.clone();
-        gesture_commits::drag_selection(&mut self.app.state, &ctx, target, from, steps);
+        gesture_commits::drag_selection(
+            &mut self.app.state.canvas_frame(),
+            &ctx,
+            target,
+            from,
+            steps,
+        );
         self.end_frame();
     }
 
