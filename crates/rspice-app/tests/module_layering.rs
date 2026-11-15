@@ -827,7 +827,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     ("app", "workflows/project_workflow"),
     ("app", "commands"),
     ("app", "chrome"),
-    ("app", "workflows/file_workflow"),
     ("app", "workflows/file_actions"),
     ("app", "frame"),
     ("app", "cross_probe"),
@@ -859,7 +858,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     // types they name.
     ("app_state", "app"),
     ("app_state", "slots"),
-    ("app_state", "workflows/file_workflow"),
     // The tests of code's documents, navigator panes and netlist workflow
     // that only seed and read state run over the code feature on its own,
     // and the feature builds that harness, as the models feature builds the

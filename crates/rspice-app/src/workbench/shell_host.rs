@@ -85,10 +85,9 @@ impl Host for RSpiceApp {
             Point::Surface(workspace) => {
                 use crate::workbench::documents::code_workspace::sync_automation_debugger;
                 use crate::workbench::project::workspace_state::LibraryCellviewPage;
-                use crate::workbench::surfaces::{
-                    library_cellview_manager, project, simulate, stimulus, verify,
-                };
+                use crate::workbench::surfaces::{simulate, stimulus, verify};
                 use rspice_app_code::workbench::surfaces::{automation, netlist, veriloga};
+                use rspice_app_project::workbench::surfaces::{library_cellview_manager, project};
 
                 if app.state.workbench.current_route().surface_id()
                     == super::SurfaceId::ReportAuthoring
@@ -408,7 +407,6 @@ impl Host for RSpiceApp {
             Point::Toolbar(ToolbarSlot::Tools(scope), layout) => {
                 use crate::workbench::chrome::toolbar::feature_tools;
                 use crate::workbench::chrome::toolbar::models::{model_editor_tools, models_tools};
-                use crate::workbench::chrome::toolbar::project::{no_project_tools, project_tools};
                 use crate::workbench::chrome::toolbar::results::{
                     offered_tool_groups, results_tracking_button,
                 };
@@ -422,6 +420,9 @@ impl Host for RSpiceApp {
                 };
                 use rspice_app_code::workbench::code::toolbar::{
                     NETLIST_TOOLBAR, VERILOGA_TOOLBAR,
+                };
+                use rspice_app_project::workbench::chrome::toolbar::project::{
+                    no_project_tools, project_tools,
                 };
 
                 match scope {
@@ -1034,14 +1035,14 @@ impl ConfirmationHost for RSpiceApp {
 
     #[cfg(target_arch = "wasm32")]
     fn pending_browser_file_operation(&self) -> Option<String> {
-        crate::workbench::workflows::project_workflow::browser_file_operation_label(
+        rspice_app_project::workbench::workflows::project_workflow::browser_file_operation_label(
             &self.state.platform,
         )
     }
 
     #[cfg(target_arch = "wasm32")]
     fn cancel_browser_file_operation(&mut self) {
-        crate::workbench::workflows::project_workflow::cancel_pending_browser_file_operation(
+        rspice_app_project::workbench::workflows::project_workflow::cancel_pending_browser_file_operation(
             &mut self.state.platform,
             &mut self.state.workbench,
         );
@@ -1056,12 +1057,12 @@ impl DocumentHost for AppState {
     fn workspace_documents(&self, workspace: Workspace) -> Vec<WorkspaceDocument> {
         use crate::workbench::chrome::document_bar::design::design_documents;
         use crate::workbench::chrome::document_bar::models::models_documents;
-        use crate::workbench::chrome::document_bar::project::project_documents;
         use crate::workbench::chrome::document_bar::results::result_documents;
         use crate::workbench::chrome::document_bar::simulate::{
             simulation_plan_documents, verification_documents,
         };
         use rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents;
+        use rspice_app_project::workbench::chrome::document_bar::project::project_documents;
 
         let state = self;
         match workspace {

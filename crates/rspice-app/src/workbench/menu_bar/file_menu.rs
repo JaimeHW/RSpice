@@ -238,7 +238,7 @@ mod tests {
 
         state
             .create_new_project_with(
-                &crate::workbench::workflows::project_workflow::NewProjectParams {
+                &rspice_app_project::workbench::workflows::project_workflow::NewProjectParams {
                     name: "amp".to_owned(),
                     root_library: "amp".to_owned(),
                     top_cell: "top".to_owned(),

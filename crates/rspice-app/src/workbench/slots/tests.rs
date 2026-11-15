@@ -454,10 +454,10 @@ const DIALOG_GATE: &[DialogRow] = &[
         dialogs.design.symbol_parameter_form.open = true;
     }),
     ("configuration_dialog", |dialogs| {
-        crate::workbench::app::dialogs::project::configuration_dialogs::open_configuration_dialog(
+        rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::open_configuration_dialog(
             &mut dialogs.project.configuration_dialog,
             &dialogs.model,
-            crate::workbench::app::dialogs::project::configuration_dialogs::ConfigurationDialogRequest::New,
+            rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::ConfigurationDialogRequest::New,
         );
     }),
     ("rule_setup", |dialogs| {

@@ -112,12 +112,12 @@ impl RSpiceApp {
                     )
                 } else if self.action_file_save() {
                     if self.state.model.schematic.session.is_dirty {
-                        crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly
+                        rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly
                     } else {
-                        crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete
+                        rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete
                     }
                 } else {
-                    crate::workbench::workflows::project_workflow::SaveRequestOutcome::Cancelled
+                    rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::Cancelled
                 };
                 if outcome.authorizes_immediate_destructive_action() {
                     if let Some(action) = pending {
@@ -131,7 +131,7 @@ impl RSpiceApp {
                     return;
                 }
                 match outcome {
-                    crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalPending(
+                    rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalPending(
                         transaction,
                     ) => {
                         if let Some(action) = pending {
@@ -144,7 +144,7 @@ impl RSpiceApp {
                             );
                         }
                     }
-                    crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly => {
+                    rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly => {
                         self.state.record(
                             LogSeverity::Warning,
                             LogSource::Studio,
@@ -157,10 +157,10 @@ impl RSpiceApp {
                             pending_recent_kind;
                         self.state.workbench.confirmation_dialog.pending_example = pending_example;
                     }
-                    crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyPending
-                    | crate::workbench::workflows::project_workflow::SaveRequestOutcome::Cancelled
-                    | crate::workbench::workflows::project_workflow::SaveRequestOutcome::Failed(_) => {}
-                    crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
+                    rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::CopyPending
+                    | rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::Cancelled
+                    | rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::Failed(_) => {}
+                    rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
                         unreachable!("canonical completion returned through the authorization gate")
                     }
                 }
@@ -233,11 +233,11 @@ impl RSpiceApp {
             return;
         }
         match self.state.save_project_scope(crate::workbench::lifecycle::project_lifecycle::SaveScope::AllDocuments) {
-            crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
+            rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
                 self.state.workbench.project_review_dialog.close();
                 self.state.close_project_discard(destination);
             }
-            crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalPending(
+            rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalPending(
                 transaction,
             ) => {
                 self.state.workbench.project_review_dialog.close();
@@ -249,16 +249,16 @@ impl RSpiceApp {
                     None,
                 );
             }
-            crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly => {
+            rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly => {
                 self.state.record(
                     LogSeverity::Warning,
                     LogSource::Studio,
                     "A project copy was downloaded, but Save all did not complete. The project remains open with its working changes.",
                 );
             }
-            crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyPending
-            | crate::workbench::workflows::project_workflow::SaveRequestOutcome::Cancelled
-            | crate::workbench::workflows::project_workflow::SaveRequestOutcome::Failed(_) => {}
+            rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::CopyPending
+            | rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::Cancelled
+            | rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome::Failed(_) => {}
         }
     }
 

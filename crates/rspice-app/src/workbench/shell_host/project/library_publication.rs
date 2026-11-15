@@ -9,21 +9,21 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::{property_card, property_row};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::surfaces::project::library_publication::PublicationAction;
+use crate::workbench::workflows::export_workflow::SaveDialogConfig;
+use egui::Context;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_project::workbench::surfaces::project::library_publication::PublicationAction;
 #[cfg(target_arch = "wasm32")]
-use crate::workbench::surfaces::project::library_publication::{
+use rspice_app_project::workbench::surfaces::project::library_publication::{
     BROWSER_PUBLICATION_COMPLETIONS, BROWSER_ROLLBACK_COMPLETIONS, BrowserPublicationCompletion,
     start_browser_rollback_picker,
 };
-use crate::workbench::surfaces::project::library_publication::{
+use rspice_app_project::workbench::surfaces::project::library_publication::{
     PROJECT_ARTIFACT_EXTENSION, PUBLICATION_DIALOG_ID, ProjectLibraryPublicationCandidate,
     PublicationDraft, ROLLBACK_DIALOG_ID, RollbackDraft, clear_rollback_artifact,
     publication_fields, rollback_fields, rollback_receipt_selector, safe_file_stem,
     selected_receipt, transaction_status,
 };
-#[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::workflows::export_workflow::SaveDialogConfig;
-use egui::Context;
 
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]

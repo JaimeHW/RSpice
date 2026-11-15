@@ -183,7 +183,9 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // Examples dialog draws in the project feature's context, and the example
     // it asked for is requested in place of the open project as it returns.
     open_confirmed(&mut app.state);
-    if let Some(example) = tools::examples_browser::show(ctx, &mut features::cx(app)) {
+    if let Some(example) =
+        rspice_app_project::workbench::tools::examples_browser::show(ctx, &mut features::cx(app))
+    {
         request_example(&mut app.state, example);
     }
     // Shortcuts and dialogs record the intent to run; the pass itself belongs
@@ -323,7 +325,8 @@ impl RSpiceApp {
     #[cfg(target_arch = "wasm32")]
     pub(in crate::workbench) fn poll_browser_project_import(
         &mut self,
-    ) -> Option<crate::workbench::workflows::project_workflow::BrowserProjectOpen> {
+    ) -> Option<rspice_app_project::workbench::workflows::project_workflow::BrowserProjectOpen>
+    {
         use crate::workbench::project::ProjectFeature;
 
         ProjectFeature::poll_browser_project_import(&mut features::cx(self))

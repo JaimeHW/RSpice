@@ -4,8 +4,6 @@ use super::*;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::ViewType;
 use crate::workbench::app::actions::workspace::{HistoryStepParts, take_history_step};
-use crate::workbench::app::dialogs::project::configuration_dialogs::Leaving;
-use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::framework::feature::ModelsPort;
@@ -17,6 +15,8 @@ use crate::workbench::session::project_transactions::{
     apply_workspace_pruned, void_veriloga_evidence,
 };
 use rspice_app_code::workbench::code::commands::CodeHandOff;
+use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::Leaving;
+use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 
 pub(super) fn open_command_palette(state: &mut AppState) {
     let route = super::super::SurfaceRoute::surface(super::super::SurfaceId::CommandPalette);

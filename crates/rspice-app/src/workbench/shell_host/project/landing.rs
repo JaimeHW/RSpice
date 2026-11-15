@@ -5,8 +5,8 @@ use egui::Ui;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectLauncherPage;
-use crate::workbench::surfaces::project::landing::{LandingAction, landing};
 use crate::workbench::{RSpiceApp, features};
+use rspice_app_project::workbench::surfaces::project::landing::{LandingAction, landing};
 
 /// The landing, drawn in the project feature's context, with what the reader
 /// asked of it carried out by the shell as soon as it has drawn.

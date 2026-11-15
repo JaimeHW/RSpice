@@ -6,9 +6,9 @@
 use egui::{ScrollArea, Ui};
 
 use crate::workbench::project::workspace_state::ProjectPage;
-use crate::workbench::surfaces::project::recovery::recovery;
-use crate::workbench::surfaces::project::{configuration, dependencies, overview};
 use crate::workbench::{RSpiceApp, features};
+use rspice_app_project::workbench::surfaces::project::recovery::recovery;
+use rspice_app_project::workbench::surfaces::project::{configuration, dependencies, overview};
 
 pub(crate) mod landing;
 pub(crate) mod launcher;

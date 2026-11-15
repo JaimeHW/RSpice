@@ -3,7 +3,7 @@
 use egui::Ui;
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::surfaces::project::library::builtin_models::{
+use rspice_app_project::workbench::surfaces::project::library::builtin_models::{
     BuiltinModelsIntent, browse, detail, selected_model,
 };
 

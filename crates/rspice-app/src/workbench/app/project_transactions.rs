@@ -13,14 +13,14 @@ use crate::workbench::app::ConfirmationAction;
 use crate::workbench::app::dialogs::check_and_save_validation::{
     CheckAndSaveValidationReport, ValidationReads, run_design_checks,
 };
-use crate::workbench::app::dialogs::project::configuration_dialogs::Leaving;
-use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::project_lifecycle::LifecycleSource;
+use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::Leaving;
+use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 #[cfg(test)]
-use crate::workbench::workflows::project_workflow::ProjectLoadOrigin;
+use rspice_app_project::workbench::workflows::project_workflow::ProjectLoadOrigin;
 #[cfg(test)]
-use crate::workbench::workflows::project_workflow::report_lifecycle_error;
+use rspice_app_project::workbench::workflows::project_workflow::report_lifecycle_error;
 
 /// Open the transaction with the default library and top cell. The project
 /// name starts empty because it is the one field with no defensible default:

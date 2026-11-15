@@ -9,7 +9,7 @@ use std::rc::Rc;
 use crate::io::{FileWorkflowIo, NativeFileWorkflowIo, SchematicIoError};
 use crate::state::{CellViewRef, SchematicState, View, ViewType};
 use crate::workbench::app_state::AppState;
-use crate::workbench::workflows::file_workflow::SchematicLoadOrigin;
+use rspice_app_project::workbench::workflows::file_workflow::SchematicLoadOrigin;
 
 #[derive(Debug, Clone)]
 struct TestFileWorkflowIo {

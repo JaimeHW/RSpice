@@ -15,7 +15,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::project_lifecycle::{
     DestinationAuthority, ProjectCloseDestination, SaveScope,
 };
-use crate::workbench::workflows::project_workflow::{
+use rspice_app_project::workbench::workflows::project_workflow::{
     LiveProjectApply, NewProjectParams, ProjectLoadOrigin, SaveRequestOutcome,
     live_mirror_save_block, project_save_dialog_default_name,
 };

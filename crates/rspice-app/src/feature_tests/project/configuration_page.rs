@@ -9,7 +9,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::examples::hierarchy_reference;
 use crate::workbench::features;
 use crate::workbench::project::configuration_state::ConfigurationSelection;
-use crate::workbench::surfaces::project::configuration::configuration;
+use rspice_app_project::workbench::surfaces::project::configuration::configuration;
 
 /// Words that name the implementation rather than anything an engineer
 /// acts on. None may reach the page.

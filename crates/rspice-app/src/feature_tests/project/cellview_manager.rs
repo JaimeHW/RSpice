@@ -9,8 +9,8 @@ use crate::state::{Cell, CellViewRef, Library, View, ViewType};
 use crate::workbench::framework::requests::OpenSymbolAuthoring;
 use crate::workbench::project::workspace_state::LibraryCellviewPage;
 use crate::workbench::state::Workspace;
-use crate::workbench::surfaces::library_cellview_manager::tests::typed_symbol;
 use crate::workbench::{RSpiceApp, RouteTransitionSource, SurfaceId, SurfaceRoute};
+use rspice_app_project::workbench::surfaces::library_cellview_manager::tests::typed_symbol;
 
 fn app_with_typed_symbol() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();

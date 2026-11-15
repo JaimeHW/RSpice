@@ -35,11 +35,11 @@ use crate::workbench::lifecycle::project_lifecycle::{
 use crate::workbench::live_session::{CloudHandles, DiscardMirror, LiveHost, MirrorApply};
 use crate::workbench::state::Workspace;
 #[cfg(target_arch = "wasm32")]
-use crate::workbench::workflows::file_workflow::BrowserSchematic;
-use crate::workbench::workflows::file_workflow::{self, SchematicLoadOrigin};
+use rspice_app_project::workbench::workflows::file_workflow::BrowserSchematic;
+use rspice_app_project::workbench::workflows::file_workflow::{self, SchematicLoadOrigin};
 #[cfg(target_arch = "wasm32")]
-use crate::workbench::workflows::project_workflow::BrowserProjectOpen;
-use crate::workbench::workflows::project_workflow::{
+use rspice_app_project::workbench::workflows::project_workflow::BrowserProjectOpen;
+use rspice_app_project::workbench::workflows::project_workflow::{
     self, ClosedProject, LiveProjectApply, LoadedProject, NewProject, NewProjectParams,
     OpenedProject, ProjectLoadOrigin, SaveParts, SaveRequestOutcome,
 };
@@ -52,7 +52,7 @@ use rspice_project::lifecycle::SaveContinuationEvent;
 use crate::services::recent_files::RecentKind;
 use crate::workbench::app::ConfirmationAction;
 use crate::workbench::app::actions::workspace::symbol_document::run_active_symbol_pin_checks;
-use crate::workbench::app::dialogs::project::configuration_dialogs::{
+use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::{
     Leaving, show_configuration_page_in,
 };
 

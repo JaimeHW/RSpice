@@ -5,17 +5,17 @@
 use crate::services::recent_files::RecentKind;
 use crate::state::ConfigurationSetId;
 use crate::ui::widgets::DialogChoice;
-use crate::workbench::app::dialogs::project::configuration::delete_refusal;
-use crate::workbench::app::dialogs::project::configuration_dialogs::{
-    ConfigurationDialog, ConfigurationDialogParts, ConfigurationDialogRequest, Leaving,
-    LeavingAnswer, answer_leaving, open_configuration_dialog, render_configuration_dialog,
-};
 use crate::workbench::app::project_transactions::hold_for_configuration_edits;
 use crate::workbench::app::{ConfirmationAction, RSpiceApp};
 use crate::workbench::examples::hierarchy_reference;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::session::project_transactions::go_on_leaving;
+use rspice_app_project::workbench::app::dialogs::project::configuration::delete_refusal;
+use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::{
+    ConfigurationDialog, ConfigurationDialogParts, ConfigurationDialogRequest, Leaving,
+    LeavingAnswer, answer_leaving, open_configuration_dialog, render_configuration_dialog,
+};
 
 /// The configuration dialogs' parts over `app`, as the project feature's
 /// context lends them.

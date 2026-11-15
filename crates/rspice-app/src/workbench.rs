@@ -60,7 +60,6 @@ pub(crate) mod chrome {
     pub(crate) mod document_bar {
         pub(crate) mod design;
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::document_bar::models;
-        pub(in crate::workbench) use rspice_app_project::workbench::chrome::document_bar::project;
         pub(in crate::workbench) use rspice_app_results::workbench::chrome::document_bar::results;
         pub(in crate::workbench) use rspice_app_simulate::workbench::chrome::document_bar::simulate;
     }
@@ -75,7 +74,6 @@ pub(crate) mod chrome {
     }
     pub(crate) mod toolbar {
         pub(in crate::workbench) use rspice_app_models::workbench::chrome::toolbar::models;
-        pub(in crate::workbench) use rspice_app_project::workbench::chrome::toolbar::project;
         pub(crate) use rspice_app_results::workbench::chrome::toolbar::results;
         pub(crate) use rspice_app_simulate::workbench::chrome::toolbar::simulate;
         pub use rspice_app_workbench::workbench::chrome::toolbar::*;
@@ -164,13 +162,10 @@ pub(crate) use rspice_app_simulate::workbench::simulate;
 pub(crate) mod slots;
 pub(crate) mod state;
 pub(crate) mod surfaces {
-    pub(crate) use rspice_app_project::workbench::surfaces::library_cellview_manager;
-    pub(crate) use rspice_app_project::workbench::surfaces::project;
     pub(crate) use rspice_app_simulate::workbench::surfaces::simulate;
     pub(crate) mod stimulus;
     pub(crate) use rspice_app_simulate::workbench::surfaces::verify;
 }
-pub(crate) mod tools;
 pub(crate) mod workflows;
 
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;

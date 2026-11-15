@@ -24,7 +24,7 @@ use crate::workbench::lifecycle::project_lifecycle::{
 };
 use crate::workbench::lifecycle::recovery::{self, RecoveryCandidate};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::workflows::file_workflow;
+use rspice_app_project::workbench::workflows::file_workflow;
 use rspice_app_services::services::session::SessionKept;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_services::workbench::app_state::session::autosave::{self, AutosaveRestore};

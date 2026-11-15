@@ -4,10 +4,10 @@
 
 use crate::state::{ConfigurationSetDefinition, ConfigurationSetId};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::project::configuration::{
+use crate::workbench::project::configuration_state::ConfigurationSelection;
+use rspice_app_project::workbench::app::dialogs::project::configuration::{
     ConfigurationTransaction, commit_configuration, delete_refusal,
 };
-use crate::workbench::project::configuration_state::ConfigurationSelection;
 
 fn commit_configuration_transaction(
     app: &mut RSpiceApp,

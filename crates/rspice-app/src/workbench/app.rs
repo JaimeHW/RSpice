@@ -657,7 +657,7 @@ impl RSpiceApp {
         }
         #[cfg(target_arch = "wasm32")]
         if let Some(opened) =
-            crate::workbench::workflows::file_workflow::poll_browser_schematic_import(
+            rspice_app_project::workbench::workflows::file_workflow::poll_browser_schematic_import(
                 &mut self.state.model,
             )
             && self.state.open_browser_schematic(opened)

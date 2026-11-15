@@ -20,7 +20,6 @@ pub(in crate::workbench) mod help;
 pub(crate) mod hierarchy;
 pub(crate) mod object_properties;
 pub(crate) mod placement;
-pub(crate) use rspice_app_project::workbench::app::dialogs::project;
 pub(crate) mod property_dialog;
 pub(crate) mod replace_instance;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::review_primitives;

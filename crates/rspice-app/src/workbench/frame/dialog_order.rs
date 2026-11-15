@@ -667,7 +667,7 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
         key: DialogKey("framework.browser_file_operation"),
         modality: Modality::Application,
         is_open: |state| {
-            crate::workbench::workflows::project_workflow::browser_file_operation_label(
+            rspice_app_project::workbench::workflows::project_workflow::browser_file_operation_label(
                 &state.platform,
             )
             .is_some()

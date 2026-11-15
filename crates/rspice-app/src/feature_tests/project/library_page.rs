@@ -14,7 +14,7 @@ use crate::workbench::shell_host::project::library_publication::commit_project_l
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::rollback_project_library_publication;
 use crate::workbench::state::Workspace;
-use crate::workbench::surfaces::project::library::{
+use rspice_app_project::workbench::surfaces::project::library::{
     AUDIT_REPORT_ID, LibraryIntent, apply_library_intent, icon_for_view, library_context,
 };
 

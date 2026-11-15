@@ -11,11 +11,11 @@ use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
 use crate::workbench::state::Workspace;
-use crate::workbench::surfaces::project::overview::{
+use crate::workbench::{RSpiceApp, features};
+use rspice_app_project::workbench::surfaces::project::overview::{
     OverviewIntent, OverviewSnapshot, ProblemSnapshot, Tone, design_objects, problem_snapshot,
     run_plan_intent,
 };
-use crate::workbench::{RSpiceApp, features};
 
 /// The Overview's snapshot, as the page takes it in the context the shell
 /// lends it, with the dispatcher's answers for the commands its rows offer.

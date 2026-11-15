@@ -13,8 +13,8 @@ use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
 use crate::workbench::state::Workspace;
-use crate::workbench::surfaces::project::recovery;
 use crate::workbench::{RSpiceApp, features};
+use rspice_app_project::workbench::surfaces::project::recovery;
 
 /// The Project workspace as the shell draws it on the stage.
 fn show(ui: &mut Ui, app: &mut RSpiceApp) {

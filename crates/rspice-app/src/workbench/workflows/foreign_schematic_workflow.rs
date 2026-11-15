@@ -37,7 +37,7 @@ use crate::state::model_library::SimulationPlanModelBinding;
 use crate::state::{Cell, CellViewRef, SchematicState, View, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::workflows::file_workflow::SchematicLoadOrigin;
+use rspice_app_project::workbench::workflows::file_workflow::SchematicLoadOrigin;
 use rspice_app_services::workbench::slots::platform::foreign_import_refusal_in;
 
 use plan::{ForeignPlan, plan_from_cards};
