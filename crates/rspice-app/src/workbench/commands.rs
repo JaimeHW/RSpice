@@ -15,7 +15,7 @@ use crate::workbench::{AppState, RSpiceApp};
 use super::state::{ConsoleChannel, ConsolePage, Workspace};
 
 mod enablement;
-pub(crate) mod netlist_validation;
+pub(crate) use rspice_app_code::workbench::code::netlist_validation;
 mod registry;
 pub(crate) use rspice_app_results::workbench::commands::result_navigation;
 mod veriloga_commits;

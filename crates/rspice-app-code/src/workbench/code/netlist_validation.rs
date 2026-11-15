@@ -6,12 +6,11 @@
 //! failed acknowledgement drops the simulation preflight. Both bodies moved
 //! verbatim from the netlist workflow, and are written over its parts.
 
-use rspice_app_code::workbench::slots::code::{netlist_shown_in, veriloga_compilation_in};
-
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::code::CodeFeature;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
+use crate::workbench::slots::{netlist_shown_in, veriloga_compilation_in};
 use crate::workbench::workflows::netlist_workflow::{
     acknowledge_canonical_dependencies, acknowledge_canonical_validation,
     invalidate_canonical_validation, normalize_owned_netlist_whitespace, record_validation_failure,
@@ -20,7 +19,7 @@ use crate::workbench::workflows::netlist_workflow::{
 /// Validate and retain the exact visible manual-deck snapshot, including its
 /// sealed dependency closure and execution-target contract. A later Run must
 /// match this one-shot authorized snapshot byte for byte.
-pub(crate) fn validate_visible_netlist_source(cx: &mut Cx<'_, CodeFeature>) -> bool {
+pub fn validate_visible_netlist_source(cx: &mut Cx<'_, CodeFeature>) -> bool {
     use crate::state::NetlistValidationReceipt;
     use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 
@@ -130,7 +129,7 @@ pub(crate) fn validate_visible_netlist_source(cx: &mut Cx<'_, CodeFeature>) -> b
 /// text ends with a line end. An include is formatted only when it parses
 /// without errors, and the deck only when it validates, after validating
 /// it when its validation is not current.
-pub(crate) fn format_owned_netlist(cx: &mut Cx<'_, CodeFeature>) {
+pub fn format_owned_netlist(cx: &mut Cx<'_, CodeFeature>) {
     if !crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
         cx.model,
         &cx.state.netlist,

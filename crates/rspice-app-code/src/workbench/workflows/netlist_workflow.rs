@@ -3,7 +3,7 @@
 //! The parts of validating the visible deck, and composing the source a run
 //! executes. Validation is pinned to an exact content digest and project
 //! revision, so an edit after validation invalidates it rather than being
-//! carried along. The shell's `commands::netlist_validation` runs the
+//! carried along. The code feature's `netlist_validation` runs the
 //! validation and the format over these parts.
 
 use crate::diagnostics::{LogSeverity, LogSource};

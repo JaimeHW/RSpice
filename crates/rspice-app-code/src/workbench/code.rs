@@ -7,6 +7,7 @@
 pub mod commands;
 mod docks;
 pub mod netlist_first;
+pub mod netlist_validation;
 pub mod toolbar;
 
 use egui::Context;
