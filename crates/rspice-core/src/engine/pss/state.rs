@@ -712,6 +712,11 @@ impl PssStateBasis {
     }
 }
 
+/// Each shooting coordinate's perturbation of the period start's solution
+/// and the pair of solution rows whose difference reads it at the end
+/// ([`PssCircuit::charge_coordinate_maps`]).
+pub(super) type ChargeCoordinateMaps = (Vec<Vec<Value>>, Vec<(usize, usize)>);
+
 /// A worker owns its circuit, accepted charge and coordinate basis together.
 /// Cloning for a derivative probe captures every accepted semiconductor history
 /// lane; each period resets those histories from the supplied shooting state.
@@ -739,6 +744,12 @@ pub(in crate::engine) struct PssCircuit {
     /// Qualification-only traversal; published and replayed orbits always
     /// use the configured method. Derivative workers clone this choice.
     pub(super) probe_precision_floor: bool,
+    /// Set once a driven shooting solve finds its period map's convergence
+    /// noise in the way of its tolerance. Every later step's Newton then
+    /// iterates past the transient's tests until its update reaches
+    /// rounding, so the map is a smooth function of the shooting state.
+    /// Derivative workers and replayed orbits clone the choice.
+    pub(super) steps_to_rounding: bool,
     basis: PssStateBasis,
     pub(super) delay_basis: PssDelayBasis,
     /// Nominal-orbit amplitudes in each integral's own units. Derivative
@@ -896,6 +907,7 @@ impl PssCircuit {
             integration_steps: 0,
             integration_mesh: None,
             probe_precision_floor: false,
+            steps_to_rounding: false,
             basis,
             delay_basis: PssDelayBasis::default(),
             integral_probe_scales,
@@ -929,6 +941,53 @@ impl PssCircuit {
 
     pub(super) fn physical_state_dimension(&self) -> usize {
         self.basis.charge_branches.len() + self.basis.currents.representatives.len()
+    }
+
+    /// Where the period map's variational recurrence starts and what it
+    /// reads, when every shooting coordinate is the voltage of a capacitor
+    /// or a generated model's node and the spanning forest alone fixes the
+    /// period start's charge-holding nodes from them: each coordinate's
+    /// perturbation of the start's solution (rows counted from one, ground
+    /// at zero) and the pair of rows whose difference it reads at the end.
+    /// `None` for any other basis: one with winding currents, integrals,
+    /// delayed waves, a descriptor or amplifier constraints, or a coordinate
+    /// a device's own charge history holds.
+    pub(super) fn charge_coordinate_maps(&self) -> Option<ChargeCoordinateMaps> {
+        let basis = &self.basis;
+        if basis.descriptor.is_some()
+            || basis.voltage_constraints.is_some()
+            || !basis.currents.representatives.is_empty()
+            || self.state_dimension() != basis.charge_branches.len()
+        {
+            return None;
+        }
+        let readout = basis
+            .charge_branches
+            .iter()
+            .map(|branch| match *branch {
+                ChargeBranch::Capacitor(index) => {
+                    let stamp = &self.circuit.capacitors.stamps[index];
+                    Some((stamp.pp.row, stamp.nn.row))
+                }
+                ChargeBranch::Generated { pos, neg, .. } => Some((pos, neg)),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let rows = self.circuit.matrix_size() + 1;
+        let mut starts = Vec::with_capacity(readout.len());
+        for coordinate in 0..readout.len() {
+            let mut start = vec![0.0; rows];
+            for edge in &basis.forest {
+                let moved = match edge.value {
+                    ForestValue::State(index) if index == coordinate => 1.0,
+                    ForestValue::State(_) | ForestValue::Zero | ForestValue::Source(_) => 0.0,
+                    _ => return None,
+                };
+                start[edge.to] = start[edge.from] + edge.sign * moved;
+            }
+            starts.push(start);
+        }
+        Some((starts, readout))
     }
 
     pub(in crate::engine) fn state_basis_names(&self) -> Vec<String> {

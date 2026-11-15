@@ -849,7 +849,9 @@ fn compare_with_settled_transient(
 /// with. Shooting solves the period map's fixed point directly and needs
 /// none. The gate swings about 1 V so that the device conducts; about the
 /// 0.6 V of the other MOSFET fixtures it is nearly off, and its drain moves
-/// by 6 µV.
+/// by 6 µV. About 0.8 V the body's Floquet multiplier is 0.99996, so the
+/// period map's step noise, magnified 3e4 times in the body, stalled
+/// shooting short of its tolerance until its steps settled to rounding.
 ///
 /// Allowance, fixed before the first comparison: the standing one, each of
 /// the DC term and first three harmonics of the harmonic-balance spectrum
@@ -860,6 +862,13 @@ fn shooting_oracle_fixtures() -> Vec<(&'static str, &'static str, &'static str)>
         (
             "SOI MOSFET (BSIM-SOI e2aff994)",
             "VDD vdd 0 1\nV1 in 0 SIN(1.0 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
+                 XM d g 0 0 0 t bsimsoi__e2aff994\n",
+            "d",
+        ),
+        #[cfg(feature = "veriloga-model-bsimsoi-e2aff994")]
+        (
+            "SOI MOSFET (BSIM-SOI e2aff994, 0.8 V gate)",
+            "VDD vdd 0 1\nV1 in 0 SIN(0.8 0.1 1meg)\nRG in g 1k\nRD vdd d 1k\n\
                  XM d g 0 0 0 t bsimsoi__e2aff994\n",
             "d",
         ),

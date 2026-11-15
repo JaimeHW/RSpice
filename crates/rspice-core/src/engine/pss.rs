@@ -50,12 +50,32 @@ pub(in crate::engine) use state::PssCircuit;
 mod history_events;
 mod mesh;
 mod time_control;
+mod variational;
 pub(in crate::engine) use mesh::PssIntegrationMesh;
 
 type AutonomousNewtonStep = (Vec<Value>, Value, Vec<Vec<Value>>);
 
 /// The largest step a Newton update may move a generated model's node by.
 const GENERATED_STEP_LIMIT: Value = 0.5;
+
+/// The rounding a step resolved to rounding settles at, in units of
+/// `f64::EPSILON` per unit of a coordinate's size.
+const STEP_ROUNDING: Value = 16.0;
+
+/// Whether a Newton update of weighted size `update`, after one of
+/// `previous`, leaves its iterate within rounding of the step's solution:
+/// the updates' contraction predicts the next one at `update^2 / previous`,
+/// and a converging Newton whose updates stop halving has reached rounding.
+/// The weights are `abstol + reltol * |x|`, so rounding is
+/// `STEP_ROUNDING * EPSILON / reltol` of them.
+fn update_reaches_rounding(update: Value, previous: Value, reltol: Value) -> bool {
+    let predicted = if previous.is_finite() && previous > 0.0 {
+        update * (update / previous).min(1.0)
+    } else {
+        update
+    };
+    predicted <= STEP_ROUNDING * Value::EPSILON / reltol || update > 0.5 * previous
+}
 
 /// Which shooting solves a PSS.
 enum PssRoute {
@@ -859,6 +879,9 @@ pub(crate) struct PssStateTrace {
     pub states: Vec<Vec<Value>>,
     /// Full node/branch solution per grid point.
     pub solutions: Vec<Vec<Value>>,
+    /// The length and companion coefficients of the step that reached each
+    /// grid point after the first.
+    pub steps: Vec<(Value, CompanionCoefficients)>,
 }
 
 /// PSS analysis result with detailed convergence info
@@ -2845,6 +2868,9 @@ impl Engine {
         });
         let mut chord_residual: Option<Value> = None;
         let affine = Self::pss_period_map_is_affine(circuit, config);
+        // A recurrence that states the map's Jacobian exactly needs no
+        // matrix-free refinement.
+        let exact = self.pss_admits_variational(circuit, config);
         // Set once a direct step reuses the mesh's Jacobian. That Jacobian
         // then belongs to an earlier iterate, and a nonlinear map's is
         // returned for Floquet reporting only when the converged state still
@@ -2852,6 +2878,10 @@ impl Engine {
         // with.
         let mut reused_jacobian = false;
         let mut jacobian_origin: Vec<Value> = Vec::new();
+        // The residual a Newton step differentiated at its own state left
+        // from. A step that does not halve it near an orbit meets the
+        // map's convergence noise, which no Jacobian removes.
+        let mut newton_residual: Option<Value> = None;
 
         loop {
             if abort.is_aborted() {
@@ -2874,6 +2904,13 @@ impl Engine {
 
             shooting_state.x_t = x_t;
             shooting_state.compute_residual();
+            if let Some(previous) = newton_residual.take()
+                && !affine
+                && !circuit.steps_to_rounding
+                && shooting_state.residual_norm() > (1.0 - 0.5 * solver.damping) * previous
+            {
+                circuit.steps_to_rounding = true;
+            }
             if config.verbose {
                 log::debug!(
                     "PSS iteration {}: period={:.6e}s residual={:.6e}",
@@ -2969,10 +3006,18 @@ impl Engine {
             drop(waveform);
 
             if let Some(delta) = correction {
-                if chord.is_some() {
-                    chord_residual = Some(shooting_state.residual_norm());
+                if affine || circuit.steps_to_rounding {
+                    if chord.is_some() {
+                        chord_residual = Some(shooting_state.residual_norm());
+                    }
+                    shooting_state.update_x0(&delta, solver.damping);
+                } else {
+                    // A nonlinear map's steps stop at the transient's
+                    // tolerance, and a slowly settling mode's correction
+                    // reads that noise magnified by 1/(1 - lambda). Resolve
+                    // the steps to rounding and traverse the state again.
+                    circuit.steps_to_rounding = true;
                 }
-                shooting_state.update_x0(&delta, solver.damping);
                 iteration += 1;
                 continue;
             }
@@ -3052,26 +3097,28 @@ impl Engine {
             } else {
                 // An affine map's Jacobian is exact at every state, so a
                 // direct step with it needs no matrix-free refinement.
-                let krylov_step =
-                    if !affine && shooting_state.dimension() >= PSS_KRYLOV_STATE_THRESHOLD {
-                        if let Some(jacobian) = preconditioner_jacobian.as_deref() {
-                            self.pss_compute_newton_step_krylov(
-                                circuit,
-                                &shooting_state,
-                                PssJacobianProbe {
-                                    period: detected_period,
-                                    config,
-                                    fd_step: PSS_FD_STEP,
-                                },
-                                jacobian,
-                                abort,
-                            )?
-                        } else {
-                            None
-                        }
+                let krylov_step = if !affine
+                    && !exact
+                    && shooting_state.dimension() >= PSS_KRYLOV_STATE_THRESHOLD
+                {
+                    if let Some(jacobian) = preconditioner_jacobian.as_deref() {
+                        self.pss_compute_newton_step_krylov(
+                            circuit,
+                            &shooting_state,
+                            PssJacobianProbe {
+                                period: detected_period,
+                                config,
+                                fd_step: PSS_FD_STEP,
+                            },
+                            jacobian,
+                            abort,
+                        )?
                     } else {
                         None
-                    };
+                    }
+                } else {
+                    None
+                };
                 let delta = if let Some(delta) = krylov_step {
                     if config.verbose {
                         log::debug!("PSS driven Newton-Krylov step accepted");
@@ -3108,6 +3155,7 @@ impl Engine {
                     preconditioner_jacobian = Some(jacobian);
                     jacobian_origin.clone_from(&shooting_state.x0);
                     reused_jacobian = false;
+                    newton_residual = Some(shooting_state.residual_norm());
                     delta
                 };
                 shooting_state.update_x0(&delta, solver.damping);
@@ -4003,6 +4051,25 @@ impl Engine {
             fd_step,
         } = probe;
         let n = state.dimension();
+        let exact = if matches!(stencil, PssColumnStencil::Central) {
+            self.pss_variational_monodromy(circuit, &state.x0, probe, abort)?
+        } else {
+            None
+        };
+        if let Some(mut jacobian) = exact {
+            for (index, row) in jacobian.iter_mut().enumerate() {
+                row[index] -= 1.0;
+            }
+            let delta = self.pss_solve_with_integral_constants(
+                circuit,
+                state,
+                &jacobian,
+                &state.residual,
+                config,
+                abort,
+            )?;
+            return Ok((delta, jacobian));
+        }
         let columns = self.pss_sensitivity_columns(
             circuit,
             &state.x0,
@@ -4142,6 +4209,12 @@ impl Engine {
             fd_step,
         } = probe;
         let n = state.dimension();
+        if !affine
+            && let Some(monodromy) =
+                self.pss_variational_monodromy(circuit, &state.x0, probe, abort)?
+        {
+            return Ok(monodromy);
+        }
         let columns = self.pss_sensitivity_columns(
             circuit,
             &state.x0,
@@ -4313,7 +4386,10 @@ impl Engine {
         } else {
             self.transient_newton_iteration_budget(false)
         };
-        for _ in 0..iteration_budget {
+        // The previous update's weighted size, for a step resolved to
+        // rounding.
+        let mut previous_update = Value::INFINITY;
+        for iteration in 0..iteration_budget {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -4388,6 +4464,18 @@ impl Engine {
                                             ) + self.voltage_reltol() * old.abs().max(new.abs()))
                             },
                         );
+                    let settled =
+                        !circuit.steps_to_rounding || iteration + 1 == iteration_budget || {
+                            let update =
+                                self.pss_weighted_update(circuit, &new_solution, &proposal);
+                            let settled = update_reaches_rounding(
+                                update,
+                                previous_update,
+                                self.voltage_reltol(),
+                            );
+                            previous_update = update;
+                            settled
+                        };
                     let voltage_converged = physical_update_converged
                         && (update_weights.is_none()
                             || super::transient::select_xyce_transient_update_norm(
@@ -4423,6 +4511,7 @@ impl Engine {
                     if voltage_converged
                         && device_converged
                         && linearized_residual_converged
+                        && settled
                         && self.pss_check_physical_candidate(
                             circuit,
                             matrix,
@@ -4453,6 +4542,31 @@ impl Engine {
         }
 
         Ok(None)
+    }
+
+    /// A Newton update's size in the transient's own tolerance units: the
+    /// largest `|new - old| / (abstol + reltol * max(|old|, |new|))` over
+    /// the coordinates the update test reads, infinite for a non-finite one.
+    fn pss_weighted_update(&self, circuit: &PssCircuit, old: &[Value], new: &[Value]) -> Value {
+        old.iter()
+            .zip(new)
+            .enumerate()
+            .filter(|&(index, _)| !circuit.is_initial_charge_rate(index))
+            .map(|(index, (&old, &new))| {
+                let tolerance = circuit.solution_abstol(
+                    index,
+                    self.voltage_abstol(),
+                    self.current_abstol(),
+                    self.config.convergence_config.charge_abstol,
+                ) + self.voltage_reltol() * old.abs().max(new.abs());
+                let update = (new - old).abs() / tolerance;
+                if update.is_finite() {
+                    update
+                } else {
+                    Value::INFINITY
+                }
+            })
+            .fold(0.0, Value::max)
     }
 
     /// Scale a Newton update so no electrical node a generated model reaches
@@ -5557,6 +5671,7 @@ impl Engine {
                 tr.times.push(t);
                 tr.states.push(self.pss_extract_reactive_state(circuit));
                 tr.solutions.push(solution.clone());
+                tr.steps.push((dt, coeff));
             }
 
             if let Some(result) = &mut result {

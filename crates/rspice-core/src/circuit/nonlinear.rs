@@ -639,6 +639,18 @@ impl CircuitData {
     /// integrator or event state). Switches, diodes without charge storage
     /// and behavioral sources keep none.
     pub(crate) fn has_no_device_charge_history(&self) -> bool {
+        let models = true;
+        #[cfg(feature = "veriloga-builtins-base")]
+        let models = models && !self.has_generated_veriloga_devices();
+        #[cfg(feature = "veriloga")]
+        let models = models && !self.has_veriloga_devices() && !self.has_mixed_signal_hosts();
+        models && self.has_no_native_device_charge_history()
+    }
+
+    /// Whether no native device keeps a charge of its own between steps, as
+    /// [`Self::has_no_device_charge_history`] reads them: Verilog-A models
+    /// are left to the caller.
+    pub(crate) fn has_no_native_device_charge_history(&self) -> bool {
         let semiconductors = self
             .diodes
             .devices
@@ -659,10 +671,6 @@ impl CircuitData {
             && self.jiles_atherton_inductors.is_empty()
             && self.xyce_core_groups.is_empty()
             && !self.has_xspice_devices();
-        #[cfg(feature = "veriloga-builtins-base")]
-        let models = models && !self.has_generated_veriloga_devices();
-        #[cfg(feature = "veriloga")]
-        let models = models && !self.has_veriloga_devices() && !self.has_mixed_signal_hosts();
         semiconductors && models
     }
 
