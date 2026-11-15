@@ -29,8 +29,8 @@ use rspice_design::{
     symbol::{
         PinDrawing, SYMBOL_PIN_LENGTH, SYMBOL_TERMINAL_GRID, SymbolAttribute, SymbolAttributeKind,
         SymbolCurve, SymbolDash, SymbolDocument, SymbolEditorMetadata, SymbolFill, SymbolShape,
-        SymbolStyle, SymbolTextAlign, SymbolTextRotation, SymbolTextSize, pin_drawing,
-        rectangle_corners, symbol_label_sample,
+        SymbolStyle, SymbolTextAlign, SymbolTextRotation, SymbolTextSize, arrow_corners,
+        pin_drawing, rectangle_corners, symbol_label_sample,
     },
 };
 use rspice_design_model::{
@@ -1592,6 +1592,8 @@ fn draw_direction_mark(
 const MARK_LENGTH: f32 = 5.0;
 const MARK_HALF_WIDTH: f32 = 2.0;
 
+/// An arrowhead in symbol units, so it keeps its size against the body at
+/// every zoom and is the mark a placed part and its print draw.
 fn draw_arrow(
     painter: &egui::Painter,
     viewport: SymbolViewport,
@@ -1599,24 +1601,11 @@ fn draw_arrow(
     rotation_quarters: i32,
     color: Color32,
 ) {
-    let tip = viewport.world_to_screen(tip);
-    let (x, y) = match rotation_quarters.rem_euclid(4) {
-        0 => (1.0, 0.0),
-        1 => (0.0, 1.0),
-        2 => (-1.0, 0.0),
-        _ => (0.0, -1.0),
-    };
-    let dir = viewport.screen_direction(x, y);
-    let side = vec2(-dir.y, dir.x);
-    painter.add(Shape::convex_polygon(
-        vec![
-            tip,
-            tip - dir * 12.0 + side * 6.0,
-            tip - dir * 12.0 - side * 6.0,
-        ],
-        color,
-        Stroke::NONE,
-    ));
+    let corners = arrow_corners(tip, rotation_quarters)
+        .into_iter()
+        .map(|corner| viewport.world_to_screen(corner))
+        .collect();
+    painter.add(Shape::convex_polygon(corners, color, Stroke::NONE));
 }
 
 /// Points along `curve` on screen, as many as the view's size needs.

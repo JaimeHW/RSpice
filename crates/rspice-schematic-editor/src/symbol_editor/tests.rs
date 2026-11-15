@@ -185,6 +185,55 @@ fn every_grid_pitch_lands_points_on_its_own_lattice() {
     }
 }
 
+/// An arrowhead is drawn in symbol units: twice the zoom draws it twice as
+/// long, as the body it points along grows.
+#[test]
+fn an_arrowhead_keeps_its_size_against_the_body_at_every_zoom() {
+    use rspice_design::symbol::ARROW_LENGTH;
+
+    let document = SymbolDocument {
+        body: vec![SymbolShape::Arrow {
+            tip: Point::origin(),
+            rotation_quarters: 0,
+        }],
+        ..SymbolDocument::default()
+    };
+    let drawn_length = |zoom: f32| {
+        let viewport = SymbolViewport::new(
+            Rect::from_min_size(Pos2::ZERO, vec2(320.0, 320.0)),
+            zoom,
+            Vec2::ZERO,
+        );
+        let canvas = rspice_ui_kit::raster::render(vec2(320.0, 320.0), |ui, _| {
+            draw_body(
+                &ui.painter().clone(),
+                viewport,
+                &document,
+                Color32::from_rgb(255, 64, 64),
+                &Default::default(),
+                Color32::WHITE,
+            );
+        });
+        // The tip lands at (160, 160) and the head reaches back left of it.
+        (0..160)
+            .filter(|x| {
+                let column = Rect::from_min_max(pos2(*x as f32, 0.0), pos2(*x as f32 + 1.0, 320.0));
+                canvas
+                    .pixels_in(column)
+                    .any(|pixel| pixel != canvas.background())
+            })
+            .count() as f32
+    };
+    for zoom in [2.0, 4.0] {
+        let length = drawn_length(zoom);
+        let wanted = ARROW_LENGTH as f32 * zoom;
+        assert!(
+            (length - wanted).abs() <= 2.0,
+            "at zoom {zoom} the head is {length} px long; {wanted} px is {ARROW_LENGTH} units"
+        );
+    }
+}
+
 /// A run turned to read upward is drawn upward on the canvas and picked
 /// where it is drawn: above the anchor it starts at, not to its right.
 #[test]
