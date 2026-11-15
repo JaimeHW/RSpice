@@ -21,7 +21,6 @@ control_structs/repeat3.sp	library_fragment	control-script driver, no analysis c
 control_structs/repeat_no_one_goto.sp	library_fragment	control-script driver
 control_structs/repeat_one_goto.sp	library_fragment	control-script driver
 control_structs/repeat_s.sp	library_fragment	control-script driver
-delta-sigma/mod1-ct.cir	library_fragment	modulator subcircuit
 pll/f-p-det-d-sub.cir	library_fragment	phase-frequency detector subcircuit
 pll/loop-filter-2.cir	library_fragment	loop-filter subcircuit
 pll/vco_sub_new.cir	library_fragment	VCO subcircuit
@@ -110,7 +109,6 @@ TransmissionLines/ltra4_1_line.sp	executes	BJT-driven LTRA undershoot tail !meas
 TransmissionLines/txl3_1_line.sp	executes	unresolved TXL ringing peak at the deck step !measures
 TransmissionLines/cpl_ibm3.sp	executes	mixed TXL/CPL wavefronts unresolved at the deck step !measures
 various/adder_mos.cir	executes	BSIM3 adder trapezoidal rail tails !measures
-delta-sigma/mod1-ct-test.cir	executes	modulator clock edges unresolved at the deck step !measures
 various/ro_17_4.cir	executes	original unforced 5 ns startup characterization, execution-only; numerical qualification in ro_17_4_startup.cir !control
 various/ro_17_4_startup.cir	executes	explicit initial condition, startup crossings and settled period/rail qualification with original tolerances !control !measures
 xspice/original-examples/analog_models4_transient.deck	executes	one-shot trigger quantized by ngspice outer step !measures
