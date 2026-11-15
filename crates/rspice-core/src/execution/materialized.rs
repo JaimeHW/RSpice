@@ -554,6 +554,19 @@ fn contains_textual_alter(
     let Some(source) = netlist.source_text.as_deref() else {
         return Ok(false);
     };
+    // A line led by `.alter` spells it, so a source that never does has
+    // none, and a byte search settles it without splitting every line.
+    const ALTER: &[u8] = b".alter";
+    if !source
+        .as_bytes()
+        .windows(ALTER.len())
+        .any(|window| window.eq_ignore_ascii_case(ALTER))
+    {
+        if !source.is_empty() {
+            ensure_not_aborted(abort)?;
+        }
+        return Ok(false);
+    }
     for line in source.lines() {
         ensure_not_aborted(abort)?;
         if line
