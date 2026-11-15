@@ -1,0 +1,66 @@
+# Measure gates for xspice/delta-sigma/mod1-ct-test (execution-manifest contract: !measures).
+#
+# Why measures: a first-order continuous-time delta-sigma modulator clocked
+# at 5 MHz, sampling a 13 kHz 0.3 V sine for 5 ms (24,999 decisions). The
+# reference's own bitstream has not converged at the deck step. ngspice-46 at
+# .tran 0.01u (10 ns ceiling) and at 10x refinement (1 ns) place every edge
+# within 0.65 ns of each other up to clock 258; from there 3,034 of the
+# 24,999 bits differ. Between 10x and 40x refinement (first 0.5 ms) only 2
+# of 2,499 bits differ, the first at clock 2,287. RSpice at the deck step
+# follows the refined reference far longer than the deck-step reference does:
+#
+#   pair (5 ms, bit sampled 100 ns after each clock)   first differing bit   bits differing
+#   ngspice deck step vs ngspice 10x                          258                 3,034
+#   RSpice deck step vs ngspice deck step                     258                 2,868
+#   RSpice deck step vs ngspice 10x                         1,118                   254
+#
+# A pointwise comparison samples single bits, so it measures where each run's
+# bitstream wandered, not the modulator. The gates measure what the deck is
+# for, the digit density following the input, plus the early edges, where
+# every decision still agrees, and the integrator swing.
+#
+# The stored table keeps 1,001 of ngspice's 1.3 million rows, one per 25
+# clocks, too sparse to resolve an edge or a half-period mean, so every gate
+# carries ref=: the value measured from ngspice-46 at the deck step at full
+# resolution (.tran 0.01u 5m, trapezoidal, every accepted point). Each
+# tolerance is twice the larger of ngspice's own movement under 10x
+# refinement and RSpice's deviation from ref=, taken over the whole family
+# (every edge or window of it in a full-resolution RSpice run, and the gate
+# run itself):
+#
+#   family                               ngspice 10x moves   RSpice deviates   tolerance
+#   rising edges 1-100                        0.65 ns            0.70 ns         1.5 ns
+#   falling edges 1-100                       0.65 ns            1.00 ns         2.1 ns
+#   half-period means, all 130 windows        1.47e-3            1.46e-3         3.0e-3
+#   mean over 1 us .. 5 ms                    1.12e-5            1.12e-5         2.3e-5
+#   integrator peak |v|                       4.6e-4             8.2e-4          1.7e-3
+#
+# A flipped early decision moves the n-th crossing by a whole 200 ns clock.
+# The half-period windows follow the input's sign, so their means are
+# +/-0.095; one uncompensated decision moves a window's mean by 1e-2, so
+# 3e-3 holds the digit density to a third of a decision per half period.
+v(xmod.adffq)	cross	level=0	dir=rise	n=1	tol=1.5e-09	ref=1.0480000000e-07
+v(xmod.adffq)	cross	level=0	dir=rise	n=2	tol=1.5e-09	ref=5.0480000000e-07
+v(xmod.adffq)	cross	level=0	dir=rise	n=3	tol=1.5e-09	ref=9.0480000000e-07
+v(xmod.adffq)	cross	level=0	dir=rise	n=12	tol=1.5e-09	ref=4.7055000000e-06
+v(xmod.adffq)	cross	level=0	dir=rise	n=50	tol=1.5e-09	ref=2.1904800000e-05
+v(xmod.adffq)	cross	level=0	dir=rise	n=100	tol=1.5e-09	ref=4.3305500000e-05
+v(xmod.adffq)	cross	level=0	dir=fall	n=1	tol=2.1e-09	ref=3.0550000000e-07
+v(xmod.adffq)	cross	level=0	dir=fall	n=2	tol=2.1e-09	ref=7.0480000000e-07
+v(xmod.adffq)	cross	level=0	dir=fall	n=3	tol=2.1e-09	ref=1.1048000000e-06
+v(xmod.adffq)	cross	level=0	dir=fall	n=12	tol=2.1e-09	ref=4.9055000000e-06
+v(xmod.adffq)	cross	level=0	dir=fall	n=50	tol=2.1e-09	ref=2.2104800000e-05
+v(xmod.adffq)	cross	level=0	dir=fall	n=100	tol=2.1e-09	ref=4.3504800000e-05
+v(xmod.adffq)	mean	t0=0.000000e+00	t1=3.846154e-05	tol_abs=0.003	tol_rel=0	ref=9.2079060645e-02
+v(xmod.adffq)	mean	t0=3.846154e-05	t1=7.692308e-05	tol_abs=0.003	tol_rel=0	ref=-9.4099670401e-02
+v(xmod.adffq)	mean	t0=1.192308e-03	t1=1.230769e-03	tol_abs=0.003	tol_rel=0	ref=-9.6649899457e-02
+v(xmod.adffq)	mean	t0=1.230769e-03	t1=1.269231e-03	tol_abs=0.003	tol_rel=0	ref=9.2088633619e-02
+v(xmod.adffq)	mean	t0=2.461538e-03	t1=2.500000e-03	tol_abs=0.003	tol_rel=0	ref=9.1980223772e-02
+v(xmod.adffq)	mean	t0=2.500000e-03	t1=2.538462e-03	tol_abs=0.003	tol_rel=0	ref=-9.5202010383e-02
+v(xmod.adffq)	mean	t0=3.730769e-03	t1=3.769231e-03	tol_abs=0.003	tol_rel=0	ref=-9.5203833166e-02
+v(xmod.adffq)	mean	t0=3.769231e-03	t1=3.807692e-03	tol_abs=0.003	tol_rel=0	ref=9.2008519666e-02
+v(xmod.adffq)	mean	t0=4.923077e-03	t1=4.961538e-03	tol_abs=0.003	tol_rel=0	ref=9.3546300913e-02
+v(xmod.adffq)	mean	t0=4.961538e-03	t1=5.000000e-03	tol_abs=0.003	tol_rel=0	ref=-9.4940833664e-02
+v(xmod.adffq)	mean	t0=1e-6	t1=5e-3	tol_abs=2.3e-05	tol_rel=0	ref=1.3262412647e-05
+v(xmod.outintp)	peak_abs	t0=0	t1=5e-3	tol_abs=0.0017	tol_rel=0	ref=4.5357269645e-01
+v(xmod.outintn)	peak_abs	t0=0	t1=5e-3	tol_abs=0.0017	tol_rel=0	ref=4.5357269648e-01
