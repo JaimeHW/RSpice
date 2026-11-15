@@ -796,7 +796,7 @@ fn parse_netlist_impl(
     // holds no card to rewrite or drop, and without a carriage return its
     // lines rejoin as its own text: it is read as written.
     let read_as_written =
-        !input.as_bytes().contains(&b'\r') && !spells_ignoring_ascii_case(input, b".preprocess");
+        !input.as_bytes().contains(&b'\r') && !spells_dot_command(input, &[".preprocess"]);
     let (preprocess, transformed_input) = if read_as_written {
         (RootPreprocessPolicy::default(), None)
     } else {
@@ -2400,17 +2400,19 @@ struct RootPreprocessPolicy {
     add_resistors_extra_lines: Vec<usize>,
 }
 
-/// Whether `text` spells `word` anywhere, in any ASCII case.
-pub(crate) fn spells_ignoring_ascii_case(text: &str, word: &[u8]) -> bool {
+/// Whether `text` spells any of the dot `commands` anywhere, in any ASCII
+/// case. A dot has one case, so a byte search finds each place one stands and
+/// only there are the commands compared: one pass over the text, however many
+/// commands are asked about.
+pub(crate) fn spells_dot_command(text: &str, commands: &[&str]) -> bool {
+    debug_assert!(commands.iter().all(|command| command.starts_with('.')));
     let bytes = text.as_bytes();
-    let Some(first) = word.first() else {
-        return true;
-    };
-    bytes.iter().enumerate().any(|(start, byte)| {
-        byte.eq_ignore_ascii_case(first)
-            && bytes
-                .get(start..start + word.len())
-                .is_some_and(|window| window.eq_ignore_ascii_case(word))
+    text.match_indices('.').any(|(start, _)| {
+        commands.iter().any(|command| {
+            bytes
+                .get(start..start + command.len())
+                .is_some_and(|window| window.eq_ignore_ascii_case(command.as_bytes()))
+        })
     })
 }
 

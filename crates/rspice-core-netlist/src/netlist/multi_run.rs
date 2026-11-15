@@ -140,9 +140,8 @@ pub fn try_expand_multi_run_with_limits_and_abort(
     // `.enddata`, or is a `.dc` or `.tran` sweep naming a data table, so a
     // source that spells none of them opens none: only its line count is
     // left to check, and that needs no line split.
-    let may_open_runs = [".alter", ".data", ".enddata", ".dc", ".tran"]
-        .into_iter()
-        .any(|word| super::parser::spells_ignoring_ascii_case(source, word.as_bytes()));
+    let may_open_runs =
+        super::parser::spells_dot_command(source, &[".alter", ".data", ".enddata", ".dc", ".tran"]);
     let mut has_multi_run = false;
     if may_open_runs {
         for (index, line) in source.lines().enumerate() {
