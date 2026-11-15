@@ -221,3 +221,56 @@ fn the_name_typed_for_a_placed_pin_renames_it() {
     );
     assert_eq!(session.selected_pin.as_deref(), Some("CLK"));
 }
+
+/// Turning a selection turns each selected pin's side with it, and
+/// mirroring flips it, so every lead still runs from its tip into the body
+/// it belongs to.
+#[test]
+fn turning_or_mirroring_a_selection_carries_each_pins_side() {
+    use rspice_design_model::symbol_pin::SymbolPinSide::{Bottom, Left, Right, Top};
+    let document = SymbolDocument {
+        pins: vec![
+            SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 0))).with_side(Left),
+            SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(40, 0))).with_side(Right),
+        ],
+        body: vec![SymbolShape::Polyline {
+            points: vec![
+                Point::new(-20, -20),
+                Point::new(20, -20),
+                Point::new(20, 20),
+                Point::new(-20, 20),
+            ],
+            closed: true,
+        }],
+        ..SymbolDocument::default()
+    };
+    for (transform, sides) in [
+        (SymbolTransform::Rotate, [Top, Bottom]),
+        (SymbolTransform::RotateCounterClockwise, [Bottom, Top]),
+        (SymbolTransform::MirrorHorizontal, [Right, Left]),
+        (SymbolTransform::MirrorVertical, [Left, Right]),
+    ] {
+        let mut document = document.clone();
+        let mut metadata = SymbolEditorMetadata::for_document(&document);
+        let mut session = SymbolEditorSession::default();
+        session.set_selection(SymbolSelection::all_in(&document));
+        let outcome = apply_edit(
+            &mut session,
+            &mut document,
+            Some(&mut metadata),
+            SymbolEditAction::Transform(transform),
+            SymbolEditCapabilities { edit: true },
+        );
+        assert!(outcome.changed, "{transform:?}");
+        let turned = document.pins.iter().map(|pin| pin.side).collect::<Vec<_>>();
+        assert_eq!(turned, sides, "{transform:?}");
+        for pin in &document.pins {
+            let inner = pin.lead_inner().expect("a placed pin");
+            assert!(
+                inner.x.abs() <= 20 && inner.y.abs() <= 20,
+                "{transform:?}: {} runs its lead to {inner:?}, off the body",
+                pin.name
+            );
+        }
+    }
+}
