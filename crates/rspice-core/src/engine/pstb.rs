@@ -22,12 +22,14 @@
 
 use crate::abort_signal::AbortSignal;
 use crate::analysis::FloquetOrbitKind;
+use crate::analysis::pss::PssResult;
 use crate::analysis::pstb::{PstbAnalyzer, PstbConfig, PstbResult};
 use crate::circuit::CircuitData;
+use crate::identity::AnalysisKind;
 use crate::netlist::{Netlist, PstbCard};
 use crate::{SimulationError, Value};
 
-use super::{Engine, PssOperatingPoint};
+use super::{Engine, PssOperatingPoint, UnsupportedCapabilityError};
 
 /// One authored `.PSTB` run: the qualified Floquet spectrum plus the probe
 /// identity it was measured at.
@@ -235,6 +237,20 @@ impl Engine {
         if operating_point.is_event_orbit() {
             // Every inductor current is a coordinate of an event orbit.
             let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+            if let Some(switch) = uncarried_saltation(&circuit, &operating_point.analysis().result)
+            {
+                return Err(UnsupportedCapabilityError::new(
+                    super::pss_event::EVENT_CARRIER,
+                    format!(
+                        "PSTB cannot read this event orbit's spectrum: switch {switch} changes \
+                         with the circuit's state, and its saltation is not carried by the \
+                         discrete map, so the monodromy PSS differenced is not the orbit's"
+                    ),
+                )
+                .for_analysis_kind(AnalysisKind::Pstb)
+                .for_instance(switch)
+                .into());
+            }
             let inductor = circuit
                 .inductor_probe_names()
                 .into_iter()
@@ -498,6 +514,86 @@ fn remembered_coordinates(
 struct ResolvedPstbProbe {
     canonical_name: String,
     projection: Vec<(usize, Value)>,
+}
+
+/// The first ideal switch whose control a state drives and whose control
+/// crosses its thresholds on the orbit. The transient's step across such a
+/// switch's closing carries only part of its saltation, so the period map's
+/// derivative is not the orbit's and event shooting's monodromy for it is
+/// the differences of that map. A switch voltage sources alone drive changes
+/// at times no perturbation moves and carries no saltation.
+fn uncarried_saltation(circuit: &CircuitData, orbit: &PssResult) -> Option<String> {
+    let names = circuit.node_names_sorted();
+    let mut fixed = vec![false; names.len() + 1];
+    fixed[0] = true;
+    let sources = &circuit.voltage_sources;
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for (&positive, &negative) in sources.node_pos.iter().zip(&sources.node_neg) {
+            let (Some(&p), Some(&n)) = (fixed.get(positive), fixed.get(negative)) else {
+                continue;
+            };
+            if p != n {
+                fixed[positive] = true;
+                fixed[negative] = true;
+                grew = true;
+            }
+        }
+    }
+    let node = |id: usize| -> Option<Vec<Value>> {
+        if id == 0 {
+            return Some(vec![0.0; orbit.time.len()]);
+        }
+        let name = names.get(id - 1)?;
+        let index = orbit
+            .node_names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))?;
+        orbit.waveforms.get(index).map(|wave| wave.values.clone())
+    };
+    // A control whose orbit is not retained is taken to cross.
+    let crosses = |control: Option<Vec<Value>>, threshold: Value, hysteresis: Value| {
+        control.is_none_or(|values| {
+            let low = values.iter().copied().fold(Value::INFINITY, Value::min);
+            let high = values.iter().copied().fold(Value::NEG_INFINITY, Value::max);
+            high > threshold + hysteresis.abs() && low < threshold - hysteresis.abs()
+        })
+    };
+    let voltage = circuit.vswitches.iter().find(|switch| {
+        let driven = fixed.get(switch.ctrl_pos).copied().unwrap_or(false)
+            && fixed.get(switch.ctrl_neg).copied().unwrap_or(false);
+        let control = node(switch.ctrl_pos)
+            .zip(node(switch.ctrl_neg))
+            .map(|(p, n)| p.iter().zip(&n).map(|(p, n)| p - n).collect());
+        switch.smooth == 0.0
+            && !switch.uses_xyce_curve_semantics()
+            && !driven
+            && crosses(control, switch.vt, switch.vh)
+    });
+    if let Some(switch) = voltage {
+        return Some(switch.name.clone());
+    }
+    circuit
+        .iswitches
+        .iter()
+        .find(|switch| {
+            let source = switch.ctrl_source.as_str();
+            let control = orbit
+                .branch_names
+                .iter()
+                .position(|name| {
+                    name.eq_ignore_ascii_case(source)
+                        || name
+                            .strip_prefix("I(")
+                            .and_then(|rest| rest.strip_suffix(')'))
+                            .is_some_and(|inner| inner.eq_ignore_ascii_case(source))
+                })
+                .and_then(|index| orbit.branch_waveforms.get(index))
+                .map(|wave| wave.values.clone());
+            switch.smooth == 0.0 && crosses(control, switch.it, switch.ih)
+        })
+        .map(|switch| switch.name.clone())
 }
 
 fn validate_card(card: &PstbCard) -> Result<(), SimulationError> {

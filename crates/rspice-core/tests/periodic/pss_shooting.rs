@@ -3869,3 +3869,65 @@ l1 x 0 10u
     assert_eq!(stability.probe_instance.to_ascii_lowercase(), "l1");
     assert_eq!(stability.probe_participation, [1.0]);
 }
+
+/// The switched RL with its clock filtered through an RC: the switch's control
+/// is a capacitor's voltage, a state, so each crossing's saltation couples
+/// `V(c)` into `I(l1)`, and the transient's step across the closing carries
+/// only part of it. PSS reports the orbit and its multipliers; PSTB, which
+/// reads the monodromy as a stability margin, names the switch and refuses.
+#[test]
+fn pstb_refuses_an_event_orbit_a_state_controlled_switch_crosses() {
+    let deck = "delayed switched rl
+vdd in 0 dc 1
+vclk clk 0 pulse(0 1 0 1n 1n 499n 1u)
+rc clk c 1k
+cc c 0 100p
+s1 in x c 0 sw1
+rf x 0 10
+l1 x 0 10u
+.model sw1 sw vt=0.5 vh=0 ron=10 roff=1e12
+.end
+";
+    let netlist = Netlist::parse(deck).expect("the delayed switched RL parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let point = engine
+        .run_pss_operating_point_with_abort(
+            &netlist,
+            PssConfig::new(F0).with_tstab(20.0e-6),
+            &NoAbort,
+        )
+        .expect("event shooting solves the delayed switched RL");
+    assert!(
+        point
+            .shooting_state_basis()
+            .first()
+            .is_some_and(|name| name.starts_with("event:"))
+    );
+    let multipliers = &point.analysis().floquet_multipliers;
+    assert!(
+        multipliers
+            .iter()
+            .any(|value| (value.re / (-0.75_f64).exp() - 1.0).abs() < 1.0e-3),
+        "{multipliers:?}"
+    );
+    let card = rspice_core::netlist::PstbCard {
+        probe_instance: "l1".to_owned(),
+        max_harmonics: 4,
+        stability_threshold: 1.0 + 1e-6,
+        detect_subharmonics: true,
+    };
+    match engine.run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort) {
+        Err(SimulationError::UnsupportedCapability(error)) => {
+            assert_eq!(error.capability, "analysis.periodic.event_carrier");
+            assert_eq!(error.instance.as_deref(), Some("S1"));
+            assert!(
+                error
+                    .detail
+                    .contains("its saltation is not carried by the discrete map"),
+                "{}",
+                error.detail
+            );
+        }
+        other => panic!("PSTB reads a spectrum whose saltation is partial: {other:?}"),
+    }
+}
