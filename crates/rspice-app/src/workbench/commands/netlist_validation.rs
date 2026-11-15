@@ -1,15 +1,17 @@
 //! Validating and formatting the visible deck, answered for the code
 //! feature's requests.
 //!
-//! Validation hands the manual deck to the runs controller, and a failed
-//! acknowledgement drops the simulation preflight. No feature context is lent
-//! the runs controller yet, so the code is held here in the shell only until
-//! the runs controller is lent to a feature context. Its long-term home is
-//! the runs tier: the manual-deck handoff is a runs fact. Both bodies moved
+//! Validation hands the manual deck to the run controller the feature's
+//! context lends, over the run tier's host built from that context, and a
+//! failed acknowledgement drops the simulation preflight. Both bodies moved
 //! verbatim from the netlist workflow, and are written over its parts.
 
+use rspice_app_code::workbench::slots::code::{netlist_shown_in, veriloga_compilation_in};
+
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::code::CodeFeature;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
 use crate::workbench::workflows::netlist_workflow::{
     acknowledge_canonical_dependencies, acknowledge_canonical_validation,
     invalidate_canonical_validation, normalize_owned_netlist_whitespace, record_validation_failure,
@@ -18,75 +20,81 @@ use crate::workbench::workflows::netlist_workflow::{
 /// Validate and retain the exact visible manual-deck snapshot, including its
 /// sealed dependency closure and execution-target contract. A later Run must
 /// match this one-shot authorized snapshot byte for byte.
-pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
+pub(crate) fn validate_visible_netlist_source(cx: &mut Cx<'_, CodeFeature>) -> bool {
     use crate::state::NetlistValidationReceipt;
     use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 
-    if app.state.code.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
-        app.state
+    if cx.state.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
+        cx.wb
             .prompt("A revision comparison is read-only and cannot be validated.");
         return false;
     }
-    if app.state.code.netlist.active_dependency_identity.is_some() {
-        let message = app
-            .state
-            .workbench
+    if cx.state.netlist.active_dependency_identity.is_some() {
+        let message = cx
+            .wb
             .messages()
             .text(crate::workbench::MessageId::NetlistRootValidationRequired);
-        app.state.prompt(message);
+        cx.wb.prompt(message);
         return false;
     }
-    if app.state.code.netlist.active_document == ActiveNetlistDocument::Generated
-        && (app.state.model.netlist_artifacts.generation_error.is_some()
-            || app.state.model.netlist_artifacts.generated_input_digest
-                != app
-                    .state
-                    .model
-                    .netlist_artifacts
-                    .current_generation_input_digest)
+    if cx.state.netlist.active_document == ActiveNetlistDocument::Generated
+        && (cx.model.netlist_artifacts.generation_error.is_some()
+            || cx.model.netlist_artifacts.generated_input_digest
+                != cx.model.netlist_artifacts.current_generation_input_digest)
     {
-        let error = app
-            .state
+        let error = cx
             .model
             .netlist_artifacts
             .generation_error
             .clone()
             .unwrap_or_else(|| "Generated netlist is stale.".to_owned());
-        app.state.model.netlist_artifacts.validation = None;
-        record_validation_failure(&mut app.state.model, &error);
-        app.state.model.netlist_artifacts.validation_error = Some(error);
+        cx.model.netlist_artifacts.validation = None;
+        record_validation_failure(cx.model, &error);
+        cx.model.netlist_artifacts.validation_error = Some(error);
         return false;
     }
 
-    let visible_digest =
-        crate::state::content_digest(&app.state.model.simulation.source.netlist_content);
-    match app
-        .simulation_controller
-        .validate_manual_deck_document(&app.state)
-    {
+    let visible_digest = crate::state::content_digest(&cx.model.simulation.source.netlist_content);
+    let validated = {
+        let code = RunCodeFacts {
+            veriloga_compilation: veriloga_compilation_in(&cx.state.code_workspace),
+            netlist_shown: netlist_shown_in(&cx.state.netlist),
+        };
+        let host = RunView::new(
+            &mut *cx.model,
+            &mut *cx.runs,
+            &mut *cx.wb,
+            &*cx.platform,
+            &mut cx.peers,
+            code,
+            cx.commands,
+        );
+        cx.handles
+            .run_controller
+            .validate_manual_deck_document(&host)
+    };
+    match validated {
         Ok(metadata) => {
             if let Err(error) = acknowledge_canonical_dependencies(
-                &mut app.state.model,
-                &mut app.state.code.netlist,
-                &mut app.state.code.code_workspace.include_resolutions,
+                cx.model,
+                &mut cx.state.netlist,
+                &mut cx.state.code_workspace.include_resolutions,
                 &metadata.sealed_source_dependencies,
             ) {
-                app.invalidate_simulation_preflight();
-                app.state.model.netlist_artifacts.validation = None;
-                record_validation_failure(&mut app.state.model, &error);
-                app.state.model.netlist_artifacts.validation_error = Some(error);
+                invalidate_preflight(cx);
+                cx.model.netlist_artifacts.validation = None;
+                record_validation_failure(cx.model, &error);
+                cx.model.netlist_artifacts.validation_error = Some(error);
                 return false;
             }
-            if let Err(error) =
-                acknowledge_canonical_validation(&mut app.state.model, &mut app.state.code.netlist)
-            {
-                app.invalidate_simulation_preflight();
-                app.state.model.netlist_artifacts.validation = None;
-                record_validation_failure(&mut app.state.model, &error);
-                app.state.model.netlist_artifacts.validation_error = Some(error);
+            if let Err(error) = acknowledge_canonical_validation(cx.model, &mut cx.state.netlist) {
+                invalidate_preflight(cx);
+                cx.model.netlist_artifacts.validation = None;
+                record_validation_failure(cx.model, &error);
+                cx.model.netlist_artifacts.validation_error = Some(error);
                 return false;
             }
-            app.state.model.netlist_artifacts.validation = Some(NetlistValidationReceipt {
+            cx.model.netlist_artifacts.validation = Some(NetlistValidationReceipt {
                 visible_content_digest: visible_digest,
                 executable_source_digest: metadata.source_digest,
                 prepared_snapshot_digest: metadata.snapshot_digest,
@@ -94,8 +102,8 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
                 task_count: metadata.task_count,
                 advisory_count: metadata.advisories.len(),
             });
-            app.state.model.netlist_artifacts.validation_error = None;
-            app.state.record(
+            cx.model.netlist_artifacts.validation_error = None;
+            cx.model.record(
                 LogSeverity::Info,
                 LogSource::Netlist,
                 format!(
@@ -108,10 +116,10 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
         }
         Err(error) => {
             let message = error.to_string();
-            invalidate_canonical_validation(&mut app.state.model, &mut app.state.code.netlist);
-            app.state.model.netlist_artifacts.validation = None;
-            record_validation_failure(&mut app.state.model, &message);
-            app.state.model.netlist_artifacts.validation_error = Some(message);
+            invalidate_canonical_validation(cx.model, &mut cx.state.netlist);
+            cx.model.netlist_artifacts.validation = None;
+            record_validation_failure(cx.model, &message);
+            cx.model.netlist_artifacts.validation_error = Some(message);
             false
         }
     }
@@ -122,69 +130,66 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
 /// text ends with a line end. An include is formatted only when it parses
 /// without errors, and the deck only when it validates, after validating
 /// it when its validation is not current.
-pub(crate) fn format_owned_netlist(app: &mut RSpiceApp) {
+pub(crate) fn format_owned_netlist(cx: &mut Cx<'_, CodeFeature>) {
     if !crate::workbench::documents::netlist_document::active_netlist_source_is_editable_in(
-        &app.state.model,
-        &app.state.code.netlist,
+        cx.model,
+        &cx.state.netlist,
     ) {
         return;
     }
-    let source = app.state.model.simulation.source.netlist_content.clone();
-    let dependency_document = app.state.code.netlist.active_dependency_identity.is_some();
+    let source = cx.model.simulation.source.netlist_content.clone();
+    let dependency_document = cx.state.netlist.active_dependency_identity.is_some();
     if dependency_document {
-        let has_errors = app.state.code.netlist.diagnostics.iter().any(|diagnostic| {
+        let has_errors = cx.state.netlist.diagnostics.iter().any(|diagnostic| {
             diagnostic.is_current()
                 && diagnostic.severity
                     == crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
         });
         if has_errors {
-            app.state
+            cx.wb
                 .prompt("Fix the include file's syntax errors before formatting it.");
             return;
         }
         let formatted = normalize_owned_netlist_whitespace(&source);
         if formatted == source {
-            app.state.prompt("The include file is already formatted.");
+            cx.wb.prompt("The include file is already formatted.");
         } else if crate::workbench::documents::netlist_document::replace_owned_dependency_source(
-            &mut app.state.model,
-            &mut app.state.code.netlist,
-            &mut app.state.code.netlist_open_documents,
+            cx.model,
+            &mut cx.state.netlist,
+            &mut cx.state.netlist_open_documents,
             formatted,
         ) {
-            app.state
+            cx.wb
                 .prompt("Formatted the include file; the top-level deck needs validating again.");
         }
         return;
     }
     let digest = crate::state::content_digest(&source);
-    let validation_current = app
-        .state
-        .model
-        .netlist_artifacts
-        .validation
-        .as_ref()
-        .is_some_and(|receipt| {
-            receipt.visible_content_digest == digest
-                && receipt.project_revision
-                    == app.state.model.workspace.content.project.revision().get()
-        });
+    let validation_current =
+        cx.model
+            .netlist_artifacts
+            .validation
+            .as_ref()
+            .is_some_and(|receipt| {
+                receipt.visible_content_digest == digest
+                    && receipt.project_revision
+                        == cx.model.workspace.content.project.revision().get()
+            });
     if !validation_current {
-        validate_visible_netlist_source(app);
+        validate_visible_netlist_source(cx);
     }
-    let validation_current = app
-        .state
-        .model
-        .netlist_artifacts
-        .validation
-        .as_ref()
-        .is_some_and(|receipt| {
-            receipt.visible_content_digest == digest
-                && receipt.project_revision
-                    == app.state.model.workspace.content.project.revision().get()
-        });
+    let validation_current =
+        cx.model
+            .netlist_artifacts
+            .validation
+            .as_ref()
+            .is_some_and(|receipt| {
+                receipt.visible_content_digest == digest
+                    && receipt.project_revision
+                        == cx.model.workspace.content.project.revision().get()
+            });
     if !validation_current {
-        let message = app
-            .state
+        let message = cx
             .model
             .netlist_artifacts
             .validation_error
@@ -192,27 +197,36 @@ pub(crate) fn format_owned_netlist(app: &mut RSpiceApp) {
             .unwrap_or_else(|| "the netlist does not validate".to_owned());
         // Validation has already recorded why it failed; this answers the
         // format gesture.
-        app.state
+        cx.wb
             .prompt(format!("The netlist was not formatted: {message}"));
         return;
     }
 
     let formatted = normalize_owned_netlist_whitespace(&source);
     if formatted == source {
-        app.state.prompt("The netlist is already formatted.");
+        cx.wb.prompt("The netlist is already formatted.");
         return;
     }
     if crate::workbench::documents::netlist_document::replace_owned_source(
-        &mut app.state.model,
-        &mut app.state.code.netlist,
-        &mut app.state.code.netlist_open_documents,
-        &mut app.state.workbench,
+        cx.model,
+        &mut cx.state.netlist,
+        &mut cx.state.netlist_open_documents,
+        cx.wb,
         formatted,
     ) {
-        app.state
+        cx.wb
             .prompt("Formatted the netlist; it needs validating again.");
     } else {
-        app.state
+        cx.wb
             .prompt("The netlist changed before formatting finished. Review it and try again.");
     }
+}
+
+/// Drop the simulation preflight, as an acknowledgement that failed leaves
+/// it stale.
+fn invalidate_preflight(cx: &mut Cx<'_, CodeFeature>) {
+    rspice_app_runs::workbench::preflight::invalidate(
+        &mut cx.runs.preflight,
+        &mut *cx.handles.run_controller,
+    );
 }

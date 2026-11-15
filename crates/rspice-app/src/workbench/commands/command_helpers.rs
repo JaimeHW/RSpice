@@ -354,9 +354,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
                 app.state.prompt(error);
             }
         }
-        CodeRequest::ValidateCodeDocument => {
-            super::netlist_validation::validate_visible_netlist_source(app);
-        }
+        CodeRequest::ValidateCodeDocument => app.validate_visible_netlist(),
         CodeRequest::ManageSourceDocument => {
             if let Err(error) = source_document::open_source_document_dialog_in(
                 app.state.workbench.workspace,
@@ -635,9 +633,7 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
         CodeRequest::BeginNetlistProfileReview => {
             app.state.begin_owned_netlist_profile_review();
         }
-        CodeRequest::FormatNetlistDocument => {
-            super::netlist_validation::format_owned_netlist(app);
-        }
+        CodeRequest::FormatNetlistDocument => app.format_owned_netlist(),
         CodeRequest::ImportDroppedNetlist(dropped) => {
             app.state.import_dropped_netlist(dropped);
         }

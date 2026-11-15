@@ -776,6 +776,7 @@ mod tests {
         use crate::state::SimulationRunIntent;
         use crate::workbench::RSpiceApp;
         use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
+        use crate::workbench::features::cx;
         use crate::workbench::framework::command_registry::{CommandAvailability, ids};
         use crate::workbench::state::Workspace;
 
@@ -800,7 +801,7 @@ mod tests {
             None,
             "standalone.cir"
         ));
-        assert!(validate_visible_netlist_source(&mut app));
+        assert!(validate_visible_netlist_source(&mut cx(&mut app)));
         app.state.workbench.workspace = Workspace::Netlist;
         assert_eq!(
             app.command_availability(ids::RUN_SIMULATION),

@@ -23,6 +23,7 @@ use crate::workbench::state::pane_focus::Pane;
 
 // The shell's submodules and re-exports, as this code saw them when it lived
 // in `workbench.rs` itself.
+use super::commands::netlist_validation;
 use super::features;
 use super::framework::dialogs::DialogKey;
 use super::framework::requests::{
@@ -287,6 +288,17 @@ impl RSpiceApp {
     /// Have the code feature dry-run the Automation workflow, in its context.
     pub(in crate::workbench) fn dry_run_automation_workflow(&mut self) {
         CodeFeature::dry_run_automation_workflow(&mut features::cx(self));
+    }
+
+    /// Have the code feature validate the deck its page shows, in its
+    /// context.
+    pub(in crate::workbench) fn validate_visible_netlist(&mut self) {
+        netlist_validation::validate_visible_netlist_source(&mut features::cx(self));
+    }
+
+    /// Have the code feature format the netlist it owns, in its context.
+    pub(in crate::workbench) fn format_owned_netlist(&mut self) {
+        netlist_validation::format_owned_netlist(&mut features::cx(self));
     }
 
     /// Have the code feature follow the Automation run in flight, in its
@@ -2347,6 +2359,7 @@ mod tests {
     fn the_run_history_primary_runs_the_netlist_deck_on_the_netlist_workspace() {
         use crate::state::SimulationRunIntent;
         use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
+        use crate::workbench::features::cx;
 
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
@@ -2370,7 +2383,7 @@ mod tests {
             None,
             "standalone.cir"
         ));
-        assert!(validate_visible_netlist_source(&mut app));
+        assert!(validate_visible_netlist_source(&mut cx(&mut app)));
         let (enabled, primary) = run_history_over_the_netlist(&ctx, &mut app);
         assert!(enabled, "a validated deck enables the primary");
 

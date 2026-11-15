@@ -5,6 +5,7 @@
 
 use crate::workbench::FolderListPreference;
 use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
+use crate::workbench::features::cx;
 use crate::workbench::workflows::netlist_workflow::fixtures::seed_owned_strategy;
 use crate::workbench::workflows::netlist_workflow::fixtures::vendor_profiles::{cases, source};
 use crate::workbench::workflows::netlist_workflow::{
@@ -27,7 +28,7 @@ fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding()
         app.state
             .apply_imported_netlist(source.to_owned(), None, "standalone.cir")
     );
-    assert!(validate_visible_netlist_source(&mut app));
+    assert!(validate_visible_netlist_source(&mut cx(&mut app)));
     assert!(app.state.model.netlist_artifacts.validation.is_some());
     assert!(
         app.state
@@ -70,7 +71,7 @@ fn validated_owned_source_can_run_before_external_source_synchronization() {
         Some(edited_digest)
     );
 
-    assert!(validate_visible_netlist_source(&mut app));
+    assert!(validate_visible_netlist_source(&mut cx(&mut app)));
     assert_eq!(app.manual_deck_run_block_reason(), None);
 }
 
@@ -95,7 +96,7 @@ fn validation_publishes_exact_direct_and_transitive_dependency_closure() {
         app.state
             .apply_imported_netlist(source.to_owned(), Some(root.clone()), "root.cir")
     );
-    assert!(validate_visible_netlist_source(&mut app));
+    assert!(validate_visible_netlist_source(&mut cx(&mut app)));
 
     let document = app
         .state
@@ -153,7 +154,7 @@ fn validation_distinguishes_inline_lib_sections_from_external_lib_paths() {
         app.state
             .apply_imported_netlist(source.to_owned(), Some(root), "root.cir")
     );
-    assert!(validate_visible_netlist_source(&mut app));
+    assert!(validate_visible_netlist_source(&mut cx(&mut app)));
 
     let document = app
         .state
@@ -205,7 +206,7 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
     app.state.code.netlist.active_document_initialized = true;
     app.state.model.simulation.source.netlist_content = parameter_source.to_owned();
 
-    assert!(validate_visible_netlist_source(&mut app));
+    assert!(validate_visible_netlist_source(&mut cx(&mut app)));
     let parameter_document = app
         .state
         .model
@@ -248,7 +249,7 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
     app.state.code.netlist.active_document_initialized = true;
     app.state.model.simulation.source.netlist_content = include_source.to_owned();
 
-    assert!(validate_visible_netlist_source(&mut app));
+    assert!(validate_visible_netlist_source(&mut cx(&mut app)));
     let include_document = app
         .state
         .model
@@ -285,7 +286,7 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
         app.state
             .apply_imported_netlist(authored.to_owned(), Some(path.clone()), "owned.cir")
     );
-    assert!(validate_visible_netlist_source(&mut app));
+    assert!(validate_visible_netlist_source(&mut cx(&mut app)));
     std::fs::write(&path, external).expect("publish external edit");
 
     assert!(!save_owned_netlist_source(
@@ -359,7 +360,7 @@ fn validation_resolves_an_include_only_a_library_folder_holds() {
             .apply_imported_netlist(source.to_owned(), Some(root), "root.cir")
     );
     assert!(
-        !validate_visible_netlist_source(&mut app),
+        !validate_visible_netlist_source(&mut cx(&mut app)),
         "nothing the deck is searched from holds device.inc"
     );
 
@@ -368,7 +369,7 @@ fn validation_resolves_an_include_only_a_library_folder_holds() {
         .preferences
         .set_folders(FolderListPreference::LibraryFolders, vec![shared.clone()])
         .expect("a full path");
-    assert!(validate_visible_netlist_source(&mut app));
+    assert!(validate_visible_netlist_source(&mut cx(&mut app)));
     let document = app
         .state
         .model
@@ -426,7 +427,7 @@ fn vendor_admitted_decks_have_explicit_preparation_outcomes() {
         descriptor.imported_dialect = Some(profile.source_dialect());
         descriptor.execution_profile = Some(profile);
         descriptor.compatibility_reviewed = true;
-        let ready = validate_visible_netlist_source(&mut app);
+        let ready = validate_visible_netlist_source(&mut cx(&mut app));
         let error = app
             .state
             .model
