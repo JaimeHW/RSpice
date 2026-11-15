@@ -320,7 +320,7 @@ mod tests {
                     egui::Sense::click(),
                 );
                 let response = ui.interact(rect, canvas, egui::Sense::click());
-                report_engineering_canvas_focus(&response, ViewType::Symbol);
+                report_engineering_canvas_focus(&response, Some(ViewType::Symbol));
             });
         };
         let focused = |id| ctx.memory(|memory| memory.focused() == Some(id));
