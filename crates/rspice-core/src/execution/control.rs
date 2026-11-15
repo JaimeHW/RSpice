@@ -553,6 +553,31 @@ impl ControlSession<'_> {
         &self.variables
     }
 
+    /// Set shell variables before the script runs, as a `set` with these
+    /// arguments at its top would: what ngspice's spinit and `.spiceinit`
+    /// preset. The host takes the same `set` command for the variables that
+    /// steer it.
+    pub fn preset_shell(&mut self, arguments: &str) -> Result<(), ControlError> {
+        self.apply_set(arguments, 0)
+    }
+
+    fn apply_set(&mut self, arguments: &str, line: usize) -> Result<(), ControlError> {
+        for assignment in shell::assignments(arguments, line)? {
+            let name = assignment.name.to_ascii_lowercase();
+            // ngspice records no variable of these (frontend/options.c:377
+            // cp_usrset, US_DONTRECORD): they set the current plot and its
+            // labels, which the host keeps.
+            if !matches!(
+                name.as_str(),
+                "curplot" | "curplotname" | "curplottitle" | "curplotdate"
+            ) {
+                self.shell
+                    .insert(name, ShellValue::assigned(&assignment.value));
+            }
+        }
+        Ok(())
+    }
+
     /// The status an executed `quit` requested, or `None` when the script
     /// ended without one. ngspice exits a batch run with this status.
     pub fn quit_status(&self) -> Option<i32> {
@@ -865,22 +890,7 @@ impl ControlSession<'_> {
                     // cp_vset); the host still sees `set` and `unset`, for
                     // the variables that steer it.
                     match name.as_str() {
-                        "set" | "setcs" => {
-                            for assignment in shell::assignments(&arguments, line)? {
-                                let name = assignment.name.to_ascii_lowercase();
-                                // ngspice records no variable of these
-                                // (frontend/options.c:377 cp_usrset,
-                                // US_DONTRECORD): they set the current
-                                // plot and its labels, which the host keeps.
-                                if !matches!(
-                                    name.as_str(),
-                                    "curplot" | "curplotname" | "curplottitle" | "curplotdate"
-                                ) {
-                                    self.shell
-                                        .insert(name, ShellValue::assigned(&assignment.value));
-                                }
-                            }
-                        }
+                        "set" | "setcs" => self.apply_set(&arguments, line)?,
                         "unset" => {
                             for word in shell::words(&arguments) {
                                 self.shell.remove(&word.text.to_ascii_lowercase());
@@ -1063,11 +1073,31 @@ impl ControlSession<'_> {
         })
     }
 
+    /// A scalar parameter as `$&name` reads it: the real part of its one
+    /// element, in the words variable.c:51 `cp_varwl` prints a real in.
+    fn parameter_word(
+        &self,
+        name: &str,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ControlError> {
+        let value = eval_expression_complex_with_abort(name, &self.variables, abort)
+            .map_err(|error| ControlError::evaluation(line, error))?;
+        if !value.re.is_finite() {
+            return Err(ControlError::new(
+                line,
+                ControlErrorKind::Expression,
+                format!("variable '{name}' is nonfinite"),
+            ));
+        }
+        Ok(shell::real_word(value.re, &self.shell))
+    }
+
     /// `$&name` reads a vector (frontend/options.c:132 `cp_enqvec_as_var`):
-    /// one `%G` word per element's real part, separated by spaces, as
-    /// variable.c `cp_varwl` renders the list. A scalar `let` stays a
-    /// session parameter and expands as `$name` does; the host answers for
-    /// every vector it keeps.
+    /// one word per element's real part, separated by spaces, as variable.c
+    /// `cp_varwl` renders the list. A scalar `let` stays a session parameter
+    /// and reads as the one-element vector it is in ngspice; the host
+    /// answers for every vector it keeps.
     fn vector_words(
         &self,
         name: &str,
@@ -1083,7 +1113,7 @@ impl ControlSession<'_> {
         let scalar = if vector {
             None
         } else {
-            match self.parameter_text(name, line, abort) {
+            match self.parameter_word(name, line, abort) {
                 Ok(text) => return Ok(text),
                 Err(error) if error.kind == ControlErrorKind::Expression => Some(error),
                 Err(error) => return Err(error),

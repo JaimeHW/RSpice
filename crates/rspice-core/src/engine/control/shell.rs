@@ -3,6 +3,7 @@
 
 use crate::Value;
 use crate::control_protocol::{ControlError, ControlErrorKind};
+use std::collections::BTreeMap;
 
 fn syntax(line: usize, message: impl Into<String>) -> ControlError {
     ControlError::new(line, ControlErrorKind::Syntax, message)
@@ -350,6 +351,22 @@ pub(crate) fn percent_e(value: Value, precision: usize) -> String {
 /// in exponent form below 1e-4 or from 1e6 on, without trailing zeros.
 pub(crate) fn percent_g(value: Value) -> String {
     percent_g_with(value, 6, true)
+}
+
+/// A real variable's word (frontend/variable.c:51 `cp_varwl`): `%G`, or
+/// `%.*g` to `csnumprec` digits while that variable is set above zero, as
+/// cp_getvar reads it as a number (variable.c:757 truncates a real).
+pub(crate) fn real_word(value: Value, shell: &BTreeMap<String, ShellValue>) -> String {
+    let digits = match shell.get("csnumprec") {
+        Some(ShellValue::Word(text)) => number_prefix(text)
+            .filter(|digits| *digits >= 1.0 && *digits <= f64::from(i32::MAX))
+            .map(|digits| digits as usize),
+        _ => None,
+    };
+    match digits {
+        Some(digits) => percent_g_with(value, digits, false),
+        None => percent_g(value),
+    }
 }
 
 /// C's `%.*g` (`%.*G` when `upper`): `precision` significant digits, in

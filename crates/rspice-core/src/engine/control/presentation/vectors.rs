@@ -754,7 +754,8 @@ impl ControlCircuit {
 
     /// `$&name`: the vector a `let` or dataset vector expression evaluates
     /// to, as ngspice's words for it (frontend/options.c:132
-    /// `cp_enqvec_as_var`): each element's real part, printed `%G`.
+    /// `cp_enqvec_as_var`): each element's real part, printed `%G`, or to
+    /// `csnumprec` digits while that is set.
     pub(in crate::engine::control) fn expand_vector(
         &self,
         name: &str,
@@ -776,7 +777,7 @@ impl ControlCircuit {
                 value
                     .samples
                     .iter()
-                    .map(|sample| crate::engine::control::shell::percent_g(sample.re))
+                    .map(|sample| crate::engine::control::shell::real_word(sample.re, &self.shell))
                     .collect(),
             )),
             Err(error)

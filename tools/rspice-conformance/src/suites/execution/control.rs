@@ -9,7 +9,9 @@ use rspice_core::engine::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlExecutionError,
     ControlPresentationKind,
 };
-use rspice_core::execution::control::{ControlErrorKind, ControlLimits, ControlProgram};
+use rspice_core::execution::control::{
+    ControlCommand, ControlErrorKind, ControlLimits, ControlProgram,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -297,6 +299,20 @@ impl ExecutionRunner {
                 })?;
             let mut session = program.start(netlist.params.clone());
             let mut circuit = ControlCircuit::new(netlist).map_err(control_error)?;
+            // The oracle ran ngspice with `set csnumprec=17` at the top of
+            // the script (oracle/control_capture.rs:133), so its `$&` gave
+            // 17 digits; the session and the host take the same `set`.
+            let preset = ControlCommand {
+                line: 0,
+                name: "set".into(),
+                arguments: format!("csnumprec={}", contract.ngspice_csnumprec),
+            };
+            session
+                .preset_shell(&preset.arguments)
+                .map_err(|error| control_error(error.into()))?;
+            circuit
+                .execute(&engine, &preset, session.variables(), &abort)
+                .map_err(control_error)?;
             let mut completed = 0usize;
             while let Some(command) = session
                 .next_command(&mut circuit.evaluator(&engine), &abort)

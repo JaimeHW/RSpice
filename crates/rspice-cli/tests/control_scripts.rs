@@ -239,7 +239,7 @@ fn complex_control_scalars_reach_print_publication_without_projection() {
     std::fs::write(
         &deck,
         "complex control\nV1 in 0 1\nR1 in 0 1k\n.control\n\
-         let z = 2-3j\nif 1e-300j\nop\nend\nprint z 2*$&z\n.endc\n.end\n",
+         let z = 2-3j\nif 1e-300j\nop\nend\nprint z 2*$z\n.endc\n.end\n",
     )
     .unwrap();
     passed(&run(&deck, &dir.join("result.csv"), &[]));
@@ -442,13 +442,15 @@ fn original_memristor_control_script_publishes_each_time_grid_and_xy_plot() {
     }
     let resistance = document(&dir.join("result.control-003.json"));
     let current = document(&dir.join("result.control-005.json"));
-    for (index, frequency) in [1.4e8, 1e8, 1.1e8].iter().enumerate() {
+    // The traces stop at stime/1.4, stime and stime/1.1 as `$&` gives them,
+    // to the six digits of ngspice's `%G`.
+    for (index, stop) in [7.14286e-9, 1e-8, 9.09091e-9].iter().enumerate() {
         let trace = &resistance["traces"][index];
         assert_eq!(trace["y"]["unit"], "ohm");
         let last = trace["x"]["samples"].as_array().unwrap().last().unwrap()[0]
             .as_f64()
             .unwrap();
-        assert!((last * frequency - 1.0).abs() < 1e-12);
+        assert!((last / stop - 1.0).abs() < 1e-12);
         let trace = &current["traces"][index];
         assert_eq!(trace["x"]["dataset"], trace["y"]["dataset"]);
         assert_eq!(trace["x"]["unit"], "V");

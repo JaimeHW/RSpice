@@ -76,17 +76,19 @@ fn control_original_scripts_preserve_every_ordered_analysis_and_alteration() {
             "tran", "alter", "tran", "alter", "tran", "plot", "settype", "plot", "plot", "plot"
         ]
     );
-    for (command, factor) in commands
+    // `$&` gives stime/1.1 and stime/1.4, and a hundredth of each, as
+    // ngspice prints a real: `%G`, six digits.
+    for (command, (step, stop)) in commands
         .iter()
         .filter(|command| command.name == "tran")
-        .zip([1.0, 1.1, 1.4])
+        .zip([
+            ("1E-10", "1E-08"),
+            ("9.09091E-11", "9.09091E-09"),
+            ("7.14286E-11", "7.14286E-09"),
+        ])
     {
         let parts = command.arguments.split_whitespace().collect::<Vec<_>>();
-        let step: f64 = parts[0].parse().unwrap();
-        let stop: f64 = parts[1].parse().unwrap();
-        assert!((stop * factor / 1e-8 - 1.0).abs() < 1e-14);
-        assert!((stop / step - 100.0).abs() < 1e-12);
-        assert_eq!(parts[2], "uic");
+        assert_eq!(parts, [step, stop, "uic"]);
     }
     for (command, expected_frequency) in commands
         .iter()
@@ -99,6 +101,29 @@ fn control_original_scripts_preserve_every_ordered_analysis_and_alteration() {
         assert_eq!(parts[3].parse::<f64>().unwrap(), 3.0);
         assert!((parts[4].parse::<f64>().unwrap() / expected_frequency - 1.0).abs() < 1e-14);
     }
+}
+
+/// `$&` gives a real `%G`, six digits, unless `csnumprec` says otherwise;
+/// a preset `csnumprec` counts as a `set` at the top of the script.
+#[test]
+fn a_preset_shell_variable_counts_as_a_set_at_the_top_of_the_script() {
+    let source = "preset\nV1 1 0 1\n.control\nlet x = 1/3\ntran 1u $&x\n.endc\n.end\n";
+    let program =
+        ControlProgram::parse_deck_with_abort(source, ControlLimits::default(), &NoAbort).unwrap();
+    let netlist = Netlist::parse(program.declarative_source()).unwrap();
+    let first = |preset: Option<&str>| {
+        let mut session = program.start(netlist.params.clone());
+        if let Some(preset) = preset {
+            session.preset_shell(preset).unwrap();
+        }
+        session
+            .next_command(&mut ParameterScalarEvaluator, &NoAbort)
+            .unwrap()
+            .unwrap()
+            .arguments
+    };
+    assert_eq!(first(None), "1u 0.333333");
+    assert_eq!(first(Some("csnumprec=17")), "1u 0.33333333333333331");
 }
 
 #[test]
@@ -179,7 +204,7 @@ fn quit_records_the_status_ngspice_reads_with_percent_d_and_stops_the_script() {
         ("quit noask", Some(0)),
         ("quit -2", Some(-2)),
         ("quit 3x", Some(3)),
-        // The substituted scalar is `4.00000000000000000e0`; %d reads 4.
+        // The substituted scalar is `4`, as ngspice prints it with %G.
         ("quit $&code", Some(4)),
         ("echo no quit", None),
     ] {

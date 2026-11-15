@@ -125,10 +125,12 @@ fn original_memristor_script_changes_frequency_and_restarts_each_uic_analysis() 
     });
     let (circuit, presentation) = drive(source, &engine, |_| {});
     assert_eq!(circuit.datasets().len(), 3);
-    for (index, (dataset, frequency)) in circuit
+    // Each stop time is stime/1.1 or stime/1.4 as `$&` gives it, to the six
+    // digits of ngspice's `%G`.
+    for (index, (dataset, (frequency, stop))) in circuit
         .datasets()
         .iter()
-        .zip([1e8, 1.1e8, 1.4e8])
+        .zip([(1e8, 1e-8), (1.1e8, 9.09091e-9), (1.4e8, 7.14286e-9)])
         .enumerate()
     {
         assert_eq!(dataset.name, format!("tran{}", index + 1));
@@ -150,7 +152,7 @@ fn original_memristor_script_changes_frequency_and_restarts_each_uic_analysis() 
             (result.voltages[state_node][0] - 7000.0).abs() < 1e-8,
             "each UIC run must start from its authored Rinit"
         );
-        assert!((result.time.last().unwrap() * frequency - 1.0).abs() < 1e-12);
+        assert!((result.time.last().unwrap() / stop - 1.0).abs() < 1e-12);
         for (&time, &voltage) in result.time.iter().zip(&result.voltages[source_node]) {
             let expected = -3.0 * (std::f64::consts::TAU * frequency * time).sin();
             assert!(
@@ -2144,7 +2146,7 @@ fn texts(presented: &[ControlPresentation]) -> Vec<String> {
 /// ngspice `$&name` reads a vector (frontend/options.c:132
 /// `cp_enqvec_as_var`) and prints each element's real part `%G`, the list
 /// as separate words (variable.c:36 `cp_varwl`). ngspice-46 prints these
-/// lines for the same script; a scalar `let` still expands as `$name` does.
+/// lines for the same script, a scalar `let` among them.
 #[test]
 fn dollar_ampersand_expands_a_vector_as_ngspice_words() {
     let source = "dollar vectors\nV1 1 0 5\nR1 1 0 1k\n.control\nop\nlet foo = 5\n\
@@ -2165,13 +2167,45 @@ fn dollar_ampersand_expands_a_vector_as_ngspice_words() {
             "x 1",
             "x 1.5",
             "0 0.5 1 1.5",
-            &format!("{:.17e}", 5.0),
+            "5",
         ]
     );
     let (_, error) = run_until_error(
         "no vector\nV1 1 0 5\nR1 1 0 1k\n.control\nop\necho $&v(nowhere)\n.endc\n.end\n",
     );
     assert!(error.unwrap().contains("names no vector"));
+}
+
+/// A scalar `let` is a one-element vector in ngspice, so `$&` reads it as a
+/// real variable (frontend/options.c:153 `cp_enqvec_as_var`): its real
+/// part, printed `%G`, or `%.*g` to `csnumprec` digits (variable.c:51
+/// `cp_varwl`). ngspice-46 echoes these lines for the same script, which
+/// misc/bugs-2.cir and the sensitivity decks print their results with
+/// (`0 tests failed`).
+#[test]
+fn dollar_ampersand_reads_a_scalar_let_as_ngspice_prints_a_real() {
+    let source = "dollar scalars\nV1 1 0 1\nR1 1 0 1k\n.control\nlet x = 0\n\
+        echo $&x tests failed\nlet y = 1.23456789\necho $&y\nlet big = 1e20\necho $&big\n\
+        let t = 1.2345678e-5\necho $&t\nlet n = -3\necho $&n\nlet h = 123456789\necho $&h\n\
+        let z = 2 + j(3)\necho $&z\nlet d = 2*$&z\necho $&d\nset csnumprec=10\necho $&y $&t\n\
+        unset csnumprec\necho $&y\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "0 tests failed",
+            "1.23457",
+            "1E+20",
+            "1.23457E-05",
+            "-3",
+            "1.23457E+08",
+            "2",
+            "4",
+            "1.23456789 1.2345678e-05",
+            "1.23457",
+        ]
+    );
 }
 
 /// ngspice `x[i]` and `x[lo,hi]` (frontend/evaluate.c:697 `op_ind`): a bound
@@ -2997,8 +3031,8 @@ fn indexed_let_assigns_elements_as_ngspice_does() {
 /// ngspice binds a scalar `let` as a one-element vector of the current plot
 /// (frontend/com_let.c:191 vec_new), so `plot.name` and `v(name)` read it.
 /// ngspice-46 echoes `1000 3 6 3` and `1003` for the same script. A read
-/// that names no plot keeps the session parameter, as before: `$&b` still
-/// expands {:.17e}, and `b` stays a parameter `$b` can expand.
+/// that names no plot keeps the session parameter, as before: `$&b` reads
+/// it as ngspice prints a real, and `b` stays a parameter `$b` can expand.
 #[test]
 fn a_scalar_let_is_also_a_vector_of_its_plot() {
     let source = "scalar lets\nV1 in 0 2\nR1 in 0 1k\n.control\nsetplot new\nlet i1 = 1k\nop\n\
@@ -3008,10 +3042,7 @@ fn a_scalar_let_is_also_a_vector_of_its_plot() {
     assert_eq!(error, None);
     assert_eq!(
         texts(&presented),
-        [
-            format!("1000 3 {:.17e} 3", 6.0),
-            format!("1003 {:.17e}", 6.0)
-        ]
+        ["1000 3 6 3".to_owned(), format!("1003 {:.17e}", 6.0)]
     );
     let one = |value: f64| vec![num_complex::Complex64::from(value)];
     let qualified = printed(&presented[1]);

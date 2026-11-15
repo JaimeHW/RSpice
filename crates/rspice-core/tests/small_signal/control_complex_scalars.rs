@@ -21,8 +21,8 @@ fn circuit(program: &ControlProgram) -> ControlCircuit {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn assignments_and_substitutions_preserve_both_components_and_precedence() {
     let program = program(
-        "let z = 2+3j\nlet square = z*z\nlet doubled = 2*$&z\n\
-         let negated = -$z\nlet tiny = 1+1e-300j\nlet tiny_copy = $&tiny\n\
+        "let z = 2+3j\nlet square = z*z\nlet doubled = 2*$z\n\
+         let negated = -$z\nlet tiny = 1+1e-300j\nlet tiny_copy = $tiny\n\
          let reused = z\nlet reused = 7\nlet resumed = reused+4j",
     );
     let mut circuit = circuit(&program);
@@ -100,7 +100,7 @@ fn repeat_requires_an_exactly_real_integer_without_partial_execution() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn imaginary_nonfinite_values_fail_before_assignment_or_command_publication() {
-    for expression in ["1+bad", "$&bad", "bad"] {
+    for expression in ["1+bad", "$bad", "bad"] {
         let program = program(&format!("let stored = {expression}\nop"));
         let mut circuit = circuit(&program);
         let mut variables = ParamContext::new();
@@ -122,7 +122,7 @@ fn imaginary_nonfinite_values_fail_before_assignment_or_command_publication() {
 fn real_commands_refuse_complex_values_without_mutating_the_circuit() {
     for command in [
         "alter R1 z",
-        "alter R1 $&z",
+        "alter R1 $z",
         "alter @V1[sin] [ 0 1 z ]",
         "set num_threads=z",
         "option reltol=0.02 abstol=z",
@@ -130,7 +130,7 @@ fn real_commands_refuse_complex_values_without_mutating_the_circuit() {
         "option abstol=2j",
         "option abstol=2.0j",
         "option abstol={2+1j}",
-        "ac lin 2 1 $&z",
+        "ac lin 2 1 $z",
     ] {
         let program = program(&format!("let z = 2+1e-300j\n{command}"));
         let mut circuit = circuit(&program);
@@ -160,7 +160,7 @@ fn real_commands_refuse_complex_values_without_mutating_the_circuit() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn complex_print_samples_survive_scalar_and_substitution_bindings() {
-    let program = program("let z = 2-3j\nop\nprint z 2*$&z");
+    let program = program("let z = 2-3j\nop\nprint z 2*$z");
     let mut circuit = circuit(&program);
     let mut session = program.start(ParamContext::new());
     let mut printed = false;
@@ -192,7 +192,7 @@ fn substitutions_roundtrip_subnormal_and_maximum_finite_components() {
         ComplexValue::new(-f64::MAX, -f64::from_bits(1)),
         ComplexValue::new(f64::from_bits(1), f64::MAX),
     ] {
-        let program = program("let copy = $&edge");
+        let program = program("let copy = $edge");
         let mut circuit = circuit(&program);
         let mut variables = ParamContext::new();
         variables.set_complex("edge", value);
