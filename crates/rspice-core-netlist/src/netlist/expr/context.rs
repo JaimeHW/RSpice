@@ -646,17 +646,18 @@ impl ParamContext {
 
     /// Whether the ordinary namespace contains this name in any value class.
     pub fn has_parameter_binding(&self, name: &str) -> bool {
-        let key = name.to_uppercase();
-        self.params.contains_key(&key)
-            || self.complex_params.contains_key(&key)
-            || self.string_params.contains_key(&key)
-            || self.parameter_expressions.contains_key(&key)
+        let key = uppercase_key(name);
+        let key = &*key;
+        self.params.contains_key(key)
+            || self.complex_params.contains_key(key)
+            || self.string_params.contains_key(key)
+            || self.parameter_expressions.contains_key(key)
     }
 
     /// Whether either the ordinary `.PARAM` namespace or the
     /// `.GLOBAL_PARAM` namespace contains this name in any value class.
     pub fn has_any_parameter_binding(&self, name: &str) -> bool {
-        let key = name.to_uppercase();
+        let key = uppercase_key(name);
         self.has_parameter_binding(&key) || self.has_global_binding_key(&key)
     }
 
@@ -683,37 +684,37 @@ impl ParamContext {
 
     /// Get a parameter value
     pub fn get(&self, name: &str) -> Option<Value> {
-        let key = name.to_uppercase();
+        let key = uppercase_key(name);
         if self.has_any_parameter_binding(&key) {
             return self.effective_numeric_without_builtin(&key);
         }
-
-        let temp_c = self
-            .effective_numeric_without_builtin("TEMP")
-            .or_else(|| self.effective_numeric_without_builtin("TEMPER"))
-            .unwrap_or(DEFAULT_TEMPERATURE_C);
-        builtin_numeric_param(&key, temp_c)
+        builtin_numeric_param(&key, || {
+            self.effective_numeric_without_builtin("TEMP")
+                .or_else(|| self.effective_numeric_without_builtin("TEMPER"))
+                .unwrap_or(DEFAULT_TEMPERATURE_C)
+        })
     }
 
     /// Get a parameter value, preserving any imaginary component.
     pub fn get_complex(&self, name: &str) -> Option<ComplexValue> {
-        let key = name.to_uppercase();
-        if self.has_parameter_binding(&key) {
+        let key = uppercase_key(name);
+        let key = &*key;
+        if self.has_parameter_binding(key) {
             return self
                 .complex_params
-                .get(&key)
+                .get(key)
                 .copied()
-                .or_else(|| self.params.get(&key).copied().map(ComplexValue::from));
+                .or_else(|| self.params.get(key).copied().map(ComplexValue::from));
         }
-        if self.has_global_binding_key(&key) {
-            return self.global_complex_params.get(&key).copied().or_else(|| {
+        if self.has_global_binding_key(key) {
+            return self.global_complex_params.get(key).copied().or_else(|| {
                 self.global_params
-                    .get(&key)
+                    .get(key)
                     .copied()
                     .map(ComplexValue::from)
             });
         }
-        self.get(&key).map(ComplexValue::from)
+        self.get(key).map(ComplexValue::from)
     }
 
     pub(crate) fn seed_parameter_direction(&mut self, name: &str, global: bool) {
@@ -839,11 +840,12 @@ impl ParamContext {
 
     /// Get a string parameter value.
     pub fn get_string(&self, name: &str) -> Option<&str> {
-        let key = name.to_uppercase();
-        if self.has_parameter_binding(&key) {
-            return self.string_params.get(&key).map(String::as_str);
+        let key = uppercase_key(name);
+        let key = &*key;
+        if self.has_parameter_binding(key) {
+            return self.string_params.get(key).map(String::as_str);
         }
-        self.global_string_params.get(&key).map(String::as_str)
+        self.global_string_params.get(key).map(String::as_str)
     }
 
     /// Merge another context into this one
@@ -1472,12 +1474,29 @@ impl ParamContext {
     }
 }
 
-fn builtin_numeric_param(name: &str, temp_c: Value) -> Option<Value> {
+/// `name.to_uppercase()`, borrowed when that is `name` itself: ASCII with no
+/// lowercase letter. A name is looked up for every element the parser reads,
+/// often through several of these lookups in turn, and only the first of
+/// them then needs to allocate.
+fn uppercase_key(name: &str) -> std::borrow::Cow<'_, str> {
+    if name
+        .bytes()
+        .all(|byte| byte.is_ascii() && !byte.is_ascii_lowercase())
+    {
+        std::borrow::Cow::Borrowed(name)
+    } else {
+        std::borrow::Cow::Owned(name.to_uppercase())
+    }
+}
+
+/// The builtin a name denotes, reading the temperature only for one that
+/// depends on it.
+fn builtin_numeric_param(name: &str, temp_c: impl FnOnce() -> Value) -> Option<Value> {
     match name {
-        "TEMP" | "TEMPER" => Some(temp_c),
+        "TEMP" | "TEMPER" => Some(temp_c()),
         "TNOM" => Some(DEFAULT_TEMPERATURE_C),
         "VT" => Some(crate::constants::thermal_voltage(
-            crate::constants::celsius_to_kelvin(temp_c),
+            crate::constants::celsius_to_kelvin(temp_c()),
         )),
         _ => None,
     }
