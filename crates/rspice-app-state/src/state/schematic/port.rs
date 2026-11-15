@@ -288,6 +288,104 @@ impl SchematicState {
         }
         Ok(placed_id.expect("a changed placement records its stable identifier"))
     }
+
+    /// Declare a port for each of a symbol's `pins`, with the pin's name and
+    /// direction, as the one undo step `step`.
+    ///
+    /// The ports stand in one column clear of the left edge of what the
+    /// schematic already holds, in the order the pins are given, and take
+    /// the next netlist places. A pin whose name cannot name a port is left
+    /// out and returned with the reason. No port already declared is
+    /// touched: this adds, it never removes.
+    pub fn declare_ports_for_symbol_pins(
+        &mut self,
+        pins: &[crate::state::SymbolPin],
+        step: &str,
+    ) -> Result<SymbolPinPorts, PortPlacementError> {
+        if self.session.read_only {
+            return Err(PortPlacementError::ReadOnly);
+        }
+        let mut outcome = SymbolPinPorts::default();
+        let mut declared = Vec::new();
+        for pin in pins {
+            let name = pin.name.trim();
+            match self.validate_new_port_name(name) {
+                Ok(()) => declared.push((name.to_owned(), port_contract_for_symbol_pin(pin))),
+                Err(error) => outcome.refused.push((pin.name.clone(), error)),
+            }
+        }
+        if declared.is_empty() {
+            return Ok(outcome);
+        }
+        // A port stands centred on its terminal: the column keeps a port's
+        // half width and two grid steps clear of the content, and the ports
+        // one port's height and a grid step apart.
+        let grid = self.design.document().grid_size.max(1);
+        let (port_left, port_top, port_right, port_bottom) =
+            Component::new(0, ComponentType::Port, super::Point::origin()).bounding_box();
+        let pitch = (port_bottom - port_top + grid * 2 - 1).div_euclid(grid) * grid;
+        let (left, top) = match self.content_bounds() {
+            Some((min_x, min_y, _, _)) => (
+                (min_x - grid * 2 - port_right.max(-port_left)).div_euclid(grid) * grid,
+                min_y.div_euclid(grid) * grid,
+            ),
+            None => (0, 0),
+        };
+        let first_order = self.next_interface_order();
+        let changed = self.with_undo(step, |schematic| {
+            for (index, (name, mut contract)) in declared.into_iter().enumerate() {
+                let at = super::Point::new(left, top + pitch * index as i32);
+                let id = schematic.add_component(ComponentType::Port, at);
+                contract.netlist_order = Some(first_order + index);
+                schematic
+                    .design
+                    .set_placed_port_contract(id, &name, &contract.encoded_params());
+                outcome.added.push(name);
+            }
+        });
+        if !changed {
+            return Err(PortPlacementError::ReadOnly);
+        }
+        Ok(outcome)
+    }
+}
+
+/// What declaring ports for a symbol's pins did: the ports added, by name,
+/// and each pin left out with why.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SymbolPinPorts {
+    pub added: Vec<String>,
+    pub refused: Vec<(String, PortPlacementError)>,
+}
+
+/// The port contract a symbol pin asks of its schematic: the pin's
+/// direction, and the signal its electrical type carries, as one of the
+/// typed combinations a port may take. A supply pin is a rail, whatever
+/// its pin type says.
+fn port_contract_for_symbol_pin(pin: &crate::state::SymbolPin) -> PortContract {
+    use crate::state::SymbolElectricalType;
+    let direction = pin.direction;
+    let signal_type = match (direction, pin.electrical_type()) {
+        (PortDirection::Supply, _)
+        | (PortDirection::InOut, SymbolElectricalType::Power | SymbolElectricalType::Ground) => {
+            PortSignalType::Power
+        }
+        (_, SymbolElectricalType::Logic) => PortSignalType::Logic,
+        _ => PortSignalType::Analog,
+    };
+    let discipline = PortDiscipline::default();
+    PortContract {
+        direction,
+        signal_type,
+        discipline,
+        netlist_order: None,
+        documentation: format!(
+            "{} {} {} interface port",
+            pin.name.trim(),
+            direction.keyword(),
+            discipline.keyword()
+        ),
+    }
 }
 
 /// The one syntax rule for an interface pin's name.
@@ -385,6 +483,88 @@ mod tests {
         component.value = name.to_string();
         component.params = params.to_string();
         id
+    }
+
+    #[test]
+    fn a_symbols_missing_pins_become_ports_in_one_column_as_one_step() {
+        use crate::state::{SymbolElectricalType, SymbolPin};
+        let mut state = SchematicState::default();
+        let existing = port(&mut state, "IN", "dir=in");
+        state.add_component(ComponentType::Resistor, Point::new(100, 40));
+        state.clear_undo_history();
+        let before = state.design.document().components.clone();
+        let pins = [
+            SymbolPin::new("OUT", PortDirection::Out, None),
+            SymbolPin::new("VDD", PortDirection::Supply, None),
+            SymbolPin::new("CLK", PortDirection::In, None).with_contract(
+                SymbolElectricalType::Logic,
+                crate::state::SymbolPinSide::Left,
+            ),
+            SymbolPin::new("in", PortDirection::In, None),
+        ];
+
+        let outcome = state
+            .declare_ports_for_symbol_pins(&pins, "Create schematic pins from symbol")
+            .expect("an editable schematic takes ports");
+
+        assert_eq!(outcome.added, ["OUT", "VDD", "CLK"]);
+        assert_eq!(
+            outcome.refused.len(),
+            1,
+            "IN is declared already, in any case"
+        );
+        assert_eq!(outcome.refused[0].0, "in");
+        let components = &state.design.document().components;
+        assert_eq!(
+            components[..before.len()],
+            before[..],
+            "nothing declared is touched"
+        );
+        let added = &components[before.len()..];
+        let contracts = added
+            .iter()
+            .map(|port| port.port_contract().expect("a declared port"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            contracts.iter().map(|c| c.direction).collect::<Vec<_>>(),
+            [PortDirection::Out, PortDirection::Supply, PortDirection::In]
+        );
+        assert_eq!(contracts[1].signal_type, PortSignalType::Power);
+        assert_eq!(contracts[2].signal_type, PortSignalType::Logic);
+        // One column, clear of the content's left edge, the pins in order.
+        let grid = state.design.document().grid_size;
+        assert!(added.iter().all(|port| port.pos.x == added[0].pos.x));
+        assert!(added.windows(2).all(|pair| pair[1].pos.y > pair[0].pos.y));
+        assert!(
+            added
+                .iter()
+                .all(|port| port.pos.x % grid == 0 && port.pos.y % grid == 0)
+        );
+        let (port_left, _, port_right, _) =
+            Component::new(0, ComponentType::Port, Point::origin()).bounding_box();
+        assert!(
+            added[0].pos.x + port_right < port_left,
+            "the column stands clear of IN, at 0"
+        );
+        let orders = state
+            .interface_ports()
+            .iter()
+            .map(|port| port.name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(orders, ["IN", "OUT", "VDD", "CLK"]);
+
+        assert_eq!(
+            state.undo_description(),
+            Some("Create schematic pins from symbol")
+        );
+        assert!(state.undo());
+        assert_eq!(
+            state.design.document().components,
+            before,
+            "one step undoes it all"
+        );
+        assert!(!state.can_undo());
+        assert_eq!(existing, before[0].id);
     }
 
     #[test]

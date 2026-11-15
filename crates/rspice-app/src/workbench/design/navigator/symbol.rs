@@ -148,6 +148,27 @@ fn pins_section(
             }
         });
     }
+    // The other direction of the same fix: the schematic takes the pins
+    // only the symbol has. Offered while the schematic lacks one.
+    let schematic_command =
+        crate::workbench::design::commands::DesignCommand::SymbolCreateSchematicPins;
+    if own_command_available(cx, schematic_command) {
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            let width = (ui.available_width() - 8.0).max(1.0);
+            if super::super::super::design_system::labeled_icon_button(
+                ui,
+                WorkbenchIcon::Pin,
+                "Create schematic pins from symbol",
+                false,
+                width,
+            )
+            .clicked()
+            {
+                cx.execute(schematic_command.key());
+            }
+        });
+    }
     ui.add_space(4.0);
     if document.pins.is_empty() && ports.is_empty() {
         // The two buttons that fill the list sit directly above this line.

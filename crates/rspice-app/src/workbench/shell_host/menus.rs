@@ -499,7 +499,7 @@ const PLACE_MENU: &[MenuEntry] = &[
 ];
 
 /// What a symbol view places: its drawing tools, then its pins from the
-/// interface contract.
+/// interface contract, and the contract's pins from it.
 const SYMBOL_PLACE_MENU: &[MenuEntry] = &[
     design_as(DesignCommand::SymbolPinTool, "Pin").access('P'),
     design_as(DesignCommand::SymbolPolylineTool, "Line").access('L'),
@@ -510,6 +510,7 @@ const SYMBOL_PLACE_MENU: &[MenuEntry] = &[
     design_as(DesignCommand::SymbolTextTool, "Text").access('T'),
     Separator,
     design(DesignCommand::SymbolUpdatePinsFromContract).access('U'),
+    design(DesignCommand::SymbolCreateSchematicPins).access('S'),
 ];
 
 /// The sheets of the active drawing, in the order the strip shows them:

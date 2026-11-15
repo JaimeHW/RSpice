@@ -87,6 +87,7 @@ mod symbol_inspector;
 mod symbol_inspector_drawn;
 mod symbol_pin_checks;
 mod symbol_project_data;
+mod symbol_schematic_pins_drawn;
 mod symbol_surface_drawn;
 mod symbol_surface_requests;
 mod touch_flow;

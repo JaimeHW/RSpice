@@ -18,7 +18,8 @@ use rspice_design::symbol::publication::{EncodedSymbolEditorBundle, bound_interf
 use super::model::{Model, interface_pins, port_electrical_type};
 use crate::state::{
     CellViewRef, ModelBoundSymbolDefinition, PortSpec, SYMBOL_DOCUMENT_METADATA_KEY,
-    SymbolDocument, SymbolEditorMetadata, SymbolInterface, ViewType, load_model_bound_symbol,
+    SymbolDocument, SymbolEditorMetadata, SymbolInterface, SymbolPin, ViewType,
+    load_model_bound_symbol,
 };
 
 impl Model {
@@ -138,6 +139,63 @@ impl Model {
         } else {
             "schematic"
         }
+    }
+
+    /// The pins of the symbol `reference` names that its cell's schematic
+    /// declares no port for, in netlist order: what creating schematic pins
+    /// from the symbol adds.
+    ///
+    /// Refused with the reason where there is nothing to add them to, or
+    /// nothing to add: a symbol bound to a model, a cell whose module
+    /// declares its pins, a cell with no schematic, or a schematic that
+    /// declares every pin already.
+    pub fn symbol_pins_missing_from_schematic(
+        &self,
+        reference: &CellViewRef,
+    ) -> Result<Vec<SymbolPin>, &'static str> {
+        if self.symbol_model_binding(reference).is_some() {
+            return Err("the symbol's pins come from its model");
+        }
+        let cell = self
+            .library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell));
+        if cell.and_then(module_interface_view).is_some() {
+            return Err("the cell's module declares its pins");
+        }
+        let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
+        let declared = if self.workspace.content.active_view == schematic_ref {
+            Some(self.schematic.document().interface_ports())
+        } else {
+            self.workspace
+                .content
+                .schematic_buffers
+                .get(&schematic_ref.key())
+                .map(|schematic| schematic.document().interface_ports())
+        };
+        let schematic_exists = declared.is_some()
+            || cell
+                .and_then(|cell| cell.get_view(&schematic_ref.view))
+                .is_some_and(|view| view.view_type == ViewType::Schematic);
+        if !schematic_exists {
+            return Err("this cell has no schematic");
+        }
+        let declared = declared.unwrap_or_default();
+        let missing = self
+            .load_symbol_document(reference)
+            .map_err(|_| "the symbol could not be read")?
+            .pins
+            .into_iter()
+            .filter(|pin| {
+                !declared
+                    .iter()
+                    .any(|port| port.name.eq_ignore_ascii_case(pin.name.trim()))
+            })
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            return Err("the schematic declares every pin of the symbol");
+        }
+        Ok(missing)
     }
 
     /// The ports of one cell's module, with their disciplines and domains,

@@ -212,6 +212,9 @@ pub(crate) enum DesignCommand {
     /// Bring the symbol's pins back into agreement with the interface its
     /// schematic declares.
     SymbolUpdatePinsFromContract,
+    /// Declare a schematic port for each of the symbol's pins its schematic
+    /// lacks: the other direction of the pin reconciliation.
+    SymbolCreateSchematicPins,
     /// Show or hide the placed preview beside the symbol canvas.
     SymbolPlacedPreview,
     /// Edit the selected instance's symbol master where the instance stands
@@ -401,7 +404,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 98] = [
+    pub(crate) const ALL: [Self; 99] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -497,6 +500,7 @@ impl DesignCommand {
         Self::SymbolPolygonTool,
         Self::SymbolTextTool,
         Self::SymbolUpdatePinsFromContract,
+        Self::SymbolCreateSchematicPins,
         Self::SymbolPlacedPreview,
         Self::EditSymbolInPlace,
         Self::ExitSymbolInPlace,
@@ -606,6 +610,7 @@ impl DesignCommand {
             Self::SymbolPolygonTool => CommandKey::new("symbol-polygon-tool"),
             Self::SymbolTextTool => CommandKey::new("symbol-text-tool"),
             Self::SymbolUpdatePinsFromContract => CommandKey::new("update-pins-from-contract"),
+            Self::SymbolCreateSchematicPins => CommandKey::new("create-schematic-pins-from-symbol"),
             Self::SymbolPlacedPreview => CommandKey::new("symbol-placed-preview"),
             Self::EditSymbolInPlace => CommandKey::new("edit-symbol-in-place"),
             Self::ExitSymbolInPlace => CommandKey::new("exit-symbol-in-place"),
@@ -674,7 +679,8 @@ impl DesignCommand {
     /// chords of the canvas; Move and Stretch have chords and are ones Repeat
     /// last command runs again.
     /// The symbol editor's commands change only the symbol canvas's own
-    /// state or its document and are chords of the symbol canvas, the tools
+    /// state or its document, or, creating schematic pins, the schematic
+    /// beside it, and are chords of the symbol canvas, the tools
     /// with chords of their own; editing a symbol in place is a chord of the
     /// design workspace, and Return leaves it. Cycling the grid is a chord
     /// of every drawing canvas.
@@ -1023,6 +1029,13 @@ impl DesignCommand {
             ),
             Self::SymbolUpdatePinsFromContract => (
                 "Update pins from contract",
+                "Design",
+                palette,
+                symbol_canvas,
+                NONE,
+            ),
+            Self::SymbolCreateSchematicPins => (
+                "Create schematic pins from symbol",
                 "Design",
                 palette,
                 symbol_canvas,

@@ -540,6 +540,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::SymbolPolygonTool.key(),
     DesignCommand::SymbolTextTool.key(),
     DesignCommand::SymbolUpdatePinsFromContract.key(),
+    DesignCommand::SymbolCreateSchematicPins.key(),
     DesignCommand::EditSymbolInPlace.key(),
     DesignCommand::ExitSymbolInPlace.key(),
     DesignCommand::PlaceResistor.key(),

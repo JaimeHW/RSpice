@@ -19,8 +19,8 @@ use std::collections::BTreeMap;
 
 use crate::diagnostics::{LogAnchor, LogSeverity, LogSource};
 use crate::state::{
-    CellViewRef, PortSpec, SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
-    SymbolInterface,
+    CellViewRef, PortSpec, SYMBOL_DOCUMENT_METADATA_KEY, SchematicState, SymbolDocument,
+    SymbolEditorMetadata, SymbolInterface,
 };
 use crate::ui::accessibility::counted;
 use crate::workbench::app_state::{Model, SlotFacts};
@@ -136,6 +136,55 @@ pub(crate) fn update_active_symbol_pins_from_contract(
     Ok(format!(
         "Symbol pins updated from the interface contract: {added} added, {orphaned} left orphaned"
     ))
+}
+
+/// Bring the active symbol's schematic into agreement with the symbol the
+/// other way: declare a port for each symbol pin the schematic lacks, with
+/// the pin's name and direction, in a column on the schematic's sheet, as
+/// one undo step of the schematic. No port is ever removed. A schematic
+/// never opened gets the new sheet `new_sheet` makes, as opening it would.
+///
+/// Returns the console line describing what changed.
+pub(crate) fn create_schematic_pins_from_active_symbol(
+    model: &mut Model,
+    new_sheet: impl FnOnce(&Model) -> SchematicState,
+) -> Result<String, String> {
+    if model.active_view_read_only() {
+        return Err(read_only_master_message(model));
+    }
+    let reference = model.workspace.content.active_view.clone();
+    let missing = model
+        .symbol_pins_missing_from_schematic(&reference)
+        .map_err(|reason| format!("No schematic pins were created: {reason}."))?;
+    let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
+    let key = schematic_ref.key();
+    if !model.workspace.content.schematic_buffers.contains_key(&key) {
+        let sheet = new_sheet(model);
+        model.workspace.insert_schematic_editor(key.clone(), sheet);
+    }
+    let mut schematic = model
+        .workspace
+        .schematic_editor_mut(&key)
+        .ok_or_else(|| format!("View '{}' not found", schematic_ref.display_path()))?;
+    let outcome = schematic
+        .editor
+        .declare_ports_for_symbol_pins(&missing, "Create schematic pins from symbol")
+        .map_err(|error| format!("No schematic pins were created: {error}."))?;
+    drop(schematic);
+    let mut line = match outcome.added.len() {
+        0 => "No schematic pins were created".to_owned(),
+        _ => format!(
+            "Added {} to {}: {}",
+            counted(outcome.added.len(), "pin", "pins"),
+            schematic_ref.display_path(),
+            outcome.added.join(", ")
+        ),
+    };
+    for (name, reason) in &outcome.refused {
+        line.push_str(&format!("; {name} was left out: {reason}"));
+    }
+    line.push('.');
+    Ok(line)
 }
 
 pub(crate) fn symbol_editor_request_source(

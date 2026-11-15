@@ -35,13 +35,15 @@ use crate::workbench::app::actions::property_edit::{
 use crate::workbench::app::actions::workspace::design_checks;
 use crate::workbench::app::actions::workspace::symbol_document::{
     active_symbol_pin_finding_count, active_symbol_ports, clear_active_symbol_pin_checks,
-    run_active_symbol_pin_checks, update_active_symbol_pins_from_contract,
+    create_schematic_pins_from_active_symbol, run_active_symbol_pin_checks,
+    update_active_symbol_pins_from_contract,
 };
 use crate::workbench::app::actions::workspace::symbol_in_place::{
     SymbolInPlaceExit, in_place_session, selected_symbol_in_place_target,
 };
 use crate::workbench::app::actions::workspace::{
-    NavigationParts, selected_hierarchy_master, selected_instance_veriloga_source,
+    NavigationParts, new_schematic_document, selected_hierarchy_master,
+    selected_instance_veriloga_source,
 };
 use crate::workbench::app::actions::{
     activate_symbol_tool, stimulus, transform_selected_symbol_item,
@@ -246,10 +248,11 @@ impl CommandSet for DesignCommand {
     ///
     /// The symbol canvas's tools and its save need an editable symbol in
     /// front; a pin turn also needs one pin selected alone, and the contract
-    /// update an interface to reconcile with; the placed preview a symbol in
-    /// front. Editing a symbol in place needs a schematic in front and an
-    /// instance whose symbol can be, and names what it lacks; leaving needs
-    /// a symbol edited in place in front.
+    /// update an interface to reconcile with. Creating schematic pins needs
+    /// a schematic that lacks one of the symbol's pins and names what is
+    /// missing; the placed preview a symbol in front. Editing a symbol in place
+    /// needs a schematic in front and an instance whose symbol can be, and
+    /// names what it lacks; leaving needs a symbol edited in place in front.
     fn availability(self, reads: &Reads<'_, DesignFeature>) -> CommandAvailability {
         let schematic = schematic_editor(reads);
         let selected = reads.state.selected_stimulus_definition.is_some();
@@ -470,6 +473,15 @@ impl CommandSet for DesignCommand {
             Self::SymbolUpdatePinsFromContract => (!editable_symbol(reads)
                 || active_symbol_ports(reads.model).is_empty())
             .then_some("command is unavailable in this context"),
+            // The other direction: offered only beside a schematic that
+            // lacks one of the symbol's pins, and named for what is missing.
+            Self::SymbolCreateSchematicPins if !editable_symbol(reads) => {
+                Some("command is unavailable in this context")
+            }
+            Self::SymbolCreateSchematicPins => reads
+                .model
+                .symbol_pins_missing_from_schematic(&reads.model.workspace.content.active_view)
+                .err(),
             Self::SymbolPlacedPreview => {
                 (!routed::symbol_editor(reads.wb.workspace, reads.model)).then_some("open a symbol")
             }
@@ -945,6 +957,15 @@ impl CommandSet for DesignCommand {
             Self::SymbolUpdatePinsFromContract => {
                 match update_active_symbol_pins_from_contract(&mut cx.state.symbol, cx.model, cx.wb)
                 {
+                    Ok(text) | Err(text) => cx.wb.prompt(text),
+                }
+            }
+            Self::SymbolCreateSchematicPins => {
+                let (snap, routing) = (&cx.state.schematic_snap, cx.state.schematic_routing_mode);
+                let created = create_schematic_pins_from_active_symbol(cx.model, |model| {
+                    new_schematic_document(model, snap, routing)
+                });
+                match created {
                     Ok(text) | Err(text) => cx.wb.prompt(text),
                 }
             }
