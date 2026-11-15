@@ -92,18 +92,22 @@ pub(crate) fn master_library() -> Library {
                         Point::new(-width + 10, 30),
                     ],
                     closed: true,
+                    style: Default::default(),
                 },
                 SymbolShape::Polyline {
                     points: vec![Point::new(-width, 0), Point::new(-width + 10, 0)],
                     closed: false,
+                    style: Default::default(),
                 },
                 SymbolShape::Polyline {
                     points: vec![Point::new(width - 10, 0), Point::new(width, 0)],
                     closed: false,
+                    style: Default::default(),
                 },
                 SymbolShape::Polyline {
                     points: vec![Point::new(0, 30), Point::new(0, 40)],
                     closed: false,
+                    style: Default::default(),
                 },
             ],
             ..SymbolDocument::default()

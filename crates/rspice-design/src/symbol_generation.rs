@@ -244,17 +244,29 @@ impl GeneratedSymbol {
     pub fn body_shapes(&self) -> Vec<SymbolShape> {
         let (min, max) = self.body_extent;
         let body = match self.body {
-            GeneratedBody::Block => vec![SymbolShape::Rectangle { min, max }],
+            GeneratedBody::Block => vec![SymbolShape::Rectangle {
+                min,
+                max,
+                style: Default::default(),
+            }],
             GeneratedBody::Amplifier => amplifier_outline(&self.pins, min, max)
                 .into_iter()
-                .map(|(points, closed)| SymbolShape::Polyline { points, closed })
+                .map(|(points, closed)| SymbolShape::Polyline {
+                    points,
+                    closed,
+                    style: Default::default(),
+                })
                 .collect(),
         };
         body.into_iter()
             .chain(
                 self.mark_outlines(false)
                     .into_iter()
-                    .map(|(points, closed)| SymbolShape::Polyline { points, closed }),
+                    .map(|(points, closed)| SymbolShape::Polyline {
+                        points,
+                        closed,
+                        style: Default::default(),
+                    }),
             )
             .collect()
     }

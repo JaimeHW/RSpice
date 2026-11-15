@@ -382,20 +382,20 @@ fn body_ink(symbol: &SymbolDocument, component: &Component) -> Vec<Ink> {
     let mut ink = Vec::new();
     for shape in &symbol.body {
         match shape {
-            SymbolShape::Polyline { points, closed } => {
+            SymbolShape::Polyline { points, closed, .. } => {
                 let ends = points.iter().copied().map(at).collect::<Vec<_>>();
                 ink.extend(ends.windows(2).map(|run| Ink::Stroke(run[0], run[1])));
                 if let (true, [first, .., last]) = (*closed, ends.as_slice()) {
                     ink.push(Ink::Stroke(*last, *first));
                 }
             }
-            SymbolShape::Rectangle { min, max } => {
+            SymbolShape::Rectangle { min, max, .. } => {
                 let corners = crate::symbol::rectangle_corners(*min, *max).map(at);
                 ink.extend(
                     (0..4).map(|index| Ink::Stroke(corners[index], corners[(index + 1) % 4])),
                 );
             }
-            SymbolShape::Circle { center, radius }
+            SymbolShape::Circle { center, radius, .. }
             | SymbolShape::Dot { center, radius }
             | SymbolShape::Arc { center, radius, .. } => {
                 let (center, radius) = (at(*center), *radius as f32);
@@ -404,7 +404,7 @@ fn body_ink(symbol: &SymbolDocument, component: &Component) -> Vec<Ink> {
                     max: LayoutPoint::new(center.x + radius, center.y + radius),
                 }));
             }
-            SymbolShape::Curve(curve) => {
+            SymbolShape::Curve { curve, .. } => {
                 let ends = curve
                     .placed(
                         component.pos + component.transform_point(Point::origin()),

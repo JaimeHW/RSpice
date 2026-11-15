@@ -162,6 +162,7 @@ mod tests {
                     body: vec![SymbolShape::Polyline {
                         points: vec![Point::new(0, 0), Point::new(9, 30), Point::new(0, 60)],
                         closed: false,
+                        style: Default::default(),
                     }],
                     ..SymbolDocument::default()
                 });

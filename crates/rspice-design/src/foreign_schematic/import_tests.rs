@@ -4147,7 +4147,11 @@ fn an_imported_arc_is_the_sources_own_curve_and_ends_on_its_rays() {
         .expect("the source's symbol")
         .document()
         .body;
-    let [SymbolShape::Curve(arc), SymbolShape::Curve(circle)] = &body[..] else {
+    let [
+        SymbolShape::Curve { curve: arc, .. },
+        SymbolShape::Curve { curve: circle, .. },
+    ] = &body[..]
+    else {
         panic!("two curves: {body:?}");
     };
     assert_eq!(arc.center, [10.0, 20.0]);

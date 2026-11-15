@@ -13,6 +13,7 @@ pub mod mobile_controls;
 pub mod navigation;
 pub mod net_labels;
 pub mod resolved_symbol_render;
+pub(crate) mod symbol_style;
 pub mod viewport;
 pub mod violations;
 

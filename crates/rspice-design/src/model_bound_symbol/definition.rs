@@ -18,11 +18,13 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
                     Point::new(-half_width, half_height),
                 ],
                 closed: true,
+                style: Default::default(),
             }],
             SymbolGraphicTemplate::RectangularIc | SymbolGraphicTemplate::RfNPort => {
                 vec![SymbolShape::Rectangle {
                     min: Point::new(-half_width, -half_height),
                     max: Point::new(half_width, half_height),
+                    style: Default::default(),
                 }]
             }
         }

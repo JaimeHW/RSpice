@@ -44,6 +44,7 @@ fn cell_symbol() -> SymbolDocument {
                 SchematicPoint::new(-30, 20),
             ],
             closed: true,
+            style: Default::default(),
         }],
         origin: SchematicPoint::origin(),
         name_anchor: SchematicPoint::new(-30, -40),
@@ -507,7 +508,7 @@ fn a_printed_source_symbol_keeps_the_native_pen_and_prints_true_curves() {
         "1k",
     )]));
     let mut symbol = cell_symbol();
-    symbol.body.push(SymbolShape::Curve(SymbolCurve {
+    symbol.body.push(SymbolShape::curve(SymbolCurve {
         center: [2.5, -7.5],
         radii: [10.0, 6.25],
         start_degrees: 30.0,

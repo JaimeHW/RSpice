@@ -153,6 +153,108 @@ pub fn symbol_text_bounds(
     )
 }
 
+/// How heavy a shape's outline is, against the weight a renderer draws a
+/// symbol body at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolStroke {
+    Thin,
+    #[default]
+    Normal,
+    Heavy,
+}
+
+impl SymbolStroke {
+    pub const ALL: [Self; 3] = [Self::Thin, Self::Normal, Self::Heavy];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Thin => "thin",
+            Self::Normal => "normal",
+            Self::Heavy => "heavy",
+        }
+    }
+
+    /// The outline's width as a multiple of the body weight.
+    pub const fn scale(self) -> f32 {
+        match self {
+            Self::Thin => 0.5,
+            Self::Normal => 1.0,
+            Self::Heavy => 2.0,
+        }
+    }
+}
+
+/// Whether a shape's outline is drawn whole or broken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolDash {
+    #[default]
+    Solid,
+    Dashed,
+    Dotted,
+}
+
+impl SymbolDash {
+    pub const ALL: [Self; 3] = [Self::Solid, Self::Dashed, Self::Dotted];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Solid => "solid",
+            Self::Dashed => "dashed",
+            Self::Dotted => "dotted",
+        }
+    }
+
+    /// The drawn and the skipped length of one step of the pattern, in
+    /// symbol units, so a pattern keeps its proportion against the body at
+    /// every zoom; `None` for a whole line.
+    pub const fn pattern(self) -> Option<(f32, f32)> {
+        match self {
+            Self::Solid => None,
+            Self::Dashed => Some((6.0, 4.0)),
+            Self::Dotted => Some((1.0, 3.0)),
+        }
+    }
+}
+
+/// Whether a closed shape's inside is painted in its outline's ink.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolFill {
+    #[default]
+    None,
+    Solid,
+}
+
+impl SymbolFill {
+    pub const ALL: [Self; 2] = [Self::None, Self::Solid];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Solid => "solid",
+        }
+    }
+}
+
+/// How a drawn shape's outline and inside are inked. The default is the one
+/// weight, whole and unfilled, every symbol drew before shapes had a style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SymbolStyle {
+    pub stroke: SymbolStroke,
+    pub dash: SymbolDash,
+    pub fill: SymbolFill,
+}
+
+impl SymbolStyle {
+    /// Whether this is the style a shape takes when nothing was chosen.
+    pub fn is_plain(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// The largest gap, in device pixels, a straight piece may leave from the
 /// curve it stands for.
 const CHORD_ERROR_PIXELS: f64 = 0.05;
@@ -316,6 +418,8 @@ pub enum SymbolShape {
     Polyline {
         points: Vec<Point>,
         closed: bool,
+        #[serde(default, skip_serializing_if = "SymbolStyle::is_plain")]
+        style: SymbolStyle,
     },
     /// An axis-aligned box between two opposite corners, `min` never right
     /// of or below `max`. Its own kind rather than a closed polyline, so an
@@ -323,19 +427,29 @@ pub enum SymbolShape {
     Rectangle {
         min: Point,
         max: Point,
+        #[serde(default, skip_serializing_if = "SymbolStyle::is_plain")]
+        style: SymbolStyle,
     },
     Circle {
         center: Point,
         radius: i32,
+        #[serde(default, skip_serializing_if = "SymbolStyle::is_plain")]
+        style: SymbolStyle,
     },
     Arc {
         center: Point,
         radius: i32,
         start_degrees: i32,
         sweep_degrees: i32,
+        #[serde(default, skip_serializing_if = "SymbolStyle::is_plain")]
+        style: SymbolStyle,
     },
     /// An ellipse or arc a drawing brought in, unrounded.
-    Curve(SymbolCurve),
+    Curve {
+        curve: SymbolCurve,
+        #[serde(default, skip_serializing_if = "SymbolStyle::is_plain")]
+        style: SymbolStyle,
+    },
     Arrow {
         tip: Point,
         rotation_quarters: i32,
@@ -368,7 +482,60 @@ impl SymbolShape {
         SymbolShape::Rectangle {
             min: Point::new(a.x.min(b.x), a.y.min(b.y)),
             max: Point::new(a.x.max(b.x), a.y.max(b.y)),
+            style: SymbolStyle::default(),
         }
+    }
+
+    /// The curve `curve`, drawn in the plain style.
+    pub fn curve(curve: SymbolCurve) -> Self {
+        SymbolShape::Curve {
+            curve,
+            style: SymbolStyle::default(),
+        }
+    }
+
+    /// How the shape's outline is inked, or `None` for a shape that has
+    /// no outline to style: an arrowhead and a dot are solid ink, and a
+    /// text run is glyphs.
+    pub fn style(&self) -> Option<SymbolStyle> {
+        match self {
+            SymbolShape::Polyline { style, .. }
+            | SymbolShape::Rectangle { style, .. }
+            | SymbolShape::Circle { style, .. }
+            | SymbolShape::Arc { style, .. }
+            | SymbolShape::Curve { style, .. } => Some(*style),
+            SymbolShape::Arrow { .. } | SymbolShape::Dot { .. } | SymbolShape::Text { .. } => None,
+        }
+    }
+
+    pub fn style_mut(&mut self) -> Option<&mut SymbolStyle> {
+        match self {
+            SymbolShape::Polyline { style, .. }
+            | SymbolShape::Rectangle { style, .. }
+            | SymbolShape::Circle { style, .. }
+            | SymbolShape::Arc { style, .. }
+            | SymbolShape::Curve { style, .. } => Some(style),
+            SymbolShape::Arrow { .. } | SymbolShape::Dot { .. } | SymbolShape::Text { .. } => None,
+        }
+    }
+
+    /// Whether the shape encloses an inside a fill can paint: a rectangle,
+    /// a circle, or a polyline closed on itself. A fill on any other shape
+    /// is never drawn.
+    pub fn is_closed(&self) -> bool {
+        match self {
+            SymbolShape::Rectangle { .. } | SymbolShape::Circle { .. } => true,
+            SymbolShape::Polyline { points, closed, .. } => *closed && points.len() > 2,
+            _ => false,
+        }
+    }
+
+    /// Whether the shape's inside is painted.
+    pub fn is_filled(&self) -> bool {
+        self.is_closed()
+            && self
+                .style()
+                .is_some_and(|style| style.fill == SymbolFill::Solid)
     }
 
     pub fn translate(&mut self, delta: Point) {
@@ -450,7 +617,7 @@ impl SymbolShape {
                 }
             }
             // A turn or a mirror swaps which corner is least; name them again.
-            SymbolShape::Rectangle { min, max } => {
+            SymbolShape::Rectangle { min, max, .. } => {
                 let (a, b) = (transform(*min), transform(*max));
                 *min = Point::new(a.x.min(b.x), a.y.min(b.y));
                 *max = Point::new(a.x.max(b.x), a.y.max(b.y));
@@ -460,7 +627,7 @@ impl SymbolShape {
             | SymbolShape::Dot { center, .. } => {
                 *center = transform(*center);
             }
-            SymbolShape::Curve(curve) => *curve = curve.placed(origin, across, down),
+            SymbolShape::Curve { curve, .. } => *curve = curve.placed(origin, across, down),
             SymbolShape::Arrow { tip, .. } => {
                 *tip = transform(*tip);
             }
@@ -578,6 +745,7 @@ mod tests {
             radius: 10,
             start_degrees: 0,
             sweep_degrees: 180,
+            style: Default::default(),
         };
         let mut arrow = SymbolShape::Arrow {
             tip: Point::origin(),
@@ -612,6 +780,7 @@ mod tests {
             SymbolShape::Rectangle {
                 min: Point::new(-10, -5),
                 max: Point::new(30, 20),
+                style: Default::default(),
             }
         );
 
@@ -622,6 +791,7 @@ mod tests {
             SymbolShape::Rectangle {
                 min: Point::new(-20, -10),
                 max: Point::new(5, 30),
+                style: Default::default(),
             }
         );
         let mut mirrored = original.clone();
@@ -631,6 +801,7 @@ mod tests {
             SymbolShape::Rectangle {
                 min: Point::new(-30, -5),
                 max: Point::new(10, 20),
+                style: Default::default(),
             }
         );
         let mut flipped = original.clone();
@@ -640,6 +811,7 @@ mod tests {
             SymbolShape::Rectangle {
                 min: Point::new(-10, -20),
                 max: Point::new(30, 5),
+                style: Default::default(),
             }
         );
         for _ in 0..3 {
@@ -742,5 +914,134 @@ mod tests {
         assert_eq!(left, (Point::new(0, -4), Point::new(15, 4)));
         assert_eq!(right, (Point::new(-15, -4), Point::new(0, 4)));
         assert_eq!(centered, (Point::new(-7, -4), Point::new(7, 4)));
+    }
+
+    fn styled() -> SymbolStyle {
+        SymbolStyle {
+            stroke: SymbolStroke::Heavy,
+            dash: SymbolDash::Dotted,
+            fill: SymbolFill::Solid,
+        }
+    }
+
+    fn every_styled_kind() -> Vec<SymbolShape> {
+        vec![
+            SymbolShape::Polyline {
+                points: vec![Point::new(0, 0), Point::new(20, 0), Point::new(0, 10)],
+                closed: true,
+                style: SymbolStyle::default(),
+            },
+            SymbolShape::rectangle(Point::new(0, 0), Point::new(20, 10)),
+            SymbolShape::Circle {
+                center: Point::new(5, 5),
+                radius: 4,
+                style: SymbolStyle::default(),
+            },
+            SymbolShape::Arc {
+                center: Point::new(5, 5),
+                radius: 4,
+                start_degrees: 0,
+                sweep_degrees: 90,
+                style: SymbolStyle::default(),
+            },
+            SymbolShape::curve(SymbolCurve::of_arc(Point::new(5, 5), 4, 0, 90)),
+        ]
+    }
+
+    /// A shape in the plain style writes no style at all, so a document
+    /// reads back exactly as it was written before shapes had one; a chosen
+    /// style is written and read back whole.
+    #[test]
+    fn only_a_chosen_style_is_written() {
+        for shape in every_styled_kind() {
+            let plain = serde_json::to_string(&shape).unwrap();
+            assert!(!plain.contains("style"), "{plain}");
+            assert_eq!(serde_json::from_str::<SymbolShape>(&plain).unwrap(), shape);
+
+            let mut chosen = shape.clone();
+            *chosen.style_mut().unwrap() = styled();
+            let written = serde_json::to_string(&chosen).unwrap();
+            assert!(
+                written.contains(r#""style":{"stroke":"heavy","dash":"dotted","fill":"solid"}"#),
+                "{written}"
+            );
+            assert_eq!(
+                serde_json::from_str::<SymbolShape>(&written).unwrap(),
+                chosen
+            );
+        }
+        // Only the part of a style that differs need be written.
+        let thin: SymbolShape = serde_json::from_str(
+            r#"{"Circle":{"center":{"x":0,"y":0},"radius":3,"style":{"stroke":"thin"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            thin.style(),
+            Some(SymbolStyle {
+                stroke: SymbolStroke::Thin,
+                ..SymbolStyle::default()
+            })
+        );
+    }
+
+    /// A turn, a mirror or a move carries the geometry and leaves the ink
+    /// alone.
+    #[test]
+    fn a_moved_turned_or_mirrored_shape_keeps_its_style() {
+        for mut shape in every_styled_kind() {
+            *shape.style_mut().unwrap() = styled();
+            shape.rotate_cw();
+            shape.mirror_h();
+            shape.mirror_v();
+            shape.translate(Point::new(7, -3));
+            assert_eq!(shape.style(), Some(styled()), "{shape:?}");
+        }
+    }
+
+    /// Only a shape with an inside takes a fill: a rectangle, a circle and a
+    /// polyline closed round at least three corners. A line, an arc and a
+    /// curve have no inside to paint, and an arrowhead, a dot and a text run
+    /// have no outline to style at all.
+    #[test]
+    fn only_a_shape_with_an_inside_is_filled() {
+        let fill = |mut shape: SymbolShape| {
+            if let Some(style) = shape.style_mut() {
+                style.fill = SymbolFill::Solid;
+            }
+            shape
+        };
+        let kinds = every_styled_kind();
+        for shape in &kinds[..3] {
+            assert!(shape.is_closed() && !shape.is_filled(), "{shape:?}");
+            assert!(fill(shape.clone()).is_filled(), "{shape:?}");
+        }
+        for shape in &kinds[3..] {
+            assert!(!fill(shape.clone()).is_filled(), "{shape:?}");
+        }
+        let open = SymbolShape::Polyline {
+            points: vec![Point::new(0, 0), Point::new(20, 0), Point::new(0, 10)],
+            closed: false,
+            style: SymbolStyle::default(),
+        };
+        let two_corners = SymbolShape::Polyline {
+            points: vec![Point::new(0, 0), Point::new(20, 0)],
+            closed: true,
+            style: SymbolStyle::default(),
+        };
+        assert!(!fill(open).is_filled());
+        assert!(!fill(two_corners).is_filled());
+        for solid in [
+            SymbolShape::Arrow {
+                tip: Point::origin(),
+                rotation_quarters: 0,
+            },
+            SymbolShape::Dot {
+                center: Point::origin(),
+                radius: 2,
+            },
+        ] {
+            assert_eq!(solid.style(), None);
+            assert!(!solid.is_filled());
+        }
     }
 }

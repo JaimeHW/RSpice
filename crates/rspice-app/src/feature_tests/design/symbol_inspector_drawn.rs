@@ -7,8 +7,10 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::inspector::symbol::*;
+use rspice_design::symbol::{SymbolDash, SymbolFill, SymbolStroke, SymbolStyle};
 use rspice_schematic_editor::symbol_editor::inspector::{self, SymbolInspectorRequest};
 use rspice_schematic_editor::symbol_editor::interaction::SymbolEditCapabilities;
+use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 use rspice_ui_kit::panels::panel_body;
 use std::collections::HashMap;
 
@@ -377,10 +379,12 @@ fn shape_geometry_rows_each_change_one_measure() {
         SymbolShape::Rectangle {
             min: Point::new(-20, -10),
             max: Point::new(20, 10),
+            style: Default::default(),
         },
         SymbolShape::Polyline {
             points: vec![Point::origin(), Point::new(30, 0)],
             closed: false,
+            style: Default::default(),
         },
     ];
     editor
@@ -405,6 +409,7 @@ fn shape_geometry_rows_each_change_one_measure() {
     let widened = SymbolShape::Rectangle {
         min: Point::new(-20, -10),
         max: Point::new(40, 10),
+        style: Default::default(),
     };
 
     editor.click("Width");
@@ -423,6 +428,7 @@ fn shape_geometry_rows_each_change_one_measure() {
         SymbolShape::Polyline {
             points: points.clone(),
             closed: false,
+            style: Default::default(),
         }
     );
 
@@ -433,6 +439,7 @@ fn shape_geometry_rows_each_change_one_measure() {
         SymbolShape::Polyline {
             points: points.clone(),
             closed: false,
+            style: Default::default(),
         }
     );
 
@@ -447,8 +454,85 @@ fn shape_geometry_rows_each_change_one_measure() {
             SymbolShape::Polyline {
                 points,
                 closed: true,
+                style: Default::default(),
             }
         ]
+    );
+}
+
+/// Several shapes selected: each style row edits every one of them as one
+/// undo step named for the row, and reads "mixed" while they disagree.
+#[test]
+fn a_style_row_restyles_every_selected_shape_as_one_undo_step() {
+    let mut editor = Editor::new();
+    let key = editor.app.state.model.workspace.content.active_key();
+    let styles = |editor: &Editor| {
+        editor
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap()
+            .body
+            .iter()
+            .map(|shape| shape.style().unwrap())
+            .collect::<Vec<_>>()
+    };
+    let select_both = |editor: &mut Editor| {
+        let mut both = SymbolSelection::default();
+        both.shapes.extend([0, 1]);
+        editor.app.state.design.symbol.editor.set_selection(both);
+        editor.pass(Vec::new());
+    };
+    // A frame after each pick for the closing menu to leave the row below it
+    // free, as a pointer travelling to the next row gives it.
+    let pick = |editor: &mut Editor, row: &str, option: &str| {
+        editor.click(row);
+        editor.pass(Vec::new());
+        editor.click(option);
+        editor.pass(Vec::new());
+    };
+
+    select_both(&mut editor);
+    assert_eq!(editor.values["Stroke"], "normal");
+    pick(&mut editor, "Stroke", "heavy");
+    assert!(
+        styles(&editor)
+            .iter()
+            .all(|style| style.stroke == SymbolStroke::Heavy)
+    );
+    let history = |editor: &Editor| {
+        let history = &editor.app.state.design.symbol.history;
+        (
+            history.undo_depth(&key),
+            history.undo_step(&key).map(str::to_owned),
+        )
+    };
+    assert_eq!(history(&editor), (1, Some("Set stroke".to_owned())));
+
+    editor.app.state.design.symbol.editor.select_shape(1);
+    editor.pass(Vec::new());
+    pick(&mut editor, "Dash", "dashed");
+    assert_eq!(history(&editor), (2, Some("Set dash".to_owned())));
+    select_both(&mut editor);
+    assert_eq!(editor.values["Dash"], "mixed");
+    assert_eq!(editor.values["Stroke"], "heavy");
+
+    pick(&mut editor, "Dash", "dotted");
+    pick(&mut editor, "Fill", "solid");
+    let both = SymbolStyle {
+        stroke: SymbolStroke::Heavy,
+        dash: SymbolDash::Dotted,
+        fill: SymbolFill::Solid,
+    };
+    assert_eq!(styles(&editor), [both, both]);
+    assert_eq!(history(&editor), (4, Some("Set fill".to_owned())));
+
+    assert!(editor.app.state.undo_active_symbol_document().unwrap());
+    assert!(
+        styles(&editor)
+            .iter()
+            .all(|style| style.fill == SymbolFill::None && style.dash == SymbolDash::Dotted)
     );
 }
 
@@ -456,6 +540,8 @@ pub(crate) struct Editor {
     ctx: egui::Context,
     pub(crate) app: RSpiceApp,
     controls: HashMap<String, egui::Rect>,
+    /// What each labelled control last read, such as a combo's choice.
+    values: HashMap<String, String>,
 }
 
 impl Editor {
@@ -477,10 +563,12 @@ impl Editor {
                 SymbolShape::Circle {
                     center: Point::origin(),
                     radius: 10,
+                    style: Default::default(),
                 },
                 SymbolShape::Circle {
                     center: Point::new(100, 0),
                     radius: 20,
+                    style: Default::default(),
                 },
             ],
             ..Default::default()
@@ -496,6 +584,7 @@ impl Editor {
             ctx,
             app,
             controls: HashMap::new(),
+            values: HashMap::new(),
         }
     }
 
@@ -547,6 +636,9 @@ impl Editor {
         );
         if let Some(update) = output.platform_output.accesskit_update {
             for (_, node) in update.nodes {
+                if let (Some(label), Some(value)) = (node.label(), node.value()) {
+                    self.values.insert(label.to_owned(), value.to_owned());
+                }
                 if let (Some(label), Some(bounds)) = (node.label(), node.bounds()) {
                     self.controls.insert(
                         label.to_owned(),

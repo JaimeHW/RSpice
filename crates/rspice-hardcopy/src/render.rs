@@ -47,7 +47,8 @@ use rspice_design::schematic::{
     component::Component, documentation_shape::DocumentationShapeGeometry,
 };
 use rspice_design::symbol::{
-    SymbolCurve, SymbolDocument, SymbolShape, SymbolTextPlacement, rectangle_corners,
+    SymbolCurve, SymbolDash, SymbolDocument, SymbolShape, SymbolStyle, SymbolTextPlacement,
+    rectangle_corners,
 };
 use rspice_design::symbol_artwork::{PathCommand, SymbolLibrary};
 use rspice_design_model::Point as SchematicPoint;

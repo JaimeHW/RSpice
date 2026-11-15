@@ -5,9 +5,9 @@ use super::session::{SymbolEditorSession, SymbolSelection};
 use egui::Ui;
 use rspice_design::symbol::edit::SymbolCommitIntent;
 use rspice_design::symbol::{
-    MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, SymbolAttributeKind, SymbolDocument,
-    SymbolEditorMetadata, SymbolPin, SymbolPinElectricalKind, SymbolShape, SymbolTextAlign,
-    SymbolTextSize,
+    MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, SymbolAttributeKind, SymbolDash,
+    SymbolDocument, SymbolEditorMetadata, SymbolFill, SymbolPin, SymbolPinElectricalKind,
+    SymbolShape, SymbolStroke, SymbolStyle, SymbolTextAlign, SymbolTextSize,
 };
 use rspice_design_model::{
     Point,
@@ -17,8 +17,8 @@ use rspice_design_model::{
 };
 use rspice_ui_kit::panels::{
     PANEL_INSET, Problem, WorkbenchIcon, labeled_icon_button, panel_bleed, panel_inset,
-    property_row, property_row_combo, property_row_input, property_row_problem, section_block_gap,
-    section_header,
+    property_row, property_row_combo, property_row_combo_showing, property_row_input,
+    property_row_problem, section_block_gap, section_header,
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
@@ -126,10 +126,13 @@ pub fn show(
                     selection.shapes.len(),
                     selection.attributes.len(),
                 );
+                let shapes = selection.shapes.iter().copied().collect::<Vec<_>>();
+                changed |= style_rows(ui, &mut edit, &mut document, &shapes);
             } else if let Some(name) = selection.pins.iter().next() {
                 changed |= pin_section(ui, &mut edit, &mut document, &mut intent, ports, name);
             } else if let Some(index) = selection.shapes.iter().next() {
                 changed |= shape_section(ui, &mut edit, &mut document, *index);
+                changed |= style_rows(ui, &mut edit, &mut document, &[*index]);
             } else if let Some(kind) = selection.attributes.iter().next() {
                 changed |= attribute_section(ui, &mut edit, &mut document, &mut metadata, *kind);
             }
@@ -750,7 +753,7 @@ fn shape_kind(shape: &SymbolShape) -> &'static str {
         SymbolShape::Polyline { .. } => "polyline",
         SymbolShape::Rectangle { .. } => "rectangle",
         SymbolShape::Circle { .. } => "circle",
-        SymbolShape::Arc { .. } | SymbolShape::Curve(_) => "arc",
+        SymbolShape::Arc { .. } | SymbolShape::Curve { .. } => "arc",
         SymbolShape::Arrow { .. } => "arrow",
         SymbolShape::Dot { .. } => "dot",
         SymbolShape::Text { .. } => "text",
@@ -778,7 +781,7 @@ fn shape_section(
     let mut changed = false;
     let mut edited = shape;
     match &mut edited {
-        SymbolShape::Polyline { points, closed } => {
+        SymbolShape::Polyline { points, closed, .. } => {
             changed |= vertex_table(ui, edit, &before, index, points, *closed);
             let mut is_closed = *closed;
             // A closed outline needs three corners; with two the switch
@@ -791,7 +794,7 @@ fn shape_section(
                 changed = true;
             }
         }
-        SymbolShape::Rectangle { min, max } => {
+        SymbolShape::Rectangle { min, max, .. } => {
             // X and Y are the top-left corner, as the rectangle is drawn
             // from; each row changes its own measure and nothing else.
             let (mut x, mut y) = (min.x, min.y);
@@ -817,7 +820,7 @@ fn shape_section(
                 changed = true;
             }
         }
-        SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
+        SymbolShape::Circle { center, radius, .. } | SymbolShape::Dot { center, radius } => {
             changed |= coordinate_row(ui, edit, &before, "Center X", &mut center.x);
             changed |= coordinate_row(ui, edit, &before, "Center Y", &mut center.y);
             changed |= integer_row(ui, edit, &before, "Radius", radius, |radius| radius >= 1);
@@ -827,6 +830,7 @@ fn shape_section(
             radius,
             start_degrees,
             sweep_degrees,
+            ..
         } => {
             changed |= coordinate_row(ui, edit, &before, "Center X", &mut center.x);
             changed |= coordinate_row(ui, edit, &before, "Center Y", &mut center.y);
@@ -841,7 +845,7 @@ fn shape_section(
             });
         }
         // A drawing's curve is not a whole-unit shape to retype; it can move.
-        SymbolShape::Curve(curve) => {
+        SymbolShape::Curve { curve, .. } => {
             let round = |value: f64| value.round() as i32;
             let (x, y) = (round(curve.center[0]), round(curve.center[1]));
             let (mut new_x, mut new_y) = (x, y);
@@ -1017,6 +1021,137 @@ fn attribute_section(
     changed
 }
 
+/// What a style row shows while the shapes it edits disagree.
+const MIXED: &str = "mixed";
+
+/// The one value every entry of `values` holds, or `None` when they differ.
+fn shared<T: Copy + PartialEq>(values: &[T]) -> Option<T> {
+    let first = *values.first()?;
+    values.iter().all(|value| *value == first).then_some(first)
+}
+
+/// A choice among `options` for every shape a style row edits, reading
+/// [`MIXED`] while they disagree. Answers the option picked this frame.
+fn style_choice<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    label: &str,
+    values: &[T],
+    options: &[T],
+    name: fn(T) -> &'static str,
+) -> Option<T> {
+    let current = shared(values);
+    let shown = current.map_or(MIXED, name);
+    let mut selected = shown.to_owned();
+    let entries = options
+        .iter()
+        .map(|option| (name(*option).to_owned(), name(*option).to_owned()))
+        .collect::<Vec<_>>();
+    let picked = property_row_combo_showing(
+        ui,
+        label,
+        ("symbol-style", label),
+        &mut selected,
+        &entries,
+        shown,
+        true,
+    );
+    options
+        .iter()
+        .copied()
+        .find(|option| picked && name(*option) == selected)
+}
+
+/// Stroke, Dash and Fill for the body shapes at `indices`: the one selected,
+/// or every one of several at once. Fill is offered only when every shape
+/// has an inside to paint. Each pick is one undo step, named for the row.
+fn style_rows(
+    ui: &mut Ui,
+    edit: &mut InspectorEdit,
+    document: &mut SymbolDocument,
+    indices: &[usize],
+) -> bool {
+    let styled = indices
+        .iter()
+        .copied()
+        .filter(|index| {
+            document
+                .body
+                .get(*index)
+                .is_some_and(|shape| shape.style().is_some())
+        })
+        .collect::<Vec<_>>();
+    if styled.is_empty() {
+        return false;
+    }
+    let styles = styled
+        .iter()
+        .filter_map(|index| document.body[*index].style())
+        .collect::<Vec<_>>();
+    let mut changed = false;
+    if let Some(stroke) = style_choice(
+        ui,
+        "Stroke",
+        &styles.iter().map(|style| style.stroke).collect::<Vec<_>>(),
+        &SymbolStroke::ALL,
+        SymbolStroke::label,
+    ) {
+        changed |= restyle(edit, document, &styled, "Set stroke", |style| {
+            style.stroke = stroke;
+        });
+    }
+    if let Some(dash) = style_choice(
+        ui,
+        "Dash",
+        &styles.iter().map(|style| style.dash).collect::<Vec<_>>(),
+        &SymbolDash::ALL,
+        SymbolDash::label,
+    ) {
+        changed |= restyle(edit, document, &styled, "Set dash", |style| {
+            style.dash = dash;
+        });
+    }
+    if styled.iter().all(|index| document.body[*index].is_closed())
+        && let Some(fill) = style_choice(
+            ui,
+            "Fill",
+            &styles.iter().map(|style| style.fill).collect::<Vec<_>>(),
+            &SymbolFill::ALL,
+            SymbolFill::label,
+        )
+    {
+        changed |= restyle(edit, document, &styled, "Set fill", |style| {
+            style.fill = fill;
+        });
+    }
+    changed
+}
+
+/// Applies `apply` to the style of every shape at `indices` as one undo
+/// step named `step`; no step when nothing changes.
+fn restyle(
+    edit: &mut InspectorEdit,
+    document: &mut SymbolDocument,
+    indices: &[usize],
+    step: &str,
+    apply: impl Fn(&mut SymbolStyle),
+) -> bool {
+    let before = document.clone();
+    for index in indices {
+        if let Some(style) = document
+            .body
+            .get_mut(*index)
+            .and_then(SymbolShape::style_mut)
+        {
+            apply(style);
+        }
+    }
+    if *document == before {
+        return false;
+    }
+    edit.undo_before.push((before, step.to_owned()));
+    true
+}
+
 /// More than one object: the count, and nothing else. Which kinds they are is
 /// in the navigator's lists, and the instruction that used to sit here told a
 /// reader to do what the next click does anyway.
@@ -1078,6 +1213,19 @@ mod tests {
         // on one of the four the combo offers.
         assert_eq!(arrow_rotation_label(5), "90\u{b0}");
         assert_eq!(arrow_rotation_label(-1), "270\u{b0}");
+    }
+
+    /// A row edits several shapes at once and names their one value only
+    /// when they all hold it.
+    #[test]
+    fn a_style_row_names_a_value_only_when_every_shape_holds_it() {
+        assert_eq!(shared(&[SymbolStroke::Heavy]), Some(SymbolStroke::Heavy));
+        assert_eq!(
+            shared(&[SymbolDash::Dotted, SymbolDash::Dotted]),
+            Some(SymbolDash::Dotted)
+        );
+        assert_eq!(shared(&[SymbolFill::None, SymbolFill::Solid]), None);
+        assert_eq!(shared::<SymbolFill>(&[]), None);
     }
 
     /// One of a thing is singular: "1 body shapes" read as a typo.

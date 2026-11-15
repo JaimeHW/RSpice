@@ -391,6 +391,7 @@ mod tests {
             shape_summary(&SymbolShape::Polyline {
                 points: vec![Point::origin(), Point::new(10, 0), Point::new(10, 10)],
                 closed: true,
+                style: Default::default(),
             }),
             "Polygon, 3 points"
         );
@@ -398,6 +399,7 @@ mod tests {
             shape_summary(&SymbolShape::Rectangle {
                 min: Point::origin(),
                 max: Point::new(60, 40),
+                style: Default::default(),
             }),
             "Rectangle 60 \u{00d7} 40"
         );
@@ -411,6 +413,7 @@ mod tests {
                     Point::new(0, 40)
                 ],
                 closed: true,
+                style: Default::default(),
             }),
             "Polygon, 4 points"
         );

@@ -16,6 +16,7 @@ use crate::view::navigation::{
     handle_viewport_navigation,
 };
 use crate::view::resolved_symbol_render::draw_resolved_symbol;
+use crate::view::symbol_style::{broken_outline, inside_outline, paint_fill, styled_stroke};
 use egui::{Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2, pos2, vec2};
 use placement::SymbolPlacement;
 use rspice_design::{
@@ -26,7 +27,8 @@ use rspice_design::{
     },
     symbol::{
         PinDrawing, SYMBOL_PIN_LENGTH, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolCurve,
-        SymbolDocument, SymbolEditorMetadata, SymbolShape, SymbolTextAlign, pin_drawing,
+        SymbolDash, SymbolDocument, SymbolEditorMetadata, SymbolFill, SymbolShape, SymbolStyle,
+        SymbolTextAlign, pin_drawing,
         rectangle_corners,
     },
 };
@@ -371,7 +373,7 @@ fn draw_shape_outline(
     stroke: Stroke,
 ) {
     let mut outline: Vec<Pos2> = match shape {
-        SymbolShape::Polyline { points, closed } => {
+        SymbolShape::Polyline { points, closed, .. } => {
             let mut outline: Vec<Pos2> = points
                 .iter()
                 .map(|point| viewport.world_to_screen(*point))
@@ -381,7 +383,7 @@ fn draw_shape_outline(
             }
             outline
         }
-        SymbolShape::Rectangle { min, max } => {
+        SymbolShape::Rectangle { min, max, .. } => {
             let corners = rectangle_corners(*min, *max);
             corners
                 .iter()
@@ -389,7 +391,7 @@ fn draw_shape_outline(
                 .map(|point| viewport.world_to_screen(*point))
                 .collect()
         }
-        SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
+        SymbolShape::Circle { center, radius, .. } | SymbolShape::Dot { center, radius } => {
             curve_points(viewport, &SymbolCurve::of_arc(*center, *radius, 0, 360))
         }
         SymbolShape::Arc {
@@ -397,11 +399,12 @@ fn draw_shape_outline(
             radius,
             start_degrees,
             sweep_degrees,
+            ..
         } => curve_points(
             viewport,
             &SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees),
         ),
-        SymbolShape::Curve(curve) => curve_points(viewport, curve),
+        SymbolShape::Curve { curve, .. } => curve_points(viewport, curve),
         SymbolShape::Arrow { .. } | SymbolShape::Text { .. } => {
             let (min, max) = session::symbol_shape_bounds(shape);
             let corners = rectangle_corners(min, max);
@@ -649,59 +652,68 @@ fn draw_body(
     for (index, shape) in document.body.iter().enumerate() {
         let is_selected = selected_shapes.contains(&index);
         let shape_color = if is_selected { selected_color } else { color };
-        let stroke = Stroke::new(if is_selected { 2.0 } else { 1.3 }, shape_color);
+        let style = shape.style().unwrap_or_default();
+        let stroke = styled_stroke(
+            Stroke::new(if is_selected { 2.0 } else { 1.3 }, shape_color),
+            style,
+        );
+        let screen = |point: Point| viewport.world_to_screen(point);
         match shape {
-            SymbolShape::Polyline { points, closed } => {
-                for pair in points.windows(2) {
-                    painter.line_segment(
-                        [
-                            viewport.world_to_screen(pair[0]),
-                            viewport.world_to_screen(pair[1]),
-                        ],
-                        stroke,
-                    );
+            SymbolShape::Polyline { points, .. } => {
+                let outline: Vec<Pos2> = points.iter().copied().map(screen).collect();
+                let closed = shape.is_closed();
+                if closed {
+                    paint_fill(painter, &outline, style, shape_color);
                 }
-                if *closed
-                    && points.len() > 2
-                    && let (Some(first), Some(last)) = (points.first(), points.last())
-                {
-                    painter.line_segment(
-                        [
-                            viewport.world_to_screen(*last),
-                            viewport.world_to_screen(*first),
-                        ],
-                        stroke,
-                    );
-                }
+                draw_outline(painter, &outline, closed, stroke, style, viewport.zoom);
             }
-            SymbolShape::Rectangle { min, max } => {
-                let corners =
-                    rectangle_corners(*min, *max).map(|point| viewport.world_to_screen(point));
-                for index in 0..corners.len() {
-                    painter.line_segment(
-                        [corners[index], corners[(index + 1) % corners.len()]],
+            SymbolShape::Rectangle { min, max, .. } => {
+                let outline = rectangle_corners(*min, *max).map(screen);
+                paint_fill(painter, &outline, style, shape_color);
+                draw_outline(painter, &outline, true, stroke, style, viewport.zoom);
+            }
+            SymbolShape::Circle { center, radius, .. } => {
+                let (middle, reach) = (screen(*center), *radius as f32 * viewport.zoom);
+                if style.fill == SymbolFill::Solid {
+                    painter.circle_filled(middle, reach, shape_color);
+                }
+                if style.dash == SymbolDash::Solid {
+                    painter.circle_stroke(middle, reach, stroke);
+                } else {
+                    let ring = SymbolCurve::of_arc(*center, *radius, 0, 360);
+                    draw_curve(
+                        painter,
+                        curve_points(viewport, &ring),
                         stroke,
+                        style,
+                        viewport,
                     );
                 }
-            }
-            SymbolShape::Circle { center, radius } => {
-                painter.circle_stroke(
-                    viewport.world_to_screen(*center),
-                    *radius as f32 * viewport.zoom,
-                    stroke,
-                );
             }
             SymbolShape::Arc {
                 center,
                 radius,
                 start_degrees,
                 sweep_degrees,
+                ..
             } => {
                 let arc = SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees);
-                painter.add(Shape::line(curve_points(viewport, &arc), stroke));
+                draw_curve(
+                    painter,
+                    curve_points(viewport, &arc),
+                    stroke,
+                    style,
+                    viewport,
+                );
             }
-            SymbolShape::Curve(curve) => {
-                painter.add(Shape::line(curve_points(viewport, curve), stroke));
+            SymbolShape::Curve { curve, .. } => {
+                draw_curve(
+                    painter,
+                    curve_points(viewport, curve),
+                    stroke,
+                    style,
+                    viewport,
+                );
             }
             SymbolShape::Arrow {
                 tip,
@@ -731,6 +743,44 @@ fn draw_body(
                     shape_color,
                 );
             }
+        }
+    }
+}
+
+/// The outline `outline` in `style`: broken where the style breaks it, else
+/// segment by segment, the way the canvas has always drawn a body.
+fn draw_outline(
+    painter: &egui::Painter,
+    outline: &[Pos2],
+    closed: bool,
+    stroke: Stroke,
+    style: SymbolStyle,
+    zoom: f32,
+) {
+    if let Some(pieces) = broken_outline(outline, closed, stroke, style, zoom) {
+        painter.extend(pieces);
+        return;
+    }
+    for pair in outline.windows(2) {
+        painter.line_segment([pair[0], pair[1]], stroke);
+    }
+    if closed && let (Some(first), Some(last)) = (outline.first(), outline.last()) {
+        painter.line_segment([*last, *first], stroke);
+    }
+}
+
+/// A curve's tessellated `points` in `style`.
+fn draw_curve(
+    painter: &egui::Painter,
+    points: Vec<Pos2>,
+    stroke: Stroke,
+    style: SymbolStyle,
+    viewport: SymbolViewport,
+) {
+    match broken_outline(&points, false, stroke, style, viewport.zoom) {
+        Some(pieces) => painter.extend(pieces),
+        None => {
+            painter.add(Shape::line(points, stroke));
         }
     }
 }
@@ -1177,8 +1227,13 @@ pub fn hit_shape(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2)
 
 fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
     const HIT_PX: f32 = 7.0;
+    // A filled shape is ink all the way across, so it is picked anywhere
+    // inside, as a text run is, and not only on its edge.
+    if shape.is_filled() && inside_filled_shape(shape, viewport, pos) {
+        return true;
+    }
     match shape {
-        SymbolShape::Polyline { points, closed } => {
+        SymbolShape::Polyline { points, closed, .. } => {
             points.windows(2).any(|pair| {
                 distance_to_screen_segment(
                     pos,
@@ -1198,7 +1253,7 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
                         ) <= HIT_PX
                     }))
         }
-        SymbolShape::Rectangle { min, max } => {
+        SymbolShape::Rectangle { min, max, .. } => {
             let corners =
                 rectangle_corners(*min, *max).map(|point| viewport.world_to_screen(point));
             (0..corners.len()).any(|index| {
@@ -1209,7 +1264,7 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
                 ) <= HIT_PX
             })
         }
-        SymbolShape::Circle { center, radius } => {
+        SymbolShape::Circle { center, radius, .. } => {
             let center = viewport.world_to_screen(*center);
             let radius = *radius as f32 * viewport.zoom;
             (center.distance(pos) - radius).abs() <= HIT_PX
@@ -1219,13 +1274,14 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
             radius,
             start_degrees,
             sweep_degrees,
+            ..
         } => curve_hit(
             &SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees),
             viewport,
             pos,
             HIT_PX,
         ),
-        SymbolShape::Curve(curve) => curve_hit(curve, viewport, pos, HIT_PX),
+        SymbolShape::Curve { curve, .. } => curve_hit(curve, viewport, pos, HIT_PX),
         SymbolShape::Arrow { tip, .. } => viewport.world_to_screen(*tip).distance(pos) <= 18.0,
         SymbolShape::Dot { center, radius } => {
             viewport.world_to_screen(*center).distance(pos)
@@ -1245,6 +1301,22 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
                 .expand(HIT_PX)
                 .contains(pos)
         }
+    }
+}
+
+fn inside_filled_shape(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
+    let screen = |point: Point| viewport.world_to_screen(point);
+    match shape {
+        SymbolShape::Polyline { points, .. } => {
+            inside_outline(&points.iter().copied().map(screen).collect::<Vec<_>>(), pos)
+        }
+        SymbolShape::Rectangle { min, max, .. } => {
+            inside_outline(&rectangle_corners(*min, *max).map(screen), pos)
+        }
+        SymbolShape::Circle { center, radius, .. } => {
+            screen(*center).distance(pos) <= *radius as f32 * viewport.zoom
+        }
+        _ => false,
     }
 }
 
@@ -1411,11 +1483,11 @@ fn document_bounds(document: &SymbolDocument) -> (Point, Point) {
                     ys.push(point.y);
                 }
             }
-            SymbolShape::Rectangle { min, max } => {
+            SymbolShape::Rectangle { min, max, .. } => {
                 xs.extend([min.x, max.x]);
                 ys.extend([min.y, max.y]);
             }
-            SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
+            SymbolShape::Circle { center, radius, .. } | SymbolShape::Dot { center, radius } => {
                 xs.extend([center.x - radius, center.x + radius]);
                 ys.extend([center.y - radius, center.y + radius]);
             }
@@ -1423,7 +1495,7 @@ fn document_bounds(document: &SymbolDocument) -> (Point, Point) {
                 xs.extend([center.x - radius, center.x + radius]);
                 ys.extend([center.y - radius, center.y + radius]);
             }
-            SymbolShape::Curve(curve) => {
+            SymbolShape::Curve { curve, .. } => {
                 let (least, greatest) = curve.whole_unit_bounds();
                 xs.extend([least.x, greatest.x]);
                 ys.extend([least.y, greatest.y]);

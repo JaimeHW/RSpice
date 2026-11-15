@@ -99,8 +99,21 @@ impl SemanticSceneCompiler<'_> {
             this.schematic_point(world)
         };
         for shape in &symbol.body {
+            let style = shape.style().unwrap_or_default();
+            let stroke = styled_print_stroke(body_stroke, style);
+            // The inside takes the outline's ink, through the same mapping a
+            // printed dot's does.
+            let fill = if shape.is_filled() {
+                self.mapped_fill(
+                    PrintObjectKind::Layer,
+                    body_stable_id,
+                    Some(SceneFill::solid(body_stroke.color)),
+                )
+            } else {
+                None
+            };
             match shape {
-                SymbolShape::Polyline { points, closed } => {
+                SymbolShape::Polyline { points, closed, .. } => {
                     if points.len() >= if *closed { 3 } else { 2 } {
                         self.primitives.push(ScenePrimitive::Polyline {
                             points: points
@@ -109,30 +122,30 @@ impl SemanticSceneCompiler<'_> {
                                 .map(|point| convert(self, point))
                                 .collect::<Result<_, _>>()?,
                             closed: *closed,
-                            stroke: body_stroke,
-                            fill: None,
+                            stroke,
+                            fill,
                         });
                     }
                 }
-                SymbolShape::Rectangle { min, max } => {
+                SymbolShape::Rectangle { min, max, .. } => {
                     self.primitives.push(ScenePrimitive::Polyline {
                         points: rectangle_corners(*min, *max)
                             .into_iter()
                             .map(|point| convert(self, point))
                             .collect::<Result<_, _>>()?,
                         closed: true,
-                        stroke: body_stroke,
-                        fill: None,
+                        stroke,
+                        fill,
                     });
                 }
-                SymbolShape::Circle { center, radius } => {
+                SymbolShape::Circle { center, radius, .. } => {
                     self.primitives.push(ScenePrimitive::Circle {
                         center: convert(self, *center)?,
                         radius: Length::from_micrometres(
                             u64::from(radius.unsigned_abs()) * SCHEMATIC_UNIT_UM as u64,
                         ),
-                        stroke: Some(body_stroke),
-                        fill: None,
+                        stroke: Some(stroke),
+                        fill,
                     });
                 }
                 SymbolShape::Dot { center, radius } => {
@@ -154,11 +167,12 @@ impl SemanticSceneCompiler<'_> {
                     radius,
                     start_degrees,
                     sweep_degrees,
+                    ..
                 } => {
                     let arc = SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees);
-                    self.symbol_curve(&arc, component, body_stroke)?;
+                    self.symbol_curve(&arc, component, stroke)?;
                 }
-                SymbolShape::Curve(curve) => self.symbol_curve(curve, component, body_stroke)?,
+                SymbolShape::Curve { curve, .. } => self.symbol_curve(curve, component, stroke)?,
                 SymbolShape::Arrow {
                     tip,
                     rotation_quarters,
@@ -308,5 +322,34 @@ impl SemanticSceneCompiler<'_> {
             stroke,
         });
         Ok(())
+    }
+}
+
+/// `stroke` weighted and broken as `style` says. A whole line keeps the
+/// pattern the print mapping gave the body's layer; a broken one is broken
+/// in symbol units, so the pattern keeps its proportion against the body on
+/// every page size, as it does on screen.
+fn styled_print_stroke(stroke: StrokeStyle, style: SymbolStyle) -> StrokeStyle {
+    let scaled = (stroke.width.micrometres() as f64 * f64::from(style.stroke.scale())).round();
+    let width = Length::from_micrometres((scaled as u64).max(1));
+    let units = |value: f32| {
+        Length::from_micrometres((f64::from(value) * SCHEMATIC_UNIT_UM as f64).round() as u64)
+    };
+    match (style.dash, style.dash.pattern()) {
+        (SymbolDash::Dotted, Some((_, skipped))) => StrokeStyle {
+            width,
+            pattern: StrokePattern::Dotted,
+            exact_dash: None,
+            exact_dot_spacing: Some(units(skipped)),
+            ..stroke
+        },
+        (_, Some((drawn, skipped))) => StrokeStyle {
+            width,
+            pattern: StrokePattern::Dashed,
+            exact_dash: Some((units(drawn), units(skipped))),
+            exact_dot_spacing: None,
+            ..stroke
+        },
+        (_, None) => StrokeStyle { width, ..stroke },
     }
 }

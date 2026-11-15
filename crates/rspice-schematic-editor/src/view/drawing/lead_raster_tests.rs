@@ -175,6 +175,7 @@ fn an_imported_symbols_lead_lies_on_its_wire() {
     let stroke = |points: Vec<Point>| SymbolShape::Polyline {
         points,
         closed: false,
+        style: Default::default(),
     };
     let mut resistor = Component::new(1, ComponentType::Resistor, Point::new(60, 60));
     resistor.display_mode = ComponentDisplayMode::Hidden;

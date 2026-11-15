@@ -28,6 +28,7 @@ fn symbol_draft_survives_passive_window_projection() {
             body: vec![SymbolShape::Circle {
                 center: Point::origin(),
                 radius: 10,
+                style: Default::default(),
             }],
             ..Default::default()
         };

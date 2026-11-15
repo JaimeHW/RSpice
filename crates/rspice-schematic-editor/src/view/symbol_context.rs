@@ -533,6 +533,7 @@ mod tests {
                 body: vec![SymbolShape::Polyline {
                     points: vec![Point::new(80, -10), Point::new(120, 10)],
                     closed: false,
+                    style: Default::default(),
                 }],
                 pins: vec![SymbolPin::new(
                     "OUT",
@@ -566,6 +567,7 @@ mod tests {
                 body: vec![SymbolShape::Polyline {
                     points: vec![Point::new(80, -10), Point::new(120, 10)],
                     closed: false,
+                    style: Default::default(),
                 }],
                 pins: vec![SymbolPin::new(
                     "OUT",
@@ -654,6 +656,7 @@ mod tests {
                 body: vec![SymbolShape::Polyline {
                     points: vec![Point::new(80, -10), Point::new(120, 10)],
                     closed: false,
+                    style: Default::default(),
                 }],
                 pins: vec![SymbolPin::new(
                     "OUT",

@@ -273,7 +273,14 @@ fn a_generated_block_body_is_a_rectangle_and_a_triangle_is_not() {
     ]);
     let (min, max) = block.body_bounds();
     let shapes = block.body_shapes();
-    assert_eq!(shapes[0], SymbolShape::Rectangle { min, max });
+    assert_eq!(
+        shapes[0],
+        SymbolShape::Rectangle {
+            min,
+            max,
+            style: Default::default()
+        }
+    );
     assert_eq!(
         block.body_outline()[0],
         (rectangle_corners(min, max).to_vec(), true)

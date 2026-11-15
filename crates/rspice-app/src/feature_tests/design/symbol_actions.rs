@@ -235,6 +235,7 @@ fn align_and_snap_act_on_the_symbol_selection_as_one_step() {
         SymbolShape::Circle {
             center: Point::new(-30, 0),
             radius: 10,
+            style: Default::default(),
         }
     );
     assert_eq!(aligned.pins, before.pins);

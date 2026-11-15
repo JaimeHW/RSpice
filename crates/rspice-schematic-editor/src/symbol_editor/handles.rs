@@ -62,7 +62,7 @@ pub fn shape_handles(shape: &SymbolShape) -> Vec<(SymbolHandle, [f64; 2])> {
         ]
     };
     match shape {
-        SymbolShape::Polyline { points, closed } => {
+        SymbolShape::Polyline { points, closed, .. } => {
             let mut handles: Vec<(SymbolHandle, [f64; 2])> = points
                 .iter()
                 .enumerate()
@@ -79,7 +79,7 @@ pub fn shape_handles(shape: &SymbolShape) -> Vec<(SymbolHandle, [f64; 2])> {
             }));
             handles
         }
-        SymbolShape::Rectangle { min, max } => {
+        SymbolShape::Rectangle { min, max, .. } => {
             let corners = rectangle_corners(*min, *max);
             let mut handles: Vec<(SymbolHandle, [f64; 2])> = corners
                 .iter()
@@ -94,7 +94,7 @@ pub fn shape_handles(shape: &SymbolShape) -> Vec<(SymbolHandle, [f64; 2])> {
             }));
             handles
         }
-        SymbolShape::Circle { center, radius } => {
+        SymbolShape::Circle { center, radius, .. } => {
             vec![(SymbolHandle::Radius, at(*center + Point::new(*radius, 0)))]
         }
         SymbolShape::Arc {
@@ -102,6 +102,7 @@ pub fn shape_handles(shape: &SymbolShape) -> Vec<(SymbolHandle, [f64; 2])> {
             radius,
             start_degrees,
             sweep_degrees,
+            ..
         } => {
             let circle = SymbolCurve::of_arc(*center, *radius, 0, 360);
             vec![
@@ -118,7 +119,7 @@ pub fn shape_handles(shape: &SymbolShape) -> Vec<(SymbolHandle, [f64; 2])> {
         SymbolShape::Text { anchor, .. } => vec![(SymbolHandle::Anchor, at(*anchor))],
         SymbolShape::Dot { center, .. } => vec![(SymbolHandle::Anchor, at(*center))],
         SymbolShape::Arrow { tip, .. } => vec![(SymbolHandle::Anchor, at(*tip))],
-        SymbolShape::Curve(curve) => vec![(SymbolHandle::Anchor, curve.center)],
+        SymbolShape::Curve { curve, .. } => vec![(SymbolHandle::Anchor, curve.center)],
     }
 }
 
@@ -144,10 +145,10 @@ pub fn grab(shape: &mut SymbolShape, index: usize, handle: SymbolHandle) -> Symb
             points.insert(edge + 1, middle);
             drag.handle = SymbolHandle::Vertex(edge + 1);
         }
-        (SymbolShape::Rectangle { min, max }, SymbolHandle::Corner(corner)) => {
+        (SymbolShape::Rectangle { min, max, .. }, SymbolHandle::Corner(corner)) => {
             drag.fixed = rectangle_corners(*min, *max)[(corner + 2) % 4];
         }
-        (SymbolShape::Rectangle { min, max }, SymbolHandle::Side(side)) => {
+        (SymbolShape::Rectangle { min, max, .. }, SymbolHandle::Side(side)) => {
             drag.fixed = rectangle_corners(*min, *max)[(side + 2) % 4];
         }
         _ => {}
@@ -162,7 +163,7 @@ pub fn grab(shape: &mut SymbolShape, index: usize, handle: SymbolHandle) -> Symb
 pub fn moved(shape: &SymbolShape, drag: &SymbolHandleDrag, point: Point) -> Option<SymbolShape> {
     let mut moved = shape.clone();
     match (&mut moved, drag.handle) {
-        (SymbolShape::Polyline { points, closed }, SymbolHandle::Vertex(index)) => {
+        (SymbolShape::Polyline { points, closed, .. }, SymbolHandle::Vertex(index)) => {
             let count = points.len();
             if index >= count {
                 return None;
@@ -180,7 +181,7 @@ pub fn moved(shape: &SymbolShape, drag: &SymbolHandleDrag, point: Point) -> Opti
             }
             moved = SymbolShape::rectangle(drag.fixed, point);
         }
-        (SymbolShape::Rectangle { min, max }, SymbolHandle::Side(side)) => {
+        (SymbolShape::Rectangle { min, max, .. }, SymbolHandle::Side(side)) => {
             // Top and bottom move in y only, right and left in x only: the
             // corner carried is the one across from the corner held.
             let corner = match side {
@@ -200,7 +201,7 @@ pub fn moved(shape: &SymbolShape, drag: &SymbolHandleDrag, point: Point) -> Opti
             }
             moved = SymbolShape::rectangle(held, corner);
         }
-        (SymbolShape::Circle { center, radius }, SymbolHandle::Radius) => {
+        (SymbolShape::Circle { center, radius, .. }, SymbolHandle::Radius) => {
             *radius = radius_through(*center, point);
             if *radius < 1 {
                 return None;
@@ -212,6 +213,7 @@ pub fn moved(shape: &SymbolShape, drag: &SymbolHandleDrag, point: Point) -> Opti
                 radius,
                 start_degrees,
                 sweep_degrees,
+                ..
             },
             SymbolHandle::ArcStart | SymbolHandle::ArcEnd,
         ) => {
@@ -245,6 +247,11 @@ pub fn moved(shape: &SymbolShape, drag: &SymbolHandleDrag, point: Point) -> Opti
         }
         _ => return None,
     }
+    // A rectangle resized from its corner is built anew; it keeps the
+    // stroke, dash and fill it was drawn with.
+    if let (Some(style), Some(kept)) = (shape.style(), moved.style_mut()) {
+        *kept = style;
+    }
     (moved != *shape).then_some(moved)
 }
 
@@ -267,7 +274,7 @@ pub fn step_name(shape: &SymbolShape, handle: SymbolHandle) -> String {
 /// Remove point `vertex` from the line or polygon `shape`, unless that would
 /// leave fewer than it needs; why not, when it would.
 pub fn remove_vertex(shape: &mut SymbolShape, vertex: usize) -> Result<(), &'static str> {
-    let SymbolShape::Polyline { points, closed } = shape else {
+    let SymbolShape::Polyline { points, closed, .. } = shape else {
         return Err("Only a line or a polygon has points to delete.");
     };
     let fewest = if *closed {
@@ -321,6 +328,25 @@ mod tests {
         assert_eq!(moved(&rectangle, &held, Point::new(-20, 30)), None);
     }
 
+    /// A resized rectangle keeps its stroke, dash and fill, from a corner
+    /// and from a side alike.
+    #[test]
+    fn a_resize_keeps_the_rectangles_style() {
+        use rspice_design::symbol::{SymbolDash, SymbolFill, SymbolStroke, SymbolStyle};
+        let style = SymbolStyle {
+            stroke: SymbolStroke::Heavy,
+            dash: SymbolDash::Dashed,
+            fill: SymbolFill::Solid,
+        };
+        let mut rectangle = SymbolShape::rectangle(Point::new(-20, -10), Point::new(20, 10));
+        *rectangle.style_mut().unwrap() = style;
+        for handle in [SymbolHandle::Corner(2), SymbolHandle::Side(1)] {
+            let held = drag(&mut rectangle, handle);
+            let resized = moved(&rectangle, &held, Point::new(40, 30)).unwrap();
+            assert_eq!(resized.style(), Some(style), "{handle:?}");
+        }
+    }
+
     /// A side drag moves that side alone.
     #[test]
     fn a_side_drag_moves_one_side() {
@@ -350,6 +376,7 @@ mod tests {
         let mut polygon = SymbolShape::Polyline {
             points: vec![Point::new(0, 0), Point::new(20, 0), Point::new(20, 20)],
             closed: true,
+            style: Default::default(),
         };
         let held = drag(&mut polygon, SymbolHandle::EdgeMiddle(2));
         assert_eq!(held.handle, SymbolHandle::Vertex(3));
@@ -363,6 +390,7 @@ mod tests {
                     Point::new(10, 10),
                 ],
                 closed: true,
+                style: Default::default(),
             }
         );
         assert_eq!(
@@ -375,6 +403,7 @@ mod tests {
                     Point::new(0, 20),
                 ],
                 closed: true,
+                style: Default::default(),
             })
         );
         // Onto the corner beside it is no point at all.
@@ -390,6 +419,7 @@ mod tests {
             radius: 10,
             start_degrees: 0,
             sweep_degrees: 90,
+            style: Default::default(),
         };
         let held = SymbolHandleDrag {
             shape: 0,
@@ -403,6 +433,7 @@ mod tests {
                 radius: 20,
                 start_degrees: 0,
                 sweep_degrees: 180,
+                style: Default::default(),
             })
         );
         let start = SymbolHandleDrag {
@@ -416,6 +447,7 @@ mod tests {
                 radius: 10,
                 start_degrees: 270,
                 sweep_degrees: 180,
+                style: Default::default(),
             })
         );
         assert_eq!(moved(&arc, &held, Point::new(10, 0)), None);
@@ -427,12 +459,14 @@ mod tests {
         let mut line = SymbolShape::Polyline {
             points: vec![Point::new(0, 0), Point::new(10, 0), Point::new(10, 10)],
             closed: false,
+            style: Default::default(),
         };
         assert_eq!(remove_vertex(&mut line, 1), Ok(()));
         assert!(remove_vertex(&mut line, 0).is_err());
         let mut polygon = SymbolShape::Polyline {
             points: vec![Point::new(0, 0), Point::new(10, 0), Point::new(10, 10)],
             closed: true,
+            style: Default::default(),
         };
         assert!(remove_vertex(&mut polygon, 0).is_err());
     }

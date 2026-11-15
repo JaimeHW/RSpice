@@ -23,8 +23,8 @@ use sha2::{Digest as ShaDigest, Sha256};
 use rspice_vocabulary::product::ContentDigest;
 
 pub use rspice_design_model::symbol_geometry::{
-    SymbolCurve, SymbolShape, SymbolTextAlign, SymbolTextPlacement, SymbolTextSize,
-    rectangle_corners, symbol_text_bounds,
+    SymbolCurve, SymbolDash, SymbolFill, SymbolShape, SymbolStroke, SymbolStyle, SymbolTextAlign,
+    SymbolTextPlacement, SymbolTextSize, rectangle_corners, symbol_text_bounds,
 };
 
 use crate::library::View;
@@ -1134,7 +1134,7 @@ impl SymbolDocument {
                         )?;
                     }
                 }
-                SymbolShape::Rectangle { min, max } => {
+                SymbolShape::Rectangle { min, max, .. } => {
                     validate_symbol_point(*min, &format!("rectangle {ordinal} corner"))?;
                     validate_symbol_point(*max, &format!("rectangle {ordinal} corner"))?;
                     if min.x > max.x || min.y > max.y {
@@ -1143,8 +1143,9 @@ impl SymbolDocument {
                         ));
                     }
                 }
-                SymbolShape::Curve(curve) => validate_symbol_curve(curve, ordinal)?,
-                SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
+                SymbolShape::Curve { curve, .. } => validate_symbol_curve(curve, ordinal)?,
+                SymbolShape::Circle { center, radius, .. }
+                | SymbolShape::Dot { center, radius } => {
                     validate_symbol_point(*center, &format!("round shape {ordinal} center"))?;
                     validate_symbol_radius(*center, *radius, ordinal)?;
                 }
@@ -1153,6 +1154,7 @@ impl SymbolDocument {
                     radius,
                     start_degrees,
                     sweep_degrees,
+                    ..
                 } => {
                     validate_symbol_point(*center, &format!("arc {ordinal} center"))?;
                     validate_symbol_radius(*center, *radius, ordinal)?;
@@ -1491,11 +1493,11 @@ fn shapes_bounds<'a>(shapes: impl IntoIterator<Item = &'a SymbolShape>) -> Optio
                     ys.push(point.y);
                 }
             }
-            SymbolShape::Rectangle { min, max } => {
+            SymbolShape::Rectangle { min, max, .. } => {
                 xs.extend([min.x, max.x]);
                 ys.extend([min.y, max.y]);
             }
-            SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
+            SymbolShape::Circle { center, radius, .. } | SymbolShape::Dot { center, radius } => {
                 xs.extend([
                     center.x.saturating_sub(*radius),
                     center.x.saturating_add(*radius),
@@ -1515,7 +1517,7 @@ fn shapes_bounds<'a>(shapes: impl IntoIterator<Item = &'a SymbolShape>) -> Optio
                     center.y.saturating_add(*radius),
                 ]);
             }
-            SymbolShape::Curve(curve) => {
+            SymbolShape::Curve { curve, .. } => {
                 let (least, greatest) = curve.whole_unit_bounds();
                 xs.extend([least.x, greatest.x]);
                 ys.extend([least.y, greatest.y]);
@@ -1682,6 +1684,7 @@ mod validation_tests {
                 radius: 10,
                 start_degrees: 0,
                 sweep_degrees: i32::MAX,
+                style: Default::default(),
             }],
             ..SymbolDocument::default()
         };
@@ -1707,6 +1710,7 @@ mod validation_tests {
             body: vec![SymbolShape::Polyline {
                 points: vec![Point::origin()],
                 closed: false,
+                style: Default::default(),
             }],
             ..SymbolDocument::default()
         };
@@ -1728,7 +1732,11 @@ mod validation_tests {
     #[test]
     fn a_rectangle_loads_only_with_its_corners_in_order() {
         let document = |min: Point, max: Point| SymbolDocument {
-            body: vec![SymbolShape::Rectangle { min, max }],
+            body: vec![SymbolShape::Rectangle {
+                min,
+                max,
+                style: Default::default(),
+            }],
             ..SymbolDocument::default()
         };
 
@@ -1770,6 +1778,7 @@ mod validation_tests {
             body: vec![SymbolShape::Circle {
                 center: Point::new(MAX_SYMBOL_COORDINATE_ABS, 0),
                 radius: MAX_SYMBOL_RADIUS,
+                style: Default::default(),
             }],
             ..SymbolDocument::default()
         };
@@ -1795,6 +1804,7 @@ mod validation_tests {
                     Point::new(-20, 20),
                 ],
                 closed: true,
+                style: Default::default(),
             }],
             pins: vec![
                 SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 0)))
@@ -1827,6 +1837,7 @@ mod validation_tests {
         document.body.push(SymbolShape::Polyline {
             points: vec![Point::new(-200, 150), Point::new(-190, 150)],
             closed: false,
+            style: Default::default(),
         });
         assert_eq!(leads(&document), expected);
         document.validate().expect("the document stays valid");

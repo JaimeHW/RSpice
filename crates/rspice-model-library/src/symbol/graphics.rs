@@ -201,6 +201,7 @@ fn parse_svg_shapes(
                 ),
             ],
             closed: false,
+            style: Default::default(),
         });
     }
     for (name, closed) in [("polyline", false), ("polygon", true)] {
@@ -224,6 +225,7 @@ fn parse_svg_shapes(
                     .map(|point| Point::new(point[0], point[1]))
                     .collect(),
                 closed,
+                style: Default::default(),
             });
         }
     }
@@ -245,6 +247,7 @@ fn parse_svg_shapes(
                 Point::new(x, y + height),
             ],
             closed: true,
+            style: Default::default(),
         });
     }
     for tag in svg_tags(source, "circle") {
@@ -260,6 +263,7 @@ fn parse_svg_shapes(
                 svg_i32(source_name, tag, "cy")?,
             ),
             radius,
+            style: Default::default(),
         });
     }
     if shapes.is_empty() {
@@ -372,14 +376,17 @@ fn parse_edif_shapes(
                         Point::new(points[0].x, points[1].y),
                     ],
                     closed: true,
+                    style: Default::default(),
                 },
                 "path" if points.len() >= 2 => SymbolShape::Polyline {
                     points,
                     closed: false,
+                    style: Default::default(),
                 },
                 "polygon" if points.len() >= 3 => SymbolShape::Polyline {
                     points,
                     closed: true,
+                    style: Default::default(),
                 },
                 "circle" if points.len() == 2 => {
                     let dx = f64::from(points[1].x - points[0].x);
@@ -387,6 +394,7 @@ fn parse_edif_shapes(
                     SymbolShape::Circle {
                         center: points[0],
                         radius: (dx.hypot(dy).round() as i32).max(1),
+                        style: Default::default(),
                     }
                 }
                 _ => {
@@ -547,6 +555,7 @@ fn parse_ltspice_asy(
                 ],
 
                 closed: false,
+                style: Default::default(),
             }),
             "RECTANGLE" | "CIRCLE" if words.len() == 6 => {
                 let a = Point::new(
@@ -569,6 +578,7 @@ fn parse_ltspice_asy(
                     shapes.push(SymbolShape::Polyline {
                         points: vec![a, Point::new(b.x, a.y), b, Point::new(a.x, b.y)],
                         closed: true,
+                        style: Default::default(),
                     });
                 } else {
                     if width != height {
@@ -580,6 +590,7 @@ fn parse_ltspice_asy(
                     shapes.push(SymbolShape::Circle {
                         center: Point::new((a.x + b.x) / 2, (a.y + b.y) / 2),
                         radius: ((b.x - a.x).abs().min((b.y - a.y).abs()) / 2).max(1),
+                        style: Default::default(),
                     });
                 }
             }
@@ -623,6 +634,7 @@ fn parse_ltspice_asy(
                     radius: ((b.x - a.x).abs().min((b.y - a.y).abs()) / 2).max(1),
                     start_degrees,
                     sweep_degrees,
+                    style: Default::default(),
                 });
             }
             "PIN" if words.len() >= 3 => {

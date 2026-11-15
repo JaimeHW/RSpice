@@ -62,6 +62,7 @@ fn hand_draw(app: &mut RSpiceApp, reference: &CellViewRef) -> (SymbolDocument, S
     let mark = SymbolShape::Polyline {
         points: vec![Point::new(-10, -5), Point::new(10, 5)],
         closed: false,
+        style: Default::default(),
     };
     drawn.body.push(mark.clone());
     app.state

@@ -11,6 +11,7 @@
 use egui::{Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};
 
 use super::lod;
+use super::symbol_style::{broken_outline, paint_fill, styled_stroke};
 use crate::symbols::PinLeads;
 use rspice_design::{
     resolved_symbol::ResolvedCellSymbol,
@@ -22,8 +23,8 @@ use rspice_design::{
         value_label::{cell_instance_value as instance_value, value_pieces},
     },
     symbol::{
-        SymbolCurve, SymbolDocument, SymbolShape, SymbolTextAlign, SymbolTextPlacement,
-        rectangle_corners, symbol_text_bounds,
+        SymbolCurve, SymbolDash, SymbolDocument, SymbolFill, SymbolShape, SymbolStyle,
+        SymbolTextAlign, SymbolTextPlacement, rectangle_corners, symbol_text_bounds,
     },
     symbol_generation::fit_pin_name,
 };
@@ -103,54 +104,70 @@ fn draw_symbol_body(
     leads: &PinLeads<'_>,
 ) {
     for shape in &symbol.document().body {
+        let style = shape.style().unwrap_or_default();
+        let outline = styled_stroke(stroke, style);
         match shape {
-            SymbolShape::Polyline { points, closed } => {
+            SymbolShape::Polyline { points, closed, .. } => {
                 let mut screen_points: Vec<Pos2> = points
                     .iter()
                     .map(|point| to_screen_symbol(origin, scale, component, symbol, *point))
                     .collect();
                 screen_points.dedup();
-                // One path, so every corner of the outline is a mitered join
-                // rather than two butt ends with a notch between them.
                 if *closed && screen_points.len() > 2 {
-                    painter.add(egui::Shape::closed_line(screen_points, stroke));
+                    paint_fill(painter, &screen_points, style, stroke.color);
+                    paint_outline(painter, screen_points, true, outline, style, scale);
                 } else {
+                    // A lead is wire, whatever the artwork it runs into.
                     let rest = leads.paint_leads(painter, &screen_points, stroke);
                     if rest.len() >= 2 {
-                        painter.add(egui::Shape::line(rest.to_vec(), stroke));
+                        paint_outline(painter, rest.to_vec(), false, outline, style, scale);
                     }
                 }
             }
-            SymbolShape::Rectangle { min, max } => {
+            SymbolShape::Rectangle { min, max, .. } => {
                 let mut screen_points: Vec<Pos2> = rectangle_corners(*min, *max)
                     .into_iter()
                     .map(|point| to_screen_symbol(origin, scale, component, symbol, point))
                     .collect();
                 screen_points.dedup();
                 if screen_points.len() > 2 {
-                    painter.add(egui::Shape::closed_line(screen_points, stroke));
+                    paint_fill(painter, &screen_points, style, stroke.color);
+                    paint_outline(painter, screen_points, true, outline, style, scale);
                 } else if screen_points.len() == 2 {
-                    painter.add(egui::Shape::line(screen_points, stroke));
+                    paint_outline(painter, screen_points, false, outline, style, scale);
                 }
             }
-            SymbolShape::Circle { center, radius } => {
-                painter.circle_stroke(
-                    to_screen_symbol(origin, scale, component, symbol, *center),
-                    *radius as f32 * scale,
-                    stroke,
-                );
+            SymbolShape::Circle { center, radius, .. } => {
+                let middle = to_screen_symbol(origin, scale, component, symbol, *center);
+                let reach = *radius as f32 * scale;
+                if style.fill == SymbolFill::Solid {
+                    painter.circle_filled(middle, reach, stroke.color);
+                }
+                if style.dash == SymbolDash::Solid {
+                    painter.circle_stroke(middle, reach, outline);
+                } else {
+                    let ring = SymbolCurve::of_arc(*center, *radius, 0, 360);
+                    paint_curve(
+                        painter, origin, scale, component, symbol, &ring, outline, style,
+                    );
+                }
             }
             SymbolShape::Arc {
                 center,
                 radius,
                 start_degrees,
                 sweep_degrees,
+                ..
             } => {
                 let arc = SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees);
-                paint_curve(painter, origin, scale, component, symbol, &arc, stroke);
+                paint_curve(
+                    painter, origin, scale, component, symbol, &arc, outline, style,
+                );
             }
-            SymbolShape::Curve(curve) => {
-                paint_curve(painter, origin, scale, component, symbol, curve, stroke);
+            SymbolShape::Curve { curve, .. } => {
+                paint_curve(
+                    painter, origin, scale, component, symbol, curve, outline, style,
+                );
             }
             SymbolShape::Arrow {
                 tip,
@@ -489,7 +506,32 @@ fn placed_curve(
     )
 }
 
-/// Strokes `curve` in as many straight pieces as its size on screen needs.
+/// The outline `points` in `style`: broken where the style breaks it, else
+/// one path, so every corner is a mitered join rather than two butt ends
+/// with a notch between them.
+fn paint_outline(
+    painter: &Painter,
+    points: Vec<Pos2>,
+    closed: bool,
+    stroke: Stroke,
+    style: SymbolStyle,
+    scale: f32,
+) {
+    if let Some(pieces) = broken_outline(&points, closed, stroke, style, scale) {
+        painter.extend(pieces);
+    } else if closed {
+        painter.add(Shape::closed_line(points, stroke));
+    } else {
+        painter.add(Shape::line(points, stroke));
+    }
+}
+
+/// Strokes `curve` in `style`, in as many straight pieces as its size on
+/// screen needs.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Independent canvas transform, curve, and paint inputs."
+)]
 fn paint_curve(
     painter: &Painter,
     origin: Pos2,
@@ -498,14 +540,20 @@ fn paint_curve(
     symbol: &ResolvedCellSymbol,
     curve: &SymbolCurve,
     stroke: Stroke,
+    style: SymbolStyle,
 ) {
-    paint_placed_curve(
-        painter,
-        origin,
-        scale,
-        &placed_curve(component, symbol, curve),
+    let placed = placed_curve(component, symbol, curve);
+    if style.dash == SymbolDash::Solid {
+        paint_placed_curve(painter, origin, scale, &placed, stroke);
+    } else if let Some(pieces) = broken_outline(
+        &placed_curve_points(painter, origin, scale, &placed),
+        false,
         stroke,
-    );
+        style,
+        scale,
+    ) {
+        painter.extend(pieces);
+    }
 }
 
 /// Strokes `placed`, whose numbers are units from `origin`.
@@ -516,18 +564,28 @@ pub(super) fn paint_placed_curve(
     placed: &SymbolCurve,
     stroke: Stroke,
 ) {
-    let pixels_per_unit = f64::from(scale * painter.pixels_per_point());
-    let mut points = placed
-        .tessellated(pixels_per_unit)
-        .into_iter()
-        .map(|[x, y]| origin + vec2(x as f32 * scale, y as f32 * scale))
-        .collect::<Vec<_>>();
+    let mut points = placed_curve_points(painter, origin, scale, placed);
     if placed.is_whole() {
         points.pop();
         painter.add(Shape::closed_line(points, stroke));
     } else {
         painter.add(Shape::line(points, stroke));
     }
+}
+
+/// `placed` in screen points, a whole ellipse ending where it starts.
+fn placed_curve_points(
+    painter: &Painter,
+    origin: Pos2,
+    scale: f32,
+    placed: &SymbolCurve,
+) -> Vec<Pos2> {
+    let pixels_per_unit = f64::from(scale * painter.pixels_per_point());
+    placed
+        .tessellated(pixels_per_unit)
+        .into_iter()
+        .map(|[x, y]| origin + vec2(x as f32 * scale, y as f32 * scale))
+        .collect()
 }
 
 fn arrow_points(tip: Point, rotation_quarters: i32) -> [Point; 3] {
@@ -577,11 +635,11 @@ fn fold_symbol_artwork_points(symbol: &ResolvedCellSymbol, mut include: impl FnM
                     include(symbol.effective_point(*point));
                 }
             }
-            SymbolShape::Rectangle { min, max } => {
+            SymbolShape::Rectangle { min, max, .. } => {
                 include(symbol.effective_point(*min));
                 include(symbol.effective_point(*max));
             }
-            SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
+            SymbolShape::Circle { center, radius, .. } | SymbolShape::Dot { center, radius } => {
                 for point in cardinal_bounds(symbol.effective_point(*center), *radius) {
                     include(point);
                 }
@@ -591,7 +649,7 @@ fn fold_symbol_artwork_points(symbol: &ResolvedCellSymbol, mut include: impl FnM
                     include(point);
                 }
             }
-            SymbolShape::Curve(curve) => {
+            SymbolShape::Curve { curve, .. } => {
                 let (least, greatest) = curve.whole_unit_bounds();
                 include(symbol.effective_point(least));
                 include(symbol.effective_point(greatest));
@@ -666,7 +724,7 @@ mod tests {
 
     use rspice_design::{
         schematic::{component_type::ComponentType, rotation::Rotation},
-        symbol::{SymbolDocument, SymbolPin, SymbolTextSize},
+        symbol::{SymbolDocument, SymbolPin, SymbolStroke, SymbolTextSize},
     };
     use rspice_design_model::port::PortSpec;
     use rspice_design_model::symbol_pin::{SymbolPinSide, SymbolPinStyle};
@@ -774,6 +832,7 @@ mod tests {
         let rectangle = symbol(SymbolShape::Rectangle {
             min: Point::new(-20, -10),
             max: Point::new(15, 25),
+            style: Default::default(),
         });
         let outline = symbol(SymbolShape::Polyline {
             points: rspice_design::symbol::rectangle_corners(
@@ -782,6 +841,7 @@ mod tests {
             )
             .to_vec(),
             closed: true,
+            style: Default::default(),
         });
         for rotation in [Rotation::R0, Rotation::R90, Rotation::R180, Rotation::R270] {
             for mirror_h in [false, true] {
@@ -808,6 +868,152 @@ mod tests {
         }
     }
 
+    fn one_shape(shape: SymbolShape) -> ResolvedCellSymbol {
+        ResolvedCellSymbol::from_authored_document(
+            SymbolDocument {
+                body: vec![shape],
+                ..SymbolDocument::default()
+            },
+            &[],
+        )
+    }
+
+    /// How far `rect` is from bare background, summed over every channel of
+    /// every pixel: a weight of ink, where a pixel count only says whether
+    /// any landed.
+    fn ink(canvas: &Canvas, rect: egui::Rect) -> u64 {
+        let background = canvas.background();
+        canvas
+            .pixels_in(rect)
+            .map(|pixel| {
+                [
+                    (pixel.r(), background.r()),
+                    (pixel.g(), background.g()),
+                    (pixel.b(), background.b()),
+                ]
+                .into_iter()
+                .map(|(a, b)| u64::from(a.abs_diff(b)))
+                .sum::<u64>()
+            })
+            .sum()
+    }
+
+    /// A filled outline paints its inside in the outline's ink, so a solid
+    /// arrowhead or body can be drawn; unfilled, the inside stays bare.
+    #[test]
+    fn a_filled_outline_paints_its_inside() {
+        let triangle = |fill| {
+            one_shape(SymbolShape::Polyline {
+                points: vec![Point::new(-20, -15), Point::new(20, 0), Point::new(-20, 15)],
+                closed: true,
+                style: SymbolStyle {
+                    fill,
+                    ..SymbolStyle::default()
+                },
+            })
+        };
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        let inside = egui::Rect::from_center_size(pos2(140.0, 160.0), egui::vec2(16.0, 16.0));
+        let drawn = |fill| raster_instance(&component, &triangle(fill), pos2(160.0, 160.0));
+
+        let (total, bare) = painted_pixels(&drawn(SymbolFill::None), inside);
+        assert!(total > 0, "the probe fell off the canvas");
+        assert_eq!(bare, 0, "an unfilled outline painted its inside");
+        let filled = drawn(SymbolFill::Solid);
+        assert_eq!(painted_pixels(&filled, inside).1, total);
+        assert!(
+            filled
+                .pixels_in(inside)
+                .all(|pixel| pixel == Color32::from_rgb(255, 64, 64)),
+            "the inside is not the outline's ink"
+        );
+    }
+
+    /// A dashed or a dotted outline leaves gaps along its length that a whole
+    /// one does not, and the weights run thin, normal, heavy.
+    #[test]
+    fn an_outline_draws_in_its_dash_and_weight() {
+        let line = |style| {
+            one_shape(SymbolShape::Polyline {
+                points: vec![Point::new(-30, 0), Point::new(30, 0)],
+                closed: false,
+                style,
+            })
+        };
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        // The line runs from x 40 to x 280 along y 160.
+        let along = egui::Rect::from_min_max(pos2(60.0, 150.0), pos2(260.0, 170.0));
+        let drawn = |style| raster_instance(&component, &line(style), pos2(160.0, 160.0));
+
+        let (whole, _) = painted_span(&drawn(SymbolStyle::default()), along);
+        assert_eq!(whole, 200, "a whole line paints every column it crosses");
+        for dash in [SymbolDash::Dashed, SymbolDash::Dotted] {
+            let (broken, _) = painted_span(
+                &drawn(SymbolStyle {
+                    dash,
+                    ..SymbolStyle::default()
+                }),
+                along,
+            );
+            assert!(
+                broken > 0 && broken < whole * 4 / 5,
+                "{dash:?}: {broken} of {whole}"
+            );
+        }
+        let weight = |stroke| {
+            ink(
+                &drawn(SymbolStyle {
+                    stroke,
+                    ..SymbolStyle::default()
+                }),
+                along,
+            )
+        };
+        let (thin, normal, heavy) = (
+            weight(SymbolStroke::Thin),
+            weight(SymbolStroke::Normal),
+            weight(SymbolStroke::Heavy),
+        );
+        assert!(thin < normal && normal < heavy, "{thin} {normal} {heavy}");
+    }
+
+    /// A circle and an arc break and weigh as a line does, and a filled
+    /// circle paints its middle.
+    #[test]
+    fn a_round_shape_draws_in_its_style() {
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        let circle = |style| {
+            raster_instance(
+                &component,
+                &one_shape(SymbolShape::Circle {
+                    center: Point::origin(),
+                    radius: 20,
+                    style,
+                }),
+                pos2(160.0, 160.0),
+            )
+        };
+        let middle = egui::Rect::from_center_size(pos2(160.0, 160.0), egui::vec2(20.0, 20.0));
+        let whole = SymbolStyle::default();
+        assert_eq!(painted_pixels(&circle(whole), middle).1, 0);
+        let filled = SymbolStyle {
+            fill: SymbolFill::Solid,
+            ..whole
+        };
+        let (total, painted) = painted_pixels(&circle(filled), middle);
+        assert_eq!(painted, total);
+
+        // The ring crosses the top edge of this band, 80 px above the middle.
+        let top = egui::Rect::from_min_max(pos2(100.0, 70.0), pos2(220.0, 90.0));
+        let (ring, _) = painted_span(&circle(whole), top);
+        let dashed = SymbolStyle {
+            dash: SymbolDash::Dashed,
+            ..whole
+        };
+        let (broken, _) = painted_span(&circle(dashed), top);
+        assert!(broken > 0 && broken < ring, "{broken} of {ring}");
+    }
+
     fn symbol_with_shifted_origin() -> ResolvedCellSymbol {
         ResolvedCellSymbol::from_authored_document(
             SymbolDocument {
@@ -822,6 +1028,7 @@ mod tests {
                 body: vec![SymbolShape::Polyline {
                     points: vec![Point::new(20, 10), Point::new(50, 20)],
                     closed: false,
+                    style: Default::default(),
                 }],
                 ..SymbolDocument::default()
             },
@@ -963,6 +1170,7 @@ mod tests {
                 body: vec![SymbolShape::Polyline {
                     points: vec![Point::new(-40, -30), Point::new(40, -30)],
                     closed: false,
+                    style: Default::default(),
                 }],
                 ..SymbolDocument::default()
             },
@@ -1012,6 +1220,7 @@ mod tests {
                     body: vec![SymbolShape::Polyline {
                         points: vec![Point::new(-20, -10), Point::new(-20, 10)],
                         closed: false,
+                        style: Default::default(),
                     }],
                     ..SymbolDocument::default()
                 },

@@ -1794,7 +1794,7 @@ impl Builder<'_> {
             .filter_map(|s| self.symbol_shape(s))
         {
             match shape {
-                SymbolShape::Polyline { points, closed } => {
+                SymbolShape::Polyline { points, closed, .. } => {
                     lines.extend(
                         points
                             .windows(2)
@@ -1804,7 +1804,7 @@ impl Builder<'_> {
                         lines.push([place(*end), place(*start)]);
                     }
                 }
-                SymbolShape::Curve(curve) => curves.push(curve.placed(origin, across, down)),
+                SymbolShape::Curve { curve, .. } => curves.push(curve.placed(origin, across, down)),
                 _ => {}
             }
         }
@@ -1838,18 +1838,20 @@ impl Builder<'_> {
             ForeignShape::Line(a, b) => SymbolShape::Polyline {
                 points: vec![self.scale(*a), self.scale(*b)],
                 closed: false,
+                style: Default::default(),
             },
             ForeignShape::Rectangle(a, b) => {
                 let (a, b) = (self.scale(*a), self.scale(*b));
                 SymbolShape::Polyline {
                     points: vec![a, Point::new(b.x, a.y), b, Point::new(a.x, b.y)],
                     closed: true,
+                    style: Default::default(),
                 }
             }
             ForeignShape::Ellipse(a, b) => {
-                SymbolShape::Curve(ellipse_in_box(self.exact(*a), self.exact(*b)))
+                SymbolShape::curve(ellipse_in_box(self.exact(*a), self.exact(*b)))
             }
-            ForeignShape::Arc([a, b, start, end]) => SymbolShape::Curve(arc_in_box(
+            ForeignShape::Arc([a, b, start, end]) => SymbolShape::curve(arc_in_box(
                 self.exact(*a),
                 self.exact(*b),
                 self.exact(*start),
@@ -2838,6 +2840,7 @@ fn draw_rspice_glyph_at_the_source_pin_span(
         .map(|run| SymbolShape::Polyline {
             points: run.points.iter().map(|&(x, y)| scaled(x, y)).collect(),
             closed: false,
+            style: Default::default(),
         })
         .collect::<Vec<_>>();
     component.pos = first - scaled(local[0].x as f32, local[0].y as f32);
@@ -2855,6 +2858,7 @@ fn draw_rspice_glyph_at_the_source_pin_span(
                 body.push(SymbolShape::Polyline {
                     points: vec![drawn, pin],
                     closed: false,
+                    style: Default::default(),
                 });
             }
             (*name, pin)

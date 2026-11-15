@@ -225,6 +225,7 @@ fn a_line_is_clicked_out_and_finished_with_enter_and_the_tool_stays_armed() {
         vec![SymbolShape::Polyline {
             points: vec![Point::new(0, 0), Point::new(20, 0), Point::new(20, 10)],
             closed: false,
+            style: Default::default(),
         }]
     );
     assert_eq!(session.tool, SymbolTool::Line);
@@ -257,6 +258,7 @@ fn a_double_click_ends_the_line_where_it_was_clicked() {
         vec![SymbolShape::Polyline {
             points: vec![Point::new(0, 0), Point::new(30, 0)],
             closed: false,
+            style: Default::default(),
         }]
     );
 }
@@ -310,6 +312,7 @@ fn a_polygon_always_closes_and_needs_three_corners() {
         Some(&SymbolShape::Polyline {
             points: vec![Point::new(0, 0), Point::new(20, 0), Point::new(20, 20)],
             closed: true,
+            style: Default::default(),
         })
     );
 
@@ -322,6 +325,7 @@ fn a_polygon_always_closes_and_needs_three_corners() {
         Some(&SymbolShape::Polyline {
             points: vec![Point::new(40, 0), Point::new(60, 0), Point::new(60, 20)],
             closed: true,
+            style: Default::default(),
         })
     );
     assert_eq!(session.tool, SymbolTool::Polygon);
@@ -360,11 +364,13 @@ fn press_drag_draws_a_segment_a_rectangle_and_a_circle() {
             SymbolShape::Polyline {
                 points: vec![Point::new(0, 0), Point::new(30, 10)],
                 closed: false,
+                style: Default::default(),
             },
             rectangle_shape(Point::new(-10, -10), Point::new(10, 20)),
             SymbolShape::Circle {
                 center: Point::new(50, 50),
                 radius: 10,
+                style: Default::default(),
             },
         ]
     );
@@ -392,6 +398,7 @@ fn the_rectangle_tool_draws_a_rectangle_whichever_way_it_is_dragged() {
         vec![SymbolShape::Rectangle {
             min: Point::new(-10, -20),
             max: Point::new(30, 20),
+            style: Default::default(),
         }]
     );
 }
@@ -442,6 +449,7 @@ fn an_armed_drawing_tool_never_picks_up_what_is_drawn() {
     let circle = SymbolShape::Circle {
         center: Point::origin(),
         radius: 20,
+        style: Default::default(),
     };
     let mut document = SymbolDocument {
         body: vec![circle.clone()],
@@ -494,6 +502,7 @@ fn an_arc_runs_from_its_start_the_way_the_pointer_turned() {
             radius: 20,
             start_degrees: 0,
             sweep_degrees: 270,
+            style: Default::default(),
         }]
     );
     assert_eq!(session.tool, SymbolTool::Arc);
@@ -509,6 +518,7 @@ fn an_arc_runs_from_its_start_the_way_the_pointer_turned() {
             radius: 20,
             start_degrees: 0,
             sweep_degrees: -90,
+            style: Default::default(),
         })
     );
 }
@@ -529,6 +539,7 @@ fn a_circle_may_be_one_unit_and_never_zero() {
         vec![SymbolShape::Circle {
             center: Point::new(5, 5),
             radius: 1,
+            style: Default::default(),
         }]
     );
 }
@@ -676,6 +687,7 @@ fn body_with_stray_artwork() -> SymbolDocument {
             SymbolShape::Polyline {
                 points: vec![Point::new(-200, 150), Point::new(-190, 150)],
                 closed: false,
+                style: Default::default(),
             },
         ],
         ..SymbolDocument::default()
@@ -700,6 +712,7 @@ fn a_pin_placed_beside_stray_artwork_keeps_its_side_and_its_lead() {
     document.body.push(SymbolShape::Polyline {
         points: vec![Point::new(-60, -90), Point::new(-60, 90)],
         closed: false,
+        style: Default::default(),
     });
     session.tool = SymbolTool::Select;
     drag(
@@ -871,6 +884,7 @@ fn dragging_a_point_of_the_selected_line_moves_that_point_alone() {
     let line = SymbolShape::Polyline {
         points: vec![Point::new(0, 0), Point::new(40, 0), Point::new(40, 40)],
         closed: false,
+        style: Default::default(),
     };
     let (mut session, mut document) = selected(line.clone());
     let steps = drag_steps(
@@ -885,6 +899,7 @@ fn dragging_a_point_of_the_selected_line_moves_that_point_alone() {
         SymbolShape::Polyline {
             points: vec![Point::new(0, 0), Point::new(60, -10), Point::new(40, 40)],
             closed: false,
+            style: Default::default(),
         }
     );
     assert_eq!(recorded(&steps), vec!["Move vertex"]);
@@ -901,6 +916,7 @@ fn grabbing_an_edge_middle_adds_a_point_there() {
     let (mut session, mut document) = selected(SymbolShape::Polyline {
         points: vec![Point::new(0, 0), Point::new(40, 0)],
         closed: false,
+        style: Default::default(),
     });
     let steps = drag_steps(
         &mut session,
@@ -914,6 +930,7 @@ fn grabbing_an_edge_middle_adds_a_point_there() {
         SymbolShape::Polyline {
             points: vec![Point::new(0, 0), Point::new(20, 20), Point::new(40, 0)],
             closed: false,
+            style: Default::default(),
         }
     );
     assert!(steps[0].changed);
@@ -927,6 +944,7 @@ fn a_rectangle_is_resized_by_its_corners_and_sides_and_stays_one() {
     let (mut session, mut document) = selected(SymbolShape::Rectangle {
         min: Point::new(0, 0),
         max: Point::new(40, 20),
+        style: Default::default(),
     });
     let steps = drag_steps(
         &mut session,
@@ -939,6 +957,7 @@ fn a_rectangle_is_resized_by_its_corners_and_sides_and_stays_one() {
         SymbolShape::Rectangle {
             min: Point::new(0, 0),
             max: Point::new(60, 30),
+            style: Default::default(),
         }
     );
     assert_eq!(recorded(&steps), vec!["Resize rectangle"]);
@@ -955,6 +974,7 @@ fn a_rectangle_is_resized_by_its_corners_and_sides_and_stays_one() {
         SymbolShape::Rectangle {
             min: Point::new(-20, 0),
             max: Point::new(60, 30),
+            style: Default::default(),
         }
     );
 }
@@ -966,6 +986,7 @@ fn a_circle_and_an_arc_are_reshaped_by_their_handles() {
     let (mut session, mut document) = selected(SymbolShape::Circle {
         center: Point::origin(),
         radius: 20,
+        style: Default::default(),
     });
     let steps = drag_steps(
         &mut session,
@@ -978,6 +999,7 @@ fn a_circle_and_an_arc_are_reshaped_by_their_handles() {
         SymbolShape::Circle {
             center: Point::origin(),
             radius: 30,
+            style: Default::default(),
         }
     );
     assert_eq!(recorded(&steps), vec!["Resize circle"]);
@@ -988,6 +1010,7 @@ fn a_circle_and_an_arc_are_reshaped_by_their_handles() {
         radius: 20,
         start_degrees: 0,
         sweep_degrees: 90,
+        style: Default::default(),
     });
     let steps = drag_steps(
         &mut session,
@@ -1002,6 +1025,7 @@ fn a_circle_and_an_arc_are_reshaped_by_their_handles() {
             radius: 20,
             start_degrees: 0,
             sweep_degrees: 180,
+            style: Default::default(),
         }
     );
     assert_eq!(recorded(&steps), vec!["Move arc end"]);
@@ -1015,6 +1039,7 @@ fn delete_takes_out_the_picked_point_and_a_line_keeps_two() {
     let (mut session, mut document) = selected(SymbolShape::Polyline {
         points: vec![Point::new(0, 0), Point::new(40, 0), Point::new(40, 40)],
         closed: false,
+        style: Default::default(),
     });
     assert!(!click(&mut session, &mut document, Point::new(40, 0)));
     assert_eq!(session.selected_vertex, Some((0, 1)));
@@ -1041,6 +1066,7 @@ fn delete_takes_out_the_picked_point_and_a_line_keeps_two() {
         vec![SymbolShape::Polyline {
             points: vec![Point::new(0, 0), Point::new(40, 40)],
             closed: false,
+            style: Default::default(),
         }]
     );
 
@@ -1065,6 +1091,7 @@ fn stretch_carries_the_handle_under_the_pointer_until_a_click() {
     let rectangle = SymbolShape::Rectangle {
         min: Point::new(0, 0),
         max: Point::new(40, 20),
+        style: Default::default(),
     };
     let (mut session, mut document) = selected(rectangle.clone());
     let corner = unit_viewport().world_to_screen(Point::new(40, 20));
@@ -1096,6 +1123,7 @@ fn stretch_carries_the_handle_under_the_pointer_until_a_click() {
         SymbolShape::Rectangle {
             min: Point::new(0, 0),
             max: Point::new(60, 40),
+            style: Default::default(),
         }
     );
     assert!(session.stretch.is_none());
@@ -1125,6 +1153,7 @@ fn a_shape_merely_standing_at_a_point_moves_with_the_rest_of_the_selection() {
             SymbolShape::Circle {
                 center: Point::new(40, 0),
                 radius: 10,
+                style: Default::default(),
             },
         ],
         ..SymbolDocument::default()
@@ -1150,6 +1179,7 @@ fn a_shape_merely_standing_at_a_point_moves_with_the_rest_of_the_selection() {
             SymbolShape::Circle {
                 center: Point::new(50, 10),
                 radius: 10,
+                style: Default::default(),
             },
         ]
     );

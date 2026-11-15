@@ -177,7 +177,7 @@ pub fn shape_anchor(shape: &SymbolShape) -> Point {
         SymbolShape::Circle { center, .. }
         | SymbolShape::Arc { center, .. }
         | SymbolShape::Dot { center, .. } => *center,
-        SymbolShape::Curve(curve) => Point::new(
+        SymbolShape::Curve { curve, .. } => Point::new(
             curve.center[0].round() as i32,
             curve.center[1].round() as i32,
         ),
@@ -263,6 +263,7 @@ mod tests {
                 SymbolShape::Circle {
                     center: Point::new(3, 7),
                     radius: 5,
+                    style: Default::default(),
                 },
             ],
             ..SymbolDocument::default()
@@ -375,7 +376,8 @@ mod tests {
             document.body[1],
             SymbolShape::Circle {
                 center: Point::new(5, 5),
-                radius: 5
+                radius: 5,
+                style: Default::default(),
             }
         );
         assert_eq!(

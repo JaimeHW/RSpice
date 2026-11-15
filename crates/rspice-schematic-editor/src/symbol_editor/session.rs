@@ -645,8 +645,8 @@ pub fn symbol_shape_bounds(
                 rspice_design_model::Point::new(max_x, max_y),
             )
         }
-        SymbolShape::Rectangle { min, max } => (*min, *max),
-        SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => (
+        SymbolShape::Rectangle { min, max, .. } => (*min, *max),
+        SymbolShape::Circle { center, radius, .. } | SymbolShape::Dot { center, radius } => (
             rspice_design_model::Point::new(center.x - radius, center.y - radius),
             rspice_design_model::Point::new(center.x + radius, center.y + radius),
         ),
@@ -654,7 +654,7 @@ pub fn symbol_shape_bounds(
             rspice_design_model::Point::new(center.x - radius, center.y - radius),
             rspice_design_model::Point::new(center.x + radius, center.y + radius),
         ),
-        SymbolShape::Curve(curve) => curve.whole_unit_bounds(),
+        SymbolShape::Curve { curve, .. } => curve.whole_unit_bounds(),
         SymbolShape::Arrow { tip, .. } => (
             rspice_design_model::Point::new(tip.x - 10, tip.y - 10),
             rspice_design_model::Point::new(tip.x + 10, tip.y + 10),
@@ -679,15 +679,15 @@ pub fn shape_kind(shape: &rspice_design::symbol::SymbolShape) -> &'static str {
         SymbolShape::Rectangle { .. } => "Rectangle",
         SymbolShape::Circle { .. } => "Circle",
         SymbolShape::Arc { .. } => "Arc",
-        SymbolShape::Curve(curve) if curve.radii[0] != curve.radii[1] => {
+        SymbolShape::Curve { curve, .. } if curve.radii[0] != curve.radii[1] => {
             if curve.sweep_degrees >= 360.0 {
                 "Ellipse"
             } else {
                 "Elliptical arc"
             }
         }
-        SymbolShape::Curve(curve) if curve.sweep_degrees >= 360.0 => "Circle",
-        SymbolShape::Curve(_) => "Arc",
+        SymbolShape::Curve { curve, .. } if curve.sweep_degrees >= 360.0 => "Circle",
+        SymbolShape::Curve { .. } => "Arc",
         SymbolShape::Arrow { .. } => "Arrow",
         SymbolShape::Dot { .. } => "Dot",
         SymbolShape::Text { .. } => "Text",
@@ -701,7 +701,7 @@ pub fn shape_summary(shape: &rspice_design::symbol::SymbolShape) -> String {
     let kind = shape_kind(shape);
     match shape {
         SymbolShape::Polyline { points, .. } => format!("{kind}, {} points", points.len()),
-        SymbolShape::Rectangle { min, max } => {
+        SymbolShape::Rectangle { min, max, .. } => {
             format!("{kind} {} \u{00d7} {}", max.x - min.x, max.y - min.y)
         }
         SymbolShape::Circle { radius, .. } => format!("{kind} r {radius}"),
@@ -710,7 +710,7 @@ pub fn shape_summary(shape: &rspice_design::symbol::SymbolShape) -> String {
             sweep_degrees,
             ..
         } => format!("{kind} r {radius}, {sweep_degrees}\u{00b0}"),
-        SymbolShape::Curve(curve) => {
+        SymbolShape::Curve { curve, .. } => {
             let [rx, ry] = curve.radii;
             let sweep = whole_or_tenths(curve.sweep_degrees);
             match (rx == ry, curve.sweep_degrees >= 360.0) {
@@ -940,6 +940,7 @@ mod tests {
             summary(SymbolShape::Polyline {
                 points: vec![Point::origin(), Point::new(10, 0), Point::new(10, 10)],
                 closed: false,
+                style: Default::default(),
             }),
             "Line, 3 points"
         );
@@ -947,6 +948,7 @@ mod tests {
             summary(SymbolShape::Polyline {
                 points: vec![Point::origin(), Point::new(10, 0), Point::new(10, 10)],
                 closed: true,
+                style: Default::default(),
             }),
             "Polygon, 3 points"
         );
@@ -961,6 +963,7 @@ mod tests {
                     Point::new(0, 10)
                 ],
                 closed: true,
+                style: Default::default(),
             }),
             "Polygon, 4 points"
         );
@@ -973,13 +976,15 @@ mod tests {
                     Point::new(0, 10)
                 ],
                 closed: false,
+                style: Default::default(),
             }),
             "Line, 4 points"
         );
         assert_eq!(
             summary(SymbolShape::Circle {
                 center: Point::origin(),
-                radius: 10
+                radius: 10,
+                style: Default::default()
             }),
             "Circle r 10"
         );
@@ -988,7 +993,8 @@ mod tests {
                 center: Point::origin(),
                 radius: 10,
                 start_degrees: 0,
-                sweep_degrees: 90
+                sweep_degrees: 90,
+                style: Default::default()
             }),
             "Arc r 10, 90\u{00b0}"
         );

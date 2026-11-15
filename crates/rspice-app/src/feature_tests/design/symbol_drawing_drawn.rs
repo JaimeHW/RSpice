@@ -331,6 +331,7 @@ fn a_line_being_drawn_shows_its_segments_and_a_rubber_band_to_the_pointer() {
         Some(&SymbolShape::Polyline {
             points: vec![a, b],
             closed: false,
+            style: Default::default(),
         })
     );
     assert_eq!(canvas.tool(), SymbolTool::Line, "the tool stays armed");
@@ -538,6 +539,7 @@ fn dragging_a_selected_line_point_moves_that_point_as_one_step() {
     let line = SymbolShape::Polyline {
         points: vec![Point::new(-60, -40), Point::new(0, -40), Point::new(0, 40)],
         closed: false,
+        style: Default::default(),
     };
     let mut canvas = Canvas::with_body(vec![line.clone()]);
     canvas.app.state.design.symbol.editor.select_shape(0);
@@ -554,6 +556,7 @@ fn dragging_a_selected_line_point_moves_that_point_as_one_step() {
         vec![SymbolShape::Polyline {
             points: vec![Point::new(-60, -40), Point::new(20, -50), Point::new(0, 40)],
             closed: false,
+            style: Default::default(),
         }]
     );
     assert_eq!(canvas.undo_step().as_deref(), Some("Move vertex"));
@@ -568,6 +571,7 @@ fn dragging_a_rectangle_corner_resizes_it() {
     let mut canvas = Canvas::with_body(vec![SymbolShape::Rectangle {
         min: Point::new(-40, -20),
         max: Point::new(40, 20),
+        style: Default::default(),
     }]);
     canvas.app.state.design.symbol.editor.select_shape(0);
     canvas.frame(vec![]);
@@ -579,6 +583,7 @@ fn dragging_a_rectangle_corner_resizes_it() {
         vec![SymbolShape::Rectangle {
             min: Point::new(-40, -20),
             max: Point::new(60, 40),
+            style: Default::default(),
         }]
     );
     assert_eq!(canvas.undo_step().as_deref(), Some("Resize rectangle"));
@@ -593,6 +598,7 @@ fn dragging_an_arc_end_turns_the_arc() {
         radius: 40,
         start_degrees: 0,
         sweep_degrees: 90,
+        style: Default::default(),
     }]);
     canvas.app.state.design.symbol.editor.select_shape(0);
     canvas.frame(vec![]);
@@ -607,6 +613,7 @@ fn dragging_an_arc_end_turns_the_arc() {
             radius: 40,
             start_degrees: 0,
             sweep_degrees: 180,
+            style: Default::default(),
         }]
     );
     assert_eq!(canvas.undo_step().as_deref(), Some("Move arc end"));
@@ -649,6 +656,7 @@ fn a_right_click_while_drawing_opens_the_drawing_menu() {
         Some(&SymbolShape::Polyline {
             points: vec![a, b],
             closed: false,
+            style: Default::default(),
         })
     );
     assert_eq!(canvas.tool(), SymbolTool::Line, "the tool stays armed");
@@ -661,6 +669,7 @@ fn a_right_click_on_a_shape_opens_its_menu_and_rotate_turns_it() {
     let mut canvas = Canvas::with_body(vec![SymbolShape::Rectangle {
         min: Point::new(60, 40),
         max: Point::new(100, 60),
+        style: Default::default(),
     }]);
     canvas.right_click(Point::new(80, 40));
     assert_eq!(
@@ -684,6 +693,7 @@ fn a_right_click_on_a_shape_opens_its_menu_and_rotate_turns_it() {
         vec![SymbolShape::Rectangle {
             min: Point::new(70, 30),
             max: Point::new(90, 70),
+            style: Default::default(),
         }]
     );
     assert_eq!(canvas.undo_step().as_deref(), Some("Rotate rectangle"));

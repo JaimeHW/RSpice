@@ -383,6 +383,7 @@ fn resolved_symbol() -> ResolvedHardcopyDocument {
             SchematicPoint::new(-20, 15),
         ],
         closed: true,
+        style: Default::default(),
     }])
 }
 
@@ -420,6 +421,7 @@ fn resolved_wide_symbol() -> ResolvedHardcopyDocument {
                 SchematicPoint::new(0, 100),
             ],
             closed: true,
+            style: Default::default(),
         }],
         origin: SchematicPoint::origin(),
         name_anchor: SchematicPoint::origin(),
@@ -1115,9 +1117,149 @@ fn a_rectangle_prints_as_its_closed_outline() {
     let rectangle = resolved_symbol_with_body(vec![SymbolShape::Rectangle {
         min: SchematicPoint::new(-20, -15),
         max: SchematicPoint::new(20, 15),
+        style: Default::default(),
     }]);
 
     assert_eq!(scene(&rectangle), scene(&resolved_symbol()));
+}
+
+/// A shape's style reaches the page: its weight scales the body's stroke, a
+/// broken outline prints broken in symbol units, and only a shape with an
+/// inside prints filled, in its outline's ink. The SVG export draws what the
+/// scene says.
+#[test]
+fn a_styled_shape_prints_its_weight_dash_and_fill() {
+    use rspice_design::symbol::{SymbolFill, SymbolStroke};
+
+    let render = |body: Vec<SymbolShape>| {
+        let source = resolved_symbol_with_body(body);
+        let plan = plan_for_resolved(&source, OutputFormat::SvgVector);
+        let scene = scene_from_resolved(
+            &source,
+            // The symbol's own mapping, the one a print of it starts from.
+            source.default_print_mapping(),
+            plan.setup().schematic(),
+            resolved_metadata(),
+        )
+        .unwrap();
+        let publication = HardcopyRenderer::render(&plan, &scene).unwrap();
+        let svg = std::str::from_utf8(publication.single_part().unwrap().bytes())
+            .unwrap()
+            .to_owned();
+        (scene.primitives().to_vec(), svg)
+    };
+    let strokes = |primitives: &[ScenePrimitive]| {
+        primitives
+            .iter()
+            .filter_map(|primitive| match primitive {
+                ScenePrimitive::Polyline { stroke, fill, .. } => Some((*stroke, *fill)),
+                ScenePrimitive::Circle {
+                    stroke: Some(stroke),
+                    fill,
+                    ..
+                } if stroke.color != SemanticColor::Accent => Some((*stroke, *fill)),
+                ScenePrimitive::Ellipse { stroke, .. } => Some((*stroke, None)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let body = |triangle: SymbolStyle, line: SymbolStyle, circle: SymbolStyle, arc: SymbolStyle| {
+        vec![
+            SymbolShape::Polyline {
+                points: vec![
+                    SchematicPoint::new(-20, -15),
+                    SchematicPoint::new(20, 0),
+                    SchematicPoint::new(-20, 15),
+                ],
+                closed: true,
+                style: triangle,
+            },
+            SymbolShape::Polyline {
+                points: vec![SchematicPoint::new(-20, 20), SchematicPoint::new(20, 20)],
+                closed: false,
+                style: line,
+            },
+            SymbolShape::Circle {
+                center: SchematicPoint::new(30, 0),
+                radius: 5,
+                style: circle,
+            },
+            SymbolShape::Arc {
+                center: SchematicPoint::new(-30, 0),
+                radius: 5,
+                start_degrees: 0,
+                sweep_degrees: 180,
+                style: arc,
+            },
+        ]
+    };
+    let plain = SymbolStyle::default();
+    let (plain_scene, plain_svg) = render(body(plain, plain, plain, plain));
+    let plain_strokes = strokes(&plain_scene);
+    assert_eq!(plain_strokes.len(), 4);
+    assert!(
+        plain_strokes
+            .iter()
+            .all(|(stroke, fill)| { stroke.pattern == StrokePattern::Solid && fill.is_none() })
+    );
+    assert!(!plain_svg.contains("stroke-dasharray"), "{plain_svg}");
+    let body_width = plain_strokes[0].0.width.micrometres();
+
+    let heavy_dashed_filled = SymbolStyle {
+        stroke: SymbolStroke::Heavy,
+        dash: SymbolDash::Dashed,
+        fill: SymbolFill::Solid,
+    };
+    let thin_dotted_filled = SymbolStyle {
+        stroke: SymbolStroke::Thin,
+        dash: SymbolDash::Dotted,
+        fill: SymbolFill::Solid,
+    };
+    let (scene, svg) = render(body(
+        heavy_dashed_filled,
+        heavy_dashed_filled,
+        thin_dotted_filled,
+        heavy_dashed_filled,
+    ));
+    let printed = strokes(&scene);
+    assert_eq!(printed.len(), 4);
+    let unit = SCHEMATIC_UNIT_UM as u64;
+
+    let (triangle, triangle_fill) = printed[0];
+    assert_eq!(triangle.width.micrometres(), body_width * 2);
+    assert_eq!(triangle.pattern, StrokePattern::Dashed);
+    assert_eq!(
+        triangle.exact_dash,
+        Some((
+            Length::from_micrometres(6 * unit),
+            Length::from_micrometres(4 * unit)
+        ))
+    );
+    assert_eq!(
+        triangle_fill,
+        Some(SceneFill::Solid {
+            color: triangle.color
+        })
+    );
+
+    let (line, line_fill) = printed[1];
+    assert_eq!(line.pattern, StrokePattern::Dashed);
+    assert_eq!(line_fill, None, "an open line has no inside to fill");
+
+    let (circle, circle_fill) = printed[2];
+    assert_eq!(circle.width.micrometres(), body_width / 2);
+    assert_eq!(circle.pattern, StrokePattern::Dotted);
+    assert_eq!(
+        circle.exact_dot_spacing,
+        Some(Length::from_micrometres(3 * unit))
+    );
+    assert!(circle_fill.is_some());
+
+    let (arc, _) = printed[3];
+    assert_eq!(arc.pattern, StrokePattern::Dashed);
+    assert_eq!(arc.width.micrometres(), body_width * 2);
+
+    assert!(svg.contains("stroke-dasharray"), "{svg}");
 }
 
 #[test]

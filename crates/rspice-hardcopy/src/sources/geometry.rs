@@ -332,11 +332,11 @@ pub(super) fn include_symbol_document_bounds(
                     .map(map)
                     .for_each(|point| bounds.include(point));
             }
-            SymbolShape::Rectangle { min, max } => {
+            SymbolShape::Rectangle { min, max, .. } => {
                 bounds.include(map(*min));
                 bounds.include(map(*max));
             }
-            SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
+            SymbolShape::Circle { center, radius, .. } | SymbolShape::Dot { center, radius } => {
                 let center = map(*center);
                 let radius = radius.unsigned_abs().min(i32::MAX as u32) as i32;
                 bounds.include(Point::new(
@@ -362,7 +362,7 @@ pub(super) fn include_symbol_document_bounds(
                     center.y.saturating_add(radius),
                 ));
             }
-            SymbolShape::Curve(curve) => {
+            SymbolShape::Curve { curve, .. } => {
                 let (least, greatest) = curve.whole_unit_bounds();
                 bounds.include(map(least));
                 bounds.include(map(greatest));

@@ -109,6 +109,7 @@ fn authored_symbol_positions_override_generated_geometry_in_interface_order() {
                 Point::new(20, 20),
             ],
             closed: false,
+            style: Default::default(),
         }],
         ..SymbolDocument::default()
     };

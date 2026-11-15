@@ -241,6 +241,7 @@ fn turning_or_mirroring_a_selection_carries_each_pins_side() {
                 Point::new(-20, 20),
             ],
             closed: true,
+            style: Default::default(),
         }],
         ..SymbolDocument::default()
     };

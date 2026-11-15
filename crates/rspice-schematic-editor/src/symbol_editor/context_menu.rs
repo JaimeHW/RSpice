@@ -158,10 +158,12 @@ mod tests {
                 SymbolShape::Circle {
                     center: Point::origin(),
                     radius: 20,
+                    style: Default::default(),
                 },
                 SymbolShape::Circle {
                     center: Point::new(100, 0),
                     radius: 20,
+                    style: Default::default(),
                 },
             ],
             ..SymbolDocument::default()

@@ -33,6 +33,7 @@ fn amplifier() -> RSpiceApp {
         body: vec![SymbolShape::Polyline {
             points: vec![Point::new(-20, -20), Point::new(20, 0), Point::new(-20, 20)],
             closed: true,
+            style: Default::default(),
         }],
         ..SymbolDocument::default()
     }

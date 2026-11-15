@@ -25,6 +25,7 @@ pub(crate) fn open_symbol() -> RSpiceApp {
             SymbolShape::Circle {
                 center: Point::origin(),
                 radius: 10,
+                style: Default::default(),
             },
             SymbolShape::Dot {
                 center: Point::new(20, 10),

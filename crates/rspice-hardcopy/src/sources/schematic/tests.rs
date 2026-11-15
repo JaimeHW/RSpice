@@ -307,6 +307,7 @@ fn authored_cell_symbol_is_frozen_into_the_semantic_source() {
         body: vec![SymbolShape::Circle {
             center: Point::origin(),
             radius: 9,
+            style: Default::default(),
         }],
         ..SymbolDocument::default()
     };

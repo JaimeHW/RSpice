@@ -923,7 +923,11 @@ fn finish_pending_polyline(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocum
         if closed { "Add polygon" } else { "Add line" }.to_owned()
     });
     let points = std::mem::take(&mut edit.session.pending_polyline);
-    document.body.push(SymbolShape::Polyline { points, closed });
+    document.body.push(SymbolShape::Polyline {
+        points,
+        closed,
+        style: Default::default(),
+    });
     select_last_shape(edit.session, document);
     true
 }
@@ -1005,7 +1009,11 @@ fn add_circle(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point: P
     }
     edit.session.shape_start = None;
     edit.record_undo(document, || "Add circle".to_owned());
-    document.body.push(SymbolShape::Circle { center, radius });
+    document.body.push(SymbolShape::Circle {
+        center,
+        radius,
+        style: Default::default(),
+    });
     select_last_shape(edit.session, document);
     true
 }
@@ -1048,6 +1056,7 @@ pub fn arc_shape(center: Point, sweep: &SymbolArcSweep) -> Option<SymbolShape> {
         radius: radius_through(center, sweep.start),
         start_degrees: bearing(center, sweep.start).round() as i32,
         sweep_degrees,
+        style: Default::default(),
     })
 }
 

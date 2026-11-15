@@ -297,6 +297,7 @@ fn symbol_scene_retains_negative_authored_coordinates_and_deterministic_extent()
         body: vec![SymbolShape::Polyline {
             points: vec![Point::new(-20, -10), Point::new(30, 10)],
             closed: false,
+            style: Default::default(),
         }],
         ..SymbolDocument::default()
     };

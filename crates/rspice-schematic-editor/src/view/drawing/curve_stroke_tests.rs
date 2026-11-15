@@ -21,7 +21,7 @@ fn imported_inductor() -> Component {
         SymbolPin::new(name, PortDirection::InOut, Some(Point::new(0, y))).with_name_hidden(true)
     };
     let hump = |y: f64| {
-        SymbolShape::Curve(SymbolCurve {
+        SymbolShape::curve(SymbolCurve {
             center: [0.0, y],
             radii: [10.0, 10.0],
             start_degrees: 200.0,
@@ -36,6 +36,7 @@ fn imported_inductor() -> Component {
             SymbolShape::Polyline {
                 points: vec![Point::new(0, 0), Point::new(-10, 15)],
                 closed: false,
+                style: Default::default(),
             },
             hump(15.0),
             hump(30.0),

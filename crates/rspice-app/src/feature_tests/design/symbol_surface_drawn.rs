@@ -30,6 +30,7 @@ fn draw_a_circle(app: &mut RSpiceApp) {
     document.body.push(SymbolShape::Circle {
         center: Point::origin(),
         radius: 20,
+        style: Default::default(),
     });
     app.state.store_active_symbol_document(&document).unwrap();
 }

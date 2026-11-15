@@ -324,7 +324,7 @@ fn artwork_lead_end(
         .body
         .iter()
         .flat_map(|shape| match shape {
-            SymbolShape::Polyline { points, closed } => {
+            SymbolShape::Polyline { points, closed, .. } => {
                 let closing =
                     (*closed && points.len() > 2).then(|| (points[points.len() - 1], points[0]));
                 points
@@ -333,7 +333,7 @@ fn artwork_lead_end(
                     .chain(closing)
                     .collect::<Vec<_>>()
             }
-            SymbolShape::Rectangle { min, max } => {
+            SymbolShape::Rectangle { min, max, .. } => {
                 let corners = crate::symbol::rectangle_corners(*min, *max);
                 (0..4)
                     .map(|index| (corners[index], corners[(index + 1) % 4]))
@@ -382,6 +382,7 @@ mod tests {
         let line = |from: (i32, i32), to: (i32, i32)| SymbolShape::Polyline {
             points: vec![Point::new(from.0, from.1), Point::new(to.0, to.1)],
             closed: false,
+            style: Default::default(),
         };
         SymbolDocument {
             pins: vec![
@@ -398,6 +399,7 @@ mod tests {
                         Point::new(-30, 30),
                     ],
                     closed: true,
+                    style: Default::default(),
                 },
                 line((-40, 0), (-30, 0)),
                 line((40, 0), (30, 0)),
@@ -433,6 +435,7 @@ mod tests {
         let line = |from: (i32, i32), to: (i32, i32)| SymbolShape::Polyline {
             points: vec![Point::new(from.0, from.1), Point::new(to.0, to.1)],
             closed: false,
+            style: Default::default(),
         };
         let document = SymbolDocument {
             pins: vec![
@@ -453,6 +456,7 @@ mod tests {
                         Point::new(-30, 30),
                     ],
                     closed: true,
+                    style: Default::default(),
                 },
                 line((-30, -8), (-22, 0)),
                 line((-30, 8), (-22, 0)),

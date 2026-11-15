@@ -128,6 +128,7 @@ fn symbol_canvas_accessibility_label_reports_editing_contract() {
         body: vec![SymbolShape::Circle {
             center: Point::origin(),
             radius: 10,
+            style: Default::default(),
         }],
         ..SymbolDocument::default()
     };

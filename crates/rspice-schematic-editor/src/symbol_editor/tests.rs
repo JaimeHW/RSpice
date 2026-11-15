@@ -13,6 +13,7 @@ fn preview_viewport_fits_large_symbols_inside_tile_body() {
                 Point::new(-300, 220),
             ],
             closed: true,
+            style: Default::default(),
         }],
         ..SymbolDocument::default()
     };
@@ -51,6 +52,7 @@ fn preview_viewport_fits_nonzero_origin_as_placed_symbol() {
                 Point::new(160, 120),
             ],
             closed: true,
+            style: Default::default(),
         }],
         ..SymbolDocument::default()
     };
@@ -110,6 +112,7 @@ fn the_preview_header_states_the_scale_it_draws_at() {
                 Point::new(-300, 220),
             ],
             closed: true,
+            style: Default::default(),
         }],
         ..SymbolDocument::default()
     };
@@ -180,4 +183,122 @@ fn every_grid_pitch_lands_points_on_its_own_lattice() {
             assert!((snapped.x - value).abs() * 2 <= step, "{spacing:?} {value}");
         }
     }
+}
+
+/// The canvas inks a shape in its style, as a placed instance does: a filled
+/// outline paints its inside, a dashed one leaves gaps along its length, a
+/// heavy one weighs more than a thin one. A filled shape is picked anywhere
+/// inside it; an unfilled one only on its edge.
+#[test]
+fn the_canvas_draws_and_picks_a_shape_in_its_style() {
+    use rspice_design::symbol::{SymbolDash, SymbolFill, SymbolStroke, SymbolStyle};
+
+    let ink_color = Color32::from_rgb(255, 64, 64);
+    let viewport = SymbolViewport::new(
+        Rect::from_min_size(Pos2::ZERO, vec2(320.0, 320.0)),
+        4.0,
+        Vec2::ZERO,
+    );
+    let document = |shape: SymbolShape| SymbolDocument {
+        body: vec![shape],
+        ..SymbolDocument::default()
+    };
+    let canvas = |shape: SymbolShape| {
+        let document = document(shape);
+        rspice_ui_kit::raster::render(vec2(320.0, 320.0), |ui, _| {
+            draw_body(
+                &ui.painter().clone(),
+                viewport,
+                &document,
+                ink_color,
+                &Default::default(),
+                Color32::WHITE,
+            );
+        })
+    };
+    let ink = |canvas: &rspice_ui_kit::raster::Canvas, rect: Rect| -> (usize, u64) {
+        let background = canvas.background();
+        canvas
+            .pixels_in(rect)
+            .fold((0, 0), |(count, weight), pixel| {
+                let distance = [
+                    (pixel.r(), background.r()),
+                    (pixel.g(), background.g()),
+                    (pixel.b(), background.b()),
+                ]
+                .into_iter()
+                .map(|(a, b)| u64::from(a.abs_diff(b)))
+                .sum::<u64>();
+                (count + usize::from(distance > 0), weight + distance)
+            })
+    };
+
+    // The triangle's corners land at (80, 100), (240, 160) and (80, 220).
+    let triangle = |style| SymbolShape::Polyline {
+        points: vec![Point::new(-20, -15), Point::new(20, 0), Point::new(-20, 15)],
+        closed: true,
+        style,
+    };
+    let filled = SymbolStyle {
+        fill: SymbolFill::Solid,
+        ..SymbolStyle::default()
+    };
+    let inside = Rect::from_center_size(pos2(140.0, 160.0), vec2(16.0, 16.0));
+    assert_eq!(ink(&canvas(triangle(SymbolStyle::default())), inside).0, 0);
+    let painted = canvas(triangle(filled));
+    assert!(painted.pixels_in(inside).all(|pixel| pixel == ink_color));
+    assert_eq!(
+        hit_shape(&document(triangle(filled)), viewport, pos2(140.0, 160.0)),
+        Some(0)
+    );
+    assert_eq!(
+        hit_shape(
+            &document(triangle(SymbolStyle::default())),
+            viewport,
+            pos2(140.0, 160.0)
+        ),
+        None
+    );
+
+    // The line runs from x 40 to x 280 along y 160.
+    let line = |style| SymbolShape::Polyline {
+        points: vec![Point::new(-30, 0), Point::new(30, 0)],
+        closed: false,
+        style,
+    };
+    let along = Rect::from_min_max(pos2(60.0, 150.0), pos2(260.0, 170.0));
+    let columns = |style| {
+        let drawn = canvas(line(style));
+        (60..260)
+            .filter(|x| {
+                let column =
+                    Rect::from_min_max(pos2(*x as f32, 150.0), pos2(*x as f32 + 1.0, 170.0));
+                ink(&drawn, column).0 > 0
+            })
+            .count()
+    };
+    assert_eq!(columns(SymbolStyle::default()), 200);
+    for dash in [SymbolDash::Dashed, SymbolDash::Dotted] {
+        let broken = columns(SymbolStyle {
+            dash,
+            ..SymbolStyle::default()
+        });
+        assert!(broken > 0 && broken < 160, "{dash:?}: {broken}");
+    }
+    let weight = |stroke| {
+        ink(
+            &canvas(line(SymbolStyle {
+                stroke,
+                ..SymbolStyle::default()
+            })),
+            along,
+        )
+        .1
+    };
+    let (thin, normal, heavy) = (
+        weight(SymbolStroke::Thin),
+        weight(SymbolStroke::Normal),
+        weight(SymbolStroke::Heavy),
+    );
+    assert!(thin < normal && normal < heavy, "{thin} {normal} {heavy}");
 }

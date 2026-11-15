@@ -27,6 +27,7 @@ pub(crate) fn open_symbol() -> DesignTestHost {
         body: vec![SymbolShape::Circle {
             center: Point::origin(),
             radius: 10,
+            style: Default::default(),
         }],
         ..SymbolDocument::default()
     };
@@ -364,6 +365,7 @@ fn ota_placed_in_open_parent(hidden_vertex: bool) -> DesignTestHost {
                 Point::new(-10, 40),
             ],
             closed: true,
+            style: Default::default(),
         }],
         ..SymbolDocument::default()
     };

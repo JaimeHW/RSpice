@@ -296,6 +296,7 @@ fn amp_symbol(ports: &[PortSpec]) -> SymbolDocument {
         body: vec![SymbolShape::Polyline {
             points: corners.map(|(x, y)| Point::new(x, y)).to_vec(),
             closed: true,
+            style: Default::default(),
         }],
         pins: ports
             .iter()
