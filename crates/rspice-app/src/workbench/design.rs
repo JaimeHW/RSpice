@@ -16,6 +16,7 @@ use egui::Context;
 use rspice_schematic_editor::symbol_editor::commands::{
     SymbolEditAction, SymbolTransform, activate_tool,
 };
+use rspice_schematic_editor::symbol_editor::interaction::arm_stretch;
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
 use crate::schematic::view::grid_snap_selection::run_snap_selection_to_grid;
@@ -357,6 +358,15 @@ impl CommandSet for DesignCommand {
                     Some("select at least three objects")
                 } else {
                     Some("select at least two objects")
+                }
+            }
+            // Stretch takes hold of a selected shape's handle under the pointer.
+            Self::StretchSelection if routed::symbol_editor(reads.wb.workspace, reads.model) => {
+                let selection = reads.state.symbol.editor.effective_selection();
+                if reads.model.active_view_read_only() {
+                    Some("the symbol is read-only")
+                } else {
+                    selection.shapes.is_empty().then_some("select a shape")
                 }
             }
             Self::RotateSelection
@@ -956,6 +966,15 @@ impl CommandSet for DesignCommand {
                 &mut cx.state.array_selection,
                 cx.model,
             ),
+            // The handle under the pointer follows it until a click.
+            Self::StretchSelection if routed::symbol_editor(cx.wb.workspace, cx.model) => {
+                if !arm_stretch(&mut cx.state.symbol.editor) {
+                    cx.wb.prompt(
+                        "Stretch takes hold of the handle under the pointer: point at a handle \
+                         of a selected shape first.",
+                    );
+                }
+            }
             Self::StretchSelection => arm_stretch_selection_in(
                 &mut cx.state.stretch_selection,
                 &mut cx.state.move_selection,

@@ -312,7 +312,17 @@ pub struct SymbolEditorSession {
     /// single-object drags when the grabbed object belongs to a
     /// multi-object selection.
     pub dragging_group: Option<rspice_design_model::Point>,
+    /// The handle of a selected shape being dragged.
+    pub dragging_handle: Option<super::handles::SymbolHandleDrag>,
     pub drag_undo_recorded: bool,
+    /// The point of a selected line or polygon that Delete removes: the
+    /// one whose handle was clicked last, as `(shape, point)`.
+    pub selected_vertex: Option<(usize, usize)>,
+    /// The handle under the pointer, which Stretch takes hold of.
+    pub hover_handle: Option<super::handles::SymbolHandleRef>,
+    /// The handle Stretch armed: it follows the pointer, a click puts it
+    /// down as one edit, and Escape lets it go.
+    pub stretch: Option<super::handles::SymbolHandleRef>,
     /// Field drafts and undo grouping, scoped to the active symbol and selection.
     pub inspector: super::inspector::SymbolInspectorSession,
     pub marquee_start: Option<rspice_design_model::Point>,
@@ -365,7 +375,11 @@ impl Default for SymbolEditorSession {
             dragging_label: None,
             dragging_origin: false,
             dragging_group: None,
+            dragging_handle: None,
             drag_undo_recorded: false,
+            selected_vertex: None,
+            hover_handle: None,
+            stretch: None,
             inspector: super::inspector::SymbolInspectorSession::default(),
             marquee_start: None,
             marquee_current: None,
@@ -399,9 +413,25 @@ impl SymbolEditorSession {
         self.selected_pin = None;
         self.selected_shape = None;
         self.selected_attribute = None;
+        self.selected_vertex = None;
+        self.stretch = None;
     }
 
     pub fn set_selection(&mut self, selection: SymbolSelection) {
+        // A point picked on a shape stays picked only while its shape is
+        // still the whole selection.
+        if self
+            .selected_vertex
+            .is_some_and(|(shape, _)| selection != SymbolSelection::single_shape(shape))
+        {
+            self.selected_vertex = None;
+        }
+        if self
+            .stretch
+            .is_some_and(|stretch| !selection.shapes.contains(&stretch.shape))
+        {
+            self.stretch = None;
+        }
         self.selected_pin = selection.pins.iter().next().cloned();
         self.selected_shape = selection.shapes.iter().next().copied();
         self.selected_attribute = selection.attributes.iter().next().copied();
@@ -443,6 +473,7 @@ impl SymbolEditorSession {
         self.dragging_label = None;
         self.dragging_origin = false;
         self.dragging_group = None;
+        self.dragging_handle = None;
         self.drag_undo_recorded = false;
     }
 

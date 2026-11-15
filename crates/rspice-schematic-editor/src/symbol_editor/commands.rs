@@ -3,6 +3,7 @@
 use super::arrange::{
     SymbolArrangeOutcome, lay_out_selection, selection_pivot, snap_selection_to_grid,
 };
+use super::handles;
 use super::interaction::{SymbolEditCapabilities, SymbolEditOutcome, SymbolRequestSource};
 use super::session::{
     SymbolClipboard, SymbolEditorSession, SymbolSelection, SymbolTool, label_name,
@@ -144,6 +145,15 @@ pub fn apply_edit(
         SymbolEditAction::Paste { clipboard, target } => {
             paste(session, document, clipboard, target, &mut outcome)
         }
+        // Delete with a point of the selected line picked takes that point
+        // out; the line stays.
+        SymbolEditAction::Delete { cut: false }
+            if session
+                .selected_vertex
+                .is_some_and(|(shape, _)| selection == SymbolSelection::single_shape(shape)) =>
+        {
+            delete_vertex(session, document, &mut outcome)
+        }
         SymbolEditAction::Delete { cut } => {
             delete(session, document, metadata, &selection, cut, &mut outcome)
         }
@@ -245,9 +255,13 @@ pub fn activate_tool(
     }
 }
 
-/// Escape on the canvas: the shape being drawn is let go and its tool stays
-/// armed; with nothing part drawn, the tool is put down for Select.
+/// Escape on the canvas: a handle Stretch holds is let go where it was;
+/// the shape being drawn is let go and its tool stays armed; with nothing
+/// part drawn, the tool is put down for Select.
 pub fn finish_cancel(session: &mut SymbolEditorSession) {
+    if session.stretch.take().is_some() {
+        return;
+    }
     session.clear_drag_state();
     session.marquee_start = None;
     session.marquee_current = None;
@@ -328,6 +342,32 @@ fn paste(
     }
     session.set_selection(selection);
     outcome.changed = true;
+}
+
+/// Take the picked point out of its line, as one edit, or say why it stays:
+/// a line keeps two points and a polygon three corners.
+fn delete_vertex(
+    session: &mut SymbolEditorSession,
+    document: &mut SymbolDocument,
+    outcome: &mut SymbolEditOutcome,
+) {
+    let Some((index, vertex)) = session.selected_vertex else {
+        return;
+    };
+    let Some(shape) = document.body.get(index) else {
+        return;
+    };
+    let mut trimmed = shape.clone();
+    match handles::remove_vertex(&mut trimmed, vertex) {
+        Ok(()) => {
+            outcome.undo_before = Some(Box::new(document.clone()));
+            outcome.step = "Delete vertex".to_owned();
+            document.body[index] = trimmed;
+            session.selected_vertex = None;
+            outcome.changed = true;
+        }
+        Err(refusal) => outcome.refusal = Some(refusal.to_owned()),
+    }
 }
 
 /// Delete the selected shapes and pins. A selected Reference, Value or Model

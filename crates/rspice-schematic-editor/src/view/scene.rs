@@ -484,7 +484,7 @@ pub fn draw_content(
 }
 
 /// The wire-vertex drag handle's ring, in points.
-const VERTEX_HANDLE_RADIUS: f32 = 3.0;
+pub(crate) const VERTEX_HANDLE_RADIUS: f32 = 3.0;
 
 /// The hover pre-highlight for a conductor or an instance, drawn beneath the
 /// conductor it outlines or after the instance family. A hovered object

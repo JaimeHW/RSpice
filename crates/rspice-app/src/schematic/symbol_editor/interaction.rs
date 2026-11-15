@@ -10,7 +10,7 @@ use rspice_schematic_editor::symbol_editor::SymbolViewport;
 use rspice_schematic_editor::symbol_editor::commands::pin_name_refusal;
 use rspice_schematic_editor::symbol_editor::interaction::{
     SymbolCanvasRequest, SymbolEditCapabilities, bind_canvas_source, canvas_request, edit_canvas,
-    track_pointer, turn_pin_tool_side,
+    track_handle, track_pointer, turn_pin_tool_side,
 };
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
@@ -34,6 +34,12 @@ pub(super) fn handle_canvas(
     });
     track_pointer(
         &mut state.design.symbol.editor,
+        viewport,
+        response.hover_pos(),
+    );
+    track_handle(
+        &mut state.design.symbol.editor,
+        document,
         viewport,
         response.hover_pos(),
     );

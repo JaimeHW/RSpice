@@ -2,6 +2,7 @@
 
 pub mod arrange;
 pub mod commands;
+pub mod handles;
 pub mod inspector;
 pub mod interaction;
 pub mod pin_table;
@@ -93,6 +94,12 @@ impl SymbolViewport {
 
     pub fn world_to_screen(self, point: Point) -> Pos2 {
         let (x, y) = self.placement.place_f(point);
+        self.rect.center() + self.pan + vec2(x * self.zoom, y * self.zoom)
+    }
+
+    /// Where a symbol point between grid units lands on screen.
+    pub fn world_to_screen_f(self, [x, y]: [f64; 2]) -> Pos2 {
+        let (x, y) = self.placement.place_xy(x as f32, y as f32);
         self.rect.center() + self.pan + vec2(x * self.zoom, y * self.zoom)
     }
 
@@ -291,8 +298,121 @@ pub fn draw_in_place(
     draw_pins(painter, viewport, document, ports, session);
     draw_pin_tool_pin(painter, viewport, document, session, &t);
     draw_labels(painter, viewport, editor, session, &t);
+    draw_handles(painter, viewport, document, session, &t);
     draw_marquee(painter, viewport, session, &t);
     draw_draft(painter, viewport, session, &t);
+}
+
+/// An edge's middle offers a new point there; it is drawn smaller than the
+/// points the shape has.
+const EDGE_HANDLE_RADIUS: f32 = 2.0;
+
+/// The handles of every selected shape, as the schematic's wire grips are
+/// drawn: a fixed ring the same at every zoom, filled under the pointer and
+/// on the point Delete would take out. A handle Stretch holds draws the
+/// shape it would leave in the draft tone.
+fn draw_handles(
+    painter: &egui::Painter,
+    viewport: SymbolViewport,
+    document: &SymbolDocument,
+    session: &SymbolEditorSession,
+    t: &Tokens,
+) {
+    let colour = t.color.canvas_select;
+    let hair = Stroke::new(1.0 / painter.pixels_per_point(), colour);
+    for &index in &session.effective_selection().shapes {
+        let Some(shape) = document.body.get(index) else {
+            continue;
+        };
+        for (handle, at) in handles::shape_handles(shape) {
+            let here = handles::SymbolHandleRef {
+                shape: index,
+                handle,
+            };
+            let centre = viewport.world_to_screen_f(at);
+            let marked = session.hover_handle == Some(here)
+                || session.stretch == Some(here)
+                || matches!(handle, handles::SymbolHandle::Vertex(vertex)
+                    if session.selected_vertex == Some((index, vertex)));
+            let (radius, stroke) = match handle {
+                handles::SymbolHandle::EdgeMiddle(_) => (
+                    EDGE_HANDLE_RADIUS,
+                    Stroke::new(hair.width, colour.gamma_multiply(DRAFT_HINT)),
+                ),
+                _ => (crate::view::scene::VERTEX_HANDLE_RADIUS, hair),
+            };
+            if marked {
+                painter.circle_filled(centre, radius, colour);
+            } else {
+                painter.circle_filled(centre, radius, t.color.canvas_bg);
+                painter.circle_stroke(centre, radius, stroke);
+            }
+        }
+    }
+    let (Some(stretch), Some(pointer)) = (session.stretch, session.pointer) else {
+        return;
+    };
+    let Some((stretched, _)) = interaction::stretched_shape(document, stretch, pointer) else {
+        return;
+    };
+    let stroke = Stroke::new(
+        DRAFT_STROKE,
+        colour.gamma_multiply(DRAFT_ALPHA * DRAFT_HINT),
+    );
+    draw_shape_outline(painter, viewport, &stretched, stroke);
+}
+
+/// `shape`'s outline alone, in `stroke`: the shape a handle would leave.
+fn draw_shape_outline(
+    painter: &egui::Painter,
+    viewport: SymbolViewport,
+    shape: &SymbolShape,
+    stroke: Stroke,
+) {
+    let mut outline: Vec<Pos2> = match shape {
+        SymbolShape::Polyline { points, closed } => {
+            let mut outline: Vec<Pos2> = points
+                .iter()
+                .map(|point| viewport.world_to_screen(*point))
+                .collect();
+            if *closed && let Some(first) = outline.first().copied() {
+                outline.push(first);
+            }
+            outline
+        }
+        SymbolShape::Rectangle { min, max } => {
+            let corners = rectangle_corners(*min, *max);
+            corners
+                .iter()
+                .chain(corners.first())
+                .map(|point| viewport.world_to_screen(*point))
+                .collect()
+        }
+        SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
+            curve_points(viewport, &SymbolCurve::of_arc(*center, *radius, 0, 360))
+        }
+        SymbolShape::Arc {
+            center,
+            radius,
+            start_degrees,
+            sweep_degrees,
+        } => curve_points(
+            viewport,
+            &SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees),
+        ),
+        SymbolShape::Curve(curve) => curve_points(viewport, curve),
+        SymbolShape::Arrow { .. } | SymbolShape::Text { .. } => {
+            let (min, max) = session::symbol_shape_bounds(shape);
+            let corners = rectangle_corners(min, max);
+            corners
+                .iter()
+                .chain(corners.first())
+                .map(|point| viewport.world_to_screen(*point))
+                .collect()
+        }
+    };
+    outline.dedup();
+    painter.add(Shape::line(outline, stroke));
 }
 
 /// A shape being drawn is the selection colour held back a little, as a
@@ -1015,6 +1135,33 @@ pub fn hit_label(
 /// reads them. Moving an attribute has to move both or the two disagree.
 pub fn hit_origin(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2) -> bool {
     viewport.world_to_screen(document.origin).distance(pos) <= 10.0
+}
+
+/// The handle of a selected shape nearest `pos`, within the reach the
+/// schematic's own grips are taken from.
+pub fn hit_handle(
+    document: &SymbolDocument,
+    selection: &session::SymbolSelection,
+    viewport: SymbolViewport,
+    pos: Pos2,
+) -> Option<handles::SymbolHandleRef> {
+    let reach = crate::view::snap_resolution::TARGET_ACQUISITION_RADIUS_POINTS;
+    selection
+        .shapes
+        .iter()
+        .filter_map(|&index| Some((index, document.body.get(index)?)))
+        .flat_map(|(index, shape)| {
+            handles::shape_handles(shape)
+                .into_iter()
+                .map(move |(handle, at)| (index, handle, at))
+        })
+        .map(|(shape, handle, at)| {
+            let distance = viewport.world_to_screen_f(at).distance(pos);
+            (handles::SymbolHandleRef { shape, handle }, distance)
+        })
+        .filter(|(_, distance)| *distance <= reach)
+        .min_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(handle, _)| handle)
 }
 
 pub fn hit_shape(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2) -> Option<usize> {

@@ -13,12 +13,14 @@ use rspice_design_model::{
 };
 use rspice_vocabulary::product::ProjectId;
 
+use super::handles::{self, SymbolHandle, SymbolHandleRef};
 use super::session::{
     SymbolArcSweep, SymbolEditorSession, SymbolPinNameDraft, SymbolSelection, SymbolTextDraft,
     SymbolTool, bearing, label_name, selection_subject, shape_kind,
 };
 use super::{
-    SymbolViewport, hit_label, hit_origin, hit_pin, hit_shape, snap_point, snap_to_terminal_grid,
+    SymbolViewport, hit_handle, hit_label, hit_origin, hit_pin, hit_shape, snap_point,
+    snap_to_terminal_grid,
 };
 
 /// Identity of the actual symbol view and the registry revision used to resolve an event.
@@ -175,7 +177,8 @@ pub struct SymbolEditOutcome {
     /// What the undo step is called, as Undo and Redo name it: "Move pin IN".
     pub step: String,
     pub edit_denied: bool,
-    /// Why a requested edit was refused, for the host to tell the author.
+    /// Why a requested edit was refused, or did nothing, for the host to
+    /// tell the author.
     pub refusal: Option<String>,
     /// What a completed edit did, where the canvas does not show it at a
     /// glance: "Snapped 3 objects to the grid."
@@ -243,16 +246,37 @@ fn handle_canvas_interaction(
     // pin no parent schematic can reach.
     let terminal_point = snap_to_terminal_grid(raw_point);
 
+    // A handle Stretch armed follows the pointer until a click puts it down.
+    if let Some(stretch) = edit.session.stretch {
+        if input.clicked || input.drag_stopped {
+            edit.session.stretch = None;
+            return put_down_stretch(edit, document, stretch, body_point);
+        }
+        return false;
+    }
+
     if edit.session.tool.draws() {
         return draw_with_tool(edit, document, input, body_point);
     }
 
+    // A point put on an edge by grabbing its middle is an edit already,
+    // whether or not the pointer has moved it yet.
+    let mut grabbed = false;
     if input.drag_started {
-        // Grabbing something that is already part of a multi-object
-        // selection moves the whole selection. Grabbing anything else
-        // reduces the selection to it first, which is what makes a
-        // mis-grab recoverable rather than a silent group move.
-        if grab_belongs_to_group(edit, document, editor, viewport, pointer) {
+        let selection = edit.session.effective_selection();
+        let several = selection.len() > 1;
+        // A handle of a selected shape is taken before the shape or
+        // anything beneath it, except the point a shape merely stands at,
+        // which with more selected moves them all. Grabbing something that
+        // is already part of a multi-object selection moves the whole
+        // selection. Grabbing anything else reduces the selection to it
+        // first, which is what makes a mis-grab recoverable rather than a
+        // silent group move.
+        let handle = hit_handle(document, &selection, viewport, pointer)
+            .filter(|handle| !(several && handle.handle == SymbolHandle::Anchor));
+        if let Some(handle) = handle {
+            grabbed = grab_handle(edit, document, handle);
+        } else if grab_belongs_to_group(edit, document, editor, viewport, pointer) {
             edit.session.dragging_group = Some(body_point);
             edit.session.drag_undo_recorded = false;
         } else if let Some(pin) = hit_pin(document, viewport, pointer) {
@@ -277,6 +301,24 @@ fn handle_canvas_interaction(
         }
     }
 
+    if input.dragged
+        && let Some(drag) = edit.session.dragging_handle
+    {
+        if edit.deny_read_only_edit() {
+            edit.session.clear_drag_state();
+            return grabbed;
+        }
+        let Some(shape) = document.body.get(drag.shape) else {
+            return grabbed;
+        };
+        let Some(moved) = handles::moved(shape, &drag, body_point) else {
+            return grabbed;
+        };
+        let step = handles::step_name(shape, drag.handle);
+        record_drag_symbol_edit(edit, document, || step);
+        document.body[drag.shape] = moved;
+        return true;
+    }
     if input.dragged
         && let Some(last_point) = edit.session.dragging_group
     {
@@ -387,12 +429,34 @@ fn handle_canvas_interaction(
     }
 
     if !input.clicked {
-        return false;
+        return grabbed;
     }
 
     match edit.session.tool {
         SymbolTool::Select => {
             let extend = input.extend_selection;
+            let handle = hit_handle(
+                document,
+                &edit.session.effective_selection(),
+                viewport,
+                pointer,
+            );
+            // A click on a point of the selected line picks that point,
+            // for Delete; the shape stays selected.
+            if let Some(SymbolHandleRef {
+                shape,
+                handle: SymbolHandle::Vertex(vertex),
+            }) = handle.filter(|_| !extend)
+            {
+                edit.session.select_shape(shape);
+                edit.session.selected_vertex = Some((shape, vertex));
+                return false;
+            }
+            edit.session.selected_vertex = None;
+            if handle.is_some() && !extend {
+                // Any other handle belongs to a shape already selected.
+                return false;
+            }
             if let Some(pin) = hit_pin(document, viewport, pointer) {
                 toggle_or_select(
                     edit,
@@ -428,6 +492,107 @@ fn handle_canvas_interaction(
         | SymbolTool::Arc
         | SymbolTool::Text => false,
     }
+}
+
+/// Take hold of `handle`. Grabbing an edge's middle puts a point there at
+/// once, as an edit of its own; whether it did.
+fn grab_handle(
+    edit: &mut CanvasEdit<'_>,
+    document: &mut SymbolDocument,
+    handle: SymbolHandleRef,
+) -> bool {
+    let Some(shape) = document.body.get(handle.shape) else {
+        return false;
+    };
+    edit.session.drag_undo_recorded = false;
+    let inserts = matches!(handle.handle, SymbolHandle::EdgeMiddle(_));
+    if inserts {
+        if edit.deny_read_only_edit() {
+            return false;
+        }
+        let step = handles::step_name(shape, handle.handle);
+        record_drag_symbol_edit(edit, document, || step);
+    }
+    let drag = handles::grab(
+        &mut document.body[handle.shape],
+        handle.shape,
+        handle.handle,
+    );
+    edit.session.select_shape(handle.shape);
+    edit.session.selected_vertex = match drag.handle {
+        SymbolHandle::Vertex(vertex) => Some((handle.shape, vertex)),
+        _ => None,
+    };
+    edit.session.dragging_handle = Some(drag);
+    inserts
+}
+
+/// What a click puts down where Stretch armed `handle`: the shape with that
+/// handle at `point`, as one edit; nothing when that changes nothing or
+/// would leave the shape with nothing to draw.
+fn put_down_stretch(
+    edit: &mut CanvasEdit<'_>,
+    document: &mut SymbolDocument,
+    handle: SymbolHandleRef,
+    point: Point,
+) -> bool {
+    if edit.deny_read_only_edit() {
+        return false;
+    }
+    let Some((stretched, became)) = stretched_shape(document, handle, point)
+        .filter(|(stretched, _)| Some(stretched) != document.body.get(handle.shape))
+    else {
+        return false;
+    };
+    let step = handles::step_name(&document.body[handle.shape], handle.handle);
+    edit.record_undo(document, || step);
+    document.body[handle.shape] = stretched;
+    edit.session.select_shape(handle.shape);
+    edit.session.selected_vertex = match became {
+        SymbolHandle::Vertex(vertex) => Some((handle.shape, vertex)),
+        _ => None,
+    };
+    true
+}
+
+/// The shape `handle` belongs to with that handle brought to `point`, and
+/// the handle it became: what a Stretch armed there would put down.
+pub fn stretched_shape(
+    document: &SymbolDocument,
+    handle: SymbolHandleRef,
+    point: Point,
+) -> Option<(SymbolShape, SymbolHandle)> {
+    let mut shape = document.body.get(handle.shape)?.clone();
+    let drag = handles::grab(&mut shape, handle.shape, handle.handle);
+    let moved = handles::moved(&shape, &drag, point)?;
+    Some((moved, drag.handle))
+}
+
+/// Which handle of the selected shapes is under `hover`, for the canvas to
+/// mark and Stretch to take hold of. Only Select edits shapes in place.
+pub fn track_handle(
+    session: &mut SymbolEditorSession,
+    document: &SymbolDocument,
+    viewport: SymbolViewport,
+    hover: Option<Pos2>,
+) {
+    session.hover_handle = hover
+        .filter(|_| session.tool == SymbolTool::Select)
+        .and_then(|pos| hit_handle(document, &session.effective_selection(), viewport, pos));
+}
+
+/// Stretch: take hold of the handle under the pointer, which then follows
+/// it until a click puts it down. Whether there was one.
+pub fn arm_stretch(session: &mut SymbolEditorSession) -> bool {
+    let Some(handle) = session
+        .hover_handle
+        .filter(|_| session.tool == SymbolTool::Select)
+    else {
+        return false;
+    };
+    session.clear_drag_state();
+    session.stretch = Some(handle);
+    true
 }
 
 /// Where a click would land this frame, snapped as the armed tool snaps, so

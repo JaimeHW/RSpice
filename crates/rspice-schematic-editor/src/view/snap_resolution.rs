@@ -17,7 +17,7 @@ use rspice_design::schematic::wire::Wire;
 use rspice_design_model::Point;
 
 /// Electrical targets are acquired within this stable on-screen radius.
-const TARGET_ACQUISITION_RADIUS_POINTS: f32 = 6.0;
+pub(crate) const TARGET_ACQUISITION_RADIUS_POINTS: f32 = 6.0;
 
 /// Convert the stable device-space acquisition radius to schematic units.
 ///

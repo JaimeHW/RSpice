@@ -815,3 +815,342 @@ fn the_pin_tool_refuses_a_point_another_pin_stands_on() {
     );
     assert_eq!(document, before);
 }
+
+/// A document holding `shape` alone, selected, with Select armed.
+fn selected(shape: SymbolShape) -> (SymbolEditorSession, SymbolDocument) {
+    let mut session = armed(SymbolTool::Select);
+    session.select_shape(0);
+    let document = SymbolDocument {
+        body: vec![shape],
+        ..SymbolDocument::default()
+    };
+    (session, document)
+}
+
+/// Press at `from`, carry the pointer to `to` and let go: each frame's
+/// outcome, so the undo steps the drag records can be read.
+fn drag_steps(
+    session: &mut SymbolEditorSession,
+    document: &mut SymbolDocument,
+    from: Point,
+    to: Point,
+) -> Vec<SymbolEditOutcome> {
+    let pressed = SymbolCanvasInput {
+        drag_started: true,
+        dragged: true,
+        ..Default::default()
+    };
+    let carried = SymbolCanvasInput {
+        dragged: true,
+        ..Default::default()
+    };
+    let released = SymbolCanvasInput {
+        drag_stopped: true,
+        ..Default::default()
+    };
+    vec![
+        feed(session, document, from, pressed),
+        feed(session, document, to, carried),
+        feed(session, document, to, released),
+    ]
+}
+
+/// The undo steps a drag recorded, by name.
+fn recorded(outcomes: &[SymbolEditOutcome]) -> Vec<&str> {
+    outcomes
+        .iter()
+        .filter(|outcome| outcome.undo_before.is_some())
+        .map(|outcome| outcome.step.as_str())
+        .collect()
+}
+
+/// A point of the selected line follows the pointer, snapped as drawing
+/// snaps, as one undo step; the rest of the line stays.
+#[test]
+fn dragging_a_point_of_the_selected_line_moves_that_point_alone() {
+    let line = SymbolShape::Polyline {
+        points: vec![Point::new(0, 0), Point::new(40, 0), Point::new(40, 40)],
+        closed: false,
+    };
+    let (mut session, mut document) = selected(line.clone());
+    let steps = drag_steps(
+        &mut session,
+        &mut document,
+        Point::new(40, 0),
+        Point::new(57, -12),
+    );
+
+    assert_eq!(
+        document.body[0],
+        SymbolShape::Polyline {
+            points: vec![Point::new(0, 0), Point::new(60, -10), Point::new(40, 40)],
+            closed: false,
+        }
+    );
+    assert_eq!(recorded(&steps), vec!["Move vertex"]);
+    let before = steps
+        .iter()
+        .find_map(|outcome| outcome.undo_before.as_ref());
+    assert_eq!(before.map(|document| &document.body[0]), Some(&line));
+    assert_eq!(session.selected_vertex, Some((0, 1)));
+}
+
+/// Grabbing an edge's middle puts a point there, which the drag carries.
+#[test]
+fn grabbing_an_edge_middle_adds_a_point_there() {
+    let (mut session, mut document) = selected(SymbolShape::Polyline {
+        points: vec![Point::new(0, 0), Point::new(40, 0)],
+        closed: false,
+    });
+    let steps = drag_steps(
+        &mut session,
+        &mut document,
+        Point::new(20, 0),
+        Point::new(20, 20),
+    );
+
+    assert_eq!(
+        document.body[0],
+        SymbolShape::Polyline {
+            points: vec![Point::new(0, 0), Point::new(20, 20), Point::new(40, 0)],
+            closed: false,
+        }
+    );
+    assert!(steps[0].changed);
+    assert_eq!(recorded(&steps), vec!["Add vertex"]);
+}
+
+/// A rectangle's corner carries that corner and holds the opposite one; a
+/// side carries that side alone; it stays the rectangle kind throughout.
+#[test]
+fn a_rectangle_is_resized_by_its_corners_and_sides_and_stays_one() {
+    let (mut session, mut document) = selected(SymbolShape::Rectangle {
+        min: Point::new(0, 0),
+        max: Point::new(40, 20),
+    });
+    let steps = drag_steps(
+        &mut session,
+        &mut document,
+        Point::new(40, 20),
+        Point::new(60, 30),
+    );
+    assert_eq!(
+        document.body[0],
+        SymbolShape::Rectangle {
+            min: Point::new(0, 0),
+            max: Point::new(60, 30),
+        }
+    );
+    assert_eq!(recorded(&steps), vec!["Resize rectangle"]);
+
+    // The left side's middle, pulled up and out: only x follows.
+    drag_steps(
+        &mut session,
+        &mut document,
+        Point::new(0, 15),
+        Point::new(-20, 0),
+    );
+    assert_eq!(
+        document.body[0],
+        SymbolShape::Rectangle {
+            min: Point::new(-20, 0),
+            max: Point::new(60, 30),
+        }
+    );
+}
+
+/// A circle's radius handle sets its radius; an arc's end turns the arc
+/// about its centre and keeps its start; neither moves its centre.
+#[test]
+fn a_circle_and_an_arc_are_reshaped_by_their_handles() {
+    let (mut session, mut document) = selected(SymbolShape::Circle {
+        center: Point::origin(),
+        radius: 20,
+    });
+    let steps = drag_steps(
+        &mut session,
+        &mut document,
+        Point::new(20, 0),
+        Point::new(30, 0),
+    );
+    assert_eq!(
+        document.body[0],
+        SymbolShape::Circle {
+            center: Point::origin(),
+            radius: 30,
+        }
+    );
+    assert_eq!(recorded(&steps), vec!["Resize circle"]);
+
+    // Clockwise on the screen from east to south; the end is carried west.
+    let (mut session, mut document) = selected(SymbolShape::Arc {
+        center: Point::origin(),
+        radius: 20,
+        start_degrees: 0,
+        sweep_degrees: 90,
+    });
+    let steps = drag_steps(
+        &mut session,
+        &mut document,
+        Point::new(0, 20),
+        Point::new(-20, 0),
+    );
+    assert_eq!(
+        document.body[0],
+        SymbolShape::Arc {
+            center: Point::origin(),
+            radius: 20,
+            start_degrees: 0,
+            sweep_degrees: 180,
+        }
+    );
+    assert_eq!(recorded(&steps), vec!["Move arc end"]);
+}
+
+/// A click on a point of the selected line picks it, and Delete then takes
+/// that point out and leaves the line; a line keeps two points.
+#[test]
+fn delete_takes_out_the_picked_point_and_a_line_keeps_two() {
+    use super::super::commands::{SymbolEditAction, apply_edit};
+    let (mut session, mut document) = selected(SymbolShape::Polyline {
+        points: vec![Point::new(0, 0), Point::new(40, 0), Point::new(40, 40)],
+        closed: false,
+    });
+    assert!(!click(&mut session, &mut document, Point::new(40, 0)));
+    assert_eq!(session.selected_vertex, Some((0, 1)));
+    assert_eq!(
+        session.effective_selection(),
+        SymbolSelection::single_shape(0)
+    );
+
+    let delete = |session: &mut SymbolEditorSession, document: &mut SymbolDocument| {
+        let mut metadata = SymbolEditorMetadata::for_document(document);
+        apply_edit(
+            session,
+            document,
+            Some(&mut metadata),
+            SymbolEditAction::Delete { cut: false },
+            SymbolEditCapabilities { edit: true },
+        )
+    };
+    let outcome = delete(&mut session, &mut document);
+    assert!(outcome.changed);
+    assert_eq!(outcome.step, "Delete vertex");
+    assert_eq!(
+        document.body,
+        vec![SymbolShape::Polyline {
+            points: vec![Point::new(0, 0), Point::new(40, 40)],
+            closed: false,
+        }]
+    );
+
+    assert!(!click(&mut session, &mut document, Point::new(40, 40)));
+    let before = document.clone();
+    let outcome = delete(&mut session, &mut document);
+    assert!(!outcome.changed);
+    assert!(outcome.undo_before.is_none());
+    assert_eq!(
+        outcome.refusal.as_deref(),
+        Some("A line keeps at least two points; delete the line instead.")
+    );
+    assert_eq!(document, before);
+}
+
+/// Stretch takes hold of the handle under the pointer; the handle follows
+/// the pointer, changing nothing, until a click puts it down as one edit.
+/// Escape lets it go where it was.
+#[test]
+fn stretch_carries_the_handle_under_the_pointer_until_a_click() {
+    use super::super::commands::finish_cancel;
+    let rectangle = SymbolShape::Rectangle {
+        min: Point::new(0, 0),
+        max: Point::new(40, 20),
+    };
+    let (mut session, mut document) = selected(rectangle.clone());
+    let corner = unit_viewport().world_to_screen(Point::new(40, 20));
+    track_handle(&mut session, &document, unit_viewport(), Some(corner));
+    assert!(arm_stretch(&mut session));
+
+    let hover = feed(
+        &mut session,
+        &mut document,
+        Point::new(60, 40),
+        SymbolCanvasInput::default(),
+    );
+    assert!(!hover.changed);
+    assert_eq!(document.body[0], rectangle);
+
+    let put_down = feed(
+        &mut session,
+        &mut document,
+        Point::new(60, 40),
+        SymbolCanvasInput {
+            clicked: true,
+            ..Default::default()
+        },
+    );
+    assert!(put_down.changed);
+    assert_eq!(put_down.step, "Resize rectangle");
+    assert_eq!(
+        document.body[0],
+        SymbolShape::Rectangle {
+            min: Point::new(0, 0),
+            max: Point::new(60, 40),
+        }
+    );
+    assert!(session.stretch.is_none());
+
+    let corner = unit_viewport().world_to_screen(Point::new(60, 40));
+    track_handle(&mut session, &document, unit_viewport(), Some(corner));
+    assert!(arm_stretch(&mut session));
+    finish_cancel(&mut session);
+    assert!(session.stretch.is_none());
+    assert_eq!(session.tool, SymbolTool::Select);
+
+    // Nothing under the pointer: nothing to take hold of.
+    track_handle(&mut session, &document, unit_viewport(), None);
+    assert!(!arm_stretch(&mut session));
+}
+
+/// With more selected, grabbing a dot moves them all rather than the dot
+/// alone by the point it stands at.
+#[test]
+fn a_shape_merely_standing_at_a_point_moves_with_the_rest_of_the_selection() {
+    let mut document = SymbolDocument {
+        body: vec![
+            SymbolShape::Dot {
+                center: Point::new(0, 0),
+                radius: 2,
+            },
+            SymbolShape::Circle {
+                center: Point::new(40, 0),
+                radius: 10,
+            },
+        ],
+        ..SymbolDocument::default()
+    };
+    let mut session = armed(SymbolTool::Select);
+    session.set_selection(SymbolSelection {
+        shapes: [0, 1].into_iter().collect(),
+        ..SymbolSelection::default()
+    });
+    drag_steps(
+        &mut session,
+        &mut document,
+        Point::new(0, 0),
+        Point::new(10, 10),
+    );
+    assert_eq!(
+        document.body,
+        vec![
+            SymbolShape::Dot {
+                center: Point::new(10, 10),
+                radius: 2,
+            },
+            SymbolShape::Circle {
+                center: Point::new(50, 10),
+                radius: 10,
+            },
+        ]
+    );
+}
