@@ -505,3 +505,46 @@ fn source_event_classification_settles_regular_rlc_storage_by_topology() {
         );
     }
 }
+
+#[test]
+fn an_inductor_only_cutset_carries_no_source_impulse() {
+    // An inductor open at one end pins its current at zero: the cutset it
+    // forms alone is index 2, yet no source event can force its flux, so
+    // the topology settles it without the exact descriptor. A current
+    // source on the same cutset forces the flux and keeps the descriptor.
+    let mut restricted = options();
+    restricted.limits.max_matrix_unknowns = 1;
+    for (deck, forced) in [
+        (
+            "open inductor\nV1 a 0 1\nR1 a b 1k\nL1 b c 1n\nC1 b 0 1p\n.end\n",
+            false,
+        ),
+        (
+            "forced cutset\nV1 a 0 1\nR1 a b 1k\nL1 b c 1n\nC1 b 0 1p\nI1 0 c 1m\n.end\n",
+            true,
+        ),
+    ] {
+        let circuit = build(deck);
+        assert_eq!(
+            PreparedEventCircuit::has_linear_events(&circuit, 1e-20, &restricted, &NoAbort)
+                .is_err(),
+            forced,
+            "{deck}"
+        );
+        // The exact descriptor agrees: from empty storage onto the sources,
+        // its structural impulse orders carry action only when forced.
+        let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+        let descriptor = sampler.linear_descriptor().unwrap();
+        assert!(descriptor.has_impulses(), "{deck}");
+        let storage = descriptor
+            .storage(&vec![0.0; circuit.matrix_size()], &options(), &NoAbort)
+            .unwrap();
+        let transition = descriptor
+            .evaluate(&circuit, 0.0, &storage, &options(), &NoAbort)
+            .unwrap();
+        let action = (0..transition.impulse_count())
+            .flat_map(|order| transition.impulse(order).unwrap().iter().copied())
+            .any(|value| value != 0.0);
+        assert_eq!(action, forced, "{deck}");
+    }
+}

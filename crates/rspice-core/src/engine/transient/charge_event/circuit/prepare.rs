@@ -272,11 +272,15 @@ impl<'a> PreparedEventCircuit<'a> {
             .is_some_and(|descriptor| descriptor.has_impulses()))
     }
 
-    /// Positive R, C and uncoupled L with independent sources form an index-1
-    /// MNA descriptor, whose storage no source event can force, unless
-    /// capacitors and voltage sources close a loop through a source (CV-loop)
-    /// or inductors and current sources form a cutset (LI-cutset). Shunts can
-    /// only remove such a cutset, so ignoring them errs toward the descriptor.
+    /// Positive R, C and uncoupled L with independent sources form an MNA
+    /// descriptor whose storage no source event can force, unless capacitors
+    /// and voltage sources close a loop through a source (CV-loop) or
+    /// inductors and current sources form a cutset through a source
+    /// (LI-cutset). A cutset of inductors alone (an inductor left open at one
+    /// end, say) is index 2, but its KCL row is homogeneous: it pins the sum
+    /// of its currents at zero whatever the sources do, so like a loop of
+    /// capacitors alone it carries no forcing. Shunts can only remove such a
+    /// cutset, so ignoring them errs toward the descriptor.
     fn has_regular_storage(circuit: &crate::CircuitData) -> bool {
         use PeriodicDeviceFamily::{
             Capacitor, CurrentSource, Inductor, Resistor, ResistorBranch, VoltageSource,
@@ -327,16 +331,14 @@ impl<'a> PreparedEventCircuit<'a> {
             .chain(pairs(&branches.node_pos, &branches.node_neg))
             .collect::<Vec<_>>();
         let voltages = pairs(&voltages.node_pos, &voltages.node_neg);
-        let flux = pairs(&inductors.node_pos, &inductors.node_neg)
-            .into_iter()
-            .chain(pairs(&currents.node_pos, &currents.node_neg))
-            .collect::<Vec<_>>();
+        let currents = pairs(&currents.node_pos, &currents.node_neg);
         let nodes = circuit.num_nodes().saturating_add(1);
         let mut loops = NodeSets::new(nodes);
         let mut joined = NodeSets::new(nodes);
         // A voltage source whose terminals capacitors and earlier sources
-        // already join closes a CV-loop. A flux branch whose terminals no
-        // resistive, capacitive or voltage branch joins lies on an LI-cutset.
+        // already join closes a CV-loop. A current source whose terminals no
+        // resistive, capacitive or voltage branch joins lies on a cutset of
+        // inductors and current sources, which it forces: an LI-cutset.
         capacitors.iter().all(|&(p, n)| loops.join(p, n).is_some())
             && voltages
                 .iter()
@@ -346,7 +348,9 @@ impl<'a> PreparedEventCircuit<'a> {
                 .chain(&capacitors)
                 .chain(&voltages)
                 .all(|&(p, n)| joined.join(p, n).is_some())
-            && flux.iter().all(|&(p, n)| joined.joined(p, n) == Some(true))
+            && currents
+                .iter()
+                .all(|&(p, n)| joined.joined(p, n) == Some(true))
     }
 
     /// The ordinary line path can opt into physical events only when every
