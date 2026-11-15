@@ -195,3 +195,42 @@ fn the_zoom_chip_reads_the_in_place_view() {
         "the chip follows the in-place view"
     );
 }
+
+/// The placed preview has nothing to add in place, where the symbol already
+/// stands placed on its sheet: its toolbar toggle gives way to the way back,
+/// and its command says why it is not offered. In the symbol's own view the
+/// toggle is there.
+#[test]
+fn the_placed_preview_is_not_offered_in_place() {
+    use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
+
+    let mut fixture = InPlace::new();
+    let entered = fixture.enter();
+    let buttons: Vec<&str> = entered
+        .iter()
+        .filter(|control| control.role == Role::Button)
+        .map(|control| control.label.as_str())
+        .collect();
+    assert!(
+        !buttons.contains(&"Preview as placed on a sheet"),
+        "{buttons:?}"
+    );
+    assert!(buttons.contains(&"Return to parent (Enter)"), "{buttons:?}");
+    assert_eq!(
+        fixture
+            .replay
+            .app
+            .command_availability(DesignCommand::SymbolPlacedPreview.key()),
+        CommandAvailability::Disabled("the symbol is shown placed on its sheet")
+    );
+
+    fixture.replay.key(egui::Key::Escape, egui::Modifiers::NONE);
+    let symbol = fixture.symbol.clone();
+    fixture.replay.app.state.open_workspace_view(symbol);
+    let own = fixture.replay.frames(vec![]);
+    assert!(
+        own.iter()
+            .any(|control| control.label == "Preview as placed on a sheet"),
+        "the symbol's own view offers the preview"
+    );
+}

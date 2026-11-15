@@ -376,10 +376,15 @@ const SYMBOL: &[ToolbarEntry<DesignFeature>] = &[
         overflow: None,
     }),
     ToolbarEntry::Separator,
-    ToolbarEntry::Control(ToolbarControl {
-        show: preview_as_placed_toggle,
-        overflow: None,
-    }),
+    // Edited in place, the symbol already stands placed on its sheet, so the
+    // preview gives way to the way back.
+    ToolbarEntry::Only(
+        symbol_in_own_view,
+        &[ToolbarEntry::Control(ToolbarControl {
+            show: preview_as_placed_toggle,
+            overflow: None,
+        })],
+    ),
     ToolbarEntry::Only(
         symbol_in_place,
         &[labelled(
@@ -392,6 +397,10 @@ const SYMBOL: &[ToolbarEntry<DesignFeature>] = &[
 
 fn symbol_in_place(reads: &Reads<'_, DesignFeature>) -> bool {
     in_place_session(&reads.state.symbol.in_place, reads.model).is_some()
+}
+
+fn symbol_in_own_view(reads: &Reads<'_, DesignFeature>) -> bool {
+    !symbol_in_place(reads)
 }
 
 /// The symbol row's toggles, each drawn as its icon under its name: show

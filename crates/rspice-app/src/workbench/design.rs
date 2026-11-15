@@ -516,8 +516,16 @@ impl CommandSet for DesignCommand {
                 .model
                 .symbol_pins_missing_from_schematic(&reads.model.workspace.content.active_view)
                 .err(),
+            Self::SymbolPlacedPreview
+                if !routed::symbol_editor(reads.wb.workspace, reads.model) =>
+            {
+                Some("open a symbol")
+            }
+            // Edited in place, the symbol already stands placed on its sheet.
             Self::SymbolPlacedPreview => {
-                (!routed::symbol_editor(reads.wb.workspace, reads.model)).then_some("open a symbol")
+                in_place_session(&reads.state.symbol.in_place, reads.model)
+                    .is_some()
+                    .then_some("the symbol is shown placed on its sheet")
             }
             Self::EditSymbolInPlace => match selected_symbol_in_place_target(reads.model) {
                 Ok(_) if schematic => None,
