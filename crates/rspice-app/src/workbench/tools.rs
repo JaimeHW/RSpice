@@ -6,5 +6,4 @@
 //! distinction from the canonical surfaces, which do own the route.
 
 pub(crate) use rspice_app_project::workbench::tools::examples_browser;
-pub(crate) use rspice_app_project::workbench::tools::project_launcher;
 pub(crate) use rspice_app_workbench::workbench::tools::notification_center;

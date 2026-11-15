@@ -6,7 +6,6 @@
 //! them all so a single read answers whether any modal owns input this
 //! frame; the dialogs themselves never inspect each other.
 
-pub(crate) use rspice_app_project::workbench::app::dialogs::check_and_save;
 pub(crate) use rspice_app_project::workbench::app::dialogs::check_and_save_validation;
 pub(crate) use rspice_app_workbench::workbench::app::dialogs::confirmation;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::confirmation_state;

@@ -13,11 +13,11 @@ use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectLauncherPage;
 use crate::workbench::session::project_transactions::start_local_safe_mode;
 use crate::workbench::state::Workspace;
-use crate::workbench::tools::project_launcher::{
+use crate::workbench::{RSpiceApp, features};
+use rspice_app_project::workbench::tools::project_launcher::{
     LAUNCHER_TOUCH_MAX_WIDTH, LauncherAction, LauncherControlHeightOverride, LauncherPass,
     launcher, restore_launcher_focus, show_discard_confirmation,
 };
-use crate::workbench::{RSpiceApp, features};
 
 fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
     let dropped = ctx.input(|input| input.raw.dropped_files.clone());

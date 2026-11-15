@@ -4,14 +4,14 @@
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{AdvisoryDisposition, ValidatedRevisionJournal, ValidatedRevisionRequest};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::dialogs::check_and_save::{
-    NEWER_CHANGES, revision_note_error, rollback_exact_journal,
-};
 use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
 use crate::workbench::app::project_transactions::{WholeStateValidation, run_design_checks_in};
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::project_lifecycle::SaveScope;
 use crate::workbench::workflows::project_workflow::SaveRequestOutcome;
+use rspice_app_project::workbench::app::dialogs::check_and_save::{
+    NEWER_CHANGES, revision_note_error, rollback_exact_journal,
+};
 
 impl RSpiceApp {
     /// Save the validated revision the open dialog reviewed, once its report
