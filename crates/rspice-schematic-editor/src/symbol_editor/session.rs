@@ -323,6 +323,12 @@ pub struct SymbolEditorSession {
     /// The handle Stretch armed: it follows the pointer, a click puts it
     /// down as one edit, and Escape lets it go.
     pub stretch: Option<super::handles::SymbolHandleRef>,
+    /// What the open context menu was opened on, and where, in symbol
+    /// coordinates.
+    pub menu: Option<(
+        super::context_menu::SymbolMenuTarget,
+        rspice_design_model::Point,
+    )>,
     /// Field drafts and undo grouping, scoped to the active symbol and selection.
     pub inspector: super::inspector::SymbolInspectorSession,
     pub marquee_start: Option<rspice_design_model::Point>,
@@ -380,6 +386,7 @@ impl Default for SymbolEditorSession {
             selected_vertex: None,
             hover_handle: None,
             stretch: None,
+            menu: None,
             inspector: super::inspector::SymbolInspectorSession::default(),
             marquee_start: None,
             marquee_current: None,

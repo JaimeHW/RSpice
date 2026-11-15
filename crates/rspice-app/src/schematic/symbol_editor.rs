@@ -1,5 +1,6 @@
 //! Symbol view surface.
 
+mod context_menu;
 mod in_place;
 pub(crate) mod interaction;
 
@@ -141,6 +142,13 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
                     &response,
                 );
             }
+            context_menu::handle_context_menu(
+                &mut canvas.parts(),
+                &mut document,
+                &mut editor,
+                viewport,
+                &response,
+            );
             match &in_place {
                 Some(frame) => {
                     in_place::draw(

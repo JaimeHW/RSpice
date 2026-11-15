@@ -2,6 +2,7 @@
 
 pub mod arrange;
 pub mod commands;
+pub mod context_menu;
 pub mod handles;
 pub mod inspector;
 pub mod interaction;

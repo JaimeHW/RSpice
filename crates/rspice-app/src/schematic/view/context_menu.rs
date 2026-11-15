@@ -576,7 +576,7 @@ pub(super) fn handle_context_menu(
     let browser_keyboard_open = false;
     let opening = context_surface::opening(response, browser_keyboard_open);
     if !opening.needs_contents() {
-        context_surface::close(response);
+        context_surface::close::<ContextMenuBinding>(response);
         forget_choices(&response.ctx);
         state.design.interaction.context_target = None;
         return;
@@ -593,7 +593,7 @@ pub(super) fn handle_context_menu(
         None
     };
     let Some(view) = context_menu_view(&state.facts(), &response.ctx) else {
-        context_surface::close(response);
+        context_surface::close::<ContextMenuBinding>(response);
         return;
     };
     let output = context_surface::show(response, opening, anchor, &view);

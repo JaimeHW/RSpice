@@ -1,4 +1,5 @@
-//! Schematic context-menu presentation and source-bound input requests.
+//! Context-menu presentation and source-bound input requests, for the
+//! schematic canvas and any other canvas whose binding and commands fit it.
 
 use super::pick_chooser::{ChooserRow, MAX_ROWS, kind_label};
 use super::pointer_target::PointerTarget;
@@ -159,6 +160,15 @@ pub enum ContextIcon {
     Wire,
     Label,
     Text,
+    /// The symbol editor's drawing tools, as its toolbar draws them.
+    SymbolPin,
+    Line,
+    Rectangle,
+    Circle,
+    Arc,
+    Polygon,
+    /// Let go of what is being drawn.
+    Close,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,15 +187,61 @@ pub struct ContextMenuBinding {
     pub click_pos: Point,
 }
 
-#[derive(Debug, Clone)]
-pub struct ContextMenuRequest {
-    pub binding: ContextMenuBinding,
-    pub action: ContextAction,
+/// What a menu was opened against. A menu whose binding no longer holds is
+/// closed rather than acted on.
+pub trait MenuBinding: Clone + PartialEq + Send + Sync + 'static {
+    /// What the header and the menu's accessible name call what it acts on.
+    fn title(&self) -> &'static str;
+
+    /// Whether the selection the menu was opened on holds `target`, which
+    /// marks that row among a long press's choices.
+    fn holds(&self, _target: PointerTarget) -> bool {
+        false
+    }
+}
+
+impl MenuBinding for ContextMenuBinding {
+    fn title(&self) -> &'static str {
+        "Schematic selection"
+    }
+
+    fn holds(&self, target: PointerTarget) -> bool {
+        target_is_selected(&self.selection, target)
+    }
+}
+
+/// What a menu row runs, as the surface needs to know it: whether the row
+/// turns the menu to its Arrange page instead, and what choosing one of the
+/// objects under a long press asks for.
+pub trait MenuAction: Copy + PartialEq {
+    fn turns_page(self) -> bool {
+        false
+    }
+
+    fn choose(_target: PointerTarget) -> Option<Self> {
+        None
+    }
+}
+
+impl MenuAction for ContextAction {
+    fn turns_page(self) -> bool {
+        self == Self::Arrange
+    }
+
+    fn choose(target: PointerTarget) -> Option<Self> {
+        Some(Self::Choose(target))
+    }
 }
 
 #[derive(Debug, Clone)]
-pub struct ContextCommand {
-    pub action: ContextAction,
+pub struct ContextMenuRequest<B = ContextMenuBinding, A = ContextAction> {
+    pub binding: B,
+    pub action: A,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContextCommand<A = ContextAction> {
+    pub action: A,
     pub icon: ContextIcon,
     pub label: &'static str,
     pub shortcut: String,
@@ -201,20 +257,20 @@ pub enum ContextEntry<T = ContextCommand> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ContextMenuView {
-    pub binding: ContextMenuBinding,
+pub struct ContextMenuView<B = ContextMenuBinding, A = ContextAction> {
+    pub binding: B,
     /// What the menu acts on, named in its header. A bare canvas has nothing
     /// to name, and its menu goes without one.
     pub summary: Option<String>,
-    pub entries: Vec<ContextEntry>,
+    pub entries: Vec<ContextEntry<ContextCommand<A>>>,
     /// The objects a long press landed on, in pick order, when two or more
     /// did. They head the menu, so a finger can take the one underneath.
     pub choices: Vec<ChooserRow>,
     /// The Arrange page, which the `Arrange` row turns the menu to.
-    pub arrange: Vec<ContextEntry>,
+    pub arrange: Vec<ContextEntry<ContextCommand<A>>>,
 }
 
-impl ContextMenuView {
+impl<B, A> ContextMenuView<B, A> {
     /// The rows and rules the menu shows: the choices and the entries, or
     /// on the Arrange page its Back row and its commands.
     fn shape(&self, arranging: bool) -> Vec<ContextEntry<()>> {
@@ -238,7 +294,7 @@ fn arrange_page_id() -> egui::Id {
 }
 
 /// Whether the open menu shows its Arrange page.
-fn arranging(ctx: &Context, view: &ContextMenuView) -> bool {
+fn arranging<B, A>(ctx: &Context, view: &ContextMenuView<B, A>) -> bool {
     !view.arrange.is_empty() && ctx.data(|data| data.get_temp(arrange_page_id()).unwrap_or(false))
 }
 
@@ -277,30 +333,41 @@ pub fn opening(response: &Response, browser_keyboard_open: bool) -> ContextMenuO
     }
 }
 
-#[derive(Debug, Default)]
-pub struct ContextMenuOutput {
-    pub request: Option<ContextMenuRequest>,
+#[derive(Debug)]
+pub struct ContextMenuOutput<B = ContextMenuBinding, A = ContextAction> {
+    pub request: Option<ContextMenuRequest<B, A>>,
     pub open: bool,
 }
 
-pub fn close(response: &Response) {
+impl<B, A> Default for ContextMenuOutput<B, A> {
+    fn default() -> Self {
+        Self {
+            request: None,
+            open: false,
+        }
+    }
+}
+
+/// Close the menu `response` opens, forgetting the binding `B` it was
+/// opened against.
+pub fn close<B: MenuBinding>(response: &Response) {
     let popup_id = Popup::default_response_id(response);
     Popup::close_id(&response.ctx, popup_id);
     response.ctx.data_mut(|data| {
         data.remove::<ContextInvocation>(popup_id.with("invocation"));
         data.remove::<egui::Pos2>(popup_id.with("surface-anchor"));
-        data.remove::<ContextMenuBinding>(popup_id.with("source"));
+        data.remove::<B>(popup_id.with("source"));
         data.remove::<bool>(arrange_page_id());
         data.remove::<bool>(arrange_page_id().with("focus"));
     });
 }
 
-pub fn show(
+pub fn show<B: MenuBinding, A: MenuAction>(
     response: &Response,
     opening: ContextMenuOpening,
     anchor: Option<egui::Pos2>,
-    view: &ContextMenuView,
-) -> ContextMenuOutput {
+    view: &ContextMenuView<B, A>,
+) -> ContextMenuOutput<B, A> {
     let ctx = &response.ctx;
     let popup_id = Popup::default_response_id(response);
     let invocation_id = popup_id.with("invocation");
@@ -330,12 +397,8 @@ pub fn show(
                 data.insert_temp(surface_anchor_id, keyboard_surface_anchor(response.rect));
             });
         }
-    } else if ctx
-        .data(|data| data.get_temp::<ContextMenuBinding>(source_id))
-        .as_ref()
-        != Some(&view.binding)
-    {
-        close(response);
+    } else if ctx.data(|data| data.get_temp::<B>(source_id)).as_ref() != Some(&view.binding) {
+        close::<B>(response);
         return ContextMenuOutput::default();
     }
     let mut request = None;
@@ -413,7 +476,7 @@ pub fn show(
     if let Some(popup_response) = &popup_response {
         ctx.accesskit_node_builder(popup_response.response.id, |node| {
             node.set_role(egui::accesskit::Role::Menu);
-            node.set_label("Schematic selection");
+            node.set_label(view.binding.title());
         });
     }
 
@@ -422,7 +485,7 @@ pub fn show(
     }
     let open = Popup::is_id_open(ctx, popup_id);
     if !open {
-        close(response);
+        close::<B>(response);
     }
     ContextMenuOutput { request, open }
 }
@@ -433,14 +496,14 @@ struct ContextRow {
     enabled: bool,
 }
 
-pub fn render_context_contents(
+pub fn render_context_contents<B: MenuBinding, A: MenuAction>(
     ui: &mut Ui,
-    view: &ContextMenuView,
+    view: &ContextMenuView<B, A>,
     row_height: f32,
     focus_first: bool,
-) -> Option<ContextMenuRequest> {
+) -> Option<ContextMenuRequest<B, A>> {
     if let Some(summary) = &view.summary {
-        menu_header(ui, summary);
+        menu_header(ui, view.binding.title(), summary);
     }
 
     let mut rows = Vec::with_capacity(16);
@@ -457,17 +520,9 @@ pub fn render_context_contents(
         &view.choices[..]
     };
     if arranging {
-        let back = ContextCommand {
-            action: ContextAction::Arrange,
-            icon: ContextIcon::Back,
-            label: "Back",
-            shortcut: String::new(),
-            enabled: true,
-            disabled_reason: "",
-        };
         let response = ui
             .push_id("schematic-context-back", |ui| {
-                menu_item(ui, &back, "", true, "", row_height)
+                menu_item(ui, ContextIcon::Back, "Back", "", true, "", row_height)
             })
             .inner;
         if menu_row_keyboard_activated(ui, &response) || response.clicked() {
@@ -480,7 +535,7 @@ pub fn render_context_contents(
         menu_separator(ui);
     }
     for (index, choice) in choices.iter().take(MAX_ROWS).enumerate() {
-        let selected = target_is_selected(&view.binding.selection, choice.target);
+        let selected = view.binding.holds(choice.target);
         let response = ui
             .push_id(("schematic-context-choice", index), |ui| {
                 choice_item(ui, choice, selected, row_height)
@@ -492,7 +547,7 @@ pub fn render_context_contents(
             enabled: true,
         });
         if activated && keyboard_or_pointer_action.is_none() {
-            keyboard_or_pointer_action = Some(ContextAction::Choose(choice.target));
+            keyboard_or_pointer_action = A::choose(choice.target);
         }
     }
     if !choices.is_empty() {
@@ -512,7 +567,15 @@ pub fn render_context_contents(
                 let shortcut = &command.shortcut;
                 let response = ui
                     .push_id(("schematic-context-command", command.label), |ui| {
-                        menu_item(ui, command, shortcut, enabled, reason, row_height)
+                        menu_item(
+                            ui,
+                            command.icon,
+                            command.label,
+                            shortcut,
+                            enabled,
+                            reason,
+                            row_height,
+                        )
                     })
                     .inner;
                 // Consume a focused Enter/Space before consulting the egui
@@ -522,7 +585,7 @@ pub fn render_context_contents(
                 let activated =
                     enabled && (menu_row_keyboard_activated(ui, &response) || response.clicked());
                 rows.push(ContextRow { response, enabled });
-                if activated && command.action == ContextAction::Arrange {
+                if activated && command.action.turns_page() {
                     // A page turn, not a command: the menu stays open.
                     turn_page(ui.ctx(), true);
                 } else if activated && keyboard_or_pointer_action.is_none() {
@@ -571,16 +634,12 @@ fn menu_row_keyboard_activated(ui: &Ui, response: &Response) -> bool {
         })
 }
 
-fn menu_header(ui: &mut Ui, summary: &str) {
+fn menu_header(ui: &mut Ui, title: &str, summary: &str) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), HEADER_HEIGHT), Sense::hover());
     response.widget_info(|| {
-        WidgetInfo::labeled(
-            WidgetType::Label,
-            true,
-            format!("Schematic selection: {summary}"),
-        )
+        WidgetInfo::labeled(WidgetType::Label, true, format!("{title}: {summary}"))
     });
     let painter = ui.painter();
     painter.rect_filled(rect, 0.0, t.color.bg_panel);
@@ -592,7 +651,7 @@ fn menu_header(ui: &mut Ui, summary: &str) {
     painter.text(
         pos2(rect.left() + 10.0, rect.top() + 8.0),
         Align2::LEFT_TOP,
-        "Schematic selection",
+        title,
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text,
     );
@@ -615,7 +674,8 @@ fn menu_header(ui: &mut Ui, summary: &str) {
 
 fn menu_item(
     ui: &mut Ui,
-    command: &ContextCommand,
+    icon: ContextIcon,
+    label: &str,
     shortcut: &str,
     enabled: bool,
     disabled_reason: &'static str,
@@ -629,10 +689,10 @@ fn menu_item(
             Sense::hover()
         },
     );
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, command.label));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::MenuItem);
-        node.set_label(command.label);
+        node.set_label(label);
         if !enabled {
             node.set_disabled();
             node.set_description(disabled_reason);
@@ -641,15 +701,7 @@ fn menu_item(
             node.set_keyboard_shortcut(shortcut);
         }
     });
-    paint_row(
-        ui,
-        rect,
-        &response,
-        enabled,
-        Some(command.icon),
-        command.label,
-        shortcut,
-    );
+    paint_row(ui, rect, &response, enabled, Some(icon), label, shortcut);
 
     if enabled {
         response
@@ -930,6 +982,13 @@ impl ContextIcon {
             Self::Wire => WorkbenchIcon::Wire.paint(painter, rect, color),
             Self::Label => WorkbenchIcon::Label.paint(painter, rect, color),
             Self::Text => WorkbenchIcon::Text.paint(painter, rect, color),
+            Self::SymbolPin => WorkbenchIcon::SymbolPin.paint(painter, rect, color),
+            Self::Line => WorkbenchIcon::Line.paint(painter, rect, color),
+            Self::Rectangle => WorkbenchIcon::Rectangle.paint(painter, rect, color),
+            Self::Circle => WorkbenchIcon::Circle.paint(painter, rect, color),
+            Self::Arc => WorkbenchIcon::Arc.paint(painter, rect, color),
+            Self::Polygon => WorkbenchIcon::Polygon.paint(painter, rect, color),
+            Self::Close => WorkbenchIcon::Close.paint(painter, rect, color),
         }
     }
 }
