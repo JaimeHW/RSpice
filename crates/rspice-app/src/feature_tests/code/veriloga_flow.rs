@@ -816,3 +816,94 @@ mod editing;
 mod keyboard_reach;
 mod language_tools;
 mod size_and_zoom;
+
+/// A placed device's symbol is edited in place as any cell's is: the
+/// command on the selected instance opens the symbol its compile drew, on
+/// the sheet around it, and a pin moved there takes the instance's wire.
+#[test]
+fn a_placed_devices_symbol_is_edited_in_place() {
+    use crate::state::Point;
+    use crate::workbench::design::commands::DesignCommand;
+
+    let (mut user, device) = wired_device();
+    let top = user.app.state.model.workspace.content.active_view.clone();
+    let instance = user
+        .app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| {
+            component
+                .library_cell
+                .as_ref()
+                .is_some_and(|binding| binding.cell == CELL)
+        })
+        .map(|component| component.id)
+        .expect("the device is placed");
+    user.app
+        .state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(instance);
+    user.app
+        .execute_command_key(DesignCommand::EditSymbolInPlace.key());
+    user.settle();
+    let symbol = CellViewRef::new(&device.view.library, CELL, "symbol");
+    let state = &user.app.state;
+    assert_eq!(state.model.workspace.content.active_view, symbol);
+    let session =
+        crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
+            .expect("the device's symbol is edited in place");
+    assert_eq!((session.instance_id, &session.parent), (instance, &top));
+
+    let wires = |user: &User| {
+        user.app
+            .state
+            .model
+            .workspace
+            .content
+            .schematic_buffers
+            .get(&top.key())
+            .expect("the sheet is held")
+            .document()
+            .wires
+            .iter()
+            .flat_map(|wire| wire.points.clone())
+            .collect::<Vec<_>>()
+    };
+    let before = wires(&user);
+    let mut document = user
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .expect("the symbol loads");
+    let out = document
+        .pins
+        .iter_mut()
+        .find(|pin| pin.name == "out")
+        .expect("the symbol draws out");
+    let delta = Point::new(0, 20);
+    out.position = out.position.map(|at| at + delta);
+    user.app
+        .state
+        .store_active_symbol_document(&document)
+        .expect("the edit stores");
+    user.settle();
+    let after = wires(&user);
+    let moved = before
+        .iter()
+        .zip(&after)
+        .filter(|(was, now)| was != now)
+        .collect::<Vec<_>>();
+    assert!(
+        !moved.is_empty() && moved.iter().all(|(was, now)| **now - **was == delta),
+        "the wire on out followed the pin: {moved:?}"
+    );
+}
