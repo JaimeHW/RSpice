@@ -290,7 +290,7 @@ fn handle_canvas_interaction(
             edit.session.select_pin(pin.clone());
             edit.session.dragging_pin = Some(pin);
             edit.session.drag_undo_recorded = false;
-        } else if let Some(kind) = hit_label(editor, viewport, pointer) {
+        } else if let Some(kind) = hit_label(document, editor, edit.session, viewport, pointer) {
             edit.session.select_attribute(kind);
             edit.session.dragging_label = Some(kind);
             edit.session.drag_undo_recorded = false;
@@ -471,7 +471,8 @@ fn handle_canvas_interaction(
                     |selection| selection.toggle_pin(&pin),
                     || SymbolSelection::single_pin(pin.clone()),
                 );
-            } else if let Some(kind) = hit_label(editor, viewport, pointer) {
+            } else if let Some(kind) = hit_label(document, editor, edit.session, viewport, pointer)
+            {
                 toggle_or_select(
                     edit,
                     extend,
@@ -766,7 +767,7 @@ fn grab_belongs_to_group(
     if let Some(pin) = hit_pin(document, viewport, pointer) {
         return selection.contains_pin(&pin);
     }
-    if let Some(kind) = hit_label(editor, viewport, pointer) {
+    if let Some(kind) = hit_label(document, editor, edit.session, viewport, pointer) {
         return selection.attributes.contains(&kind);
     }
     hit_shape(document, viewport, pointer).is_some_and(|index| selection.shapes.contains(&index))

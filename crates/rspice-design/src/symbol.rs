@@ -24,7 +24,8 @@ use rspice_vocabulary::product::ContentDigest;
 
 pub use rspice_design_model::symbol_geometry::{
     SymbolCurve, SymbolDash, SymbolFill, SymbolShape, SymbolStroke, SymbolStyle, SymbolTextAlign,
-    SymbolTextPlacement, SymbolTextRotation, SymbolTextSize, rectangle_corners, symbol_text_bounds,
+    SymbolTextPlacement, SymbolTextRotation, SymbolTextSize, rectangle_corners,
+    symbol_label_sample, symbol_label_text, symbol_text_bounds,
 };
 
 use crate::library::View;
@@ -1182,6 +1183,32 @@ impl SymbolDocument {
                         ));
                     }
                 }
+                SymbolShape::Label {
+                    anchor,
+                    parameter,
+                    default,
+                    ..
+                } => {
+                    validate_symbol_point(*anchor, &format!("label {ordinal} anchor"))?;
+                    validate_symbol_text(default, &format!("label {ordinal} default"))?;
+                    // The name an instance's parameter text sets it by.
+                    if parameter.is_empty()
+                        || parameter.len() > MAX_SYMBOL_TEXT_BYTES
+                        || parameter
+                            .chars()
+                            .any(|ch| ch.is_whitespace() || ch.is_control() || ch == '=')
+                    {
+                        return Err(format!(
+                            "Invalid symbol metadata: label {ordinal} does not name a parameter"
+                        ));
+                    }
+                    total_texts += 1;
+                    if total_texts > MAX_SYMBOL_TEXT_OBJECTS {
+                        return Err(format!(
+                            "Invalid symbol metadata: {total_texts} text objects exceed the limit of {MAX_SYMBOL_TEXT_OBJECTS}"
+                        ));
+                    }
+                }
             }
         }
         Ok(())
@@ -1542,6 +1569,24 @@ fn shapes_bounds<'a>(shapes: impl IntoIterator<Item = &'a SymbolShape>) -> Optio
                 let (min, max) = symbol_text_bounds(*anchor, text, *size, *align, *rotation);
                 xs.extend([min.x, max.x]);
                 ys.extend([min.y, max.y]);
+            }
+            // What an instance letters, measured by the editor's sample;
+            // a hidden label is drawn on no instance, so it takes no room.
+            SymbolShape::Label {
+                anchor,
+                parameter,
+                default,
+                size,
+                align,
+                rotation,
+                shown,
+            } => {
+                if *shown {
+                    let sample = symbol_label_sample(parameter, default);
+                    let (min, max) = symbol_text_bounds(*anchor, &sample, *size, *align, *rotation);
+                    xs.extend([min.x, max.x]);
+                    ys.extend([min.y, max.y]);
+                }
             }
         }
     }
@@ -2092,6 +2137,44 @@ mod validation_tests {
             .expect_err("a control character in body text must be rejected");
 
         assert!(error.contains("text 1 is invalid or too long"), "{error}");
+    }
+
+    /// A label must name one parameter an instance can set, and takes room
+    /// in the symbol's extents only while instances letter it.
+    #[test]
+    fn a_label_names_a_parameter_and_takes_room_only_when_shown() {
+        let label = |parameter: &str, shown| SymbolDocument {
+            body: vec![SymbolShape::Label {
+                anchor: Point::origin(),
+                parameter: parameter.to_owned(),
+                default: "1u".to_owned(),
+                size: SymbolTextSize::Normal,
+                align: SymbolTextAlign::Left,
+                rotation: SymbolTextRotation::R0,
+                shown,
+            }],
+            ..SymbolDocument::default()
+        };
+
+        assert_eq!(label("W", true).validate(), Ok(()));
+        for unnamed in ["", "W L", "W=1u"] {
+            let error = label(unnamed, true)
+                .validate()
+                .expect_err("a label must name one parameter");
+            assert!(
+                error.contains("label 1 does not name a parameter"),
+                "{error}"
+            );
+        }
+        // "W=1u" is four glyphs, five units each at the normal size.
+        assert_eq!(
+            label("W", true).body_bounds(),
+            (Point::new(0, -4), Point::new(20, 4))
+        );
+        assert_eq!(
+            label("W", false).body_bounds(),
+            SymbolDocument::default().body_bounds()
+        );
     }
 
     /// Reconciling used to reset every pin to its direction's default type,

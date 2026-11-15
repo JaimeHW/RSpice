@@ -6,6 +6,7 @@ use crate::state::{
     ViewType,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::app::actions::workspace::symbol_document::active_symbol_label_parameters;
 use crate::workbench::design::inspector::symbol::*;
 use rspice_design::symbol::{
     SymbolDash, SymbolFill, SymbolStroke, SymbolStyle, SymbolTextAlign, SymbolTextRotation,
@@ -593,6 +594,98 @@ fn the_rotation_row_turns_a_text_run_as_one_named_undo_step() {
     assert_eq!(history.undo_step(&key), Some("Rotate text"));
 }
 
+/// A parameter the cell declares to its instances can be placed as a label
+/// from the inspector, as one undo step named for it: lettered with the
+/// parameter's default, shown on instances, and selected. A parameter that
+/// has a label is not offered again, and hiding the label is a step of its
+/// own.
+#[test]
+fn a_parameter_the_cell_declares_is_placed_as_a_label() {
+    let mut editor = Editor::new();
+    let key = editor.app.state.model.workspace.content.active_key();
+    editor
+        .app
+        .state
+        .model
+        .library_manager
+        .get_library_mut("work")
+        .unwrap()
+        .get_cell_mut("amp")
+        .unwrap()
+        .metadata
+        .insert(
+            "cdf.parameter_contract".to_owned(),
+            r#"[{"name":"W","default":"1u"},{"name":"L","default":"180n"}]"#.to_owned(),
+        );
+    editor.pass(Vec::new());
+    assert_eq!(editor.values["Add label"], "choose a parameter");
+
+    editor.click("Add label");
+    editor.pass(Vec::new());
+    editor.click("W");
+    editor.pass(Vec::new());
+
+    let document = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
+    let added = document.body.len() - 1;
+    let SymbolShape::Label {
+        parameter,
+        default,
+        shown,
+        anchor,
+        ..
+    } = &document.body[added]
+    else {
+        panic!("no label was placed: {:?}", document.body[added]);
+    };
+    assert_eq!(
+        (parameter.as_str(), default.as_str(), *shown),
+        ("W", "1u", true)
+    );
+    assert!(
+        anchor.y > document.value_anchor.y,
+        "a new label goes below the value"
+    );
+    assert_eq!(
+        editor.app.state.design.symbol.editor.effective_selection(),
+        SymbolSelection::single_shape(added)
+    );
+    let step = |editor: &Editor| {
+        let history = &editor.app.state.design.symbol.history;
+        (
+            history.undo_depth(&key),
+            history.undo_step(&key).map(str::to_owned),
+        )
+    };
+    assert_eq!(step(&editor), (1, Some("Add label".to_owned())));
+
+    editor.click("Show on instances");
+    let document = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
+    assert!(matches!(
+        &document.body[added],
+        SymbolShape::Label { shown: false, .. }
+    ));
+    assert_eq!(step(&editor), (2, Some("Hide label".to_owned())));
+
+    // W has its label; only L is offered now.
+    editor.app.state.design.symbol.editor.select_shape(0);
+    editor.controls.clear();
+    editor.pass(Vec::new());
+    editor.click("Add label");
+    editor.pass(Vec::new());
+    assert!(editor.controls.contains_key("L"));
+    assert!(!editor.controls.contains_key("W"));
+}
+
 pub(crate) struct Editor {
     ctx: egui::Context,
     pub(crate) app: RSpiceApp,
@@ -682,6 +775,7 @@ impl Editor {
                             document,
                             metadata,
                             &[],
+                            &active_symbol_label_parameters(&self.app.state.model),
                             &self.app.state.design.symbol.editor,
                             SymbolEditCapabilities {
                                 edit: !self.app.state.model.schematic_edit_read_only(),

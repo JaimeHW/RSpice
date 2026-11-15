@@ -14,6 +14,7 @@
 #[cfg(test)]
 mod tests;
 
+use rspice_schematic_editor::symbol_editor::inspector::LabelParameter;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolRequestSource;
 use std::collections::BTreeMap;
 
@@ -87,6 +88,51 @@ pub(crate) fn store_symbol_canvas_frame(
 /// The ports the interface its schematic declares gives the active symbol.
 pub(crate) fn active_symbol_ports(model: &Model) -> Vec<PortSpec> {
     model.symbol_ports(&model.workspace.content.active_view)
+}
+
+/// The parameters a label on the active symbol can letter, each with its
+/// default: the fields of the parameter form a model binds the symbol to,
+/// else what its cell declares to instances, through its compiled module,
+/// its schematic or the symbol view itself.
+pub(crate) fn active_symbol_label_parameters(model: &Model) -> Vec<LabelParameter> {
+    use rspice_design::library::metadata::{cell_parameter_contract, module_interface_view};
+    let reference = &model.workspace.content.active_view;
+    if let Some(definition) = model.symbol_model_binding(reference) {
+        return definition
+            .parameter_form
+            .fields()
+            .map(|field| LabelParameter {
+                name: field.key.clone(),
+                default: field.default.display_string(),
+            })
+            .collect();
+    }
+    let Some(cell) = model
+        .library_manager
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+    else {
+        return Vec::new();
+    };
+    [
+        module_interface_view(cell),
+        cell.get_view("schematic"),
+        cell.get_view(&reference.view),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|view| {
+        cell_parameter_contract(cell, Some(view))
+            .ok()
+            .filter(|parameters| !parameters.is_empty())
+    })
+    .unwrap_or_default()
+    .into_iter()
+    .map(|parameter| LabelParameter {
+        name: parameter.name,
+        default: parameter.default_value.unwrap_or_default(),
+    })
+    .collect()
 }
 
 /// Bring the active symbol's pins back into agreement with the interface

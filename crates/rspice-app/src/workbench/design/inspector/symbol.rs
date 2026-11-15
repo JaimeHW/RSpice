@@ -2,8 +2,8 @@
 
 use crate::workbench::app::actions::workspace::deny_read_only_edit;
 use crate::workbench::app::actions::workspace::symbol_document::{
-    active_symbol_ports, commit_active_symbol_edit, load_active_symbol_editor_metadata,
-    record_symbol_edit, symbol_editor_request_source,
+    active_symbol_label_parameters, active_symbol_ports, commit_active_symbol_edit,
+    load_active_symbol_editor_metadata, record_symbol_edit, symbol_editor_request_source,
 };
 use crate::workbench::design::DesignFeature;
 use crate::workbench::framework::feature::Cx;
@@ -14,6 +14,7 @@ use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 
 pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let ports = active_symbol_ports(cx.model);
+    let parameters = active_symbol_label_parameters(cx.model);
     let Ok(document) = cx.model.load_active_symbol_document() else {
         muted_inspector_copy(
             ui,
@@ -34,6 +35,7 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         document,
         metadata,
         &ports,
+        &parameters,
         &cx.state.symbol.editor,
         SymbolEditCapabilities {
             edit: !cx.model.schematic_edit_read_only() && !cx.application_modal_open(),

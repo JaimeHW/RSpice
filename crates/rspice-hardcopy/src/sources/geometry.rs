@@ -381,6 +381,26 @@ pub(super) fn include_symbol_document_bounds(
                 bounds.include(map(min));
                 bounds.include(map(max));
             }
+            SymbolShape::Label {
+                anchor,
+                parameter,
+                default,
+                size,
+                align,
+                rotation,
+                shown: true,
+            } => {
+                let (min, max) = rspice_design::symbol::symbol_text_bounds(
+                    *anchor,
+                    &rspice_design::symbol::symbol_label_sample(parameter, default),
+                    *size,
+                    *align,
+                    *rotation,
+                );
+                bounds.include(map(min));
+                bounds.include(map(max));
+            }
+            SymbolShape::Label { .. } => {}
         }
     }
     for pin in &document.pins {

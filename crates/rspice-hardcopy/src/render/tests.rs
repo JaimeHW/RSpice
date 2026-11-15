@@ -1320,6 +1320,46 @@ fn a_run_read_upward_prints_turned() {
     assert!(!upright_svg.contains("rotate(-90 "), "{upright_svg}");
 }
 
+/// The symbol printed alone letters each label shown on instances with its
+/// default, as the editor does, and leaves a hidden one out.
+#[test]
+fn a_printed_symbol_letters_its_labels_with_their_defaults() {
+    use rspice_design::symbol::{SymbolTextAlign, SymbolTextRotation, SymbolTextSize};
+
+    let label = |parameter: &str, shown| SymbolShape::Label {
+        anchor: SchematicPoint::new(0, 20),
+        parameter: parameter.to_owned(),
+        default: "1u".to_owned(),
+        size: SymbolTextSize::Normal,
+        align: SymbolTextAlign::Left,
+        rotation: SymbolTextRotation::R0,
+        shown,
+    };
+    let source = resolved_symbol_with_body(vec![label("W", true), label("L", false)]);
+    let plan = plan_for_resolved(&source, OutputFormat::SvgVector);
+    let scene = scene_from_resolved(
+        &source,
+        source.default_print_mapping(),
+        plan.setup().schematic(),
+        resolved_metadata(),
+    )
+    .unwrap();
+    let texts = scene
+        .primitives()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(texts.contains(&"W=1u"), "{texts:?}");
+    assert!(
+        !texts.iter().any(|text| text.starts_with("L=")),
+        "{texts:?}"
+    );
+}
+
 #[test]
 fn schematic_inclusion_contract_gates_real_scene_primitives() {
     let source = resolved_blank_schematic(&SchematicSheetFormat::default());

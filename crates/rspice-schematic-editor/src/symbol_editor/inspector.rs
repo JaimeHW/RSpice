@@ -72,6 +72,14 @@ impl SymbolInspectorSession {
     }
 }
 
+/// A parameter of the symbol's form that a label can letter, with the
+/// default the editor letters it with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabelParameter {
+    pub name: String,
+    pub default: String,
+}
+
 /// The host validates source and selection before recording history or publishing the draft.
 #[derive(Debug)]
 pub struct SymbolInspectorRequest {
@@ -88,12 +96,17 @@ pub struct SymbolInspectorRequest {
     pub open_parameter_form: bool,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The document, its interface, its parameters and the editor state are independent inputs."
+)]
 pub fn show(
     ui: &mut Ui,
     source: SymbolRequestSource,
     mut document: SymbolDocument,
     mut metadata: SymbolEditorMetadata,
     ports: &[PortSpec],
+    parameters: &[LabelParameter],
     editor: &SymbolEditorSession,
     capabilities: SymbolEditCapabilities,
 ) -> SymbolInspectorRequest {
@@ -141,6 +154,9 @@ pub fn show(
         // placed for: one list, in one place, rather than the same numbered
         // pins with the same marks on two panels at once.
         definition_section(ui, &mut edit);
+        ui.add_enabled_ui(capabilities.edit, |ui| {
+            changed |= add_label_row(ui, &mut edit, &mut document, parameters);
+        });
     });
     edit.session.selection = edit.selection.clone();
     SymbolInspectorRequest {
@@ -757,6 +773,7 @@ fn shape_kind(shape: &SymbolShape) -> &'static str {
         SymbolShape::Arrow { .. } => "arrow",
         SymbolShape::Dot { .. } => "dot",
         SymbolShape::Text { .. } => "text",
+        SymbolShape::Label { .. } => "label",
     }
 }
 
@@ -911,73 +928,115 @@ fn shape_section(
                 *text = value;
                 changed = true;
             }
-            let mut size_value = size.label().to_owned();
-            let size_options = SymbolTextSize::ALL
-                .into_iter()
-                .map(|option| (option.label().to_owned(), option.label().to_owned()))
-                .collect::<Vec<_>>();
-            if property_row_combo(
-                ui,
-                "Size",
-                ("symbol-text-size", index),
-                &mut size_value,
-                &size_options,
-                true,
-            ) && let Some(picked) = SymbolTextSize::ALL
-                .into_iter()
-                .find(|option| option.label() == size_value)
-            {
-                record_once(edit, &before);
-                *size = picked;
+            changed |= run_rows(ui, edit, &before, index, "text", (size, align, rotation));
+            changed |= coordinate_row(ui, edit, &before, "Anchor X", &mut anchor.x);
+            changed |= coordinate_row(ui, edit, &before, "Anchor Y", &mut anchor.y);
+        }
+        // The parameter is what the label is; picking another is adding
+        // another label. What it letters on a sheet is the instance's value.
+        SymbolShape::Label {
+            anchor,
+            parameter,
+            size,
+            align,
+            rotation,
+            shown,
+            ..
+        } => {
+            property_row(ui, "Parameter", parameter);
+            let mut show = *shown;
+            if rspice_ui_kit::widgets::switch_row(ui, "Show on instances", &mut show) {
+                let step = if show { "Show label" } else { "Hide label" };
+                edit.undo_before.push((before.clone(), step.to_owned()));
+                *shown = show;
                 changed = true;
             }
-            let mut align_value = align.label().to_owned();
-            let align_options = SymbolTextAlign::ALL
-                .into_iter()
-                .map(|option| (option.label().to_owned(), option.label().to_owned()))
-                .collect::<Vec<_>>();
-            if property_row_combo(
-                ui,
-                "Align",
-                ("symbol-text-align", index),
-                &mut align_value,
-                &align_options,
-                true,
-            ) && let Some(picked) = SymbolTextAlign::ALL
-                .into_iter()
-                .find(|option| option.label() == align_value)
-            {
-                record_once(edit, &before);
-                *align = picked;
-                changed = true;
-            }
-            let mut rotation_value = rotation.label().to_owned();
-            let rotation_options = SymbolTextRotation::ALL
-                .into_iter()
-                .map(|option| (option.label().to_owned(), option.label().to_owned()))
-                .collect::<Vec<_>>();
-            if property_row_combo(
-                ui,
-                "Rotation",
-                ("symbol-text-rotation", index),
-                &mut rotation_value,
-                &rotation_options,
-                true,
-            ) && let Some(picked) = SymbolTextRotation::ALL
-                .into_iter()
-                .find(|option| option.label() == rotation_value)
-            {
-                edit.undo_before
-                    .push((before.clone(), "Rotate text".to_owned()));
-                *rotation = picked;
-                changed = true;
-            }
+            changed |= run_rows(ui, edit, &before, index, "label", (size, align, rotation));
             changed |= coordinate_row(ui, edit, &before, "Anchor X", &mut anchor.x);
             changed |= coordinate_row(ui, edit, &before, "Anchor Y", &mut anchor.y);
         }
     }
     if changed {
         document.body[index] = edited;
+    }
+    changed
+}
+
+/// Size, Align and Rotation for a text run or a label, `noun` naming which
+/// in the undo step a turn takes.
+fn run_rows(
+    ui: &mut Ui,
+    edit: &mut InspectorEdit,
+    before: &SymbolDocument,
+    index: usize,
+    noun: &str,
+    (size, align, rotation): (
+        &mut SymbolTextSize,
+        &mut SymbolTextAlign,
+        &mut SymbolTextRotation,
+    ),
+) -> bool {
+    let mut changed = false;
+    let mut size_value = size.label().to_owned();
+    let size_options = SymbolTextSize::ALL
+        .into_iter()
+        .map(|option| (option.label().to_owned(), option.label().to_owned()))
+        .collect::<Vec<_>>();
+    if property_row_combo(
+        ui,
+        "Size",
+        ("symbol-text-size", index),
+        &mut size_value,
+        &size_options,
+        true,
+    ) && let Some(picked) = SymbolTextSize::ALL
+        .into_iter()
+        .find(|option| option.label() == size_value)
+    {
+        record_once(edit, before);
+        *size = picked;
+        changed = true;
+    }
+    let mut align_value = align.label().to_owned();
+    let align_options = SymbolTextAlign::ALL
+        .into_iter()
+        .map(|option| (option.label().to_owned(), option.label().to_owned()))
+        .collect::<Vec<_>>();
+    if property_row_combo(
+        ui,
+        "Align",
+        ("symbol-text-align", index),
+        &mut align_value,
+        &align_options,
+        true,
+    ) && let Some(picked) = SymbolTextAlign::ALL
+        .into_iter()
+        .find(|option| option.label() == align_value)
+    {
+        record_once(edit, before);
+        *align = picked;
+        changed = true;
+    }
+    let mut rotation_value = rotation.label().to_owned();
+    let rotation_options = SymbolTextRotation::ALL
+        .into_iter()
+        .map(|option| (option.label().to_owned(), option.label().to_owned()))
+        .collect::<Vec<_>>();
+    if property_row_combo(
+        ui,
+        "Rotation",
+        ("symbol-text-rotation", index),
+        &mut rotation_value,
+        &rotation_options,
+        true,
+    ) && let Some(picked) = SymbolTextRotation::ALL
+        .into_iter()
+        .find(|option| option.label() == rotation_value)
+    {
+        edit.undo_before
+            .push((before.clone(), format!("Rotate {noun}")));
+        *rotation = picked;
+        changed = true;
     }
     changed
 }
@@ -1196,6 +1255,78 @@ fn definition_section(ui: &mut Ui, edit: &mut InspectorEdit) {
         edit.open_parameter_form = true;
     }
 }
+
+/// Places a label for a parameter of the symbol's form that has none yet,
+/// below the value and every label already placed, and selects it.
+fn add_label_row(
+    ui: &mut Ui,
+    edit: &mut InspectorEdit,
+    document: &mut SymbolDocument,
+    parameters: &[LabelParameter],
+) -> bool {
+    let labelled = |name: &str| {
+        document.body.iter().any(|shape| {
+            matches!(shape, SymbolShape::Label { parameter, .. } if parameter.eq_ignore_ascii_case(name))
+        })
+    };
+    let open = parameters
+        .iter()
+        .filter(|parameter| !labelled(&parameter.name))
+        .collect::<Vec<_>>();
+    let options = open
+        .iter()
+        .map(|parameter| (parameter.name.clone(), parameter.name.clone()))
+        .collect::<Vec<_>>();
+    let mut picked = String::new();
+    let shown = if parameters.is_empty() {
+        "no parameters"
+    } else if open.is_empty() {
+        "every parameter has one"
+    } else {
+        "choose a parameter"
+    };
+    if !property_row_combo_showing(
+        ui,
+        "Add label",
+        "symbol-add-label",
+        &mut picked,
+        &options,
+        shown,
+        !open.is_empty(),
+    ) {
+        return false;
+    }
+    let Some(parameter) = open.iter().find(|parameter| parameter.name == picked) else {
+        return false;
+    };
+    let lowest = document
+        .body
+        .iter()
+        .filter_map(|shape| match shape {
+            SymbolShape::Label { anchor, .. } => Some(anchor.y),
+            _ => None,
+        })
+        .chain([document.value_anchor.y])
+        .max()
+        .unwrap_or_default();
+    edit.undo_before
+        .push((document.clone(), "Add label".to_owned()));
+    document.body.push(SymbolShape::Label {
+        anchor: Point::new(document.value_anchor.x, lowest + LABEL_PITCH),
+        parameter: parameter.name.clone(),
+        default: parameter.default.clone(),
+        size: SymbolTextSize::Normal,
+        align: SymbolTextAlign::Left,
+        rotation: SymbolTextRotation::R0,
+        shown: true,
+    });
+    edit.selection = SymbolSelection::single_shape(document.body.len() - 1);
+    true
+}
+
+/// How far below the value, and below each other, new labels are placed:
+/// one terminal pitch, a line of normal-size type.
+const LABEL_PITCH: i32 = 10;
 
 #[cfg(test)]
 mod tests {

@@ -53,6 +53,50 @@ fn cell_symbol() -> SymbolDocument {
     }
 }
 
+/// A label on a placed part prints its parameter with the part's own value,
+/// or the default where the part sets none; a hidden one prints nothing.
+#[test]
+fn a_placed_parts_labels_print_its_own_values() {
+    use rspice_design::symbol::{SymbolTextAlign, SymbolTextRotation, SymbolTextSize};
+
+    let label = |parameter: &str, default: &str, shown, y| SymbolShape::Label {
+        anchor: SchematicPoint::new(-30, y),
+        parameter: parameter.to_owned(),
+        default: default.to_owned(),
+        size: SymbolTextSize::Normal,
+        align: SymbolTextAlign::Left,
+        rotation: SymbolTextRotation::R0,
+        shown,
+    };
+    let mut symbol = cell_symbol();
+    symbol.body.extend([
+        label("W", "1u", true, 50),
+        label("L", "180n", true, 60),
+        label("M", "1", false, 70),
+    ]);
+    let mut component = part(1, ComponentType::CellInstance, (0, 0), "X1", "amp");
+    component.params = "w=2u".to_owned();
+    let mut printed = sheet(Vec::new());
+    printed.components.push(SemanticComponent {
+        symbol_source: Some(SemanticSymbolSource::Authored),
+        component,
+        resolved_symbol: Some(symbol),
+    });
+
+    let compiled = compile(&printed);
+    let texts = compiled
+        .texts()
+        .into_iter()
+        .map(|(text, ..)| text)
+        .collect::<Vec<_>>();
+    assert!(texts.contains(&"W=2u"), "{texts:?}");
+    assert!(texts.contains(&"L=180n"), "{texts:?}");
+    assert!(
+        !texts.iter().any(|text| text.starts_with("M=")),
+        "{texts:?}"
+    );
+}
+
 fn semantic(component: Component) -> SemanticComponent {
     let resolved_symbol = (component.kind == ComponentType::CellInstance).then(cell_symbol);
     SemanticComponent {

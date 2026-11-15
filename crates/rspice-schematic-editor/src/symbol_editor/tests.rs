@@ -282,6 +282,139 @@ fn the_canvas_draws_and_picks_a_run_read_upward() {
     );
 }
 
+/// A label is lettered on the canvas with its default at its true size,
+/// faint while hidden on instances, and picked anywhere on that text.
+#[test]
+fn the_canvas_letters_a_label_with_its_default() {
+    use rspice_design::symbol::{SymbolTextRotation, SymbolTextSize};
+
+    let viewport = SymbolViewport::new(
+        Rect::from_min_size(Pos2::ZERO, vec2(320.0, 320.0)),
+        4.0,
+        Vec2::ZERO,
+    );
+    // "W=1u" from the anchor at (160, 160): four glyphs, 20 units, 80 px.
+    let document = |shown| SymbolDocument {
+        body: vec![SymbolShape::Label {
+            anchor: Point::origin(),
+            parameter: "W".to_owned(),
+            default: "1u".to_owned(),
+            size: SymbolTextSize::Normal,
+            align: SymbolTextAlign::Left,
+            rotation: SymbolTextRotation::R0,
+            shown,
+        }],
+        ..SymbolDocument::default()
+    };
+    let weight = |shown| {
+        let document = document(shown);
+        let canvas = rspice_ui_kit::raster::render(vec2(320.0, 320.0), |ui, _| {
+            draw_body(
+                &ui.painter().clone(),
+                viewport,
+                &document,
+                Color32::from_rgb(255, 64, 64),
+                &Default::default(),
+                Color32::WHITE,
+            );
+        });
+        let background = canvas.background();
+        canvas
+            .pixels_in(Rect::from_min_max(pos2(160.0, 140.0), pos2(250.0, 180.0)))
+            .map(|pixel| {
+                u64::from(pixel.r().abs_diff(background.r()))
+                    + u64::from(pixel.g().abs_diff(background.g()))
+                    + u64::from(pixel.b().abs_diff(background.b()))
+            })
+            .sum::<u64>()
+    };
+    let (shown, hidden) = (weight(true), weight(false));
+    assert!(hidden > 0, "a hidden label is still drawn");
+    assert!(
+        hidden < shown,
+        "faint while hidden: {hidden} against {shown}"
+    );
+
+    assert_eq!(
+        hit_shape(&document(true), viewport, pos2(230.0, 160.0)),
+        Some(0),
+        "the end of the lettering picks it"
+    );
+    assert_eq!(
+        hit_shape(&document(true), viewport, pos2(270.0, 160.0)),
+        None
+    );
+}
+
+/// An attribute is lettered as a new instance letters it, at its true size,
+/// and picked anywhere on that text: the end of a long value as surely as
+/// its start, and nothing past it.
+#[test]
+fn an_attribute_is_lettered_at_true_size_and_picked_on_its_text() {
+    use rspice_design::schematic::label_layout::{INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD};
+
+    let viewport = SymbolViewport::new(
+        Rect::from_min_size(Pos2::ZERO, vec2(480.0, 320.0)),
+        4.0,
+        Vec2::ZERO,
+    );
+    let document = SymbolDocument {
+        name_anchor: Point::new(0, -30),
+        value_anchor: Point::new(0, 30),
+        ..SymbolDocument::default()
+    };
+    let mut metadata = SymbolEditorMetadata::for_document(&document);
+    for attribute in &mut metadata.attributes {
+        if attribute.kind == SymbolAttributeKind::Value {
+            attribute.default_value = "OPA_LONG_VALUE".to_owned();
+        }
+    }
+    let session = SymbolEditorSession::default();
+    let lettering = |kind| {
+        let attribute = metadata
+            .attributes
+            .iter()
+            .find(|attribute| attribute.kind == kind)
+            .unwrap();
+        attribute_lettering(&document, attribute, &session, viewport).unwrap()
+    };
+
+    let reference = lettering(SymbolAttributeKind::Reference);
+    assert_eq!(reference.text, "U1");
+    assert_eq!(reference.font.size, INSTANCE_NAME_WORLD * 4.0);
+    let value = lettering(SymbolAttributeKind::Value);
+    assert_eq!(value.text, "OPA_LONG_VALUE");
+    assert_eq!(value.font.size, INSTANCE_VALUE_WORLD * 4.0);
+
+    let rect = value.rect();
+    assert!(rect.width() > 200.0, "{rect:?}");
+    let hit = |pos| hit_label(&document, &metadata, &session, viewport, pos);
+    assert_eq!(
+        hit(pos2(rect.right() - 3.0, rect.center().y)),
+        Some(SymbolAttributeKind::Value)
+    );
+    assert_eq!(
+        hit(pos2(rect.left() + 3.0, rect.center().y)),
+        Some(SymbolAttributeKind::Value)
+    );
+    assert_eq!(hit(pos2(rect.right() + 30.0, rect.center().y)), None);
+    assert_eq!(
+        hit(reference.rect().center()),
+        Some(SymbolAttributeKind::Reference)
+    );
+}
+
+#[test]
+fn a_new_instances_reference_and_value_stand_in_for_the_defaults() {
+    assert_eq!(reference_sample("R?"), "R1");
+    assert_eq!(reference_sample("U?"), "U1");
+    assert_eq!(reference_sample(""), "X1");
+    assert_eq!(value_sample("VALUE", Some("amp")), "amp");
+    assert_eq!(value_sample("", Some("amp")), "amp");
+    assert_eq!(value_sample("10k", Some("amp")), "10k");
+    assert_eq!(value_sample("VALUE", None), "VALUE");
+}
+
 /// Rotating a selection turns a text run in it with the drawing, standing a
 /// run read across up to read upward.
 #[test]

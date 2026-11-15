@@ -25,7 +25,7 @@ use rspice_design::{
     symbol::{
         SymbolCurve, SymbolDash, SymbolDocument, SymbolFill, SymbolShape, SymbolStyle,
         SymbolTextAlign, SymbolTextPlacement, SymbolTextRotation, rectangle_corners,
-        symbol_text_bounds,
+        symbol_label_text, symbol_text_bounds,
     },
     symbol_generation::fit_pin_name,
 };
@@ -212,7 +212,61 @@ fn draw_symbol_body(
                     stroke.color,
                 );
             }
+            // Lettered with the instance's own values, beside its name and
+            // value.
+            SymbolShape::Label { .. } => {}
         }
+    }
+}
+
+/// The symbol's labels lettered with this instance's values, in the type
+/// the symbol sets them in and the value's ink. A parameter the instance
+/// does not set letters its default; one with neither letters nothing.
+fn draw_parameter_labels(
+    painter: &Painter,
+    origin: Pos2,
+    scale: f32,
+    component: &Component,
+    symbol: &ResolvedCellSymbol,
+    color: Color32,
+) {
+    let mut values = None;
+    for shape in &symbol.document().body {
+        let SymbolShape::Label {
+            anchor,
+            parameter,
+            default,
+            size,
+            align,
+            rotation,
+            shown: true,
+        } = shape
+        else {
+            continue;
+        };
+        let Some(font_size) =
+            lod::annotation_size(size.height() as f32, scale, painter.pixels_per_point())
+        else {
+            continue;
+        };
+        let values = values.get_or_insert_with(|| {
+            rspice_design::parameters::parse_params_string(&component.params)
+        });
+        let value = values
+            .get(&parameter.to_lowercase())
+            .map_or(default.as_str(), String::as_str);
+        if value.is_empty() {
+            continue;
+        }
+        paint_symbol_text(
+            painter,
+            to_screen_symbol(origin, scale, component, symbol, *anchor),
+            symbol_text_align(component, *align, *rotation),
+            *rotation,
+            &symbol_label_text(parameter, value),
+            rspice_ui_kit::theme::mono(font_size, rspice_ui_kit::theme::FontWeight::Regular),
+            color,
+        );
     }
 }
 
@@ -404,6 +458,9 @@ fn draw_symbol_labels(
         } else {
             painter.text(position, align, &component.name, font, palette.text);
         }
+    }
+    if component.display_mode.show_value(visibility) {
+        draw_parameter_labels(painter, origin, scale, component, symbol, palette.text_dim);
     }
     // A value the drawing lettered in texts of its own stands as they were
     // set.
@@ -650,6 +707,16 @@ fn fold_symbol_extent_points(symbol: &ResolvedCellSymbol, mut include: impl FnMu
     include(Point::origin());
     include(symbol.effective_point(symbol.document().name_anchor));
     include(symbol.effective_point(symbol.document().value_anchor));
+    for shape in &symbol.document().body {
+        if let SymbolShape::Label {
+            anchor,
+            shown: true,
+            ..
+        } = shape
+        {
+            include(symbol.effective_point(*anchor));
+        }
+    }
     fold_symbol_artwork_points(symbol, include);
 }
 
@@ -716,6 +783,9 @@ fn fold_symbol_artwork_points(symbol: &ResolvedCellSymbol, mut include: impl FnM
                 include(symbol.effective_point(min));
                 include(symbol.effective_point(max));
             }
+            // An instance's lettering, which the artwork leaves out as it
+            // leaves out the name and value.
+            SymbolShape::Label { .. } => {}
         }
     }
 }
@@ -1107,6 +1177,53 @@ mod tests {
         );
         let left = egui::Rect::from_min_max(pos2(0.0, 80.0), pos2(156.0, 240.0));
         assert_eq!(painted_pixels(&canvas, left).1, 0);
+    }
+
+    /// A label letters the instance's own value of its parameter, its
+    /// default where the instance sets none, and nothing once hidden or
+    /// with neither.
+    #[test]
+    fn a_label_letters_the_instances_own_value() {
+        let label = |default: &str, shown| {
+            one_shape(SymbolShape::Label {
+                anchor: Point::new(0, 20),
+                parameter: "W".to_owned(),
+                default: default.to_owned(),
+                size: SymbolTextSize::Normal,
+                align: SymbolTextAlign::Left,
+                rotation: SymbolTextRotation::R0,
+                shown,
+            })
+        };
+        // The label's line, 20 units below the origin, clear of the name
+        // and value at the origin.
+        let line = egui::Rect::from_min_max(pos2(40.0, 225.0), pos2(320.0, 255.0));
+        let drawn = |symbol: &ResolvedCellSymbol, params: &str| {
+            let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
+            component.params = params.to_owned();
+            let canvas = rspice_ui_kit::raster::render(egui::vec2(320.0, 320.0), |ui, _| {
+                draw_symbol_labels(
+                    &ui.painter().clone(),
+                    pos2(40.0, 160.0),
+                    4.0,
+                    &component,
+                    symbol,
+                    SchematicParameterLabelVisibility::NamesAndValues,
+                    &Tokens::get(ui.ctx()).color,
+                );
+            });
+            painted_span(&canvas, line).0
+        };
+
+        let default = drawn(&label("1u", true), "");
+        let own = drawn(&label("1u", true), "w=1000000u");
+        assert!(default > 0, "an unset parameter letters its default");
+        assert!(
+            own > default * 2,
+            "the instance's longer value is lettered: {own} against {default}"
+        );
+        assert_eq!(drawn(&label("1u", false), "w=2u"), 0, "a hidden label");
+        assert_eq!(drawn(&label("", true), ""), 0, "nothing to letter");
     }
 
     fn symbol_with_shifted_origin() -> ResolvedCellSymbol {

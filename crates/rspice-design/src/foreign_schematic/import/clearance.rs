@@ -419,7 +419,7 @@ fn body_ink(symbol: &SymbolDocument, component: &Component) -> Vec<Ink> {
                     .collect::<Vec<_>>();
                 ink.extend(ends.windows(2).map(|run| Ink::Stroke(run[0], run[1])));
             }
-            SymbolShape::Arrow { .. } | SymbolShape::Text { .. } => {}
+            SymbolShape::Arrow { .. } | SymbolShape::Text { .. } | SymbolShape::Label { .. } => {}
         }
     }
     ink

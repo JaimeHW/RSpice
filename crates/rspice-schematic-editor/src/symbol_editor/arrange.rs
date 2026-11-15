@@ -182,7 +182,7 @@ pub fn shape_anchor(shape: &SymbolShape) -> Point {
             curve.center[1].round() as i32,
         ),
         SymbolShape::Arrow { tip, .. } => *tip,
-        SymbolShape::Text { anchor, .. } => *anchor,
+        SymbolShape::Text { anchor, .. } | SymbolShape::Label { anchor, .. } => *anchor,
     }
 }
 

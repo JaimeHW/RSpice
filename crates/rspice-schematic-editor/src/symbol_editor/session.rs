@@ -666,6 +666,21 @@ pub fn symbol_shape_bounds(
             align,
             rotation,
         } => rspice_design::symbol::symbol_text_bounds(*anchor, text, *size, *align, *rotation),
+        SymbolShape::Label {
+            anchor,
+            parameter,
+            default,
+            size,
+            align,
+            rotation,
+            ..
+        } => rspice_design::symbol::symbol_text_bounds(
+            *anchor,
+            &rspice_design::symbol::symbol_label_sample(parameter, default),
+            *size,
+            *align,
+            *rotation,
+        ),
     }
 }
 
@@ -692,6 +707,7 @@ pub fn shape_kind(shape: &rspice_design::symbol::SymbolShape) -> &'static str {
         SymbolShape::Arrow { .. } => "Arrow",
         SymbolShape::Dot { .. } => "Dot",
         SymbolShape::Text { .. } => "Text",
+        SymbolShape::Label { .. } => "Label",
     }
 }
 
@@ -731,6 +747,7 @@ pub fn shape_summary(shape: &rspice_design::symbol::SymbolShape) -> String {
             "" => kind.to_owned(),
             words => format!("{kind} \"{words}\""),
         },
+        SymbolShape::Label { parameter, .. } => format!("{kind} {parameter}"),
     }
 }
 

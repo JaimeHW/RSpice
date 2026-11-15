@@ -116,7 +116,9 @@ pub fn shape_handles(shape: &SymbolShape) -> Vec<(SymbolHandle, [f64; 2])> {
                 ),
             ]
         }
-        SymbolShape::Text { anchor, .. } => vec![(SymbolHandle::Anchor, at(*anchor))],
+        SymbolShape::Text { anchor, .. } | SymbolShape::Label { anchor, .. } => {
+            vec![(SymbolHandle::Anchor, at(*anchor))]
+        }
         SymbolShape::Dot { center, .. } => vec![(SymbolHandle::Anchor, at(*center))],
         SymbolShape::Arrow { tip, .. } => vec![(SymbolHandle::Anchor, at(*tip))],
         SymbolShape::Curve { curve, .. } => vec![(SymbolHandle::Anchor, curve.center)],

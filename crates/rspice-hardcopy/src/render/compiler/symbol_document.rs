@@ -213,33 +213,44 @@ impl SemanticSceneCompiler<'_> {
                     rotation,
                 } => {
                     let origin = convert(self, *anchor)?;
-                    // The scene sets a run along its reading only, so an
-                    // orientation that carried the run across that reading
-                    // centres it instead of hanging it off a side the print
-                    // cannot express.
-                    let placement = align.placement(*rotation, |point| {
-                        component.map_or(point, |c| c.transform_point(point))
-                    });
-                    let placed = match (rotation, placement) {
-                        (SymbolTextRotation::R0, SymbolTextPlacement::After)
-                        | (SymbolTextRotation::R90, SymbolTextPlacement::Above) => {
-                            TextAnchor::Start
-                        }
-                        (SymbolTextRotation::R0, SymbolTextPlacement::Before)
-                        | (SymbolTextRotation::R90, SymbolTextPlacement::Below) => TextAnchor::End,
-                        _ => TextAnchor::Middle,
-                    };
-                    let turn = match rotation {
-                        SymbolTextRotation::R0 => SceneTextRotation::Upright,
-                        SymbolTextRotation::R90 => SceneTextRotation::CounterClockwise90,
-                    };
                     self.add_text_placed(
                         origin,
                         text,
                         SceneFont::Monospace,
                         u64::from(size.height().unsigned_abs()) * SCHEMATIC_UNIT_UM as u64,
                         body_stroke.color,
-                        (placed, turn),
+                        placed_run(*align, *rotation, component),
+                    )?;
+                }
+                // An instance letters its own value of the parameter, or the
+                // default where it sets none; the symbol printed alone
+                // letters the default.
+                SymbolShape::Label {
+                    anchor,
+                    parameter,
+                    default,
+                    size,
+                    align,
+                    rotation,
+                    shown,
+                } => {
+                    let value = component
+                        .and_then(|component| {
+                            rspice_design::parameters::parse_params_string(&component.params)
+                                .remove(&parameter.to_lowercase())
+                        })
+                        .unwrap_or_else(|| default.clone());
+                    if !*shown || value.is_empty() {
+                        continue;
+                    }
+                    let origin = convert(self, *anchor)?;
+                    self.add_text_placed(
+                        origin,
+                        &rspice_design::symbol::symbol_label_text(parameter, &value),
+                        SceneFont::Monospace,
+                        u64::from(size.height().unsigned_abs()) * SCHEMATIC_UNIT_UM as u64,
+                        body_stroke.color,
+                        placed_run(*align, *rotation, component),
                     )?;
                 }
             }
@@ -339,6 +350,32 @@ impl SemanticSceneCompiler<'_> {
 /// pattern the print mapping gave the body's layer; a broken one is broken
 /// in symbol units, so the pattern keeps its proportion against the body on
 /// every page size, as it does on screen.
+/// Where the scene sets a run from and which way it reads, once `component`
+/// (if any) has carried it. The scene sets a run along its reading only, so
+/// an orientation that carried the run across that reading centres it
+/// instead of hanging it off a side the print cannot express.
+fn placed_run(
+    align: SymbolTextAlign,
+    rotation: SymbolTextRotation,
+    component: Option<&Component>,
+) -> (TextAnchor, SceneTextRotation) {
+    let placement = align.placement(rotation, |point| {
+        component.map_or(point, |c| c.transform_point(point))
+    });
+    let placed = match (rotation, placement) {
+        (SymbolTextRotation::R0, SymbolTextPlacement::After)
+        | (SymbolTextRotation::R90, SymbolTextPlacement::Above) => TextAnchor::Start,
+        (SymbolTextRotation::R0, SymbolTextPlacement::Before)
+        | (SymbolTextRotation::R90, SymbolTextPlacement::Below) => TextAnchor::End,
+        _ => TextAnchor::Middle,
+    };
+    let turn = match rotation {
+        SymbolTextRotation::R0 => SceneTextRotation::Upright,
+        SymbolTextRotation::R90 => SceneTextRotation::CounterClockwise90,
+    };
+    (placed, turn)
+}
+
 fn styled_print_stroke(stroke: StrokeStyle, style: SymbolStyle) -> StrokeStyle {
     let scaled = (stroke.width.micrometres() as f64 * f64::from(style.stroke.scale())).round();
     let width = Length::from_micrometres((scaled as u64).max(1));

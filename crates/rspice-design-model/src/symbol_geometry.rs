@@ -531,6 +531,42 @@ pub enum SymbolShape {
         #[serde(default, skip_serializing_if = "SymbolTextRotation::is_r0")]
         rotation: SymbolTextRotation,
     },
+    /// One of the symbol's parameters lettered as `name=value`: a placed
+    /// instance letters its own value of `parameter`, or `default` where it
+    /// sets none, and the editor letters `default`. It moves, turns and
+    /// mirrors as a text run does. A hidden label stays in the symbol, so it
+    /// can be shown again; only placed instances leave it out.
+    Label {
+        anchor: Point,
+        parameter: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        default: String,
+        size: SymbolTextSize,
+        align: SymbolTextAlign,
+        #[serde(default, skip_serializing_if = "SymbolTextRotation::is_r0")]
+        rotation: SymbolTextRotation,
+        #[serde(default = "label_shown", skip_serializing_if = "is_shown")]
+        shown: bool,
+    },
+}
+
+const fn label_shown() -> bool {
+    true
+}
+
+fn is_shown(shown: &bool) -> bool {
+    *shown
+}
+
+/// What a label letters for `parameter` holding `value`.
+pub fn symbol_label_text(parameter: &str, value: &str) -> String {
+    format!("{parameter}={value}")
+}
+
+/// What a label letters where no instance's value is known: its default,
+/// or a mark holding the place of one.
+pub fn symbol_label_sample(parameter: &str, default: &str) -> String {
+    symbol_label_text(parameter, if default.is_empty() { "?" } else { default })
 }
 
 /// A rectangle's outline, clockwise on screen from its top-left corner: the
@@ -559,7 +595,7 @@ impl SymbolShape {
 
     /// How the shape's outline is inked, or `None` for a shape that has
     /// no outline to style: an arrowhead and a dot are solid ink, and a
-    /// text run is glyphs.
+    /// text run or a label is glyphs.
     pub fn style(&self) -> Option<SymbolStyle> {
         match self {
             SymbolShape::Polyline { style, .. }
@@ -567,7 +603,10 @@ impl SymbolShape {
             | SymbolShape::Circle { style, .. }
             | SymbolShape::Arc { style, .. }
             | SymbolShape::Curve { style, .. } => Some(*style),
-            SymbolShape::Arrow { .. } | SymbolShape::Dot { .. } | SymbolShape::Text { .. } => None,
+            SymbolShape::Arrow { .. }
+            | SymbolShape::Dot { .. }
+            | SymbolShape::Text { .. }
+            | SymbolShape::Label { .. } => None,
         }
     }
 
@@ -578,7 +617,10 @@ impl SymbolShape {
             | SymbolShape::Circle { style, .. }
             | SymbolShape::Arc { style, .. }
             | SymbolShape::Curve { style, .. } => Some(style),
-            SymbolShape::Arrow { .. } | SymbolShape::Dot { .. } | SymbolShape::Text { .. } => None,
+            SymbolShape::Arrow { .. }
+            | SymbolShape::Dot { .. }
+            | SymbolShape::Text { .. }
+            | SymbolShape::Label { .. } => None,
         }
     }
 
@@ -621,6 +663,9 @@ impl SymbolShape {
             // one up also moves it to the other side of its anchor.
             SymbolShape::Text {
                 align, rotation, ..
+            }
+            | SymbolShape::Label {
+                align, rotation, ..
             } => {
                 if rotation.is_r0() {
                     *align = align.mirrored();
@@ -655,6 +700,11 @@ impl SymbolShape {
                 align,
                 rotation: SymbolTextRotation::R0,
                 ..
+            }
+            | SymbolShape::Label {
+                align,
+                rotation: SymbolTextRotation::R0,
+                ..
             } => *align = align.mirrored(),
             _ => {}
         }
@@ -679,6 +729,11 @@ impl SymbolShape {
             // The mirror runs across a run read upward, which keeps reading
             // upward from the moved anchor on the other side of it.
             SymbolShape::Text {
+                align,
+                rotation: SymbolTextRotation::R90,
+                ..
+            }
+            | SymbolShape::Label {
                 align,
                 rotation: SymbolTextRotation::R90,
                 ..
@@ -717,7 +772,7 @@ impl SymbolShape {
             SymbolShape::Arrow { tip, .. } => {
                 *tip = transform(*tip);
             }
-            SymbolShape::Text { anchor, .. } => {
+            SymbolShape::Text { anchor, .. } | SymbolShape::Label { anchor, .. } => {
                 *anchor = transform(*anchor);
             }
         }
@@ -1117,6 +1172,105 @@ mod tests {
             SymbolTextAlign::Left.placement(SymbolTextRotation::R0, still),
             SymbolTextPlacement::After
         );
+    }
+
+    /// A label turns and mirrors exactly as a text run with the same anchor,
+    /// alignment and reading does, keeping its parameter, default and
+    /// visibility.
+    #[test]
+    fn a_label_moves_as_a_text_run_does() {
+        let label = |anchor, align, rotation| SymbolShape::Label {
+            anchor,
+            parameter: "W".to_owned(),
+            default: "1u".to_owned(),
+            size: SymbolTextSize::Small,
+            align,
+            rotation,
+            shown: false,
+        };
+        let run = |anchor, align, rotation| SymbolShape::Text {
+            anchor,
+            text: "W=1u".to_owned(),
+            size: SymbolTextSize::Small,
+            align,
+            rotation,
+        };
+        let parts = |shape: &SymbolShape| match shape {
+            SymbolShape::Label {
+                anchor,
+                align,
+                rotation,
+                ..
+            }
+            | SymbolShape::Text {
+                anchor,
+                align,
+                rotation,
+                ..
+            } => (*anchor, *align, *rotation),
+            other => unreachable!("{other:?}"),
+        };
+        let transforms: [fn(&mut SymbolShape); 4] = [
+            SymbolShape::rotate_cw,
+            SymbolShape::mirror_h,
+            SymbolShape::mirror_v,
+            |shape| shape.translate(Point::new(3, -4)),
+        ];
+        for align in SymbolTextAlign::ALL {
+            for rotation in SymbolTextRotation::ALL {
+                for transform in transforms {
+                    let mut moved_label = label(Point::new(20, 5), align, rotation);
+                    let mut moved_run = run(Point::new(20, 5), align, rotation);
+                    transform(&mut moved_label);
+                    transform(&mut moved_run);
+                    assert_eq!(parts(&moved_label), parts(&moved_run));
+                    let (anchor, align, rotation) = parts(&moved_label);
+                    assert_eq!(moved_label, label(anchor, align, rotation));
+                }
+            }
+        }
+    }
+
+    /// A label shown on instances, with no default, reading across, writes
+    /// only what names it; the rest is written when it differs.
+    #[test]
+    fn a_label_writes_only_what_differs_from_the_plain_one() {
+        let label = |default: &str, shown| SymbolShape::Label {
+            anchor: Point::new(0, 0),
+            parameter: "W".to_owned(),
+            default: default.to_owned(),
+            size: SymbolTextSize::Normal,
+            align: SymbolTextAlign::Left,
+            rotation: SymbolTextRotation::R0,
+            shown,
+        };
+        let plain = label("", true);
+        let written = serde_json::to_string(&plain).unwrap();
+        assert!(!written.contains("default"), "{written}");
+        assert!(!written.contains("shown"), "{written}");
+        assert!(!written.contains("rotation"), "{written}");
+        assert_eq!(
+            serde_json::from_str::<SymbolShape>(&written).unwrap(),
+            plain
+        );
+
+        let hidden = label("1u", false);
+        let written = serde_json::to_string(&hidden).unwrap();
+        assert!(written.contains(r#""default":"1u""#), "{written}");
+        assert!(written.contains(r#""shown":false"#), "{written}");
+        assert_eq!(
+            serde_json::from_str::<SymbolShape>(&written).unwrap(),
+            hidden
+        );
+        assert_eq!(hidden.style(), None);
+        assert!(!hidden.is_closed());
+    }
+
+    #[test]
+    fn a_label_letters_its_name_and_a_value() {
+        assert_eq!(symbol_label_text("W", "2u"), "W=2u");
+        assert_eq!(symbol_label_sample("W", "1u"), "W=1u");
+        assert_eq!(symbol_label_sample("W", ""), "W=?");
     }
 
     /// A run read left to right is written as it always was; only a turned

@@ -27,9 +27,10 @@ use rspice_design::{
         component_type::ComponentType,
     },
     symbol::{
-        PinDrawing, SYMBOL_PIN_LENGTH, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolCurve,
-        SymbolDash, SymbolDocument, SymbolEditorMetadata, SymbolFill, SymbolShape, SymbolStyle,
-        SymbolTextAlign, SymbolTextRotation, pin_drawing, rectangle_corners,
+        PinDrawing, SYMBOL_PIN_LENGTH, SYMBOL_TERMINAL_GRID, SymbolAttribute, SymbolAttributeKind,
+        SymbolCurve, SymbolDash, SymbolDocument, SymbolEditorMetadata, SymbolFill, SymbolShape,
+        SymbolStyle, SymbolTextAlign, SymbolTextRotation, SymbolTextSize, pin_drawing,
+        rectangle_corners, symbol_label_sample,
     },
 };
 use rspice_design_model::{
@@ -300,7 +301,7 @@ pub fn draw_in_place(
     draw_bbox_and_origin(painter, viewport, document, &t);
     draw_pins(painter, viewport, document, ports, session);
     draw_pin_tool_pin(painter, viewport, document, session, &t);
-    draw_labels(painter, viewport, editor, session, &t);
+    draw_labels(painter, viewport, document, editor, session, &t);
     draw_handles(painter, viewport, document, session, &t);
     draw_marquee(painter, viewport, session, &t);
     draw_draft(painter, viewport, session, &t);
@@ -405,7 +406,7 @@ fn draw_shape_outline(
             &SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees),
         ),
         SymbolShape::Curve { curve, .. } => curve_points(viewport, curve),
-        SymbolShape::Arrow { .. } | SymbolShape::Text { .. } => {
+        SymbolShape::Arrow { .. } | SymbolShape::Text { .. } | SymbolShape::Label { .. } => {
             let (min, max) = session::symbol_shape_bounds(shape);
             let corners = rectangle_corners(min, max);
             corners
@@ -733,21 +734,70 @@ fn draw_body(
                 align,
                 rotation,
             } => {
-                let at = viewport.world_to_screen(*anchor);
-                let hang = editor_text_align(viewport.placement, *align, *rotation);
-                let font = theme::mono(
-                    (size.height() as f32 * viewport.zoom).max(1.0),
-                    FontWeight::Regular,
+                paint_run(
+                    painter,
+                    viewport,
+                    *anchor,
+                    text,
+                    (*size, *align, *rotation),
+                    shape_color,
                 );
-                match rotation {
-                    SymbolTextRotation::R0 => {
-                        painter.text(at, hang, text, font, shape_color);
-                    }
-                    SymbolTextRotation::R90 => {
-                        paint_upward_text(painter, at, hang, text, font, shape_color);
-                    }
-                }
             }
+            // A label letters its default here, as an instance that sets no
+            // value of its own does. One hidden on instances is drawn faint,
+            // so it can still be found and shown again.
+            SymbolShape::Label {
+                anchor,
+                parameter,
+                default,
+                size,
+                align,
+                rotation,
+                shown,
+            } => {
+                let color = if *shown || is_selected {
+                    shape_color
+                } else {
+                    shape_color.gamma_multiply(HIDDEN_LABEL_ALPHA)
+                };
+                paint_run(
+                    painter,
+                    viewport,
+                    *anchor,
+                    &symbol_label_sample(parameter, default),
+                    (*size, *align, *rotation),
+                    color,
+                );
+            }
+        }
+    }
+}
+
+/// How strongly a label hidden on instances is drawn, against a shown one.
+const HIDDEN_LABEL_ALPHA: f32 = 0.45;
+
+/// A run of glyphs hung off `anchor` at its true size, read across or, once
+/// turned, upward.
+fn paint_run(
+    painter: &egui::Painter,
+    viewport: SymbolViewport,
+    anchor: Point,
+    text: &str,
+    (size, align, rotation): (SymbolTextSize, SymbolTextAlign, SymbolTextRotation),
+    color: Color32,
+) {
+    let at = viewport.world_to_screen(anchor);
+    let hang = editor_text_align(viewport.placement, align, rotation);
+    let font = theme::mono(
+        (size.height() as f32 * viewport.zoom).max(1.0),
+        FontWeight::Regular,
+    );
+    match rotation {
+        SymbolTextRotation::R0 => {
+            painter.text(at, hang, text, font, color);
+        }
+        SymbolTextRotation::R90 => {
+            paint_upward_text(painter, at, hang, text, font, color);
         }
     }
 }
@@ -1012,29 +1062,123 @@ fn draw_dashed_line(
     }
 }
 
+/// Each attribute shown on instances, lettered as a new instance letters it
+/// and at its true size: "U1" for a reference of "U?", the cell's name for
+/// its value, in the type and hang the sheet gives them.
 fn draw_labels(
     painter: &egui::Painter,
     viewport: SymbolViewport,
+    document: &SymbolDocument,
     editor: &SymbolEditorMetadata,
     session: &SymbolEditorSession,
     t: &Tokens,
 ) {
     let selection = session.effective_selection();
     for attribute in &editor.attributes {
-        if !attribute.shown {
+        let Some(lettering) = attribute_lettering(document, attribute, session, viewport) else {
             continue;
-        }
+        };
+        let color = if selection.attributes.contains(&attribute.kind) {
+            t.color.accent
+        } else {
+            t.color.net_label
+        };
         painter.text(
-            viewport.world_to_screen(attribute.position),
-            Align2::LEFT_CENTER,
-            format!("@{}", attribute.kind.key()),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            if selection.attributes.contains(&attribute.kind) {
-                t.color.accent
-            } else {
-                t.color.net_label
-            },
+            lettering.at,
+            lettering.align,
+            &lettering.text,
+            lettering.font,
+            color,
         );
+    }
+}
+
+/// What the canvas letters for an attribute, where, and in which type.
+#[derive(Debug, Clone, PartialEq)]
+struct AttributeLettering {
+    text: String,
+    at: Pos2,
+    align: Align2,
+    font: egui::FontId,
+}
+
+impl AttributeLettering {
+    /// The box the lettering covers on screen.
+    fn rect(&self) -> Rect {
+        let width = rspice_ui_kit::text::printed_width_em(&self.font.family, &self.text) as f32
+            * self.font.size;
+        let height = self.font.size * rspice_design::schematic::label_layout::LINE_BOX_EM;
+        self.align.anchor_size(self.at, vec2(width, height))
+    }
+}
+
+/// How an attribute shown on instances is lettered on the canvas: the
+/// sample a new instance shows, hung off its anchor as the sheet hangs it,
+/// in the sheet's type at the canvas's zoom. `None` for a hidden one.
+fn attribute_lettering(
+    document: &SymbolDocument,
+    attribute: &SymbolAttribute,
+    session: &SymbolEditorSession,
+    viewport: SymbolViewport,
+) -> Option<AttributeLettering> {
+    use rspice_design::schematic::label_layout::{
+        INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, symbol_label_placement,
+    };
+    if !attribute.shown {
+        return None;
+    }
+    let cell = session
+        .canvas_source
+        .as_ref()
+        .map(|source| source.document.cell.as_str());
+    let (sample, size, weight) = match attribute.kind {
+        SymbolAttributeKind::Reference => (
+            reference_sample(&attribute.default_value),
+            INSTANCE_NAME_WORLD,
+            FontWeight::Medium,
+        ),
+        SymbolAttributeKind::Value => (
+            value_sample(&attribute.default_value, cell),
+            INSTANCE_VALUE_WORLD,
+            FontWeight::Regular,
+        ),
+        SymbolAttributeKind::Model => (
+            attribute.default_value.trim().to_owned(),
+            INSTANCE_VALUE_WORLD,
+            FontWeight::Regular,
+        ),
+    };
+    // An attribute with nothing to letter still shows where it stands.
+    let text = if sample.is_empty() {
+        attribute.kind.key().to_owned()
+    } else {
+        sample
+    };
+    let instance = Component::new(0, ComponentType::CellInstance, document.origin);
+    let placed = symbol_label_placement(&instance, document, attribute.position);
+    Some(AttributeLettering {
+        text,
+        at: viewport.world_to_screen(attribute.position),
+        align: crate::view::drawing::text_align(placed.horizontal, placed.vertical),
+        font: theme::sans((size * viewport.zoom).max(1.0), weight),
+    })
+}
+
+/// The reference a new instance takes: the prefix's first number in place
+/// of its `?`, as "U?" places "U1".
+fn reference_sample(default: &str) -> String {
+    match default.trim() {
+        "" => "X1".to_owned(),
+        prefix => prefix.replacen('?', "1", 1),
+    }
+}
+
+/// The value a new instance shows: the default the symbol states, else the
+/// cell's own name, which is what an instance of the cell is valued by.
+fn value_sample(default: &str, cell: Option<&str>) -> String {
+    match (default.trim(), cell) {
+        ("" | "VALUE", Some(cell)) => cell.to_owned(),
+        (value, _) => value.to_owned(),
     }
 }
 
@@ -1171,8 +1315,12 @@ pub fn hit_pin(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2) -
         .map(|(name, _)| name)
 }
 
+/// The attribute whose lettering is under `pos`: anywhere on its text as
+/// drawn, so the end of a long value is as easy to grab as its start.
 pub fn hit_label(
+    document: &SymbolDocument,
     editor: &SymbolEditorMetadata,
+    session: &SymbolEditorSession,
     viewport: SymbolViewport,
     pos: Pos2,
 ) -> Option<SymbolAttributeKind> {
@@ -1181,10 +1329,14 @@ pub fn hit_label(
         .iter()
         .rev()
         .find(|attribute| {
-            attribute.shown && viewport.world_to_screen(attribute.position).distance(pos) <= 22.0
+            attribute_lettering(document, attribute, session, viewport)
+                .is_some_and(|lettering| lettering.rect().expand(LABEL_HIT_SLOP).contains(pos))
         })
         .map(|attribute| attribute.kind)
 }
+
+/// How far outside its lettering an attribute is still picked, in points.
+const LABEL_HIT_SLOP: f32 = 4.0;
 
 /// The document's own label anchors are the pre-attribute spelling of the
 /// refdes and value positions, and every renderer outside the editor still
@@ -1303,6 +1455,27 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
         } => {
             let (min, max) =
                 rspice_design::symbol::symbol_text_bounds(*anchor, text, *size, *align, *rotation);
+            Rect::from_two_pos(viewport.world_to_screen(min), viewport.world_to_screen(max))
+                .expand(HIT_PX)
+                .contains(pos)
+        }
+        // A label is picked anywhere on the text the canvas letters for it.
+        SymbolShape::Label {
+            anchor,
+            parameter,
+            default,
+            size,
+            align,
+            rotation,
+            ..
+        } => {
+            let (min, max) = rspice_design::symbol::symbol_text_bounds(
+                *anchor,
+                &symbol_label_sample(parameter, default),
+                *size,
+                *align,
+                *rotation,
+            );
             Rect::from_two_pos(viewport.world_to_screen(min), viewport.world_to_screen(max))
                 .expand(HIT_PX)
                 .contains(pos)
@@ -1519,6 +1692,25 @@ fn document_bounds(document: &SymbolDocument) -> (Point, Point) {
             } => {
                 let (min, max) = rspice_design::symbol::symbol_text_bounds(
                     *anchor, text, *size, *align, *rotation,
+                );
+                xs.extend([min.x, max.x]);
+                ys.extend([min.y, max.y]);
+            }
+            SymbolShape::Label {
+                anchor,
+                parameter,
+                default,
+                size,
+                align,
+                rotation,
+                ..
+            } => {
+                let (min, max) = rspice_design::symbol::symbol_text_bounds(
+                    *anchor,
+                    &symbol_label_sample(parameter, default),
+                    *size,
+                    *align,
+                    *rotation,
                 );
                 xs.extend([min.x, max.x]);
                 ys.extend([min.y, max.y]);

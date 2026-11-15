@@ -94,7 +94,7 @@ pub fn pointer_target(
             selection.pins.contains(&pin),
             SymbolSelection::single_pin(pin),
         ))
-    } else if let Some(kind) = hit_label(editor, viewport, pos) {
+    } else if let Some(kind) = hit_label(document, editor, session, viewport, pos) {
         Some((
             selection.attributes.contains(&kind),
             SymbolSelection::single_attribute(kind),
