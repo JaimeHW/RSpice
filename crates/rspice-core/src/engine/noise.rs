@@ -255,6 +255,10 @@ impl Engine {
         }
     }
 
+    /// `mantissa * 2^exponent` as a binary64 output density. One below the
+    /// binary64 range rounds as IEEE 754 rounds it, to a subnormal or to zero:
+    /// a contribution that small is negligible, not invalid. One above the
+    /// range is refused.
     fn compose_positive(
         label: &str,
         mantissa: Value,
@@ -267,10 +271,9 @@ impl Engine {
                 "Noise source '{label}' output density overflowed at {frequency} Hz"
             )));
         }
+        // Below half the least subnormal, nearest rounding gives zero.
         if exponent < -1075 {
-            return Err(SimulationError::Circuit(format!(
-                "Noise source '{label}' output density underflowed at {frequency} Hz"
-            )));
+            return Ok(0.0);
         }
         let result = if exponent == -1075 {
             (mantissa * 0.5) * Value::from_bits(1)
@@ -280,11 +283,6 @@ impl Engine {
         if !result.is_finite() {
             return Err(SimulationError::Circuit(format!(
                 "Noise source '{label}' output density overflowed at {frequency} Hz"
-            )));
-        }
-        if result == 0.0 {
-            return Err(SimulationError::Circuit(format!(
-                "Noise source '{label}' output density underflowed at {frequency} Hz"
             )));
         }
         Ok(result)
@@ -456,15 +454,12 @@ impl Engine {
         if output_density == 0.0 {
             return Ok(0.0);
         }
+        // A quotient below the binary64 range rounds to a subnormal or to
+        // zero, as the output contribution it refers does.
         let referred = output_density / gain_squared;
         if !referred.is_finite() {
             return Err(SimulationError::Circuit(format!(
                 "Input-referred noise for '{label}' overflowed at {frequency} Hz"
-            )));
-        }
-        if referred == 0.0 {
-            return Err(SimulationError::Circuit(format!(
-                "Input-referred noise for '{label}' underflowed at {frequency} Hz"
             )));
         }
         Ok(referred)
@@ -4684,14 +4679,23 @@ mod tests {
         .expect("large PSD times small transfer remains representable");
         assert!((large_psd / 1.0e-100 - 1.0).abs() < 2.0e-15);
 
+        let subnormal = Engine::transferred_noise_density(
+            "subnormal",
+            2.0_f64.powi(-1000),
+            crate::Complex64::new(2.0_f64.powi(-30), 0.0),
+            1.0e3,
+        )
+        .expect("an output PSD below the normal range is a subnormal");
+        assert_eq!(subnormal.to_bits(), 1 << 14);
+
         let underflow = Engine::transferred_noise_density(
             "underflow",
             f64::from_bits(1),
             crate::Complex64::new(f64::from_bits(1), 0.0),
             1.0e3,
         )
-        .expect_err("a nonrepresentable positive output PSD must fail closed");
-        assert!(underflow.to_string().contains("underflowed"));
+        .expect("an output PSD below the least subnormal is a negligible contribution");
+        assert_eq!(underflow.to_bits(), 0.0_f64.to_bits());
 
         let overflow = Engine::transferred_noise_density(
             "overflow",
@@ -4701,6 +4705,32 @@ mod tests {
         )
         .expect_err("a nonrepresentable output PSD must fail closed");
         assert!(overflow.to_string().contains("overflowed"));
+    }
+
+    #[test]
+    fn output_and_referred_densities_below_the_binary64_range_round_to_nearest() {
+        let compose = |mantissa: f64, exponent: i32| {
+            Engine::compose_positive("rounding", mantissa, exponent, 1.0e3)
+                .expect("a density below the binary64 range rounds")
+                .to_bits()
+        };
+        assert_eq!(compose(1.0, -1060), 1 << 14);
+        assert_eq!(compose(1.25, -1074), 1);
+        assert_eq!(compose(1.75, -1074), 2);
+        // Half the least subnormal is a tie, and ties round to even.
+        assert_eq!(compose(1.0, -1075), 0);
+        assert_eq!(compose(1.5, -1075), 1);
+        assert_eq!(compose(1.999, -1076), 0);
+        assert_eq!(compose(1.0, i32::MIN), 0);
+
+        let refer = |output: f64, gain_squared: f64| {
+            Engine::referred_noise_density("rounding", output, gain_squared, 1.0e3)
+                .expect("a referred density below the binary64 range rounds")
+                .to_bits()
+        };
+        assert_eq!(refer(f64::from_bits(8), 2.0), 4);
+        assert_eq!(refer(f64::from_bits(1), 4.0), 0);
+        assert_eq!(refer(0.0, 1.0e-20), 0);
     }
 
     #[test]

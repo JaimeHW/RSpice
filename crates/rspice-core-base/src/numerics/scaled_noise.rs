@@ -166,8 +166,26 @@ impl ScaledComplexAccumulator {
         }
     }
 
+    /// Add a term, aligned to the common scale exactly or refused: a sum
+    /// whose large terms cancel may be made of its small ones alone.
     #[doc(hidden)]
     pub fn add(&mut self, term: ScaledComplex) -> Result<(), &'static str> {
+        self.add_aligned(term, false)
+    }
+
+    /// Add a term to a sum whose caller bounds its roundoff by at least
+    /// `absolute_sum * EPSILON` per term, rounding the term's components as
+    /// IEEE 754 rounds them where they fall below the subnormal range at the
+    /// common scale. With the common scale the largest term's, the absolute
+    /// sum is at least one there, and each component's rounding, at most half
+    /// the smallest subnormal, is far inside that bound: such a term is
+    /// negligible, not a failure.
+    #[doc(hidden)]
+    pub fn add_bounded(&mut self, term: ScaledComplex) -> Result<(), &'static str> {
+        self.add_aligned(term, true)
+    }
+
+    fn add_aligned(&mut self, term: ScaledComplex, round: bool) -> Result<(), &'static str> {
         validate_scaled_complex(term)?;
         if term.is_zero() {
             return Ok(());
@@ -176,8 +194,22 @@ impl ScaledComplexAccumulator {
             .exponent
             .checked_sub(self.common_exponent)
             .ok_or("a scaled-term exponent range exceeds this platform")?;
-        let real = scale_complex_component_exactly(term.mantissa.re, shift)?;
-        let imag = scale_complex_component_exactly(term.mantissa.im, shift)?;
+        let (real, imag) = if round {
+            let real = libm::scalbn(term.mantissa.re, shift);
+            let imag = libm::scalbn(term.mantissa.im, shift);
+            if !real.is_finite() || !imag.is_finite() {
+                return Err("a nonzero term component exceeds the common scale");
+            }
+            if real == 0.0 && imag == 0.0 {
+                return Ok(());
+            }
+            (real, imag)
+        } else {
+            (
+                scale_complex_component_exactly(term.mantissa.re, shift)?,
+                scale_complex_component_exactly(term.mantissa.im, shift)?,
+            )
+        };
         compensated_add(&mut self.real_sum, &mut self.real_compensation, real)?;
         compensated_add(&mut self.imag_sum, &mut self.imag_compensation, imag)?;
         let magnitude = Complex64::new(real, imag).norm();
@@ -215,6 +247,15 @@ impl ScaledComplexAccumulator {
         scaled_complex_product3(value, Complex64::ONE, Complex64::ONE, self.common_exponent)
     }
 
+    /// The completed sum and its absolute sum at their physical scale.
+    ///
+    /// A component or an absolute sum below binary64's normal range rounds
+    /// as IEEE 754 rounds it, to a subnormal or to zero: a contribution that
+    /// small is negligible beside any a caller can represent, so it is a
+    /// value, not a failure. One above the range is refused. The rounding
+    /// of that last scaling is at most half the smallest subnormal, which a
+    /// relative roundoff bound taken from a subnormal absolute sum does not
+    /// cover (see [`subnormal_roundoff_floor`]).
     #[doc(hidden)]
     pub fn finish(self) -> Result<(Complex64, Value), &'static str> {
         let (normalized, normalized_absolute_sum) = self.normalized_sum()?;
@@ -226,16 +267,28 @@ impl ScaledComplexAccumulator {
         if !contribution.re.is_finite()
             || !contribution.im.is_finite()
             || !physical_absolute_sum.is_finite()
-            || physical_absolute_sum <= 0.0
         {
             return Err("the completed noise sum is outside the finite binary64 range");
         }
-        if (normalized.re != 0.0 && contribution.re == 0.0)
-            || (normalized.im != 0.0 && contribution.im == 0.0)
-        {
-            return Err("a nonzero completed noise component is below the binary64 range");
-        }
         Ok((contribution, physical_absolute_sum))
+    }
+}
+
+/// The least roundoff bound of a sum [`ScaledComplexAccumulator::finish`]
+/// completed, for a caller that bounds its roundoff by `absolute_sum *
+/// EPSILON * multiplier`.
+///
+/// Below binary64's normal range that product underflows while the sum's
+/// components still carry the rounding of their last scaling, at most half
+/// the smallest subnormal each. There `absolute_sum * EPSILON` is itself
+/// below the smallest subnormal, so `multiplier + 1` smallest subnormals
+/// bound both. A normal absolute sum needs no floor, and this is zero.
+#[doc(hidden)]
+pub fn subnormal_roundoff_floor(absolute_sum: Value, multiplier: Value) -> Value {
+    if absolute_sum < Value::MIN_POSITIVE {
+        (multiplier + 1.0) * Value::from_bits(1)
+    } else {
+        0.0
     }
 }
 
@@ -411,4 +464,111 @@ pub fn scaled_flicker_cross_term(
         Complex64::new(1.0, 0.0),
         power,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn completed(mantissa: Complex64, exponent: i32) -> Result<(Complex64, Value), &'static str> {
+        let mut sum = ScaledComplexAccumulator::new(exponent);
+        sum.add(ScaledComplex { mantissa, exponent })?;
+        sum.finish()
+    }
+
+    #[test]
+    fn a_real_part_below_the_binary64_range_rounds_to_zero() {
+        let (value, absolute) =
+            completed(Complex64::new(libm::scalbn(1.0, -60), 1.0), -1020).unwrap();
+        assert_eq!(value.re.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(value.im, libm::scalbn(1.0, -1020));
+        assert!(absolute >= libm::scalbn(1.0, -1020));
+    }
+
+    #[test]
+    fn an_imaginary_part_below_the_binary64_range_rounds_to_zero() {
+        let (value, absolute) =
+            completed(Complex64::new(-1.0, libm::scalbn(1.0, -60)), -1020).unwrap();
+        assert_eq!(value.re, -libm::scalbn(1.0, -1020));
+        assert_eq!(value.im.to_bits(), 0.0_f64.to_bits());
+        assert!(absolute >= libm::scalbn(1.0, -1020));
+    }
+
+    #[test]
+    fn a_sum_wholly_below_the_binary64_range_rounds_to_zero() {
+        let (value, absolute) = completed(Complex64::new(1.5, -1.25), -1080).unwrap();
+        assert_eq!(value, Complex64::new(0.0, 0.0));
+        assert_eq!(absolute, 0.0);
+        assert_eq!(
+            subnormal_roundoff_floor(absolute, 32.0),
+            33.0 * Value::from_bits(1)
+        );
+    }
+
+    /// The components and the absolute sum round to nearest, ties to even,
+    /// in the subnormal range: 2^-1070 is 16 smallest subnormals exactly,
+    /// sqrt(2) times it is 22.6 of them, and 1.5 of them is a tie.
+    #[test]
+    fn an_absolute_sum_below_the_normal_range_rounds_to_its_nearest_subnormal() {
+        let (value, absolute) = completed(Complex64::new(1.0, 1.0), -1070).unwrap();
+        assert_eq!(value.re.to_bits(), 16);
+        assert_eq!(value.im.to_bits(), 16);
+        assert_eq!(absolute.to_bits(), 23);
+        let floor = subnormal_roundoff_floor(absolute, 64.0);
+        assert_eq!(floor, 65.0 * Value::from_bits(1));
+        assert!(floor >= absolute * Value::EPSILON * 64.0);
+
+        let (tie, absolute) = completed(Complex64::new(1.5, 0.0), -1074).unwrap();
+        assert_eq!(tie.re.to_bits(), 2);
+        assert_eq!(absolute.to_bits(), 2);
+    }
+
+    /// A term more than the subnormal range below the common scale is refused
+    /// when added exactly, and rounds, here to zero and to the smallest
+    /// subnormal, when added to a bounded sum.
+    #[test]
+    fn a_bounded_sum_rounds_a_term_below_its_common_scale() {
+        let large = ScaledComplex {
+            mantissa: Complex64::new(1.0, 0.0),
+            exponent: 0,
+        };
+        let vanishing = ScaledComplex {
+            mantissa: Complex64::new(1.0, -1.0),
+            exponent: -1100,
+        };
+        let mut exact = ScaledComplexAccumulator::new(0);
+        exact.add(large).unwrap();
+        assert!(exact.add(vanishing).is_err());
+
+        let mut bounded = ScaledComplexAccumulator::new(0);
+        bounded.add_bounded(large).unwrap();
+        bounded.add_bounded(vanishing).unwrap();
+        bounded
+            .add_bounded(ScaledComplex {
+                mantissa: Complex64::new(0.0, 1.0),
+                exponent: -1074,
+            })
+            .unwrap();
+        let (value, absolute) = bounded.finish().unwrap();
+        assert_eq!(value, Complex64::new(1.0, Value::from_bits(1)));
+        assert_eq!(absolute, 1.0);
+    }
+
+    #[test]
+    fn a_normal_absolute_sum_takes_no_roundoff_floor() {
+        assert_eq!(subnormal_roundoff_floor(Value::MIN_POSITIVE, 1.0e6), 0.0);
+        assert_eq!(subnormal_roundoff_floor(1.0, 32.0), 0.0);
+    }
+
+    #[test]
+    fn a_sum_above_the_binary64_range_or_with_no_terms_is_refused() {
+        assert_eq!(
+            completed(Complex64::new(1.5, 0.0), 1024),
+            Err("the completed noise sum is outside the finite binary64 range")
+        );
+        assert_eq!(
+            ScaledComplexAccumulator::new(0).finish(),
+            Err("the completed common-scale noise sum is invalid")
+        );
+    }
 }

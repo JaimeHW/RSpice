@@ -70,19 +70,25 @@ fn source_covariance(
         }
         Ok(())
     })?;
-    let (mut value, absolute_sum) = if let Some(exponent) = common_exponent {
+    let multiplier = 32.0 * term_count.max(1) as Value;
+    let (mut value, absolute_sum, floor) = if let Some(exponent) = common_exponent {
         let mut accumulator = ScaledComplexAccumulator::new(exponent);
-        visit(&mut |term| accumulator.add(term))?;
-        accumulator.finish().map_err(|reason| {
+        visit(&mut |term| accumulator.add_bounded(term))?;
+        let (value, absolute_sum) = accumulator.finish().map_err(|reason| {
             HbError::InvalidCircuit(format!(
                 "pnoise source '{}' noise accumulation is invalid: {reason}",
                 source.name
             ))
-        })?
+        })?;
+        // A contribution below binary64's normal range rounded to a subnormal
+        // or to zero; its bound must still cover that rounding.
+        let floor =
+            crate::numerics::scaled_noise::subnormal_roundoff_floor(absolute_sum, multiplier);
+        (value, absolute_sum, floor)
     } else {
-        (Complex64::ZERO, 0.0)
+        (Complex64::ZERO, 0.0, 0.0)
     };
-    let roundoff = absolute_sum * Value::EPSILON * 32.0 * term_count.max(1) as Value;
+    let roundoff = (absolute_sum * Value::EPSILON * 32.0 * term_count.max(1) as Value).max(floor);
     if !roundoff.is_finite() {
         return Err(HbError::InvalidCircuit(format!(
             "pnoise source '{}' roundoff bound is non-finite",

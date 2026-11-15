@@ -379,13 +379,23 @@ fn qpnoise_retains_representable_extremes_and_refuses_unrepresentable_results() 
         .source_covariance_with_abort(&[one.clone()], &source(white(1.0, -1074)), &NoAbort)
         .unwrap();
     assert_eq!(tiny.values[0].re.to_bits(), 1);
-    for scale in [-1075, 1024] {
-        assert!(
-            projector
-                .source_covariance_with_abort(&[one.clone()], &source(white(1.0, scale)), &NoAbort)
-                .is_err()
-        );
+    // Below the least subnormal a covariance rounds to nearest: half of it is
+    // a tie, which rounds to even, and three quarters of it rounds up.
+    for (coefficient, bits) in [(1.0, 0), (1.5, 1)] {
+        let rounded = projector
+            .source_covariance_with_abort(
+                &[one.clone()],
+                &source(white(coefficient, -1075)),
+                &NoAbort,
+            )
+            .unwrap();
+        assert_eq!(rounded.values[0].re.to_bits(), bits);
     }
+    assert!(
+        projector
+            .source_covariance_with_abort(&[one.clone()], &source(white(1.0, 1024)), &NoAbort)
+            .is_err()
+    );
 }
 
 #[test]

@@ -3046,11 +3046,15 @@ mod matrix_free_tests {
                 Ok(1.0)
             );
         }
-        for scale in [i32::MIN, i32::MAX] {
-            assert!(
-                scaled_flicker_density(Complex64::new(1.0, 0.0), 0, 1.0, scale, 1.0, 0.0).is_err()
-            );
-        }
+        // A density below the binary64 range rounds to zero; one above it is
+        // refused.
+        assert_eq!(
+            scaled_flicker_density(Complex64::new(1.0, 0.0), 0, 1.0, i32::MIN, 1.0, 0.0),
+            Ok(0.0)
+        );
+        assert!(
+            scaled_flicker_density(Complex64::new(1.0, 0.0), 0, 1.0, i32::MAX, 1.0, 0.0).is_err()
+        );
     }
 
     #[test]

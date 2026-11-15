@@ -1219,3 +1219,100 @@ fn native_vbic_periodic_noise_matches_stationary_physical_sources() {
         }
     }
 }
+
+/// Twenty diode-RC stages at zero bias attenuate each stage's noise by about
+/// seventeen decades, so the sources nearest the drive reach the output below
+/// binary64's range. Those contributions are negligible, not invalid: they
+/// round to subnormals or to zero, and the total is the sum of the rest.
+#[test]
+fn noise_contributions_below_the_binary64_range_round_and_the_total_is_their_sum() {
+    let stages = 20;
+    let mut deck = String::from("underflowing ladder\nV1 n0 0 DC 0 SIN(0 0.5 1meg) AC 1\n");
+    for i in 0..stages {
+        let j = i + 1;
+        deck += &format!(
+            "R{i} n{i} m{i} 100\nD{i} m{i} n{j} dmod\nC{i} n{j} 0 10p\nRL{i} n{j} 0 10k\n"
+        );
+    }
+    deck += ".model dmod d(is=1e-14 n=1)\n.end\n";
+    let netlist = Netlist::parse(&deck).expect("ladder parses");
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice));
+    let offsets = [1.0e3, 1.0e4];
+    let output = format!("n{stages}");
+
+    let hb = engine
+        .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(16))
+        .expect("the ladder's periodic operating point converges");
+    let request = rspice_core::engine::PeriodicNoiseRequest {
+        offsets: &offsets,
+        output_node: &output,
+        output_ref: None,
+        input_source: None,
+        max_sideband: 4,
+        sidebands: rspice_core::engine::PeriodicNoiseSidebands::default(),
+        sampling: None,
+    };
+    let periodic = engine
+        .run_pnoise_from_hb_request_with_abort(&netlist, &request, &hb.operating_point, &NoAbort)
+        .expect("pnoise runs with underflowing contributions");
+    for (k, offset) in offsets.iter().enumerate() {
+        let values = periodic.contributors.iter().map(|(_, values)| values[k]);
+        assert!(
+            values
+                .clone()
+                .all(|value| value.is_finite() && value >= 0.0),
+            "pnoise contributions at {offset:e} Hz are finite and nonnegative"
+        );
+        assert!(values.clone().any(|value| value == 0.0));
+        assert!(
+            values
+                .clone()
+                .any(|value| value > 0.0 && value < f64::MIN_POSITIVE)
+        );
+        let sum: f64 = values.sum();
+        let total = periodic.output_noise[k];
+        assert!(
+            (total - sum).abs() <= 1.0e-14 * total,
+            "pnoise total at {offset:e} Hz is its contributions' sum: {total:e} vs {sum:e}"
+        );
+    }
+
+    // ngspice-46, `noise v(n20) V1 dec 1 1e3 1e4` on the same deck with
+    // `.options temp=27`, prints onoise_spectrum in V/sqrt(Hz).
+    let ngspice46 = [1.287480451403e-08, 1.287455292444e-08];
+    let stationary = engine
+        .run_noise_named_with_input_source_and_abort(
+            &netlist, &output, None, "V1", &offsets, T_REF, &NoAbort,
+        )
+        .expect(".noise runs with underflowing contributions");
+    for (point, oracle) in stationary.iter().zip(ngspice46) {
+        let frequency = point.frequency;
+        let contributions = point
+            .contributions
+            .iter()
+            .map(|contribution| contribution.output_contribution);
+        assert!(contributions.clone().any(|value| value == 0.0));
+        assert!(
+            point.contributions.iter().all(|contribution| {
+                contribution.output_contribution.is_finite()
+                    && contribution.output_contribution >= 0.0
+                    && contribution.input_contribution.is_finite()
+                    && contribution.percentage.is_finite()
+            }),
+            ".noise contributions at {frequency:e} Hz stay finite"
+        );
+        let sum: f64 = contributions.sum();
+        let total = point.output_noise_density;
+        assert!(
+            (total - sum).abs() <= 1.0e-14 * total,
+            ".noise total at {frequency:e} Hz is its contributions' sum: {total:e} vs {sum:e}"
+        );
+        assert!(point.input_referred_density.is_finite());
+        let expected = oracle * oracle;
+        // The oracle's thirteen printed digits fix its square to 8e-13.
+        assert!(
+            (total / expected - 1.0).abs() <= 2.0e-12,
+            ".noise total at {frequency:e} Hz matches ngspice-46: {total:.12e} vs {expected:.12e} V^2/Hz"
+        );
+    }
+}

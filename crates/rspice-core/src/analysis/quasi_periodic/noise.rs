@@ -23,7 +23,8 @@ use super::{
 };
 use crate::numerics::scaled_noise::{
     ScaledComplex, ScaledComplexAccumulator, scale_complex_component_exactly,
-    scaled_complex_product3, scaled_flicker_cross_term, validate_scaled_complex,
+    scaled_complex_product3, scaled_flicker_cross_term, subnormal_roundoff_floor,
+    validate_scaled_complex,
 };
 use crate::{
     Complex64, ResourceKind, ResourceLimitError, ResourceLimits, Value, abort_signal::AbortSignal,
@@ -428,9 +429,13 @@ fn sum_terms(
         return Ok((Complex64::ZERO, 0.0));
     };
     let mut sum = ScaledComplexAccumulator::new(common);
-    visit(&mut |term| sum.add(term).map_err(numerical))?;
+    visit(&mut |term| sum.add_bounded(term).map_err(numerical))?;
     let (mut value, absolute) = sum.finish().map_err(numerical)?;
-    let bound = absolute * (Value::EPSILON * 32.0 * count.max(1) as Value);
+    // A sum below binary64's normal range rounded to a subnormal or to zero;
+    // its bound must still cover that rounding.
+    let multiplier = 32.0 * count.max(1) as Value;
+    let bound = (absolute * (Value::EPSILON * multiplier))
+        .max(subnormal_roundoff_floor(absolute, multiplier));
     if !bound.is_finite() {
         return Err(numerical("noise accumulation roundoff bound overflowed"));
     }
