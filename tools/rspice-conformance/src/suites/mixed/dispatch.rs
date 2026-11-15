@@ -289,6 +289,16 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
         .iter()
         .map(|task| (task.instance_id, task.label.clone()))
         .collect();
+    // The workers standing idle; a worker runs one task at a time. The first
+    // is up before the case's budget starts: the browser starts its worker
+    // once, before any run, and loading the image and qualifying its JIT has
+    // its own allowance (`worker_host::STARTUP`), so a cell's budget is its
+    // run's whatever the machine's load does to that start.
+    let mut workers = match request.worker.map(worker_host::WorkerHost::start) {
+        None => Vec::new(),
+        Some(Ok(worker)) => vec![worker],
+        Some(Err(error)) => return result.failed(harness_error(error)),
+    };
     let abort = DeadlineAbort::new(Instant::now(), request.budget.as_millis());
     let mut input = HeadlessRunInput::new(&sealed.source, origin, tasks);
     input.resolver = HeadlessSourceResolver::Native {
@@ -309,12 +319,6 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
     let dispatch = match PreparedRunAuthorization::default().authorize_campaign_member(snapshot) {
         Ok(dispatch) => dispatch,
         Err(error) => return result.failed(harness_error(error)),
-    };
-    // The workers standing idle; a worker runs one task at a time.
-    let mut workers = match request.worker.map(worker_host::WorkerHost::start) {
-        None => Vec::new(),
-        Some(Ok(worker)) => vec![worker],
-        Some(Err(error)) => return result.failed(harness_error(error)),
     };
     // The runners standing idle. A study runs its tasks one after another on
     // one runner, and a runner keeps what one task leaves for the next: the
