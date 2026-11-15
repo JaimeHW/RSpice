@@ -3,6 +3,7 @@
 pub mod commands;
 pub mod inspector;
 pub mod interaction;
+pub mod pin_table;
 pub mod placement;
 pub mod session;
 pub mod surface;

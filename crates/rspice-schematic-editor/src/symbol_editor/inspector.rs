@@ -404,6 +404,26 @@ fn netlist_order_row(ui: &mut Ui, order: usize, total: usize) -> Option<usize> {
     (changed && picked != order && picked < total).then_some(picked)
 }
 
+/// Whether `candidate` can name the pin at netlist place `order`: not
+/// empty, short enough, free of control characters, and no other pin's name
+/// in any case.
+pub fn pin_name_accepted(document: &SymbolDocument, order: usize, candidate: &str) -> bool {
+    !candidate.is_empty()
+        && candidate.len() <= MAX_SYMBOL_PIN_NAME_BYTES
+        && !candidate.chars().any(char::is_control)
+        && document
+            .pins
+            .iter()
+            .enumerate()
+            .all(|(index, pin)| index == order || !pin.name.eq_ignore_ascii_case(candidate))
+}
+
+/// Whether a pin's lead can run `length` grid units from its tip toward the
+/// body; 0 leaves a bare connection point whose lead, if any, is artwork.
+pub const fn lead_length_accepted(length: i32) -> bool {
+    length >= 0
+}
+
 fn pin_section(
     ui: &mut Ui,
     edit: &mut InspectorEdit,
@@ -428,24 +448,15 @@ fn pin_section(
     section_header(ui, "Selected pin", Some(COORDINATE_UNIT));
 
     let mut changed = false;
-    if let Some(new_name) =
-        text_row(
-            ui,
-            edit,
-            &before,
-            ("pin-name", order),
-            "Name",
-            &current_name,
-            |candidate| {
-                !candidate.is_empty()
-                    && candidate.len() <= MAX_SYMBOL_PIN_NAME_BYTES
-                    && !candidate.chars().any(char::is_control)
-                    && document.pins.iter().enumerate().all(|(index, pin)| {
-                        index == order || !pin.name.eq_ignore_ascii_case(candidate)
-                    })
-            },
-        )
-    {
+    if let Some(new_name) = text_row(
+        ui,
+        edit,
+        &before,
+        ("pin-name", order),
+        "Name",
+        &current_name,
+        |candidate| pin_name_accepted(&before, order, candidate),
+    ) {
         // Declared, not inferred: the commit carries the old name so every
         // placed instance's terminal follows the pin instead of detaching
         // from a name that no longer exists.
@@ -520,9 +531,14 @@ fn pin_section(
     // How far the lead runs from the tip toward the body; 0 leaves a bare
     // connection point whose lead, if any, is artwork.
     let mut length = document.pins[order].length;
-    if integer_row(ui, edit, &before, "Lead length", &mut length, |length| {
-        length >= 0
-    }) {
+    if integer_row(
+        ui,
+        edit,
+        &before,
+        "Lead length",
+        &mut length,
+        lead_length_accepted,
+    ) {
         document.pins[order].length = length;
         changed = true;
     }
