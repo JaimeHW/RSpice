@@ -367,6 +367,18 @@ mod tests {
         .expect("fixture compilation seals into a prepared runtime")
     }
 
+    #[cfg(feature = "wasm-jit")]
+    /// The runtime's browser model, compiled as a run compiles it: from the
+    /// artifact the runtime's install holds.
+    fn compile_installed(
+        runtime: &PreparedVerilogARuntime,
+    ) -> Result<std::sync::Arc<rspice_veriloga::wasm_jit::WasmJitModelArtifact>, String> {
+        let installed =
+            crate::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])?
+                .install()?;
+        runtime.compile_wasm_jit_artifact(&installed)
+    }
+
     /// A module whose assignment pass has no steps exports no kernel for it,
     /// so `WasmJitModelArtifact::assignment_export` is `None` and the shared
     /// `WasmJitExecutable::run_assignments` — the same driver the browser
@@ -400,12 +412,11 @@ module rspice_one_assignment_probe(p, n);
 endmodule
 "#;
 
-        let empty = seal_runtime(
+        let empty = compile_installed(&seal_runtime(
             "no-assignment.va",
             "rspice_no_assignment_probe",
             NO_ASSIGNMENTS,
-        )
-        .compile_wasm_jit_artifact()
+        ))
         .expect("assignment-free module qualifies for the browser JIT");
         let empty = super::WasmJitWorkerArtifact::from_compiled(&empty);
         assert_eq!(
@@ -413,12 +424,11 @@ endmodule
             "a pass with no steps must cross the wire as an absence"
         );
 
-        let control = seal_runtime(
+        let control = compile_installed(&seal_runtime(
             "one-assignment.va",
             "rspice_one_assignment_probe",
             ONE_ASSIGNMENT,
-        )
-        .compile_wasm_jit_artifact()
+        ))
         .expect("single-assignment module qualifies for the browser JIT");
         let control = super::WasmJitWorkerArtifact::from_compiled(&control);
         assert_eq!(
@@ -446,12 +456,11 @@ endmodule
     #[cfg(feature = "wasm-jit")]
     #[test]
     fn a_bound_step_module_compiles_all_the_way_to_a_browser_worker_artifact() {
-        let artifact = seal_runtime(
+        let artifact = compile_installed(&seal_runtime(
             "bound-step.va",
             "rspice_bound_step_probe",
             BOUND_STEP_SOURCE,
-        )
-        .compile_wasm_jit_artifact()
+        ))
         .expect("a $bound_step module qualifies for the browser JIT");
         let artifact = super::WasmJitWorkerArtifact::from_compiled(&artifact);
         assert_eq!(
@@ -476,8 +485,7 @@ endmodule
             "rspice_infinite_constant_probe",
             INFINITE_CONSTANT_SOURCE,
         );
-        runtime
-            .compile_wasm_jit_artifact()
+        compile_installed(&runtime)
             .expect("a module with an infinite default qualifies for the browser JIT");
         let ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact = serde_json::from_str(
             serde_json::to_value(&runtime).unwrap()["canonical_ir_json"]
@@ -499,8 +507,7 @@ endmodule
 
     /// A run asks for each runtime's browser model before it starts, every
     /// time the project runs. The second ask, for the same sealed runtime,
-    /// is handed the model the first one compiled: nothing is parsed or
-    /// emitted again.
+    /// is handed the model the first one compiled: nothing is emitted again.
     #[cfg(feature = "wasm-jit")]
     #[test]
     fn a_runtime_asked_again_is_handed_the_browser_model_it_compiled() {
@@ -509,36 +516,45 @@ endmodule
             "rspice_bound_step_probe",
             BOUND_STEP_SOURCE,
         );
-        let first = runtime
-            .compile_wasm_jit_artifact()
-            .expect("the module qualifies for the browser JIT");
-        let second = runtime
-            .clone()
-            .compile_wasm_jit_artifact()
-            .expect("the module qualifies again");
+        let first = compile_installed(&runtime).expect("the module qualifies for the browser JIT");
+        let second = compile_installed(&runtime.clone()).expect("the module qualifies again");
         assert!(std::sync::Arc::ptr_eq(&first, &second));
     }
 
-    /// The kept model is found by the runtime's digest, but a payload that
-    /// no longer matches that digest is refused before the model is looked up.
+    /// A browser model is compiled from the artifact the runtime's install
+    /// holds and from nothing else: a runtime the run did not install has
+    /// none, and a payload its digest refuses installs nothing.
     #[cfg(feature = "wasm-jit")]
     #[test]
-    fn a_kept_browser_model_is_not_handed_to_a_payload_its_digest_refuses() {
+    fn a_browser_model_is_compiled_only_from_an_installed_artifact() {
         let runtime = seal_runtime(
+            "bound-step-uninstalled.va",
+            "rspice_bound_step_probe",
+            BOUND_STEP_SOURCE,
+        );
+        let nothing = crate::veriloga::PreparedVerilogARuntimeSet::default()
+            .install()
+            .expect("an empty set installs");
+        let refused = runtime
+            .compile_wasm_jit_artifact(&nothing)
+            .expect_err("an uninstalled runtime has no browser model");
+        assert!(refused.contains("not installed"), "{refused}");
+
+        let altered = seal_runtime(
             "bound-step-altered.va",
             "rspice_bound_step_probe",
             BOUND_STEP_SOURCE,
         );
-        runtime
-            .compile_wasm_jit_artifact()
-            .expect("the module qualifies for the browser JIT");
-        let mut altered = serde_json::to_value(&runtime).unwrap();
-        let model_json = format!("{} ", altered["model_json"].as_str().unwrap());
-        altered["model_json"] = serde_json::Value::String(model_json);
-        let altered: PreparedVerilogARuntime = serde_json::from_value(altered).unwrap();
-        let refused = altered
-            .compile_wasm_jit_artifact()
-            .expect_err("an altered payload does not qualify");
+        let mut set = serde_json::to_value(
+            crate::veriloga::PreparedVerilogARuntimeSet::try_new(vec![altered]).unwrap(),
+        )
+        .unwrap();
+        let model_json = &mut set["runtimes"][0]["model_json"];
+        *model_json = serde_json::Value::String(format!("{} ", model_json.as_str().unwrap()));
+        let set: crate::veriloga::PreparedVerilogARuntimeSet = serde_json::from_value(set).unwrap();
+        let refused = set
+            .install()
+            .expect_err("an altered payload does not install");
         assert!(refused.contains("digest"), "{refused}");
     }
 }

@@ -241,7 +241,8 @@ impl WorkerRequestTransport {
             dependency_buffer_count,
             op_previous_state,
         } = self.request;
-        request.project_veriloga_runtimes.validate()?;
+        // Each runtime's payload is checked when the run installs it.
+        request.project_veriloga_runtimes.check_structure()?;
         request
             .measurement_references
             .validate_source(&request.netlist)?;

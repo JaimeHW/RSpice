@@ -617,16 +617,55 @@ fn installing_an_edited_module_leaves_each_deck_the_runtime_it_names() {
     }
 }
 
-/// The digest an artifact had before its min:typ:max selection joined its
-/// identity: `rspice.project-veriloga-runtime/v2` over its six fields, each
-/// length-prefixed, and the cell table it names, if any.
-fn digest_before_the_selection(
+/// A session runs one project again and again, and each run installs its
+/// runtimes. The first install checks and parses the payloads; a later one
+/// reads neither, holding the artifact the first one parsed by the key and
+/// the fingerprint the runtime was sealed with, so a request whose payloads
+/// were emptied in transit runs that same artifact.
+#[test]
+fn a_second_install_holds_the_installed_artifact_without_reading_its_payloads() {
+    let runtime = seal_runtime(
+        "installed-twice.va",
+        "installed_twice",
+        "`include \"disciplines.vams\"\nmodule installed_twice(p, n);\n  inout p, n;\n  \
+         electrical p, n;\n  analog I(p, n) <+ 1.0e-3 * V(p, n);\nendmodule\n",
+    );
+    let key = std::path::Path::new(runtime.source_key());
+    let set = super::PreparedVerilogARuntimeSet::try_new(vec![runtime.clone()])
+        .expect("one runtime is a set");
+    let first = set
+        .install()
+        .expect("the first install parses the payloads");
+    let (model, _) = first.runtime_artifact(key).expect("the install holds it");
+    drop(first);
+
+    let mut emptied = serde_json::to_value(&set).expect("encode the set");
+    emptied["runtimes"][0]["model_json"] = serde_json::Value::String(String::new());
+    emptied["runtimes"][0]["canonical_ir_json"] = serde_json::Value::String(String::new());
+    let emptied: super::PreparedVerilogARuntimeSet =
+        serde_json::from_value(emptied).expect("decode the emptied set");
+    let second = emptied
+        .install()
+        .expect("the installed artifact is held by its identity");
+    let (again, _) = second
+        .runtime_artifact(key)
+        .expect("the second install holds it");
+    assert!(
+        std::sync::Arc::ptr_eq(&model, &again),
+        "the artifact the first install parsed"
+    );
+}
+
+/// The digest of an artifact that names no min:typ:max selection:
+/// `rspice.project-veriloga-runtime/v3` over its seven fields, each
+/// length-prefixed, and nothing after them.
+fn digest_without_a_selection(
     runtime: &PreparedVerilogARuntime,
 ) -> rspice_vocabulary::product::ContentDigest {
     use sha2::{Digest as _, Sha256};
     assert!(runtime.external_cells.is_none(), "a fixture without leaves");
     let mut hasher = Sha256::new();
-    hasher.update(b"rspice.project-veriloga-runtime/v2\0");
+    hasher.update(b"rspice.project-veriloga-runtime/v3\0");
     for bytes in [
         runtime.source_key.as_bytes(),
         runtime.source_digest.as_bytes(),
@@ -634,6 +673,7 @@ fn digest_before_the_selection(
         runtime.netlist_alias.as_bytes(),
         runtime.model_json.as_bytes(),
         runtime.canonical_ir_json.as_bytes(),
+        runtime.artifact_fingerprint.as_bytes(),
     ] {
         hasher.update((bytes.len() as u64).to_le_bytes());
         hasher.update(bytes);
@@ -676,11 +716,10 @@ fn seal_held(
     .expect("fixture compilation seals into a prepared runtime")
 }
 
-/// A typical artifact keeps the digest and the bytes it had before the
-/// selection joined its identity, so artifacts sealed before stay valid; the
-/// digest of a fixed payload is pinned to the value it had then.
+/// A typical artifact names no selection, in its digest or in its bytes, and
+/// the digest of a fixed payload is pinned.
 #[test]
-fn a_typical_artifact_keeps_the_digest_and_bytes_it_had() {
+fn a_typical_artifact_names_no_selection() {
     use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
     let pinned = super::runtime_artifact_digest(
         "__rspice_project__/fixture/held.va",
@@ -689,18 +728,19 @@ fn a_typical_artifact_keeps_the_digest_and_bytes_it_had() {
         "HELD",
         "{\"model\":1}",
         "{\"ir\":1}",
+        rspice_vocabulary::product::ContentDigest::from_bytes([0xa5; 32]),
         None,
         DigitalDelaySelect::Typ,
     );
     assert_eq!(
         pinned.to_string(),
-        "6515661f6015bacf1b8fd9b06f1da25f9aeff3716769438ecd0e8bd8d59c4fa6"
+        "fda865b4be20bedcb2c3c518d137b3d8ff7d9b715a765d434e3bf1c79b8e75a1"
     );
 
     let typical = seal_held(DigitalDelaySelect::Typ);
     assert_eq!(
         typical.artifact_digest(),
-        digest_before_the_selection(&typical)
+        digest_without_a_selection(&typical)
     );
     let json = serde_json::to_string(&typical).expect("encode the artifact");
     assert!(!json.contains("delay_select"), "{json}");
@@ -729,6 +769,7 @@ fn each_selection_seals_an_artifact_of_its_own() {
             "HELD",
             "{\"model\":1}",
             "{\"ir\":1}",
+            rspice_vocabulary::product::ContentDigest::from_bytes([0xa5; 32]),
             None,
             delay_select,
         )

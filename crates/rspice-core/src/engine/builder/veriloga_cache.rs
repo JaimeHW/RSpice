@@ -788,6 +788,12 @@ pub(super) struct CachedVerilogAModel {
     pub(super) canonical_ir:
         Option<std::sync::Arc<rspice_veriloga::canonical_ir::CanonicalIrArtifact>>,
     pub(super) diagnostics: std::sync::Arc<[rspice_veriloga::SourceCompileDiagnostic]>,
+    /// The artifact's fingerprint ([`runtime_artifact_fingerprint`]), taken
+    /// once: a sealed runtime arrives with the one it was sealed with, and
+    /// anything else takes it the first time it is compared. Every install
+    /// compares each sealed entry the cache holds, so recomputing it there
+    /// re-serialized every installed model on every run.
+    pub(super) artifact_fingerprint: std::sync::OnceLock<[u8; 32]>,
 }
 
 #[cfg(feature = "veriloga")]
@@ -806,10 +812,16 @@ impl CachedVerilogAModel {
         if std::sync::Arc::ptr_eq(&self.model, &other.model) && same_canonical {
             return Ok(true);
         }
-        Ok(
-            runtime_artifact_fingerprint(&self.model, self.canonical_ir.as_deref())?
-                == runtime_artifact_fingerprint(&other.model, other.canonical_ir.as_deref())?,
-        )
+        Ok(self.artifact_fingerprint()? == other.artifact_fingerprint()?)
+    }
+
+    /// [`Self::artifact_fingerprint`]'s value, computed at most once.
+    pub(super) fn artifact_fingerprint(&self) -> Result<[u8; 32], String> {
+        if let Some(fingerprint) = self.artifact_fingerprint.get() {
+            return Ok(*fingerprint);
+        }
+        let fingerprint = runtime_artifact_fingerprint(&self.model, self.canonical_ir.as_deref())?;
+        Ok(*self.artifact_fingerprint.get_or_init(|| fingerprint))
     }
 }
 
@@ -836,9 +848,7 @@ impl CachedVerilogASource {
 
     fn artifact_fingerprint(&self) -> Result<[u8; 32], String> {
         match self {
-            Self::Runtime(model) => {
-                runtime_artifact_fingerprint(&model.model, model.canonical_ir.as_deref())
-            }
+            Self::Runtime(model) => model.artifact_fingerprint(),
             Self::Connections(library) => Ok(*library.identity()),
         }
     }
@@ -2372,6 +2382,7 @@ fn load_model_from_disk_at_with_limits(
             model: std::sync::Arc::new(record.model),
             canonical_ir: record.canonical_ir.map(std::sync::Arc::new),
             diagnostics: record.diagnostics.into(),
+            artifact_fingerprint: Default::default(),
         },
         encoded_bytes,
     }))
@@ -2526,24 +2537,27 @@ impl DeckHdl {
     /// The identity of the cell table a record's key names: `None` for no
     /// cells at all, so a deck without any reads the records it always did.
     fn cells_identity(&self) -> Option<[u8; 32]> {
-        let cells = self
-            .external_cells
-            .as_deref()
-            .filter(|cells| !cells.is_empty())?;
-        let mut hasher = blake3::Hasher::new();
-        let mut field = |text: &str| {
-            hasher.update(&(text.len() as u64).to_le_bytes());
-            hasher.update(text.as_bytes());
-        };
-        for cell in cells {
-            field(&cell.name);
-            for names in [&cell.ports, &cell.parameters] {
-                field(&names.len().to_string());
-                names.iter().for_each(|name| field(name));
-            }
-        }
-        Some(*hasher.finalize().as_bytes())
+        cells_table_identity(self.external_cells.as_deref().map(Vec::as_slice))
     }
+}
+
+/// [`DeckHdl::cells_identity`] of a deck offering `cells`.
+#[cfg(feature = "veriloga")]
+fn cells_table_identity(cells: Option<&[rspice_veriloga::ExternalCell]>) -> Option<[u8; 32]> {
+    let cells = cells.filter(|cells| !cells.is_empty())?;
+    let mut hasher = blake3::Hasher::new();
+    let mut field = |text: &str| {
+        hasher.update(&(text.len() as u64).to_le_bytes());
+        hasher.update(text.as_bytes());
+    };
+    for cell in cells {
+        field(&cell.name);
+        for names in [&cell.ports, &cell.parameters] {
+            field(&names.len().to_string());
+            names.iter().for_each(|name| field(name));
+        }
+    }
+    Some(*hasher.finalize().as_bytes())
 }
 
 #[cfg(feature = "veriloga")]
@@ -3281,6 +3295,7 @@ pub(super) fn compile_and_cache_prepared_with_connections(
         model: std::sync::Arc::new(compiled.model),
         canonical_ir: Some(std::sync::Arc::new(compiled.canonical_ir)),
         diagnostics: compiled.diagnostics.into(),
+        artifact_fingerprint: Default::default(),
     };
 
     check_build_abort(abort)?;
@@ -3355,6 +3370,7 @@ fn register_precompiled_veriloga_entry_with_dependencies(
         model: std::sync::Arc::new(model),
         canonical_ir: canonical_ir.map(std::sync::Arc::new),
         diagnostics: Vec::new().into(),
+        artifact_fingerprint: Default::default(),
     };
 
     retain_veriloga_model(
@@ -3447,6 +3463,13 @@ pub struct ProjectVerilogAConnectionLibraryRegistration {
 )]
 pub enum ProjectVerilogASourceRegistration {
     Runtime(ProjectVerilogARuntimeRegistration),
+    /// A runtime and the fingerprint its artifact was sealed with
+    /// ([`sealed_veriloga_artifact_fingerprint`]), which the install takes
+    /// instead of serializing the model to compute it.
+    Sealed {
+        runtime: ProjectVerilogARuntimeRegistration,
+        artifact_fingerprint: [u8; 32],
+    },
     Connections(ProjectVerilogAConnectionLibraryRegistration),
 }
 
@@ -3502,6 +3525,23 @@ fn runtime_artifact_fingerprint(
     serde_json::to_writer(&mut writer, &(model, canonical_ir))
         .map_err(|error| format!("failed to fingerprint Verilog-A runtime artifact: {error}"))?;
     Ok(*writer.0.finalize().as_bytes())
+}
+
+/// The fingerprint an install compares a sealed runtime's artifact by, taken
+/// from the text it was sealed as: `model_json` and `canonical_ir_json`, the
+/// model and canonical IR as `serde_json` writes them. They are hashed as the
+/// one JSON array the fingerprint serializes, so this is the fingerprint the
+/// parsed artifact gets, without parsing or writing it again. A sealer takes
+/// it once and carries it with the artifact.
+#[cfg(feature = "veriloga")]
+pub fn sealed_veriloga_artifact_fingerprint(model_json: &str, canonical_ir_json: &str) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"[");
+    hasher.update(model_json.as_bytes());
+    hasher.update(b",");
+    hasher.update(canonical_ir_json.as_bytes());
+    hasher.update(b"]");
+    *hasher.finalize().as_bytes()
 }
 
 #[cfg(feature = "veriloga")]
@@ -3560,6 +3600,7 @@ fn validate_project_runtime_alias(alias: &str) -> Result<String, String> {
 #[cfg(feature = "veriloga")]
 fn prepare_project_veriloga_registration(
     registration: ProjectVerilogARuntimeRegistration,
+    sealed_fingerprint: Option<[u8; 32]>,
 ) -> Result<PreparedProjectVerilogARegistration, String> {
     let (key, folded_key, authority_scope) =
         validate_sealed_runtime_source_key(&registration.source_key)?;
@@ -3586,8 +3627,12 @@ fn prepare_project_veriloga_registration(
     for alias in registration.aliases {
         aliases.insert(validate_project_runtime_alias(&alias)?);
     }
-    let artifact_fingerprint =
-        runtime_artifact_fingerprint(&registration.model, Some(&registration.canonical_ir))?;
+    let artifact_fingerprint = match sealed_fingerprint {
+        Some(fingerprint) => fingerprint,
+        None => {
+            runtime_artifact_fingerprint(&registration.model, Some(&registration.canonical_ir))?
+        }
+    };
     Ok(PreparedProjectVerilogARegistration {
         key,
         folded_key,
@@ -3601,6 +3646,7 @@ fn prepare_project_veriloga_registration(
             model: std::sync::Arc::new(registration.model),
             canonical_ir: Some(std::sync::Arc::new(registration.canonical_ir)),
             diagnostics: Vec::new().into(),
+            artifact_fingerprint: artifact_fingerprint.into(),
         }),
     })
 }
@@ -3656,6 +3702,93 @@ pub fn hold_project_veriloga_sources_for_session(
     install_project_veriloga_sources(registrations, limits).map(|keys| HeldVerilogASources { keys })
 }
 
+/// A sealed runtime named by its identity alone: the source key it installs
+/// under, the cell table and min:typ:max selection it was compiled for, and
+/// the fingerprint it was sealed with.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, Copy)]
+pub struct InstalledProjectVerilogARuntime<'a> {
+    pub source_key: &'a Path,
+    pub external_cells: Option<&'a [rspice_veriloga::ExternalCell]>,
+    pub delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
+    pub artifact_fingerprint: [u8; 32],
+}
+
+/// Hold, as [`hold_project_veriloga_sources_for_session`] does, the sealed
+/// runtimes `runtimes` names when the cache already holds every one under its
+/// key with its fingerprint, as an earlier install of them left it: `None`
+/// when one is missing, and nothing is held then.
+///
+/// A session runs one project again and again, and each run installs its
+/// runtimes before it builds. An install parses each payload, checks the
+/// artifact pair and compares it with every sealed entry; an artifact the
+/// cache already holds identically needs none of that, so the caller tries
+/// this first and installs the payloads only when it answers `None`. The
+/// caller has checked the set itself: its keys are distinct and each alias
+/// names one artifact.
+#[cfg(feature = "veriloga")]
+pub fn hold_installed_project_veriloga_runtimes<'a>(
+    runtimes: impl IntoIterator<Item = InstalledProjectVerilogARuntime<'a>>,
+) -> Result<Option<HeldVerilogASources>, String> {
+    let mut wanted = Vec::new();
+    for runtime in runtimes {
+        let (key, _, _) = validate_sealed_runtime_source_key(runtime.source_key)?;
+        let mut cache_key = VerilogASourceKey::new(&key, None);
+        cache_key.external_cells = cells_table_identity(runtime.external_cells);
+        cache_key.delay_select = runtime.delay_select;
+        wanted.push((cache_key, runtime.artifact_fingerprint));
+    }
+    let mut cache = veriloga_source_cache()
+        .write()
+        .map_err(|_| "failed to acquire Verilog-A cache lock".to_owned())?;
+    for (key, fingerprint) in &wanted {
+        let installed = match cache.get(key) {
+            Some(CachedVerilogASource::Runtime(entry)) => entry.artifact_fingerprint()?,
+            _ => return Ok(None),
+        };
+        if installed != *fingerprint {
+            return Ok(None);
+        }
+    }
+    let keys = wanted
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect::<Vec<VerilogASourceKey>>();
+    for key in &keys {
+        cache.hold(key);
+    }
+    Ok(Some(HeldVerilogASources { keys }))
+}
+
+#[cfg(feature = "veriloga")]
+impl HeldVerilogASources {
+    /// The compiled model and canonical IR held under the sealed `source_key`:
+    /// the artifact its install checked, for a caller that needs the parsed
+    /// artifact again in the same session without its payload.
+    pub fn runtime_artifact(
+        &self,
+        source_key: &Path,
+    ) -> Option<(
+        std::sync::Arc<rspice_veriloga::CompiledModel>,
+        std::sync::Arc<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
+    )> {
+        let (key, _, _) = validate_sealed_runtime_source_key(source_key).ok()?;
+        let cache = veriloga_source_cache()
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.keys
+            .iter()
+            .filter(|held| held.source_path == key)
+            .find_map(|held| match cache.get(held) {
+                Some(CachedVerilogASource::Runtime(entry)) => Some((
+                    std::sync::Arc::clone(&entry.model),
+                    std::sync::Arc::clone(entry.canonical_ir.as_ref()?),
+                )),
+                _ => None,
+            })
+    }
+}
+
 /// Install the set in one transaction under the cache lock, holding each
 /// installed key before the lock is released, so no other install can evict
 /// it in between. Returns the held keys.
@@ -3669,8 +3802,12 @@ fn install_project_veriloga_sources(
     for registration in registrations {
         let prepared = match registration {
             ProjectVerilogASourceRegistration::Runtime(runtime) => {
-                prepare_project_veriloga_registration(runtime)?
+                prepare_project_veriloga_registration(runtime, None)?
             }
+            ProjectVerilogASourceRegistration::Sealed {
+                runtime,
+                artifact_fingerprint,
+            } => prepare_project_veriloga_registration(runtime, Some(artifact_fingerprint))?,
             ProjectVerilogASourceRegistration::Connections(library) => {
                 let (key, folded_key, authority_scope) =
                     validate_sealed_runtime_source_key(&library.source_key)?;
@@ -3932,6 +4069,7 @@ endmodule
             model: std::sync::Arc::new(runtime.model),
             canonical_ir: Some(std::sync::Arc::new(runtime.canonical_ir)),
             diagnostics: runtime.diagnostics.into(),
+            artifact_fingerprint: Default::default(),
         }
     }
 
@@ -4043,6 +4181,7 @@ endmodule
             model: std::sync::Arc::new(report.model),
             canonical_ir: Some(std::sync::Arc::new(report.canonical_ir)),
             diagnostics: report.diagnostics.into(),
+            artifact_fingerprint: Default::default(),
         };
         persist_model_to_disk_at_with_limits(&key, &entry, &root, ResourceLimits::default())
             .unwrap();
@@ -4092,6 +4231,7 @@ endmodule
                 model: std::sync::Arc::new(report.model),
                 canonical_ir: Some(std::sync::Arc::new(report.canonical_ir)),
                 diagnostics: report.diagnostics.into(),
+                artifact_fingerprint: Default::default(),
             };
             persist_model_to_disk_at_with_limits(key, &entry, &root, ResourceLimits::default())
                 .unwrap();
@@ -4188,6 +4328,7 @@ endmodule
                 model: std::sync::Arc::new(report.model),
                 canonical_ir: Some(std::sync::Arc::new(report.canonical_ir)),
                 diagnostics: report.diagnostics.into(),
+                artifact_fingerprint: Default::default(),
             };
             fingerprints.push(
                 runtime_artifact_fingerprint(&entry.model, entry.canonical_ir.as_deref()).unwrap(),
@@ -4260,6 +4401,91 @@ endmodule
             external_cells: None,
             delay_select: Default::default(),
         }
+    }
+
+    /// The fingerprint taken from the sealed text is the one the parsed
+    /// artifact has, and an install of the runtime under it lets a later run
+    /// hold the same artifact by its identity alone, without its payload.
+    #[test]
+    fn a_runtime_installed_with_its_sealed_fingerprint_is_held_again_by_identity() {
+        let key = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-0000000000b1/digest/sealed.va",
+        );
+        let other = PathBuf::from(
+            "__rspice_project__/00000000-0000-0000-0000-0000000000b2/digest/sealed.va",
+        );
+        let registration = project_registration(&key, "sealed_conductance", &[]);
+        let model_json = serde_json::to_string(&registration.model).unwrap();
+        let canonical_ir_json = serde_json::to_string(&registration.canonical_ir).unwrap();
+        let fingerprint = sealed_veriloga_artifact_fingerprint(&model_json, &canonical_ir_json);
+        assert_eq!(
+            fingerprint,
+            runtime_artifact_fingerprint(&registration.model, Some(&registration.canonical_ir))
+                .unwrap(),
+            "the sealed text hashes as the artifact serializes"
+        );
+        fn identity(
+            source_key: &Path,
+            artifact_fingerprint: [u8; 32],
+        ) -> InstalledProjectVerilogARuntime<'_> {
+            InstalledProjectVerilogARuntime {
+                source_key,
+                external_cells: None,
+                delay_select: Default::default(),
+                artifact_fingerprint,
+            }
+        }
+        remove_project_runtime_keys(&[key.as_path(), other.as_path()]);
+        assert!(
+            hold_installed_project_veriloga_runtimes([identity(&key, fingerprint)])
+                .unwrap()
+                .is_none(),
+            "nothing is held before the install"
+        );
+
+        let installed = hold_project_veriloga_sources_for_session(
+            [ProjectVerilogASourceRegistration::Sealed {
+                runtime: registration,
+                artifact_fingerprint: fingerprint,
+            }],
+            ResourceLimits::default(),
+        )
+        .expect("the sealed runtime installs");
+        let (model, _) = installed
+            .runtime_artifact(&key)
+            .expect("its artifact is held");
+        drop(installed);
+
+        let held = hold_installed_project_veriloga_runtimes([identity(&key, fingerprint)])
+            .unwrap()
+            .expect("the installed artifact is held again by identity");
+        let (again, canonical_ir) = held.runtime_artifact(&key).expect("held artifact");
+        assert!(
+            std::sync::Arc::ptr_eq(&model, &again),
+            "the very artifact installed"
+        );
+        assert_eq!(canonical_ir.hir.module_name.as_str(), "sealed_conductance");
+        assert!(held.runtime_artifact(&other).is_none());
+        drop(held);
+
+        let mut differing = fingerprint;
+        differing[0] ^= 1;
+        assert!(
+            hold_installed_project_veriloga_runtimes([identity(&key, differing)])
+                .unwrap()
+                .is_none(),
+            "another fingerprint is another artifact"
+        );
+        assert!(
+            hold_installed_project_veriloga_runtimes([
+                identity(&key, fingerprint),
+                identity(&other, fingerprint),
+            ])
+            .unwrap()
+            .is_none(),
+            "a set with one runtime missing holds none of it"
+        );
+        remove_project_runtime_keys(&[key.as_path(), other.as_path()]);
     }
 
     fn remove_project_runtime_keys(keys: &[&Path]) {
@@ -4737,6 +4963,7 @@ endmodule
                 model: std::sync::Arc::new(other.model),
                 canonical_ir: Some(std::sync::Arc::new(other.canonical_ir)),
                 diagnostics: std::sync::Arc::from([]),
+                artifact_fingerprint: Default::default(),
             },
             1,
             usize::MAX,
@@ -4897,7 +5124,7 @@ endmodule
             .expect("install stable runtime");
 
         let candidate = project_registration(&candidate_key, "resource_candidate", &[]);
-        let prepared = prepare_project_veriloga_registration(candidate.clone())
+        let prepared = prepare_project_veriloga_registration(candidate.clone(), None)
             .expect("prepare candidate runtime");
         let required = veriloga_source_cache_entry_bytes(
             &VerilogASourceKey::new(&prepared.key, None),

@@ -80,6 +80,12 @@ pub struct PreparedVerilogARuntime {
     netlist_alias: String,
     model_json: String,
     canonical_ir_json: String,
+    /// The fingerprint the engine compares installed artifacts by
+    /// ([`rspice_core::sealed_veriloga_artifact_fingerprint`]), taken from the
+    /// two payloads once when they are sealed and covered by the digest. An
+    /// install takes it rather than computing it, and holds an artifact the
+    /// engine already has under it without reading either payload.
+    artifact_fingerprint: rspice_vocabulary::product::ContentDigest,
     /// The cell table the artifact was compiled against, when its design
     /// instantiates SPICE cells as leaves: part of its identity, and of the
     /// key the engine installs it under, so it builds only for a deck that
@@ -100,18 +106,20 @@ fn is_typical(delay_select: &DigitalDelaySelect) -> bool {
 }
 
 impl PreparedVerilogARuntime {
-    /// The runtime's browser JIT model, compiled once per worker session.
+    /// The runtime's browser JIT model, compiled once per worker session from
+    /// the artifact `installed` holds for it: the set's install checked and
+    /// parsed the payload, and the devices build on that same artifact.
     ///
     /// A run asks for every runtime's model before it starts, and the same
     /// project runs again and again: the model is kept by the runtime's sealed
-    /// artifact digest, so a later run checks the payload against its digest
-    /// and parses and emits nothing. The first run's emission is the one its
-    /// devices take ([`rspice_veriloga::wasm_jit::cached_browser_model`]). A
-    /// refusal is kept the same way. As many models are kept as the worker's
-    /// registry holds.
+    /// artifact digest, so a later run emits nothing. The first run's emission
+    /// is the one its devices take
+    /// ([`rspice_veriloga::wasm_jit::cached_browser_model`]). A refusal is kept
+    /// the same way. As many models are kept as the worker's registry holds.
     #[cfg(feature = "wasm-jit")]
     pub fn compile_wasm_jit_artifact(
         &self,
+        installed: &rspice_core::HeldVerilogASources,
     ) -> Result<std::sync::Arc<rspice_veriloga::wasm_jit::WasmJitModelArtifact>, String> {
         use std::cell::RefCell;
         use std::sync::Arc;
@@ -123,7 +131,6 @@ impl PreparedVerilogARuntime {
                 const { RefCell::new(Vec::new()) };
         }
 
-        self.verify_payload_digest()?;
         let kept = COMPILED.with(|compiled| {
             let mut compiled = compiled.borrow_mut();
             let index = compiled
@@ -137,9 +144,15 @@ impl PreparedVerilogARuntime {
         if let Some(kept) = kept {
             return kept;
         }
-        let result = self.parsed().and_then(|(model, canonical_ir)| {
-            rspice_veriloga::wasm_jit::cached_browser_model(&Arc::new(model), &canonical_ir)
-        });
+        let (model, canonical_ir) = installed
+            .runtime_artifact(std::path::Path::new(&self.source_key))
+            .ok_or_else(|| {
+                format!(
+                    "Verilog-A runtime '{}' is not installed for this run",
+                    self.netlist_alias
+                )
+            })?;
+        let result = rspice_veriloga::wasm_jit::cached_browser_model(&model, &canonical_ir);
         COMPILED.with(|compiled| {
             let mut compiled = compiled.borrow_mut();
             compiled.insert(0, (self.artifact_digest, result.clone()));
@@ -211,6 +224,9 @@ impl PreparedVerilogARuntime {
     ) -> Result<Self, PreparedRuntimeError> {
         let model_json = seal_compiled_model(&report.model)?;
         let canonical_ir_json = seal_canonical_ir(&report.canonical_ir)?;
+        let artifact_fingerprint = rspice_vocabulary::product::ContentDigest::from_bytes(
+            rspice_core::sealed_veriloga_artifact_fingerprint(&model_json, &canonical_ir_json),
+        );
         let external_cells = cells
             .filter(|_| !report.canonical_ir.hir.external_leaves.is_empty())
             .map(<[_]>::to_vec);
@@ -221,6 +237,7 @@ impl PreparedVerilogARuntime {
             &netlist_alias,
             &model_json,
             &canonical_ir_json,
+            artifact_fingerprint,
             external_cells.as_deref(),
             delay_select,
         );
@@ -232,6 +249,7 @@ impl PreparedVerilogARuntime {
             netlist_alias,
             model_json,
             canonical_ir_json,
+            artifact_fingerprint,
             external_cells,
             delay_select,
         };
@@ -274,13 +292,36 @@ impl PreparedVerilogARuntime {
         })
     }
 
+    /// The registration an install hands the engine: the payloads checked
+    /// against the digest and parsed once each, with the fingerprint they were
+    /// sealed with.
+    fn sealed_registration(
+        &self,
+    ) -> Result<rspice_core::ProjectVerilogASourceRegistration, String> {
+        Ok(rspice_core::ProjectVerilogASourceRegistration::Sealed {
+            runtime: self.registration()?,
+            artifact_fingerprint: *self.artifact_fingerprint.as_bytes(),
+        })
+    }
+
+    /// What the engine knows an installed artifact by: its key, its cell table
+    /// and selection, and its fingerprint.
+    fn installed_identity(&self) -> rspice_core::InstalledProjectVerilogARuntime<'_> {
+        rspice_core::InstalledProjectVerilogARuntime {
+            source_key: std::path::Path::new(&self.source_key),
+            external_cells: self.external_cells.as_deref(),
+            delay_select: self.delay_select,
+            artifact_fingerprint: *self.artifact_fingerprint.as_bytes(),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         self.parsed().map(|_| ())
     }
 
-    /// The identity checks and the payload digest, without parsing either
-    /// payload.
-    fn verify_payload_digest(&self) -> Result<(), String> {
+    /// The source key, module and alias are well formed: the checks that need
+    /// neither payload.
+    fn check_identity(&self) -> Result<(), String> {
         if !valid_sealed_source_key(&self.source_key) {
             return Err("Verilog-A runtime has an invalid sealed virtual source key".to_owned());
         }
@@ -290,6 +331,13 @@ impl PreparedVerilogARuntime {
         if !valid_veriloga_netlist_identifier(&self.netlist_alias) {
             return Err("Verilog-A runtime has an invalid netlist alias".to_owned());
         }
+        Ok(())
+    }
+
+    /// The identity checks and the payload digest, without parsing either
+    /// payload.
+    fn verify_payload_digest(&self) -> Result<(), String> {
+        self.check_identity()?;
         let expected = runtime_artifact_digest(
             &self.source_key,
             self.source_digest,
@@ -297,6 +345,7 @@ impl PreparedVerilogARuntime {
             &self.netlist_alias,
             &self.model_json,
             &self.canonical_ir_json,
+            self.artifact_fingerprint,
             self.external_cells.as_deref(),
             self.delay_select,
         );
@@ -459,6 +508,20 @@ impl PreparedVerilogARuntimeSet {
         for runtime in &self.runtimes {
             runtime.validate()?;
         }
+        self.check_structure()
+    }
+
+    /// Everything [`Self::validate`] checks but the runtimes' payloads: each
+    /// source's identity, the keys and aliases across the set, and its order.
+    ///
+    /// A runtime's payload is checked against its digest and parsed by the
+    /// install that first hands it to the engine ([`Self::install`]), and by
+    /// nothing before: a worker decodes the same project's request run after
+    /// run, and reading every payload there was a fixed cost of each run.
+    pub(crate) fn check_structure(&self) -> Result<(), String> {
+        for runtime in &self.runtimes {
+            runtime.check_identity()?;
+        }
         for library in &self.connections {
             library.validate()?;
         }
@@ -529,16 +592,28 @@ impl PreparedVerilogARuntimeSet {
     /// sealed source the shared cache evicted is not compiled again, so a
     /// build after the eviction fails. While held, another execution's
     /// install that could only fit by evicting one is refused instead.
+    ///
+    /// A session runs one project again and again. When the engine already
+    /// holds every runtime under its key with the fingerprint it was sealed
+    /// with, as the first run's install left it, they are held as they are,
+    /// and no payload is hashed or parsed. Otherwise each payload is checked
+    /// against its digest and parsed once, and the engine takes the sealed
+    /// fingerprint rather than computing it.
     pub fn install(&self) -> Result<rspice_core::HeldVerilogASources, String> {
-        self.validate()?;
+        self.check_structure()?;
+        if self.connections.is_empty()
+            && let Some(held) = rspice_core::hold_installed_project_veriloga_runtimes(
+                self.runtimes
+                    .iter()
+                    .map(PreparedVerilogARuntime::installed_identity),
+            )?
+        {
+            return Ok(held);
+        }
         let registrations = self
             .runtimes
             .iter()
-            .map(|runtime| {
-                runtime
-                    .registration()
-                    .map(rspice_core::ProjectVerilogASourceRegistration::Runtime)
-            })
+            .map(PreparedVerilogARuntime::sealed_registration)
             .chain(
                 self.connections
                     .iter()
@@ -924,11 +999,12 @@ fn runtime_artifact_digest(
     netlist_alias: &str,
     model_json: &str,
     canonical_ir_json: &str,
+    artifact_fingerprint: rspice_vocabulary::product::ContentDigest,
     external_cells: Option<&[rspice_veriloga::ExternalCell]>,
     delay_select: DigitalDelaySelect,
 ) -> rspice_vocabulary::product::ContentDigest {
     let mut hasher = Sha256::new();
-    hasher.update(b"rspice.project-veriloga-runtime/v2\0");
+    hasher.update(b"rspice.project-veriloga-runtime/v3\0");
     let mut field = |bytes: &[u8]| {
         hasher.update((bytes.len() as u64).to_le_bytes());
         hasher.update(bytes);
@@ -940,6 +1016,7 @@ fn runtime_artifact_digest(
         netlist_alias.as_bytes(),
         model_json.as_bytes(),
         canonical_ir_json.as_bytes(),
+        artifact_fingerprint.as_bytes(),
     ] {
         field(bytes);
     }

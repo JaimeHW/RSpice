@@ -163,11 +163,13 @@ pub use engine::{
 };
 #[cfg(feature = "veriloga")]
 pub use engine::{
-    HeldVerilogASources, ProjectVerilogAConnectionLibraryRegistration,
-    ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration, VerilogACacheTelemetry,
-    hold_project_veriloga_sources_for_session, register_precompiled_veriloga_model,
-    register_precompiled_veriloga_model_with_dependencies,
-    register_precompiled_veriloga_runtime_with_dependencies, veriloga_cache_telemetry,
+    HeldVerilogASources, InstalledProjectVerilogARuntime,
+    ProjectVerilogAConnectionLibraryRegistration, ProjectVerilogARuntimeRegistration,
+    ProjectVerilogASourceRegistration, VerilogACacheTelemetry,
+    hold_installed_project_veriloga_runtimes, hold_project_veriloga_sources_for_session,
+    register_precompiled_veriloga_model, register_precompiled_veriloga_model_with_dependencies,
+    register_precompiled_veriloga_runtime_with_dependencies, sealed_veriloga_artifact_fingerprint,
+    veriloga_cache_telemetry,
 };
 pub use netlist::Netlist;
 pub use resource::{ResourceKind, ResourceLimitError, ResourceLimits};

@@ -531,6 +531,9 @@ struct PendingWasmJitRequest {
     /// The cache key of each JIT model the preparation handed the worker to
     /// install: the models the run may build devices on.
     installed: std::collections::HashSet<String>,
+    /// The run's sources, installed by the preparation and held until the run
+    /// ends, so the run's own install finds every one where it left them.
+    _sources: Option<rspice_core::HeldVerilogASources>,
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
@@ -604,8 +607,14 @@ pub fn prepare_wasm_jit_request_value(
         errors: Vec::new(),
     };
     let mut unqualified = Vec::new();
+    // Installed once for the whole preparation: the install checks and parses
+    // each payload the engine does not already hold, every model is compiled
+    // from the artifact it holds, and the build below reads the same sources.
+    // A set that does not install is answered by the run's own install.
+    let sources = request.project_veriloga_runtimes.install().ok();
     for runtime in request.project_veriloga_runtimes.device_runtimes() {
-        match runtime.compile_wasm_jit_artifact() {
+        let Some(sources) = &sources else { break };
+        match runtime.compile_wasm_jit_artifact(sources) {
             Ok(artifact) => preparation.artifacts.push(
                 crate::project_veriloga::worker::WasmJitWorkerArtifact::from_compiled(&artifact),
             ),
@@ -628,7 +637,8 @@ pub fn prepare_wasm_jit_request_value(
         .map(|artifact| artifact.cache_key.clone())
         .collect();
     // A run refused for an unqualified runtime builds nothing.
-    if unqualified.is_empty() && !request.project_veriloga_runtimes.is_empty() {
+    if sources.is_some() && unqualified.is_empty() && !request.project_veriloga_runtimes.is_empty()
+    {
         for model in discover_wasm_jit_models(&request) {
             if installed.insert(model.cache_key().to_owned()) {
                 preparation.artifacts.push(
@@ -645,6 +655,7 @@ pub fn prepare_wasm_jit_request_value(
             request,
             unqualified,
             installed,
+            _sources: sources,
         });
     });
     Ok(value)
@@ -704,14 +715,12 @@ pub fn run_prepared_wasm_jit_request_value(
 /// same code, so the two cannot disagree about which models a deck needs. A
 /// later build of the run that asks for a model this one did not (a
 /// structural parameter a sweep changes, say) is refused when it builds that
-/// device ([`rspice_veriloga::wasm_jit::with_browser_run_models`]).
+/// device ([`rspice_veriloga::wasm_jit::with_browser_run_models`]). The
+/// caller holds the request's Verilog-A sources installed.
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 fn discover_wasm_jit_models(
     request: &WorkerRequest,
 ) -> Vec<Arc<rspice_veriloga::wasm_jit::WasmJitModelArtifact>> {
-    let Ok(_veriloga) = request.project_veriloga_runtimes.install() else {
-        return Vec::new();
-    };
     let Ok(_data_files) = request.data_files.hold(request.execution_limits) else {
         return Vec::new();
     };
