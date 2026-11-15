@@ -227,13 +227,14 @@ impl HbSolver {
         if let Some(seed) = seed {
             solve::validate_spectra(seed, n, &grid, "initial state", abort)?;
         }
-        let budget = |values| {
+        let budget = |values| -> Result<(), Error> {
             ResourceLimitError::ensure(
                 ResourceKind::ResultValues,
                 values,
-                limits.max_result_values.min(32_000_000),
-            )
-            .map_err(Error::from)
+                limits.max_result_values,
+            )?;
+            crate::analysis::confirm_working_values("nonlinear integral-input workspace", values)?;
+            Ok(())
         };
         let mut storage = n.saturating_mul(64);
         budget(storage)?;
@@ -477,10 +478,7 @@ impl HbSolver {
             let retained = storage
                 .saturating_add(component.len().saturating_mul(grid.len()).saturating_mul(4));
             budget(retained)?;
-            working.max_result_values = working
-                .max_result_values
-                .min(32_000_000)
-                .saturating_sub(retained);
+            working.max_result_values = working.max_result_values.saturating_sub(retained);
             let rhs: Vec<_> = component
                 .iter()
                 .map(|&(row, _)| sources[row].clone())

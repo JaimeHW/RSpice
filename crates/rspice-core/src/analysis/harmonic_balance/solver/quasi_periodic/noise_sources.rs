@@ -15,11 +15,8 @@ fn noise_error(message: impl Into<String>) -> Error {
     Error::InvalidCircuit(format!("QPNOISE: {}", message.into()))
 }
 fn budget(values: usize, limits: &ResourceLimits) -> Result<(), Error> {
-    ResourceLimitError::ensure(
-        ResourceKind::ResultValues,
-        values,
-        limits.max_result_values.min(32_000_000),
-    )?;
+    ResourceLimitError::ensure(ResourceKind::ResultValues, values, limits.max_result_values)?;
+    crate::analysis::confirm_working_values("quasi-periodic noise-source workspace", values)?;
     Ok(())
 }
 
@@ -217,10 +214,7 @@ impl HbSolver {
             .saturating_add(grid.sample_count().saturating_mul(8));
         budget(resident, limits)?;
         let mut remaining = *limits;
-        remaining.max_result_values = limits
-            .max_result_values
-            .min(32_000_000)
-            .saturating_sub(resident);
+        remaining.max_result_values = limits.max_result_values.saturating_sub(resident);
         let mut transform = QuasiPeriodicTransform::new_with_abort(grid.clone(), abort)?;
         let waves = orbit
             .iter()

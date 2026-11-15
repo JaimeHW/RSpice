@@ -127,13 +127,11 @@ pub(crate) fn visit_with_abort(
     ResourceLimitError::ensure(
         ResourceKind::ResultValues,
         resident,
-        limits.max_result_values.min(32_000_000),
+        limits.max_result_values,
     )?;
+    crate::analysis::confirm_working_values("quasi-periodic noise sweep", resident)?;
     let mut noise_limits = *limits;
-    noise_limits.max_result_values = limits
-        .max_result_values
-        .min(32_000_000)
-        .saturating_sub(resident);
+    noise_limits.max_result_values = limits.max_result_values.saturating_sub(resident);
     let mut projector = QuasiPeriodicNoiseProjector::new_with_abort(
         grid.clone(),
         n,

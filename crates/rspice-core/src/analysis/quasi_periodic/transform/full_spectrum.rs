@@ -87,12 +87,17 @@ impl QuasiPeriodicTransform {
         let dimensions = self.grid.dimensions();
         let widths: Vec<_> = dimensions.iter().map(|n| 2 * (n / 2) + 1).collect();
         let count = widths.iter().fold(1usize, |a, n| a.saturating_mul(*n));
+        let spectrum_values = count
+            .saturating_mul(dimensions.len() + 2)
+            .saturating_add(samples.len().saturating_mul(8));
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
-            count
-                .saturating_mul(dimensions.len() + 2)
-                .saturating_add(samples.len().saturating_mul(8)),
-            limits.max_result_values.min(32_000_000),
+            spectrum_values,
+            limits.max_result_values,
+        )?;
+        crate::analysis::confirm_working_values(
+            "quasi-periodic complete spectrum",
+            spectrum_values,
         )?;
         let mut values = zero_buffer(samples.len())?;
         for (i, (value, sample)) in values.iter_mut().zip(samples).enumerate() {

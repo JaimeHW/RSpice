@@ -117,8 +117,9 @@ impl QpnoiseAnalysisResult {
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
             retained,
-            limits.max_result_values.min(32_000_000),
+            limits.max_result_values,
         )?;
+        crate::analysis::confirm_working_values("QPNOISE retained result", retained)?;
         for names in [&m.node_names, &m.branch_names] {
             let mut seen = BTreeSet::new();
             for name in names {
@@ -198,10 +199,7 @@ impl QpnoiseAnalysisResult {
         }
         let mut names = BTreeSet::new();
         let mut workspace = *limits;
-        workspace.max_result_values = workspace
-            .max_result_values
-            .min(32_000_000)
-            .saturating_sub(retained);
+        workspace.max_result_values = workspace.max_result_values.saturating_sub(retained);
         if !self.sources.is_empty() {
             let projector = QuasiPeriodicNoiseProjector::new_with_abort(
                 grid.clone(),

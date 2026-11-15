@@ -59,6 +59,8 @@ pub mod stb;
 pub mod temperature;
 pub mod transfer;
 pub mod transient;
+mod working_memory;
+pub(crate) use working_memory::confirm_working_values;
 
 pub use dcmatch::{DcMatchContributor, DcMatchResult, DcMatchScope};
 pub use floquet::{

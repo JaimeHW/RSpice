@@ -32,7 +32,6 @@ use crate::{Complex64, ResourceKind, ResourceLimitError, ResourceLimits, Value};
 use std::sync::Arc;
 
 const MAX_DENSE_UNKNOWNS: usize = 512;
-const MAX_WORKSPACE_VALUES: usize = 32_000_000;
 /// The largest direct system a sparse solve that fails its backward-error
 /// check retries with extended-precision dense elimination. The retry is
 /// O(n^3) and certified against the same matrix, so it is bounded while
@@ -288,8 +287,9 @@ pub(crate) fn check_bordered_workload(
             grid.len()
                 .saturating_mul(grid.dimensions().len().saturating_add(6)),
         );
-    let value_limit = limits.max_result_values.min(MAX_WORKSPACE_VALUES);
+    let value_limit = limits.max_result_values;
     ResourceLimitError::ensure(ResourceKind::ResultValues, base_values, value_limit)?;
+    crate::analysis::confirm_working_values("quasi-periodic solver workspace", base_values)?;
     Ok((base_values, value_limit))
 }
 

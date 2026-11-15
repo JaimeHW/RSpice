@@ -174,17 +174,11 @@ impl Engine {
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
             retained,
-            engine
-                .config
-                .resource_limits
-                .max_result_values
-                .min(32_000_000),
+            engine.config.resource_limits.max_result_values,
         )?;
+        crate::analysis::confirm_working_values("QPNOISE retained result", retained)?;
         let mut limits = engine.config.resource_limits;
-        limits.max_result_values = limits
-            .max_result_values
-            .min(32_000_000)
-            .saturating_sub(retained);
+        limits.max_result_values = limits.max_result_values.saturating_sub(retained);
         let output_values = metadata
             .request
             .outputs

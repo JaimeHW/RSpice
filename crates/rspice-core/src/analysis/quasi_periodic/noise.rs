@@ -121,12 +121,18 @@ impl QuasiPeriodicNoiseProjector {
             coordinates.saturating_mul(grid.len()),
             limits.max_matrix_unknowns,
         )?;
+        let projector_values = grid
+            .sample_count()
+            .saturating_mul(8)
+            .saturating_add(input_lattices.len().saturating_mul(2));
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
-            grid.sample_count()
-                .saturating_mul(8)
-                .saturating_add(input_lattices.len().saturating_mul(2)),
-            limits.max_result_values.min(32_000_000),
+            projector_values,
+            limits.max_result_values,
+        )?;
+        crate::analysis::confirm_working_values(
+            "quasi-periodic noise projector",
+            projector_values,
         )?;
         let mut seen = HashSet::new();
         let mut selected = Vec::with_capacity(input_lattices.len());
@@ -307,8 +313,9 @@ impl QuasiPeriodicNoiseProjector {
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
             values,
-            self.limits.max_result_values.min(32_000_000),
+            self.limits.max_result_values,
         )?;
+        crate::analysis::confirm_working_values("quasi-periodic noise workspace", values)?;
         Ok(())
     }
 

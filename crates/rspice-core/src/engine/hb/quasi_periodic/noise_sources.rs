@@ -63,10 +63,7 @@ impl Catalog {
     }
     fn remaining(&self, engine: &Engine) -> ResourceLimits {
         let mut limits = engine.config.resource_limits;
-        limits.max_result_values = limits
-            .max_result_values
-            .min(32_000_000)
-            .saturating_sub(self.values);
+        limits.max_result_values = limits.max_result_values.saturating_sub(self.values);
         limits
     }
     fn push(&mut self, engine: &Engine, source: Source) -> Result<(), SimulationError> {

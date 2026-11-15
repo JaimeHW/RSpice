@@ -316,13 +316,17 @@ impl HbSolver {
         if plans.is_empty() {
             return Ok((*limits, Vec::new()));
         }
-        let budget = |values| {
+        let budget = |values| -> Result<(), Error> {
             ResourceLimitError::ensure(
                 ResourceKind::ResultValues,
                 values,
-                limits.max_result_values.min(32_000_000),
-            )
-            .map_err(Error::from)
+                limits.max_result_values,
+            )?;
+            crate::analysis::confirm_working_values(
+                "quasi-periodic prescribed-integral workspace",
+                values,
+            )?;
+            Ok(())
         };
         let input_values = if retained { 0 } else { self.unknowns() };
         budget(plans.len().saturating_add(input_values))?;
@@ -453,7 +457,6 @@ impl HbSolver {
                 },
                 limits
                     .max_result_values
-                    .min(32_000_000)
                     .saturating_sub(values)
                     .saturating_sub(forced_values)
                     .saturating_sub(grid.sample_count().saturating_mul(8)),

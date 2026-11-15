@@ -140,8 +140,9 @@ impl QpnoiseTransferMetadata {
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
             resident,
-            limits.max_result_values.min(32_000_000),
+            limits.max_result_values,
         )?;
+        crate::analysis::confirm_working_values("QPNOISE transport decode", resident)?;
         if value_count != expected {
             return Err(qpnoise_error(
                 "packed buffer length differs from the complete noise layout",

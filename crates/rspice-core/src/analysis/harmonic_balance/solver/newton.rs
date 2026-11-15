@@ -2118,7 +2118,13 @@ impl HbSolver {
         })?;
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
 
-        // Initialize Jacobian
+        // The dense spectral Jacobian is `size` rows of `size` complex
+        // entries; ask the allocator for the whole of it before any row
+        // exists, so one this machine cannot hold is a typed failure.
+        crate::analysis::confirm_working_values(
+            "harmonic-balance spectral Jacobian",
+            size.saturating_mul(size).saturating_mul(2),
+        )?;
         let mut jac = vec![vec![Complex64::new(0.0, 0.0); size]; size];
 
         // --- Linear part: block-diagonal per harmonic ---

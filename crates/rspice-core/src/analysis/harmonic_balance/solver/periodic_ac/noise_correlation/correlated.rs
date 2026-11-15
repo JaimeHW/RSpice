@@ -82,9 +82,10 @@ impl HbSolver {
         crate::ResourceLimitError::ensure(
             crate::ResourceKind::ResultValues,
             values,
-            limits.max_result_values.min(32_000_000),
+            limits.max_result_values,
         )
         .map_err(error)?;
+        crate::analysis::confirm_working_values("correlated pnoise workspace", values)?;
         // The channel amplitude is independent of the input frequency. Its
         // Fourier coefficients are reused for all stationary source bands.
         let mut drain_spectra = Vec::new();
