@@ -359,6 +359,11 @@ impl HbGeneratedDevice {
         &self.static_probe.instance_name
     }
 
+    /// Each carried site's output row, in the model's site order.
+    pub(super) fn carried_output_rows(&self) -> impl Iterator<Item = usize> + '_ {
+        self.operators.iter().map(|operator| operator.output)
+    }
+
     /// Stamp the DC operating point that seeds the periodic solve, or the
     /// periodic solve itself. At the operating point a mean-free `idt`'s
     /// output row holds its output at its initial condition, with the

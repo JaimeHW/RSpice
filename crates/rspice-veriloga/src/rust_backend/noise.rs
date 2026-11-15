@@ -112,9 +112,11 @@ pub(super) fn generate_noise_file(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
     cross_slots: &HashMap<ExprId, usize>,
+    periodic_sites: PeriodicSites<'_>,
     control: &dyn PipelineControl,
 ) -> Result<GeneratedRustFile, RustBackendError> {
-    let grouped_noise = grouped_noise_extension(artifact, options, cross_slots, control)?;
+    let grouped_noise =
+        grouped_noise_extension(artifact, options, cross_slots, periodic_sites, control)?;
     let parameter_fields = parameter_field_names(artifact);
     let variables = noise_variables(artifact);
     let branch_unknowns = noise_branch_unknowns(artifact);
@@ -480,6 +482,30 @@ struct GroupedNoisePlan {
     primal_checks: Vec<usize>,
 }
 
+/// The operator sites a periodic solver carries as unknowns of their own,
+/// each to its index among the model's carried sites as the stamp numbers
+/// them: `ddt` sites first, then `idt` sites. The grouped slice reads each
+/// one's output from the evaluation's periodic frame, so noise sampled over
+/// a periodic orbit is evaluated at the orbit's values of them.
+#[derive(Clone, Copy)]
+pub(super) struct PeriodicSites<'a> {
+    pub(super) ddt: &'a HashMap<ExprId, usize>,
+    pub(super) idt: &'a HashMap<ExprId, usize>,
+}
+
+#[cfg(test)]
+impl PeriodicSites<'static> {
+    /// No carried site: every `ddt` and `idt` freezes at its DC value.
+    fn none() -> Self {
+        static NONE: std::sync::LazyLock<HashMap<ExprId, usize>> =
+            std::sync::LazyLock::new(HashMap::new);
+        Self {
+            ddt: &NONE,
+            idt: &NONE,
+        }
+    }
+}
+
 /// Emit the additive grouped-noise ABI implemented by newly generated model
 /// crates. The scalar descriptor/evaluator above deliberately remains intact:
 /// checked-in artifacts generated before this capability continue to compile,
@@ -488,9 +514,10 @@ pub(super) fn grouped_noise_extension(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
     cross_slots: &HashMap<ExprId, usize>,
+    periodic_sites: PeriodicSites<'_>,
     control: &dyn PipelineControl,
 ) -> Result<String, RustBackendError> {
-    let Some(plan) = plan_grouped_noise(artifact, control)? else {
+    let Some(plan) = plan_grouped_noise(artifact, periodic_sites, control)? else {
         return Ok(
             "\npub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 0] = [];\n\
              pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 0] = [];\n\n\
@@ -935,6 +962,7 @@ fn authored_branch(
 
 fn plan_grouped_noise(
     artifact: &CanonicalIrArtifact,
+    periodic_sites: PeriodicSites<'_>,
     control: &dyn PipelineControl,
 ) -> Result<Option<GroupedNoisePlan>, RustBackendError> {
     let mut cfg = crate::canonical_ir::CfgModel::from_hir(&artifact.hir, &artifact.mir).map_err(
@@ -1086,7 +1114,11 @@ fn plan_grouped_noise(
     // The real routing gain is the residual derivative at the DC operating
     // point, even when that same contribution also carries charge. Clear the
     // transient companion only after AD has recovered the reactive lane.
-    frequency::freeze_noise_primal(&mut differentiated.function);
+    frequency::freeze_noise_primal(
+        &mut differentiated.function,
+        periodic_sites.ddt,
+        periodic_sites.idt,
+    );
 
     let mut wanted = Vec::new();
     let mut processes = Vec::with_capacity(cfg.noise_processes.len());
@@ -2096,6 +2128,7 @@ endmodule
             &artifact,
             &crate::rust_backend::RustTranspileOptions::default(),
             &std::collections::HashMap::new(),
+            super::PeriodicSites::none(),
             &crate::metrics::NoPipelineControl,
         )
         .expect("fallback noise emission succeeds")
@@ -2159,9 +2192,13 @@ mod grouped_process_tests {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(source)
             .expect("grouped-noise fixture compiles");
-        let plan = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
-            .expect("grouped-noise planning succeeds")
-            .expect("fixture has a grouped process");
+        let plan = super::plan_grouped_noise(
+            &artifact,
+            super::PeriodicSites::none(),
+            &crate::metrics::NoPipelineControl,
+        )
+        .expect("grouped-noise planning succeeds")
+        .expect("fixture has a grouped process");
         let inputs = CfgEvalInputs {
             parameters: artifact
                 .mir
@@ -2272,9 +2309,13 @@ endmodule
 "#,
             )
             .expect("written-orientation fixture compiles");
-        let plan = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
-            .expect("grouped-noise planning succeeds")
-            .expect("fixture has grouped processes");
+        let plan = super::plan_grouped_noise(
+            &artifact,
+            super::PeriodicSites::none(),
+            &crate::metrics::NoPipelineControl,
+        )
+        .expect("grouped-noise planning succeeds")
+        .expect("fixture has grouped processes");
         let mut names = plan
             .processes
             .iter()
@@ -2332,6 +2373,7 @@ endmodule
             &artifact,
             &crate::rust_backend::RustTranspileOptions::default(),
             &std::collections::HashMap::new(),
+            super::PeriodicSites::none(),
             &crate::metrics::NoPipelineControl,
         )
         .expect("mixed grouped-noise emission succeeds");
@@ -2388,9 +2430,13 @@ endmodule
             )
             .expect("dead-report fixture compiles");
 
-        let plan = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
-            .expect("dead nonlinear report is irrelevant to circuit noise")
-            .expect("fixture has a grouped process");
+        let plan = super::plan_grouped_noise(
+            &artifact,
+            super::PeriodicSites::none(),
+            &crate::metrics::NoPipelineControl,
+        )
+        .expect("dead nonlinear report is irrelevant to circuit noise")
+        .expect("fixture has a grouped process");
         assert_eq!(plan.processes.len(), 1);
         assert_eq!(plan.processes[0].injections.len(), 1);
         assert!(
@@ -2412,9 +2458,13 @@ endmodule
             let artifact = crate::VerilogACompiler::default().compile_canonical_ir(&format!(
                 "module dynamic_metadata(p,n); inout p,n; electrical p,n; analog begin {body} end endmodule"
             )).unwrap();
-            let plan = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
-                .unwrap()
-                .unwrap();
+            let plan = super::plan_grouped_noise(
+                &artifact,
+                super::PeriodicSites::none(),
+                &crate::metrics::NoPipelineControl,
+            )
+            .unwrap()
+            .unwrap();
             let mut inputs = crate::canonical_ir::CfgEvalInputs {
                 node_potentials: vec![2.0, 0.0],
                 ..Default::default()
@@ -2452,9 +2502,13 @@ endmodule
             )
             .expect("nonlinear-routing fixture compiles");
 
-        let plan = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
-            .expect("smooth nonlinear routing has a small-signal tangent")
-            .expect("fixture has a process");
+        let plan = super::plan_grouped_noise(
+            &artifact,
+            super::PeriodicSites::none(),
+            &crate::metrics::NoPipelineControl,
+        )
+        .expect("smooth nonlinear routing has a small-signal tangent")
+        .expect("fixture has a process");
         assert_eq!(plan.processes[0].injections.len(), 1);
         assert!(!plan.primal_checks.is_empty());
     }
@@ -2475,9 +2529,13 @@ endmodule
 "#,
             )
             .expect("dead-control fixture compiles");
-        super::plan_grouped_noise(&dead, &crate::metrics::NoPipelineControl)
-            .expect("dead report-only control flow is not circuit-observable")
-            .expect("fixture has a grouped process");
+        super::plan_grouped_noise(
+            &dead,
+            super::PeriodicSites::none(),
+            &crate::metrics::NoPipelineControl,
+        )
+        .expect("dead report-only control flow is not circuit-observable")
+        .expect("fixture has a grouped process");
 
         let live = crate::VerilogACompiler::default()
             .compile_canonical_ir(
@@ -2492,8 +2550,12 @@ endmodule
 "#,
             )
             .expect("live-control fixture compiles");
-        let error = super::plan_grouped_noise(&live, &crate::metrics::NoPipelineControl)
-            .expect_err("noise-dependent circuit control flow must fail closed");
+        let error = super::plan_grouped_noise(
+            &live,
+            super::PeriodicSites::none(),
+            &crate::metrics::NoPipelineControl,
+        )
+        .expect_err("noise-dependent circuit control flow must fail closed");
         assert!(error.to_string().contains("control flow"), "{error}");
     }
 }

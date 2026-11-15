@@ -461,6 +461,16 @@ pub enum CfgValueKind {
         modulus: ValueId,
         offset: ValueId,
     },
+    /// Read-only operating-point value noise lowering gives an operator site
+    /// a periodic solver carries as an unknown of its own: the output the
+    /// evaluation's periodic frame supplies for `site`, or `fallback` (the
+    /// operating-point value, zero for a `ddt` and its initial condition for
+    /// an `idt`) when no frame is installed. It validates `input` either way.
+    PeriodicSiteOutput {
+        site: u32,
+        input: ValueId,
+        fallback: ValueId,
+    },
     /// One real frequency coefficient on the operating-point wrap branch:
     /// integral_derivative - floor((ic-offset)/modulus)*modulus_derivative.
     /// The quotient remains exact even when it cannot fit in binary64.
@@ -1443,6 +1453,7 @@ impl CfgValueKind {
             | Self::IdtMod { .. }
             | Self::IntegralDerivative { .. }
             | Self::IdtModInitial { .. }
+            | Self::PeriodicSiteOutput { .. }
             | Self::IdtModBranchDerivative { .. }
             | Self::AbsDelay { .. }
             | Self::AbsDelayDerivative { .. }
@@ -1643,6 +1654,9 @@ impl CfgValueKind {
                 else_value,
             } => vec![*condition, *then_value, *else_value],
             Self::Idt { input, ic, .. } => vec![*input, *ic],
+            Self::PeriodicSiteOutput {
+                input, fallback, ..
+            } => vec![*input, *fallback],
             Self::IdtMod {
                 input,
                 ic,
@@ -1969,6 +1983,12 @@ impl CfgValueKind {
             Self::Idt { input, ic, .. } => {
                 *input = map(*input);
                 *ic = map(*ic);
+            }
+            Self::PeriodicSiteOutput {
+                input, fallback, ..
+            } => {
+                *input = map(*input);
+                *fallback = map(*fallback);
             }
             Self::IdtMod {
                 input,

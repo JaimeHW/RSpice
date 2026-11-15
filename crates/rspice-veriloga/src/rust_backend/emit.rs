@@ -1937,6 +1937,7 @@ impl<'a> Emitter<'a> {
                 | CfgValueKind::DdtDerivative { .. }
                 | CfgValueKind::Idt { .. }
                 | CfgValueKind::IdtScale
+                | CfgValueKind::PeriodicSiteOutput { .. }
                 | CfgValueKind::Limit { .. }
                 | CfgValueKind::LimitPrevious { .. }
                 | CfgValueKind::LaneSplat(_)
@@ -2229,6 +2230,19 @@ impl<'a> Emitter<'a> {
                     self.numeric_operand(*ic),
                     self.numeric_operand(*modulus),
                     self.numeric_operand(*offset)
+                )
+            }
+            CfgValueKind::PeriodicSiteOutput {
+                site,
+                input,
+                fallback,
+            } => {
+                let input = self.numeric_operand(*input);
+                let fallback = self.numeric_operand(*fallback);
+                format!(
+                    "{}({input}, match ctx.periodic_frame() {{ Some(periodic_frame) => \
+                     periodic_frame.primal({site}, {input}, {fallback}), None => {fallback} }})",
+                    bindings.checked_value
                 )
             }
             CfgValueKind::IdtModInitial {

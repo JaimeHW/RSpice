@@ -20,9 +20,10 @@ use super::bjt::{NativeNoiseWaveform, sampled_noise_sources};
 use super::*;
 use crate::engine::UnsupportedCapabilityError;
 use crate::engine::transient::device_noise::processes::{
-    CollectedNoiseProcess, NoiseProcessKey, NoiseProcessSpectrum, collect_noise_processes,
+    CollectedNoiseProcess, NoiseProcessKey, NoiseProcessSpectrum, collect_noise_processes_on_orbit,
     has_structural_noise_processes,
 };
+use rspice_veriloga_runtime::GeneratedPeriodicFrame;
 use std::collections::BTreeMap;
 
 /// The token every refused Verilog-A noise process carries: the same one
@@ -92,9 +93,76 @@ fn sampled(
     Ok(([injection.node_pos, injection.node_neg], exponent, power))
 }
 
+/// The carried operator sites of each generated instance, in the circuit's
+/// order, as one sample of the orbit holds them: the periodic state's row of
+/// each site's output, and the frame that supplies those outputs to the
+/// instance's noise evaluation. An instance with no carried site has none.
+struct CarriedSiteSamples {
+    rows: Vec<Vec<usize>>,
+    outputs: Vec<Value>,
+    frames: Vec<Option<GeneratedPeriodicFrame>>,
+}
+
+impl CarriedSiteSamples {
+    fn new(circuit: &CircuitData, solver: &HbSolver) -> Result<Self, SimulationError> {
+        // Without generated models nothing is pushed.
+        #[cfg_attr(not(feature = "veriloga-builtins-base"), allow(unused_mut))]
+        let mut samples = Self {
+            rows: Vec::new(),
+            outputs: Vec::new(),
+            frames: Vec::new(),
+        };
+        #[cfg(feature = "veriloga-builtins-base")]
+        for device in circuit.generated_veriloga_devices().iter() {
+            let sites = device.harmonic_balance_periodic_sites().len();
+            if sites == 0 || !device.has_grouped_noise_processes() {
+                samples.rows.push(Vec::new());
+                samples.frames.push(None);
+                continue;
+            }
+            let rows = solver
+                .generated_carried_output_rows(&device.instance_name)
+                .filter(|rows| rows.len() == sites)
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic noise found no carried operator rows for generated Verilog-A \
+                         instance '{}'",
+                        device.instance_name
+                    ))
+                })?;
+            samples
+                .outputs
+                .resize(samples.outputs.len().max(sites), 0.0);
+            samples.rows.push(rows);
+            samples
+                .frames
+                .push(Some(GeneratedPeriodicFrame::new(sites)));
+        }
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let _ = (circuit, solver);
+        Ok(samples)
+    }
+
+    /// Supply each frame its sites' outputs at `solution`, one sample.
+    fn prepare(&mut self, solution: &[Value]) {
+        for (rows, frame) in self.rows.iter().zip(&mut self.frames) {
+            let Some(frame) = frame else {
+                continue;
+            };
+            let outputs = &mut self.outputs[..rows.len()];
+            for (output, &row) in outputs.iter_mut().zip(rows) {
+                *output = solution[row];
+            }
+            frame.prepare(outputs, &[]);
+        }
+    }
+}
+
 impl Engine {
     /// Every runtime and generated Verilog-A noise process, sampled over the
-    /// retained orbit.
+    /// retained orbit. A generated model's noise reads the orbit's value of
+    /// every operator site harmonic balance carries as an unknown of its own,
+    /// at each sample, as harmonic balance's own sampler of the model does.
     pub(in crate::engine::hb) fn veriloga_periodic_noise_sources(
         circuit: &CircuitData,
         solver: &mut HbSolver,
@@ -109,10 +177,14 @@ impl Engine {
         // reactive or filtered part.
         let frequency = solver.fundamental_freq();
         let mut waveforms: BTreeMap<NoiseProcessKey, NativeNoiseWaveform> = BTreeMap::new();
+        let mut carried = CarriedSiteSamples::new(circuit, solver)?;
         let mut failure = None;
         let mut sample = |time: usize, count: usize, solution: &[Value]| {
-            let processes = collect_noise_processes(circuit, solution, frequency)?;
-            let shifted = collect_noise_processes(circuit, solution, 2.5 * frequency)?;
+            carried.prepare(solution);
+            let frames = carried.frames.as_slice();
+            let processes = collect_noise_processes_on_orbit(circuit, solution, frequency, frames)?;
+            let shifted =
+                collect_noise_processes_on_orbit(circuit, solution, 2.5 * frequency, frames)?;
             for process in &processes {
                 let Some(other) = shifted.iter().find(|other| other.key() == process.key()) else {
                     return Err(refused(

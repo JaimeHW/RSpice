@@ -155,6 +155,18 @@ impl HbSolver {
         Ok(())
     }
 
+    /// The row of each operator site of generated instance `instance` that
+    /// the solver carries as an unknown of its own, its output's, in the
+    /// model's site order; `None` when the solver does not sample the
+    /// instance.
+    #[cfg(feature = "veriloga-builtins-base")]
+    pub(crate) fn generated_carried_output_rows(&self, instance: &str) -> Option<Vec<usize>> {
+        self.generated_nonlinear_devices
+            .iter()
+            .find(|device| device.name() == instance)
+            .map(|device| device.carried_output_rows().collect())
+    }
+
     /// Add a generated compact model to the F/Q sampler. The generator must
     /// have proved its residual `F(x) + dQ(x)/dt`, which the harmonic-balance
     /// capability gate checks before the solver is built.

@@ -1048,6 +1048,17 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.inputs.idt
             }
             CfgValueKind::IdtScale => self.inputs.idt_scale,
+            // The interpreter evaluates with no periodic frame, so a carried
+            // site's output is its operating-point value.
+            CfgValueKind::PeriodicSiteOutput {
+                input, fallback, ..
+            } => {
+                let input = self.read(input)?;
+                let fallback = self.read(fallback)?;
+                rspice_veriloga_runtime::checked_derivative_value(input.real(), fallback.real())
+                    .map_err(|reason| CfgEvalError::InvalidDerivative { reason })?;
+                fallback
+            }
             // These are real coefficients introduced only after differentiation;
             // the operating point is held fixed during frequency evaluation.
             CfgValueKind::IdtModInitial {

@@ -2278,6 +2278,14 @@ impl BuiltinVerilogAInstance {
             .insert(mechanism)
     }
 
+    /// Every grouped noise process at `voltages` and `frequency_hz`.
+    ///
+    /// `periodic`, when given, supplies the output of each operator site
+    /// harmonic balance carries as an unknown of its own (see
+    /// [`Self::harmonic_balance_periodic_sites`]), so a process whose power or
+    /// gain depends on one reads a periodic orbit's value there; without it a
+    /// carried `ddt` is zero and a carried `idt` its initial condition, as at
+    /// an operating point.
     #[doc(hidden)]
     pub fn evaluate_noise_processes_at_frequency(
         &self,
@@ -2285,6 +2293,7 @@ impl BuiltinVerilogAInstance {
         num_nodes: usize,
         frequency_hz: Value,
         simparams: GeneratedSimulationParameters,
+        periodic: Option<&rspice_veriloga_runtime::GeneratedPeriodicFrame>,
     ) -> Result<Vec<BuiltinEvaluatedNoiseProcess>, BuiltinNoiseEvaluationError> {
         if !self.has_grouped_noise_processes() {
             return Ok(Vec::new());
@@ -2298,7 +2307,8 @@ impl BuiltinVerilogAInstance {
             self.analysis_final_step,
             simparams,
         )
-        .with_analysis_phase(self.analysis_phase);
+        .with_analysis_phase(self.analysis_phase)
+        .with_periodic_frame(periodic);
         let processes = self.kind.grouped_noise_process_descriptors();
         let injections = self.kind.grouped_noise_injection_descriptors();
         Self::validate_grouped_noise_catalog(processes, injections).map_err(|source| {

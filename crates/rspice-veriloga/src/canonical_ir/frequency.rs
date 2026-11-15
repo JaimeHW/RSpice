@@ -7,14 +7,24 @@
 //! transient Jacobian. A frequency sweep only substitutes D = jω, I = 1/jω;
 //! it neither repeats the primal body nor touches operator histories.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use super::ValueId;
 use super::cfg::{CfgBinaryOp, CfgFunction, CfgInstruction, CfgValue, CfgValueKind, CfgValueType};
+use super::{ExprId, ValueId};
 
 /// Freeze noise metadata and routing gains at their DC primal values, retaining
 /// input validation. Existing value IDs stay valid; no transient history is read.
-pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
+///
+/// `carried_ddt` and `carried_idt` give each operator site a periodic solver
+/// carries as an unknown of its own its index among the model's carried
+/// sites. Such a site's primal reads the output the evaluation's periodic
+/// frame supplies, so noise sampled over a periodic orbit sees the orbit's
+/// value there, and falls back to the DC value with no frame.
+pub(crate) fn freeze_noise_primal(
+    function: &mut CfgFunction,
+    carried_ddt: &HashMap<ExprId, usize>,
+    carried_idt: &HashMap<ExprId, usize>,
+) {
     if !function.values.iter().any(|value| {
         matches!(
             value.kind,
@@ -99,15 +109,33 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
     }
     for value in &mut function.values {
         value.kind = match value.kind {
-            CfgValueKind::Ddt { input, .. } => CfgValueKind::Binary {
-                op: CfgBinaryOp::CheckedValue,
-                left: input,
-                right: zero,
+            CfgValueKind::Ddt { operator, input } => match carried_ddt.get(&operator) {
+                Some(&site) => CfgValueKind::PeriodicSiteOutput {
+                    site: carried_site(site),
+                    input,
+                    fallback: zero,
+                },
+                None => CfgValueKind::Binary {
+                    op: CfgBinaryOp::CheckedValue,
+                    left: input,
+                    right: zero,
+                },
             },
-            CfgValueKind::Idt { input, ic, .. } => CfgValueKind::Binary {
-                op: CfgBinaryOp::CheckedValue,
-                left: input,
-                right: ic,
+            CfgValueKind::Idt {
+                operator,
+                input,
+                ic,
+            } => match carried_idt.get(&operator) {
+                Some(&site) => CfgValueKind::PeriodicSiteOutput {
+                    site: carried_site(site),
+                    input,
+                    fallback: ic,
+                },
+                None => CfgValueKind::Binary {
+                    op: CfgBinaryOp::CheckedValue,
+                    left: input,
+                    right: ic,
+                },
             },
             CfgValueKind::IdtMod {
                 input,
@@ -158,6 +186,11 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
             _ => continue,
         };
     }
+}
+
+/// A carried site's index as the frame addresses it.
+fn carried_site(site: usize) -> u32 {
+    u32::try_from(site).expect("a model carries fewer than 2^32 operator sites")
 }
 
 /// Return one after evaluating a scalar dependency, suitable for multiplying

@@ -621,6 +621,57 @@ for proposed in [0.3_f64,2.0] {
 "#).unwrap_or_else(|report|panic!("{report}"));
 }
 
+/// A noise process whose power depends on an operator harmonic balance
+/// carries as an unknown of its own reads that operator's output from the
+/// periodic frame, so periodic noise sampled over an orbit sees the orbit's
+/// value there; without a frame it is the operating point's, a `ddt` zero
+/// and an `idt` its initial condition.
+#[test]
+fn generated_grouped_noise_reads_a_carried_operators_output_from_the_periodic_frame() {
+    let (state, stamp, noise) = generated_parts(
+        "module carried_noise(p,n); inout p,n; electrical p,n; real r, q;
+         analog begin
+           r = ddt(V(p,n)); q = idt(V(p,n), 0.5);
+           I(p,n) <+ V(p,n) + 1e-3*r*r + 1e-3*q;
+           I(p,n) <+ white_noise(1.0 + abs(r), \"rate\");
+           I(p,n) <+ white_noise(1.0 + abs(q), \"integral\");
+         end endmodule",
+        "carried noise",
+    );
+    assert!(
+        state.contains(
+            "HB_PERIODIC_SITES: &'static [crate::runtime::GeneratedPeriodicKind] = \
+             &[crate::runtime::GeneratedPeriodicKind::Derivative, \
+             crate::runtime::GeneratedPeriodicKind::Integral];"
+        ),
+        "the ddt and the idt must both be carried:\n{state}"
+    );
+    run_generated_main("carried noise", &state, &stamp, &noise, r#"
+#[derive(Default)] struct Capture(Vec<f64>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self,_index:usize,value:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool { self.0.push(value.psd); true }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let voltages=[0.25,0.0];
+let ctx=runtime::GeneratedEvalContext { voltages:&voltages,temperature:300.0 };
+let mut held=Capture::default();
+instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut held).unwrap();
+assert_eq!(held.0,vec![1.0,1.5],"operating point: ddt 0, idt its initial condition");
+let frame:&'static runtime::GeneratedPeriodicFrame={
+    let frame=Box::leak(Box::new(runtime::GeneratedPeriodicFrame::new(2)));
+    frame.prepare(&[-3.0,2.0],&[]);
+    frame
+};
+runtime::install_periodic_frame(Some(frame));
+let mut orbit=Capture::default();
+instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut orbit).unwrap();
+runtime::install_periodic_frame(None);
+assert_eq!(orbit.0,vec![4.0,3.0],"orbit sample: each carried output as the frame supplies it");
+assert!(!ctx.evaluation_failed());
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
 #[test]
 fn generated_default_limit_preserves_state_unit_slope_and_affine_correction() {
     for (suffix, step) in [(",0.25", 0.25), ("", 0.7)] {
@@ -8250,6 +8301,10 @@ pub mod runtime {
     static SIMPARAM_OVERRIDE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(f64::NAN.to_bits());
     pub fn set_simparam_override(value: Option<f64>) { SIMPARAM_OVERRIDE.store(value.unwrap_or(f64::NAN).to_bits(), std::sync::atomic::Ordering::SeqCst); }
     static EVALUATION_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    thread_local! {
+        static PERIODIC_FRAME: std::cell::Cell<Option<&'static GeneratedPeriodicFrame>> = const { std::cell::Cell::new(None) };
+    }
+    pub fn install_periodic_frame(frame: Option<&'static GeneratedPeriodicFrame>) { PERIODIC_FRAME.with(|slot| slot.set(frame)); }
     pub fn set_tasks_enabled(enabled: bool) { TASKS_ENABLED.store(enabled, std::sync::atomic::Ordering::SeqCst); }
     pub fn clear_evaluation_error() { EVALUATION_FAILED.store(false, std::sync::atomic::Ordering::SeqCst); }
 
@@ -8285,8 +8340,10 @@ pub mod runtime {
 
     impl GeneratedEvalContext<'_> {
         pub fn limiting_enabled(&self) -> bool { true }
-        // No periodic analysis runs here, so no site is carried.
-        pub fn periodic_frame(&self) -> Option<&GeneratedPeriodicFrame> { None }
+        // A probe stands in for a periodic analysis by installing a frame.
+        pub fn periodic_frame(&self) -> Option<&GeneratedPeriodicFrame> {
+            PERIODIC_FRAME.with(std::cell::Cell::get)
+        }
         pub fn node_voltage(&self, node: usize) -> Value {
             self.voltages.get(node).copied().unwrap_or(0.0)
         }

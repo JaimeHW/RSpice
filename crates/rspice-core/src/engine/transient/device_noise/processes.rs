@@ -189,6 +189,20 @@ pub(in crate::engine) fn collect_noise_processes(
     solution: &[Value],
     frequency: Value,
 ) -> Result<Vec<CollectedNoiseProcess>, SimulationError> {
+    collect_noise_processes_on_orbit(circuit, solution, frequency, &[])
+}
+
+/// [`collect_noise_processes`] at one sample of a periodic orbit: `periodic`
+/// gives each generated device, in the circuit's order, the frame that
+/// supplies its carried operator sites' outputs at that sample (`None`, or
+/// no entry, for a device that carries none), so a process that depends on
+/// one is evaluated at the orbit's value there.
+pub(in crate::engine) fn collect_noise_processes_on_orbit(
+    circuit: &CircuitData,
+    solution: &[Value],
+    frequency: Value,
+    periodic: &[Option<rspice_veriloga_runtime::GeneratedPeriodicFrame>],
+) -> Result<Vec<CollectedNoiseProcess>, SimulationError> {
     let mut processes = Vec::new();
     #[cfg(feature = "veriloga")]
     for device in circuit.veriloga_devices().iter() {
@@ -204,9 +218,10 @@ pub(in crate::engine) fn collect_noise_processes(
         }
     }
     #[cfg(feature = "veriloga-builtins-base")]
-    for device in circuit.generated_veriloga_devices().iter() {
+    for (index, device) in circuit.generated_veriloga_devices().iter().enumerate() {
         if device.has_grouped_noise_processes() {
-            collect_generated_device(circuit, device, solution, frequency, &mut processes)?;
+            let frame = periodic.get(index).and_then(Option::as_ref);
+            collect_generated_device(circuit, device, solution, frequency, frame, &mut processes)?;
         }
     }
     #[cfg(feature = "veriloga")]
@@ -225,6 +240,8 @@ pub(in crate::engine) fn collect_noise_processes(
     }
     #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
     let _ = (circuit, solution, frequency, &mut processes);
+    #[cfg(not(feature = "veriloga-builtins-base"))]
+    let _ = periodic;
     Ok(processes)
 }
 
@@ -454,6 +471,7 @@ fn collect_generated_device(
     device: &crate::device::veriloga_builtins::BuiltinVerilogAInstance,
     solution: &[Value],
     frequency: Value,
+    periodic: Option<&rspice_veriloga_runtime::GeneratedPeriodicFrame>,
     processes: &mut Vec<CollectedNoiseProcess>,
 ) -> Result<(), SimulationError> {
     let instance = device.instance_name.as_str();
@@ -463,6 +481,7 @@ fn collect_generated_device(
             circuit.num_nodes(),
             frequency,
             circuit.generated_simulation_parameters,
+            periodic,
         )
         .map_err(|err| {
             SimulationError::Circuit(format!(

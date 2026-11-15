@@ -1994,7 +1994,13 @@ impl CanonicalNoiseRuntimePlan {
                     "grouped-noise PSD/exponent metadata derivative failed: {error}"
                 )))
             })?;
-        crate::canonical_ir::frequency::freeze_noise_primal(&mut function);
+        // Periodic noise refuses a runtime module with a carried operator
+        // site before it evaluates any noise, so every site freezes.
+        crate::canonical_ir::frequency::freeze_noise_primal(
+            &mut function,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
         for value in &function.values {
             use crate::canonical_ir::CfgValueKind;
             if matches!(

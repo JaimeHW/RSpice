@@ -1846,6 +1846,9 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::IdtMod { .. }
         | CfgValueKind::DdtDerivative { .. }
         | CfgValueKind::IntegralDerivative { .. }
+        // A carried site's output is the periodic frame's value at this
+        // evaluation, which no operand shows.
+        | CfgValueKind::PeriodicSiteOutput { .. }
         // Every remaining stateful operator is here because its value is a
         // function of accepted history and of the current time, not only of the
         // operands the propagation pass can see. The catch-all below would

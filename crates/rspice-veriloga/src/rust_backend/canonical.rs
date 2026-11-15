@@ -422,6 +422,7 @@ fn kernel_region_metrics(
                 write!(out, "idtmod:{}", operator_indices[operator])
             }
             CfgValueKind::IdtModInitial { .. } => write!(out, "idtmod-initial"),
+            CfgValueKind::PeriodicSiteOutput { site, .. } => write!(out, "periodic-site-output:{site}"),
             CfgValueKind::IdtModBranchDerivative { .. } => write!(out, "idtmod-branch-derivative"),
             CfgValueKind::AbsDelay { operator, .. } => {
                 write!(out, "absdelay:{}", operator_indices[operator])
@@ -2408,7 +2409,9 @@ fn plan_noise(
         .map(ValueId::from)
         .collect::<Vec<_>>();
     let (mut function, outputs, mapped) = optimize_with_tracking(function, &wanted, &tracked);
-    frequency::freeze_noise_primal(&mut function);
+    // The source-wise slice serves the operating-point analyses alone; periodic
+    // noise reads the grouped processes.
+    frequency::freeze_noise_primal(&mut function, &HashMap::new(), &HashMap::new());
     let mut origins = vec![None; function.values.len()];
     for (original, mapped) in tracked.into_iter().zip(mapped) {
         if let Some(mapped) = mapped {
@@ -3643,6 +3646,15 @@ impl ModelPlan {
         Ok(())
     }
 
+    /// The carried operator sites whose outputs the grouped noise slice
+    /// reads from a periodic frame.
+    fn periodic_noise_sites(&self) -> super::noise::PeriodicSites<'_> {
+        super::noise::PeriodicSites {
+            ddt: &self.periodic_ddt,
+            idt: &self.periodic_idt,
+        }
+    }
+
     /// `noise.rs`: the descriptor table, then one body for every magnitude.
     fn noise_file(
         &self,
@@ -3655,6 +3667,7 @@ impl ModelPlan {
                 artifact,
                 options,
                 &self.cross_slots,
+                self.periodic_noise_sites(),
                 control,
             );
         };
@@ -3690,8 +3703,13 @@ impl ModelPlan {
         }
         let (body, values) = emit_body(function, &noise.outputs, &self.emit_bindings())
             .map_err(|error| unsupported(artifact, format!("noise body: {error}")))?;
-        let grouped_noise =
-            super::noise::grouped_noise_extension(artifact, options, &self.cross_slots, control)?;
+        let grouped_noise = super::noise::grouped_noise_extension(
+            artifact,
+            options,
+            &self.cross_slots,
+            self.periodic_noise_sites(),
+            control,
+        )?;
         // Import from both emitted evaluators, not only from the compact
         // source-wise noise slice's CFG value kinds. The coherent-process
         // extension is emitted from its own differentiated replay plan; the
