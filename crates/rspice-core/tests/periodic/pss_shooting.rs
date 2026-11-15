@@ -3871,12 +3871,36 @@ l1 x 0 10u
 }
 
 /// The switched RL with its clock filtered through an RC: the switch's control
-/// is a capacitor's voltage, a state, so each crossing's saltation couples
-/// `V(c)` into `I(l1)`, and the transient's step across the closing carries
-/// only part of it. PSS reports the orbit and its multipliers; PSTB, which
-/// reads the monodromy as a stability margin, names the switch and refuses.
+/// is the capacitor voltage `V(c)`, a state, so each crossing's instant moves
+/// with it and its saltation couples `V(c)` into `I(l1)`. PSTB reads it
+/// against the closed form, fixed before the first comparison:
+///
+/// - `V(c)` follows the clock with `τ = 1 kΩ·100 pF = 100 ns`. Its periodic
+///   orbit, exact over the 1 ns edges, crosses VT = 0.5 V rising at
+///   `t_on = 1 ns + τ·ln((1 − V₁)/0.5) = 69.14 ns` and falling at
+///   `t_off = 501 ns + τ·ln(V₃/0.5) = 569.14 ns`, `V₁` and `V₃` its values at
+///   the end of each edge. S1 is closed for exactly 500 ns, so the current's
+///   multiplier is exp(−0.75), as on the clocked deck, and `V(c)`'s own is
+///   exp(−T/τ) = exp(−10).
+/// - `I(l1)` decays with `τ_o = L/RF = 1 µs` open and toward 0.1 A with
+///   `τ_c = L/(RF ∥ RON) = 2 µs` closed, on the slopes `f_o = −RF·I/L` and
+///   `f_c = (0.5 V − 5 Ω·I)/L`.
+/// - A deviation `δv` of `V(c)` at the period's start `φ` moves each crossing
+///   by `δt = −δv·exp(−(t − φ)/τ)/V̇(c)`, `V̇(c) = ±0.5 V/τ`, and the current by
+///   the slope's jump across it, `δI = (f_before − f_after)·δt`, which the
+///   decays after it carry to the period's end. Both crossings summed are
+///   `Φ_IV`.
+/// - Over `(I(l1), V(c))` the monodromy is `[[exp(−0.75), Φ_IV], [0,
+///   exp(−10)]]`, and exp(−10)'s mode is `(Φ_IV/(exp(−10) − exp(−0.75)), 1)`,
+///   whose participation at `l1` is `|a|/√(a² + 1)`.
+///
+/// The period starts at the boundary the shooting state holds, which V(c)'s
+/// value there dates. At the orbit's start, 343.75 ns into the clock's period,
+/// `Φ_IV = 7.955e-4 A/V` and the participation is 1.6843e-3. A step that
+/// ended just past each crossing carried half the saltation into the period
+/// map, 8.42e-4, and PSTB refused the orbit by name.
 #[test]
-fn pstb_refuses_an_event_orbit_a_state_controlled_switch_crosses() {
+fn pstb_reads_the_saltation_of_a_switch_a_state_controls() {
     let deck = "delayed switched rl
 vdd in 0 dc 1
 vclk clk 0 pulse(0 1 0 1n 1n 499n 1u)
@@ -3903,33 +3927,105 @@ l1 x 0 10u
             .first()
             .is_some_and(|name| name.starts_with("event:"))
     );
-    let multipliers = &point.analysis().floquet_multipliers;
-    assert!(
-        multipliers
-            .iter()
-            .any(|value| (value.re / (-0.75_f64).exp() - 1.0).abs() < 1.0e-3),
-        "{multipliers:?}"
-    );
     let card = rspice_core::netlist::PstbCard {
         probe_instance: "l1".to_owned(),
         max_harmonics: 4,
         stability_threshold: 1.0 + 1e-6,
         detect_subharmonics: true,
     };
-    match engine.run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort) {
-        Err(SimulationError::UnsupportedCapability(error)) => {
-            assert_eq!(error.capability, "analysis.periodic.event_carrier");
-            assert_eq!(error.instance.as_deref(), Some("S1"));
-            assert!(
-                error
-                    .detail
-                    .contains("its saltation is not carried by the discrete map"),
-                "{}",
-                error.detail
-            );
-        }
-        other => panic!("PSTB reads a spectrum whose saltation is partial: {other:?}"),
-    }
+    let stability = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
+        .expect("PSTB reads the event orbit's monodromy");
+
+    let (period, tau, edge, width) = (1.0e-6, 100.0e-9, 1.0e-9, 499.0e-9);
+    let (inductance, rf) = (10.0e-6, 10.0);
+    // V(c) over one clock period from `v0`: the ends of the rising edge, the
+    // top, the falling edge and the period.
+    let clock_period = |v0: f64| {
+        let v1 = 1.0 - tau / edge + (v0 + tau / edge) * (-edge / tau).exp();
+        let v2 = 1.0 + (v1 - 1.0) * (-width / tau).exp();
+        let v3 = tau / edge + (v2 - 1.0 - tau / edge) * (-edge / tau).exp();
+        let v4 = v3 * (-(period - 2.0 * edge - width) / tau).exp();
+        (v1, v3, v4)
+    };
+    let offset = clock_period(0.0).2;
+    let v0 = offset / (1.0 - (clock_period(1.0).2 - offset));
+    let (v1, v3, _) = clock_period(v0);
+    let t_on = edge + tau * ((1.0 - v1) / 0.5).ln();
+    let t_off = 2.0 * edge + width + tau * (v3 / 0.5).ln();
+    let (tau_open, tau_closed, settled) = (inductance / rf, inductance / 5.0, 0.1);
+    let current_period = |i0: f64| {
+        let on = i0 * (-t_on / tau_open).exp();
+        let off = settled + (on - settled) * (-(t_off - t_on) / tau_closed).exp();
+        (on, off, off * (-(period - t_off) / tau_open).exp())
+    };
+    let offset = current_period(0.0).2;
+    let i0 = offset / (1.0 - (current_period(1.0).2 - offset));
+    let (i_on, i_off, _) = current_period(i0);
+    let open = |current: f64| -rf * current / inductance;
+    let closed = |current: f64| (0.5 - 5.0 * current) / inductance;
+
+    // The monodromy is taken at the boundary the shooting state holds. S1 is
+    // closed there, on the top of the clock, where V(c) = 1 − (1 − V₁)·
+    // exp(−(t − 1 ns)/τ) dates it, and I(l1) must agree.
+    let coordinate = |name: &str| {
+        let index = point
+            .shooting_state_basis()
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("{name} in {:?}", point.shooting_state_basis()));
+        point.shooting_state()[index]
+    };
+    let start = edge + tau * ((1.0 - v1) / (1.0 - coordinate("event:V(C)"))).ln();
+    assert!(
+        t_on < start && start < edge + width,
+        "the period starts at {start:e} s, with S1 closed"
+    );
+    let current_there = settled + (i_on - settled) * (-(start - t_on) / tau_closed).exp();
+    assert!(
+        (coordinate("event:I(L1)") / current_there - 1.0).abs() < 1.0e-3,
+        "I(l1) = {} A at {start:e} s against {current_there} A",
+        coordinate("event:I(L1)")
+    );
+    let opening = (closed(i_off) - open(i_off))
+        * (tau / 0.5)
+        * (-(t_off - start) / tau).exp()
+        * (-(t_on + period - t_off) / tau_open).exp();
+    let closing =
+        (open(i_on) - closed(i_on)) * (-tau / 0.5) * (-(t_on + period - start) / tau).exp();
+    let coupling = (opening + closing) * (-(start - t_on) / tau_closed).exp();
+    let (current_mode, capacitor_mode) = ((-0.75_f64).exp(), (-period / tau).exp());
+    let shape = coupling / (capacitor_mode - current_mode);
+    let participation = shape.abs() / (shape * shape + 1.0).sqrt();
+
+    let multipliers: Vec<_> = stability
+        .result
+        .multipliers
+        .iter()
+        .map(|mode| mode.value)
+        .collect();
+    eprintln!(
+        "delayed switched RL from {start:e} s: multipliers {multipliers:?} against \
+         {current_mode} and {capacitor_mode}; participation {:?} against {participation}",
+        stability.probe_participation
+    );
+    assert_eq!(multipliers.len(), 2, "{multipliers:?}");
+    assert!(multipliers.iter().all(|value| value.im.abs() < 1e-9));
+    assert!(
+        (multipliers[0].re / current_mode - 1.0).abs() < 1.0e-3,
+        "{multipliers:?} against {current_mode}"
+    );
+    assert!(
+        (multipliers[1].re / capacitor_mode - 1.0).abs() < 1.0e-2,
+        "{multipliers:?} against {capacitor_mode}"
+    );
+    assert_eq!(stability.probe_participation.len(), 2);
+    assert!((stability.probe_participation[0] - 1.0).abs() < 1.0e-9);
+    assert!(
+        (stability.probe_participation[1] / participation - 1.0).abs() < 1.0e-2,
+        "{:?} against {participation}",
+        stability.probe_participation
+    );
 }
 
 #[test]

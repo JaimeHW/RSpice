@@ -18,13 +18,40 @@
 //! derivative history is the image's own, `δQ̇_0 = 0`. A coordinate no charge
 //! reads (an algebraic node, a source branch) maps to zero.
 //!
-//! **Saltation.** An ideal switch changes where its control crosses the
-//! threshold, and that instant `τ` moves with the state. It moves by
-//! `δτ = −∇g·δx_τ / ġ`, with `ġ` the control's rate over the step that
-//! crossed; over `δτ` the charges follow the old conductance instead of the
-//! new, so `δQ_τ += (f_new − f_old)(x_τ)·δτ`: the switch's conductance step
-//! times its voltage, into those of its two nodes that hold a charge. A clock-driven switch's control is
-//! fixed by its source, `∇g·δx_τ = 0`, and its saltation vanishes.
+//! **Saltation.** An ideal switch changes where its control `c(x)` crosses
+//! its threshold. A locked step is landed a resolution short of the crossing,
+//! where the switch still holds its state, and the switch changes at the
+//! start of the next step, which leaves at order one over a tenth of the
+//! mesh's step, before the step to the mesh's target resumes; the instant `τ`
+//! the step into it ends at is the root of `c`, so it moves with the state.
+//! That step, of length `h_A = τ − t_{k−1}`, ends at `x_τ = x_τ^fix + w·δτ`:
+//! the derivative at a fixed end, and `w = ∂x_τ/∂τ`, which solves
+//!
+//! - `(g/h_A·C_τ + G_τ)·w = (Q̇_τ + i₁·Q̇_{k−1})/h_A + ḃ(τ)`,
+//!
+//! the step's own residual moved with its end: its charge derivative's
+//! `1/h_A` and the sources' right-hand side `b`, read from the left. The
+//! crossing holds `∇c·δx_τ = 0`, so `δτ = −∇c·δx_τ^fix / ∇c·w`, and
+//!
+//! - `δQ_τ += C_τ·w·δτ`, `δQ̇_τ += (g/h_A·C_τ·w − (Q̇_τ + i₁·Q̇_{k−1})/h_A)·δτ`.
+//!
+//! The step leaving `τ`, of length `h_B = t_k − τ`, moves with its start, and
+//! its end follows by `s`: the order-one step's end a fixed interval after
+//! `τ` moves with it, `s = 1`, one halfway to its target by `s = 1/2`, and an
+//! end at the target stays, `s = 0`. Its right-hand side gains
+//!
+//! - `((s − 1)·(Q̇_k + i₁·Q̇_τ)/h_B + s·ḃ(t_k))·δτ`,
+//!
+//! its charge derivative keeps the moved end's `s·ḃ(t_k)·δτ`, and the step
+//! after it, whose start moves by `s·δτ`, gains
+//!
+//! - `−s·(Q̇_{k+1} + i₁·Q̇_k)/h_{k+1}·δτ`.
+//!
+//! Those charge derivatives are the companions' own,
+//! `Q̇_k = (g·ΔQ_k + v₂·ΔQ_{k−1})/h − i₁·Q̇_{k−1}`, with the charge steps
+//! `ΔQ_k` taken on the mean of the two points' `C`. A clock-driven switch's
+//! control is fixed by its source, `∇c·δx_τ = 0`, and its saltation
+//! vanishes.
 //!
 //! **Scope.** The recurrence is the map's exact derivative where every
 //! charge the circuit stores is one a segment takes from its starting
@@ -40,14 +67,17 @@
 //! `G + jωC`, the Xyce dialect's one-step integration, or a step that arrives
 //! without its coefficients keeps the finite-difference columns, and a
 //! recurrence the orbit's seeded directions do not confirm gives way to
-//! them. A switch a state controls is one: the transient's split step ends
-//! just past its crossing, and that step's trapezoid carries only part of the
-//! saltation into the discrete map the directions measure.
+//! them. A saltation is exact where the charges are linear, the
+//! source-driven residual is the independent sources', and the steps around
+//! the crossing are one-step formulas whose coefficients do not depend on
+//! the step ratio (backward Euler, the trapezoid); elsewhere it is the
+//! nearest the recurrence states, and the directions decide.
 
 use std::cell::RefCell;
 
 use super::newton::Orbit;
 use super::pac::Linearizer;
+use crate::circuit::SourceTimeSide;
 use crate::engine::SimulationError;
 use crate::engine::transient::state_capture::{
     AcceptedPointObserver, AcceptedStep, CapturedTransientState,
@@ -63,8 +93,6 @@ struct SwitchSite {
     /// The control: node voltages `(positive, negative)`, or a branch
     /// current at a solution index.
     control: SwitchControl,
-    /// The switched branch's nodes, matrix rows counted from one.
-    nodes: (usize, usize),
     /// `1/RON` and `1/ROFF`.
     conductances: (Value, Value),
 }
@@ -79,9 +107,7 @@ enum SwitchControl {
 #[derive(Clone, Copy)]
 struct SwitchSample {
     state: u64,
-    control: Value,
     conductance: Value,
-    across: Value,
 }
 
 /// One accepted point of the linearized traversal.
@@ -89,15 +115,31 @@ struct Point {
     time: Value,
     g: Vec<Value>,
     c: Vec<Value>,
+    solution: Vec<Value>,
     step: Option<AcceptedStep>,
     switches: Vec<SwitchSample>,
 }
 
-/// The saltation at one switch change: `δQ += jump·(−∇g·δx / ġ)`.
+/// A switch change at the start of a step, whose instant `τ` the step into
+/// it ended at: with `δτ = −∇c·δx_τ / rate`, the step's start moves by
+/// `δQ_τ += charge·δτ` and `δQ̇_τ += history·δτ`, its right-hand side by
+/// `rhs·δτ` and its charge derivative by `end_rate·δτ`, and the next step's
+/// right-hand side by `next_rhs·δτ`.
 struct Saltation {
     gradient: Vec<(usize, Value)>,
+    /// `∇c·w`.
     rate: Value,
-    jump: Vec<(usize, Value)>,
+    /// `C_τ·w`.
+    charge: Vec<Value>,
+    /// `g/h_A·C_τ·w − (Q̇_τ + i₁·Q̇_{k−1})/h_A`.
+    history: Vec<Value>,
+    /// `(s − 1)·(Q̇_k + i₁·Q̇_τ)/h_B + s·ḃ(t_k)`, with `s` how far the
+    /// step's end follows its start.
+    rhs: Vec<Value>,
+    /// `s·ḃ(t_k)`; empty for an end that stays.
+    end_rate: Vec<Value>,
+    /// `−s·(Q̇_{k+1} + i₁·Q̇_k)/h_{k+1}`; empty for an end that stays.
+    next_rhs: Vec<Value>,
 }
 
 /// One step of the recurrence.
@@ -107,6 +149,7 @@ struct Step {
     c: Vec<Value>,
     /// `g/h`, `v₁/h`, `v₂/h` and `i₁`.
     weights: (Value, Value, Value, Value),
+    /// The switch changes at the step's start.
     saltations: Vec<Saltation>,
 }
 
@@ -114,34 +157,17 @@ fn row(node: usize) -> Option<usize> {
     node.checked_sub(1)
 }
 
-fn read(solution: &[Value], node: usize) -> Value {
-    row(node).map_or(0.0, |index| {
-        solution.get(index).copied().unwrap_or(Value::NAN)
-    })
-}
-
 impl SwitchSite {
     fn sites(circuit: &CircuitData) -> Vec<Self> {
         let voltage = circuit.vswitches.iter().map(|switch| Self {
             control: SwitchControl::Voltage(switch.ctrl_pos, switch.ctrl_neg),
-            nodes: (switch.node_pos, switch.node_neg),
             conductances: (1.0 / switch.ron, 1.0 / switch.roff),
         });
         let current = circuit.iswitches.iter().map(|switch| Self {
             control: SwitchControl::Current(switch.ctrl_branch.unwrap_or(0)),
-            nodes: (switch.node_pos, switch.node_neg),
             conductances: (1.0 / switch.ron, 1.0 / switch.roff),
         });
         voltage.chain(current).collect()
-    }
-
-    fn control(&self, solution: &[Value]) -> Value {
-        match self.control {
-            SwitchControl::Voltage(positive, negative) => {
-                read(solution, positive) - read(solution, negative)
-            }
-            SwitchControl::Current(index) => read(solution, index),
-        }
     }
 
     fn gradient(&self) -> Vec<(usize, Value)> {
@@ -188,14 +214,9 @@ fn sample_switches(
                 switch.small_signal_conductance(solution),
             )
         }));
-    for site in sites {
+    for _ in sites {
         let (state, conductance) = conductances.next().unwrap_or((0, 0.0));
-        samples.push(SwitchSample {
-            state,
-            control: site.control(solution),
-            conductance,
-            across: read(solution, site.nodes.0) - read(solution, site.nodes.1),
-        });
+        samples.push(SwitchSample { state, conductance });
     }
     samples
 }
@@ -227,7 +248,8 @@ impl Orbit<'_> {
         };
         let sites = SwitchSite::sites(&start.circuit);
         let n = start.solution.len();
-        let Some(steps) = Self::recurrence_steps(n, &points, &structure, &sites)? else {
+        let Some(steps) = Self::recurrence_steps(&start.circuit, &points, &structure, &sites)?
+        else {
             return Ok(None);
         };
         let positions: Vec<(usize, usize)> = structure.stored_positions().collect();
@@ -266,6 +288,7 @@ impl Orbit<'_> {
             switches: sample_switches(&start.circuit, &sites, &start.solution),
             g: first.g,
             c: first.c,
+            solution: start.solution.clone(),
             step: None,
         };
         let linearizer = RefCell::new(linearizer);
@@ -280,6 +303,7 @@ impl Orbit<'_> {
                     switches: sample_switches(circuit, &sites, solution),
                     g: operator.g,
                     c: operator.c,
+                    solution: solution.to_vec(),
                     step,
                 };
                 let mut points = points.borrow_mut();
@@ -317,11 +341,12 @@ impl Orbit<'_> {
     /// Each step's factored matrix, charge operator, weights and
     /// saltations, or `None` for a step the recurrence cannot state.
     fn recurrence_steps(
-        n: usize,
+        circuit: &CircuitData,
         points: &[Point],
         structure: &StaticMatrix,
         sites: &[SwitchSite],
     ) -> Result<Option<Vec<Step>>, SimulationError> {
+        let n = points[0].solution.len();
         let positions: Vec<(usize, usize)> = structure.stored_positions().collect();
         let mut options = structure.solver_options();
         options.numeric_factorization = NumericFactorizationPolicy::ReusePivotSequence;
@@ -338,8 +363,12 @@ impl Orbit<'_> {
         if !template.stored_positions().eq(positions.iter().copied()) {
             return Ok(None);
         }
-        let mut steps = Vec::with_capacity(points.len() - 1);
-        for pair in points.windows(2) {
+        // The companions' charge derivatives at the latest three points, and
+        // the latest two charge steps, which a saltation moves with its
+        // instant. A circuit with no switch has none.
+        let mut derivatives = Derivatives::new(if sites.is_empty() { 0 } else { n });
+        let mut steps: Vec<Step> = Vec::with_capacity(points.len() - 1);
+        for (index, pair) in points.windows(2).enumerate() {
             let (before, after) = (&pair[0], &pair[1]);
             let Some(step) = after.step else {
                 return Ok(None);
@@ -363,10 +392,24 @@ impl Orbit<'_> {
             for ((value, g), c) in a.values_mut().iter_mut().zip(&after.g).zip(&after.c) {
                 *value = weights.0 * c + g;
             }
-            // A charge moves only on a row that holds one.
-            let mut holds_charge = vec![false; n];
-            for (&(row, _), c) in positions.iter().zip(&after.c) {
-                holds_charge[row] |= *c != 0.0;
+            derivatives.advance(&positions, before, after, weights);
+            // The previous step's end followed a switch's instant, and this
+            // step's start moves with it.
+            if let Some(follows) = before.step.map(|into| into.follows).filter(|s| *s != 0.0)
+                && let Some(previous) = steps.last_mut()
+            {
+                if step.follows != 0.0 {
+                    return Ok(None);
+                }
+                let next_rhs: Vec<Value> = derivatives
+                    .at(0)
+                    .iter()
+                    .zip(derivatives.at(1))
+                    .map(|(now, then)| -follows * (now + weights.3 * then) / h)
+                    .collect();
+                for saltation in &mut previous.saltations {
+                    saltation.next_rhs.clone_from(&next_rhs);
+                }
             }
             let mut saltations = Vec::new();
             for (site, (from, to)) in sites
@@ -377,23 +420,79 @@ impl Orbit<'_> {
                     continue;
                 }
                 let gradient = site.gradient();
-                if gradient.is_empty() {
+                // A change on the step from the image has no step into its
+                // instant: the image is where it was dated.
+                let (Some(previous), false) = (index.checked_sub(1), gradient.is_empty()) else {
                     continue;
-                }
-                let rate = (to.control - from.control) / h;
+                };
+                let Some(into) = before.step else {
+                    return Ok(None);
+                };
+                let (into_g, into_i1) = (into.coefficients.coeff_g, into.coefficients.coeff_i_n);
+                // `(Q̇_τ + i₁·Q̇_{k−1})/h_A`, the step into `τ`'s charge
+                // derivative moved with its end.
+                let reach: Vec<Value> = derivatives
+                    .at(1)
+                    .iter()
+                    .zip(derivatives.at(2))
+                    .map(|(now, then)| (now + into_i1 * then) / into.step)
+                    .collect();
+                let sources = source_rate(circuit, before.time, 1.0e-3 * into.step, n);
+                let moved: Vec<Value> = reach.iter().zip(&sources).map(|(a, b)| a + b).collect();
+                let mut w = vec![0.0; n];
+                steps[previous]
+                    .a
+                    .borrow_mut()
+                    .solve_many_into_with_factorization(
+                        &moved,
+                        1,
+                        &mut w,
+                        FactorizationRequest::Automatic,
+                    )
+                    .map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "the period map's recurrence does not solve the instant of \
+                             its step {index}: {error}"
+                        ))
+                    })?;
+                let rate: Value = gradient.iter().map(|&(row, weight)| weight * w[row]).sum();
                 if !rate.is_finite() || rate == 0.0 {
                     return Ok(None);
                 }
-                let step = (to.conductance - from.conductance) * to.across;
-                let jump = [(site.nodes.0, step), (site.nodes.1, -step)]
-                    .into_iter()
-                    .filter_map(|(node, value)| row(node).map(|index| (index, value)))
-                    .filter(|&(index, _)| holds_charge[index])
+                let mut charge = vec![0.0; n];
+                multiply(&positions, &before.c, &w, &mut charge);
+                let history = charge
+                    .iter()
+                    .zip(&reach)
+                    .map(|(q, reach)| into_g / into.step * q - reach)
+                    .collect();
+                let follows = step.follows;
+                let end_rate: Vec<Value> = if follows == 0.0 {
+                    Vec::new()
+                } else {
+                    source_rate(circuit, after.time, 1.0e-3 * h, n)
+                        .into_iter()
+                        .map(|rate| follows * rate)
+                        .collect()
+                };
+                let rhs = derivatives
+                    .at(0)
+                    .iter()
+                    .zip(derivatives.at(1))
+                    .enumerate()
+                    .map(|(row, (now, then))| {
+                        (follows - 1.0) * (now + weights.3 * then) / h
+                            + end_rate.get(row).copied().unwrap_or(0.0)
+                    })
                     .collect();
                 saltations.push(Saltation {
                     gradient,
                     rate,
-                    jump,
+                    charge,
+                    history,
+                    rhs,
+                    end_rate,
+                    next_rhs: Vec::new(),
                 });
             }
             steps.push(Step {
@@ -405,6 +504,92 @@ impl Orbit<'_> {
         }
         Ok(Some(steps))
     }
+}
+
+/// The companions' charge derivatives along the traversal, newest first,
+/// and the latest two charge steps.
+struct Derivatives {
+    rates: [Vec<Value>; 3],
+    changes: [Vec<Value>; 2],
+}
+
+impl Derivatives {
+    fn new(n: usize) -> Self {
+        Self {
+            rates: std::array::from_fn(|_| vec![0.0; n]),
+            changes: std::array::from_fn(|_| vec![0.0; n]),
+        }
+    }
+
+    /// `Q̇` at the newest point, `back` points ago.
+    fn at(&self, back: usize) -> &[Value] {
+        &self.rates[back]
+    }
+
+    /// Take the step from `before` to `after` on `weights`: `ΔQ_k` on the
+    /// mean of the two points' `C`, and `Q̇_k = (g·ΔQ_k + v₂·ΔQ_{k−1})/h −
+    /// i₁·Q̇_{k−1}`, the companion's own, since `g = v₁ + v₂`. The image's
+    /// derivative history is not known and reads zero; a segment leaves its
+    /// image at order one, which does not read it.
+    fn advance(
+        &mut self,
+        positions: &[(usize, usize)],
+        before: &Point,
+        after: &Point,
+        (g, _, v2, i1): (Value, Value, Value, Value),
+    ) {
+        if self.rates[0].is_empty() {
+            return;
+        }
+        self.changes.swap(0, 1);
+        self.rates.rotate_right(1);
+        let difference: Vec<Value> = after
+            .solution
+            .iter()
+            .zip(&before.solution)
+            .map(|(a, b)| a - b)
+            .collect();
+        let [change, earlier] = &mut self.changes;
+        change.fill(0.0);
+        multiply(positions, &after.c, &difference, change);
+        multiply(positions, &before.c, &difference, change);
+        change.iter_mut().for_each(|value| *value *= 0.5);
+        let [now, then, _] = &mut self.rates;
+        for (((rate, change), earlier), then) in
+            now.iter_mut().zip(&*change).zip(&*earlier).zip(&*then)
+        {
+            *rate = g * change + v2 * earlier - i1 * then;
+        }
+    }
+}
+
+/// `ḃ(t)`, the rate of the independent sources' right-hand side at `time`,
+/// from the left: the step into `t` ends there and reads the sources' left
+/// limit. The second-order backward difference over `spacing`, a thousandth
+/// of that step, reaches no source corner, since a step ends at every one.
+fn source_rate(circuit: &CircuitData, time: Value, spacing: Value, n: usize) -> Vec<Value> {
+    let nodes = circuit.num_nodes();
+    let at = |instant: Value| {
+        let mut rhs = vec![0.0; n];
+        circuit.voltage_sources.update_transient_rhs_on_side(
+            &mut rhs,
+            instant,
+            |ordinal| nodes + ordinal,
+            SourceTimeSide::LeftLimit,
+        );
+        circuit.current_sources.stamp_transient_rhs_on_side(
+            &mut rhs,
+            instant,
+            SourceTimeSide::LeftLimit,
+        );
+        rhs
+    };
+    let (now, one, two) = (at(time), at(time - spacing), at(time - 2.0 * spacing));
+    now.iter()
+        .zip(&one)
+        .zip(&two)
+        .map(|((now, one), two)| (3.0 * now - 4.0 * one + two) / (2.0 * spacing))
+        .collect()
 }
 
 /// `y += M·x` for the operator `M` on `positions`.
@@ -434,8 +619,11 @@ fn propagate(
     let mut rate = Vec::new();
     let mut rhs = Vec::new();
     let mut solved = Vec::new();
+    let mut delays = Vec::new();
+    let mut carried = Vec::new();
     for chunk in columns.chunks(COLUMNS_PER_BLOCK) {
         let count = chunk.len();
+        carried.clear();
         charge.clear();
         charge.resize(n * count, 0.0);
         for (j, &col) in chunk.iter().enumerate() {
@@ -450,6 +638,29 @@ fn propagate(
         solved.resize(n * count, 0.0);
         for (index, step) in steps.iter().enumerate() {
             let (g, v1, v2, i1) = step.weights;
+            // A switch's instant at the step's start moves the charges and
+            // their derivative there, and the step's own length.
+            delays.clear();
+            for saltation in &step.saltations {
+                for j in 0..count {
+                    let moved: Value = saltation
+                        .gradient
+                        .iter()
+                        .map(|&(row, weight)| weight * solved[j * n + row])
+                        .sum();
+                    let delay = -moved / saltation.rate;
+                    delays.push(delay);
+                    let range = j * n..(j + 1) * n;
+                    for ((q, qdot), (shift, history)) in charge[range.clone()]
+                        .iter_mut()
+                        .zip(&mut rate[range])
+                        .zip(saltation.charge.iter().zip(&saltation.history))
+                    {
+                        *q += shift * delay;
+                        *qdot += history * delay;
+                    }
+                }
+            }
             rhs.clear();
             rhs.extend(
                 charge
@@ -458,6 +669,25 @@ fn propagate(
                     .zip(&rate)
                     .map(|((q1, q2), qdot)| v1 * q1 + v2 * q2 + i1 * qdot),
             );
+            for (saltation, delays) in step.saltations.iter().zip(delays.chunks(count)) {
+                for (j, delay) in delays.iter().enumerate() {
+                    for (b, shift) in rhs[j * n..(j + 1) * n].iter_mut().zip(&saltation.rhs) {
+                        *b += shift * delay;
+                    }
+                }
+            }
+            // An instant at the previous step's start moved its end, which
+            // is this step's start.
+            let previous = index
+                .checked_sub(1)
+                .map_or(&[][..], |p| &steps[p].saltations[..]);
+            for (saltation, delays) in previous.iter().zip(carried.chunks(count)) {
+                for (j, delay) in delays.iter().enumerate() {
+                    for (b, shift) in rhs[j * n..(j + 1) * n].iter_mut().zip(&saltation.next_rhs) {
+                        *b += shift * delay;
+                    }
+                }
+            }
             step.a
                 .borrow_mut()
                 .solve_many_into_with_factorization(
@@ -484,24 +714,17 @@ fn propagate(
                 for ((qdot, q), b) in rate[range.clone()]
                     .iter_mut()
                     .zip(&charge[range.clone()])
-                    .zip(&rhs[range])
+                    .zip(&rhs[range.clone()])
                 {
                     *qdot = g * q - b;
                 }
-                // The switch's instant moves the charges, not the derivative
-                // history the step left.
-                for saltation in &step.saltations {
-                    let moved: Value = saltation
-                        .gradient
-                        .iter()
-                        .map(|&(row, weight)| weight * solved[j * n + row])
-                        .sum();
-                    let delay = -moved / saltation.rate;
-                    for &(row, value) in &saltation.jump {
-                        charge[j * n + row] += value * delay;
+                for (saltation, delays) in step.saltations.iter().zip(delays.chunks(count)) {
+                    for (qdot, shift) in rate[range.clone()].iter_mut().zip(&saltation.end_rate) {
+                        *qdot += shift * delays[j];
                     }
                 }
             }
+            std::mem::swap(&mut carried, &mut delays);
         }
         for (j, &col) in chunk.iter().enumerate() {
             for (row, values) in phi.iter_mut().enumerate() {

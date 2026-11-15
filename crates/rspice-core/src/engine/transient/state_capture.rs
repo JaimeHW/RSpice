@@ -48,6 +48,11 @@ pub(in crate::engine) struct CapturedTransientState {
 pub(in crate::engine) struct AcceptedStep {
     pub(in crate::engine) step: Value,
     pub(in crate::engine) coefficients: crate::numerics::integration::CompanionCoefficients,
+    /// How far the step's end moves when its start does. A locked step's
+    /// end is a mesh point and stays; the order-one step from a landing short
+    /// of a switch's crossing ends a fixed fraction of the way to its target,
+    /// so its end follows the crossing by the rest of that fraction.
+    pub(in crate::engine) follows: Value,
 }
 
 /// Offered every accepted point of a run, with the circuit and solution as

@@ -6375,7 +6375,7 @@ impl Engine {
         let segment_from_image = locked_grid.is_some() && image.is_some();
         let splits_switch_thresholds =
             segment_from_image && (!circuit.vswitches.is_empty() || !circuit.iswitches.is_empty());
-        let mut crossing_search: Option<switch_crossing::SwitchCrossingSearch> = None;
+        let mut switch_crossings = switch_crossing::SwitchCrossings::default();
         let tstop = match locked_grid.as_ref().and_then(|grid| grid.last()) {
             Some(&last) => last.min(tstop),
             None => tstop,
@@ -8033,13 +8033,18 @@ impl Engine {
                     {
                         step_target = step_target.min(breakpoint);
                     }
+                    // The step from a landing short of a switch's crossing
+                    // restarts integration a tenth of the way to its target.
+                    if let Some(restart) = switch_crossings.restart_target(t, step_target) {
+                        step_target = restart;
+                    }
                     // The cut is taken as found: the search keeps it inside
                     // the bracket it was found in, and a tolerance wider than
                     // the bracket would refuse it and solve the same step
                     // again.
-                    if let Some(split) =
-                        switch_crossing::SwitchCrossingSearch::target(crossing_search.as_ref(), t)
-                            .filter(|split| *split < step_target)
+                    if let Some(split) = switch_crossings
+                        .target(t)
+                        .filter(|split| *split < step_target)
                     {
                         step_target = split;
                     }
@@ -11013,8 +11018,7 @@ impl Engine {
             // retries.
             if splits_switch_thresholds
                 && !locked_replay_hidden_attempt
-                && switch_crossing::SwitchCrossingSearch::advance(
-                    &mut crossing_search,
+                && switch_crossings.advance(
                     &circuit,
                     (t, &solution),
                     (step_time, &new_solution),
@@ -12239,6 +12243,7 @@ impl Engine {
                             Some(state_capture::AcceptedStep {
                                 step: t - accepted_from,
                                 coefficients: coeff,
+                                follows: switch_crossings.follows(accepted_from, t),
                             }),
                         )?
                     {
@@ -12993,6 +12998,7 @@ impl Engine {
                     Some(state_capture::AcceptedStep {
                         step: t - accepted_from,
                         coefficients: coeff,
+                        follows: switch_crossings.follows(accepted_from, t),
                     }),
                 )?
             {
@@ -13245,6 +13251,17 @@ impl Engine {
                     hit_breakpoint,
                     true,
                 );
+            }
+            // A step landed short of a switch's crossing ends where the
+            // switch still holds its state. It changes at the start of the
+            // next step, which leaves at order one as a breakpoint's does, so
+            // no step averages the slopes on both sides of the change, and
+            // the step after that one resumes the order held here.
+            if switch_crossings.landed_at(step_time) {
+                switch_crossings.hold_order(step_time, trap_order);
+                trap_order = xyce_startup_or_restart_order(xyce_min_order);
+            } else if let Some(order) = switch_crossings.held_order(accepted_from) {
+                trap_order = order;
             }
 
             lte_estimator.set_method_order(effective_method_order(current_method, trap_order));

@@ -868,10 +868,15 @@ cl d 0 100p
 /// - `Φ_xc = Σ (ẋ_old − ẋ_new)(τ_i)·δτ_i/δc₀·exp(−∫ after τ_i)`, with
 ///   `δτ_i = −exp(−(τ_i − t₀)/R1C1)/v̇(c)(τ_i)` per unit of v(c) at `t₀`.
 ///
-/// The recurrence meets all three to the trapezoidal steps' error. The
-/// forward differences of the discrete map carry only half of the closing
-/// jump: the transient's split step ends just past the crossing, and its
-/// trapezoid averages the open and closed slopes over it.
+/// The recurrence is the discrete map's derivative: it meets the map's
+/// central differences to 1e-5, and both meet the closed form to the
+/// trapezoidal steps' error. The map's differences once carried half of each
+/// jump (0.050359 against 0.068703): the step that dated a crossing ended
+/// just past it, and its trapezoid averaged the open and closed slopes over
+/// it. It now ends short of the crossing, and the step after it restarts at
+/// order one over a tenth of the mesh's step. An order-one step run on to the
+/// mesh's target instead moved its error with the crossing, and `Φ_cc`, which
+/// no switch touches, fell 0.4% short (3.553614e-2).
 #[test]
 fn the_recurrence_carries_a_state_controlled_switchs_saltation() {
     let deck = "sampler
@@ -886,7 +891,7 @@ c2 x 0 300p
 .end
 ";
     let config = PssConfig::new(1.0e6).with_tstab(5.0e-6);
-    let monodromies = both_monodromies(deck, &config);
+    let monodromies = monodromies(deck, &config, Some(1.0e-6));
     let (c, x) = (
         monodromies.coordinate("V(c)"),
         monodromies.coordinate("V(x)"),
@@ -932,19 +937,24 @@ c2 x 0 300p
         ((x, x), decay_on * wrapped_off),
         ((x, c), closing + opening),
     ];
+    let central = monodromies.central.as_ref().expect("central differences");
     for ((row, col), closed_form) in expected {
-        let (exact, differenced) = (
-            monodromies.exact[row][col],
-            monodromies.differenced[row][col],
-        );
+        let (exact, differenced) = (monodromies.exact[row][col], central[row][col]);
         eprintln!(
-            "sampler Φ[{}][{}]: recurrence {exact:.6e}, differences {differenced:.6e}, closed form {closed_form:.6e}",
-            monodromies.names[row], monodromies.names[col]
+            "sampler Φ[{}][{}]: recurrence {exact:.6e}, central differences {differenced:.6e}, \
+             forward differences {:.6e}, closed form {closed_form:.6e}",
+            monodromies.names[row], monodromies.names[col], monodromies.differenced[row][col]
         );
         assert!(
-            (exact - closed_form).abs() <= 1.0e-2 * closed_form.abs(),
-            "Φ[{row}][{col}] = {exact:e} against {closed_form:e}"
+            (exact - differenced).abs() <= 1.0e-5 * differenced.abs(),
+            "Φ[{row}][{col}] = {exact:e} against the map's {differenced:e}"
         );
+        for value in [exact, differenced] {
+            assert!(
+                (value - closed_form).abs() <= 1.0e-2 * closed_form.abs(),
+                "Φ[{row}][{col}] = {value:e} against {closed_form:e}"
+            );
+        }
     }
 }
 
