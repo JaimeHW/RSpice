@@ -44,8 +44,12 @@ mod tf;
 pub(crate) use tf::run_tf_analysis_with_bias;
 mod transient;
 mod transient_state;
+// The store is kept by the desktop runner and by the browser worker's
+// session; a wasm32 build without the worker keeps none.
+#[cfg(any(not(target_arch = "wasm32"), feature = "browser-worker"))]
+pub(crate) use transient_state::TransientStateStore;
 pub(crate) use transient_state::{
-    Bias, StateCard, StateRunError, TransientStateHandoff, TransientStateRole, TransientStateStore,
+    Bias, StateCard, StateRunError, TransientStateHandoff, TransientStateRole,
     install_transient_state_handoff, linearize_at_state, publish_transient_states,
     state_capture_times,
 };

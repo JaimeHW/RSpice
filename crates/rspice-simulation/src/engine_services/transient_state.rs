@@ -90,6 +90,7 @@ pub(crate) struct TransientStateHandoff {
 }
 
 impl TransientStateHandoff {
+    #[cfg(any(not(target_arch = "wasm32"), feature = "browser-worker"))]
     pub(crate) const fn new(store: Arc<TransientStateStore>, role: TransientStateRole) -> Self {
         Self { store, role }
     }
