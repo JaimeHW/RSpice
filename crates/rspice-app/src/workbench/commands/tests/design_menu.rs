@@ -156,7 +156,7 @@ fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
 fn configurations_opens_the_project_configuration_page() {
     let mut app = RSpiceApp::test_instance();
     assert!(ShellCommand::ConfigurationSets.is_enabled(&app));
-    ShellCommand::ConfigurationSets.execute(&mut app);
+    app.execute_command_key(ShellCommand::ConfigurationSets.key());
     assert_eq!(
         app.state.workbench.workspace,
         rspice_app_state::workbench::workspace::Workspace::Project

@@ -485,14 +485,14 @@ fn full_screen_command_enters_in_the_same_frame_with_no_dialog() {
     assert!(!app.state.workbench.full_screen_presentation);
     assert_eq!(take_full_screen_request(&mut app), None);
 
-    ShellCommand::ToggleFullScreen.execute(&mut app);
+    app.execute_command_key(ShellCommand::ToggleFullScreen.key());
 
     assert!(!app.state.dialog_modal_open());
     assert!(app.state.workbench.full_screen_presentation);
     assert!(app.state.workbench.full_screen);
     assert_eq!(take_full_screen_request(&mut app), Some(true));
 
-    ShellCommand::ToggleFullScreen.execute(&mut app);
+    app.execute_command_key(ShellCommand::ToggleFullScreen.key());
 
     assert!(!app.state.workbench.full_screen_presentation);
     assert!(!app.state.workbench.full_screen);

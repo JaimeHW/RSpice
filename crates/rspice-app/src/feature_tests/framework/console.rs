@@ -666,12 +666,12 @@ fn the_clear_control_clears_the_visible_page_through_its_command() {
 
     app.state.workbench.console_page = ConsolePage::Problems;
     assert!(!ShellCommand::ClearConsole.is_enabled(&app));
-    ShellCommand::ClearConsole.execute(&mut app);
+    app.execute_command_key(ShellCommand::ClearConsole.key());
     assert!(!app.state.model.log_buffer.is_empty());
 
     app.state.workbench.console_page = ConsolePage::Console;
     assert!(ShellCommand::ClearConsole.is_enabled(&app));
-    ShellCommand::ClearConsole.execute(&mut app);
+    app.execute_command_key(ShellCommand::ClearConsole.key());
     assert!(app.state.model.log_buffer.is_empty());
     assert!(!ShellCommand::ClearConsole.is_enabled(&app));
 }
@@ -703,7 +703,7 @@ fn a_run_channel_has_no_clear_and_the_command_leaves_the_session_alone() {
         app.state.workbench.console_view.channel
     ));
     assert!(!ShellCommand::ClearConsole.is_enabled(&app));
-    ShellCommand::ClearConsole.execute(&mut app);
+    app.execute_command_key(ShellCommand::ClearConsole.key());
     assert!(!app.state.model.log_buffer.is_empty());
 }
 

@@ -18,9 +18,7 @@ mod status_order;
 use egui::Ui;
 use egui::os::OperatingSystem;
 
-use crate::workbench::commands::vocabulary::{
-    CommandRegistry, ShellCommand, command_registry, legacy_command,
-};
+use crate::workbench::commands::vocabulary::{CommandRegistry, ShellCommand, command_registry};
 use crate::workbench::features;
 use crate::workbench::{AppState, RSpiceApp};
 use menus::{APPLICATION_MENU, COMPACT_MENU, application_menu_entries};
@@ -754,27 +752,16 @@ impl Host for RSpiceApp {
         command_registry()
     }
 
-    // A key no legacy command answers to is a feature's, or nobody's: the
-    // dispatcher by key answers both.
     fn availability(&self, key: CommandKey) -> CommandAvailability {
-        legacy_command(key).map_or_else(
-            || self.command_availability(key),
-            |command| command.availability(self),
-        )
+        self.command_availability(key)
     }
 
     fn is_enabled(&self, key: CommandKey) -> bool {
-        legacy_command(key).map_or_else(
-            || self.command_key_enabled(key),
-            |command| command.is_enabled(self),
-        )
+        self.command_key_enabled(key)
     }
 
     fn checked(&self, key: CommandKey) -> Option<bool> {
-        legacy_command(key).map_or_else(
-            || features::checked(self, key),
-            |command| command.checked(self),
-        )
+        self.command_checked(key)
     }
 
     fn label(&self, key: CommandKey) -> &'static str {
@@ -788,33 +775,28 @@ impl Host for RSpiceApp {
                 model.symbol_contract_source(&model.workspace.content.active_view),
             );
         }
-        legacy_command(key).map_or_else(
-            || features::spec(key).map_or_else(|| command_registry().label(key), |spec| spec.label),
-            |command| command.spec().label,
-        )
+        features::spec(key).map_or_else(|| command_registry().label(key), |spec| spec.label)
     }
 
     fn menu_label(&self, key: CommandKey) -> std::borrow::Cow<'static, str> {
         if let Some(command) = WorkbenchCommand::from_key(key) {
             return crate::workbench::commands::workbench_menu_label(command, self);
         }
-        legacy_command(key).map_or_else(
-            || {
-                let label = self.label(key);
-                // Check and save with a symbol in front is the save itself:
-                // no dialog follows it, so its row promises none.
-                if key == rspice_app_project::workbench::project::commands::ProjectCommand::CheckAndSave.key()
-                    && self.state.workbench.workspace == Workspace::Design
-                    && self.state.model.workspace.content.active_view_type()
-                        == Some(ViewType::Symbol)
-                {
-                    label.trim_end_matches('\u{2026}').into()
-                } else {
-                    label.into()
-                }
-            },
-            |command| crate::workbench::commands::menu_label(command, self),
-        )
+        if key == ShellCommand::RepeatLastCommand.key() {
+            return crate::workbench::commands::repeat_menu_label(self);
+        }
+        let label = self.label(key);
+        // Check and save with a symbol in front is the save itself: no
+        // dialog follows it, so its row promises none.
+        if key
+            == rspice_app_project::workbench::project::commands::ProjectCommand::CheckAndSave.key()
+            && self.state.workbench.workspace == Workspace::Design
+            && self.state.model.workspace.content.active_view_type() == Some(ViewType::Symbol)
+        {
+            label.trim_end_matches('\u{2026}').into()
+        } else {
+            label.into()
+        }
     }
 
     fn shortcut_label(
@@ -831,10 +813,7 @@ impl Host for RSpiceApp {
     }
 
     fn execute(&mut self, key: CommandKey) {
-        match legacy_command(key) {
-            Some(command) => command.execute(self),
-            None => self.execute_command_key(key),
-        }
+        self.execute_command_key(key);
     }
 
     fn command_icon(&self, key: CommandKey) -> Option<WorkbenchIcon> {
@@ -843,7 +822,7 @@ impl Host for RSpiceApp {
     }
 
     fn palette_icon(&self, key: CommandKey) -> Option<Icon> {
-        legacy_command(key).map_or_else(
+        ShellCommand::from_key(key).map_or_else(
             || palette_icons::feature_palette_icon(key),
             palette_icons::palette_icon,
         )
@@ -1326,7 +1305,7 @@ mod tests {
             ),
         ] {
             assert_eq!(id, command.key(), "{command:?}");
-            assert_eq!(legacy_command(id), Some(command), "{command:?}");
+            assert_eq!(ShellCommand::from_key(id), Some(command), "{command:?}");
         }
     }
 
@@ -1341,7 +1320,7 @@ mod tests {
                 Some(command),
                 "{command:?}"
             );
-            assert_eq!(legacy_command(key), None, "{command:?}");
+            assert_eq!(ShellCommand::from_key(key), None, "{command:?}");
         }
     }
 
@@ -1378,7 +1357,7 @@ mod tests {
         ] {
             assert_eq!(id, command.key(), "{command:?}");
             assert_eq!(ResultsCommand::from_key(id), Some(command), "{command:?}");
-            assert_eq!(legacy_command(id), None, "{command:?}");
+            assert_eq!(ShellCommand::from_key(id), None, "{command:?}");
         }
     }
 
@@ -1403,7 +1382,7 @@ mod tests {
         ] {
             assert_eq!(id, command.key(), "{command:?}");
             assert_eq!(SimulateCommand::from_key(id), Some(command), "{command:?}");
-            assert_eq!(legacy_command(id), None, "{command:?}");
+            assert_eq!(ShellCommand::from_key(id), None, "{command:?}");
         }
     }
 
@@ -1424,7 +1403,7 @@ mod tests {
         ] {
             assert_eq!(id, command.key(), "{command:?}");
             assert_eq!(ProjectCommand::from_key(id), Some(command), "{command:?}");
-            assert_eq!(legacy_command(id), None, "{command:?}");
+            assert_eq!(ShellCommand::from_key(id), None, "{command:?}");
         }
     }
 
@@ -1436,7 +1415,7 @@ mod tests {
 
         let command = CloudCommand::AccountOrganization;
         assert_eq!(ids::ACCOUNT_ORGANIZATION, command.key());
-        assert_eq!(legacy_command(ids::ACCOUNT_ORGANIZATION), None);
+        assert_eq!(ShellCommand::from_key(ids::ACCOUNT_ORGANIZATION), None);
         assert_eq!(
             features::spec(ids::ACCOUNT_ORGANIZATION).map(|spec| spec.key),
             Some(command.key())
@@ -1452,7 +1431,7 @@ mod tests {
         let app = RSpiceApp::test_instance();
         for left_out in HardcopyCommand::REPORT_TOOLBAR {
             let key = left_out.key();
-            assert_eq!(legacy_command(key), None, "{left_out:?}");
+            assert_eq!(ShellCommand::from_key(key), None, "{left_out:?}");
             assert_eq!(
                 command_registry().resolve(key.as_str()),
                 None,

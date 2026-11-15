@@ -14,6 +14,7 @@ use rspice_app_state::state::command_catalog::{
 };
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
+use rspice_app_workbench::workbench::framework::feature::held_back;
 
 const ALL: &[CommandPlatform] = &CommandPlatform::ALL;
 const DESKTOP: &[CommandPlatform] = &[CommandPlatform::Desktop];
@@ -235,11 +236,8 @@ impl ShellCommand {
     }
 
     pub fn availability(self, app: &RSpiceApp) -> CommandAvailability {
-        if self.held_by_project_operation(&app.state.platform) {
-            return CommandAvailability::Disabled("project operation is still in progress");
-        }
-        if self.lacks_open_project(&app.state.platform) {
-            return CommandAvailability::Disabled("no project is open");
+        if let Some(reason) = held_back(self.declared_spec().flags, &app.state.platform) {
+            return CommandAvailability::Disabled(reason);
         }
         if self.mutates_window_session() && app.state.application_modal_open() {
             return CommandAvailability::Disabled(

@@ -218,7 +218,7 @@ impl RSpiceApp {
 
         if notices {
             self.state.shell.about = false;
-            ShellCommand::LegalPrivacy.execute(self);
+            self.execute_command_key(ShellCommand::LegalPrivacy.key());
             return;
         }
         match choice {
@@ -789,7 +789,7 @@ mod tests {
     #[test]
     fn examples_open_from_the_help_menu_and_not_from_the_help_center() {
         let mut app = RSpiceApp::test_instance();
-        ShellCommand::Examples.execute(&mut app);
+        app.execute_command_key(ShellCommand::Examples.key());
         assert_eq!(app.state.project.examples_selection, Some(0));
 
         let mut app = RSpiceApp::test_instance();
@@ -848,7 +848,7 @@ mod tests {
     fn about_states_the_build_engine_and_license_in_words() {
         let mut app = RSpiceApp::test_instance();
         assert!(app.state.cloud.license.is_none());
-        ShellCommand::About.execute(&mut app);
+        app.execute_command_key(ShellCommand::About.key());
         let shown = shown_nodes(&mut app, RSpiceApp::render_about_dialog);
         let texts: Vec<&str> = shown.iter().map(|shown| shown.text.as_str()).collect();
         for expected in [
@@ -910,7 +910,7 @@ mod tests {
     #[test]
     fn the_legal_page_captions_are_headings() {
         let mut app = RSpiceApp::test_instance();
-        ShellCommand::LegalPrivacy.execute(&mut app);
+        app.execute_command_key(ShellCommand::LegalPrivacy.key());
         let shown = shown_nodes(&mut app, RSpiceApp::render_help_center_dialog);
         for caption in [
             "Privacy and support data",
@@ -932,7 +932,7 @@ mod tests {
     #[test]
     fn the_legal_page_shows_the_shipped_license_and_third_party_notices() {
         let mut app = RSpiceApp::test_instance();
-        ShellCommand::LegalPrivacy.execute(&mut app);
+        app.execute_command_key(ShellCommand::LegalPrivacy.key());
         let shown = shown_texts(app);
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for name in ["LICENSE", "NOTICE"] {
@@ -956,7 +956,7 @@ mod tests {
     fn report_a_problem_replaces_the_diagnostics_and_support_bundle_pages() {
         for command in [ShellCommand::SystemDiagnostics, ShellCommand::SupportBundle] {
             let mut app = RSpiceApp::test_instance();
-            command.execute(&mut app);
+            app.execute_command_key(command.key());
             let shown = shown_texts(app);
             for expected in ["Report a problem", report_problem::SUPPORT_ADDRESS] {
                 assert!(

@@ -29,7 +29,7 @@ fn task_focused_menu_can_open_the_palette_in_an_exact_scope() {
     );
     assert_eq!(PaletteScope::from_label("unknown"), None);
 }
-use crate::workbench::commands::vocabulary::{ShellCommand, command_registry, legacy_command};
+use crate::workbench::commands::vocabulary::{ShellCommand, command_registry};
 
 /// What the registry declares about the project feature's `command`.
 fn project_spec(command: ProjectCommand) -> &'static CommandSpec {
@@ -48,7 +48,7 @@ fn code_spec(command: CodeCommand) -> &'static CommandSpec {
 /// The commands the palette lists, as values, in its order.
 fn palette_commands_listed() -> Vec<ShellCommand> {
     palette_commands(&RSpiceApp::test_instance())
-        .filter_map(|command| legacy_command(command.key()))
+        .filter_map(|command| ShellCommand::from_key(command.key()))
         .collect()
 }
 

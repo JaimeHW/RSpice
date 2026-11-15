@@ -53,18 +53,14 @@ pub(super) fn open_help_center(state: &mut AppState, page: crate::workbench::app
     state.shell.help_center.open_routed(page);
 }
 
-/// The label a menu row shows for `command` right now: Repeat names the
-/// command it repeats, and every other row reads the vocabulary's label.
-pub(crate) fn menu_label(command: ShellCommand, app: &RSpiceApp) -> std::borrow::Cow<'static, str> {
-    let label = command.spec().label;
-    let named = match command {
-        ShellCommand::RepeatLastCommand => {
-            vocabulary::last_repeatable(app.state.workbench.last_repeatable_command.as_deref())
-                .map(|spec| format!("Repeat {}", lower_first_word(spec.label)))
-        }
-        _ => None,
-    };
-    named.map_or(label.into(), Into::into)
+/// The label Repeat last command's menu row shows right now: it names the
+/// command it repeats once one has run.
+pub(crate) fn repeat_menu_label(app: &RSpiceApp) -> std::borrow::Cow<'static, str> {
+    let label = ShellCommand::RepeatLastCommand.spec().label;
+    vocabulary::last_repeatable(app.state.workbench.last_repeatable_command.as_deref())
+        .map_or(label.into(), |spec| {
+            format!("Repeat {}", lower_first_word(spec.label)).into()
+        })
 }
 
 /// The label a menu row shows for the routed `command` right now: Undo and
@@ -340,7 +336,9 @@ pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_of
 /// in the order the change once did it.
 pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request: ProjectRequest) {
     match request {
-        ProjectRequest::ConfigurationSets => ShellCommand::ConfigurationSets.execute(app),
+        ProjectRequest::ConfigurationSets => {
+            app.execute_command_key(ShellCommand::ConfigurationSets.key())
+        }
         ProjectRequest::OpenView(reference, view_type) => {
             app.state.open_workspace_view(reference);
             // Source views are cell views too: Design shows a Verilog-A module's
@@ -352,7 +350,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
                 }
                 _ => Workspace::Design,
             };
-            ShellCommand::OpenWorkspace(workspace).execute(app);
+            app.execute_command_key(ShellCommand::OpenWorkspace(workspace).key());
         }
         ProjectRequest::SaveMigrationCopy => {
             let saved = app.state.save_project_as();
@@ -366,7 +364,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
         }
         ProjectRequest::OpenRootAndCheck(root) => {
             app.state.open_workspace_view(root);
-            ShellCommand::OpenWorkspace(Workspace::Design).execute(app);
+            app.execute_command_key(ShellCommand::OpenWorkspace(Workspace::Design).key());
             let check = DesignCommand::CheckDesign.key();
             if app.command_key_enabled(check) {
                 app.execute_command_key(check);

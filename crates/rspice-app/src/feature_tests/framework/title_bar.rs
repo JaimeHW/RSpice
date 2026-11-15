@@ -1718,7 +1718,7 @@ fn switching_rows_are_checked_while_their_state_is_on() {
         ShellCommand::ToggleConsole,
     ] {
         let before = command.checked(&app).expect("a switch");
-        command.execute(&mut app);
+        app.execute_command_key(command.key());
         assert_eq!(
             command.checked(&app),
             Some(!before),
@@ -1728,9 +1728,9 @@ fn switching_rows_are_checked_while_their_state_is_on() {
 
     app.state.workbench.focus_mode = false;
     app.state.workbench.console_visible = true;
-    ShellCommand::ToggleFocusMode.execute(&mut app);
+    app.execute_command_key(ShellCommand::ToggleFocusMode.key());
     assert_eq!(ShellCommand::ToggleConsole.checked(&app), Some(false));
-    ShellCommand::ToggleConsole.execute(&mut app);
+    app.execute_command_key(ShellCommand::ToggleConsole.key());
     assert_eq!(ShellCommand::ToggleConsole.checked(&app), Some(true));
     assert_eq!(ShellCommand::ToggleFocusMode.checked(&app), Some(false));
 

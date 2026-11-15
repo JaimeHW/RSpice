@@ -3,15 +3,13 @@
 //! test [`ShellCommand::availability`] builds its reasons on.
 
 use super::*;
+use rspice_app_workbench::workbench::framework::feature::held_back;
 
 impl ShellCommand {
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
         let state = &app.state;
         // The dispatcher's own guards, so what is drawn enabled is what runs.
-        if self.held_by_project_operation(&state.platform) {
-            return false;
-        }
-        if self.lacks_open_project(&state.platform) {
+        if held_back(self.declared_spec().flags, &state.platform).is_some() {
             return false;
         }
         match self {

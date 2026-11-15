@@ -25,37 +25,6 @@ mod registry;
 mod veriloga_commits;
 pub(crate) mod vocabulary;
 
-/// A test seam on the dispatch boundary. While a recording is open,
-/// [`ShellCommand::execute`] notes the command it was handed and returns before
-/// acting, so a test can prove a route reaches the boundary without carrying
-/// the command out.
-#[cfg(test)]
-pub(crate) mod dispatch_probe {
-    use super::ShellCommand;
-    use std::cell::RefCell;
-
-    thread_local! {
-        static REACHED: RefCell<Option<Vec<ShellCommand>>> = const { RefCell::new(None) };
-    }
-
-    /// Run `route` and return every command it handed to `ShellCommand::execute`.
-    pub(crate) fn reached(route: impl FnOnce()) -> Vec<ShellCommand> {
-        REACHED.with(|reached| *reached.borrow_mut() = Some(Vec::new()));
-        route();
-        REACHED.with(|reached| reached.borrow_mut().take().unwrap_or_default())
-    }
-
-    pub(in crate::workbench) fn intercept(command: ShellCommand) -> bool {
-        REACHED.with(|reached| {
-            reached
-                .borrow_mut()
-                .as_mut()
-                .map(|log| log.push(command))
-                .is_some()
-        })
-    }
-}
-
 impl ShellCommand {
     /// Shared by menu/palette dispatch and the keyboard dispatcher.
     pub(crate) const fn commits_inspector_edit(self) -> bool {
@@ -120,15 +89,10 @@ impl ShellCommand {
         }
     }
 
-    /// Run this command through the shell's dispatcher, as every route does.
-    pub fn execute(self, app: &mut RSpiceApp) {
-        self.dispatch(app);
-    }
-
-    /// The shell's legacy table: what each command does once the
-    /// dispatcher's prologue has let it through. [`ShellCommand::dispatch`] is
-    /// its one caller, so no command skips the prologue.
-    pub(super) fn run_legacy_arm(self, app: &mut RSpiceApp) {
+    /// What the command does once the dispatcher's prologue has let it
+    /// through. The dispatcher is its one caller, so no command skips the
+    /// prologue.
+    pub(in crate::workbench) fn carry_out(self, app: &mut RSpiceApp) {
         match self {
             Self::OpenWorkspace(workspace) => {
                 if workspace_available(app.state.platform.project_lifecycle.is_open(), workspace) {
@@ -313,7 +277,7 @@ pub(in crate::workbench) use command_helpers::{
     active_schematic_editor, answer_project_request, carry_out_code_hand_off, file_action,
     run_project_file_action,
 };
-pub(crate) use command_helpers::{menu_label, workbench_menu_label};
+pub(crate) use command_helpers::{repeat_menu_label, workbench_menu_label};
 pub(in crate::workbench) use edit_target::source_editor_redirect;
 mod design_requests;
 #[cfg(test)]

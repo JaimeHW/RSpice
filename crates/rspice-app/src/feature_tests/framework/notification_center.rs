@@ -873,7 +873,7 @@ fn the_command_opens_the_panel_for_shells_that_draw_no_bell() {
 
     assert!(ShellCommand::ALL.contains(&ShellCommand::OpenNotifications));
     let mut app = RSpiceApp::test_instance();
-    ShellCommand::OpenNotifications.execute(&mut app);
+    app.execute_command_key(ShellCommand::OpenNotifications.key());
     assert!(app.state.workbench.notification_center_showing());
 }
 

@@ -259,7 +259,7 @@ mod tests {
         );
         let mut app = RSpiceApp::test_instance();
         assert!(opened_pages(&mut app).is_empty(), "nothing opens unasked");
-        ShellCommand::ReleaseNotes.execute(&mut app);
+        app.execute_command_key(ShellCommand::ReleaseNotes.key());
         assert_eq!(
             opened_pages(&mut app),
             [OpenUrl::new_tab(RELEASE_NOTES_URL)]
@@ -361,7 +361,7 @@ mod tests {
     fn help_opens_the_page_for_the_workspace_in_front() {
         let mut app = RSpiceApp::test_instance();
         app.state.close_project_session();
-        ShellCommand::HelpCenter.execute(&mut app);
+        app.execute_command_key(ShellCommand::HelpCenter.key());
         assert_eq!(
             opened_pages(&mut app),
             [OpenUrl::new_tab("https://rspice.app/docs/getting-started")]
@@ -374,7 +374,7 @@ mod tests {
             (Workspace::Models, "models-and-pdks"),
         ] {
             let mut app = open_project_on(workspace);
-            ShellCommand::HelpCenter.execute(&mut app);
+            app.execute_command_key(ShellCommand::HelpCenter.key());
             assert_eq!(
                 opened_pages(&mut app),
                 [OpenUrl::new_tab(format!("https://rspice.app/docs/{slug}"))],

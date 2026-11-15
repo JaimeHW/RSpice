@@ -97,7 +97,7 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
         order: 1,
         workspace: None,
         content: checks_cell,
-        activate: Some(|app, _| ShellCommand::OpenProblems.execute(app)),
+        activate: Some(|app, _| app.execute_command_key(ShellCommand::OpenProblems.key())),
     },
     StatusCell {
         key: StatusKey::Context,

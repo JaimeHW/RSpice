@@ -71,7 +71,9 @@ fn switching_fields_in_either_render_order_commits_each_edit_once() {
 fn workspace_and_run_commands_resolve_the_pending_field_first() {
     let mut editor = Editor::new();
     editor.edit("Instance", "invalid name");
-    ShellCommand::OpenWorkspace(Workspace::Simulate).execute(&mut editor.app);
+    editor
+        .app
+        .execute_command_key(ShellCommand::OpenWorkspace(Workspace::Simulate).key());
     assert_eq!(editor.app.state.workbench.workspace, Workspace::Design);
     editor.app.execute_command_key(
         rspice_app_workbench::workbench::framework::command_registry::ids::RUN_SIMULATION,
@@ -83,7 +85,9 @@ fn workspace_and_run_commands_resolve_the_pending_field_first() {
     );
     assert!(editor.app.state.workbench.inline_edit.session().is_some());
     editor.replace("V9");
-    ShellCommand::OpenWorkspace(Workspace::Simulate).execute(&mut editor.app);
+    editor
+        .app
+        .execute_command_key(ShellCommand::OpenWorkspace(Workspace::Simulate).key());
     assert_eq!(editor.app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
         editor.app.state.model.schematic.document().components[0].name,

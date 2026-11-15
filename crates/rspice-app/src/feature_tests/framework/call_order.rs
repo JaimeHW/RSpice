@@ -409,9 +409,9 @@ const ROUTE_OVERLAYS: &[(&str, &str)] = &[
     ("SimulateFeature::render_workflow_dialogs", "simulate"),
 ];
 
-/// `RSpiceApp::dispatch_feature_command`: a feature's command runs behind
-/// the shared prologue, and what it raised is answered straight after it, in
-/// the same dispatch.
+/// `RSpiceApp::dispatch`, for a feature's command: it runs behind the shared
+/// prologue, and what it raised is answered straight after it, in the same
+/// dispatch.
 const DISPATCH_FEATURE_COMMAND: &[Step] = &[
     ("1", &["held_back(flags, &self.state.platform).is_some()"]),
     (
@@ -1632,12 +1632,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
 
 #[test]
 fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
-    let dispatch = body(DISPATCH, "fn dispatch_feature_command(");
-    assert_runs_in_order(
-        "RSpiceApp::dispatch_feature_command",
-        &dispatch,
-        DISPATCH_FEATURE_COMMAND,
-    );
+    let dispatch = body(DISPATCH, "fn dispatch(");
+    assert_runs_in_order("RSpiceApp::dispatch", &dispatch, DISPATCH_FEATURE_COMMAND);
     assert!(
         without_whitespace(&dispatch).ends_with(&without_whitespace("self.after_contribution();")),
         "nothing runs after a feature's command has what it raised answered"

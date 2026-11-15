@@ -8,19 +8,17 @@
 //! first, and a repeatable command is recorded for Repeat. Only then does the
 //! command's owner carry it out: the feature that declares it, in its
 //! context; for one of the workbench's routed commands, the part the shell's
-//! edit target sends it to; or for a key neither declares the shell's legacy
-//! table [`ShellCommand::run_legacy_arm`]. A command a feature's command raised
-//! runs as soon as that one returns, behind the same prologue.
+//! edit target sends it to; or for one of the shell's own commands, the
+//! shell ([`ShellCommand::carry_out`]). A command a feature's command
+//! raised runs as soon as that one returns, behind the same prologue.
 //!
-//! The dispatcher is handed a command value or a key. A key names a command
-//! when the registry lists it, or when a feature declares it and leaves it
-//! out of the registry for the one container that holds its key; no menu,
-//! shortcut profile or Repeat reaches one of those.
+//! The dispatcher is handed a key. A key names a command when the registry
+//! lists it, or when a feature declares it and leaves it out of the registry
+//! for the one container that holds its key; no menu, shortcut profile or
+//! Repeat reaches one of those.
 
 use crate::workbench::RSpiceApp;
-#[cfg(test)]
-use crate::workbench::commands::dispatch_probe;
-use crate::workbench::commands::vocabulary::{ShellCommand, legacy_command};
+use crate::workbench::commands::vocabulary::ShellCommand;
 use crate::workbench::commands::{
     active_schematic_editor, answer_project_request, answer_surface_request,
     carry_out_code_hand_off, file_action, run_project_file_action, select_probed_trace,
@@ -40,7 +38,6 @@ use rspice_app_design::workbench::design::inspector::CommitSheetSection;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use rspice_app_hardcopy::workbench::hardcopy;
 use rspice_app_project::workbench::project::commands::ProjectRequest;
-use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::state::command_catalog::CommandKey;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::{
@@ -64,11 +61,12 @@ enum Owner {
     Feature,
     /// The part the shell's edit target sends it to.
     Workbench(WorkbenchCommand),
+    /// The shell itself.
+    Shell(ShellCommand),
 }
 
 /// The dispatcher by key: where a key becomes the command it names, a
-/// feature's first, then a routed command's, and the shell's legacy table's
-/// otherwise.
+/// feature's first, then a routed command's, and the shell's own otherwise.
 impl RSpiceApp {
     /// Carry out the command `key` names behind the prologue every command
     /// shares. A key no command answers to does nothing.
@@ -77,8 +75,8 @@ impl RSpiceApp {
             self.dispatch(*spec, Owner::Feature);
         } else if let Some(command) = WorkbenchCommand::from_key(key) {
             self.dispatch(command.declared_spec(), Owner::Workbench(command));
-        } else if let Some(command) = legacy_command(key) {
-            command.dispatch(self);
+        } else if let Some(command) = ShellCommand::from_key(key) {
+            self.dispatch(command.declared_spec(), Owner::Shell(command));
         }
     }
 
@@ -91,7 +89,7 @@ impl RSpiceApp {
             if let Some(command) = WorkbenchCommand::from_key(key) {
                 return self.workbench_command_availability(command);
             }
-            return legacy_command(key).map_or(CommandAvailability::Hidden, |command| {
+            return ShellCommand::from_key(key).map_or(CommandAvailability::Hidden, |command| {
                 command.availability(self)
             });
         };
@@ -123,7 +121,17 @@ impl RSpiceApp {
         if let Some(command) = WorkbenchCommand::from_key(key) {
             return self.workbench_command_enabled(command);
         }
-        legacy_command(key).is_some_and(|command| command.is_enabled(self))
+        ShellCommand::from_key(key).is_some_and(|command| command.is_enabled(self))
+    }
+
+    /// Whether the state the command `key` names switches is on right now;
+    /// `None` for a command that acts once, and for a key no command
+    /// answers to.
+    pub(crate) fn command_checked(&self, key: CommandKey) -> Option<bool> {
+        ShellCommand::from_key(key).map_or_else(
+            || features::checked(self, key),
+            |command| command.checked(self),
+        )
     }
 
     /// Carry out the routed command `key` in the feature that takes it where
@@ -150,8 +158,8 @@ impl RSpiceApp {
     }
 
     /// Carry out the command `spec` declares behind the prologue, in its
-    /// `owner`: a feature's, then every command it raised; a routed one, in
-    /// the part that takes it here.
+    /// `owner`: a routed one, in the part that takes it here; the shell's,
+    /// by the shell; a feature's, then every command it raised.
     fn dispatch(&mut self, spec: CommandSpec, owner: Owner) {
         let flags = spec.flags;
         if held_back(flags, &self.state.platform).is_some() {
@@ -185,18 +193,24 @@ impl RSpiceApp {
             self.state.workbench.last_repeatable_command = Some(spec.key.as_str().to_owned());
         }
         match owner {
-            Owner::Feature => {
-                if self.netlist_takes_run(spec.key) {
-                    if self.manual_deck_run_block_reason().is_none() {
-                        self.state.request_netlist_manual_deck_run();
-                    }
-                } else {
-                    features::execute(self, spec.key);
-                }
-                self.after_contribution();
+            Owner::Workbench(command) => {
+                self.carry_out_workbench_command(command);
+                return;
             }
-            Owner::Workbench(command) => self.carry_out_workbench_command(command),
+            Owner::Shell(command) => {
+                command.carry_out(self);
+                return;
+            }
+            Owner::Feature => {}
         }
+        if self.netlist_takes_run(spec.key) {
+            if self.manual_deck_run_block_reason().is_none() {
+                self.state.request_netlist_manual_deck_run();
+            }
+        } else {
+            features::execute(self, spec.key);
+        }
+        self.after_contribution();
     }
 
     /// Whether `key` is Run on the Netlist workspace, which runs the deck
@@ -708,42 +722,6 @@ impl RSpiceApp {
         direction: HistoryDirection,
     ) -> Result<Option<String>, String> {
         code_requests::step_history(&mut features::cx(self), direction == HistoryDirection::Undo)
-    }
-}
-
-impl ShellCommand {
-    /// Carry this command out behind the prologue every command shares.
-    pub(super) fn dispatch(self, app: &mut RSpiceApp) {
-        #[cfg(test)]
-        if dispatch_probe::intercept(self) {
-            return;
-        }
-        // Both guards are also `is_enabled`'s, so the command is drawn
-        // disabled and a shortcut for it is silent, as in any desktop app.
-        if self.held_by_project_operation(&app.state.platform) {
-            return;
-        }
-        if self.lacks_open_project(&app.state.platform) {
-            return;
-        }
-        if self.commits_inspector_edit() && !app.state.commit_pending_inspector_edit() {
-            return;
-        }
-        self.run_legacy_arm(app);
-    }
-
-    /// Whether a project operation still in progress holds this command
-    /// back. Availability asks the same question, so a command the
-    /// dispatcher would refuse is drawn disabled.
-    pub(crate) fn held_by_project_operation(self, platform: &PlatformState) -> bool {
-        rspice_app_services::workbench::lifecycle::project_lifecycle::operation_in_progress(
-            platform,
-        ) && self.blocked_by_project_operation()
-    }
-
-    /// Whether this command needs an open project and none is open.
-    pub(crate) fn lacks_open_project(self, platform: &PlatformState) -> bool {
-        self.requires_open_project() && !platform.project_lifecycle.is_open()
     }
 }
 

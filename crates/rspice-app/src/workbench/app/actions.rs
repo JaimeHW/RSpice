@@ -167,12 +167,6 @@ impl RSpiceApp {
             self.execute_command_key(help);
         }
     }
-
-    /// Carry out `command` the way pressing its key does.
-    #[cfg(test)]
-    pub(crate) fn execute_shortcut_command(&mut self, command: ShellCommand) {
-        self.execute_command_key(command.key());
-    }
 }
 
 #[cfg(test)]
@@ -388,56 +382,6 @@ mod shortcut_ownership_tests {
 
         app.execute_command_key(ids::UNDO);
         assert!(app.state.model.schematic.document().components.is_empty());
-    }
-
-    fn app_on_a_symbol_view() -> RSpiceApp {
-        use rspice_app_state::state::{Cell, CellViewRef, Library, SymbolDocument, View, ViewType};
-
-        let mut app = RSpiceApp::test_instance();
-        let mut library = Library::new("dispatch");
-        let mut cell = Cell::new("amp");
-        let mut view = View::new("symbol", ViewType::Symbol);
-        SymbolDocument::default().store_in_view(&mut view).unwrap();
-        cell.add_view(view);
-        library.add_cell(cell);
-        app.state.model.library_manager.add_library(library);
-        app.state
-            .open_workspace_view(CellViewRef::new("dispatch", "amp", "symbol"));
-        app.state
-            .workbench
-            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
-        app
-    }
-
-    /// A key runs the command the menus, toolbar, context menu and palette
-    /// run. The key route used to carry its own copy of some forty commands,
-    /// and the copies drifted: Find, Escape and Zoom 1:1 each did something
-    /// different depending on how they were asked for.
-    #[test]
-    fn every_shortcut_command_reaches_the_one_dispatcher() {
-        use crate::workbench::commands::dispatch_probe;
-        use crate::workbench::commands::vocabulary::ShellCommand;
-
-        let mut schematic = RSpiceApp::test_instance();
-        schematic
-            .state
-            .workbench
-            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
-        let mut symbol = app_on_a_symbol_view();
-        for app in [&mut schematic, &mut symbol] {
-            let view = app.state.model.workspace.content.active_view_type();
-            let mut bypassed = Vec::new();
-            for &command in ShellCommand::ALL {
-                let reached = dispatch_probe::reached(|| app.execute_shortcut_command(command));
-                if reached != [command] {
-                    bypassed.push(command);
-                }
-            }
-            assert!(
-                bypassed.is_empty(),
-                "on a {view:?} view these keys bypass ShellCommand::execute: {bypassed:?}"
-            );
-        }
     }
 
     #[test]

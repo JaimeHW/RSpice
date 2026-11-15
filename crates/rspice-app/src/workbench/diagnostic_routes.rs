@@ -118,11 +118,11 @@ fn open_code_document(
     let language = match &owner {
         ProjectSourceOwner::CellView { reference } => {
             app.state.open_workspace_view(reference.clone());
-            ShellCommand::OpenWorkspace(Workspace::Design).execute(app);
+            app.execute_command_key(ShellCommand::OpenWorkspace(Workspace::Design).key());
             ProjectSourceLanguage::VerilogA
         }
         ProjectSourceOwner::CodeWorkspace { language } => {
-            ShellCommand::OpenWorkspace(Workspace::Netlist).execute(app);
+            app.execute_command_key(ShellCommand::OpenWorkspace(Workspace::Netlist).key());
             app.state.code.code_workspace.page = code_workspace::CodeWorkspacePage::Automation;
             *language
         }
@@ -183,11 +183,11 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                 .content
                 .simulation_root_reference();
             app.state.open_workspace_view(root.clone());
-            ShellCommand::OpenWorkspace(Workspace::Design).execute(app);
+            app.execute_command_key(ShellCommand::OpenWorkspace(Workspace::Design).key());
             if let Some(worst) = app.state.model.worst_design_rule_finding(&root) {
                 app.state.model.diagnostics.set_current_finding(Some(worst));
             }
-            ShellCommand::OpenProblems.execute(app);
+            app.execute_command_key(ShellCommand::OpenProblems.key());
         }
         // The analysis the finding is about, selected before the page opens
         // so its first frame shows it. One the plan no longer holds is said

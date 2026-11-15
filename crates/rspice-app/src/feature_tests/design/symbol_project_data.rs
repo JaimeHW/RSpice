@@ -348,7 +348,9 @@ fn symbol_edits_are_unsaved_project_work_until_the_project_is_saved() {
         .app
         .state
         .open_workspace_view(fixture.symbol.clone());
-    ShellCommand::CloseActiveDocument.execute(&mut fixture.app);
+    fixture
+        .app
+        .execute_command_key(ShellCommand::CloseActiveDocument.key());
     assert!(
         !fixture
             .app

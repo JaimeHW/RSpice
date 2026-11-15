@@ -52,7 +52,7 @@ fn the_registry_catalog_answers_for_every_command_as_the_command_does() {
         .commands()
         .iter()
         .copied()
-        .filter(|key| vocabulary::legacy_command(*key).is_some())
+        .filter(|key| vocabulary::ShellCommand::from_key(*key).is_some())
         .collect::<Vec<CommandKey>>();
     assert_eq!(shell_commands.len(), vocabulary::ShellCommand::ALL.len());
     for (key, command) in shell_commands
@@ -269,7 +269,7 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
 fn command_palette_and_help_commands_own_canonical_routes() {
     let mut palette = RSpiceApp::test_instance();
     let palette_source = palette.state.workbench.current_route();
-    ShellCommand::CommandPalette.execute(&mut palette);
+    palette.execute_command_key(ShellCommand::CommandPalette.key());
     assert_eq!(
         palette.state.workbench.current_route(),
         rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(
@@ -285,7 +285,7 @@ fn command_palette_and_help_commands_own_canonical_routes() {
 
     let mut help = RSpiceApp::test_instance();
     let help_source = help.state.workbench.current_route();
-    ShellCommand::LegalPrivacy.execute(&mut help);
+    help.execute_command_key(ShellCommand::LegalPrivacy.key());
     assert_eq!(
         help.state.workbench.current_route(),
         rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(

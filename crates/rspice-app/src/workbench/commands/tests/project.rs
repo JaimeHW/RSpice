@@ -236,7 +236,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         );
 
         let before = app.state.model.log_buffer.revision();
-        command.execute(&mut app);
+        app.execute_command_key(command.key());
 
         assert_eq!(
             app.state.workbench.workspace,

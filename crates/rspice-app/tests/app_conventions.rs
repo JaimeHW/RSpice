@@ -594,8 +594,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // context from the application state.
     "features",
     // The one dispatcher every command runs through: its prologue, then the
-    // feature that declares the command or the legacy table the commands
-    // module keeps.
+    // feature that declares the command, the part a routed command goes to,
+    // or the shell itself for its own commands.
     "dispatch",
     // The project feature's compositions over the whole application: they
     // lend the feature its context and carry out what it returns, so they
@@ -623,7 +623,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     // out of `RSpiceApp` into the presentation and workflow layers it renders.
     // They retire as the frame loop stops calling and starts setting state
     // that the called module reads — the pattern `frame` already follows.
-    ("app", "commands"),
     ("app", "workflows/file_actions"),
     ("app", "frame"),
     // `AppState` is the session aggregate, split out of the root, and it

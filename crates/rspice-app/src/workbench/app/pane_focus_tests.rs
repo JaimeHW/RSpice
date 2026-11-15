@@ -190,7 +190,9 @@ fn a_modal_dialog_keeps_the_keyboard_from_the_pane_keys() {
         press(&ctx, &mut app, egui::Modifiers::NONE),
         Some(Pane::Document)
     );
-    crate::workbench::commands::vocabulary::ShellCommand::CommandPalette.dispatch(&mut app);
+    app.execute_command_key(
+        crate::workbench::commands::vocabulary::ShellCommand::CommandPalette.key(),
+    );
     frame(&ctx, &mut app, DESKTOP);
     frame(&ctx, &mut app, DESKTOP);
     let in_palette = ctx.memory(|memory| memory.focused());

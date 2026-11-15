@@ -674,7 +674,7 @@ const COMMAND_ROUTE_FILES: &[(&str, &str)] = &[
     ("schematic/view/context_menu.rs", "schematic context menu"),
 ];
 
-/// Dispatch. Nothing under here counts as a route: `execute` names every
+/// Dispatch. Nothing under here counts as a route: `carry_out` names every
 /// variant, so a scan that included it would answer its own question.
 const COMMAND_DISPATCH_MODULE: &str = "workbench/commands";
 
@@ -1055,30 +1055,33 @@ fn every_command_has_a_user_route() {
         // page tile — is as much a route as a menu item. The dispatcher's own
         // recursive calls are not, so its module is excluded.
         if !path.starts_with(COMMAND_DISPATCH_MODULE) {
+            const BY_VARIANT: &str = "execute_command_key(ShellCommand::";
             let mut rest = code.as_str();
-            while let Some(index) = rest.find("Command::") {
-                rest = &rest[index + "Command::".len()..];
+            while let Some(index) = rest.find(BY_VARIANT) {
+                rest = &rest[index + BY_VARIANT.len()..];
                 let name: String = rest
                     .chars()
                     .take_while(|c| c.is_alphanumeric() || *c == '_')
                     .collect();
-                if !name.is_empty() && rest[name.len()..].starts_with(".execute(") {
+                if !name.is_empty() {
                     routes
                         .entry(name)
                         .or_default()
                         .insert("in-place control".to_owned());
                 }
             }
-            // The same control in the framework asks the host to run the
-            // command an id names.
-            let mut rest = code.as_str();
-            while let Some(index) = rest.find(".execute(ids::") {
-                rest = &rest[index + ".execute(ids::".len()..];
-                if let Some(variant) = ids.get(&id_name(rest)) {
-                    routes
-                        .entry(variant.clone())
-                        .or_default()
-                        .insert("in-place control".to_owned());
+            // The same control may name the command by its framework id, as
+            // the framework's own controls do when they ask the host.
+            for by_id in [".execute(ids::", "execute_command_key(ids::"] {
+                let mut rest = code.as_str();
+                while let Some(index) = rest.find(by_id) {
+                    rest = &rest[index + by_id.len()..];
+                    if let Some(variant) = ids.get(&id_name(rest)) {
+                        routes
+                            .entry(variant.clone())
+                            .or_default()
+                            .insert("in-place control".to_owned());
+                    }
                 }
             }
         }

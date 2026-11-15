@@ -1693,7 +1693,7 @@ fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
 
     app.execute_command_key(DesignCommand::RotateSelection.key());
     assert!(repeat.is_enabled(&app));
-    repeat.execute(&mut app);
+    app.execute_command_key(repeat.key());
 
     assert_eq!(
         offset(&app),

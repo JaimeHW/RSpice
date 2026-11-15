@@ -1330,7 +1330,9 @@ mod tests {
 
             // A new modal task supersedes a still-pending placement focus request.
             rspice_schematic_editor::view::canvas::request_focus(&fixture.ctx);
-            ShellCommand::CommandPalette.execute(&mut fixture.app);
+            fixture
+                .app
+                .execute_command_key(ShellCommand::CommandPalette.key());
             fixture.frame(Vec::new());
             fixture.frame(Vec::new());
             fixture.frame(vec![egui::Event::Text("help".to_owned())]);

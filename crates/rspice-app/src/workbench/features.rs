@@ -742,7 +742,7 @@ mod tests {
     /// more answers than a context holds.
     #[test]
     fn every_command_a_feature_reads_is_one_the_dispatcher_answers() {
-        use crate::workbench::commands::vocabulary::legacy_command;
+        use crate::workbench::commands::vocabulary::ShellCommand;
         use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
 
         for ((slot, foreign), (_, menus)) in
@@ -754,7 +754,7 @@ mod tests {
                 assert!(
                     spec(*key).is_some()
                         || WorkbenchCommand::from_key(*key).is_some()
-                        || legacy_command(*key).is_some(),
+                        || ShellCommand::from_key(*key).is_some(),
                     "{slot} reads {key:?}, which no command answers to"
                 );
                 assert!(!keys[..index].contains(key), "{slot} reads {key:?} twice");
@@ -799,12 +799,12 @@ mod tests {
     /// the window session or runs only in a source editor does.
     #[test]
     fn a_command_a_feature_reads_runs_exactly_when_it_is_available() {
-        use crate::workbench::commands::vocabulary::legacy_command;
+        use crate::workbench::commands::vocabulary::ShellCommand;
         use rspice_app_code::workbench::code::commands::CodeCommand;
 
         for (slot, keys) in foreign_availability() {
             for key in keys {
-                if let Some(command) = legacy_command(*key) {
+                if let Some(command) = ShellCommand::from_key(*key) {
                     assert!(
                         !command.mutates_window_session(),
                         "{slot} reads {key:?}, whose answer refuses more than its run does"

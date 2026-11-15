@@ -11,9 +11,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::time::Duration;
 
 use super::*;
-use crate::workbench::commands::vocabulary::{
-    CommandRegistry, ShellCommand, command_registry, legacy_command,
-};
+use crate::workbench::commands::vocabulary::{CommandRegistry, ShellCommand, command_registry};
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
@@ -126,7 +124,7 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
         .copied()
         .enumerate()
         .map(|(index, key)| {
-            let Some(command) = legacy_command(key) else {
+            let Some(command) = ShellCommand::from_key(key) else {
                 let spec = WorkbenchCommand::from_key(key)
                     .map(WorkbenchCommand::declared_spec)
                     .or_else(|| {
@@ -504,7 +502,7 @@ fn the_registry_order_breaks_ties_as_the_command_registry_does() {
     let shell_order = order
         .iter()
         .copied()
-        .filter(|key| legacy_command(*key).is_some())
+        .filter(|key| ShellCommand::from_key(*key).is_some())
         .collect::<Vec<_>>();
     assert_eq!(shell_order.len(), ShellCommand::ALL.len());
     for (index, (key, command)) in shell_order.iter().zip(ShellCommand::ALL).enumerate() {

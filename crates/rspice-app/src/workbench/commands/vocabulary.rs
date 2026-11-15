@@ -2,9 +2,9 @@
 //!
 //! Every command the product exposes, its stable portable identity, and the
 //! label and group a menu or palette shows it under. This is a value model:
-//! it describes what commands exist, not what pressing one does. Dispatch —
-//! `is_enabled` and `execute`, both of which need the running application —
-//! lives up in [`crate::workbench::commands`].
+//! it describes what commands exist, not what pressing one does. What a
+//! shell command does and whether it can, both of which need the running
+//! application, live up in [`crate::workbench::commands`].
 //!
 //! Keeping the two apart is what lets the artifact writers name a command
 //! without depending on the dispatcher that runs it. Shortcut profiles name
@@ -121,7 +121,7 @@ impl ShellCommand {
     /// a stored id to a key; a key becomes a command only at dispatch.
     #[cfg(test)]
     pub fn from_stable_id(id: &str) -> Option<Self> {
-        command_registry().resolve(id).and_then(legacy_command)
+        command_registry().resolve(id).and_then(Self::from_key)
     }
 
     pub const fn spec(self) -> CommandSpec {
@@ -227,8 +227,9 @@ impl ShellCommand {
         }
     }
 
-    /// The command as the registry holds it.
-    fn registry_spec(self) -> command_registry::CommandSpec {
+    /// The command as the registry holds it, with the flags the
+    /// dispatcher's prologue reads.
+    pub(crate) fn declared_spec(self) -> command_registry::CommandSpec {
         command_registry::CommandSpec {
             key: self.key(),
             label: self.spec().label,
@@ -238,6 +239,18 @@ impl ShellCommand {
                 .with(
                     CommandFlags::PRIMARY_RESERVED_BY_BROWSER,
                     self.primary_is_reserved_on(CommandPlatform::Browser),
+                )
+                .with(
+                    CommandFlags::REQUIRES_OPEN_PROJECT,
+                    self.requires_open_project(),
+                )
+                .with(
+                    CommandFlags::BLOCKED_BY_PROJECT_OPERATION,
+                    self.blocked_by_project_operation(),
+                )
+                .with(
+                    CommandFlags::COMMITS_INSPECTOR_EDIT,
+                    self.commits_inspector_edit(),
                 ),
             context: self.shortcut_context(),
             bindings: self.shortcut_bindings(),
@@ -765,7 +778,7 @@ pub(crate) fn command_registry() -> &'static Registry {
             COMMAND_ORDER,
             ShellCommand::ALL
                 .iter()
-                .map(|command| command.registry_spec())
+                .map(|command| command.declared_spec())
                 .chain(WorkbenchCommand::ALL.map(WorkbenchCommand::declared_spec))
                 .chain(SheetsCommand::ALL.map(SheetsCommand::declared_spec))
                 .chain(SettingsCommand::ALL.map(SettingsCommand::declared_spec))
@@ -803,17 +816,19 @@ pub(crate) fn last_repeatable(
     registry.spec(registry.resolve(recorded?)?)
 }
 
-/// The command a registered key names. Every registered command is still
-/// declared by this enum, and this table is how a key reaches it.
-pub(crate) fn legacy_command(key: CommandKey) -> Option<ShellCommand> {
-    static BY_KEY: LazyLock<HashMap<CommandKey, ShellCommand>> = LazyLock::new(|| {
-        let mut commands = HashMap::with_capacity(ShellCommand::ALL.len());
-        for command in ShellCommand::ALL {
-            commands.entry(command.key()).or_insert(*command);
-        }
-        commands
-    });
-    BY_KEY.get(&key).copied()
+impl ShellCommand {
+    /// The shell command `key` names; `None` for a feature's key, a routed
+    /// command's, or nobody's.
+    pub(crate) fn from_key(key: CommandKey) -> Option<Self> {
+        static BY_KEY: LazyLock<HashMap<CommandKey, ShellCommand>> = LazyLock::new(|| {
+            let mut commands = HashMap::with_capacity(ShellCommand::ALL.len());
+            for command in ShellCommand::ALL {
+                commands.entry(command.key()).or_insert(*command);
+            }
+            commands
+        });
+        BY_KEY.get(&key).copied()
+    }
 }
 
 /// The command registry as the catalog a shortcut profile reads command facts
@@ -858,5 +873,5 @@ pub fn command_catalog() -> impl Iterator<Item = ShellCommand> {
                 .spec(**key)
                 .is_some_and(|spec| spec.flags.contains(CommandFlags::PALETTE_VISIBLE))
         })
-        .filter_map(|key| legacy_command(*key))
+        .filter_map(|key| ShellCommand::from_key(*key))
 }
