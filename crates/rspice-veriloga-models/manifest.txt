@@ -2,11 +2,11 @@
 {
   "schema_version": 7,
   "source_tree_digest": "02168e4bfa108bd4624c2c3d38cce9211ec42f99130fdda3d5495ab94e58db8c",
-  "generator_digest": "de7c72c9e3a85d677ddb0a7b2e85468d1d4502bba641e6a76731933674195ce7",
-  "bundle_digest": "4970a38baa93e10250b8876e870d5720039c6deb352f1cccc7f015690abac2a1",
+  "generator_digest": "6b22a247b8c43e42f1c711285cc0d573eb6be1846e37b6921beeb9f54f535474",
+  "bundle_digest": "17abb5409adebedc3e8c82b62f8d3df0a14de0a36364a1e3221dd1b170f14135",
   "device_count": 60,
   "file_count": 544,
-  "source_bytes": 53336022,
+  "source_bytes": 53339079,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -177,7 +177,7 @@
       "feature_name": "veriloga-model-psp103tva",
       "package_name": "rspice-veriloga-model-psp103tva",
       "file_count": 6,
-      "source_bytes": 1158562,
+      "source_bytes": 1158334,
       "workspace": {
         "abi_version": 3,
         "variable_count": 2597,
@@ -204,7 +204,7 @@
       "feature_name": "veriloga-model-psp103va",
       "package_name": "rspice-veriloga-model-psp103va",
       "file_count": 6,
-      "source_bytes": 1138495,
+      "source_bytes": 1138267,
       "workspace": {
         "abi_version": 3,
         "variable_count": 2578,
@@ -366,7 +366,7 @@
       "feature_name": "veriloga-model-pspnqs103va",
       "package_name": "rspice-veriloga-model-pspnqs103va",
       "file_count": 6,
-      "source_bytes": 1548084,
+      "source_bytes": 1551778,
       "workspace": {
         "abi_version": 3,
         "variable_count": 3107,
@@ -798,7 +798,7 @@
       "feature_name": "veriloga-model-bsimcmg107",
       "package_name": "rspice-veriloga-model-bsimcmg107",
       "file_count": 6,
-      "source_bytes": 663090,
+      "source_bytes": 662909,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1172,
@@ -2352,8 +2352,8 @@
     },
     {
       "relative_path": "models/bsimcmg107/src/bsimcmg__bsimcmg__2942a719/state.rs",
-      "bytes": 206838,
-      "blake3": "7b5c7692df6b47a679822a3a62d4ff46a3026e9d90a4a2ab0d39d69ca159e159"
+      "bytes": 206657,
+      "blake3": "61aa7024f671edb5c437d2d8570c8ac8cd47f85e291db538f9b1bfec3bbfa879"
     },
     {
       "relative_path": "models/bsimcmg107/src/lib.rs",
@@ -3662,8 +3662,8 @@
     },
     {
       "relative_path": "models/psp103tva/src/psp103t__psp103tva__ed4bdd6f/state.rs",
-      "bytes": 208770,
-      "blake3": "611517a83d04a109d0ee5441c89271883dd4520350c078eed53a3216edaa30ce"
+      "bytes": 208542,
+      "blake3": "9b37903b1d745b353c5a205d500adf12372e46a1d0edc092bdbdf7b0f3ce5e7c"
     },
     {
       "relative_path": "models/psp103va/.rspice-veriloga-model-package",
@@ -3707,8 +3707,8 @@
     },
     {
       "relative_path": "models/psp103va/src/psp103__psp103va__03c38fd5/state.rs",
-      "bytes": 206416,
-      "blake3": "f9c904713fe7e1fc024f44cbca8915978d80c745b8387f56236e8dd917589bbf"
+      "bytes": 206188,
+      "blake3": "2655a76cccba7d811dcf11b3db7e1ee707d9409c0aaa63babaab3981d873496c"
     },
     {
       "relative_path": "models/psp104tva/.rspice-veriloga-model-package",
@@ -3972,13 +3972,13 @@
     },
     {
       "relative_path": "models/pspnqs103va/src/psp103_nqs__pspnqs103va__fe75f349/stamp.rs",
-      "bytes": 938422,
-      "blake3": "5dfd6885e9d86a7587d8bc878de16971e49919d56b323fe4b04fad3a64186879"
+      "bytes": 941824,
+      "blake3": "39b7979684815ec5d1ac1131302811e87b6d7000417139178b9f236f12f61099"
     },
     {
       "relative_path": "models/pspnqs103va/src/psp103_nqs__pspnqs103va__fe75f349/state.rs",
-      "bytes": 207572,
-      "blake3": "cfc7960a9322519cc3c0c00f389c518530054f822cb74af2d233f4a454ae40ae"
+      "bytes": 207864,
+      "blake3": "9e6d0701c84088e56be584433592fa78e150e9afbd5cdd00bdbeab61a8badf20"
     },
     {
       "relative_path": "models/pspnqs104va/.rspice-veriloga-model-package",

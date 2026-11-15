@@ -2068,8 +2068,8 @@ impl Instance {
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([80, 109, 198, 167, 185, 45, 24, 140, 253, 239, 86, 65, 213, 125, 165, 30, 77, 82, 45, 63, 68, 19, 226, 202, 61, 19, 95, 180, 131, 101, 37, 90]);
 	pub const EVENT_STATE_COUNT: usize = 29;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
-	pub const HB_ADMISSIBLE: bool = false;
-	pub const HB_REFUSAL: Option<&'static str> = Some("`T3` is read before it is assigned on a path its parameters do not rule out, so it keeps its value from the last accepted time point, which no harmonic-balance spectrum carries");
+	pub const HB_ADMISSIBLE: bool = true;
+	pub const HB_REFUSAL: Option<&'static str> = None;
 	pub const HB_PERIODIC_SITES: &'static [rspice_veriloga_runtime::GeneratedPeriodicKind] = &[];
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;

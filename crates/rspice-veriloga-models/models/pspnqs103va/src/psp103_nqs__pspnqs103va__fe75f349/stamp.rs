@@ -34551,8 +34551,8 @@ impl Instance {
 		let NWT=JEH* AD;
 		let NWU=NWT* JEF;
 		let NWV=L13([NWU[0],NWU[1],NWU[2],NWU[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (JEI* NWS);
-		let NWW=idt(0, (NWS* JEF), GWT);
-		let NWX=L13(std::array::from_fn(|i| idt_derivative(0,NWW,(NWV)[i],(L13([GXC[0],GXC[1],GXC[2],GXC[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let NWW=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, (NWS* JEF), GWT), None => idt(0, (NWS* JEF), GWT) };
+		let NWX=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(0, (NWV)[i], (L13([GXC[0],GXC[1],GXC[2],GXC[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(0,NWW,(NWV)[i],(L13([GXC[0],GXC[1],GXC[2],GXC[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let NWY=NWX* NWO;
 		let NWZ=NWV* NWO;
 		let NXA=BN+ (NWO* NWW);
@@ -34560,8 +34560,8 @@ impl Instance {
 		let NXC=BN+ ((NWO* branch_unknown_flows[2])* NWP);
 		let NXD=NWT* JUO;
 		let NXE=L13([NXD[0],NXD[1],NXD[2],NXD[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (JUP* NWS);
-		let NXF=idt(1, (NWS* JUO), GWU);
-		let NXG=L13(std::array::from_fn(|i| idt_derivative(1,NXF,(NXE)[i],(L13([GXD[0],GXD[1],GXD[2],GXD[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let NXF=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, (NWS* JUO), GWU), None => idt(1, (NWS* JUO), GWU) };
+		let NXG=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(1, (NXE)[i], (L13([GXD[0],GXD[1],GXD[2],GXD[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(1,NXF,(NXE)[i],(L13([GXD[0],GXD[1],GXD[2],GXD[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let NXH=NXG* NWO;
 		let NXI=NXE* NWO;
 		let NXJ=BN+ (NWO* NXF);
@@ -34569,8 +34569,8 @@ impl Instance {
 		let NXL=BN+ ((NWO* branch_unknown_flows[4])* NWP);
 		let NXM=NWT* KJX;
 		let NXN=L13([NXM[0],NXM[1],NXM[2],NXM[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (KJY* NWS);
-		let NXO=idt(2, (NWS* KJX), GWV);
-		let NXP=L13(std::array::from_fn(|i| idt_derivative(2,NXO,(NXN)[i],(L13([GXE[0],GXE[1],GXE[2],GXE[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let NXO=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(2, (NWS* KJX), GWV), None => idt(2, (NWS* KJX), GWV) };
+		let NXP=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(2, (NXN)[i], (L13([GXE[0],GXE[1],GXE[2],GXE[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(2,NXO,(NXN)[i],(L13([GXE[0],GXE[1],GXE[2],GXE[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let NXQ=NXP* NWO;
 		let NXR=NXN* NWO;
 		let NXS=BN+ (NWO* NXO);
@@ -34578,8 +34578,8 @@ impl Instance {
 		let NXU=BN+ ((NWO* branch_unknown_flows[6])* NWP);
 		let NXV=NWT* KYF;
 		let NXW=L13([NXV[0],NXV[1],NXV[2],NXV[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (KYG* NWS);
-		let NXX=idt(3, (NWS* KYF), GWW);
-		let NXY=L13(std::array::from_fn(|i| idt_derivative(3,NXX,(NXW)[i],(L13([GXF[0],GXF[1],GXF[2],GXF[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let NXX=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(3, (NWS* KYF), GWW), None => idt(3, (NWS* KYF), GWW) };
+		let NXY=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(3, (NXW)[i], (L13([GXF[0],GXF[1],GXF[2],GXF[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(3,NXX,(NXW)[i],(L13([GXF[0],GXF[1],GXF[2],GXF[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let NXZ=NXY* NWO;
 		let NYA=NXW* NWO;
 		let NYB=BN+ (NWO* NXX);
@@ -34587,8 +34587,8 @@ impl Instance {
 		let NYD=BN+ ((NWO* branch_unknown_flows[8])* NWP);
 		let NYE=NWT* LLV;
 		let NYF=L13([NYE[0],NYE[1],NYE[2],NYE[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (LLW* NWS);
-		let NYG=idt(4, (NWS* LLV), GWX);
-		let NYH=L13(std::array::from_fn(|i| idt_derivative(4,NYG,(NYF)[i],(L13([GXG[0],GXG[1],GXG[2],GXG[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let NYG=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(4, (NWS* LLV), GWX), None => idt(4, (NWS* LLV), GWX) };
+		let NYH=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(4, (NYF)[i], (L13([GXG[0],GXG[1],GXG[2],GXG[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(4,NYG,(NYF)[i],(L13([GXG[0],GXG[1],GXG[2],GXG[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let NYI=NYH* NWO;
 		let NYJ=NYF* NWO;
 		let NYK=BN+ (NWO* NYG);
@@ -34596,8 +34596,8 @@ impl Instance {
 		let NYM=BN+ ((NWO* branch_unknown_flows[10])* NWP);
 		let NYN=NWT* LZD;
 		let NYO=L13([NYN[0],NYN[1],NYN[2],NYN[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (LZE* NWS);
-		let NYP=idt(5, (NWS* LZD), GWY);
-		let NYQ=L13(std::array::from_fn(|i| idt_derivative(5,NYP,(NYO)[i],(L13([GXH[0],GXH[1],GXH[2],GXH[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let NYP=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(5, (NWS* LZD), GWY), None => idt(5, (NWS* LZD), GWY) };
+		let NYQ=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(5, (NYO)[i], (L13([GXH[0],GXH[1],GXH[2],GXH[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(5,NYP,(NYO)[i],(L13([GXH[0],GXH[1],GXH[2],GXH[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let NYR=NYQ* NWO;
 		let NYS=NYO* NWO;
 		let NYT=BN+ (NWO* NYP);
@@ -34605,8 +34605,8 @@ impl Instance {
 		let NYV=BN+ ((NWO* branch_unknown_flows[12])* NWP);
 		let NYW=NWT* MLK;
 		let NYX=L13([NYW[0],NYW[1],NYW[2],NYW[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (MLL* NWS);
-		let NYY=idt(6, (NWS* MLK), GWZ);
-		let NYZ=L13(std::array::from_fn(|i| idt_derivative(6,NYY,(NYX)[i],(L13([GXI[0],GXI[1],GXI[2],GXI[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let NYY=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(6, (NWS* MLK), GWZ), None => idt(6, (NWS* MLK), GWZ) };
+		let NYZ=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(6, (NYX)[i], (L13([GXI[0],GXI[1],GXI[2],GXI[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(6,NYY,(NYX)[i],(L13([GXI[0],GXI[1],GXI[2],GXI[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let NZA=NYZ* NWO;
 		let NZB=NYX* NWO;
 		let NZC=BN+ (NWO* NYY);
@@ -34614,8 +34614,8 @@ impl Instance {
 		let NZE=BN+ ((NWO* branch_unknown_flows[14])* NWP);
 		let NZF=NWT* MXS;
 		let NZG=L13([NZF[0],NZF[1],NZF[2],NZF[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (MXT* NWS);
-		let NZH=idt(7, (NWS* MXS), GXA);
-		let NZI=L13(std::array::from_fn(|i| idt_derivative(7,NZH,(NZG)[i],(L13([GXJ[0],GXJ[1],GXJ[2],GXJ[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let NZH=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(7, (NWS* MXS), GXA), None => idt(7, (NWS* MXS), GXA) };
+		let NZI=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(7, (NZG)[i], (L13([GXJ[0],GXJ[1],GXJ[2],GXJ[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(7,NZH,(NZG)[i],(L13([GXJ[0],GXJ[1],GXJ[2],GXJ[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let NZJ=NZI* NWO;
 		let NZK=NZG* NWO;
 		let NZL=BN+ (NWO* NZH);
@@ -34623,8 +34623,8 @@ impl Instance {
 		let NZN=BN+ ((NWO* branch_unknown_flows[16])* NWP);
 		let NZO=NWT* NJZ;
 		let NZP=L13([NZO[0],NZO[1],NZO[2],NZO[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])+ (NKA* NWS);
-		let NZQ=idt(8, (NWS* NJZ), GXB);
-		let NZR=L13(std::array::from_fn(|i| idt_derivative(8,NZQ,(NZP)[i],(L13([GXK[0],GXK[1],GXK[2],GXK[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i])));
+		let NZQ=match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(8, (NWS* NJZ), GXB), None => idt(8, (NWS* NJZ), GXB) };
+		let NZR=L13(std::array::from_fn(|i| match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.derivative(8, (NZP)[i], (L13([GXK[0],GXK[1],GXK[2],GXK[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i], [5u32, 6u32, 7u32, 8u32, 12u32, 13u32, 14u32, 15u32, 16u32, 17u32, 18u32, 19u32, 20u32][i]), None => idt_derivative(8,NZQ,(NZP)[i],(L13([GXK[0],GXK[1],GXK[2],GXK[3],0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]))[i]) }));
 		let NZS=NZR* NWO;
 		let NZT=NZP* NWO;
 		let NZU=BN+ (NWO* NZQ);
