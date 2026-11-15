@@ -326,7 +326,9 @@ fn turning_a_part_off_a_pin_it_touched_wires_the_two_pins() {
 
 /// Ctrl+R turns the selection clockwise and Ctrl+Shift+R counter-clockwise;
 /// Ctrl+M mirrors it horizontally and Ctrl+Shift+M vertically. No key turned
-/// a placed selection before, and there was no counter-clockwise turn.
+/// a placed selection before, and there was no counter-clockwise turn. The
+/// keys hold in the edit context, so a symbol canvas turns its selection
+/// with them as a schematic does.
 #[test]
 fn rotate_and_mirror_have_their_keys_on_the_canvas() {
     use crate::state::command_catalog::{CommandKey, CommandPlatform, ShortcutContext};
@@ -346,7 +348,7 @@ fn rotate_and_mirror_have_their_keys_on_the_canvas() {
             .find(|binding| binding.supports(CommandPlatform::Desktop))
             .map_or("", |binding| binding.chord.label);
         assert_eq!(label, key, "{command:?}");
-        assert_eq!(spec.context, ShortcutContext::EngineeringCanvas);
+        assert_eq!(spec.context, ShortcutContext::EditContext, "{command:?}");
     }
 }
 
