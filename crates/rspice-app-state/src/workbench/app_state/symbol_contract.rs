@@ -9,6 +9,7 @@ use rspice_design::library::metadata::{
     SourceViewPort, VERILOGA_PORTS_KEY, decode_source_view_ports, metadata_ports,
     module_interface_view,
 };
+use rspice_design::model_bound_symbol::materialize_symbol_document;
 use rspice_design::symbol::generated::{
     GENERATED_PORTS_KEY, decode_ports, generated_interface_document, is_generated_symbol,
 };
@@ -67,10 +68,11 @@ impl Model {
         }
     }
 
-    /// The pins one cell's schematic or compiled module declares for its
-    /// symbol; none where the symbol defines the interface itself.
+    /// The pins one cell's symbol answers to, as [`Self::symbol_interface`]
+    /// reads them: its model's terminals, else its schematic's or compiled
+    /// module's ports; none where the symbol defines the interface itself.
     pub fn symbol_ports(&self, reference: &CellViewRef) -> Vec<PortSpec> {
-        match self.drawn_symbol_interface(reference) {
+        match self.symbol_interface(reference) {
             SymbolInterface::SymbolDefined => Vec::new(),
             SymbolInterface::Declared(ports) => ports,
         }
@@ -216,13 +218,17 @@ impl Model {
         )
     }
 
-    /// The symbol generated for `ports`: for a cell a compiled module
-    /// defines, the one that module's compile draws.
+    /// The symbol generated for `ports`: for a symbol bound to a model, the
+    /// one its model's contract draws; for a cell a compiled module defines,
+    /// the one that module's compile draws.
     pub fn generated_symbol_document(
         &self,
         reference: &CellViewRef,
         ports: &[PortSpec],
     ) -> SymbolDocument {
+        if let Some(definition) = self.symbol_model_binding(reference) {
+            return materialize_symbol_document(&definition);
+        }
         match self.symbol_contract_module_ports(reference) {
             Some(typed) => generated_interface_document(
                 ports,
@@ -233,14 +239,29 @@ impl Model {
         }
     }
 
-    /// `document` brought into agreement with `ports`, a compiled module's
-    /// discrete ports typed as the module declares them.
+    /// `document` brought into agreement with `ports`: a bound model's
+    /// terminals typed and sided as its contract states them, a compiled
+    /// module's discrete ports typed as the module declares them.
     pub fn reconcile_symbol_with_contract(
         &self,
         reference: &CellViewRef,
         document: &mut SymbolDocument,
         ports: &[PortSpec],
     ) {
+        if let Some(definition) = self.symbol_model_binding(reference) {
+            let declared = |port: &PortSpec| {
+                definition
+                    .pins
+                    .iter()
+                    .find(|pin| pin.name.eq_ignore_ascii_case(&port.name))
+            };
+            document.reconcile_contract_ports(
+                ports,
+                |port| declared(port).map(|pin| pin.electrical_type),
+                |port| declared(port).map(|pin| pin.side),
+            );
+            return;
+        }
         let typed = self
             .symbol_contract_module_ports(reference)
             .unwrap_or_default();

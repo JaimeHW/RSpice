@@ -1259,6 +1259,18 @@ impl SymbolDocument {
         ports: &[PortSpec],
         electrical: impl Fn(&PortSpec) -> Option<SymbolElectricalType>,
     ) {
+        self.reconcile_contract_ports(ports, electrical, |_| None);
+    }
+
+    /// [`Self::reconcile_typed_ports`], with the side `stated_side` gives a
+    /// port's new pin winning over the side its direction implies: a model's
+    /// contract says where each of its terminals is drawn.
+    pub fn reconcile_contract_ports(
+        &mut self,
+        ports: &[PortSpec],
+        electrical: impl Fn(&PortSpec) -> Option<SymbolElectricalType>,
+        stated_side: impl Fn(&PortSpec) -> Option<SymbolPinSide>,
+    ) {
         let bounds = self.body_bounds();
         for port in ports {
             let stated = electrical(port);
@@ -1283,7 +1295,7 @@ impl SymbolDocument {
                 }
                 None => false,
             };
-            let side = default_pin_side(port.direction, None);
+            let side = stated_side(port).unwrap_or_else(|| default_pin_side(port.direction, None));
             let (tip, length) = self.free_place(side, bounds);
             if known {
                 if let Some(pin) = self.pin_mut(&port.name) {
@@ -2229,5 +2241,41 @@ mod validation_tests {
                 "{name}"
             );
         }
+    }
+
+    /// A side the contract states for a port puts its new pin on that side,
+    /// not on the one its direction implies; a pin already drawn stays put.
+    #[test]
+    fn a_contract_side_places_a_new_pin_where_the_contract_draws_it() {
+        let port = |name: &str, direction| PortSpec {
+            name: name.to_owned(),
+            direction,
+        };
+        let drawn = SymbolPin::new("G", PortDirection::In, Some(Point::new(-60, 0)))
+            .with_contract(SymbolElectricalType::Analog, SymbolPinSide::Left);
+        let mut document = SymbolDocument {
+            pins: vec![drawn.clone()],
+            ..SymbolDocument::default()
+        };
+        let ports = [
+            port("G", PortDirection::In),
+            port("B", PortDirection::InOut),
+        ];
+
+        document.reconcile_contract_ports(
+            &ports,
+            |port| (port.name == "B").then_some(SymbolElectricalType::Power),
+            |port| match port.name.as_str() {
+                "B" => Some(SymbolPinSide::Bottom),
+                _ => Some(SymbolPinSide::Top),
+            },
+        );
+
+        let bulk = document.pin("B").expect("the missing terminal is added");
+        assert_eq!(bulk.side, SymbolPinSide::Bottom);
+        assert_eq!(bulk.electrical_type(), SymbolElectricalType::Power);
+        let tip = bulk.position.expect("and placed");
+        assert!(tip.y > 0, "below the body: {tip:?}");
+        assert_eq!(document.pin("G"), Some(&drawn), "a drawn pin stays put");
     }
 }

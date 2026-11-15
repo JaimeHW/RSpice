@@ -45,6 +45,7 @@ mod layout_editor_drawn;
 mod library_transactions;
 mod mobile_controls;
 mod mobile_controls_drawn;
+mod model_bound_symbol_editor;
 mod navigator;
 mod navigator_drawn;
 mod navigator_rails;
