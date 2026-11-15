@@ -14,8 +14,8 @@ use crate::schematic::view::{CanvasFacts, CanvasParts, canvas_facts_lent, canvas
 use crate::state::pdk_config::PdkConfig;
 use crate::state::{CellViewRef, SchematicState, SymbolDocument, SymbolEditorMetadata};
 use crate::workbench::app::actions::workspace::symbol_document::{
-    can_undo_active_symbol_document, redo_active_symbol_document,
-    store_active_symbol_document, store_active_symbol_editor_bundle, undo_active_symbol_document,
+    can_undo_active_symbol_document, redo_active_symbol_document, store_active_symbol_document,
+    store_active_symbol_editor_bundle, undo_active_symbol_document,
 };
 use crate::workbench::app::actions::workspace::{
     NavigationParts, new_schematic_document, sync_active_schematic,
