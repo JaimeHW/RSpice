@@ -26,6 +26,9 @@ pub enum ViewType {
     Verilog,
     /// VerilogA behavioral model for SPICE
     VerilogA,
+    /// Verilog-AMS mixed-signal model: analog and discrete behaviour in one
+    /// module.
+    VerilogAms,
     /// SPICE netlist
     Spice,
     /// Documentation
@@ -50,6 +53,7 @@ impl ViewType {
             ViewType::Testbench => "testbench",
             ViewType::Verilog => "verilog",
             ViewType::VerilogA => "veriloga",
+            ViewType::VerilogAms => "verilogams",
             ViewType::Spice => "spice",
             ViewType::Document => "doc",
             ViewType::Extracted => "extracted",
@@ -70,6 +74,7 @@ impl ViewType {
             ViewType::Layout => "layout",
             ViewType::Testbench => "testbench",
             ViewType::Verilog => "Verilog",
+            ViewType::VerilogAms => "Verilog-AMS",
             ViewType::Spice => "SPICE",
             ViewType::Document => "document",
             ViewType::Extracted => "extracted",
@@ -80,13 +85,36 @@ impl ViewType {
     }
 
     /// A tab or title caption for the view named `name`: a view keeps the
-    /// name it was given, and the default-named Verilog-A view reads as its
-    /// type.
+    /// name it was given, and a source view under its type's default name
+    /// reads as its language.
     pub fn caption_for<'a>(&self, name: &'a str) -> &'a str {
-        if *self == ViewType::VerilogA && name.eq_ignore_ascii_case("veriloga") {
-            "Verilog-A"
+        if self.is_hdl_source() && name.eq_ignore_ascii_case(self.display_name()) {
+            self.caption()
         } else {
             name
+        }
+    }
+
+    /// Whether this is a Verilog-family source view: Verilog, Verilog-A or
+    /// Verilog-AMS. One compiler reads all three (Verilog-AMS LRM 2.4 over
+    /// IEEE 1364-2005), so a view of any of them that owns a project source
+    /// compiles, draws its symbol from its module's ports and netlists the
+    /// same way.
+    pub const fn is_hdl_source(&self) -> bool {
+        matches!(
+            self,
+            ViewType::Verilog | ViewType::VerilogA | ViewType::VerilogAms
+        )
+    }
+
+    /// The extension of the root file a new source view of this type is
+    /// created with, for the Verilog family.
+    pub const fn hdl_root_extension(&self) -> Option<&'static str> {
+        match self {
+            ViewType::Verilog => Some(".v"),
+            ViewType::VerilogA => Some(".va"),
+            ViewType::VerilogAms => Some(".vams"),
+            _ => None,
         }
     }
 
@@ -99,6 +127,7 @@ impl ViewType {
             "testbench" | "tb" => ViewType::Testbench,
             "verilog" | "v" => ViewType::Verilog,
             "veriloga" | "va" => ViewType::VerilogA,
+            "verilogams" | "vams" => ViewType::VerilogAms,
             "spice" | "sp" => ViewType::Spice,
             "doc" | "document" => ViewType::Document,
             "extracted" | "ext" => ViewType::Extracted,
@@ -109,13 +138,14 @@ impl ViewType {
     }
 
     /// All standard view types
-    pub const ALL: [ViewType; 12] = [
+    pub const ALL: [ViewType; 13] = [
         ViewType::Schematic,
         ViewType::Symbol,
         ViewType::Layout,
         ViewType::Testbench,
         ViewType::Verilog,
         ViewType::VerilogA,
+        ViewType::VerilogAms,
         ViewType::Spice,
         ViewType::Document,
         ViewType::Extracted,
@@ -191,5 +221,25 @@ mod caption_tests {
         assert_eq!(ViewType::VerilogA.caption_for("behavioral"), "behavioral");
         assert_eq!(ViewType::Schematic.caption_for("schematic"), "schematic");
         assert_eq!(ViewType::VerilogA.caption(), "Verilog-A");
+        assert_eq!(ViewType::Verilog.caption_for("verilog"), "Verilog");
+        assert_eq!(
+            ViewType::VerilogAms.caption_for("verilogams"),
+            "Verilog-AMS"
+        );
+        assert_eq!(ViewType::VerilogAms.caption_for("mixed"), "mixed");
+    }
+
+    #[test]
+    fn a_verilog_ams_view_keeps_its_name_and_reads_back_from_it() {
+        assert_eq!(ViewType::VerilogAms.display_name(), "verilogams");
+        assert_eq!(ViewType::from_name("verilogams"), ViewType::VerilogAms);
+        assert_eq!(ViewType::from_name("vams"), ViewType::VerilogAms);
+        assert!(ViewType::ALL.contains(&ViewType::VerilogAms));
+        let family = ViewType::ALL
+            .into_iter()
+            .filter(ViewType::is_hdl_source)
+            .map(|view| view.hdl_root_extension())
+            .collect::<Vec<_>>();
+        assert_eq!(family, [Some(".v"), Some(".va"), Some(".vams")]);
     }
 }

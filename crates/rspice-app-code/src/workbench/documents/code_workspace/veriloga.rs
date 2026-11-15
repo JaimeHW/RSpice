@@ -15,7 +15,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::simulation::NetlistShown;
 use crate::state::{
     ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
-    ProjectSourceOwner, ProjectSourceRole, ViewType,
+    ProjectSourceOwner, ProjectSourceRole,
 };
 use crate::workbench::MessageId;
 use rspice_app_workbench::workbench::state::WorkbenchSession;
@@ -150,7 +150,7 @@ fn view_names_no_module(model: &Model, reference: &crate::state::CellViewRef) ->
         .and_then(|library| library.get_cell(&reference.cell))
         .and_then(|cell| Some((cell, cell.get_view(&reference.view)?)))
         .is_some_and(|(cell, view)| {
-            view.view_type == ViewType::VerilogA
+            view.view_type.is_hdl_source()
                 && crate::state::workspace::metadata_value(
                     [&view.metadata, &cell.metadata],
                     &["veriloga.module", "netlist.module"],
@@ -1031,6 +1031,7 @@ pub fn compile_project_bundle_virtual_for_provenance(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::ViewType;
     use crate::state::{Cell, CellViewRef, Library, ProjectSourceDocument, View};
     use crate::workbench::code::{
         CodeFeature,

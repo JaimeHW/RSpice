@@ -144,7 +144,7 @@ pub fn refresh_symbol_standing(
     active: &CellViewRef,
     active_type: Option<ViewType>,
 ) {
-    if active_type != Some(ViewType::VerilogA) {
+    if !active_type.is_some_and(|view_type| view_type.is_hdl_source()) {
         if state.symbol_standing.measured.is_some() {
             state.symbol_standing = VerilogASymbolStanding::default();
         }

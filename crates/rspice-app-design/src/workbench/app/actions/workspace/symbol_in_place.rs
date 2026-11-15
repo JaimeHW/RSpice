@@ -180,7 +180,7 @@ fn symbol_in_place_target(
     let Some(symbol) = symbol else {
         let bound_to_module = cell
             .get_view(&binding.view)
-            .is_some_and(|view| view.view_type == ViewType::VerilogA);
+            .is_some_and(|view| view.view_type.is_hdl_source());
         return Err(if bound_to_module {
             Refusal::ModuleWithoutSymbol
         } else {

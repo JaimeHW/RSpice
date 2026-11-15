@@ -210,10 +210,12 @@ impl ProjectSourceLanguage {
     }
 
     /// Every extension a root file of this language may carry: Verilog-AMS
-    /// sources are `.vams` as often as `.va`.
+    /// sources are `.vams` as often as `.va`, and a Verilog view's module is
+    /// `.v`. One compiler reads all three (Verilog-AMS LRM 2.4 over IEEE
+    /// 1364-2005).
     const fn accepted_extensions(self) -> &'static [&'static str] {
         match self {
-            Self::VerilogA => &[".va", ".vams"],
+            Self::VerilogA => &[".va", ".vams", ".v"],
             Self::RSpiceAutomation => &[".py"],
         }
     }
@@ -221,7 +223,7 @@ impl ProjectSourceLanguage {
     /// [`Self::accepted_extensions`] as the sentence that names them.
     const fn accepted_extension_text(self) -> &'static str {
         match self {
-            Self::VerilogA => "'.va' or '.vams'",
+            Self::VerilogA => "'.va', '.vams' or '.v'",
             Self::RSpiceAutomation => "'.py'",
         }
     }

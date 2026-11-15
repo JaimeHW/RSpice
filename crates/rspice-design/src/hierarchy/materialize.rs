@@ -50,11 +50,11 @@ pub struct SourceViewSource {
 
 /// The source a source view runs, by the one rule netlisting binds it with.
 ///
-/// A Verilog-A view runs the project bundle it owns, and nothing else: a
-/// view without one has nothing to run, whatever path it names. Any other
-/// source view runs the file it or its cell names. The component shelf asks
-/// this same question before it calls a view ready to place, so a cell it
-/// offers is one the netlister can bind.
+/// A Verilog, Verilog-A or Verilog-AMS view runs the project bundle it owns,
+/// and nothing else: a view without one has nothing to run, whatever path it
+/// names. Any other source view runs the file it or its cell names. The
+/// component shelf asks this same question before it calls a view ready to
+/// place, so a cell it offers is one the netlister can bind.
 pub fn source_view_source(
     library: &Library,
     cell: &Cell,
@@ -63,7 +63,7 @@ pub fn source_view_source(
     project_sources: &ProjectSourceRegistry,
     libraries: &LibraryCatalog,
 ) -> Result<SourceViewSource, String> {
-    if view.view_type == ViewType::VerilogA {
+    if view.view_type.is_hdl_source() {
         let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
         let binding =
             project_veriloga_binding_for_view(project_id, project_sources, libraries, &reference)?;
@@ -207,9 +207,9 @@ pub fn project_veriloga_binding_for_view(
             reference.display_path()
         )
     })?;
-    if view.view_type != ViewType::VerilogA {
+    if !view.view_type.is_hdl_source() {
         return Err(format!(
-            "project source owner {} is not a Verilog-A view",
+            "project source owner {} is not a Verilog, Verilog-A or Verilog-AMS view",
             reference.display_path()
         ));
     }
@@ -327,7 +327,7 @@ pub(super) fn hierarchy_view_search_order(requested: &str, is_root: bool) -> Vec
             order.push("spice".to_owned());
         }
         ViewType::Schematic | ViewType::Testbench => order.push("spice".to_owned()),
-        ViewType::Extracted | ViewType::Verilog | ViewType::VerilogA => {
+        ViewType::Extracted | ViewType::Verilog | ViewType::VerilogA | ViewType::VerilogAms => {
             order.push("spice".to_owned());
         }
         ViewType::Spice => {}
@@ -390,10 +390,11 @@ fn configured_scope(pattern: &str) -> Result<InstancePathPattern, String> {
 /// View types that are terminal implementations: a stop at one of these ends
 /// the hierarchy, and the built-in default stops at them; any other view is
 /// descended into.
-pub const DEFAULT_STOP_VIEW_TYPES: [ViewType; 4] = [
+pub const DEFAULT_STOP_VIEW_TYPES: [ViewType; 5] = [
     ViewType::Spice,
     ViewType::Verilog,
     ViewType::VerilogA,
+    ViewType::VerilogAms,
     ViewType::Extracted,
 ];
 

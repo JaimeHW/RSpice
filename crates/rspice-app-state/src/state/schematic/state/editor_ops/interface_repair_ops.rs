@@ -19,7 +19,7 @@ use super::super::super::{
     ComponentType, LibraryCellInstance, PortSpec, SchematicReplacementError,
 };
 use super::super::*;
-use crate::state::{LibraryManager, SymbolResolver, ViewType};
+use crate::state::{LibraryManager, SymbolResolver};
 use rspice_design::library::metadata::metadata_ports;
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design::schematic::interface_repair::interface_is_stale;
@@ -146,7 +146,7 @@ fn master_interface<S: AsRef<SchematicDocument>>(
                 .get_cell(&binding.cell)?;
             let view = cell
                 .get_view(&binding.view)
-                .filter(|view| view.view_type == ViewType::VerilogA)?;
+                .filter(|view| view.view_type.is_hdl_source())?;
             metadata_ports(&view.metadata).or_else(|| metadata_ports(&cell.metadata))?
         }
     };

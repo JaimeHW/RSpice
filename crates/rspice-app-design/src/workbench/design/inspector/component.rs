@@ -254,7 +254,7 @@ pub(super) fn component_model_source_target(
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
             .and_then(|cell| cell.get_view(&reference.view))
-            .is_some_and(|view| view.view_type == crate::state::ViewType::VerilogA);
+            .is_some_and(|view| view.view_type.is_hdl_source());
         if is_veriloga {
             return Some(ComponentModelSourceTarget::VerilogA(reference));
         }

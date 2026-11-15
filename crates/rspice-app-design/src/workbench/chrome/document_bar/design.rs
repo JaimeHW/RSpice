@@ -52,8 +52,8 @@ pub const fn icon_for_view(view_type: ViewType) -> WorkbenchIcon {
         ViewType::Symbol => WorkbenchIcon::Models,
         // A Verilog-A module is edited in its own tab beside the schematic it
         // describes; borrowing the netlist mark made it read as a deck.
-        ViewType::VerilogA => WorkbenchIcon::VerilogA,
-        ViewType::Spice | ViewType::Verilog => WorkbenchIcon::Netlist,
+        ViewType::VerilogA | ViewType::VerilogAms | ViewType::Verilog => WorkbenchIcon::VerilogA,
+        ViewType::Spice => WorkbenchIcon::Netlist,
         _ => WorkbenchIcon::File,
     }
 }

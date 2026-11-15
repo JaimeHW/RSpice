@@ -93,7 +93,9 @@ pub(in crate::workbench) fn docs_url(topic: Option<DocsTopic>) -> String {
 const fn workspace_topic(workspace: Workspace, view: Option<ViewType>) -> DocsTopic {
     match workspace {
         Workspace::Project => DocsTopic::GettingStarted,
-        Workspace::Design if matches!(view, Some(ViewType::VerilogA)) => DocsTopic::VerilogA,
+        Workspace::Design if matches!(view, Some(view) if view.is_hdl_source()) => {
+            DocsTopic::VerilogA
+        }
         Workspace::Design => DocsTopic::SchematicEntry,
         Workspace::Simulate | Workspace::Stimulus => DocsTopic::SimulationSetup,
         Workspace::Results => DocsTopic::Results,

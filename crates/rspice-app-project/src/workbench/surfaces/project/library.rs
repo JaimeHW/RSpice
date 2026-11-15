@@ -1239,7 +1239,9 @@ pub fn icon_for_view(view_type: ViewType) -> WorkbenchIcon {
     match view_type {
         ViewType::Schematic | ViewType::Testbench | ViewType::Extracted => WorkbenchIcon::Design,
         ViewType::Symbol => WorkbenchIcon::Project,
-        ViewType::Verilog | ViewType::VerilogA | ViewType::Spice => WorkbenchIcon::Code,
+        ViewType::Verilog | ViewType::VerilogA | ViewType::VerilogAms | ViewType::Spice => {
+            WorkbenchIcon::Code
+        }
         ViewType::Config => WorkbenchIcon::Sliders,
         ViewType::Layout | ViewType::Document | ViewType::Abstract | ViewType::Custom => {
             WorkbenchIcon::File
@@ -1255,6 +1257,7 @@ fn open_view_label(view_type: ViewType) -> &'static str {
         ViewType::Testbench => "Open testbench",
         ViewType::Verilog => "Open Verilog",
         ViewType::VerilogA => "Open Verilog-A",
+        ViewType::VerilogAms => "Open Verilog-AMS",
         ViewType::Spice => "Open SPICE source",
         ViewType::Document => "Open document",
         ViewType::Extracted => "Open extracted view",

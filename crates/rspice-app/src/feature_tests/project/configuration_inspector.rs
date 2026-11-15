@@ -101,7 +101,7 @@ fn on_default_it_states_the_built_in_facts() {
     for fact in [
         "Default",
         "the instance's own view, then extracted, then spice",
-        "spice, verilog, veriloga, extracted",
+        "spice, verilog, veriloga, verilogams, extracted",
         "Stop the netlist",
         "Yes",
     ] {

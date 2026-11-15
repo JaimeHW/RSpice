@@ -57,7 +57,21 @@ pub fn verilog_port_declaration(name: &str) -> Option<(&str, Option<(u32, u32)>)
 /// is declared under its base name with its range, as `inout [7:0] d;`. A
 /// supply pin is an `inout` port, the only way a module can declare one.
 pub fn starter_veriloga_source(module_name: &str, ports: &[crate::state::PortSpec]) -> String {
+    starter_hdl_source(crate::state::ViewType::VerilogA, module_name, ports)
+}
+
+/// The module a new source view of `view_type` starts from. A Verilog-A or
+/// Verilog-AMS module reads the standard headers and declares its ports
+/// `electrical`; a Verilog module is IEEE 1364-2005 alone, with no headers,
+/// and declares its ports `wire`, so every port is a discrete net.
+pub fn starter_hdl_source(
+    view_type: crate::state::ViewType,
+    module_name: &str,
+    ports: &[crate::state::PortSpec],
+) -> String {
     use crate::state::PortDirection;
+
+    let verilog = view_type == crate::state::ViewType::Verilog;
 
     let declared = ports
         .iter()
@@ -65,7 +79,11 @@ pub fn starter_veriloga_source(module_name: &str, ports: &[crate::state::PortSpe
             verilog_port_declaration(&port.name).map(|(base, range)| (port.direction, base, range))
         })
         .collect::<Vec<_>>();
-    let mut source = String::from("`include \"constants.vams\"\n`include \"disciplines.vams\"\n\n");
+    let mut source = if verilog {
+        String::new()
+    } else {
+        String::from("`include \"constants.vams\"\n`include \"disciplines.vams\"\n\n")
+    };
     if declared.is_empty() {
         source.push_str(&format!("module {module_name};\nendmodule\n"));
         return source;
@@ -110,7 +128,7 @@ pub fn starter_veriloga_source(module_name: &str, ports: &[crate::state::PortSpe
     }
     declare(
         &mut source,
-        "electrical",
+        if verilog { "wire" } else { "electrical" },
         declared
             .iter()
             .map(|(_, base, range)| (*base, *range))

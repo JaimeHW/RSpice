@@ -1063,9 +1063,9 @@ impl ProjectFile {
                     view.reference.key()
                 )));
             }
-            if view.view_type != ViewType::VerilogA {
+            if !view.view_type.is_hdl_source() {
                 return Err(ProjectIoError::InvalidData(format!(
-                    "project source bundle {} owns {} view '{}'; cell-owned Verilog-A source requires a Verilog-A view",
+                    "project source bundle {} owns {} view '{}'; cell-owned Verilog-family source requires a Verilog, Verilog-A or Verilog-AMS view",
                     bundle.id(),
                     view.view_type.display_name(),
                     reference.key()
@@ -1078,7 +1078,7 @@ impl ProjectFile {
             ));
         }
         for view in view_index.exact.values() {
-            if view.view_type != ViewType::VerilogA {
+            if !view.view_type.is_hdl_source() {
                 continue;
             }
             let owner_key = canonical_cell_view_owner_key(
@@ -1088,7 +1088,8 @@ impl ProjectFile {
             );
             if !owned_veriloga_views.contains(&owner_key) {
                 return Err(ProjectIoError::InvalidData(format!(
-                    "Verilog-A cell view '{}' has no project source bundle; every Verilog-A view must own exactly one persisted source closure",
+                    "{} cell view '{}' has no project source bundle; every Verilog, Verilog-A or Verilog-AMS view must own exactly one persisted source closure",
+                    view.view_type.caption(),
                     view.reference.key()
                 )));
             }

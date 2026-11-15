@@ -21,6 +21,13 @@ impl ProjectWorkspace {
             .map(|open| open.view_type)
     }
 
+    /// Whether the active document is a Verilog, Verilog-A or Verilog-AMS
+    /// view: a project source the code editor edits and the compiler reads.
+    pub fn active_view_is_hdl_source(&self) -> bool {
+        self.active_view_type()
+            .is_some_and(|view_type| view_type.is_hdl_source())
+    }
+
     pub fn active_schematic_reference(&self) -> CellViewRef {
         if self.active_view_type() == Some(ViewType::Symbol) {
             return CellViewRef::new(

@@ -56,12 +56,12 @@ fn show_document(
             canvas = crate::schematic::symbol_editor::show(ui, &mut canvas_frame_in(cx), symbols);
         }
         ViewType::Layout => layout_editor::show(ui, &mut canvas_frame_in(cx)),
-        // A Verilog-A view is a document, not a drawing: it is no level of a
-        // descent, and its own heading and the navigator's path already name
-        // it. A crumb floating over the source would only cover the first
-        // line.
-        ViewType::VerilogA => return None,
-        ViewType::Spice | ViewType::Verilog => {
+        // A Verilog, Verilog-A or Verilog-AMS view is a document, not a
+        // drawing: it is no level of a descent, and its own heading and the
+        // navigator's path already name it. A crumb floating over the source
+        // would only cover the first line.
+        ViewType::VerilogA | ViewType::VerilogAms | ViewType::Verilog => return None,
+        ViewType::Spice => {
             source_reference_document(ui, cx.model, view_type);
         }
         view_type => unsupported_document(ui, cx.model, view_type),

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use rspice_design_model::port::{PortDirection, PortSpec};
 use serde::{Deserialize, Serialize};
 
-use super::{Cell, View, ViewType};
+use super::{Cell, View};
 use crate::schematic::component::InstanceMultiplicity;
 
 /// Lossless parameter contract authored by a cell or concrete implementation
@@ -431,14 +431,14 @@ pub(crate) fn metadata_port_list(metadata: &HashMap<String, String>) -> Option<&
 ///
 /// A cell's `schematic` view, when it has one, defines its ports, and a
 /// module that disagrees with it is a finding about the module. Otherwise the
-/// last clean compile of its Verilog-A view does.
+/// last clean compile of its Verilog, Verilog-A or Verilog-AMS view does.
 pub fn module_interface_view(cell: &Cell) -> Option<&View> {
     if cell.get_view("schematic").is_some() {
         return None;
     }
     cell.views_sorted()
         .into_iter()
-        .find(|view| view.view_type == ViewType::VerilogA)
+        .find(|view| view.view_type.is_hdl_source())
 }
 
 /// Read source-view ports using the stored metadata key precedence.
@@ -693,6 +693,7 @@ fn merge_parameter_contracts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::library::ViewType;
 
     #[test]
     fn a_computed_value_reads_in_engineering_notation_and_keeps_every_digit() {

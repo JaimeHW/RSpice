@@ -934,12 +934,13 @@ fn a_key_written_before_a_move_reads_back_as_the_current_key_until_the_bytes_cha
     );
 }
 
-/// A Verilog-AMS root is a `.vams` file as often as a `.va` one; any other
-/// extension, or an extension alone, is refused and the refusal names both.
+/// A Verilog-AMS root is a `.vams` file as often as a `.va` one, and a
+/// Verilog module's is `.v`; any other extension, or an extension alone, is
+/// refused and the refusal names all three.
 #[test]
-fn a_veriloga_root_may_be_a_va_or_a_vams_file() {
+fn a_veriloga_root_may_be_a_va_a_vams_or_a_v_file() {
     let owner = || ProjectSourceOwner::cell_view(CellViewRef::new("lib", "amp", "veriloga"));
-    for root in ["amp.va", "models/amp.VAMS"] {
+    for root in ["amp.va", "models/amp.VAMS", "amp.v"] {
         let bundle = ProjectSourceBundle::try_new(
             owner(),
             ProjectSourceLanguage::VerilogA,
@@ -951,7 +952,7 @@ fn a_veriloga_root_may_be_a_va_or_a_vams_file() {
         );
         assert!(bundle.is_ok(), "{root}: {bundle:?}");
     }
-    for root in ["amp.v", ".vams", "amp.vams.txt"] {
+    for root in ["amp.sv", ".vams", "amp.vams.txt"] {
         let refused = ProjectSourceBundle::try_new(
             owner(),
             ProjectSourceLanguage::VerilogA,
@@ -964,7 +965,7 @@ fn a_veriloga_root_may_be_a_va_or_a_vams_file() {
         .expect_err(root)
         .to_string();
         assert_eq!(
-            refused, "Verilog-A source file name must end in '.va' or '.vams'",
+            refused, "Verilog-A source file name must end in '.va', '.vams' or '.v'",
             "{root}"
         );
     }

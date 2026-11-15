@@ -180,8 +180,12 @@ impl Host for RSpiceApp {
                     Workspace::Design => {
                         use crate::workbench::design::DesignFeature;
 
-                        let verilog_a = app.state.model.workspace.content.active_view_type()
-                            == Some(ViewType::VerilogA);
+                        let verilog_a = app
+                            .state
+                            .model
+                            .workspace
+                            .content
+                            .active_view_is_hdl_source();
                         features::show_surface::<DesignFeature>(app, ui);
                         if verilog_a {
                             let application_modal = app.state.application_modal_open();
@@ -293,8 +297,12 @@ impl Host for RSpiceApp {
                         app.after_contribution();
                     }
                     Workspace::Design
-                        if app.state.model.workspace.content.active_view_type()
-                            == Some(ViewType::VerilogA) =>
+                        if app
+                            .state
+                            .model
+                            .workspace
+                            .content
+                            .active_view_is_hdl_source() =>
                     {
                         features::show_navigator::<CodeFeature>(app, ui);
                         app.after_contribution();
@@ -346,8 +354,12 @@ impl Host for RSpiceApp {
                     // A Verilog-A module is inspected for what it compiles
                     // to, not for a schematic selection it does not have.
                     Workspace::Design
-                        if app.state.model.workspace.content.active_view_type()
-                            == Some(crate::state::ViewType::VerilogA) =>
+                        if app
+                            .state
+                            .model
+                            .workspace
+                            .content
+                            .active_view_is_hdl_source() =>
                     {
                         features::show_inspector::<CodeFeature>(app, ui);
                     }
@@ -456,8 +468,12 @@ impl Host for RSpiceApp {
                             app.after_contribution();
                         }
                         Workspace::Design
-                            if app.state.model.workspace.content.active_view_type()
-                                == Some(ViewType::VerilogA) =>
+                            if app
+                                .state
+                                .model
+                                .workspace
+                                .content
+                                .active_view_is_hdl_source() =>
                         {
                             features::show_toolbar::<CodeFeature>(
                                 app,

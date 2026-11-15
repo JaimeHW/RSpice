@@ -5,7 +5,7 @@
 //! changes.
 
 use super::{LibraryRemoval, Model, WorkspacePruned};
-use crate::state::{CellViewRef, ViewType};
+use crate::state::CellViewRef;
 
 impl Model {
     /// Create one empty writable library as a project transaction.
@@ -390,7 +390,7 @@ fn require_no_owned_sources(model: &Model, library: &str) -> Result<(), String> 
                 .cells
                 .values()
                 .flat_map(|cell| cell.views.values())
-                .filter(|view| view.view_type == ViewType::VerilogA)
+                .filter(|view| view.view_type.is_hdl_source())
                 .count()
         });
     if veriloga_views > 0 {

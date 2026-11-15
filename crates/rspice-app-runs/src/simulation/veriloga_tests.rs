@@ -9,6 +9,8 @@ use rspice_simulation::veriloga::compile_pdk_source_runtime;
 use rspice_simulation::veriloga::{PreparedVerilogARuntime, PreparedVerilogARuntimeSet};
 
 #[cfg(test)]
+mod hdl_view_tests;
+#[cfg(test)]
 mod project_tests;
 pub mod test_support;
 

@@ -33,7 +33,9 @@ impl<'a> NetlistGenerator<'a> {
 
     /// Emit include directives for placed library cell instances.
     ///
-    /// - Verilog-A bindings emit `.VERILOGA "path" [module]`
+    /// - Bindings to a Verilog-family source (Verilog, Verilog-A or
+    ///   Verilog-AMS, a project bundle or a file) emit
+    ///   `.VERILOGA "path" [module]`
     /// - Other source-backed bindings emit `.include "path"`
     pub(super) fn generate_library_view_includes(&mut self) {
         let mut includes =
@@ -78,7 +80,7 @@ impl<'a> NetlistGenerator<'a> {
                     }
                 }
             }
-            if binding.view.eq_ignore_ascii_case("veriloga") {
+            if names_verilog_family_source(source_path) {
                 let model = binding
                     .module_name
                     .as_ref()
@@ -213,6 +215,22 @@ impl<'a> NetlistGenerator<'a> {
         retained.splice(insertion..insertion, section);
         self.lines = retained;
     }
+}
+
+/// Whether a binding's source is Verilog-family code, which the deck loads
+/// with `.VERILOGA`: decided by the source it binds, never by what its view
+/// is called. A project bundle's key ends in its root file, whose extension
+/// the bundle's language fixes, so one rule reads a project source and a
+/// file alike.
+fn names_verilog_family_source(source: &std::path::Path) -> bool {
+    source
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["va", "vams", "v"]
+                .iter()
+                .any(|family| extension.eq_ignore_ascii_case(family))
+        })
 }
 
 /// Whether `line` is the `* lib/cell/view (module name)` comment written above
@@ -423,6 +441,60 @@ mod tests {
             generator.lines[directive],
             ".VERILOGA \"C:/models/ota.va\" ota_core_1a2b3c4d"
         );
+    }
+
+    /// The source a binding names decides its line, not its view's name: a
+    /// Verilog or Verilog-AMS module under any view name loads with
+    /// `.VERILOGA`, as a project bundle's key does, and a SPICE file with
+    /// `.include`.
+    #[test]
+    fn a_verilog_family_source_loads_as_hdl_whatever_its_view_is_called() {
+        let mut schematic = rspice_design::schematic::owned::Schematic::default();
+        for (id, (view, source)) in [
+            ("behavioral", "C:/models/mix.vams"),
+            ("verilog", "__rspice_project__/p/b/d/m/inv.v"),
+            ("veriloga", "C:/models/cells.sp"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut binding = rspice_design::schematic::component::LibraryCellInstance::new(
+                "work",
+                format!("cell{id}"),
+                view,
+            );
+            binding.source_path = Some(std::path::PathBuf::from(source));
+            binding.module_name = Some(format!("module{id}"));
+            binding.terminal_order = vec!["a".to_owned(), "y".to_owned()];
+            binding.interface_bound = true;
+            schematic.document_mut_for_test().components.push(
+                rspice_design::schematic::component::Component::new(
+                    u64::try_from(id).unwrap_or_default() + 1,
+                    rspice_design::schematic::component_type::ComponentType::CellInstance,
+                    rspice_design_model::Point::origin(),
+                )
+                .with_library_cell(binding),
+            );
+        }
+        let mut generator = NetlistGenerator::new(
+            &schematic,
+            crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
+
+        generator.generate_library_view_includes();
+
+        assert!(generator.errors.is_empty(), "{:?}", generator.errors);
+        for line in [
+            ".VERILOGA \"C:/models/mix.vams\" module0",
+            ".VERILOGA \"__rspice_project__/p/b/d/m/inv.v\" module1",
+            ".include \"C:/models/cells.sp\"",
+        ] {
+            assert!(
+                generator.lines.iter().any(|written| written == line),
+                "{line} in {:#?}",
+                generator.lines
+            );
+        }
     }
 
     #[test]

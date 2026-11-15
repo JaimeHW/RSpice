@@ -24,7 +24,7 @@ pub use veriloga_cells::{
 };
 
 pub use veriloga_starter::{
-    starter_veriloga_source, verilog_module_name, verilog_port_declaration,
+    starter_hdl_source, starter_veriloga_source, verilog_module_name, verilog_port_declaration,
 };
 
 // The two functions are renamed on export: bare `normalize` and
@@ -176,18 +176,22 @@ impl ProjectWorkspace {
     /// Who owns the source bundle a language's editor is showing.
     ///
     /// One owner for one fact, read by every host, command, dialog, and dock.
-    /// Every Verilog-A source is a cell view, so the Verilog-A source in front
-    /// of the reader is the active cell view's bundle, and there is none while
-    /// the active view is not a Verilog-A view. Automation is the project's
+    /// Every Verilog-family source is a cell view, so the source in front of
+    /// the reader is the active cell view's bundle, and there is none while
+    /// the active view is not a Verilog, Verilog-A or Verilog-AMS view. Automation is the project's
     /// code-workspace bundle.
     pub fn active_source_owner(
         &self,
         language: ProjectSourceLanguage,
     ) -> Option<crate::state::ProjectSourceOwner> {
         match language {
-            ProjectSourceLanguage::VerilogA => (self.content.active_view_type()
-                == Some(crate::state::ViewType::VerilogA))
-            .then(|| crate::state::ProjectSourceOwner::cell_view(self.content.active_view.clone())),
+            ProjectSourceLanguage::VerilogA => self
+                .content
+                .active_view_type()
+                .is_some_and(|view_type| view_type.is_hdl_source())
+                .then(|| {
+                    crate::state::ProjectSourceOwner::cell_view(self.content.active_view.clone())
+                }),
             ProjectSourceLanguage::RSpiceAutomation => {
                 Some(crate::state::ProjectSourceOwner::code_workspace(language))
             }

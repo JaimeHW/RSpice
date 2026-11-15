@@ -279,8 +279,7 @@ pub fn veriloga_master_of_component(model: &Model, component_id: u64) -> Option<
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
         .and_then(|cell| cell.get_view(&reference.view))
-        .map(|view| view.view_type)
-        == Some(ViewType::VerilogA))
+        .is_some_and(|view| view.view_type.is_hdl_source()))
     .then_some(reference)
 }
 

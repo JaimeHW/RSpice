@@ -555,6 +555,7 @@ fn the_built_in_default_reads_as_the_resolver_follows_it() {
         ViewType::Testbench,
         ViewType::Verilog,
         ViewType::VerilogA,
+        ViewType::VerilogAms,
         ViewType::Spice,
         ViewType::Document,
         ViewType::Extracted,
@@ -574,6 +575,7 @@ fn the_built_in_default_reads_as_the_resolver_follows_it() {
             ViewType::Spice,
             ViewType::Verilog,
             ViewType::VerilogA,
+            ViewType::VerilogAms,
             ViewType::Extracted
         ]
     );

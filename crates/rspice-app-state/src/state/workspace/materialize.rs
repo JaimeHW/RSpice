@@ -80,14 +80,16 @@ pub(super) fn validate_source_file(
         .filter(|name| !name.trim().is_empty())
         .unwrap_or(&binding.cell);
     let declaration_found = match view_type {
-        ViewType::Verilog | ViewType::VerilogA => source.lines().any(|line| {
-            let code = line.split("//").next().unwrap_or_default();
-            let mut tokens = code
-                .split(|character: char| !character.is_alphanumeric() && character != '_')
-                .filter(|token| !token.is_empty());
-            tokens.any(|token| token.eq_ignore_ascii_case("module"))
-                && tokens.any(|token| token.eq_ignore_ascii_case(master))
-        }),
+        ViewType::Verilog | ViewType::VerilogA | ViewType::VerilogAms => {
+            source.lines().any(|line| {
+                let code = line.split("//").next().unwrap_or_default();
+                let mut tokens = code
+                    .split(|character: char| !character.is_alphanumeric() && character != '_')
+                    .filter(|token| !token.is_empty());
+                tokens.any(|token| token.eq_ignore_ascii_case("module"))
+                    && tokens.any(|token| token.eq_ignore_ascii_case(master))
+            })
+        }
         ViewType::Spice | ViewType::Extracted => source.lines().any(|line| {
             let mut tokens = line.split_ascii_whitespace();
             let directive = tokens.next();

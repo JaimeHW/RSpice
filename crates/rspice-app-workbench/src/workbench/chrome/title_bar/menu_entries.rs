@@ -131,7 +131,10 @@ impl MenuContext {
             Self::NoProject => !platform_state.project_lifecycle.is_open(),
             Self::SymbolView => view_is(crate::state::ViewType::Symbol),
             Self::NotSymbolView => !view_is(crate::state::ViewType::Symbol),
-            Self::VerilogAView => view_is(crate::state::ViewType::VerilogA),
+            Self::VerilogAView => {
+                workbench.workspace == crate::workbench::state::Workspace::Design
+                    && model.workspace.content.active_view_is_hdl_source()
+            }
         }
     }
 }

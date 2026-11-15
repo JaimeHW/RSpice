@@ -19,7 +19,7 @@ use rspice_design::library::metadata::{
 use super::Model;
 use crate::state::{
     Cell, Component, ComponentType, InstanceMultiplicity, MODEL_BOUND_SYMBOL_METADATA_KEY,
-    PropertyDefinition, PropertySheet, PropertyType, PropertyValue, View, ViewType,
+    PropertyDefinition, PropertySheet, PropertyType, PropertyValue, View,
 };
 
 /// What an empty field of a parameter whose module derives its default from
@@ -30,7 +30,7 @@ const COMPUTED_DEFAULT: &str = "computed";
 /// parameters an instance takes. A cell that publishes a model-bound symbol
 /// presents that symbol's form instead.
 pub fn states_compiled_parameters(cell: &Cell, view: &View) -> bool {
-    view.view_type == ViewType::VerilogA
+    view.view_type.is_hdl_source()
         && !cell.metadata.contains_key(MODEL_BOUND_SYMBOL_METADATA_KEY)
         && declares_parameter_contract(cell, Some(view))
 }
@@ -59,7 +59,7 @@ impl Model {
     /// as a parameter its module declares, which its own row then offers.
     pub fn instantiates_veriloga_view(&self, component: &Component) -> bool {
         self.bound_view(component)
-            .is_some_and(|(_, view)| view.view_type == ViewType::VerilogA)
+            .is_some_and(|(_, view)| view.view_type.is_hdl_source())
     }
 
     /// Whether `component`'s property sheet is its module's compiled contract.

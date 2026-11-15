@@ -97,30 +97,33 @@ fn new_view_is_a_command_form_that_says_what_create_waits_for() {
         .expect("Create has bounds");
     let width = 2.0 * (create.x1 + 12.0) - 1440.0;
     assert!(width <= 524.0, "New view is {width} pt wide");
-    // The types are one row of equal segments: none wraps to a line of
-    // its own, and no two are spaced apart unevenly.
-    // Each reads in sentence case; the view keeps its lowercase name.
+    // Seven types are one list, as Virtuoso's New File form offers them:
+    // one control in the Type row, never a row of segments run past the
+    // card. Each reads in sentence case; the view keeps its lowercase name.
     assert_eq!(
         CREATABLE_VIEW_TYPES.map(view_type_label),
-        ["Schematic", "Testbench", "Symbol", "Layout", "Verilog-A"]
+        [
+            "Schematic",
+            "Testbench",
+            "Symbol",
+            "Layout",
+            "Verilog-A",
+            "Verilog-AMS",
+            "Verilog"
+        ]
     );
-    let types = CREATABLE_VIEW_TYPES.map(|view_type| {
-        nodes
+    let type_list = nodes
+        .values()
+        .find(|node| node.role() == egui::accesskit::Role::ComboBox && node.label() == Some("Type"))
+        .and_then(egui::accesskit::Node::bounds)
+        .expect("Type is one list");
+    assert!(
+        !nodes
             .values()
-            .find(|node| node.label() == Some(view_type_label(view_type)))
-            .and_then(egui::accesskit::Node::bounds)
-            .unwrap_or_else(|| panic!("{} is published", view_type_label(view_type)))
-    });
-    for pair in types.windows(2) {
-        assert!(
-            (pair[0].y0 - pair[1].y0).abs() < 0.5,
-            "{types:?} are not one row"
-        );
-        assert!(
-            ((pair[0].x1 - pair[0].x0) - (pair[1].x1 - pair[1].x0)).abs() < 0.5,
-            "{types:?} are not equal segments"
-        );
-    }
+            .any(|node| node.role() == egui::accesskit::Role::RadioButton
+                && node.label() == Some("Verilog-AMS")),
+        "the types are not segments"
+    );
     assert!(nodes.values().any(|node| {
         node.role() == egui::accesskit::Role::TextInput && node.label() == Some("View name")
     }));
@@ -143,9 +146,9 @@ fn new_view_is_a_command_form_that_says_what_create_waits_for() {
             .next()
             .unwrap_or_else(|| panic!("{label} is published"))
     };
-    // The kit paints row labels; the Type row stands where its segments do.
+    // The kit paints row labels; the Type row stands where its list does.
     let [library, cell, name] = ["Library", "Cell", "View name"].map(row);
-    let bottoms = [library, cell, name, types[0].y1];
+    let bottoms = [library, cell, name, type_list.y1];
     for pair in bottoms.windows(2) {
         assert!(
             ((pair[1] - pair[0]) - (bottoms[1] - bottoms[0])).abs() < 1.0,
@@ -856,7 +859,8 @@ fn the_offered_view_name_follows_the_type_until_the_reader_types_one() {
         offered.display_name()
     );
 
-    replay.click(view_type_label(ViewType::Symbol), Role::RadioButton);
+    replay.click("Type", Role::ComboBox);
+    replay.click(view_type_label(ViewType::Symbol), Role::ListBoxOption);
     assert_eq!(replay.app.state.project.new_view_type, ViewType::Symbol);
     assert_eq!(replay.app.state.project.new_view_name, "symbol");
 
@@ -865,7 +869,8 @@ fn the_offered_view_name_follows_the_type_until_the_reader_types_one() {
     replay.type_text("sym_alt");
     assert_eq!(replay.app.state.project.new_view_name, "sym_alt");
 
-    replay.click(view_type_label(ViewType::Layout), Role::RadioButton);
+    replay.click("Type", Role::ComboBox);
+    replay.click(view_type_label(ViewType::Layout), Role::ListBoxOption);
     assert_eq!(replay.app.state.project.new_view_type, ViewType::Layout);
     assert_eq!(
         replay.app.state.project.new_view_name, "sym_alt",

@@ -4,9 +4,7 @@
 use egui::Context;
 
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
-use crate::state::workspace::{
-    starter_veriloga_source, verilog_module_name, verilog_port_declaration,
-};
+use crate::state::workspace::{starter_hdl_source, verilog_module_name, verilog_port_declaration};
 use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::dialogs::library::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use crate::workbench::app_state::Model;
@@ -21,17 +19,20 @@ use rspice_design::symbol::generated::{GENERATED_SYMBOL_VIEW, store_generated_sy
 /// Other persisted `ViewType` variants remain valid for project interchange,
 /// but must not be offered by the creation workflow until their editor and
 /// storage contract are implemented end to end.
-pub const CREATABLE_VIEW_TYPES: [crate::state::ViewType; 5] = [
+pub const CREATABLE_VIEW_TYPES: [crate::state::ViewType; 7] = [
     crate::state::ViewType::Schematic,
     crate::state::ViewType::Testbench,
     crate::state::ViewType::Symbol,
     crate::state::ViewType::Layout,
     crate::state::ViewType::VerilogA,
+    crate::state::ViewType::VerilogAms,
+    crate::state::ViewType::Verilog,
 ];
 
-/// What a Type segment says: the view type in sentence case. The view keeps
-/// its lowercase name in the library and the project; the segments read
-/// "schematic testbench symbol layout veriloga" beside capitalised labels.
+/// What the Type list says: the view type in sentence case, a language by
+/// its own name. The view keeps its lowercase name in the library and the
+/// project: "schematic testbench symbol layout veriloga verilogams verilog"
+/// beside capitalised labels.
 pub const fn view_type_label(view_type: crate::state::ViewType) -> &'static str {
     match view_type {
         crate::state::ViewType::Schematic => "Schematic",
@@ -39,6 +40,8 @@ pub const fn view_type_label(view_type: crate::state::ViewType) -> &'static str 
         crate::state::ViewType::Symbol => "Symbol",
         crate::state::ViewType::Layout => "Layout",
         crate::state::ViewType::VerilogA => "Verilog-A",
+        crate::state::ViewType::VerilogAms => "Verilog-AMS",
+        crate::state::ViewType::Verilog => "Verilog",
         _ => "Other",
     }
 }
@@ -51,6 +54,8 @@ const fn is_creatable_view_type(view_type: crate::state::ViewType) -> bool {
             | crate::state::ViewType::Symbol
             | crate::state::ViewType::Layout
             | crate::state::ViewType::VerilogA
+            | crate::state::ViewType::VerilogAms
+            | crate::state::ViewType::Verilog
     )
 }
 
@@ -219,16 +224,14 @@ impl ProjectFeature {
             && catalog_current;
         let error = dialogs.new_view_error.clone();
         let name_id = egui::Id::new("library.new-view.name");
-        let type_names = CREATABLE_VIEW_TYPES.map(view_type_label);
-        let mut type_index = CREATABLE_VIEW_TYPES
-            .iter()
-            .position(|view_type| *view_type == dialogs.new_view_type)
-            .unwrap_or_default();
+        let type_names =
+            CREATABLE_VIEW_TYPES.map(|view_type| view_type_label(view_type).to_owned());
         let creates_symbol = dialogs.new_view_creates_symbol;
 
-        // The five types are one row of equal segments, which the 420 pt
-        // card would run past its edge. Create symbol offers no type, so it
-        // keeps the card.
+        // Seven types are more than one row of segments holds, so Type is
+        // one list, as Virtuoso's New File form offers its types; the form
+        // keeps the card its option rows set. Create symbol offers no type,
+        // so it keeps the card.
         let form = if creates_symbol {
             CommandForm::new(CREATE_SYMBOL_TITLE, "Create")
                 .describe("Create a symbol for this cell from its schematic's pins.")
@@ -257,14 +260,17 @@ impl ProjectFeature {
                 {
                     dialogs.new_view_name_edited = true;
                 }
-                if !creates_symbol
-                    && rows.segmented_columns(
-                        "Type",
-                        "library.new-view.type",
-                        &type_names,
-                        &mut type_index,
-                    )
-                {
+                let picked = (!creates_symbol)
+                    .then(|| {
+                        rows.select(
+                            "Type",
+                            "library.new-view.type",
+                            view_type_label(dialogs.new_view_type),
+                            &type_names,
+                        )
+                    })
+                    .flatten();
+                if let Some(type_index) = picked {
                     dialogs.new_view_type = CREATABLE_VIEW_TYPES[type_index];
                     // The name the dialog offered follows the type until the
                     // reader types one of their own.
@@ -360,8 +366,8 @@ pub fn create_new_view(cx: &mut Cx<'_, ProjectFeature>) -> bool {
     if view_type == crate::state::ViewType::Layout {
         return create_layout_cell_view(cx, &library, &cell, &view_name);
     }
-    if view_type == crate::state::ViewType::VerilogA {
-        return create_veriloga_cell_view(cx, &library, &cell, &view_name);
+    if view_type.is_hdl_source() {
+        return create_hdl_cell_view(cx, &library, &cell, &view_name, view_type);
     }
 
     use crate::state::View;
@@ -523,12 +529,19 @@ fn create_layout_cell_view(
     true
 }
 
-fn create_veriloga_cell_view(
+/// Create a Verilog, Verilog-A or Verilog-AMS view: a project source seeded
+/// with a starter module for the cell's interface, compiled before anything
+/// is kept, so the view opens with the symbol its module's ports draw. All
+/// three take this one path; only the root file's extension and the
+/// starter's dialect differ.
+fn create_hdl_cell_view(
     cx: &mut Cx<'_, ProjectFeature>,
     library: &str,
     cell: &str,
     view_name: &str,
+    view_type: crate::state::ViewType,
 ) -> bool {
+    let language = view_type.caption();
     let reference = crate::state::CellViewRef::new(library, cell, view_name);
     let ports = match derive_cell_interface(cx.model, library, cell) {
         Ok(ports) => ports,
@@ -543,13 +556,16 @@ fn create_veriloga_cell_view(
         .find(|port| verilog_port_declaration(&port.name).is_none())
     {
         cx.state.new_view_error = Some(format!(
-            "Interface port '{}' is not a valid Verilog-A identifier; rename the cell port before creating this view",
+            "Interface port '{}' is not a valid {language} identifier; rename the cell port before creating this view",
             invalid.name
         ));
         return false;
     }
-    let source = starter_veriloga_source(&module_name, &ports);
-    let root_path = format!("{module_name}.va");
+    let source = starter_hdl_source(view_type, &module_name, &ports);
+    let root_path = format!(
+        "{module_name}{}",
+        view_type.hdl_root_extension().unwrap_or(".va")
+    );
     let mut bundle = match crate::state::ProjectSourceBundle::try_new(
         crate::state::ProjectSourceOwner::cell_view(reference.clone()),
         crate::state::ProjectSourceLanguage::VerilogA,
@@ -561,7 +577,7 @@ fn create_veriloga_cell_view(
         Ok(bundle) => bundle,
         Err(error) => {
             cx.state.new_view_error = Some(format!(
-                "The Verilog-A source bundle could not be created: {error}"
+                "The {language} source bundle could not be created: {error}"
             ));
             return false;
         }
@@ -578,14 +594,14 @@ fn create_veriloga_cell_view(
                 .map(|diagnostic| format!("{}: {}", diagnostic.message, diagnostic.detail))
                 .unwrap_or_else(|| "the compiler returned no diagnostic".to_owned());
             cx.state.new_view_error = Some(format!(
-                "The Verilog-A starter module did not compile: {detail}"
+                "The {language} starter module did not compile: {detail}"
             ));
             return false;
         }
     };
     if let Err(error) = bundle.mark_validated() {
         cx.state.new_view_error = Some(format!(
-            "The compiled Verilog-A source could not retain its validation identity: {error}"
+            "The compiled {language} source could not retain its validation identity: {error}"
         ));
         return false;
     }
@@ -595,7 +611,7 @@ fn create_veriloga_cell_view(
     let mut candidate_sources = cx.model.workspace.content.project_sources.clone();
     if let Err(error) = candidate_sources.insert_bundle(bundle) {
         cx.state.new_view_error = Some(format!(
-            "The Verilog-A source bundle could not be retained: {error}"
+            "The {language} source bundle could not be retained: {error}"
         ));
         return false;
     }
@@ -607,12 +623,12 @@ fn create_veriloga_cell_view(
         Ok(encoded) => encoded,
         Err(error) => {
             cx.state.new_view_error = Some(format!(
-                "The Verilog-A interface contract could not be retained: {error}"
+                "The {language} interface contract could not be retained: {error}"
             ));
             return false;
         }
     };
-    let mut view = crate::state::View::new(view_name, crate::state::ViewType::VerilogA);
+    let mut view = crate::state::View::new(view_name, view_type);
     view.metadata
         .insert("veriloga.module".to_owned(), module_name.clone());
     view.metadata
@@ -665,7 +681,7 @@ fn create_veriloga_cell_view(
         view: reference,
         veriloga: Some(Box::new(receipt)),
         notice: format!(
-            "Created Verilog-A view '{view_name}' for cell '{cell}' and opened its source."
+            "Created {language} view '{view_name}' for cell '{cell}' and opened its source."
         ),
         persist_global_veriloga: library == VERILOGA_LIBRARY_NAME,
     });
@@ -972,6 +988,94 @@ mod tests {
         assert!(stale_error.contains("no longer exists"));
         assert!(!harness.state.new_view_dialog);
         assert_eq!(harness.state.new_view_library, "sentinel");
+    }
+
+    /// New view makes a Verilog or a Verilog-AMS view by the path it makes a
+    /// Verilog-A one: a project source seeded with a module for the cell's
+    /// ports, under the root file its language names, compiled before it is
+    /// kept and opened with that compile's receipt. A Verilog starter is
+    /// IEEE 1364 alone, its ports discrete nets.
+    #[test]
+    fn new_view_creates_verilog_and_verilog_ams_views_on_the_verilog_a_path() {
+        use crate::state::{PortDirection, PortSpec, ProjectSourceOwner};
+
+        for (view_type, root, header, discipline) in [
+            (ViewType::Verilog, "amp.v", false, "wire"),
+            (ViewType::VerilogAms, "amp.vams", true, "electrical"),
+        ] {
+            let mut harness = harness();
+            harness.open_project_session();
+            let mut library = Library::new("hdl_test");
+            let mut cell = Cell::new("amp");
+            let ports = [
+                PortSpec {
+                    name: "a".to_owned(),
+                    direction: PortDirection::In,
+                },
+                PortSpec {
+                    name: "y".to_owned(),
+                    direction: PortDirection::Out,
+                },
+            ];
+            cell.add_view(seeded_symbol_view("symbol", &ports).expect("a symbol"));
+            library.add_cell(cell);
+            harness.model.library_manager.add_library(library);
+            harness
+                .state
+                .open_new_view_dialog(&harness.model, "hdl_test", "amp", Some(view_type))
+                .expect("a writable cell");
+            assert_eq!(harness.state.new_view_name, view_type.display_name());
+
+            assert!(
+                create_new_view(&mut harness.cx()),
+                "{view_type:?}: {:?}",
+                harness.state.new_view_error
+            );
+
+            let reference = CellViewRef::new("hdl_test", "amp", view_type.display_name());
+            let view = harness
+                .model
+                .library_manager
+                .get_library("hdl_test")
+                .and_then(|library| library.get_cell("amp"))
+                .and_then(|cell| cell.get_view(view_type.display_name()))
+                .expect("the view is kept");
+            assert_eq!(view.view_type, view_type);
+            assert_eq!(
+                view.metadata.get("veriloga.module").map(String::as_str),
+                Some("amp")
+            );
+            let bundle = harness
+                .model
+                .workspace
+                .content
+                .project_sources
+                .bundle_for_owner(&ProjectSourceOwner::cell_view(reference.clone()))
+                .expect("the view owns its source");
+            assert_eq!(bundle.root().logical_path(), root);
+            let source = bundle.root().content();
+            assert_eq!(source.contains("`include"), header, "{source}");
+            assert!(
+                source.contains(&format!("    {discipline} a, y;")),
+                "{source}"
+            );
+            match harness.wb.outbox.take::<ProjectRequest>() {
+                Some(ProjectRequest::ViewOpened { view, veriloga, .. }) => {
+                    assert_eq!(view, reference);
+                    let receipt = veriloga.expect("the compile's receipt");
+                    let abi = &receipt.compilation.report().abi;
+                    assert_eq!(abi.module_name.as_str(), "amp");
+                    assert_eq!(
+                        abi.formal_ports
+                            .iter()
+                            .map(|port| port.name.as_str())
+                            .collect::<Vec<_>>(),
+                        ["a", "y"]
+                    );
+                }
+                _ => panic!("{view_type:?} opens with its receipt"),
+            }
+        }
     }
 
     #[test]

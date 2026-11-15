@@ -951,7 +951,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             && master
                 .as_ref()
                 .and_then(|value| value.view_type)
-                .is_some_and(|view_type| view_type == ViewType::VerilogA)
+                .is_some_and(|view_type| view_type.is_hdl_source())
         {
             match project_veriloga_binding_for_view(
                 self.context.project_id,
@@ -1597,13 +1597,13 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         let source_bound = binding
             .and_then(|value| value.source_path.as_ref())
             .is_some();
-        // A Verilog-A view runs the project bundle its cell view owns,
-        // configured or not (`source_view_source`): Spectre's default view
-        // list reaches `veriloga`, and a placed binding's copy of its source
-        // and module is only what placement saw.
+        // A Verilog, Verilog-A or Verilog-AMS view runs the project bundle
+        // its cell view owns, configured or not (`source_view_source`):
+        // Spectre's default view list reaches `veriloga`, and a placed
+        // binding's copy of its source and module is only what placement saw.
         let requests_veriloga = cell
             .and_then(|cell| find_view(cell, &requested.view))
-            .is_some_and(|view| view.view_type == ViewType::VerilogA);
+            .is_some_and(|view| view.view_type.is_hdl_source());
 
         // Compatibility mode retains the historical placed-binding authority.
         // Configuration mode below instead materializes each selected L/C/V
@@ -1680,7 +1680,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 continue;
             }
             if hierarchy_stop_view(view_type)
-                && (self.configuration.is_some() || view_type == ViewType::VerilogA)
+                && (self.configuration.is_some() || view_type.is_hdl_source())
             {
                 let Some(placed) = binding else {
                     return Err(format!(
@@ -1744,7 +1744,11 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         };
         if !matches!(
             view.view_type,
-            ViewType::Spice | ViewType::VerilogA | ViewType::Verilog | ViewType::Extracted
+            ViewType::Spice
+                | ViewType::VerilogA
+                | ViewType::Verilog
+                | ViewType::VerilogAms
+                | ViewType::Extracted
         ) {
             return Err(format!(
                 "source-backed binding {}/{}/{} is not an executable source view",
@@ -1761,7 +1765,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             .source_path
             .as_deref()
             .expect("validated only for source-backed bindings");
-        if view.view_type == ViewType::VerilogA {
+        if view.view_type.is_hdl_source() {
             let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
             let project_binding = project_veriloga_binding_for_view(
                 self.context.project_id,

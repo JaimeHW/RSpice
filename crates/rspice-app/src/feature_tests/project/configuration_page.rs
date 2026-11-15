@@ -128,7 +128,8 @@ fn the_default_states_the_built_in_lists() {
         "Stop list 1: spice",
         "Stop list 2: verilog",
         "Stop list 3: veriloga",
-        "Stop list 4: extracted",
+        "Stop list 4: verilogams",
+        "Stop list 5: extracted",
         "Stop the netlist",
     ] {
         assert!(shown.says(fact), "Default must state {fact:?}");

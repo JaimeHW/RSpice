@@ -42,7 +42,11 @@ pub fn library_cell_placement_candidates(
                 .filter(|view| {
                     matches!(
                         view.view_type,
-                        ViewType::Schematic | ViewType::VerilogA | ViewType::Spice
+                        ViewType::Schematic
+                            | ViewType::Verilog
+                            | ViewType::VerilogA
+                            | ViewType::VerilogAms
+                            | ViewType::Spice
                     )
                 })
                 .collect::<Vec<_>>();
@@ -73,7 +77,10 @@ pub fn library_cell_placement_candidates(
                             (false, "open master first".to_owned())
                         }
                     }
-                    ViewType::VerilogA | ViewType::Spice => {
+                    ViewType::Verilog
+                    | ViewType::VerilogA
+                    | ViewType::VerilogAms
+                    | ViewType::Spice => {
                         // The netlister's own rule: a Verilog-A view runs the
                         // project bundle it owns, any other source view the
                         // file it names. A shelf that judged a Verilog-A view
@@ -193,7 +200,7 @@ fn metadata_owned<const N: usize>(
 const fn view_preference(view_type: ViewType) -> u8 {
     match view_type {
         ViewType::Schematic => 0,
-        ViewType::VerilogA => 1,
+        ViewType::VerilogA | ViewType::VerilogAms | ViewType::Verilog => 1,
         ViewType::Spice => 2,
         _ => 3,
     }

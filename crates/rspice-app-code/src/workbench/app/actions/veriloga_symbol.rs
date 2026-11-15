@@ -13,7 +13,6 @@ use crate::workbench::app_state::{Model, publish_symbol_definition_candidate};
 use crate::workbench::documents::code_workspace::{
     VerilogACellSymbol, reconciled_symbol, symbol_standing,
 };
-use rspice_design::library::ViewType;
 use rspice_design::symbol::generated::GENERATED_SYMBOL_VIEW;
 
 /// The symbol of the cell the open Verilog-A view defines, when it has one.
@@ -23,7 +22,7 @@ pub fn active_veriloga_symbol(model: &Model) -> Option<CellViewRef> {
         .library_manager
         .get_library(&active.library)?
         .get_cell(&active.cell)?;
-    (cell.get_view(&active.view)?.view_type == ViewType::VerilogA
+    (cell.get_view(&active.view)?.view_type.is_hdl_source()
         && cell.get_view(GENERATED_SYMBOL_VIEW).is_some())
     .then(|| CellViewRef::new(&active.library, &active.cell, GENERATED_SYMBOL_VIEW))
 }

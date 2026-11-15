@@ -1633,7 +1633,7 @@ pub fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> 
     for document in snapshot.open_documents.iter().filter(|document| {
         matches!(
             document.view_type,
-            ViewType::Verilog | ViewType::VerilogA | ViewType::Spice
+            ViewType::Verilog | ViewType::VerilogA | ViewType::VerilogAms | ViewType::Spice
         )
     }) {
         push_unique(

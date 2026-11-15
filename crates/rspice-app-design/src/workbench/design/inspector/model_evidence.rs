@@ -3,7 +3,7 @@
 use rspice_ui_kit::panels::Problem;
 
 use crate::state::model_library::ModelConsumerScope;
-use crate::state::{CellViewRef, Component, ViewType, explicit_component_model};
+use crate::state::{CellViewRef, Component, explicit_component_model};
 use crate::workbench::app_state::Model;
 
 /// The model an instance runs, and what is wrong with that binding when
@@ -46,7 +46,7 @@ fn project_module_evidence(
         .get_library(&reference.library)?
         .get_cell(&reference.cell)?
         .get_view(&reference.view)?;
-    if view.view_type != ViewType::VerilogA {
+    if !view.view_type.is_hdl_source() {
         return None;
     }
     let module = view

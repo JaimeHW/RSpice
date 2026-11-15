@@ -481,7 +481,7 @@ fn deselect_all(cx: &mut Cx<'_, DesignFeature>) {
 /// gives the netlist page's find to code before it routes the command.
 fn finds_in_design(reads: &Reads<'_, DesignFeature>) -> bool {
     reads.wb.workspace != Workspace::Design
-        || reads.model.workspace.content.active_view_type() != Some(ViewType::VerilogA)
+        || !reads.model.workspace.content.active_view_is_hdl_source()
 }
 
 /// Bring the Navigator forward on the Design workspace and focus its search
