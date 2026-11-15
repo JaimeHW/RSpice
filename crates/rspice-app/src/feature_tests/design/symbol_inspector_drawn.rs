@@ -360,6 +360,98 @@ fn each_pin_row_changes_only_its_own_field() {
     assert_eq!(pin(&editor), expected);
 }
 
+/// A selected shape's rows each change one measure: a rectangle's Width
+/// moves its right side alone and refuses nothing, a line's point row moves
+/// that point's one coordinate, Add point puts a point a terminal step past
+/// the last, and Closed closes a line that has three.
+#[test]
+fn shape_geometry_rows_each_change_one_measure() {
+    let mut editor = Editor::new();
+    let mut document = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
+    document.body = vec![
+        SymbolShape::Rectangle {
+            min: Point::new(-20, -10),
+            max: Point::new(20, 10),
+        },
+        SymbolShape::Polyline {
+            points: vec![Point::origin(), Point::new(30, 0)],
+            closed: false,
+        },
+    ];
+    editor
+        .app
+        .state
+        .store_active_symbol_editor_bundle(
+            &document,
+            &SymbolEditorMetadata::for_document(&document),
+        )
+        .unwrap();
+    editor.app.state.design.symbol.editor.select_shape(0);
+    editor.pass(Vec::new());
+    let body = |editor: &Editor| {
+        editor
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap()
+            .body
+    };
+    let widened = SymbolShape::Rectangle {
+        min: Point::new(-20, -10),
+        max: Point::new(40, 10),
+    };
+
+    editor.click("Width");
+    editor.replace("60");
+    assert_eq!(body(&editor)[0], widened);
+    editor.replace("0");
+    assert_eq!(body(&editor)[0], widened, "a rectangle keeps some width");
+
+    editor.app.state.design.symbol.editor.select_shape(1);
+    editor.pass(Vec::new());
+    editor.click("Point 2 Y");
+    editor.replace("20");
+    let mut points = vec![Point::origin(), Point::new(30, 20)];
+    assert_eq!(
+        body(&editor)[1],
+        SymbolShape::Polyline {
+            points: points.clone(),
+            closed: false,
+        }
+    );
+
+    editor.click("Add point");
+    points.push(Point::new(40, 20));
+    assert_eq!(
+        body(&editor)[1],
+        SymbolShape::Polyline {
+            points: points.clone(),
+            closed: false,
+        }
+    );
+
+    // The new point's row pushes the switch down; a click goes where the
+    // switch is drawn now.
+    editor.pass(Vec::new());
+    editor.click("Closed");
+    assert_eq!(
+        body(&editor),
+        vec![
+            widened,
+            SymbolShape::Polyline {
+                points,
+                closed: true,
+            }
+        ]
+    );
+}
+
 pub(crate) struct Editor {
     ctx: egui::Context,
     pub(crate) app: RSpiceApp,
