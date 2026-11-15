@@ -3,7 +3,7 @@
 use super::Schematic;
 use crate::symbol::edit::SymbolInstanceWiring;
 use rspice_design_model::{Point, cell_view::CellViewRef};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 impl Schematic {
     /// Move the wire vertices the wiring holds to where their terminals now
@@ -37,5 +37,18 @@ impl Schematic {
             self.invalidate_topology();
         }
         renamed
+    }
+
+    pub fn drop_instance_terminals(
+        &mut self,
+        reference: &CellViewRef,
+        removed: &BTreeSet<String>,
+    ) -> bool {
+        let dropped =
+            crate::symbol::edit::drop_instance_terminals(&mut self.document, reference, removed);
+        if dropped {
+            self.invalidate_topology();
+        }
+        dropped
     }
 }

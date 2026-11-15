@@ -786,21 +786,25 @@ fn create_schematic_pins_declares_the_missing_ports_as_one_schematic_step() {
     );
 }
 
-/// A placed instance of a cell whose symbol the schematic draws keeps its
-/// wires on its pins as the schematic's ports change and the symbol is
-/// redrawn: a pin that moves takes its wire with it.
-#[test]
-fn an_instance_keeps_its_wires_as_the_schematic_redraws_its_symbol() {
-    use crate::state::{Cell, Component, LibraryCellInstance, View, Wire, WireConnection};
+/// Where `document` puts the terminal of its pin `name`, from its origin:
+/// where that terminal is on an instance placed unturned at (0, 0).
+fn terminal(document: &SymbolDocument, name: &str) -> Point {
+    document
+        .pin(name)
+        .and_then(|pin| pin.position)
+        .expect("the pin is placed")
+        - document.origin
+}
 
-    let mut replay = new_project();
-    let schematic = replay.app.state.model.workspace.content.active_view.clone();
-    let symbol = symbol_of(&schematic);
-    declare(
-        &mut replay,
-        &[("IN", PortDirection::In), ("OUT", PortDirection::Out)],
-    );
-    let drawn = document(&replay.app, &symbol);
+/// A sheet `parent` of its own, in the library of `schematic`, placing the
+/// cell `schematic` draws once at (0, 0) as instance 900, with wire 950 run
+/// 40 to the left from its pin `pin`. The sheet is held as the project holds
+/// a sheet that is not open.
+fn place_wired_instance(replay: &mut Replay, schematic: &CellViewRef, pin: &str) -> CellViewRef {
+    use crate::state::{Cell, LibraryCellInstance, View, Wire, WireConnection};
+
+    let symbol = symbol_of(schematic);
+    let at = terminal(&document(&replay.app, &symbol), pin);
     let parent = CellViewRef::new(&schematic.library, "parent", "schematic");
     let mut cell = Cell::new("parent");
     cell.add_view(View::new("schematic", ViewType::Schematic));
@@ -815,37 +819,43 @@ fn an_instance_keeps_its_wires_as_the_schematic_redraws_its_symbol() {
     let mut sheet = crate::state::SchematicState::default();
     let mut binding = LibraryCellInstance::new(&schematic.library, &schematic.cell, "schematic");
     binding.bind_interface(&replay.app.state.model.symbol_ports(&symbol));
-    let terminal = |document: &SymbolDocument, name: &str| {
-        document
-            .pin(name)
-            .and_then(|pin| pin.position)
-            .expect("the pin is placed")
-            - document.origin
-    };
-    let at_in = terminal(&drawn, "IN");
-    sheet.document_mut_for_test().components.push(
+    let drawing = sheet.document_mut_for_test();
+    drawing.components.push(
         Component::new(900, ComponentType::CellInstance, Point::new(0, 0))
             .with_library_cell(binding),
     );
-    sheet
-        .document_mut_for_test()
+    drawing
         .wires
-        .push(Wire::segment(950, at_in, at_in - Point::new(40, 0)));
-    sheet
-        .document_mut_for_test()
-        .connections
-        .push(WireConnection {
-            wire_id: 950,
-            point_index: 0,
-            component_id: 900,
-            terminal_name: "IN".to_owned(),
-        });
+        .push(Wire::segment(950, at, at - Point::new(40, 0)));
+    drawing.connections.push(WireConnection {
+        wire_id: 950,
+        point_index: 0,
+        component_id: 900,
+        terminal_name: pin.to_owned(),
+    });
     replay
         .app
         .state
         .model
         .workspace
         .insert_schematic_editor(parent.key(), sheet);
+    parent
+}
+
+/// A placed instance of a cell whose symbol the schematic draws keeps its
+/// wires on its pins as the schematic's ports change and the symbol is
+/// redrawn: a pin that moves takes its wire with it.
+#[test]
+fn an_instance_keeps_its_wires_as_the_schematic_redraws_its_symbol() {
+    let mut replay = new_project();
+    let schematic = replay.app.state.model.workspace.content.active_view.clone();
+    let symbol = symbol_of(&schematic);
+    declare(
+        &mut replay,
+        &[("IN", PortDirection::In), ("OUT", PortDirection::Out)],
+    );
+    let at_in = terminal(&document(&replay.app, &symbol), "IN");
+    let parent = place_wired_instance(&mut replay, &schematic, "IN");
 
     let held = |replay: &Replay| {
         let sheet = replay
@@ -860,7 +870,10 @@ fn an_instance_keeps_its_wires_as_the_schematic_redraws_its_symbol() {
             .document();
         (
             sheet.wires[0].points[0],
-            sheet.connections[0].terminal_name.clone(),
+            sheet
+                .connections
+                .first()
+                .map(|connection| connection.terminal_name.clone()),
         )
     };
 
@@ -873,7 +886,7 @@ fn an_instance_keeps_its_wires_as_the_schematic_redraws_its_symbol() {
     );
     assert_eq!(
         held(&replay),
-        (terminal(&redrawn, "IN"), "IN".to_owned()),
+        (terminal(&redrawn, "IN"), Some("IN".to_owned())),
         "the wire followed IN to where it is drawn now"
     );
 
@@ -881,16 +894,102 @@ fn an_instance_keeps_its_wires_as_the_schematic_redraws_its_symbol() {
     let renamed = document(&replay.app, &symbol);
     assert_eq!(
         held(&replay),
-        (terminal(&renamed, "A_IN"), "A_IN".to_owned()),
+        (terminal(&renamed, "A_IN"), Some("A_IN".to_owned())),
         "the renamed pin keeps its wire"
     );
 
-    let before = held(&replay);
+    let (end, _) = held(&replay);
     delete_port(&mut replay, "A_IN");
     assert!(document(&replay.app, &symbol).pin("A_IN").is_none());
     assert_eq!(
         held(&replay),
-        before,
-        "the wire of a pin that went is left where it was"
+        (end, None),
+        "the wire of a pin that went is left where it was, attached to nothing"
+    );
+}
+
+/// A port deleted from the schematic takes its pin off the symbol the
+/// schematic draws. The wire an instance held on that pin stays where it
+/// was, open: no other pin takes it, and checking the sheet reports it.
+#[test]
+fn a_wire_a_deleted_port_let_go_is_reported_on_its_sheet() {
+    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+
+    let mut replay = new_project();
+    let schematic = replay.app.state.model.workspace.content.active_view.clone();
+    let symbol = symbol_of(&schematic);
+    declare(
+        &mut replay,
+        &[
+            ("IN", PortDirection::In),
+            ("IN2", PortDirection::In),
+            ("OUT", PortDirection::Out),
+        ],
+    );
+    let parent = place_wired_instance(&mut replay, &schematic, "IN");
+    let findings = |replay: &mut Replay| {
+        open(replay, &parent);
+        replay
+            .app
+            .execute_command_key(DesignCommand::CheckCellview.key());
+        replay.frames(Vec::new());
+        let subject = DiagnosticInputs::DesignCheck {
+            subject: parent.clone(),
+        };
+        let found = replay
+            .app
+            .state
+            .model
+            .diagnostics
+            .batches()
+            .filter(|batch| batch.inputs == subject)
+            .flat_map(|batch| batch.records.iter())
+            .map(|record| (record.canonical.code.to_string(), record.message.clone()))
+            .collect::<Vec<_>>();
+        open(replay, &schematic);
+        found
+    };
+    let before = findings(&mut replay);
+
+    delete_port(&mut replay, "IN");
+    let redrawn = document(&replay.app, &symbol);
+    assert!(redrawn.pin("IN").is_none(), "the pin went with its port");
+    let sheet = replay
+        .app
+        .state
+        .model
+        .workspace
+        .content
+        .schematic_buffers
+        .get(&parent.key())
+        .expect("the sheet is held")
+        .document()
+        .clone();
+    let end = sheet.wires[0].points[0];
+    for pin in &redrawn.pins {
+        assert_ne!(
+            terminal(&redrawn, &pin.name),
+            end,
+            "{} is not drawn onto the wire IN let go",
+            pin.name
+        );
+    }
+    assert!(
+        sheet
+            .connections
+            .iter()
+            .filter(|connection| connection.wire_id == 950)
+            .all(|connection| redrawn.pin(&connection.terminal_name).is_none()),
+        "no pin the symbol still draws holds the wire: {:?}",
+        sheet.connections
+    );
+    let after = findings(&mut replay);
+    let reported = after
+        .iter()
+        .filter(|finding| !before.contains(finding))
+        .collect::<Vec<_>>();
+    assert!(
+        !reported.is_empty(),
+        "checking the sheet reports the wire end IN let go; before {before:?}, after {after:?}"
     );
 }

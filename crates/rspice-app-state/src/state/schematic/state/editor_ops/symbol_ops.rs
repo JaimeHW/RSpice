@@ -2,7 +2,7 @@
 
 use crate::state::{CellViewRef, Point, SchematicState};
 use rspice_design::symbol::edit::SymbolInstanceWiring;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 impl SchematicState {
     pub fn apply_symbol_instance_wiring(
@@ -27,5 +27,17 @@ impl SchematicState {
             self.session.is_dirty = true;
         }
         renamed
+    }
+
+    pub fn drop_instance_terminals(
+        &mut self,
+        reference: &CellViewRef,
+        removed: &BTreeSet<String>,
+    ) -> bool {
+        let dropped = self.design.drop_instance_terminals(reference, removed);
+        if dropped {
+            self.session.is_dirty = true;
+        }
+        dropped
     }
 }

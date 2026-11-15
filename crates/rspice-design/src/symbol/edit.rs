@@ -1,6 +1,6 @@
 //! Committed symbol history, metadata snapshots, and placed-instance edits.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::{
     SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_EDITOR_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
@@ -636,6 +636,60 @@ fn restored_editor_metadata(view: &View, snapshot: &SymbolDocumentSnapshot) -> O
         None => SymbolEditorMetadata::for_document(&snapshot.document),
     };
     serde_json::to_string(&restored.with_revision_history_of(&history)).ok()
+}
+
+/// Take the terminals `removed` names, lowercased, off every instance of
+/// `reference` in one sheet: the ports they stood for went from the cell's
+/// interface. A wire that ended on one keeps its end where it was, attached
+/// to nothing, so the sheet's checks report it rather than counting a
+/// terminal the instance no longer has. Whether anything was taken off.
+pub fn drop_instance_terminals(
+    schematic: &mut SchematicDocument,
+    reference: &CellViewRef,
+    removed: &BTreeSet<String>,
+) -> bool {
+    let gone = |name: &str| removed.contains(&name.to_ascii_lowercase());
+    let mut instances = Vec::new();
+    let mut changed = false;
+    for component in &mut schematic.components {
+        let Some(binding) = component.library_cell.as_mut().filter(|binding| {
+            binding.library.eq_ignore_ascii_case(&reference.library)
+                && binding.cell.eq_ignore_ascii_case(&reference.cell)
+        }) else {
+            continue;
+        };
+        instances.push(component.id);
+        let kept = binding
+            .terminal_order
+            .iter()
+            .map(|terminal| !gone(terminal))
+            .collect::<Vec<_>>();
+        if kept.iter().all(|keep| *keep) {
+            continue;
+        }
+        changed = true;
+        let keep = |index: usize| kept.get(index).copied().unwrap_or(true);
+        let mut index = 0;
+        binding.terminal_order.retain(|_| {
+            index += 1;
+            keep(index - 1)
+        });
+        let mut index = 0;
+        binding.terminal_dirs.retain(|_| {
+            index += 1;
+            keep(index - 1)
+        });
+        let mut index = 0;
+        binding.terminal_roles.retain(|_| {
+            index += 1;
+            keep(index - 1)
+        });
+    }
+    let before = schematic.connections.len();
+    schematic.connections.retain(|connection| {
+        !(instances.contains(&connection.component_id) && gone(&connection.terminal_name))
+    });
+    changed || schematic.connections.len() != before
 }
 
 /// Rewrite the terminal names of every instance of `reference` in one sheet.

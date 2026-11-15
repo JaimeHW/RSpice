@@ -332,8 +332,9 @@ impl Model {
     /// Carry every placed instance of `symbol` from `drawn` to `redrawn`:
     /// each wire end a terminal held follows it to where the redrawn symbol
     /// puts it, and a terminal whose port was renamed takes the new name, so
-    /// its wire stays on the pin. A pin that went holds its wire nowhere: the
-    /// wire is left where it was, for the checks to report. Each sheet that
+    /// its wire stays on the pin. A pin that went holds its wire nowhere: its
+    /// terminal comes off each instance and the wire is left where it was,
+    /// attached to nothing, for the checks to report. Each sheet that
     /// changes records the change as one step of its own.
     fn carry_placed_instances(
         &mut self,
@@ -348,7 +349,21 @@ impl Model {
             .iter()
             .map(|(from, to)| (from.to_ascii_lowercase(), to.clone()))
             .collect();
-        if remaps.is_empty() && renamed.is_empty() {
+        // The pins whose ports went: drawn before, not drawn now, and not
+        // drawn again under a new name.
+        let removed: std::collections::BTreeSet<String> = drawn
+            .pins
+            .iter()
+            .map(|pin| pin.name.to_ascii_lowercase())
+            .filter(|name| {
+                !renamed.contains_key(name)
+                    && !redrawn
+                        .pins
+                        .iter()
+                        .any(|pin| pin.name.eq_ignore_ascii_case(name))
+            })
+            .collect();
+        if remaps.is_empty() && renamed.is_empty() && removed.is_empty() {
             return;
         }
         // The open schematic is the cell's own, which places no instance of
@@ -390,7 +405,8 @@ impl Model {
                     }
                     let moved = schematic.apply_symbol_instance_wiring(&wiring, &remaps);
                     let relabelled = schematic.rename_instance_terminals(symbol, &renamed) > 0;
-                    if (moved || relabelled)
+                    let dropped = schematic.drop_instance_terminals(symbol, &removed);
+                    if (moved || relabelled || dropped)
                         && let Some(before) = before.take()
                     {
                         schematic.commit_undo_from(before, STEP);
