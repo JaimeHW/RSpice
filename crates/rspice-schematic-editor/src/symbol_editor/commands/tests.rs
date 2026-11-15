@@ -296,3 +296,50 @@ fn a_copied_pin_takes_the_next_free_name() {
         assert_eq!(next_free_pin_name(&document, copied), named, "{copied}");
     }
 }
+
+/// A lone pin turns about its own tip: it stays where it is wired and only
+/// its side turns. A group turns about the middle of what is selected, not
+/// the symbol's origin, so a shape drawn off to one side turns in place.
+#[test]
+fn a_turn_pivots_on_the_selection_not_the_origin() {
+    use rspice_design_model::symbol_pin::SymbolPinSide::{Left, Top};
+    let document = SymbolDocument {
+        pins: vec![SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 10))).with_side(Left)],
+        body: vec![SymbolShape::rectangle(Point::new(60, 40), Point::new(100, 60))],
+        ..SymbolDocument::default()
+    };
+    let turn = |selection: SymbolSelection, transform: SymbolTransform| {
+        let mut document = document.clone();
+        let mut metadata = SymbolEditorMetadata::for_document(&document);
+        let mut session = SymbolEditorSession::default();
+        session.set_selection(selection);
+        let outcome = apply_edit(
+            &mut session,
+            &mut document,
+            Some(&mut metadata),
+            SymbolEditAction::Transform(transform),
+            SymbolEditCapabilities { edit: true },
+        );
+        (document, outcome)
+    };
+
+    let (turned, outcome) = turn(SymbolSelection::single_pin("IN"), SymbolTransform::Rotate);
+    assert_eq!(turned.pins[0].position, Some(Point::new(-40, 10)));
+    assert_eq!(turned.pins[0].side, Top);
+    assert_eq!(outcome.step, "Rotate pin IN");
+
+    // A pin on the left mirrored left to right across its own tip faces
+    // right; mirrored top to bottom it is the same pin, and no edit.
+    let (mirrored, outcome) = turn(SymbolSelection::single_pin("IN"), SymbolTransform::MirrorVertical);
+    assert_eq!(mirrored, document);
+    assert!(!outcome.changed && outcome.undo_before.is_none());
+
+    // The rectangle's middle is (80, 50); it turns there, a 40 x 20 box
+    // standing 20 x 40 about the same middle.
+    let (turned, outcome) = turn(SymbolSelection::single_shape(0), SymbolTransform::Rotate);
+    assert_eq!(
+        turned.body[0],
+        SymbolShape::rectangle(Point::new(70, 30), Point::new(90, 70))
+    );
+    assert!(outcome.changed);
+}

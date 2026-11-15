@@ -144,13 +144,15 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
         SymbolTransform::Rotate,
     );
     let after = app.state.model.load_active_symbol_document().unwrap();
-    assert_eq!(after.pin("IN").unwrap().position, Some(Point::new(20, -30)));
+    // The selection spans x -40 to 30 and y -10 to 40, so it turns about
+    // (0, 20), the terminal grid point nearest its middle, not the origin.
+    assert_eq!(after.pin("IN").unwrap().position, Some(Point::new(10, -20)));
     // The pin turns with the selection: a pin on the left comes up on top.
     assert_eq!(
         after.pin("IN").unwrap().side,
         before.pin("IN").unwrap().side.turned_clockwise()
     );
-    assert_eq!(after.name_anchor, Point::new(-10, 40));
+    assert_eq!(after.name_anchor, Point::new(-20, 50));
     assert_eq!(
         crate::workbench::app::load_active_symbol_editor_metadata(&app.state.model, &after)
             .unwrap()
@@ -175,36 +177,36 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     assert_eq!(metadata_encoding(&app.state), encoded);
 
     // A selected pin turns and flips with the Arrange commands the
-    // schematic uses; there is no pin-only pair beside them.
+    // schematic uses; there is no pin-only pair beside them. A lone pin
+    // turns about its own tip: it stays where it is wired and its lead
+    // turns.
     app.state.design.symbol.editor.select_pin("IN");
     let pin_at = |app: &crate::workbench::RSpiceApp| {
-        app.state
+        let pin = app
+            .state
             .model
             .load_active_symbol_document()
             .unwrap()
             .pin("IN")
             .unwrap()
-            .position
+            .clone();
+        (pin.position, pin.side)
     };
-    let placed = pin_at(&app);
+    let (placed, _) = pin_at(&app);
     app.execute_command_key(DesignCommand::RotateSelection.key());
-    let rotated = pin_at(&app);
-    assert_ne!(rotated, placed, "Rotate turns the selected pin");
     assert_eq!(
-        app.state
-            .model
-            .load_active_symbol_document()
-            .unwrap()
-            .pin("IN")
-            .unwrap()
-            .side,
-        crate::state::SymbolPinSide::Top,
-        "its lead turns with it"
+        pin_at(&app),
+        (placed, crate::state::SymbolPinSide::Top),
+        "Rotate turns the selected pin's lead about its tip"
     );
-    app.execute_command_key(DesignCommand::MirrorSelectionHorizontal.key());
-    assert_ne!(pin_at(&app), rotated, "Mirror flips the selected pin");
+    app.execute_command_key(DesignCommand::MirrorSelectionVertical.key());
+    assert_eq!(
+        pin_at(&app),
+        (placed, crate::state::SymbolPinSide::Bottom),
+        "Mirror flips the selected pin's lead across its tip"
+    );
     assert!(app.state.undo_active_symbol_document().unwrap());
-    assert_eq!(pin_at(&app), rotated);
+    assert_eq!(pin_at(&app), (placed, crate::state::SymbolPinSide::Top));
 }
 
 /// Escape lets go of the shape being drawn and leaves its tool armed; a

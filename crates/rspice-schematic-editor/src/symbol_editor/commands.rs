@@ -1,5 +1,6 @@
 //! Symbol clipboard and command edits over local drafts; the app owns authority and publication.
 
+use super::arrange::selection_pivot;
 use super::interaction::{SymbolEditCapabilities, SymbolEditOutcome, SymbolRequestSource};
 use super::session::{
     SymbolClipboard, SymbolEditorSession, SymbolSelection, SymbolTool, label_name,
@@ -368,6 +369,10 @@ fn delete(
     outcome.changed = changed;
 }
 
+/// Turn or mirror the selection about its pivot (see [`selection_pivot`]).
+/// Pins turn their sides with it, so every lead still runs from its tip into
+/// the body that turned with it. A motion that changes nothing, such as a
+/// lone side pin mirrored across its own lead, is no edit.
 fn transform_selection(
     document: &mut SymbolDocument,
     metadata: &mut SymbolEditorMetadata,
@@ -375,29 +380,27 @@ fn transform_selection(
     motion: &SelectionMotion,
     outcome: &mut SymbolEditOutcome,
 ) {
+    let Some(pivot) = selection_pivot(document, metadata, selection) else {
+        return;
+    };
     let before = document.clone();
-    let origin = document.origin;
-    let mut changed = false;
+    let labels_before = metadata.attributes.clone();
     for index in selection.shapes.iter().copied() {
         if let Some(shape) = document.body.get_mut(index) {
-            (motion.shape)(shape, origin);
-            changed = true;
+            (motion.shape)(shape, pivot);
         }
     }
     for name in &selection.pins {
         if let Some(pin) = document.pin_mut(name)
             && let Some(position) = pin.position
         {
-            // The pin turns with the selection: its lead still runs toward
-            // the body that turned with it.
-            pin.position = Some((motion.point)(position, origin));
+            pin.position = Some((motion.point)(position, pivot));
             pin.side = (motion.side)(pin.side);
-            changed = true;
         }
     }
     for kind in &selection.attributes {
         if let Some(attribute) = metadata.attribute_mut(*kind) {
-            attribute.position = (motion.point)(attribute.position, origin);
+            attribute.position = (motion.point)(attribute.position, pivot);
             match kind {
                 SymbolAttributeKind::Reference => {
                     document.name_anchor = attribute.position;
@@ -407,9 +410,9 @@ fn transform_selection(
                 }
                 SymbolAttributeKind::Model => {}
             }
-            changed = true;
         }
     }
+    let changed = *document != before || metadata.attributes != labels_before;
     if changed {
         outcome.step = format!("{} {}", motion.verb, selection_subject(&before, selection));
         outcome.undo_before = Some(Box::new(before));
