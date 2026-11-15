@@ -6,7 +6,13 @@
 //! computed by the same code from the reference table and from the
 //! simulation, so the reference stays the sole source of expected values;
 //! the sidecar (`<deck>.gates.tsv`) only declares which quantities matter
-//! and their tolerances. This is the professional gate for waveforms whose
+//! and their tolerances. The one exception is a quantity the stored table
+//! cannot resolve: the table keeps at most 1,001 of the reference run's
+//! rows, so on a long run of fast edges (a 5 MHz bitstream over 5 ms) it
+//! holds one row per 25 clocks and no crossing or windowed mean read from
+//! it means anything. Such a gate carries `ref=`, the value measured from
+//! the reference run at full resolution, and the sidecar's header names
+//! that run. This is the professional gate for waveforms whose
 //! raw tail samples are chaotic amplifications below solver tolerance: the
 //! reference simulator's own answers at such rows move tens of percent
 //! under timestep refinement, so pointwise agreement there measures grid
@@ -83,6 +89,19 @@ struct MeasureGate {
     signal: String,
     kind: MeasureKind,
     label: String,
+    /// The reference value measured from the full-resolution reference run,
+    /// for a quantity the stored table is too sparse to resolve.
+    reference: Option<f64>,
+}
+
+impl MeasureGate {
+    /// The value the simulation is judged against: the sidecar's `ref=`
+    /// when it gives one, otherwise the measure read from the reference
+    /// table.
+    fn expected(&self, x: &[f64], y: &[f64]) -> Option<f64> {
+        self.reference
+            .or_else(|| TestRunner::evaluate_measure(&self.kind, x, y))
+    }
 }
 
 impl TestRunner {
@@ -152,9 +171,9 @@ impl TestRunner {
                 .map(|(a, b)| a - b)
                 .collect();
 
-            let expected =
-                Self::evaluate_measure(&gate.kind, &reference_series.x, &reference_series.y)
-                    .ok_or_else(|| {
+            let expected = gate
+                .expected(&reference_series.x, &reference_series.y)
+                .ok_or_else(|| {
                         format!(
                             "measure '{}' cannot be computed on the reference of '{}' -- the gate definition does not match the reference waveform",
                             gate.label,
@@ -372,10 +391,28 @@ impl TestRunner {
                 }
             };
 
+            let reference = match args.get("ref") {
+                None => None,
+                Some(value) => Some(
+                    value
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|value| value.is_finite())
+                        .ok_or_else(|| {
+                            format!(
+                                "{}:{}: invalid 'ref': expected a finite number, got '{value}'",
+                                sidecar.display(),
+                                line_number + 1
+                            )
+                        })?,
+                ),
+            };
+
             gates.push(MeasureGate {
                 signal,
                 kind,
                 label,
+                reference,
             });
         }
 
@@ -723,6 +760,36 @@ mod tests {
             }
             ref other => panic!("expected a period gate, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_gate_with_a_reference_value_is_judged_against_it() {
+        let deck = temp_deck("ref");
+        fs::write(
+            deck.with_extension("gates.tsv"),
+            "v(q)\tmean\tt0=0\tt1=4\ttol_abs=1e-3\tref=0.25\n\
+             v(q)\tmean\tt0=0\tt1=4\ttol_abs=1e-3\n",
+        )
+        .expect("write gate sidecar");
+
+        let gates = TestRunner::load_measure_gates(&deck).expect("sidecar parses");
+        let x = [0.0, 1.0, 2.0, 3.0, 4.0];
+        let y = [0.0, 1.0, 0.0, 1.0, 0.0];
+        assert_eq!(gates[0].expected(&x, &y), Some(0.25));
+        assert_eq!(gates[1].expected(&x, &y), Some(0.5));
+    }
+
+    #[test]
+    fn sidecar_rejects_a_reference_value_that_is_not_finite() {
+        let deck = temp_deck("ref_nan");
+        fs::write(
+            deck.with_extension("gates.tsv"),
+            "v(q)\tmean\tt0=0\tt1=4\ttol_abs=1e-3\tref=nan\n",
+        )
+        .expect("write gate sidecar");
+
+        let error = TestRunner::load_measure_gates(&deck).expect_err("ref= must be finite");
+        assert!(error.contains("invalid 'ref'"), "got '{error}'");
     }
 
     #[test]
