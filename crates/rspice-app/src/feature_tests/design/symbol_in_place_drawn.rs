@@ -312,6 +312,33 @@ fn the_placed_preview_is_not_offered_in_place() {
     );
 }
 
+/// Return to parent, the hierarchy's way up, leaves a symbol edited in place
+/// as Return does, by its shortcut: the symbol is a level below its sheet.
+#[test]
+fn return_to_parent_leaves_the_in_place_edit() {
+    let mut fixture = InPlace::new();
+    fixture.enter();
+    fixture.replay.key(egui::Key::H, egui::Modifiers::SHIFT);
+    assert_eq!(
+        fixture.replay.app.state.model.workspace.content.active_view,
+        fixture.parent
+    );
+    assert!(fixture.replay.app.state.design.symbol.in_place.is_none());
+    assert_eq!(
+        fixture
+            .replay
+            .app
+            .state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .single_component(),
+        Some(fixture.instance)
+    );
+}
+
 /// Deleting a pin in place lets go of the wire it held: the wire stays where
 /// it was, open, joined to nothing, and the status bar says how many ends
 /// were left and where.

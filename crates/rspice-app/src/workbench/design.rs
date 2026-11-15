@@ -301,6 +301,14 @@ impl CommandSet for DesignCommand {
             Self::ReplaceInstance | Self::CreateHierarchy => Some("select an editable object"),
             Self::FindReplace => (!schematic || reads.model.schematic_edit_read_only())
                 .then_some("command is unavailable in this context"),
+            // A symbol edited in place is a level below its sheet: going up
+            // leaves it, as Return does.
+            Self::AscendHierarchy
+                if routed::symbol_editor(reads.wb.workspace, reads.model)
+                    && in_place_session(&reads.state.symbol.in_place, reads.model).is_some() =>
+            {
+                reads.state.symbol.editor.draft_activity()
+            }
             Self::AscendHierarchy if !schematic => Some("open a schematic or testbench"),
             Self::AscendHierarchy => (reads.model.workspace.content.hierarchy_stack.len() <= 1)
                 .then_some("already at top hierarchy"),
@@ -802,6 +810,11 @@ impl CommandSet for DesignCommand {
                     cx.wb,
                 );
                 cx.wb.activate(Workspace::Design);
+            }
+            Self::AscendHierarchy
+                if in_place_session(&cx.state.symbol.in_place, cx.model).is_some() =>
+            {
+                navigation(cx).request_symbol_in_place_exit(SymbolInPlaceExit::Parent);
             }
             Self::AscendHierarchy => navigation(cx).ascend_workspace_level(),
             Self::DescendHierarchy => {
