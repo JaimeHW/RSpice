@@ -6,11 +6,12 @@ use crate::ui::widgets::{CanvasEntry, CanvasEntryChoice};
 use crate::workbench::app::actions::{
     apply_symbol_edit_request, symbol_pin_name_request, symbol_text_request,
 };
+use crate::workbench::app::load_active_symbol_editor_metadata;
 use rspice_schematic_editor::symbol_editor::SymbolViewport;
 use rspice_schematic_editor::symbol_editor::commands::pin_name_refusal;
 use rspice_schematic_editor::symbol_editor::interaction::{
-    SymbolCanvasRequest, SymbolEditCapabilities, bind_canvas_source, canvas_request, edit_canvas,
-    track_handle, track_pointer, turn_pin_tool_side,
+    SymbolCanvasInput, SymbolCanvasRequest, SymbolEditCapabilities, bind_canvas_source,
+    canvas_request, edit_canvas, track_handle, track_pointer, turn_pin_tool_side,
 };
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
@@ -166,9 +167,10 @@ pub(super) fn show_pin_name_entry(
 }
 
 /// R while the Pin tool is armed on the symbol in front turns the pin it is
-/// about to place a quarter clockwise. The key is the tool's rather than
-/// Draw rectangle's while the canvas holds the keyboard, or holds the
-/// pointer with no field holding the keyboard.
+/// about to place a quarter clockwise, and while a pin is being dragged it
+/// turns that pin about its tip. The key is the pin's rather than Draw
+/// rectangle's while the canvas holds the keyboard, or holds the pointer
+/// with no field holding the keyboard.
 pub(crate) fn turn_pin_being_placed(
     ctx: &egui::Context,
     state: &mut CanvasParts<'_>,
@@ -176,20 +178,47 @@ pub(crate) fn turn_pin_being_placed(
 ) -> bool {
     let editor = &state.design.symbol.editor;
     let over_canvas = editor.pointer.is_some() && ctx.memory(|memory| memory.focused().is_none());
+    let placing = editor.tool == SymbolTool::PlacePin && editor.pin_name_draft.is_none();
+    let dragging = editor.dragging_pin.is_some();
     if state.model.workspace.content.active_view_type() != Some(crate::state::ViewType::Symbol)
-        || editor.tool != SymbolTool::PlacePin
-        || editor.pin_name_draft.is_some()
+        || !(placing || dragging)
         || !(canvas_has_focus || over_canvas)
         || !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::R))
     {
         return false;
     }
-    if let Ok(document) = state.model.load_active_symbol_document() {
+    if dragging {
+        turn_dragged_pin(state);
+    } else if let Ok(document) = state.model.load_active_symbol_document() {
         let pointer = state.design.symbol.editor.pointer;
         turn_pin_tool_side(&mut state.design.symbol.editor, &document, pointer);
     }
     ctx.request_repaint();
     true
+}
+
+/// The pin being dragged turns about its tip, inside the drag's one edit.
+fn turn_dragged_pin(state: &mut CanvasParts<'_>) {
+    let Ok(mut document) = state.model.load_active_symbol_document() else {
+        return;
+    };
+    let Ok(mut metadata) = load_active_symbol_editor_metadata(state.model, &document) else {
+        return;
+    };
+    let editor = &state.design.symbol.editor;
+    let request = SymbolCanvasRequest {
+        source: state.symbol_editor_request_source(),
+        tool: editor.tool,
+        selection: editor.effective_selection(),
+        // The turn reads no pointer: the pin keeps its tip.
+        viewport: SymbolViewport::new(egui::Rect::NOTHING, 1.0, egui::Vec2::ZERO),
+        input: SymbolCanvasInput {
+            dragged: true,
+            turn_pin: true,
+            ..SymbolCanvasInput::default()
+        },
+    };
+    apply_canvas_request(state, &mut document, &mut metadata, request);
 }
 
 /// Why `text` cannot be placed as typed, if it cannot.

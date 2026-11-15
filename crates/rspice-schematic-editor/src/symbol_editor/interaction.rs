@@ -65,6 +65,9 @@ pub struct SymbolCanvasInput {
     pub finish: bool,
     /// Backspace, while a shape is being drawn: take back its last point.
     pub remove_last_point: bool,
+    /// R, while a pin is being dragged: turn its lead a quarter clockwise
+    /// about its tip, inside the drag's one edit.
+    pub turn_pin: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +118,7 @@ pub fn canvas_request(
         extend_selection: response.ctx.input(|input| input.modifiers.shift),
         finish,
         remove_last_point,
+        turn_pin: false,
     };
     if !(input.drag_started
         || input.dragged
@@ -233,6 +237,9 @@ fn handle_canvas_interaction(
     viewport: SymbolViewport,
     input: SymbolCanvasInput,
 ) -> bool {
+    if input.turn_pin {
+        return turn_dragged_pin(edit, document);
+    }
     let pointer = input.pointer;
     let raw_point = viewport.screen_to_world(pointer);
     let body_point = if edit.session.snap_to_grid {
@@ -492,6 +499,25 @@ fn handle_canvas_interaction(
         | SymbolTool::Arc
         | SymbolTool::Text => false,
     }
+}
+
+/// The pin being dragged, its lead turned a quarter clockwise about its tip.
+/// It is part of the drag's one edit, named as the drag is.
+fn turn_dragged_pin(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument) -> bool {
+    let Some(name) = edit.session.dragging_pin.clone() else {
+        return false;
+    };
+    if edit.deny_read_only_edit() {
+        return false;
+    }
+    let Some(side) = document.pin(&name).map(|pin| pin.side) else {
+        return false;
+    };
+    record_drag_symbol_edit(edit, document, || format!("Move pin {name}"));
+    if let Some(pin) = document.pin_mut(&name) {
+        pin.side = side.turned_clockwise();
+    }
+    true
 }
 
 /// Take hold of `handle`. Grabbing an edge's middle puts a point there at

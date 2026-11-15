@@ -1154,3 +1154,62 @@ fn a_shape_merely_standing_at_a_point_moves_with_the_rest_of_the_selection() {
         ]
     );
 }
+
+/// R while a pin is dragged turns its lead about its tip; the turn and the
+/// move are the drag's one undo step, named for the pin.
+#[test]
+fn r_turns_a_dragged_pin_inside_the_drag() {
+    let mut session = armed(SymbolTool::Select);
+    let mut document = SymbolDocument {
+        pins: vec![
+            SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 0)))
+                .with_side(SymbolPinSide::Left),
+        ],
+        ..SymbolDocument::default()
+    };
+    let before = document.clone();
+    let pressed = SymbolCanvasInput {
+        drag_started: true,
+        dragged: true,
+        ..Default::default()
+    };
+    let carried = SymbolCanvasInput {
+        dragged: true,
+        ..Default::default()
+    };
+    let turned = SymbolCanvasInput {
+        dragged: true,
+        turn_pin: true,
+        ..Default::default()
+    };
+    let released = SymbolCanvasInput {
+        drag_stopped: true,
+        ..Default::default()
+    };
+    let steps = vec![
+        feed(&mut session, &mut document, Point::new(-40, 0), pressed),
+        feed(&mut session, &mut document, Point::new(-40, 20), carried),
+        // The turn reads no pointer.
+        feed(&mut session, &mut document, Point::new(300, 300), turned),
+        feed(&mut session, &mut document, Point::new(-40, 30), carried),
+        feed(&mut session, &mut document, Point::new(-40, 30), released),
+    ];
+
+    let pin = document.pin("IN").unwrap();
+    assert_eq!(
+        (pin.position, pin.side),
+        (Some(Point::new(-40, 30)), SymbolPinSide::Top)
+    );
+    assert!(steps[2].changed);
+    assert_eq!(recorded(&steps), vec!["Move pin IN"]);
+    assert_eq!(
+        steps
+            .iter()
+            .find_map(|outcome| outcome.undo_before.as_deref()),
+        Some(&before)
+    );
+
+    // With no pin in hand, R on the canvas is not the pin's.
+    let idle = feed(&mut session, &mut document, Point::origin(), turned);
+    assert!(!idle.changed);
+}
