@@ -5,12 +5,17 @@ use rspice_design::occurrence::DocumentOccurrence;
 use rspice_design::symbol::{
     SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolShape,
 };
-use rspice_design_model::{Point, cell_view::CellViewRef};
+use rspice_design_model::{
+    Point,
+    cell_view::CellViewRef,
+    port::PortDirection,
+    symbol_pin::{SymbolElectricalType, SymbolPinSide},
+};
 use rspice_vocabulary::product::ProjectId;
 
 use super::session::{
-    SymbolArcSweep, SymbolEditorSession, SymbolSelection, SymbolTextDraft, SymbolTool, bearing,
-    label_name, selection_subject, shape_kind,
+    SymbolArcSweep, SymbolEditorSession, SymbolPinNameDraft, SymbolSelection, SymbolTextDraft,
+    SymbolTool, bearing, label_name, selection_subject, shape_kind,
 };
 use super::{
     SymbolViewport, hit_label, hit_origin, hit_pin, hit_shape, snap_point, snap_to_terminal_grid,
@@ -411,7 +416,7 @@ fn handle_canvas_interaction(
             }
             false
         }
-        SymbolTool::PlacePin => place_selected_pin(edit, document, terminal_point),
+        SymbolTool::PlacePin => place_next_pin(edit, document, terminal_point),
         // The drawing tools took the input above.
         SymbolTool::Line
         | SymbolTool::Polygon
@@ -430,8 +435,15 @@ pub fn track_pointer(
     viewport: SymbolViewport,
     hover: Option<Pos2>,
 ) {
-    session.pointer =
-        hover.map(|position| drawing_point(session, viewport.screen_to_world(position)));
+    session.pointer = hover.map(|position| {
+        let raw = viewport.screen_to_world(position);
+        // A pin's tip lands on the terminal pitch, as the click places it.
+        if session.tool == SymbolTool::PlacePin {
+            snap_to_terminal_grid(raw)
+        } else {
+            drawing_point(session, raw)
+        }
+    });
     if let (Some(center), Some(point), Some(sweep)) = (
         session.shape_start,
         session.pointer,
@@ -621,45 +633,54 @@ fn translate_selection(
     }
 }
 
-fn place_selected_pin(
-    edit: &mut CanvasEdit<'_>,
-    document: &mut SymbolDocument,
-    point: Point,
-) -> bool {
-    let selected = edit
-        .session
-        .selected_pin
-        .clone()
-        .or_else(|| next_unplaced_pin(document));
-    let Some(name) = selected else {
-        return false;
-    };
+/// A click of the Pin tool: its next pin goes down with its tip at `point`,
+/// on the side the tool shows there, and its name opens for typing. The
+/// tool stays armed for the pin after it.
+fn place_next_pin(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point: Point) -> bool {
     if edit.deny_read_only_edit() {
         return false;
     }
-    let Some(placed) = pin_placed_at(document, &name, point) else {
-        return false;
-    };
-    if let Some(other) = placed
-        .position
-        .and_then(|position| pin_at(document, &name, position))
-    {
+    let offer = next_pin_offer(document, edit.session);
+    let name = offer.name().to_owned();
+    if let Some(other) = pin_at(document, &name, point) {
         edit.outcome.refusal = Some(format!(
             "Pin {name} was not placed: pin {other} already stands there, and two pins on one point would join their nets in every schematic that places this symbol."
         ));
         return false;
     }
-    let changed = document.pin(&name).and_then(|pin| pin.position) != Some(point);
-    if changed {
-        edit.record_undo(document, || format!("Place pin {name}"));
+    let side = pin_tool_side(document, edit.session, point);
+    edit.record_undo(document, || format!("Place pin {name}"));
+    match offer {
+        PinOffer::Unplaced(_) => {
+            let Some(pin) = document.pin_mut(&name) else {
+                return false;
+            };
+            pin.position = Some(point);
+            pin.side = side;
+        }
+        PinOffer::New { direction, .. } => {
+            let pin = SymbolPin::new(name.clone(), direction, Some(point));
+            // A pin the interface does not declare is an analog terminal
+            // until its author says otherwise, as Add pin makes one.
+            let declared = edit
+                .session
+                .declared_ports
+                .iter()
+                .any(|port| port.name.eq_ignore_ascii_case(&name));
+            document.pins.push(if declared {
+                pin.with_side(side)
+            } else {
+                pin.with_contract(SymbolElectricalType::Analog, side)
+            });
+        }
     }
-    if let Some(pin) = document.pin_mut(&name) {
-        *pin = placed;
-        edit.session.select_pin(name);
-        edit.session.tool = SymbolTool::Select;
-        return changed;
-    }
-    false
+    edit.session.select_pin(name.clone());
+    edit.session.pin_name_draft = Some(SymbolPinNameDraft {
+        pin: name.clone(),
+        text: name,
+        caret_placed: false,
+    });
+    true
 }
 
 /// The corners a polygon needs before it can close.
@@ -869,12 +890,86 @@ fn sync_legacy_attribute_anchor(
     }
 }
 
-fn next_unplaced_pin(document: &SymbolDocument) -> Option<String> {
-    document
-        .pins
+/// The pin the Pin tool puts down next.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PinOffer {
+    /// A pin the document has that is not placed yet.
+    Unplaced(String),
+    /// A pin the document does not have yet: a declared port's, or the next
+    /// free `PIN<n>`.
+    New {
+        name: String,
+        direction: PortDirection,
+    },
+}
+
+impl PinOffer {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Unplaced(name) | Self::New { name, .. } => name,
+        }
+    }
+}
+
+/// What the Pin tool offers next: the selected pin if it is unplaced, else
+/// the document's first unplaced pin, else the first declared port with no
+/// pin, else the first `PIN<n>` no pin is named.
+pub fn next_pin_offer(document: &SymbolDocument, session: &SymbolEditorSession) -> PinOffer {
+    let unplaced = |name: &str| document.pin(name).is_some_and(|pin| pin.position.is_none());
+    if let Some(selected) = session
+        .selected_pin
+        .as_deref()
+        .filter(|name| unplaced(name))
+    {
+        return PinOffer::Unplaced(selected.to_owned());
+    }
+    if let Some(pin) = document.pins.iter().find(|pin| pin.position.is_none()) {
+        return PinOffer::Unplaced(pin.name.clone());
+    }
+    if let Some(port) = session
+        .declared_ports
         .iter()
-        .find(|pin| pin.position.is_none())
-        .map(|pin| pin.name.clone())
+        .find(|port| document.pin(&port.name).is_none())
+    {
+        return PinOffer::New {
+            name: port.name.clone(),
+            direction: port.direction,
+        };
+    }
+    let name = (1usize..)
+        .map(|number| format!("PIN{number}"))
+        .find(|name| document.pin(name).is_none())
+        .unwrap_or_default();
+    PinOffer::New {
+        name,
+        direction: PortDirection::InOut,
+    }
+}
+
+/// The side the Pin tool's pin takes with its tip at `point`: the side R
+/// turned it to, else the side of the artwork nearest it.
+pub fn pin_tool_side(
+    document: &SymbolDocument,
+    session: &SymbolEditorSession,
+    point: Point,
+) -> SymbolPinSide {
+    session
+        .pin_side
+        .unwrap_or_else(|| document.suggested_pin_side(point))
+}
+
+/// R while the Pin tool is armed: its pin turns a quarter clockwise from
+/// the side it shows at `point`, and keeps that side for the pins after it.
+pub fn turn_pin_tool_side(
+    session: &mut SymbolEditorSession,
+    document: &SymbolDocument,
+    point: Option<Point>,
+) {
+    let showing = point.map_or_else(
+        || session.pin_side.unwrap_or(SymbolPinSide::Left),
+        |point| pin_tool_side(document, session, point),
+    );
+    session.pin_side = Some(showing.turned_clockwise());
 }
 
 #[cfg(test)]

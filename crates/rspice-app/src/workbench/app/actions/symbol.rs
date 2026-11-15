@@ -3,7 +3,7 @@
 use crate::state::Point;
 use crate::workbench::app::actions::workspace::deny_read_only_edit;
 use crate::workbench::app::actions::workspace::symbol_document::{
-    SymbolUiState, load_active_symbol_editor_metadata, record_symbol_edit,
+    SymbolUiState, active_symbol_ports, load_active_symbol_editor_metadata, record_symbol_edit,
     store_active_symbol_document, store_active_symbol_editor_bundle, symbol_editor_request_source,
 };
 use crate::workbench::app_state::Model;
@@ -45,13 +45,46 @@ pub(crate) fn symbol_text_request(
     ))
 }
 
-/// Arm `tool` on the symbol canvas. A pin starts from the document in front,
-/// so the tool offers the next pin it would place.
+/// Arm `tool` on the symbol canvas. A pin starts from the document in front
+/// and the ports its interface declares, so the tool offers the next pin it
+/// would place.
 pub(crate) fn activate_symbol_tool(symbol: &mut SymbolUiState, model: &Model, tool: SymbolTool) {
-    let document = (tool == SymbolTool::PlacePin)
+    let pin_tool = tool == SymbolTool::PlacePin;
+    let document = pin_tool
         .then(|| model.load_active_symbol_document().ok())
         .flatten();
-    commands::activate_tool(&mut symbol.editor, tool, document.as_ref());
+    let ports = if pin_tool {
+        active_symbol_ports(model)
+    } else {
+        Vec::new()
+    };
+    commands::activate_tool(&mut symbol.editor, tool, document.as_ref(), &ports);
+}
+
+/// The request that names the pin the Pin tool has just placed what was
+/// typed into its entry; `None` with no entry open, or on a read-only
+/// symbol, which lets the entry go.
+pub(crate) fn symbol_pin_name_request(
+    symbol: &mut SymbolUiState,
+    model: &Model,
+    wb: &mut WorkbenchSession,
+) -> Option<SymbolEditRequest> {
+    let source = symbol_editor_request_source(model, wb);
+    bind_canvas_source(&mut symbol.editor, source);
+    let draft = symbol.editor.pin_name_draft.clone()?;
+    if deny_read_only_edit(model, wb) {
+        symbol.editor.pin_name_draft = None;
+        return None;
+    }
+    Some(symbol_edit_request(
+        symbol,
+        model,
+        wb,
+        SymbolEditAction::RenamePlacedPin {
+            pin: draft.pin,
+            name: draft.text,
+        },
+    ))
 }
 
 /// Turn or flip the selected pins and shapes as one edit. `modal_open` is
@@ -246,6 +279,16 @@ fn apply_current_symbol_edit_request(
     }
     if let SymbolEditAction::PlaceText { anchor, .. } = &request.action
         && symbol.editor.text_draft.as_ref().map(|draft| draft.anchor) != Some(*anchor)
+    {
+        return;
+    }
+    if let SymbolEditAction::RenamePlacedPin { pin, .. } = &request.action
+        && symbol
+            .editor
+            .pin_name_draft
+            .as_ref()
+            .map(|draft| &draft.pin)
+            != Some(pin)
     {
         return;
     }

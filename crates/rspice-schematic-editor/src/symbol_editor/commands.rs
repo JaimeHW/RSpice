@@ -8,10 +8,10 @@ use super::session::{
     selection_subject,
 };
 use rspice_design::symbol::{
-    SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolShape, SymbolTextAlign,
-    SymbolTextSize,
+    MAX_SYMBOL_PIN_NAME_BYTES, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
+    SymbolShape, SymbolTextAlign, SymbolTextSize,
 };
-use rspice_design_model::{Point, symbol_pin::SymbolPinSide};
+use rspice_design_model::{Point, port::PortSpec, symbol_pin::SymbolPinSide};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolTransform {
@@ -36,11 +36,37 @@ pub enum SymbolEditAction {
         anchor: Point,
         text: String,
     },
+    /// Name `pin`, which the Pin tool has just placed, `name`: what was
+    /// typed into its entry.
+    RenamePlacedPin {
+        pin: String,
+        name: String,
+    },
 }
 
 impl SymbolEditAction {
     pub fn document_only(&self) -> bool {
-        matches!(self, Self::PlaceText { .. })
+        matches!(self, Self::PlaceText { .. } | Self::RenamePlacedPin { .. })
+    }
+}
+
+/// Why `name` cannot name `pin` in `document`, if it cannot: the rules the
+/// inspector's Name row holds a pin to.
+pub fn pin_name_refusal(document: &SymbolDocument, pin: &str, name: &str) -> Option<&'static str> {
+    if name.is_empty() {
+        Some("A pin needs a name.")
+    } else if name.len() > MAX_SYMBOL_PIN_NAME_BYTES {
+        Some("That name is longer than a pin name can be.")
+    } else if name.chars().any(char::is_control) {
+        Some("A pin name cannot hold control characters.")
+    } else if document
+        .pins
+        .iter()
+        .any(|other| !other.name.eq_ignore_ascii_case(pin) && other.name.eq_ignore_ascii_case(name))
+    {
+        Some("Another pin already has that name.")
+    } else {
+        None
     }
 }
 
@@ -119,6 +145,19 @@ pub fn apply_edit(
                 }
             }
         }
+        SymbolEditAction::RenamePlacedPin { pin, name } => {
+            session.pin_name_draft = None;
+            if let Some(index) = document.pins.iter().position(|placed| placed.name == pin)
+                && name != pin
+                && pin_name_refusal(document, &pin, &name).is_none()
+            {
+                outcome.undo_before = Some(Box::new(document.clone()));
+                outcome.step = format!("Rename pin {pin}");
+                document.pins[index].name = name.clone();
+                session.select_pin(name);
+                outcome.changed = true;
+            }
+        }
         SymbolEditAction::PlaceText { anchor, text } => {
             session.text_draft = None;
             if !text.trim().is_empty() {
@@ -140,15 +179,20 @@ pub fn apply_edit(
     outcome
 }
 
-/// Arm `tool`. Whatever the last tool had part drawn is let go.
+/// Arm `tool`. Whatever the last tool had part drawn is let go. The Pin
+/// tool keeps `ports`, the ports the interface declares, to offer the ones
+/// that have no pin before any pin of its own naming.
 pub fn activate_tool(
     session: &mut SymbolEditorSession,
     tool: SymbolTool,
     document: Option<&SymbolDocument>,
+    ports: &[PortSpec],
 ) {
     session.tool = tool;
     session.clear_draft();
+    session.pin_side = None;
     if tool == SymbolTool::PlacePin {
+        session.declared_ports = ports.to_vec();
         let next = document.and_then(|document| {
             document
                 .pins

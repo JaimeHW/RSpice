@@ -3,12 +3,16 @@
 use crate::schematic::view::CanvasParts;
 use crate::state::{SymbolDocument, SymbolEditorMetadata};
 use crate::ui::widgets::{CanvasEntry, CanvasEntryChoice};
-use crate::workbench::app::actions::{apply_symbol_edit_request, symbol_text_request};
+use crate::workbench::app::actions::{
+    apply_symbol_edit_request, symbol_pin_name_request, symbol_text_request,
+};
 use rspice_schematic_editor::symbol_editor::SymbolViewport;
+use rspice_schematic_editor::symbol_editor::commands::pin_name_refusal;
 use rspice_schematic_editor::symbol_editor::interaction::{
     SymbolCanvasRequest, SymbolEditCapabilities, bind_canvas_source, canvas_request, edit_canvas,
-    track_pointer,
+    track_pointer, turn_pin_tool_side,
 };
+use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
 pub(crate) fn bind_active_canvas(state: &mut CanvasParts<'_>) {
     let source = state.symbol_editor_request_source();
@@ -90,6 +94,96 @@ pub(super) fn show_text_entry(
         }
         CanvasEntryChoice::None => {}
     }
+}
+
+/// The name entry the Pin tool opens at the pin it has just placed. The
+/// pin is in `document` under the name it was offered, which the entry
+/// holds selected so typing replaces it; Enter keeps what was typed, and
+/// Escape or a click elsewhere keeps the name the pin has.
+pub(super) fn show_pin_name_entry(
+    ctx: &egui::Context,
+    state: &mut CanvasParts<'_>,
+    viewport: SymbolViewport,
+    document: &SymbolDocument,
+) {
+    let Some(draft) = state.design.symbol.editor.pin_name_draft.as_mut() else {
+        return;
+    };
+    let Some(tip) = document.pin(&draft.pin).and_then(|pin| pin.position) else {
+        state.design.symbol.editor.pin_name_draft = None;
+        return;
+    };
+    let field = egui::Id::new("symbol-editor.pin-name-entry");
+    let take_caret = !std::mem::replace(&mut draft.caret_placed, true);
+    let refusal = (draft.text != draft.pin)
+        .then(|| pin_name_refusal(document, &draft.pin, &draft.text))
+        .flatten();
+    let choice = CanvasEntry::new("symbol-pin-name", "Pin", viewport.world_to_screen(tip))
+        .commit_enabled(refusal.is_none())
+        .status(refusal.map_or(Ok(None), Err))
+        .show(ctx, |rows| {
+            rows.text("Name", field, &mut draft.text, "");
+            Some(field)
+        });
+    if take_caret {
+        ctx.memory_mut(|memory| memory.request_focus(field));
+        let mut edit = egui::text_edit::TextEditState::load(ctx, field).unwrap_or_default();
+        edit.cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(draft.text.chars().count()),
+            )));
+        edit.store(ctx, field);
+    }
+    match choice {
+        CanvasEntryChoice::Commit => {
+            if let Some(request) =
+                symbol_pin_name_request(&mut state.design.symbol, state.model, state.workbench)
+            {
+                let modal_open = state.application_modal_open();
+                apply_symbol_edit_request(
+                    &mut state.design.symbol,
+                    state.model,
+                    state.workbench,
+                    modal_open,
+                    request,
+                );
+            }
+            crate::workbench::app_state::request_engineering_canvas_focus(ctx);
+        }
+        CanvasEntryChoice::Cancelled => {
+            state.design.symbol.editor.pin_name_draft = None;
+            crate::workbench::app_state::request_engineering_canvas_focus(ctx);
+        }
+        CanvasEntryChoice::None => {}
+    }
+}
+
+/// R while the Pin tool is armed on the symbol in front turns the pin it is
+/// about to place a quarter clockwise. The key is the tool's rather than
+/// Draw rectangle's while the canvas holds the keyboard, or holds the
+/// pointer with no field holding the keyboard.
+pub(crate) fn turn_pin_being_placed(
+    ctx: &egui::Context,
+    state: &mut CanvasParts<'_>,
+    canvas_has_focus: bool,
+) -> bool {
+    let editor = &state.design.symbol.editor;
+    let over_canvas = editor.pointer.is_some() && ctx.memory(|memory| memory.focused().is_none());
+    if state.model.workspace.content.active_view_type() != Some(crate::state::ViewType::Symbol)
+        || editor.tool != SymbolTool::PlacePin
+        || editor.pin_name_draft.is_some()
+        || !(canvas_has_focus || over_canvas)
+        || !ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::R))
+    {
+        return false;
+    }
+    if let Ok(document) = state.model.load_active_symbol_document() {
+        let pointer = state.design.symbol.editor.pointer;
+        turn_pin_tool_side(&mut state.design.symbol.editor, &document, pointer);
+    }
+    ctx.request_repaint();
+    true
 }
 
 /// Why `text` cannot be placed as typed, if it cannot.

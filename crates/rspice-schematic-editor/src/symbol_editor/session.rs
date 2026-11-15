@@ -91,6 +91,18 @@ pub struct SymbolTextDraft {
     pub caret_placed: bool,
 }
 
+/// The name of the pin the Pin tool has just placed, open for typing where
+/// it stands. The pin is in the document already, under the name the tool
+/// offered; Enter renames it to what was typed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolPinNameDraft {
+    /// The pin's name in the document.
+    pub pin: String,
+    pub text: String,
+    /// Whether the entry has taken the caret, which it does once, on opening.
+    pub caret_placed: bool,
+}
+
 /// Display lattice of the symbol canvas.
 ///
 /// This governs body artwork only. A terminal always lands on
@@ -319,6 +331,14 @@ pub struct SymbolEditorSession {
     pub shape_start: Option<rspice_design_model::Point>,
     pub arc_sweep: Option<SymbolArcSweep>,
     pub text_draft: Option<SymbolTextDraft>,
+    /// The name of the pin just placed, while it is being typed.
+    pub pin_name_draft: Option<SymbolPinNameDraft>,
+    /// The side R turned the pin tool's pin to; `None` follows the artwork
+    /// nearest the pointer.
+    pub pin_side: Option<rspice_design_model::symbol_pin::SymbolPinSide>,
+    /// The ports the symbol's interface declares, as the Pin tool was armed
+    /// with them: those without a pin are the pins it offers first.
+    pub declared_ports: Vec<rspice_design_model::port::PortSpec>,
     /// Whether the press-drag in progress began the shape being drawn.
     pub drawing_drag: bool,
     /// Where a click would land on the canvas, snapped as the armed tool
@@ -359,6 +379,9 @@ impl Default for SymbolEditorSession {
             shape_start: None,
             arc_sweep: None,
             text_draft: None,
+            pin_name_draft: None,
+            pin_side: None,
+            declared_ports: Vec::new(),
             drawing_drag: false,
             pointer: None,
             show_grid: true,
@@ -423,12 +446,14 @@ impl SymbolEditorSession {
         self.drag_undo_recorded = false;
     }
 
-    /// Whether a shape or a text is part drawn.
+    /// Whether a shape or a text is part drawn, or a placed pin's name is
+    /// being typed: what Escape lets go of before it puts the tool down.
     pub fn has_draft(&self) -> bool {
         !self.pending_polyline.is_empty()
             || self.shape_start.is_some()
             || self.arc_sweep.is_some()
             || self.text_draft.is_some()
+            || self.pin_name_draft.is_some()
     }
 
     /// Let go of the shape or text being drawn. The document never held it.
@@ -437,6 +462,7 @@ impl SymbolEditorSession {
         self.shape_start = None;
         self.arc_sweep = None;
         self.text_draft = None;
+        self.pin_name_draft = None;
         self.drawing_drag = false;
     }
 
@@ -444,7 +470,11 @@ impl SymbolEditorSession {
     pub fn next_step(&self) -> Option<&'static str> {
         let placed = self.pending_polyline.len();
         Some(match self.tool {
-            SymbolTool::Select | SymbolTool::PlacePin => return None,
+            SymbolTool::Select => return None,
+            SymbolTool::PlacePin if self.pin_name_draft.is_some() => {
+                "Pin: type its name, Enter to keep it"
+            }
+            SymbolTool::PlacePin => "Pin: click where its tip goes, R to turn it",
             SymbolTool::Line if placed == 0 => "Line: click the first point",
             SymbolTool::Line => "Line: click the next point, Enter to finish",
             SymbolTool::Polygon if placed == 0 => "Polygon: click the first corner",

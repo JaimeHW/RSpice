@@ -319,3 +319,96 @@ fn text_is_typed_where_it_was_clicked_and_placed_on_enter() {
     assert_eq!(canvas.body(), body);
     assert_eq!(canvas.tool(), SymbolTool::Text);
 }
+
+/// Every straight segment `output` painted in `colour`, by its ends.
+fn segments_in(output: &egui::FullOutput, colour: egui::Color32) -> Vec<[egui::Pos2; 2]> {
+    output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::LineSegment { points, stroke } if stroke.color == colour => Some(*points),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The Pin tool shows the pin it would place at the pointer, in the draft
+/// tone, and R turns it rather than arming the rectangle. A click puts it
+/// there with its name selected for typing; Enter keeps what was typed, and
+/// the tool stays armed for the next pin, which it makes when none waits.
+#[test]
+fn the_pin_tool_shows_its_pin_places_it_and_takes_its_name() {
+    let mut canvas = Canvas::new();
+    canvas.arm(DesignCommand::SymbolPinTool);
+    assert_eq!(canvas.tool(), SymbolTool::PlacePin);
+    assert_eq!(
+        canvas.hint(),
+        Some("Pin: click where its tip goes, R to turn it")
+    );
+    let tip = Point::new(-40, -30);
+    let output = canvas.hover(tip);
+    let (placed, _) = canvas.draft_colours();
+    let ghost = segments_in(&output, placed);
+    assert!(
+        ghost.iter().any(|[from, _]| *from == canvas.at(tip)),
+        "the pin about to be placed runs its lead from the pointer: {ghost:?}"
+    );
+
+    canvas.key(egui::Key::R);
+    assert_eq!(canvas.tool(), SymbolTool::PlacePin, "R is the pin's");
+    let turned = canvas
+        .app
+        .state
+        .design
+        .symbol
+        .editor
+        .pin_side
+        .expect("R turned the pin");
+
+    canvas.click(tip);
+    let document = |canvas: &Canvas| {
+        canvas
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap()
+    };
+    let pin = document(&canvas)
+        .pin("in_COPY")
+        .cloned()
+        .expect("the waiting pin");
+    assert_eq!((pin.position, pin.side), (Some(tip), turned));
+    assert_eq!(canvas.hint(), Some("Pin: type its name, Enter to keep it"));
+    canvas.frame(vec![egui::Event::Text("CLK".to_owned())]);
+    canvas.key(egui::Key::Enter);
+
+    let named = document(&canvas);
+    assert!(named.pin("in_COPY").is_none());
+    assert_eq!(named.pin("CLK").and_then(|pin| pin.position), Some(tip));
+    assert_eq!(canvas.tool(), SymbolTool::PlacePin, "the tool stays armed");
+    assert!(
+        canvas
+            .app
+            .state
+            .design
+            .symbol
+            .editor
+            .pin_name_draft
+            .is_none()
+    );
+
+    let next = Point::new(40, -30);
+    canvas.click(next);
+    assert_eq!(
+        document(&canvas).pin("PIN1").and_then(|pin| pin.position),
+        Some(next),
+        "with no pin waiting the tool makes one"
+    );
+    canvas.key(egui::Key::Escape);
+    assert!(
+        document(&canvas).pin("PIN1").is_some(),
+        "Escape keeps the name it has"
+    );
+    assert_eq!(canvas.tool(), SymbolTool::PlacePin);
+}

@@ -24,7 +24,8 @@ pub(crate) use rspice_app_simulate::workbench::app::actions::tuning_staging;
 pub(crate) use symbol::{
     activate_symbol_tool, apply_symbol_edit_request, copy_selected_symbol_shape,
     delete_selected_symbol_item, duplicate_selected_symbol_shape, paste_symbol_shape,
-    select_all_symbol_items, symbol_text_request, transform_selected_symbol_item,
+    select_all_symbol_items, symbol_pin_name_request, symbol_text_request,
+    transform_selected_symbol_item,
 };
 pub(crate) mod workspace;
 

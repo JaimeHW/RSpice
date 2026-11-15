@@ -21,15 +21,15 @@ use rspice_design::{
         component_type::ComponentType,
     },
     symbol::{
-        PinDrawing, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolCurve, SymbolDocument,
-        SymbolEditorMetadata, SymbolShape, SymbolTextAlign, pin_drawing,
+        PinDrawing, SYMBOL_PIN_LENGTH, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolCurve,
+        SymbolDocument, SymbolEditorMetadata, SymbolShape, SymbolTextAlign, pin_drawing,
     },
 };
 use rspice_design_model::{
     Point,
     cell_view::CellViewRef,
     port::{PortDirection, PortSpec},
-    symbol_pin::SymbolPinSide,
+    symbol_pin::{SymbolPinSide, SymbolPinStyle},
 };
 use rspice_ui_kit::{
     theme::{self, FontWeight},
@@ -243,6 +243,7 @@ pub fn draw_in_place(
     );
     draw_bbox_and_origin(painter, viewport, document, &t);
     draw_pins(painter, viewport, document, ports, session);
+    draw_pin_tool_pin(painter, viewport, document, session, &t);
     draw_labels(painter, viewport, editor, session, &t);
     draw_marquee(painter, viewport, session, &t);
     draw_draft(painter, viewport, session, &t);
@@ -642,6 +643,48 @@ fn draw_pins(
         );
         draw_direction_mark(painter, viewport, pin.direction, drawing.lead, color);
     }
+}
+
+/// The pin the Pin tool would place, at the pointer, in the draft tone: its
+/// lead on the side it would take and its name, so where a click puts it
+/// and what it is called are on the canvas before it is in the document.
+fn draw_pin_tool_pin(
+    painter: &egui::Painter,
+    viewport: SymbolViewport,
+    document: &SymbolDocument,
+    session: &SymbolEditorSession,
+    t: &Tokens,
+) {
+    if session.tool != SymbolTool::PlacePin || session.pin_name_draft.is_some() {
+        return;
+    }
+    let Some(tip) = session.pointer else {
+        return;
+    };
+    let offer = interaction::next_pin_offer(document, session);
+    let side = interaction::pin_tool_side(document, session, tip);
+    let (length, style) = document
+        .pin(offer.name())
+        .map_or((SYMBOL_PIN_LENGTH, SymbolPinStyle::Plain), |pin| {
+            (pin.length, pin.style)
+        });
+    let colour = t.color.canvas_select.gamma_multiply(DRAFT_ALPHA);
+    let stroke = Stroke::new(DRAFT_STROKE, colour);
+    paint_pin_drawing(
+        painter,
+        viewport,
+        pin_drawing(tip, side, length, style),
+        stroke,
+    );
+    let pad = Rect::from_center_size(viewport.world_to_screen(tip), vec2(8.0, 8.0));
+    painter.rect_stroke(pad, 0.0, stroke, egui::StrokeKind::Inside);
+    painter.text(
+        pin_label_pos(tip, side, viewport),
+        Align2::CENTER_CENTER,
+        offer.name(),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        colour,
+    );
 }
 
 /// A pin's lead and the marks its style puts where the lead meets the body.

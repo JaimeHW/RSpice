@@ -75,7 +75,7 @@ fn escape_cancels_the_shape_then_returns_to_select() {
 fn arming_a_tool_lets_go_of_any_shape_being_drawn() {
     for tool in [SymbolTool::Select, SymbolTool::Line, SymbolTool::Text] {
         let mut session = with_every_draft(SymbolTool::Polygon);
-        activate_tool(&mut session, tool, None);
+        activate_tool(&mut session, tool, None, &[]);
         assert!(!session.has_draft(), "{tool:?}");
         assert_eq!(session.tool, tool);
     }
@@ -166,4 +166,58 @@ fn deleting_a_selected_label_hides_it() {
     assert_eq!(shown(SymbolAttributeKind::Reference), Some(true));
     assert_eq!(document.body.len(), 1);
     assert!(session.effective_selection().is_empty());
+}
+
+/// Enter in the Pin tool's name entry renames the pin it placed, as one
+/// edit, and closes the entry. A name another pin has is refused, and so is
+/// an empty one; the pin keeps the name it was given.
+#[test]
+fn the_name_typed_for_a_placed_pin_renames_it() {
+    let mut document = SymbolDocument {
+        pins: vec![
+            SymbolPin::new("IN", PortDirection::In, Some(Point::new(-10, 0))),
+            SymbolPin::new("PIN1", PortDirection::InOut, Some(Point::new(10, 0))),
+        ],
+        ..SymbolDocument::default()
+    };
+    let rename = |session: &mut SymbolEditorSession, document: &mut SymbolDocument, name: &str| {
+        session.pin_name_draft = Some(crate::symbol_editor::session::SymbolPinNameDraft {
+            pin: "PIN1".to_owned(),
+            text: name.to_owned(),
+            caret_placed: true,
+        });
+        let outcome = apply_edit(
+            session,
+            document,
+            None,
+            SymbolEditAction::RenamePlacedPin {
+                pin: "PIN1".to_owned(),
+                name: name.to_owned(),
+            },
+            SymbolEditCapabilities { edit: true },
+        );
+        assert!(
+            session.pin_name_draft.is_none(),
+            "{name:?} closes the entry"
+        );
+        outcome
+    };
+    let mut session = SymbolEditorSession::default();
+    for refused in ["in", ""] {
+        let outcome = rename(&mut session, &mut document, refused);
+        assert!(
+            !outcome.changed && outcome.undo_before.is_none(),
+            "{refused:?}"
+        );
+        assert!(document.pin("PIN1").is_some());
+    }
+    let outcome = rename(&mut session, &mut document, "CLK");
+    assert!(outcome.changed && outcome.undo_before.is_some());
+    assert_eq!(outcome.step, "Rename pin PIN1");
+    assert!(document.pin("PIN1").is_none());
+    assert_eq!(
+        document.pin("CLK").and_then(|pin| pin.position),
+        Some(Point::new(10, 0))
+    );
+    assert_eq!(session.selected_pin.as_deref(), Some("CLK"));
 }

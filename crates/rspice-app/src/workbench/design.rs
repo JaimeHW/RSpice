@@ -716,7 +716,7 @@ impl CommandSet for DesignCommand {
             Self::PlaceCurrentSource => arm_tool(cx, Tool::Place(ComponentType::CurrentSource)),
             Self::SelectTool => {
                 if routed::symbol_editor(cx.wb.workspace, cx.model) {
-                    activate_tool(&mut cx.state.symbol.editor, SymbolTool::Select, None);
+                    activate_tool(&mut cx.state.symbol.editor, SymbolTool::Select, None, &[]);
                 } else {
                     arm_tool(cx, Tool::Select);
                 }

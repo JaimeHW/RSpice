@@ -216,6 +216,7 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
     );
     // After the canvas has taken the keyboard for the click that opened it.
     interaction::show_text_entry(ui.ctx(), &mut canvas.parts(), viewport);
+    interaction::show_pin_name_entry(ui.ctx(), &mut canvas.parts(), viewport, &document);
 }
 
 pub(crate) fn apply_surface_request(

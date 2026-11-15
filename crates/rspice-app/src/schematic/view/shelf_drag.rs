@@ -253,6 +253,13 @@ pub(crate) fn handle_pre_render_placement_transform(
     state: &mut CanvasParts<'_>,
     canvas_has_focus: bool,
 ) -> bool {
+    if crate::schematic::symbol_editor::interaction::turn_pin_being_placed(
+        ctx,
+        state,
+        canvas_has_focus,
+    ) {
+        return true;
+    }
     let pointer_over_canvas = rspice_schematic_editor::view::canvas::contains_pointer(ctx);
     // A floating paste, or the selection Move carries, turns about its own
     // middle and keeps floating. A turn of what Move carries is its own undo

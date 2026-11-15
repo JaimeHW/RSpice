@@ -21,8 +21,10 @@ fn finishing_pending_polyline_creates_one_selected_shape() {
     assert!(edit.session.pending_polyline.is_empty());
 }
 
+/// With no pin waiting to be placed, the Pin tool makes one: the first
+/// `PIN<n>` free, an analog terminal, as one edit, its name open for typing.
 #[test]
-fn place_pin_without_available_pin_does_not_record_undo() {
+fn the_pin_tool_makes_a_pin_when_none_is_waiting() {
     let mut session = SymbolEditorSession::default();
     let mut edit = CanvasEdit {
         session: &mut session,
@@ -31,14 +33,22 @@ fn place_pin_without_available_pin_does_not_record_undo() {
     };
     let mut document = SymbolDocument::default();
 
-    assert!(!place_selected_pin(
-        &mut edit,
-        &mut document,
-        Point::new(10, 0)
-    ));
+    assert!(place_next_pin(&mut edit, &mut document, Point::new(10, 0)));
 
-    assert!(edit.outcome.undo_before.is_none());
-    assert!(document.pins.is_empty());
+    assert!(edit.outcome.undo_before.is_some());
+    let pin = document.pin("PIN1").expect("the tool made PIN1");
+    assert_eq!(pin.position, Some(Point::new(10, 0)));
+    assert_eq!(
+        pin.electrical_type(),
+        rspice_design_model::symbol_pin::SymbolElectricalType::Analog
+    );
+    assert_eq!(
+        edit.session
+            .pin_name_draft
+            .as_ref()
+            .map(|draft| draft.text.as_str()),
+        Some("PIN1")
+    );
 }
 
 /// A drag reports as started only past egui's threshold, by which time a
@@ -680,4 +690,106 @@ fn a_pin_placed_beside_stray_artwork_keeps_its_side_and_its_lead() {
     assert_eq!(pin.position, Some(Point::new(-40, -50)));
     assert_eq!(pin.side, SymbolPinSide::Left);
     assert_eq!(pin.lead_inner(), Some(Point::new(-20, -50)));
+}
+
+/// The Pin tool puts down what is waiting first: a pin the symbol has that
+/// is not placed, then a port the interface declares that has no pin, then
+/// the first free `PIN<n>`. It stays armed, and each pin it places opens its
+/// name for typing.
+#[test]
+fn the_pin_tool_offers_waiting_pins_then_declared_ports_then_numbered_pins() {
+    use rspice_design_model::port::{PortDirection, PortSpec};
+    let mut document = body_with_stray_artwork();
+    document.pins.push(SymbolPin::new(
+        "PIN1",
+        PortDirection::InOut,
+        Some(Point::new(40, 10)),
+    ));
+    let mut session = armed(SymbolTool::PlacePin);
+    session.declared_ports = ["A", "B"]
+        .into_iter()
+        .map(|name| PortSpec {
+            name: name.to_owned(),
+            direction: PortDirection::Out,
+        })
+        .collect();
+
+    for (at, name) in [
+        (Point::new(-40, 0), "A"),
+        (Point::new(40, -10), "B"),
+        (Point::new(0, -40), "PIN2"),
+    ] {
+        assert_eq!(next_pin_offer(&document, &session).name(), name);
+        assert!(click(&mut session, &mut document, at), "{name}");
+        assert_eq!(document.pin(name).and_then(|pin| pin.position), Some(at));
+        assert_eq!(
+            session
+                .pin_name_draft
+                .as_ref()
+                .map(|draft| draft.pin.as_str()),
+            Some(name)
+        );
+        assert_eq!(session.tool, SymbolTool::PlacePin);
+    }
+    assert_eq!(
+        document.pin("B").map(|pin| pin.direction),
+        Some(PortDirection::Out),
+        "a declared port's pin takes the port's direction"
+    );
+    assert_eq!(document.pins.len(), 4);
+}
+
+/// The Pin tool's pin takes the side of the artwork nearest it until R
+/// turns it; then it keeps the side it was turned to, wherever it goes.
+#[test]
+fn r_turns_the_pin_tool_pin_and_it_keeps_that_side() {
+    use rspice_design_model::symbol_pin::SymbolPinSide;
+    let mut document = body_with_stray_artwork();
+    document.pins.clear();
+    let mut session = armed(SymbolTool::PlacePin);
+    assert_eq!(
+        pin_tool_side(&document, &session, Point::new(-40, 0)),
+        SymbolPinSide::Left
+    );
+    turn_pin_tool_side(&mut session, &document, Some(Point::new(-40, 0)));
+    assert_eq!(session.pin_side, Some(SymbolPinSide::Top));
+
+    assert!(click(&mut session, &mut document, Point::new(-40, 0)));
+    assert!(click(&mut session, &mut document, Point::new(40, 0)));
+    let sides = document
+        .pins
+        .iter()
+        .map(|pin| (pin.name.as_str(), pin.side))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sides,
+        [("PIN1", SymbolPinSide::Top), ("PIN2", SymbolPinSide::Top)]
+    );
+}
+
+/// The Pin tool never stacks a pin on another: the click is refused and
+/// says why, and nothing changes.
+#[test]
+fn the_pin_tool_refuses_a_point_another_pin_stands_on() {
+    let mut document = body_with_stray_artwork();
+    document.pins[0].position = Some(Point::new(-40, 0));
+    let mut session = armed(SymbolTool::PlacePin);
+    let before = document.clone();
+    let outcome = feed(
+        &mut session,
+        &mut document,
+        Point::new(-40, 0),
+        SymbolCanvasInput {
+            clicked: true,
+            ..Default::default()
+        },
+    );
+    assert!(!outcome.changed);
+    assert!(outcome.undo_before.is_none());
+    assert!(
+        outcome
+            .refusal
+            .is_some_and(|why| why.contains("pin A already stands there"))
+    );
+    assert_eq!(document, before);
 }
