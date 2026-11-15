@@ -10084,10 +10084,10 @@ impl Engine {
                                     "this grouped-noise model requires canonical IR, and the artifact bound to it carries none",
                                 ));
                             }
-                            let mut device = crate::device::veriloga::VerilogADevice::try_new_with_simulation_parameters_and_control(
+                            let mut device = crate::device::veriloga::VerilogADevice::try_new_shared_with_simulation_parameters_and_control(
                                 element.name.clone(),
                                 std::sync::Arc::clone(model),
-                                prepared.canonical_ir.as_deref(),
+                                prepared.canonical_ir.as_ref(),
                                 &node_ids,
                                 &prepared.overrides,
                                 circuit.generated_simulation_parameters,

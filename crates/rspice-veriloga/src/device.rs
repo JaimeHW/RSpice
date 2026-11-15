@@ -1755,6 +1755,8 @@ enum NoisePlanning<'scope, 'env> {
         Option<&'env CanonicalIrArtifact>,
         std::marker::PhantomData<&'scope ()>,
     ),
+    /// Planned for an earlier instance of the same model and artifact.
+    Checked(CanonicalNoisePlan),
 }
 
 impl<'scope, 'env> NoisePlanning<'scope, 'env> {
@@ -1781,6 +1783,7 @@ impl<'scope, 'env> NoisePlanning<'scope, 'env> {
                 .join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
             Self::InLine(model, artifact, _) => CanonicalNoisePlan::for_model(&model, artifact),
+            Self::Checked(plan) => Ok(plan),
         }
     }
 
@@ -1790,6 +1793,70 @@ impl<'scope, 'env> NoisePlanning<'scope, 'env> {
         #[cfg(not(target_arch = "wasm32"))]
         if let Self::Beside(planning) = self {
             let _ = planning.join();
+        }
+    }
+}
+
+/// What constructing a device derives from its model and canonical artifact
+/// alone: the artifact checked against the model, and the grouped-noise plan.
+/// For a large model that costs more than the rest of construction together,
+/// so it is kept while both are alive, and a design's further instances of
+/// the model take it instead of repeating it.
+///
+/// An entry holds the model and the artifact weakly. While it does, neither
+/// allocation can be reused, so a live `Arc` at the same address is the same
+/// object. An entry whose model or artifact has been dropped is pruned.
+struct CheckedModel {
+    model: std::sync::Weak<CompiledModel>,
+    artifact: std::sync::Weak<CanonicalIrArtifact>,
+    noise_plan: CanonicalNoisePlan,
+}
+
+static CHECKED_MODELS: std::sync::Mutex<Vec<CheckedModel>> = std::sync::Mutex::new(Vec::new());
+
+impl CheckedModel {
+    fn is(
+        &self,
+        model: &std::sync::Arc<CompiledModel>,
+        artifact: &std::sync::Arc<CanonicalIrArtifact>,
+    ) -> bool {
+        std::ptr::eq(self.model.as_ptr(), std::sync::Arc::as_ptr(model))
+            && std::ptr::eq(self.artifact.as_ptr(), std::sync::Arc::as_ptr(artifact))
+    }
+
+    /// The live entries.
+    fn entries() -> std::sync::MutexGuard<'static, Vec<Self>> {
+        let mut entries = CHECKED_MODELS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        entries.retain(|entry| entry.model.strong_count() > 0 && entry.artifact.strong_count() > 0);
+        entries
+    }
+
+    /// The noise plan of a model and artifact an earlier instance checked.
+    fn find(
+        model: &std::sync::Arc<CompiledModel>,
+        artifact: &std::sync::Arc<CanonicalIrArtifact>,
+    ) -> Option<CanonicalNoisePlan> {
+        Self::entries()
+            .iter()
+            .find(|entry| entry.is(model, artifact))
+            .map(|entry| entry.noise_plan.clone())
+    }
+
+    /// Keep a model and artifact construction has checked, with their plan.
+    fn keep(
+        model: &std::sync::Arc<CompiledModel>,
+        artifact: &std::sync::Arc<CanonicalIrArtifact>,
+        noise_plan: &CanonicalNoisePlan,
+    ) {
+        let mut entries = Self::entries();
+        if !entries.iter().any(|entry| entry.is(model, artifact)) {
+            entries.push(Self {
+                model: std::sync::Arc::downgrade(model),
+                artifact: std::sync::Arc::downgrade(artifact),
+                noise_plan: noise_plan.clone(),
+            });
         }
     }
 }
@@ -2409,6 +2476,7 @@ impl VerilogADevice {
             model,
             nodes,
             None,
+            None,
             &[],
             Default::default(),
             &crate::NoPipelineControl,
@@ -2449,6 +2517,7 @@ impl VerilogADevice {
             model,
             nodes,
             Some(artifact),
+            None,
             &[],
             Default::default(),
             control,
@@ -2470,6 +2539,7 @@ impl VerilogADevice {
             model.into(),
             nodes,
             artifact,
+            None,
             parameters,
             Default::default(),
             control,
@@ -2492,17 +2562,48 @@ impl VerilogADevice {
             model.into(),
             nodes,
             artifact,
+            None,
             parameters,
             simulation_parameters,
             control,
         )
     }
 
+    /// [`Self::try_new_with_simulation_parameters_and_control`] for one of a
+    /// design's instances, whose model and artifact its other instances of
+    /// the model share. What construction derives from the model and the
+    /// artifact alone (the artifact checked against the model, the
+    /// grouped-noise plan) is done for the first instance and taken by the
+    /// rest while both are alive.
+    pub fn try_new_shared_with_simulation_parameters_and_control(
+        name: impl Into<SmolStr>,
+        model: std::sync::Arc<CompiledModel>,
+        artifact: Option<&std::sync::Arc<CanonicalIrArtifact>>,
+        nodes: &[usize],
+        parameters: &[(&str, f64)],
+        simulation_parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
+        control: &dyn crate::PipelineControl,
+    ) -> Result<Self, VmError> {
+        Self::try_new_inner(
+            name,
+            model,
+            nodes,
+            artifact.map(|artifact| &**artifact),
+            artifact,
+            parameters,
+            simulation_parameters,
+            control,
+        )
+    }
+
+    /// `shared_artifact`, when given, is `canonical_artifact`'s `Arc`.
+    #[allow(clippy::too_many_arguments)]
     fn try_new_inner(
         name: impl Into<SmolStr>,
         model: std::sync::Arc<CompiledModel>,
         nodes: &[usize],
         canonical_artifact: Option<&CanonicalIrArtifact>,
+        shared_artifact: Option<&std::sync::Arc<CanonicalIrArtifact>>,
         parameters: &[(&str, f64)],
         simulation_parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
         control: &dyn crate::PipelineControl,
@@ -2514,6 +2615,7 @@ impl VerilogADevice {
                 model,
                 nodes,
                 canonical_artifact,
+                shared_artifact,
                 parameters,
                 simulation_parameters,
                 control,
@@ -2530,6 +2632,7 @@ impl VerilogADevice {
         model: std::sync::Arc<CompiledModel>,
         nodes: &[usize],
         canonical_artifact: Option<&'env CanonicalIrArtifact>,
+        shared_artifact: Option<&std::sync::Arc<CanonicalIrArtifact>>,
         parameters: &[(&str, f64)],
         simulation_parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
         control: &dyn crate::PipelineControl,
@@ -2577,11 +2680,19 @@ impl VerilogADevice {
         }
         // Planning starts beside the artifact's validation and is waited out
         // if that fails; its outcome is taken after the native image, so an
-        // error it reports still comes before one compiling reports.
-        let canonical_noise_plan = NoisePlanning::start(scope, &model, canonical_artifact);
+        // error it reports still comes before one compiling reports. An
+        // earlier instance of the same shared model and artifact has done
+        // both (`CheckedModel`), and this one takes its plan.
+        let checked = shared_artifact.and_then(|artifact| CheckedModel::find(&model, artifact));
+        let already_checked = checked.is_some();
+        let canonical_noise_plan = match checked {
+            Some(plan) => NoisePlanning::Checked(plan),
+            None => NoisePlanning::start(scope, &model, canonical_artifact),
+        };
         // Validate before looking up a compiled image: a cache hit skips the
         // backend compiler, including its artifact checks.
-        if let Some(artifact) = canonical_artifact
+        if !already_checked
+            && let Some(artifact) = canonical_artifact
             && let Err(detail) =
                 crate::canonical_compat::validate_canonical_artifact_identity_for_model(
                     &model, artifact,
@@ -2673,6 +2784,9 @@ impl VerilogADevice {
             None => Err(Self::missing_canonical_ir_native_error()),
         };
         let canonical_noise_plan = canonical_noise_plan.finish()?;
+        if !already_checked && let Some(artifact) = shared_artifact {
+            CheckedModel::keep(&model, artifact, &canonical_noise_plan);
+        }
         #[cfg(feature = "native")]
         let native_model = native_model?;
 
@@ -11396,6 +11510,73 @@ endmodule
         let history = device.context.state_values.clone();
         assert_eq!(stamp(&mut device, 2.0, Mode::StaticProbe), 2.0);
         assert_eq!(device.context.state_values, history);
+    }
+}
+
+#[cfg(test)]
+mod shared_checks_tests {
+    use super::{CanonicalNoisePlan, CheckedModel, VerilogADevice};
+    use crate::canonical_ir::CanonicalIrArtifact;
+    use crate::{CompilerOptions, VerilogACompiler};
+    use std::sync::Arc;
+
+    /// A design's instances of one model and artifact take the checks and the
+    /// grouped-noise plan the first one made. Another artifact, even with the
+    /// same content, is checked again, and a dropped one is forgotten.
+    #[test]
+    fn a_designs_instances_of_one_model_take_the_first_instances_checks() {
+        let source = r#"
+`include "disciplines.vams"
+module shared_checks(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1k;
+    analog begin
+        I(p, n) <+ V(p, n) / r;
+        I(p, n) <+ white_noise(4.0 * 1.380649e-23 * 300.0 / r, "thermal");
+    end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = Arc::new(compiler.compile(source).expect("the model compiles"));
+        let artifact = Arc::new(
+            compiler
+                .compile_canonical_ir(source)
+                .expect("the canonical IR compiles"),
+        );
+        assert!(CanonicalNoisePlan::required_for(&model));
+        let instance = |name: &str, artifact: &Arc<CanonicalIrArtifact>| {
+            VerilogADevice::try_new_shared_with_simulation_parameters_and_control(
+                name,
+                Arc::clone(&model),
+                Some(artifact),
+                &[1, 0],
+                &[],
+                Default::default(),
+                &crate::NoPipelineControl,
+            )
+            .expect("the instance constructs")
+        };
+        let plan = |device: &VerilogADevice| match &device.canonical_noise_plan {
+            CanonicalNoisePlan::Ready(plan) => Arc::clone(plan),
+            other => panic!("no grouped-noise plan: {other:?}"),
+        };
+
+        let first = instance("X1", &artifact);
+        let second = instance("X2", &artifact);
+        assert!(Arc::ptr_eq(&plan(&first), &plan(&second)));
+
+        let copy = Arc::new(CanonicalIrArtifact::clone(&artifact));
+        let third = instance("X3", &copy);
+        assert!(!Arc::ptr_eq(&plan(&first), &plan(&third)));
+
+        let dropped = Arc::downgrade(&artifact);
+        drop((first, second, third, artifact, copy));
+        assert!(
+            CheckedModel::entries()
+                .iter()
+                .all(|entry| !std::ptr::eq(entry.artifact.as_ptr(), dropped.as_ptr()))
+        );
     }
 }
 
