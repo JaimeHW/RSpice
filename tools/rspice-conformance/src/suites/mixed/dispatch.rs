@@ -316,6 +316,12 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
         Some(Ok(worker)) => vec![worker],
         Some(Err(error)) => return result.failed(harness_error(error)),
     };
+    // The runners standing idle. A study runs its tasks one after another on
+    // one runner, and a runner keeps what one task leaves for the next: the
+    // state a `.TRAN` task captured for the `ACTIMES=` card bound to it, which
+    // the card's task then linearizes around instead of running the
+    // transient again. A finished runner serves the next task here too.
+    let mut runners: Vec<rspice_simulation::runner::SimulationRunner> = Vec::new();
     // A family's members are independent tasks and run side by side, as
     // the engine's own Monte Carlo runs its trials; a dependent task starts
     // once every producer it binds has finished. Results keep task order.
@@ -377,7 +383,7 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
                     TaskRun::Worker(worker_host::WorkerTask::start(worker, resolved, abort))
                 }
                 None => {
-                    let mut runner = rspice_simulation::runner::SimulationRunner::new();
+                    let mut runner = runners.pop().unwrap_or_default();
                     if let Err(error) = runner.start_prepared(resolved, false) {
                         return fail(&mut active, result, simulation_error(&error));
                     }
@@ -437,6 +443,9 @@ fn headless_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &
                 Err(error) => return fail(&mut active, result, simulation_error(&error)),
             };
             let checkpoints = done.runner.take_task_transient_checkpoints();
+            if let TaskRun::Native(runner) = done.runner {
+                runners.push(runner);
+            }
             match done.producer.capture_with_transient_checkpoints(
                 &simulated,
                 &checkpoints,
