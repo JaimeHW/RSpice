@@ -103,7 +103,7 @@ pub(crate) fn selection_summary(
     if wb.workspace != Workspace::Design {
         return wb.workspace.label().to_owned();
     }
-    if model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+    if model.workspace.content.active_view_type() == Some(crate::state::ViewType::Symbol) {
         return symbol_selection_summary(symbol, model);
     }
     let selection = &model.schematic.session.editor.selection;

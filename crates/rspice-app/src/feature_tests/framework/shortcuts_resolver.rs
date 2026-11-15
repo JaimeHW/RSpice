@@ -636,7 +636,7 @@ fn the_symbol_canvas_keys_have_one_owner_each() {
     };
     let design_symbol = ShortcutEnvironment {
         workspace: Workspace::Design,
-        active_view: ViewType::Symbol,
+        active_view: Some(ViewType::Symbol),
         canvas_focus: true,
         source_editor_focus: false,
     };

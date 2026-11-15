@@ -148,6 +148,7 @@ impl Fixture {
             &mut self.app.state.design.symbol,
             &self.app.state.model,
             &before,
+            "Move pin",
         );
         self.app
             .state
