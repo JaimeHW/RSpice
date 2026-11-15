@@ -242,7 +242,7 @@ why = "cont floats on MOS leakage when both switches are off; it is not a model-
 # freedom (bins correlate 4/9 in power with their neighbours), taken at 99.9%
 # two-sided, widened by the band's change under a 2% error in the pump gain
 # and 0.3 dB for Hann leakage at the edges, the linearized pump and the
-# acquisition residual. A free-running VCO would put the first band 15.9 dB
+# acquisition residual. A free-running VCO would put the first band 15.7 dB
 # high, outside its interval. No band edge lies within 0.35 bins of a bin.
 [[q]]
 id = "pn.suppress"
@@ -255,7 +255,7 @@ window = [2.0e-5, 5.5e-5]
 points = [4.0e4, 2.1e5]
 oracle = "O6"
 expect = "c02::phase_noise"
-why = "L(f) (analytic::c02::phase_noise), averaged over the record's bins k/35 us in the band: every rendered source is frequency noise at the VCO, S_f = [sf + Kv²·Σ 4kT/R·|Z_out,R|²]·sinc²(f·NT), with sf = 10 Hz²/Hz, |Kv| = 405.35 MHz/V at the 1.9439 V lock, R2's and R3's thermal noise through the filter to cont, and NT = 5 ns; the PFD samples the VCO phase once per 100 ns and the pump delivers K_q·Δ (K_q = 3.603 mA, oracle/mx.pump.ngspice.cir), so with G_c = K_q·Z·|Kv|/(N·s) and G_eff = Σ_m G_c(s + j·m·ω_ref), L(f) = Σ_k |T_k|²·S_f(f + k·f_ref)/(2·(f + k·f_ref)²), T_0 = 1 − G_c/(1 + G_eff) (the closed loop's high-pass), T_k = −G_c/(1 + G_eff) (sampling aliases). L = −108.68; the loop holds the VCO 15.9 dB under its free-running noise; 6 bins, nu = 5.4: chi-square [−16.11, +6.34] dB, K_q 0.22 dB, so [−125.30, −101.82]"
+why = "L(f) (analytic::c02::phase_noise), averaged over the record's bins k/35 us in the band: every rendered source is frequency noise at the VCO, S_f = [sf + Kv²·Σ 4kT/R·|Z_out,R|²]·sinc²(f·NT), with sf = 10 Hz²/Hz, |Kv| = 405.35 MHz/V at the 1.9439 V lock, R2's and R3's thermal noise through the filter to cont, and NT = 5 ns; the PFD samples the VCO phase once per 100 ns and the pump delivers K_q·Δ (K_q = 3.603 mA, oracle/mx.pump.ngspice.cir), so with G_c = K_q·Z·|Kv|/(N·s) and G_eff = Σ_m G_c(s + j·m·ω_ref), L(f) = Σ_k |T_k|²·S_f(f + k·f_ref)/(2·(f + k·f_ref)²), T_0 = 1 − G_c/(1 + G_eff) (the closed loop's high-pass), T_k = −G_c/(1 + G_eff) (sampling aliases). L = −108.56; the loop holds the VCO 15.7 dB under its free-running noise; 6 bins, nu = 5.4: chi-square [−16.08, +6.34] dB, K_q 0.22 dB, so [−125.16, −101.70]"
 
 [[q]]
 id = "pn.peak"
@@ -268,7 +268,7 @@ window = [2.0e-5, 5.5e-5]
 points = [2.1e5, 7.9e5]
 oracle = "O6"
 expect = "c02::phase_noise"
-why = "the loop's peaking, 6.5 dB over the free-running VCO (L(f) as pn.suppress); L = −98.79; 20 bins, nu = 10.1: chi-square [−9.26, +4.98] dB, K_q 0.00 dB, so [−108.36, −93.51]"
+why = "the loop's peaking, 6.6 dB over the free-running VCO (L(f) as pn.suppress); L = −98.72; 20 bins, nu = 10.1: chi-square [−9.27, +4.98] dB, K_q 0.00 dB, so [−108.28, −93.44]"
 
 [[q]]
 id = "pn.tail"
@@ -281,7 +281,7 @@ window = [2.0e-5, 5.5e-5]
 points = [7.9e5, 1.99e6]
 oracle = "O6"
 expect = "c02::phase_noise"
-why = "the loop's tail, 1.3 dB over the free-running VCO (L(f) as pn.suppress); L = −113.60; 42 bins, nu = 29.4: chi-square [−4.53, +3.20] dB, K_q 0.03 dB, so [−118.46, −110.07]"
+why = "the loop's tail, 1.4 dB over the free-running VCO (L(f) as pn.suppress); L = −113.55; 42 bins, nu = 29.4: chi-square [−4.53, +3.20] dB, K_q 0.03 dB, so [−118.41, −110.01]"
 
 [[q]]
 id = "pn.vco"
@@ -294,7 +294,7 @@ window = [2.0e-5, 5.5e-5]
 points = [1.99e6, 9.47e6]
 oracle = "O6"
 expect = "c02::phase_noise"
-why = "the VCO's own sf/(2f²), the loop within 0.13 dB (L(f) as pn.suppress); L = −125.62; 262 bins, nu = 132.3 (L falls 13 dB over the band): chi-square [−1.91, +1.63] dB, so [−127.84, −123.69]"
+why = "the VCO's own sf/(2f²), the loop within 0.2 dB (L(f) as pn.suppress); L = −125.59; 262 bins, nu = 132.0 (L falls 13 dB over the band): chi-square [−1.91, +1.63] dB, so [−127.80, −123.65]"
 
 [[q]]
 id = "pn.alias"
@@ -307,7 +307,7 @@ window = [2.0e-5, 5.5e-5]
 points = [1.053e7, 1.947e7]
 oracle = "O6"
 expect = "c02::phase_noise"
-why = "above the reference: the VCO's noise as rendered, sinc²(f·NT) included, with the sampling's aliases (L(f) as pn.suppress); L = −136.20; 313 bins, nu = 284.5: chi-square [−1.27, +1.14] dB, so [−137.77, −134.76]; the band keeps clear of the 10 and 20 MHz reference lines"
+why = "above the reference: the VCO's noise as rendered, sinc²(f·NT) included, with the sampling's aliases (L(f) as pn.suppress); L = −136.19; 313 bins, nu = 284.4: chi-square [−1.27, +1.14] dB, so [−137.76, −134.75]; the band keeps clear of the 10 and 20 MHz reference lines"
 
 [[q]]
 id = "vlock"
