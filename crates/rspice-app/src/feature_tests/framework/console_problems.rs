@@ -1234,7 +1234,7 @@ fn the_canvas_tour_and_the_grid_stand_on_one_finding() {
 /// suppressed whenever anything outside the canvas holds focus.
 #[test]
 fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
-    use crate::workbench::design::commands::DesignCommand;
+    use rspice_app_design::workbench::design::commands::DesignCommand;
     use rspice_app_workbench::workbench::app_state::session::shortcuts::{
         ShortcutEnvironment, ShortcutInputSnapshot, runtime_command_platform,
     };
@@ -1329,7 +1329,11 @@ fn app_frame(
             problems(ui, &mut app.state);
         });
         ui.scope_builder(egui::UiBuilder::new().max_rect(canvas), |ui| {
-            crate::schematic::view::render_schematic_view(ui, &mut app.state.canvas_frame(), None);
+            rspice_app_design::schematic::view::render_schematic_view(
+                ui,
+                &mut app.state.canvas_frame(),
+                None,
+            );
         });
         crate::workbench::diagnostic_routes::apply_pending(ui.ctx(), app);
     }))

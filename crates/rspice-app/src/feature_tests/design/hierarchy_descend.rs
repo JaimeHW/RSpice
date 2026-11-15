@@ -2,8 +2,8 @@
 //! transaction is answered as the shell answers it.
 
 use crate::workbench::TogglePreference;
-use crate::workbench::app::dialogs::hierarchy::descend::*;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::workbench::app::dialogs::hierarchy::descend::*;
 use rspice_app_state::state::{
     Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point, View,
     ViewType,
@@ -128,8 +128,11 @@ fn the_symbol_mode_edits_the_instance_symbol_on_this_sheet() {
         CellViewRef::new("hierarchy_test", "afe_core", "symbol")
     );
     assert_eq!(
-        crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
-            .map(|session| &session.parent),
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
+            &state.design.symbol.in_place,
+            &state.model
+        )
+        .map(|session| &session.parent),
         Some(&parent),
         "the symbol is edited on the sheet, not descended into"
     );
@@ -172,7 +175,7 @@ fn read_only_reference_belongs_to_its_document_and_never_mutates_library_ownersh
         "returning to the reference document still refuses writes"
     );
     assert!(
-        !crate::workbench::app::symbol_editor_copy_available(&state.model),
+        !rspice_app_design::workbench::app::actions::workspace::symbol_document::symbol_editor_copy_available(&state.model),
         "the symbol editor's escape hatch follows the same document"
     );
 }

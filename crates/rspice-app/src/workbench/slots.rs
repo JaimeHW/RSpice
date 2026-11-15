@@ -10,7 +10,6 @@
 
 use rspice_app_cloud::workbench::slots::cloud;
 use rspice_app_code::workbench::slots::code;
-use rspice_app_design::workbench::slots::design;
 use rspice_app_hardcopy::workbench::slots::hardcopy;
 use rspice_app_models::workbench::slots::models;
 use rspice_app_project::workbench::slots::project;
@@ -24,7 +23,6 @@ use rspice_app_simulate::workbench::slots::simulate;
 
 pub(crate) use cloud::CloudState;
 pub(crate) use code::CodeState;
-pub(crate) use design::{DesignPanel, DesignState};
 pub(crate) use hardcopy::HardcopyState;
 pub(crate) use models::ModelsState;
 pub(crate) use platform::PlatformState;

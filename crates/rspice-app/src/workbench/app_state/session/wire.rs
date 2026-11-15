@@ -19,15 +19,14 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use rspice_results_ui::report::session::ReportAuthoringState;
 use serde::{Deserialize, Serialize};
 
-use crate::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::window_session::WindowSessionRegistry;
 use crate::workbench::models::workspace_state::ModelsWorkbenchViewState;
 use crate::workbench::preferences::UserPreferences;
 use crate::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
 use crate::workbench::slots::{
-    CodeState, DesignPanel, DesignState, HardcopyState, ModelsState, PlatformState, ProjectState,
-    ResultsState, SettingsState, SimulateState,
+    CodeState, HardcopyState, ModelsState, PlatformState, ProjectState, ResultsState,
+    SettingsState, SimulateState,
 };
 use crate::workbench::state::{
     ConsolePage, VerificationSessionState, WorkbenchSession, Workspace, WorkspaceDocumentId,
@@ -35,6 +34,8 @@ use crate::workbench::state::{
     default_console_height, default_inspector_width, default_navigator_width,
 };
 use crate::workbench::{SurfaceNavigation, WorkspacePreset};
+use rspice_app_design::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
+use rspice_app_design::workbench::slots::design::{DesignPanel, DesignState};
 use rspice_app_models::workbench::documents::model_editor::ModelEditorRecoveryDraft;
 use rspice_app_state::state::{GridStyle, SchematicVisibilityPolicy, SchematicWireRoutingStyle};
 use rspice_app_state::state::{SimulationPage, VerificationPage};
@@ -829,7 +830,7 @@ impl WorkbenchWire {
 #[cfg(test)]
 mod ui_session_tests {
     use super::*;
-    use crate::workbench::app::dialogs::selection::bulk_filter::{
+    use rspice_app_design::workbench::app::dialogs::selection::bulk_filter::{
         SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind,
     };
     use rspice_app_state::state::{

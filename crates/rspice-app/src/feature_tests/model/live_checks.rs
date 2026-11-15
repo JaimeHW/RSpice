@@ -270,13 +270,13 @@ fn a_finding_a_live_pass_restated_is_marked_once_where_it_now_is() {
 
     // Turned, its pins are open where they now are.
     select_component_named(&mut state, &name);
-    let symbols = crate::schematic::view::schematic_symbol_context(&state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
     assert!(
-        crate::schematic::view::selection_transform::transform_selection_on_active_sheet(
+        rspice_app_design::schematic::view::selection_transform::transform_selection_on_active_sheet(
             &mut state.model,
             &mut state.workbench,
             &symbols,
-            crate::schematic::view::selection_transform::SelectionTransform::RotateClockwise,
+            rspice_app_design::schematic::view::selection_transform::SelectionTransform::RotateClockwise,
         )
     );
     settle(&mut state, start);

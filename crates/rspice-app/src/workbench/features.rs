@@ -16,7 +16,6 @@ use std::sync::LazyLock;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::design::DesignFeature;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
@@ -29,6 +28,7 @@ use crate::workbench::results::ResultsFeature;
 use crate::workbench::simulate::SimulateFeature;
 use rspice_app_cloud::workbench::cloud::CloudFeature;
 use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_design::workbench::design::DesignFeature;
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
 use rspice_app_settings::workbench::settings::SettingsFeature;
 use rspice_app_sheets::workbench::sheets::SheetsFeature;
@@ -575,10 +575,10 @@ impl RSpiceApp {
 /// slot, with the application's commands and its modal facts as they stand
 /// now.
 impl AppState {
-    pub(crate) fn canvas_parts(&mut self) -> crate::schematic::view::CanvasParts<'_> {
+    pub(crate) fn canvas_parts(&mut self) -> rspice_app_design::schematic::view::CanvasParts<'_> {
         let application_modal_open = self.application_modal_open();
         let dialog_modal_open = self.dialog_modal_open();
-        crate::schematic::view::canvas_parts_lent(
+        rspice_app_design::schematic::view::canvas_parts_lent(
             &mut self.design,
             &mut self.model,
             &mut self.workbench,
@@ -597,10 +597,10 @@ impl AppState {
 /// canvas through the whole application.
 #[cfg(test)]
 impl AppState {
-    pub(crate) fn canvas_frame(&mut self) -> crate::schematic::view::CanvasFrame<'_> {
+    pub(crate) fn canvas_frame(&mut self) -> rspice_app_design::schematic::view::CanvasFrame<'_> {
         let application_modal_open = self.application_modal_open();
         let dialog_modal_open = self.dialog_modal_open();
-        crate::schematic::view::canvas_frame_lent(
+        rspice_app_design::schematic::view::canvas_frame_lent(
             &mut self.design,
             &mut self.model,
             &mut self.workbench,
@@ -613,8 +613,8 @@ impl AppState {
         )
     }
 
-    pub(crate) fn canvas_facts(&self) -> crate::schematic::view::CanvasFacts<'_> {
-        crate::schematic::view::canvas_facts_lent(
+    pub(crate) fn canvas_facts(&self) -> rspice_app_design::schematic::view::CanvasFacts<'_> {
+        rspice_app_design::schematic::view::canvas_facts_lent(
             &self.design,
             &self.model,
             &self.workbench,
@@ -629,7 +629,8 @@ impl AppState {
     /// or one it asked another workspace to open that waits for the shell.
     /// Every dialog the surface asks for counts for the dialog gate too.
     pub(crate) fn canvas_application_modal_open(&self) -> bool {
-        self.application_modal_open() || crate::schematic::view::asked_dialog_waits(&self.workbench)
+        self.application_modal_open()
+            || rspice_app_design::schematic::view::asked_dialog_waits(&self.workbench)
     }
 }
 
@@ -715,7 +716,7 @@ mod tests {
                 + crate::workbench::models::commands::ModelsCommand::ALL.len()
                 + crate::workbench::simulate::commands::SimulateCommand::ALL.len()
                 + crate::workbench::project::commands::ProjectCommand::ALL.len()
-                + crate::workbench::design::commands::DesignCommand::ALL.len()
+                + rspice_app_design::workbench::design::commands::DesignCommand::ALL.len()
                 + rspice_app_code::workbench::code::commands::CodeCommand::ALL.len()
         );
     }

@@ -27,8 +27,6 @@ pub(crate) use console_views::InlineEditSession;
 pub use console_views::{
     ConsoleReveal, ConsoleSelection, ConsoleSeverity, ConsoleView, NotificationFilter,
 };
-#[cfg(test)]
-pub use rspice_app_design::workbench::state::stimulus_editor::*;
 pub use simulate_session::*;
 #[cfg(test)]
 use workbench_session::LAYOUT_SCHEMA_VERSION;

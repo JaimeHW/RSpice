@@ -3,12 +3,12 @@
 use egui::{Context, Id, Key, Modifiers, Order, Rect, pos2, vec2};
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::CommandSpec;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
 use rspice_app_workbench::ui::icons::Icon;
 use rspice_app_workbench::workbench::app::command_palette::*;

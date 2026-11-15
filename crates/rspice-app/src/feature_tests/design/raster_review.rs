@@ -1,5 +1,5 @@
 //! Canvas geometry measured on fixture sheets rendered through the real paint
-//! path ([`crate::schematic::view::render_schematic_view`]) at the zooms, themes and pixel
+//! path ([`rspice_app_design::schematic::view::render_schematic_view`]) at the zooms, themes and pixel
 //! densities a customer meets.
 //!
 //! The sheets are a dense analog stage and a hierarchy sheet with its
@@ -259,7 +259,7 @@ pub(super) fn hierarchy_sheet() -> AppState {
     let mut components = Vec::new();
     let instance = |ids: &mut Ids, master: &str, at: (i32, i32), name: &str| {
         let mut binding = LibraryCellInstance::new("work", master, "schematic");
-        binding.bind_interface(&crate::schematic::view::frame_cost::master_ports());
+        binding.bind_interface(&rspice_app_design::schematic::view::frame_cost::master_ports());
         let mut component = Component::new(
             ids.next(),
             ComponentType::CellInstance,
@@ -349,7 +349,7 @@ pub(super) fn hierarchy_sheet() -> AppState {
     state
         .model
         .library_manager
-        .add_library(crate::schematic::view::frame_cost::master_library());
+        .add_library(rspice_app_design::schematic::view::frame_cost::master_library());
     let document = state.model.schematic.document_mut_for_test();
     document.components = components;
     document.wires = wires;
@@ -357,7 +357,10 @@ pub(super) fn hierarchy_sheet() -> AppState {
     document.net_labels = labels;
     settle(&mut state);
 
-    crate::schematic::view::frame_cost::install_projected_run_geometry(&mut state.model, nets);
+    rspice_app_design::schematic::view::frame_cost::install_projected_run_geometry(
+        &mut state.model,
+        nets,
+    );
     let mut run = SimulationRun::new(1);
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_dc_op(DcOpResult {
@@ -479,7 +482,7 @@ pub(super) fn render_pointing(
     let ctx = egui::Context::default();
     ctx.set_os(egui::os::OperatingSystem::Nix);
     theme.apply(&ctx);
-    let symbols = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
+    let symbols = rspice_app_design::schematic::symbols::SymbolLibrary::load_embedded().ok();
     let mut output = None;
     for _ in 0..3 {
         let editor = &mut state.model.schematic.session.editor;
@@ -496,7 +499,7 @@ pub(super) fn render_pointing(
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ui, |ui| {
-                    crate::schematic::view::render_schematic_view(
+                    rspice_app_design::schematic::view::render_schematic_view(
                         ui,
                         &mut state.canvas_frame(),
                         symbols.as_ref(),

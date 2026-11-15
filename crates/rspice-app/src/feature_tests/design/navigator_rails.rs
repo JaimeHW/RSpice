@@ -2,12 +2,12 @@
 //! excitations and RF ports, and the occurrences each rail answers about.
 
 use super::navigator::{NavigatorPanel, interface_design, two_sheet_named_signals};
-use crate::schematic::view::sheet_visibility::SheetScope;
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::navigator::hierarchy_tree;
-use crate::workbench::design::navigator::tests::*;
-use crate::workbench::design::navigator::*;
 use crate::workbench::state::Workspace;
+use rspice_app_design::schematic::view::sheet_visibility::SheetScope;
+use rspice_app_design::workbench::design::navigator::hierarchy_tree;
+use rspice_app_design::workbench::design::navigator::tests::*;
+use rspice_app_design::workbench::design::navigator::*;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::state::ComponentType;
 use rspice_app_state::state::InstancePath;

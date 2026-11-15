@@ -1,11 +1,11 @@
 //! Editing a symbol in place on its parent sheet, drawn through a whole application.
 
-use crate::schematic::view::schematic_symbol_context;
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
 use egui::{Color32, Context, Pos2, Rect, Vec2, vec2};
+use rspice_app_design::schematic::view::schematic_symbol_context;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::{
     Cell, CellViewRef, ComponentType, LibraryCellInstance, Point, PortSpec, Rotation,
     SchematicState, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolShape, View, ViewType,
@@ -304,7 +304,7 @@ fn leaving_in_place_gives_the_sheet_back_its_own_view() {
         fixture.enter(0);
         Command::ZoomIn.execute(&mut fixture.app);
         fixture.frame(vec![]);
-        let session = crate::workbench::app::in_place_session(
+        let session = rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
             &fixture.app.state.design.symbol.in_place,
             &fixture.app.state.model,
         )
@@ -352,7 +352,7 @@ fn zoom_previous_steps_back_the_in_place_view_only_where_it_is_shown() {
     let mut fixture = Fixture::new(&[(Point::new(100, 80), Rotation::R0, false)]);
     fixture.enter(0);
     let view = |fixture: &Fixture| {
-        let session = crate::workbench::app::in_place_session(
+        let session = rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
             &fixture.app.state.design.symbol.in_place,
             &fixture.app.state.model,
         )
@@ -368,7 +368,7 @@ fn zoom_previous_steps_back_the_in_place_view_only_where_it_is_shown() {
     fixture.app.state.workbench.activate(Workspace::Simulate);
     assert_eq!(fixture.app.state.workbench.workspace, Workspace::Simulate);
     assert!(
-        crate::workbench::app::in_place_session(
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
             &fixture.app.state.design.symbol.in_place,
             &fixture.app.state.model
         )
@@ -564,9 +564,13 @@ impl Fixture {
                 app.handle_shortcuts(ui.ctx());
                 *canvas = ui.available_rect_before_wrap();
                 if app.state.model.workspace.content.active_view_type() == Some(ViewType::Symbol) {
-                    crate::schematic::symbol_editor::show(ui, &mut app.state.canvas_frame(), None);
+                    rspice_app_design::schematic::symbol_editor::show(
+                        ui,
+                        &mut app.state.canvas_frame(),
+                        None,
+                    );
                 } else {
-                    crate::schematic::view::render_schematic_view(
+                    rspice_app_design::schematic::view::render_schematic_view(
                         ui,
                         &mut app.state.canvas_frame(),
                         None,
@@ -589,7 +593,7 @@ impl Fixture {
             self.symbol
         );
         assert!(
-            crate::workbench::app::in_place_session(
+            rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
                 &self.app.state.design.symbol.in_place,
                 &self.app.state.model
             )
@@ -659,7 +663,7 @@ impl Fixture {
 
     fn on_parent(&self) -> bool {
         self.app.state.model.workspace.content.active_view == self.parent
-            && crate::workbench::app::in_place_session(
+            && rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
                 &self.app.state.design.symbol.in_place,
                 &self.app.state.model,
             )

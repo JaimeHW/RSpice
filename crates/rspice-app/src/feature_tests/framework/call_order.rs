@@ -416,10 +416,12 @@ const DISPATCH_FEATURE_COMMAND: &[Step] = &[
     ("1", &["held_back(flags, &self.state.platform).is_some()"]),
     (
         "2",
-        &["crate::workbench::app::deny_read_only_edit(\
+        &[
+            "rspice_app_design::workbench::app::actions::workspace::deny_read_only_edit(\
            &self.state.model,\
            &mut self.state.workbench,\
-           )"],
+           )",
+        ],
     ),
     ("3", &["self.state.commit_pending_inspector_edit()"]),
     ("4", &["features::execute(self, spec.key)"]),
@@ -457,8 +459,8 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "0.3",
         &[
             "|app, request: VerilogAStripRequest| match request {",
-            "crate::workbench::design::DesignFeature::open_updated_veriloga_symbol(",
-            "crate::workbench::design::DesignFeature::place_veriloga_device(",
+            "rspice_app_design::workbench::design::DesignFeature::open_updated_veriloga_symbol(",
+            "rspice_app_design::workbench::design::DesignFeature::place_veriloga_device(",
         ],
     ),
     ("1", &["|app, Execute(key)| app.execute_command_key(key)"]),
@@ -520,7 +522,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "8.2",
         &[
             "|app, OpenStimulusDefinition(definition)|",
-            "crate::workbench::app::show_stimulus_definition(\
+            "rspice_app_design::workbench::app::dialogs::stimulus_link::show_stimulus_definition(\
              &mut app.state.design.selected_stimulus_definition,\
              &mut app.state.workbench,\
              &definition,\
@@ -562,7 +564,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "12",
         &[
             "|app, MarkFailureSites(run_sequence)|",
-            "if crate::workbench::app::highlight_active_failure_sites(\
+            "if rspice_app_design::workbench::app::actions::workspace::highlight_active_failure_sites(\
              &mut app.state.model,\
              &mut app.state.workbench,\
              ) {",
@@ -584,7 +586,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "15",
         &[
             "|app, BindComponentModel { component_id, library, model, }|",
-            "crate::workbench::design::inspector::bind_component_model_from_catalog(",
+            "rspice_app_design::workbench::design::inspector::bind_component_model_from_catalog(",
             "app.state.models.models_view.note_receipt(result);",
         ],
     ),
@@ -592,39 +594,39 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "16",
         &[
             "|app, request: OpenSymbolAuthoring| match request {",
-            "crate::workbench::app::open_create_model_bound_symbol_dialog(\
+            "rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_create_model_bound_symbol_dialog(\
              &mut app.state.design.create_model_bound_symbol,\
              &app.state.model,\
              &mut app.state.workbench,\
              app.state.models.selected_model.as_deref(),\
              );",
-            "crate::workbench::app::open_symbol_parameter_form_dialog(\
+            "rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_parameter_form_dialog(\
              &mut app.state.design.symbol_parameter_form,\
              &app.state.model,\
              &mut app.state.workbench,\
              &app.state.platform,\
              );",
-            "crate::workbench::app::open_symbol_parameter_form_dialog_for(\
+            "rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_parameter_form_dialog_for(\
              &mut app.state.design.symbol_parameter_form,\
              &app.state.model,\
              &mut app.state.workbench,\
              &app.state.platform,\
              target,\
              );",
-            "crate::workbench::app::open_symbol_import_dialog(\
+            "rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_import_dialog(\
              &mut app.state.design.symbol_import,\
              &app.state.model,\
              &mut app.state.workbench,\
              &app.state.platform,\
              );",
-            "crate::workbench::app::open_symbol_import_dialog_for(\
+            "rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_import_dialog_for(\
              &mut app.state.design.symbol_import,\
              &app.state.model,\
              &mut app.state.workbench,\
              &app.state.platform,\
              Some(&binding_source),\
              );",
-            "crate::workbench::app::open_create_subcircuit_bound_symbol_dialog(",
+            "rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_create_subcircuit_bound_symbol_dialog(",
             "app.state.models.models_view.note_receipt(result);",
         ],
     ),
@@ -1196,7 +1198,7 @@ const END_FRAME: &[Step] = &[
     (
         "16.2",
         &[
-            "crate::workbench::synchronize_schematic_cross_probe(",
+            "rspice_app_design::workbench::cross_probe::synchronize_schematic_cross_probe(",
             "project_cross_probe_trace(projection.released_trace, projection.trace)",
             "project_cross_probe_line(projection.released_line, projection.line)",
         ],
@@ -2054,7 +2056,7 @@ const CREATE_HIERARCHY_OPENED: &[Step] = &[(
     "OpenCreateHierarchy",
     &[
         "ProjectRequest::OpenCreateHierarchy => {",
-        "crate::workbench::app::open_create_hierarchy_dialog(
+        "rspice_app_design::workbench::app::dialogs::hierarchy::create::open_create_hierarchy_dialog(
             &mut app.state.design.create_hierarchy,
             &app.state.model,
             &mut app.state.workbench,

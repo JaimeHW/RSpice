@@ -1,8 +1,8 @@
 //! The engineering table drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::engineering_table::tests as dialog;
-use crate::workbench::app::dialogs::engineering_table::*;
+use rspice_app_design::workbench::app::dialogs::engineering_table::tests as dialog;
+use rspice_app_design::workbench::app::dialogs::engineering_table::*;
 use rspice_app_state::state::EngineeringTableView;
 use rspice_app_state::state::EngineeringViewScope;
 use rspice_app_state::state::engineering_table::active_schematic_dataset;

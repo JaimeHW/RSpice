@@ -1,18 +1,18 @@
 //! Editing the properties a selection shares through the whole application: the dialog
 //! asks the application whether a dialog holds the canvas.
 
-use crate::properties::property_bridge::collect_properties_from_component;
-use crate::properties::property_bridge::property_value_to_string;
-use crate::workbench::app::dialogs::selection::shared_properties::SharedField;
-use crate::workbench::app::dialogs::selection::shared_properties::tests::resistor;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::properties::property_bridge::collect_properties_from_component;
+use rspice_app_design::properties::property_bridge::property_value_to_string;
+use rspice_app_design::workbench::app::dialogs::selection::shared_properties::SharedField;
+use rspice_app_design::workbench::app::dialogs::selection::shared_properties::tests::resistor;
 use rspice_app_state::state::ComponentType;
 
 /// Open the form, over the parts it reads and edits.
 fn open_shared_properties(state: &mut AppState) -> bool {
     let modal_open = state.dialog_modal_open();
     let design = &mut state.design;
-    crate::workbench::app::dialogs::selection::shared_properties::open_shared_properties(
+    rspice_app_design::workbench::app::dialogs::selection::shared_properties::open_shared_properties(
         &mut design.shared_properties,
         &design.property_registry,
         modal_open,
@@ -23,7 +23,7 @@ fn open_shared_properties(state: &mut AppState) -> bool {
 
 /// The apply, over the parts it reads and edits.
 fn apply_shared_properties(state: &mut AppState) -> Result<usize, String> {
-    crate::workbench::app::dialogs::selection::shared_properties::apply_shared_properties(
+    rspice_app_design::workbench::app::dialogs::selection::shared_properties::apply_shared_properties(
         &state.design.shared_properties,
         &state.design.property_registry,
         &mut state.model,

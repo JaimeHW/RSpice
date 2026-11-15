@@ -1,10 +1,6 @@
 //! Command-dispatch helpers that apply concrete workbench state transitions.
 
 use super::*;
-use crate::workbench::app::actions::workspace::{
-    HistoryStepParts, project_step_comes_first, take_history_step,
-};
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::framework::requests::ProjectFileAction;
@@ -15,6 +11,10 @@ use crate::workbench::session::project_transactions::{
     apply_workspace_pruned, void_veriloga_evidence,
 };
 use rspice_app_code::workbench::code::commands::CodeHandOff;
+use rspice_app_design::workbench::app::actions::workspace::{
+    HistoryStepParts, project_step_comes_first, take_history_step,
+};
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::Leaving;
 use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
@@ -445,7 +445,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             }
         }
         ProjectRequest::OpenCreateHierarchy => {
-            crate::workbench::app::open_create_hierarchy_dialog(
+            rspice_app_design::workbench::app::dialogs::hierarchy::create::open_create_hierarchy_dialog(
                 &mut app.state.design.create_hierarchy,
                 &app.state.model,
                 &mut app.state.workbench,

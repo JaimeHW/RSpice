@@ -2,12 +2,12 @@
 //! back to the glyph of a command's scope.
 
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_state::state::command_catalog::CommandKey;
 use rspice_app_workbench::ui::icons::Icon;

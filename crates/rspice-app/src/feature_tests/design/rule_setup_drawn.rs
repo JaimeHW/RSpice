@@ -1,8 +1,8 @@
 //! The rule setup dialog drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::rule_setup::*;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::workbench::app::dialogs::rule_setup::*;
 use rspice_design::drc::DeckIssue;
 use rspice_design::drc::DrcSeverity;
 use rspice_design::drc::DrcViolationType;
@@ -10,7 +10,7 @@ use rspice_design::drc::DrcViolationType;
 /// Apply the draft as the dialog's Apply does, over the whole state.
 fn apply_rule_setup(state: &mut AppState) {
     let review_markers = state.design.schematic_visibility.review_markers;
-    crate::workbench::app::dialogs::rule_setup::apply_rule_setup(
+    rspice_app_design::workbench::app::dialogs::rule_setup::apply_rule_setup(
         &mut state.design.rule_setup,
         review_markers,
         &mut state.model,

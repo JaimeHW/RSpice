@@ -5,8 +5,8 @@
 //! only the mutating ones explain the refusal and decline.
 
 use super::*;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::project::commands::ProjectCommand;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 
 #[test]
 fn design_menu_commands_explain_wrong_context_and_read_only_states() {

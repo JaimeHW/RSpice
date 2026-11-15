@@ -2,8 +2,8 @@
 //! stale document or selection targets.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::actions::workspace::symbol_document::active_symbol_label_parameters;
-use crate::workbench::design::inspector::symbol::*;
+use rspice_app_design::workbench::app::actions::workspace::symbol_document::active_symbol_label_parameters;
+use rspice_app_design::workbench::design::inspector::symbol::*;
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, Point, SymbolDocument, SymbolEditorMetadata, SymbolShape, View,
     ViewType,
@@ -750,7 +750,7 @@ impl Editor {
     }
 
     pub(crate) fn frame(&mut self, events: Vec<egui::Event>) -> SymbolInspectorRequest {
-        let source = crate::workbench::app::symbol_editor_request_source(
+        let source = rspice_app_design::workbench::app::actions::workspace::symbol_document::symbol_editor_request_source(
             &self.app.state.model,
             &self.app.state.workbench,
         );
@@ -772,14 +772,14 @@ impl Editor {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     panel_body(ui, |ui| {
                         let document = self.app.state.model.load_active_symbol_document().unwrap();
-                        let metadata = crate::workbench::app::load_active_symbol_editor_metadata(
+                        let metadata = rspice_app_design::workbench::app::actions::workspace::symbol_document::load_active_symbol_editor_metadata(
                             &self.app.state.model,
                             &document,
                         )
                         .unwrap();
                         request = Some(inspector::show(
                             ui,
-                            crate::workbench::app::symbol_editor_request_source(
+                            rspice_app_design::workbench::app::actions::workspace::symbol_document::symbol_editor_request_source(
                                 &self.app.state.model,
                                 &self.app.state.workbench,
                             ),

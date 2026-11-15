@@ -1,11 +1,11 @@
 //! The mobile canvas controls drawn through a whole application.
 
 use super::mobile_controls::strip_cx;
-use crate::schematic::view::mobile_controls::{operation_live, show};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::duplicate_schematic_selection_at;
 use crate::workbench::state::Workspace;
 use egui::{Context, Event, Pos2, RawInput, Rect, TouchPhase, Vec2};
+use rspice_app_design::schematic::view::mobile_controls::{operation_live, show};
+use rspice_app_design::workbench::app::dialogs::selection::commands::duplicate_schematic_selection_at;
 use rspice_app_state::state::{ComponentType, Point, SchematicState};
 
 /// A Design workspace under a finger: the canvas and the strip, drawn as the
@@ -89,7 +89,7 @@ impl Finger {
             |ui| {
                 app.state.reconcile_schematic_drag(ui.ctx(), false);
                 *canvas = ui.available_rect_before_wrap();
-                crate::schematic::view::render_schematic_view(
+                rspice_app_design::schematic::view::render_schematic_view(
                     ui,
                     &mut app.state.canvas_frame(),
                     None,
@@ -541,7 +541,7 @@ fn the_strip_turns_a_floating_duplicate() {
         finger.app.state.design.floating_paste.is_some(),
         "the copy still floats"
     );
-    assert!(crate::workbench::app::place_floating_paste(
+    assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
         &mut finger.app.state.design.floating_paste,
         &mut finger.app.state.model,
         &mut finger.app.state.workbench

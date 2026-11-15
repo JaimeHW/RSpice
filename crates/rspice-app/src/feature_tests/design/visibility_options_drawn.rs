@@ -1,9 +1,9 @@
 //! The visibility options dialog drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::visibility_options::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::visibility_options::*;
 use rspice_app_state::state::SchematicParameterLabelVisibility;
 
 /// Draw the dialog as its dialog step does.

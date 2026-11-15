@@ -1,9 +1,9 @@
 //! Canvas drags bound to the application's checked transaction owner, driven
 //! through a whole application.
 
-use crate::schematic::view::selection_drag::*;
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::DragType;
+use rspice_app_design::schematic::view::selection_drag::*;
+use rspice_app_design::workbench::app_state::interaction_state::DragType;
 use rspice_app_state::state::{CellViewRef, ComponentType, Point, ViewType};
 use rspice_schematic_editor::view::pointer_target::PointerTarget;
 use rspice_schematic_editor::view::selection_drag::SelectionDragAction;
@@ -22,7 +22,7 @@ fn a_vertex_drag_over_a_lone_junction_follows_the_pointer_every_frame() {
     let junction = Point::new(100, 100);
     state.model.schematic.add_junction(junction);
     // No component takes part, so one context serves the whole gesture.
-    let symbols = crate::schematic::view::schematic_symbol_context(&state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
 
     dispatch(
         &mut state.canvas_parts(),
@@ -67,7 +67,7 @@ fn a_vertex_drag_over_a_lone_junction_follows_the_pointer_every_frame() {
 fn drag(
     state: &mut AppState,
     ctx: &egui::Context,
-    symbols: &crate::schematic::view::SchematicSymbolContext,
+    symbols: &rspice_app_design::schematic::view::SchematicSymbolContext,
     target: PointerTarget,
     from: Point,
     delta: Point,
@@ -111,7 +111,7 @@ fn drag(
 fn drag_through(
     state: &mut AppState,
     ctx: &egui::Context,
-    symbols: &crate::schematic::view::SchematicSymbolContext,
+    symbols: &rspice_app_design::schematic::view::SchematicSymbolContext,
     target: PointerTarget,
     from: Point,
     steps: &[Point],
@@ -181,7 +181,7 @@ fn a_dragged_part_keeps_its_wires_square() {
     let ctx = egui::Context::default();
     let mut state = AppState::default();
     let (target, pin, far) = resistor_wired_right(&mut state);
-    let symbols = crate::schematic::view::schematic_symbol_context(&state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
 
     drag_through(
         &mut state,
@@ -213,7 +213,7 @@ fn a_diagonal_drag_toward_the_far_end_leaves_no_hook() {
     let ctx = egui::Context::default();
     let mut state = AppState::default();
     let (target, pin, far) = resistor_wired_right(&mut state);
-    let symbols = crate::schematic::view::schematic_symbol_context(&state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
 
     drag_through(
         &mut state,
@@ -250,7 +250,7 @@ fn dragging_a_part_off_a_pin_it_touched_wires_the_two_pins() {
         .schematic
         .add_component(ComponentType::Resistor, pitch);
     state.model.schematic.init_undo_history();
-    let symbols = crate::schematic::view::schematic_symbol_context(&state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
 
     drag_through(
         &mut state,
@@ -280,7 +280,7 @@ fn a_drag_that_wanders_and_comes_home_leaves_the_wire_as_drawn() {
     let mut state = AppState::default();
     let (target, _, _) = resistor_wired_right(&mut state);
     let drawn = state.model.schematic.document().wires.clone();
-    let symbols = crate::schematic::view::schematic_symbol_context(&state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
 
     drag_through(
         &mut state,
@@ -318,7 +318,7 @@ fn a_drag_passing_over_a_loose_wire_end_leaves_it_behind() {
         .wires
         .push(loose.clone());
     state.model.schematic.init_undo_history();
-    let symbols = crate::schematic::view::schematic_symbol_context(&state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
 
     drag_through(
         &mut state,
@@ -350,7 +350,7 @@ fn an_angled_routing_style_stretches_the_dragged_wire_straight() {
         .editor
         .wire_drawing
         .set_routing_mode(rspice_app_state::state::WireRoutingMode::Diagonal);
-    let symbols = crate::schematic::view::schematic_symbol_context(&state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
 
     drag_through(
         &mut state,
@@ -391,7 +391,7 @@ fn a_drag_leaves_another_sheets_wire_end_in_place() {
         hidden.clone(),
     ];
     state.model.schematic.init_undo_history();
-    let symbols = crate::schematic::view::schematic_symbol_context(&state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
 
     drag_through(
         &mut state,
@@ -434,7 +434,7 @@ fn a_pin_dragged_into_a_wire_splits_it_and_the_next_drag_carries_it() {
         ),
     );
     state.model.schematic.init_undo_history();
-    let symbols = crate::schematic::view::schematic_symbol_context(&state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
     let target = PointerTarget::Component(id);
 
     drag(
@@ -486,7 +486,7 @@ fn queued_drag_requests_reject_changed_sources_and_replacement_transactions() {
             .model
             .workspace
             .descend_into("X1".into(), master.clone(), ViewType::Schematic);
-        let symbols = crate::schematic::view::schematic_symbol_context(&state);
+        let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&state);
         let action = SelectionDragAction::BeginSelection {
             target: PointerTarget::Component(id),
             position: Point::new(100, 100),

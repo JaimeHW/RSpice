@@ -8,11 +8,11 @@
 
 use super::*;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 
 #[test]
 fn command_catalog_has_unique_stable_ids() {

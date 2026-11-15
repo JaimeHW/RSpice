@@ -2,9 +2,11 @@
 
 use crate::feature_tests::design::rename::{apply_commit, component_app};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::selection::rename::tests::{self as dialog, key_event};
-use crate::workbench::app::dialogs::selection::rename::*;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::selection::rename::tests::{
+    self as dialog, key_event,
+};
+use rspice_app_design::workbench::app::dialogs::selection::rename::*;
 use rspice_app_state::state::Component;
 use rspice_app_state::state::{ComponentType, NetLabel, Point, Wire};
 

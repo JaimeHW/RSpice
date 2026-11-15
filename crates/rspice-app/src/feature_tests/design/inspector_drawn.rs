@@ -3,9 +3,11 @@
 
 use super::inspector::app_with_model_bound_instance;
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::inspector::component::{bound_model_choices, catalog_model_location};
-use crate::workbench::design::inspector::tests::painted_panel;
-use crate::workbench::design::inspector::*;
+use rspice_app_design::workbench::design::inspector::component::{
+    bound_model_choices, catalog_model_location,
+};
+use rspice_app_design::workbench::design::inspector::tests::painted_panel;
+use rspice_app_design::workbench::design::inspector::*;
 use rspice_app_state::state::{Point, SchematicProbe};
 
 /// One retained probe on a cell view whose sheet catalog holds `sheets`

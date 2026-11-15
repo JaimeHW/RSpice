@@ -927,7 +927,7 @@ SYMATTR Value 1k
 
 /// What a sheet paints, as text: every stroke and every run of lettering.
 fn painted_sheet(state: &mut AppState) -> Vec<String> {
-    let symbols = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
+    let symbols = rspice_app_design::schematic::symbols::SymbolLibrary::load_embedded().ok();
     let ctx = egui::Context::default();
     ctx.set_os(egui::os::OperatingSystem::Nix);
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
@@ -943,7 +943,7 @@ fn painted_sheet(state: &mut AppState) -> Vec<String> {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ui, |ui| {
-                    crate::schematic::view::render_schematic_view(
+                    rspice_app_design::schematic::view::render_schematic_view(
                         ui,
                         &mut state.canvas_frame(),
                         symbols.as_ref(),

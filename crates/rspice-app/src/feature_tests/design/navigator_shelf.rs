@@ -1,18 +1,18 @@
 //! The component shelf drawn through a whole application: arming, variants, supplies, pins,
 //! the recent band and its history, keyboard walks and the stimulus section.
 
-use crate::schematic::view::SchematicShelfDragPayload;
-use crate::schematic::{
-    ComponentCategory, PaletteRow, component_palette, palette_rows, supply_palette,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::design::navigator::shelf::*;
-use crate::workbench::design::navigator::tests::shelf::{
+use crate::workbench::framework::requests::FocusPlacementSearch;
+use rspice_app_design::schematic::view::SchematicShelfDragPayload;
+use rspice_app_design::schematic::{
+    ComponentCategory, PaletteRow, component_palette, palette_rows, supply_palette,
+};
+use rspice_app_design::workbench::design::navigator::shelf::*;
+use rspice_app_design::workbench::design::navigator::tests::shelf::{
     draw_component_shelf, retained_model_library,
 };
-use crate::workbench::design::navigator::tests::*;
-use crate::workbench::framework::requests::FocusPlacementSearch;
+use rspice_app_design::workbench::design::navigator::tests::*;
 use rspice_app_state::state::model_hub::PartPlacement;
 use rspice_app_state::state::{
     ComponentType, Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports,
@@ -116,7 +116,9 @@ fn a_part_the_project_retained_arms_from_the_component_shelf() {
     let rows = library_part_rows(
         &app.model_hub,
         &app.state.model,
-        &crate::workbench::design::navigator::shelf::search::ShelfQuery::new("proving_parts"),
+        &rspice_app_design::workbench::design::navigator::shelf::search::ShelfQuery::new(
+            "proving_parts",
+        ),
     );
     let row = |name: &str| {
         rows.iter()
@@ -290,7 +292,7 @@ fn a_supply_row_places_its_global_rail_on_every_click() {
         let before = app.state.model.schematic.document().net_labels.len();
         for y in [0, 20] {
             let dialog_modal_open = app.state.dialog_modal_open();
-            assert!(crate::workbench::app::place_sequenced_net_label_in(
+            assert!(rspice_app_design::workbench::app::dialogs::placement::net_label::place_sequenced_net_label_in(
                 &mut app.state.model,
                 &mut app.state.workbench,
                 dialog_modal_open,
@@ -308,7 +310,9 @@ fn a_supply_row_places_its_global_rail_on_every_click() {
         assert!(
             shelf_hits(
                 &app.state.model,
-                &crate::workbench::design::navigator::shelf::search::ShelfQuery::new(name),
+                &rspice_app_design::workbench::design::navigator::shelf::search::ShelfQuery::new(
+                    name
+                ),
                 &[],
                 &[],
             )
@@ -324,7 +328,7 @@ fn a_supply_row_places_its_global_rail_on_every_click() {
     app.state.model.schematic.arm_tool(Tool::Select);
     let dialog_modal_open = app.state.dialog_modal_open();
     assert!(
-        !crate::workbench::app::place_sequenced_net_label_in(
+        !rspice_app_design::workbench::app::dialogs::placement::net_label::place_sequenced_net_label_in(
             &mut app.state.model,
             &mut app.state.workbench,
             dialog_modal_open,

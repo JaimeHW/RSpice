@@ -1,7 +1,7 @@
 //! The schematic canvas drawn by a whole application's frame.
 
-use crate::schematic::view::*;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::schematic::view::*;
 use rspice_app_state::state::{Component, ComponentType, Point};
 
 #[cfg(not(target_arch = "wasm32"))]

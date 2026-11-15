@@ -264,7 +264,7 @@ fn after_a_sheet_tab_the_canvas_still_takes_its_keys() {
                     app.handle_shortcuts(ui.ctx());
                     chrome_rows(ui, app);
                     egui::CentralPanel::default().show(ui, |ui| {
-                        crate::schematic::view::render_schematic_view(
+                        rspice_app_design::schematic::view::render_schematic_view(
                             ui,
                             &mut app.state.canvas_frame(),
                             None,

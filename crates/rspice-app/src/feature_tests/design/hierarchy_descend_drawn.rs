@@ -2,8 +2,8 @@
 
 use crate::feature_tests::design::hierarchy_descend::hierarchy_state;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::hierarchy::descend::*;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::hierarchy::descend::*;
 
 /// Every text the descent form paints over `app`, after three frames.
 fn painted_texts(app: &mut RSpiceApp) -> Vec<String> {

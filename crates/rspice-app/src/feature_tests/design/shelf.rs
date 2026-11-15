@@ -1,7 +1,7 @@
 //! The parts shelf drawn and armed through a whole application.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::navigator::shelf::*;
+use rspice_app_design::workbench::design::navigator::shelf::*;
 use rspice_app_state::state::{ComponentType, Tool};
 
 #[test]

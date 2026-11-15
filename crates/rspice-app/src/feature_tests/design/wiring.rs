@@ -1,8 +1,8 @@
 //! Wiring on the canvas driven through a whole application.
 
-use crate::schematic::view::interaction::handle_tool_interactions;
-use crate::schematic::view::schematic_symbol_context;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::schematic::view::interaction::handle_tool_interactions;
+use rspice_app_design::schematic::view::schematic_symbol_context;
 use rspice_app_state::state::{ComponentType, Point, Tool, Wire};
 use rspice_schematic_editor::view::viewport::Viewport;
 

@@ -2,12 +2,12 @@
 //! whole application lends: the rows, the scope strip, the footer and the
 //! adopter cards.
 
-use crate::workbench::design::inspector::stimulus as inspector_dock;
-use crate::workbench::design::navigator::stimulus::tests::NAVIGATOR;
-use crate::workbench::design::navigator::stimulus::*;
-use crate::workbench::docks::navigator::stimulus_browser_state::StimulusScope;
 use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_design::workbench::design::inspector::stimulus as inspector_dock;
+use rspice_app_design::workbench::design::navigator::stimulus::tests::NAVIGATOR;
+use rspice_app_design::workbench::design::navigator::stimulus::*;
+use rspice_app_design::workbench::docks::navigator::stimulus_browser_state::StimulusScope;
 use rspice_app_state::state::stimulus_library::definition::StimulusFamily;
 use rspice_app_state::state::stimulus_library::draft::DefinitionDraft;
 use rspice_app_state::state::stimulus_library::fixtures;

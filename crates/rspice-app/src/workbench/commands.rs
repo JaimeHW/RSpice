@@ -4,12 +4,12 @@
 //! command is omitted from a menu when its behavior is not implemented; the
 //! UI does not advertise speculative or placeholder capability.
 
-use crate::workbench::app::actions::workspace::HistoryDirection;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
 use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_design::workbench::app::actions::workspace::HistoryDirection;
 use rspice_app_workbench::workbench::app::dialogs::window_session::{
     WindowSessionPage, WindowWorkflow, open_window_workflow,
 };
@@ -385,7 +385,7 @@ impl Command {
             }
             Self::Cancel => {
                 if active_symbol_editor(app)
-                    && super::app::actions::workspace::symbol_in_place::symbol_in_place_canvas_idle(
+                    && rspice_app_design::workbench::app::actions::workspace::symbol_in_place::symbol_in_place_canvas_idle(
                         &app.state.design.symbol,
                         &app.state.model,
                     )
@@ -393,7 +393,7 @@ impl Command {
                     // Nothing on the canvas to cancel: Escape leaves the
                     // in-place edit, as Return does.
                     app.state.navigation().request_symbol_in_place_exit(
-                        super::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Parent,
+                        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Parent,
                     );
                 } else if active_symbol_editor(app) {
                     // Escape lets go of the shape being drawn and keeps its
@@ -412,23 +412,23 @@ impl Command {
                     app.state.model.schematic.session.editor.zoom_box.disarm();
                 } else if app.state.design.descend_hierarchy.open {
                     app.state.design.descend_hierarchy.close();
-                } else if crate::workbench::app::cancel_floating_paste_in(
+                } else if rspice_app_design::workbench::app::dialogs::selection::commands::floating::cancel_floating_paste_in(
                     &mut app.state.design.floating_paste,
                     &mut app.state.workbench,
                 ) {
                     // The floating copy is let go; the drawing never changed.
                 } else if app.state.design.move_selection.armed {
-                    crate::workbench::app::cancel_armed_move_selection_in(
+                    rspice_app_design::workbench::app::dialogs::selection::move_selection::cancel_armed_move_selection_in(
                         &mut app.state.design.move_selection,
                         &mut app.state.model,
                     );
                 } else if app.state.design.stretch_selection.armed {
-                    crate::workbench::app::cancel_armed_stretch_selection_in(
+                    rspice_app_design::workbench::app::dialogs::selection::stretch::cancel_armed_stretch_selection_in(
                         &mut app.state.design.stretch_selection,
                         &mut app.state.model,
                     );
                 } else if app.state.design.array_selection.armed {
-                    crate::workbench::app::cancel_armed_array_selection_in(
+                    rspice_app_design::workbench::app::dialogs::selection::array::cancel_armed_array_selection_in(
                         &mut app.state.design.array_selection,
                         &mut app.state.model,
                     );

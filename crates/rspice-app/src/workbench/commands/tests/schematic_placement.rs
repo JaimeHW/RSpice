@@ -6,7 +6,7 @@
 //! that cancelling or escaping returns to.
 
 use super::*;
-use crate::workbench::design::commands::DesignCommand;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 
 #[test]
 fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_available() {
@@ -52,7 +52,7 @@ fn draw_bus_arms_directly_but_bus_tap_waits_for_its_validated_dialog() {
     assert!(app.state.design.bus_tap.open);
     assert_eq!(
         app.state.design.bus_tap.source,
-        Some(crate::workbench::app::schematic_editor_request_source(
+        Some(rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
             &app.state
         ))
     );

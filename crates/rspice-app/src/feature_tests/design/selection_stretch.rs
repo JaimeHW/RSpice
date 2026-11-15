@@ -1,8 +1,8 @@
 //! Stretching a selection through the whole application: arming the stretch asks the
 //! application whether a dialog holds the canvas.
 
-use crate::workbench::app::arm_stretch_selection_in;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::workbench::app::dialogs::selection::stretch::arm_stretch_selection_in;
 use rspice_app_state::state::StretchOrthogonalPolicy;
 use rspice_app_state::state::Tool;
 use rspice_app_state::state::{Point, StretchTarget, Wire};

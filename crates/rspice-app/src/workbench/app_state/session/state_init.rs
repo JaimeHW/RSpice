@@ -113,7 +113,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     };
     // The slots derive their `Default`; these are the values a new session
     // was always built with, set where they always were.
-    state.design.property_registry = crate::properties::PropertyEditorSchema::new();
+    state.design.property_registry = rspice_app_design::properties::PropertyEditorSchema::new();
     state.results.calculator_panel = CalculatorPanel::new();
     *state.models.pdk_settings_dialog = PdkSettingsDialogState::new();
     *state.results.analysis = analysis;

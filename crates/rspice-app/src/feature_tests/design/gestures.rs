@@ -2,7 +2,7 @@
 
 use crate::feature_tests::design::gestures_drawn::Fixture;
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::DragType;
+use rspice_app_design::workbench::app_state::interaction_state::DragType;
 use rspice_app_state::state::{Point, SchematicState, Tool};
 
 #[test]

@@ -7,17 +7,17 @@
 //! Here too, what the design feature's dialogs hand the shell to carry out
 //! over the whole session.
 
-use crate::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
-use crate::workbench::app::dialogs::connectivity_manager::{
-    apply_selected_connectivity_repairs, reveal_connectivity_target,
-};
-use crate::workbench::app::dialogs::design_request::DesignRequest;
-use crate::workbench::app::dialogs::hierarchy::create::commit_create_hierarchy;
-use crate::workbench::app::dialogs::hierarchy::descend::answer_descend_hierarchy;
-use crate::workbench::app::open_create_model_bound_symbol_dialog;
 use crate::workbench::documents::result_document::open_specification_editor;
 use crate::workbench::{AppState, RSpiceApp, ResultViewer};
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
+use rspice_app_design::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
+use rspice_app_design::workbench::app::dialogs::connectivity_manager::{
+    apply_selected_connectivity_repairs, reveal_connectivity_target,
+};
+use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_create_model_bound_symbol_dialog;
+use rspice_app_design::workbench::app::dialogs::design_request::DesignRequest;
+use rspice_app_design::workbench::app::dialogs::hierarchy::create::commit_create_hierarchy;
+use rspice_app_design::workbench::app::dialogs::hierarchy::descend::answer_descend_hierarchy;
 
 /// Carry out what the design surface asked of another feature's workspace,
 /// as the surface once did in place.

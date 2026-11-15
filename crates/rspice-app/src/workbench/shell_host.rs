@@ -85,8 +85,8 @@ impl Host for RSpiceApp {
             Point::Surface(workspace) => {
                 use crate::workbench::documents::code_workspace::sync_automation_debugger;
                 use crate::workbench::project::workspace_state::LibraryCellviewPage;
-                use crate::workbench::surfaces::stimulus;
                 use rspice_app_code::workbench::surfaces::{automation, netlist, veriloga};
+                use rspice_app_design::workbench::surfaces::stimulus;
                 use rspice_app_project::workbench::surfaces::{library_cellview_manager, project};
                 use rspice_app_simulate::workbench::surfaces::{simulate, verify};
 
@@ -180,7 +180,7 @@ impl Host for RSpiceApp {
                     // document drew, reading its commands' answers only where
                     // it draws.
                     Workspace::Design => {
-                        use crate::workbench::design::DesignFeature;
+                        use rspice_app_design::workbench::design::DesignFeature;
 
                         let verilog_a = app
                             .state
@@ -206,7 +206,7 @@ impl Host for RSpiceApp {
                                 == super::SurfaceId::Design
                         {
                             let ctx = ui.ctx().clone();
-                            crate::schematic::view::show_mobile_canvas_controls(
+                            rspice_app_design::schematic::view::show_mobile_canvas_controls(
                                 &ctx,
                                 &mut features::surface_cx::<DesignFeature>(app, |_| {
                                     rspice_schematic_editor::view::pointer_target::canvas_touch_mode(
@@ -287,9 +287,9 @@ impl Host for RSpiceApp {
             }
             // A workspace's navigator, below the heading and the filter field.
             Point::Navigator(workspace) => {
-                use crate::workbench::design::DesignFeature;
-                use crate::workbench::design::navigator as design;
-                use crate::workbench::design::navigator::stimulus;
+                use rspice_app_design::workbench::design::DesignFeature;
+                use rspice_app_design::workbench::design::navigator as design;
+                use rspice_app_design::workbench::design::navigator::stimulus;
 
                 match workspace {
                     // What the reader asked of the code navigator is
@@ -340,9 +340,9 @@ impl Host for RSpiceApp {
             }
             // A workspace's own inspector section.
             Point::Inspector(InspectorScope::Workspace(workspace)) => {
-                use crate::workbench::design::DesignFeature;
-                use crate::workbench::design::inspector as design;
-                use crate::workbench::design::inspector::stimulus;
+                use rspice_app_design::workbench::design::DesignFeature;
+                use rspice_app_design::workbench::design::inspector as design;
+                use rspice_app_design::workbench::design::inspector::stimulus;
 
                 match workspace {
                     // What the reader asked of the project inspector is
@@ -422,12 +422,12 @@ impl Host for RSpiceApp {
             Point::Toolbar(ToolbarSlot::Tools(scope), layout) => {
                 use crate::workbench::chrome::toolbar::feature_tools;
                 use crate::workbench::chrome::toolbar::{context_separator, toolbar_icon_command};
-                use crate::workbench::design::DesignFeature;
-                use crate::workbench::design::toolbar::{
-                    SCHEMATIC_TOOLBAR, STIMULUS_TOOLBAR, SYMBOL_TOOLBAR,
-                };
                 use rspice_app_code::workbench::code::toolbar::{
                     NETLIST_TOOLBAR, VERILOGA_TOOLBAR,
+                };
+                use rspice_app_design::workbench::design::DesignFeature;
+                use rspice_app_design::workbench::design::toolbar::{
+                    SCHEMATIC_TOOLBAR, STIMULUS_TOOLBAR, SYMBOL_TOOLBAR,
                 };
                 use rspice_app_models::workbench::chrome::toolbar::models::{
                     model_editor_tools, models_tools,
@@ -672,8 +672,8 @@ impl Host for RSpiceApp {
     }
 
     fn title_cell(&self, workspace: Workspace) -> String {
-        use crate::workbench::chrome::title_bar::design::design_title_cell;
         use rspice_app_code::workbench::chrome::title_bar::code::code_title_cell;
+        use rspice_app_design::workbench::chrome::title_bar::design::design_title_cell;
 
         let app = self;
         match workspace {
@@ -767,10 +767,10 @@ impl Host for RSpiceApp {
         // Update pins names the drawing it takes the pins from, so every
         // place the command is shown says which one.
         if key
-            == crate::workbench::design::commands::DesignCommand::SymbolUpdatePinsFromContract.key()
+            == rspice_app_design::workbench::design::commands::DesignCommand::SymbolUpdatePinsFromContract.key()
         {
             let model = &self.state.model;
-            return crate::workbench::design::commands::update_pins_label(
+            return rspice_app_design::workbench::design::commands::update_pins_label(
                 model.symbol_contract_source(&model.workspace.content.active_view),
             );
         }
@@ -930,7 +930,10 @@ impl ConsoleHost for AppState {
     }
 
     fn log_anchor_refusal(&self, anchor: &LogAnchor) -> Option<String> {
-        crate::workbench::app::log_anchor_refusal(&self.model, anchor)
+        rspice_app_design::workbench::app::actions::workspace::log_anchor_refusal(
+            &self.model,
+            anchor,
+        )
     }
 
     fn waive_finding(&mut self, target: &WaiverTarget, reason: &str) -> Result<(), String> {
@@ -1089,8 +1092,8 @@ impl DocumentHost for AppState {
     type Document = WorkspaceDocument;
 
     fn workspace_documents(&self, workspace: Workspace) -> Vec<WorkspaceDocument> {
-        use crate::workbench::chrome::document_bar::design::design_documents;
         use rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents;
+        use rspice_app_design::workbench::chrome::document_bar::design::design_documents;
         use rspice_app_models::workbench::chrome::document_bar::models::models_documents;
         use rspice_app_project::workbench::chrome::document_bar::project::project_documents;
         use rspice_app_results::workbench::chrome::document_bar::results::result_documents;
@@ -1134,11 +1137,11 @@ impl DocumentHost for AppState {
     }
 
     fn activate_owned_document(&mut self, document: &WorkspaceDocumentId) -> bool {
-        use crate::workbench::chrome::document_bar::design::activate_cell_view;
         use rspice_app_code::workbench::chrome::document_bar::code::{
             activate_generated_netlist, activate_netlist_comparison, activate_netlist_dependency,
             activate_netlist_run_snapshot, activate_owned_netlist,
         };
+        use rspice_app_design::workbench::chrome::document_bar::design::activate_cell_view;
         use rspice_app_results::workbench::chrome::document_bar::results::{
             activate_result_dataset, activate_visualization_document,
         };

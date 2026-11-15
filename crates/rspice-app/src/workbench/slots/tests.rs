@@ -7,15 +7,15 @@
 
 use super::*;
 use crate::workbench::app::HelpCenterPage;
-use crate::workbench::app::SchematicEditAuthority;
-use crate::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState;
-use crate::workbench::app::dialogs::replace_instance::ReplaceInstanceOpen;
-use crate::workbench::app::dialogs::selection::commands::floating::{
-    FloatingPaste, FloatingPasteOrigin,
-};
 use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::menu_bar::DatasetExportPicker;
 use crate::workbench::project::workspace_state::LibraryDeletionTarget;
+use rspice_app_design::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState;
+use rspice_app_design::workbench::app::dialogs::replace_instance::ReplaceInstanceOpen;
+use rspice_app_design::workbench::app::dialogs::selection::commands::floating::{
+    FloatingPaste, FloatingPasteOrigin,
+};
+use rspice_app_design::workbench::app::schematic::edit_authority::SchematicEditAuthority;
 use rspice_app_results::workbench::docks::inspector::run_details::RunDetailsDialogState;
 use rspice_app_simulate::workbench::app::dialogs::plan_removal::PlanRemovalTarget;
 use rspice_app_workbench::workbench::app::dialogs::window_session::WindowSessionPage;
@@ -71,7 +71,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     assert_blocks_shortcuts(|dialogs| dialogs.workbench.command_palette.open = true);
     assert_blocks_shortcuts(|dialogs| {
         dialogs.design.bus_tap.open(
-            crate::workbench::app::schematic_editor_request_source(
+            rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ),
             String::new(),
@@ -86,7 +86,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
         dialogs.design.pin_port.open(
             "EN".to_owned(),
             rspice_app_state::state::PlacementAuthority::new(
-                crate::workbench::app::schematic_editor_request_source(
+                rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
                     &crate::workbench::app_state::AppState::default(),
                 ),
             ),
@@ -96,13 +96,13 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
         dialogs
             .design
             .design_note
-            .open(crate::workbench::app::schematic_editor_request_source(
+            .open(rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ));
     });
     assert_blocks_shortcuts(|dialogs| {
         dialogs.design.documentation_shape.open(
-            crate::workbench::app::schematic_editor_request_source(
+            rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ),
             Vec::new(),
@@ -325,7 +325,7 @@ const DIALOG_GATE: &[DialogRow] = &[
     }),
     ("bus_tap", |dialogs| {
         dialogs.design.bus_tap.open(
-            crate::workbench::app::schematic_editor_request_source(
+            rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ),
             String::new(),
@@ -353,7 +353,7 @@ const DIALOG_GATE: &[DialogRow] = &[
         dialogs.design.pin_port.open(
             "EN".to_owned(),
             rspice_app_state::state::PlacementAuthority::new(
-                crate::workbench::app::schematic_editor_request_source(
+                rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
                     &crate::workbench::app_state::AppState::default(),
                 ),
             ),
@@ -363,13 +363,13 @@ const DIALOG_GATE: &[DialogRow] = &[
         dialogs
             .design
             .design_note
-            .open(crate::workbench::app::schematic_editor_request_source(
+            .open(rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ));
     }),
     ("documentation_shape", |dialogs| {
         dialogs.design.documentation_shape.open(
-            crate::workbench::app::schematic_editor_request_source(
+            rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ),
             Vec::new(),

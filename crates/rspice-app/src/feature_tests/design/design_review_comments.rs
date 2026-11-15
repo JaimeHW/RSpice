@@ -1,9 +1,9 @@
 //! The design review comments dialog drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::design_review_comments::tests::review_note;
-use crate::workbench::app::dialogs::design_review_comments::*;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::design_review_comments::tests::review_note;
+use rspice_app_design::workbench::app::dialogs::design_review_comments::*;
 
 #[test]
 fn initial_focus_accepts_review_reply_typing() {
@@ -18,7 +18,7 @@ fn initial_focus_accepts_review_reply_typing() {
         .design_notes
         .push(review_note(1));
     app.execute_command_key(
-        crate::workbench::design::commands::DesignCommand::ReviewComments.key(),
+        rspice_app_design::workbench::design::commands::DesignCommand::ReviewComments.key(),
     );
     let notes = app.state.model.schematic.document().design_notes.clone();
     let _ = ctx.run_ui(

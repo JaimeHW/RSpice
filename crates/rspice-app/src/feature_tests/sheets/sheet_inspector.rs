@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use super::apply_drawing_sheet_edit;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::design::commands::DesignCommand;
-use crate::workbench::design::inspector::tests::{accesskit_nodes, painted_panel};
+use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_design::workbench::design::inspector::tests::{accesskit_nodes, painted_panel};
 use rspice_app_sheets::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
 use rspice_app_sheets::workbench::docks::inspector::design::sheet::*;
 use rspice_app_state::state::{

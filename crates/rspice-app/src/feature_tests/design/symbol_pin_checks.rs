@@ -6,10 +6,10 @@ use crate::workbench::app_state::AppState;
 use rspice_app_state::diagnostics::LogAnchor;
 use rspice_app_state::state::{CellViewRef, Point};
 
-/// [`state_with_amp_symbol_pin`](crate::workbench::app::actions::workspace::tests::state_with_amp_symbol_pin) made a whole application.
+/// [`state_with_amp_symbol_pin`](rspice_app_design::workbench::app::actions::workspace::tests::state_with_amp_symbol_pin) made a whole application.
 fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppState {
     app_state_of(
-        crate::workbench::app::actions::workspace::tests::state_with_amp_symbol_pin(
+        rspice_app_design::workbench::app::actions::workspace::tests::state_with_amp_symbol_pin(
             pin_name, position,
         ),
     )
@@ -28,7 +28,7 @@ fn symbol_pin_checks_publish_records_routed_to_the_failing_pin() {
     state.open_project_session();
 
     let facts = state.slot_facts();
-    crate::workbench::app::actions::workspace::symbol_document::run_active_symbol_pin_checks(
+    rspice_app_design::workbench::app::actions::workspace::symbol_document::run_active_symbol_pin_checks(
         &mut state.model,
         facts,
     );

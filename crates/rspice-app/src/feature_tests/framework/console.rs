@@ -7,10 +7,10 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticOwner;
 use crate::workbench::app_state::diagnostic_store::listing::listing;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::{ConsolePage, WorkbenchSession};
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::state::{
     AnalysisResult, AnalysisType, Point, SimulationRun, SimulationState,

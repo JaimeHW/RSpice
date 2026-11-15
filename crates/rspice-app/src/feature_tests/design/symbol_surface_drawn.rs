@@ -7,9 +7,9 @@ use egui::{FullOutput, Rect, pos2};
 use super::app_state_of;
 use crate::feature_tests::replay::{Replay, only};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::actions::workspace::tests::state_with_amp_symbol_pin;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_design::workbench::app::actions::workspace::tests::state_with_amp_symbol_pin;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::{Point, SymbolShape};
 
 /// The amp whose schematic declares IN; its symbol has the pin, unplaced,

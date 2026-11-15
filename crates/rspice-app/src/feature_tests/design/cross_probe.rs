@@ -15,11 +15,13 @@ use rspice_app_state::state::{
 /// The end-frame step as the shell runs it: the projection, applied
 /// through the results' and the netlist's own fns.
 fn synchronize_schematic_cross_probe(state: &mut AppState) {
-    if let Some(projection) = crate::workbench::synchronize_schematic_cross_probe(
-        &state.model,
-        &mut state.design.schematic_cross_probe,
-        state.code.shown_netlist_document_key(),
-    ) {
+    if let Some(projection) =
+        rspice_app_design::workbench::cross_probe::synchronize_schematic_cross_probe(
+            &state.model,
+            &mut state.design.schematic_cross_probe,
+            state.code.shown_netlist_document_key(),
+        )
+    {
         state
             .results
             .results
@@ -330,7 +332,8 @@ fn digest(byte: u8) -> ContentDigest {
 #[test]
 fn a_run_that_named_nothing_offers_no_highlight() {
     let mut state =
-        crate::workbench::app::actions::workspace::tests::state_with_probed_conductors();
+        rspice_app_design::workbench::app::actions::workspace::tests::state_with_probed_conductors(
+        );
 
     assert!(
         !crate::workbench::documents::result_document::operational_state::active_failure_names_objects(
@@ -339,7 +342,7 @@ fn a_run_that_named_nothing_offers_no_highlight() {
         "with no failed analysis on display there is nothing to offer"
     );
     assert!(
-        !crate::workbench::app::highlight_active_failure_sites(
+        !rspice_app_design::workbench::app::actions::workspace::highlight_active_failure_sites(
             &mut state.model,
             &mut state.workbench
         ),

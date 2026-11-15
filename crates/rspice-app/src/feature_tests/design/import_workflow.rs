@@ -1,7 +1,7 @@
 //! The symbol definition import workflow driven through a whole application.
 
-use crate::workbench::app::dialogs::symbol_definition::import_workflow::*;
-use crate::workbench::app::dialogs::symbol_definition::state::SymbolImportBindingChoice;
+use rspice_app_design::workbench::app::dialogs::symbol_definition::import_workflow::*;
+use rspice_app_design::workbench::app::dialogs::symbol_definition::state::SymbolImportBindingChoice;
 use rspice_app_state::state::SymbolSourceContract;
 
 #[test]

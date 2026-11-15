@@ -378,11 +378,11 @@ impl Command {
 mod tests {
     use super::*;
     use crate::workbench::ResultViewer;
-    use crate::workbench::design::commands::DesignCommand;
     use crate::workbench::framework::command_registry::CommandFlags;
     use crate::workbench::results::commands::ResultsCommand;
     use crate::workbench::simulate::commands::SimulateCommand;
     use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_design::workbench::design::commands::DesignCommand;
     use rspice_app_state::state::VerificationPage;
     use rspice_app_state::state::command_catalog::{CommandCatalog, CommandKey};
 

@@ -802,7 +802,7 @@ mod tests {
         assert!(!design.is_empty());
         for spec in design {
             assert_eq!(
-                crate::workbench::design::dialog_modality(spec.key),
+                rspice_app_design::workbench::design::dialog_modality(spec.key),
                 spec.modality,
                 "{:?}",
                 spec.key

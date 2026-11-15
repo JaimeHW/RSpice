@@ -2,11 +2,11 @@
 //! watermark.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::surface::tests::descended;
-use crate::workbench::design::surface::{
+use egui::{Rect, Vec2};
+use rspice_app_design::workbench::design::surface::tests::descended;
+use rspice_app_design::workbench::design::surface::{
     breadcrumb, hierarchy_breadcrumb_segments, master_occurrence_paths, occurrence_scope_banner,
 };
-use egui::{Rect, Vec2};
 use rspice_app_state::state::ViewType;
 
 /// The canvas every render in this module uses. Wide enough that the crumb

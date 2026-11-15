@@ -16,9 +16,6 @@
 //! out of the registry for the one container that holds its key; no menu,
 //! shortcut profile or Repeat reaches one of those.
 
-use crate::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
-use crate::workbench::app::actions::workspace::HistoryDirection;
-use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app_state::PlatformState;
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
@@ -28,7 +25,6 @@ use crate::workbench::commands::{
     carry_out_code_hand_off, command_edits_schematic, file_action, run_project_file_action,
     select_probed_trace,
 };
-use crate::workbench::design::inspector::CommitSheetSection;
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
     CommandAvailability, CommandFlags, CommandSpec, ids,
@@ -53,6 +49,10 @@ use rspice_app_code::workbench::code::commands::{
     CodeRequest, NetlistEditorRequest, VerilogAStripRequest,
 };
 use rspice_app_code::workbench::code::requests as code_requests;
+use rspice_app_design::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
+use rspice_app_design::workbench::app::actions::workspace::HistoryDirection;
+use rspice_app_design::workbench::app::dialogs::design_request::DesignRequest;
+use rspice_app_design::workbench::design::inspector::CommitSheetSection;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use rspice_app_hardcopy::workbench::hardcopy;
 use rspice_app_state::state::command_catalog::CommandKey;
@@ -132,7 +132,7 @@ impl RSpiceApp {
             && active_schematic_editor(self)
             && self.state.model.schematic_edit_read_only()
         {
-            crate::workbench::app::deny_read_only_edit(
+            rspice_app_design::workbench::app::actions::workspace::deny_read_only_edit(
                 &self.state.model,
                 &mut self.state.workbench,
             );
@@ -249,7 +249,7 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, request: VerilogAStripRequest| match request {
                 VerilogAStripRequest::OpenUpdatedSymbol { symbol, pins } => {
-                    crate::workbench::design::DesignFeature::open_updated_veriloga_symbol(
+                    rspice_app_design::workbench::design::DesignFeature::open_updated_veriloga_symbol(
                         &mut features::cx(app),
                         symbol,
                         pins,
@@ -260,7 +260,7 @@ impl RSpiceApp {
                     binding,
                     ctx,
                 } => {
-                    crate::workbench::design::DesignFeature::place_veriloga_device(
+                    rspice_app_design::workbench::design::DesignFeature::place_veriloga_device(
                         &mut features::cx(app),
                         target,
                         *binding,
@@ -353,7 +353,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, OpenStimulusDefinition(definition)| {
-                crate::workbench::app::show_stimulus_definition(
+                rspice_app_design::workbench::app::dialogs::stimulus_link::show_stimulus_definition(
                     &mut app.state.design.selected_stimulus_definition,
                     &mut app.state.workbench,
                     &definition,
@@ -407,7 +407,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, MarkFailureSites(run_sequence)| {
-                if crate::workbench::app::highlight_active_failure_sites(
+                if rspice_app_design::workbench::app::actions::workspace::highlight_active_failure_sites(
                     &mut app.state.model,
                     &mut app.state.workbench,
                 ) {
@@ -437,7 +437,7 @@ impl RSpiceApp {
                  model,
              }| {
                 let result =
-                    crate::workbench::design::inspector::bind_component_model_from_catalog(
+                    rspice_app_design::workbench::design::inspector::bind_component_model_from_catalog(
                         &mut features::cx(app),
                         component_id,
                         &library,
@@ -452,7 +452,7 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, request: OpenSymbolAuthoring| match request {
                 OpenSymbolAuthoring::ModelBound => {
-                    crate::workbench::app::open_create_model_bound_symbol_dialog(
+                    rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_create_model_bound_symbol_dialog(
                         &mut app.state.design.create_model_bound_symbol,
                         &app.state.model,
                         &mut app.state.workbench,
@@ -460,7 +460,7 @@ impl RSpiceApp {
                     );
                 }
                 OpenSymbolAuthoring::ParameterForm(None) => {
-                    crate::workbench::app::open_symbol_parameter_form_dialog(
+                    rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_parameter_form_dialog(
                         &mut app.state.design.symbol_parameter_form,
                         &app.state.model,
                         &mut app.state.workbench,
@@ -468,7 +468,7 @@ impl RSpiceApp {
                     );
                 }
                 OpenSymbolAuthoring::ParameterForm(Some(target)) => {
-                    crate::workbench::app::open_symbol_parameter_form_dialog_for(
+                    rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_parameter_form_dialog_for(
                         &mut app.state.design.symbol_parameter_form,
                         &app.state.model,
                         &mut app.state.workbench,
@@ -477,7 +477,7 @@ impl RSpiceApp {
                     );
                 }
                 OpenSymbolAuthoring::Import(None) => {
-                    crate::workbench::app::open_symbol_import_dialog(
+                    rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_import_dialog(
                         &mut app.state.design.symbol_import,
                         &app.state.model,
                         &mut app.state.workbench,
@@ -485,7 +485,7 @@ impl RSpiceApp {
                     );
                 }
                 OpenSymbolAuthoring::Import(Some(binding_source)) => {
-                    crate::workbench::app::open_symbol_import_dialog_for(
+                    rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_import_dialog_for(
                         &mut app.state.design.symbol_import,
                         &app.state.model,
                         &mut app.state.workbench,
@@ -504,7 +504,7 @@ impl RSpiceApp {
                         parameter_defaults,
                         opened_receipt,
                     } = *source;
-                    let result = crate::workbench::app::open_create_subcircuit_bound_symbol_dialog(
+                    let result = rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_create_subcircuit_bound_symbol_dialog(
                         &mut app.state.design.create_model_bound_symbol,
                         &app.state.model,
                         library,
@@ -688,7 +688,10 @@ impl Command {
             && command_edits_schematic(self)
             && app.state.model.schematic_edit_read_only()
         {
-            crate::workbench::app::deny_read_only_edit(&app.state.model, &mut app.state.workbench);
+            rspice_app_design::workbench::app::actions::workspace::deny_read_only_edit(
+                &app.state.model,
+                &mut app.state.workbench,
+            );
             return;
         }
         if self.commits_inspector_edit() && !app.state.commit_pending_inspector_edit() {
@@ -731,7 +734,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
-    use crate::workbench::design::commands::DesignCommand;
+    use rspice_app_design::workbench::design::commands::DesignCommand;
     use rspice_app_state::state::command_catalog::CommandCatalog;
 
     fn variant(command: Command) -> String {

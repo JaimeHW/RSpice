@@ -2,8 +2,8 @@
 //! open_property_editor and the validated save answer over AppState.
 
 use crate::workbench::app::project_transactions::WholeStateValidation;
-use crate::workbench::app::selected_object_properties_available_in;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::workbench::app::actions::property_edit::selected_object_properties_available_in;
 use rspice_app_state::state::{
     Component, GeneratedSymbolViews, Library, LibraryCellInstance, ModelBoundSymbolDefinition,
     ParameterInheritance, Point, PortDirection, PropertyType, SymbolElectricalType,

@@ -4,9 +4,9 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::project_transactions::open_new_project_dialog;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::state::Workspace;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::{
     CellViewRef, Component, ComponentType, PinFindingKind, Point, PortDirection, SymbolDocument,
     SymbolInterface, SymbolPin, SymbolPinSide, ViewType,
@@ -213,7 +213,7 @@ fn hand_edit(replay: &mut Replay, step: &str, edit: impl FnOnce(&mut SymbolDocum
         .expect("its metadata loads");
     let mut edited = before.clone();
     edit(&mut edited);
-    crate::workbench::app::record_symbol_edit(
+    rspice_app_design::workbench::app::actions::workspace::symbol_document::record_symbol_edit(
         &mut replay.app.state.design.symbol,
         &replay.app.state.model,
         &before,

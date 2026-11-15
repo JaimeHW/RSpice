@@ -58,7 +58,8 @@ impl User {
             node_ids: Vec::new(),
             focused: None,
         };
-        user.app.symbol_library = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
+        user.app.symbol_library =
+            rspice_app_design::schematic::symbols::SymbolLibrary::load_embedded().ok();
         user.app.state.workbench.inspector_visible = true;
         user.settle();
         user
@@ -473,7 +474,7 @@ pub(crate) fn wired_device() -> (User, Device) {
     let &[instance] = instances.as_slice() else {
         panic!("one click places one instance: {instances:?}");
     };
-    let symbols = crate::schematic::view::schematic_symbol_context(&user.app.state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&user.app.state);
     let placed = user.component(instance);
     assert!(
         symbols.resolved_symbol(&placed).is_some(),

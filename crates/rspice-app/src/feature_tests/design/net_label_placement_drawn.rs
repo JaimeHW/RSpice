@@ -1,12 +1,14 @@
 //! Placing a net label, drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::placement::net_label::tests::{self as entry, key_event};
-use crate::workbench::app::dialogs::placement::net_label::*;
-use crate::workbench::app::open_net_label_placement_in;
-use crate::workbench::app::place_sequenced_net_label_in;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::placement::net_label::open_net_label_placement_in;
+use rspice_app_design::workbench::app::dialogs::placement::net_label::place_sequenced_net_label_in;
+use rspice_app_design::workbench::app::dialogs::placement::net_label::tests::{
+    self as entry, key_event,
+};
+use rspice_app_design::workbench::app::dialogs::placement::net_label::*;
 use rspice_app_state::state::CrossSheetPortDirection;
 use rspice_app_state::state::NetLabel;
 use rspice_app_state::state::NetLabelKind;

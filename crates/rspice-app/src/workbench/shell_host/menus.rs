@@ -2,10 +2,8 @@
 //! renderer draws and a test can read. The source editor's right-click menu
 //! is the code feature's (`code::SOURCE_EDITOR_MENU`).
 
-use crate::schematic::view::sheet_visibility::SchematicObjectKind;
 use crate::workbench::ResultViewer;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
@@ -14,6 +12,8 @@ use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;

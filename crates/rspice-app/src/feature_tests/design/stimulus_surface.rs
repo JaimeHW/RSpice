@@ -3,9 +3,9 @@
 //! the column the shell leaves it.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::surfaces::stimulus::tests::stage_size;
-use crate::workbench::surfaces::stimulus::*;
 use egui::{Pos2, Rect, vec2};
+use rspice_app_design::workbench::surfaces::stimulus::tests::stage_size;
+use rspice_app_design::workbench::surfaces::stimulus::*;
 use rspice_app_state::state::stimulus_library::fixtures;
 
 /// An application whose project holds the fixture library.
@@ -228,7 +228,7 @@ fn a_many_cycle_window_announces_its_band_and_a_curve_does_not() {
 fn many_cycle_train() -> RSpiceApp {
     let mut app = seeded("bridge_cal_step");
     for (field, value) in [("tr", "1n"), ("tf", "1n"), ("pw", "1u"), ("per", "2u")] {
-        crate::workbench::app::actions::stimulus::edit_field(
+        rspice_app_design::workbench::app::actions::stimulus::edit_field(
             app.state.design.selected_stimulus_definition.as_deref(),
             &mut app.state.design.stimulus_editor,
             &app.state.model,
@@ -236,7 +236,8 @@ fn many_cycle_train() -> RSpiceApp {
             value,
         );
     }
-    app.state.design.stimulus_editor.span = crate::workbench::state::PreviewSpan::Transient;
+    app.state.design.stimulus_editor.span =
+        rspice_app_design::workbench::state::stimulus_editor::PreviewSpan::Transient;
     app
 }
 
@@ -273,7 +274,7 @@ fn a_finding_lands_on_the_field_its_rule_named() {
 #[test]
 fn a_name_collision_is_stated_at_the_name_field() {
     let mut app = seeded("bridge_cal_step");
-    crate::workbench::app::actions::stimulus::edit_name(
+    rspice_app_design::workbench::app::actions::stimulus::edit_name(
         app.state.design.selected_stimulus_definition.as_deref(),
         &mut app.state.design.stimulus_editor,
         &app.state.model,
@@ -282,7 +283,7 @@ fn a_name_collision_is_stated_at_the_name_field() {
     let stage = resolve(&mut app.design_cx()).expect("stage");
     assert!(
         stage
-            .field_findings(crate::workbench::state::NAME_FIELD)
+            .field_findings(rspice_app_design::workbench::state::stimulus_editor::NAME_FIELD)
             .any(|finding| finding.blocking
                 && finding.message.contains("already defines 'sensor_diff_1k'")),
         "{:?}",
@@ -315,7 +316,7 @@ fn the_footer_states_a_specification_rather_than_a_card() {
 #[test]
 fn apply_is_blocked_by_an_error_and_available_after_the_fix() {
     let mut app = seeded("bridge_cal_step");
-    crate::workbench::app::actions::stimulus::edit_name(
+    rspice_app_design::workbench::app::actions::stimulus::edit_name(
         app.state.design.selected_stimulus_definition.as_deref(),
         &mut app.state.design.stimulus_editor,
         &app.state.model,
@@ -325,7 +326,7 @@ fn apply_is_blocked_by_an_error_and_available_after_the_fix() {
     assert!(stage.errors() > 0);
     assert!(stage.apply_block().is_some());
 
-    crate::workbench::app::actions::stimulus::edit_name(
+    rspice_app_design::workbench::app::actions::stimulus::edit_name(
         app.state.design.selected_stimulus_definition.as_deref(),
         &mut app.state.design.stimulus_editor,
         &app.state.model,
@@ -384,7 +385,7 @@ fn a_frame_that_changed_nothing_does_not_re_evaluate_the_waveform() {
     let _ = published(&mut app, size);
     assert_eq!(app.state.design.stimulus_editor.evaluations(), after_first);
 
-    crate::workbench::app::actions::stimulus::edit_field(
+    rspice_app_design::workbench::app::actions::stimulus::edit_field(
         app.state.design.selected_stimulus_definition.as_deref(),
         &mut app.state.design.stimulus_editor,
         &app.state.model,
@@ -544,7 +545,7 @@ fn the_identity_band_never_cuts_a_fact_short() {
         // And the same definition as a draft the deck would refuse, which is
         // the longest thing the lifecycle chip ever has to say.
         let mut refused = seeded(name);
-        crate::workbench::app::actions::stimulus::edit_name(
+        rspice_app_design::workbench::app::actions::stimulus::edit_name(
             refused.state.design.selected_stimulus_definition.as_deref(),
             &mut refused.state.design.stimulus_editor,
             &refused.state.model,
@@ -607,7 +608,7 @@ fn guide_labels_that_would_touch_are_merged() {
 #[test]
 fn a_count_of_one_is_singular() {
     let mut app = seeded("bridge_cal_step");
-    crate::workbench::app::actions::stimulus::edit_name(
+    rspice_app_design::workbench::app::actions::stimulus::edit_name(
         app.state.design.selected_stimulus_definition.as_deref(),
         &mut app.state.design.stimulus_editor,
         &app.state.model,

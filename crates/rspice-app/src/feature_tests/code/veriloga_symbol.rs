@@ -252,7 +252,7 @@ fn the_editor_generates_what_the_compile_drew() {
     let drawn = symbol(&app, &reference);
     app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
 
-    crate::workbench::app::generate_active_symbol_document(
+    rspice_app_design::workbench::app::actions::workspace::symbol_document::generate_active_symbol_document(
         &mut app.state.design.symbol,
         &mut app.state.model,
     )
@@ -487,7 +487,7 @@ fn a_compiled_symbol_undoes_saves_and_reverts_as_a_drawn_one() {
             .find(|pin| pin.name == "vdd")
             .expect("the rail");
         rail.position = rail.position.map(|at| at + by);
-        crate::workbench::app::record_symbol_edit(
+        rspice_app_design::workbench::app::actions::workspace::symbol_document::record_symbol_edit(
             &mut app.state.design.symbol,
             &app.state.model,
             &before,

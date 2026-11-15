@@ -107,11 +107,11 @@ use egui::{Context, Rect, pos2, vec2};
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::design::DesignFeature;
-use crate::workbench::design::commands::DesignCommand;
-use crate::workbench::design::test_host::DesignTestHost;
 use crate::workbench::features::{self, Registered};
 use crate::workbench::state::Workspace;
+use rspice_app_design::workbench::design::DesignFeature;
+use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_design::workbench::design::test_host::DesignTestHost;
 use rspice_app_state::state::{
     Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance,
     ModelBoundSymbolDefinition, Point, SymbolDefinitionImport, View, ViewType,
@@ -158,20 +158,20 @@ pub(crate) fn state_with_work_cell(cell_name: &str) -> AppState {
     state
 }
 
-/// [`state_with_populated_user_library`](crate::workbench::app::actions::workspace::tests::state_with_populated_user_library)
+/// [`state_with_populated_user_library`](rspice_app_design::workbench::app::actions::workspace::tests::state_with_populated_user_library)
 /// made a whole application.
 pub(crate) fn state_with_populated_user_library() -> AppState {
     app_state_of(
-        crate::workbench::app::actions::workspace::tests::state_with_populated_user_library(),
+        rspice_app_design::workbench::app::actions::workspace::tests::state_with_populated_user_library(),
     )
 }
 
 /// A cell view with two sheets
-/// ([`seed_two_sheets`](crate::schematic::view::sheet_visibility::seed_two_sheets))
+/// ([`seed_two_sheets`](rspice_app_design::schematic::view::sheet_visibility::seed_two_sheets))
 /// in a new whole application.
 fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
     let mut state = AppState::default();
-    crate::schematic::view::sheet_visibility::seed_two_sheets(
+    rspice_app_design::schematic::view::sheet_visibility::seed_two_sheets(
         &mut state.model,
         active_ids,
         hidden_ids,
@@ -302,7 +302,7 @@ fn net_label_opens_and_draws_in_the_frame() {
     let mut app = design_app();
     let before = labelled(&mut app, "Net label");
     let dialog_modal_open = app.state.dialog_modal_open();
-    assert!(crate::workbench::app::open_net_label_placement_in(
+    assert!(rspice_app_design::workbench::app::dialogs::placement::net_label::open_net_label_placement_in(
         &mut app.state.design.net_label_placement,
         &mut app.state.model,
         &mut app.state.workbench,
@@ -522,7 +522,7 @@ fn a_descent_is_carried_out_in_the_frame_it_is_chosen() {
 #[test]
 fn import_symbol_definition_opens_and_draws_in_the_frame() {
     let mut app = design_app();
-    crate::workbench::app::open_symbol_import_dialog(
+    rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_import_dialog(
         &mut app.state.design.symbol_import,
         &app.state.model,
         &mut app.state.workbench,
@@ -564,7 +564,7 @@ fn the_component_form_designer_opens_and_draws_in_the_frame() {
         .model
         .library_manager
         .select_view(&library_name, "review_form", "symbol");
-    crate::workbench::app::open_symbol_parameter_form_dialog(
+    rspice_app_design::workbench::app::dialogs::symbol_definition::open_symbol_parameter_form_dialog(
         &mut app.state.design.symbol_parameter_form,
         &app.state.model,
         &mut app.state.workbench,
@@ -626,11 +626,11 @@ fn stimulus_link_opens_and_draws_in_the_frame() {
         .find(|component| component.id == id)
         .expect("the source is placed")
         .spice_instance_name();
-    crate::workbench::app::open_stimulus_link(
+    rspice_app_design::workbench::app::dialogs::stimulus_link::open_stimulus_link(
         &mut app.state.design.stimulus_link,
         &app.state.model,
         id,
-        crate::workbench::app::StimulusLinkMode::Extract,
+        rspice_app_design::workbench::app::dialogs::stimulus_link::StimulusLinkMode::Extract,
     )
     .expect("the save dialog opens");
     assert!(draws_dialog(
@@ -643,7 +643,7 @@ fn stimulus_link_opens_and_draws_in_the_frame() {
 #[test]
 fn create_model_bound_symbol_opens_and_draws_in_the_frame() {
     let mut app = design_app();
-    crate::workbench::app::open_create_model_bound_symbol_dialog(
+    rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_create_model_bound_symbol_dialog(
         &mut app.state.design.create_model_bound_symbol,
         &app.state.model,
         &mut app.state.workbench,
@@ -729,7 +729,7 @@ fn a_readoption_reopens_the_editor_in_the_frame_it_is_chosen() {
 fn the_connectivity_manager_opens_and_draws_in_the_frame() {
     let mut app = design_app();
     resistor(&mut app, Point::new(0, 0));
-    crate::workbench::app::open_connectivity_manager(
+    rspice_app_design::workbench::app::dialogs::connectivity_manager::open_connectivity_manager(
         &mut app.state.design.connectivity_manager,
         &mut app.state.model,
         &mut app.state.workbench,
@@ -754,7 +754,7 @@ fn a_connectivity_reveal_is_carried_out_in_the_frame_it_is_chosen() {
         .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(0, 0));
-    crate::workbench::app::open_connectivity_manager(
+    rspice_app_design::workbench::app::dialogs::connectivity_manager::open_connectivity_manager(
         &mut replay.app.state.design.connectivity_manager,
         &mut replay.app.state.model,
         &mut replay.app.state.workbench,
@@ -798,7 +798,7 @@ fn two_of_three_resistors_selected(app: &mut RSpiceApp) -> (u64, u64) {
 fn create_hierarchy_opens_and_draws_in_the_frame() {
     let mut app = design_app();
     two_of_three_resistors_selected(&mut app);
-    crate::workbench::app::open_create_hierarchy_dialog(
+    rspice_app_design::workbench::app::dialogs::hierarchy::create::open_create_hierarchy_dialog(
         &mut app.state.design.create_hierarchy,
         &app.state.model,
         &mut app.state.workbench,
@@ -815,7 +815,7 @@ fn an_extraction_is_carried_out_in_the_frame_it_is_chosen() {
     replay.app.state.workbench.activate(Workspace::Design);
     two_of_three_resistors_selected(&mut replay.app);
     let parent = replay.app.state.model.workspace.content.active_view.clone();
-    crate::workbench::app::open_create_hierarchy_dialog(
+    rspice_app_design::workbench::app::dialogs::hierarchy::create::open_create_hierarchy_dialog(
         &mut replay.app.state.design.create_hierarchy,
         &replay.app.state.model,
         &mut replay.app.state.workbench,
@@ -842,7 +842,7 @@ fn selected_voltage_source(app: &mut RSpiceApp) -> u64 {
 fn replace_instance_opens_and_draws_in_the_frame() {
     let mut app = design_app();
     selected_voltage_source(&mut app);
-    crate::workbench::app::open_replace_instance_dialog(
+    rspice_app_design::workbench::app::dialogs::replace_instance::open_replace_instance_dialog(
         &mut app.state.design.replace_instance,
         &app.state.design.property_registry,
         &app.state.model,
@@ -859,7 +859,7 @@ fn a_replacement_is_carried_out_in_the_frame_it_is_chosen() {
     let mut replay = Replay::of(RSpiceApp::test_instance());
     replay.app.state.workbench.activate(Workspace::Design);
     selected_voltage_source(&mut replay.app);
-    crate::workbench::app::open_replace_instance_dialog(
+    rspice_app_design::workbench::app::dialogs::replace_instance::open_replace_instance_dialog(
         &mut replay.app.state.design.replace_instance,
         &replay.app.state.design.property_registry,
         &replay.app.state.model,
@@ -887,7 +887,7 @@ fn open_lookup_table_placement(app: &mut RSpiceApp) -> &'static str {
         .expect("the lookup-table device");
     let ports =
         rspice_app_state::state::builtin_xspice_vector_ports(descriptor).expect("its vector ports");
-    let source = crate::workbench::app::schematic_editor_request_source(&app.state);
+    let source = rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(&app.state);
     app.state.design.builtin_xspice_placement.open(
         descriptor.stable_id,
         descriptor.display_name,

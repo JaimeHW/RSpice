@@ -2,12 +2,12 @@
 //! what activating, cycling and closing a tab does to them, and how the tabs
 //! share the strip's width, elide their labels and scroll into view.
 
-use crate::workbench::chrome::document_bar::design::icon_for_view;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents;
+use rspice_app_design::workbench::chrome::document_bar::design::icon_for_view;
 use rspice_app_state::product::ObjectRevision;
 use rspice_app_state::state::ViewType;
 use rspice_app_state::state::{

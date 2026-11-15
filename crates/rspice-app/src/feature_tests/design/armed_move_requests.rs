@@ -2,11 +2,11 @@
 //! request rechecks the source, the mode and the draft it was armed under, and one refused for a replaced
 //! draft never cancels the replacement.
 
-use crate::schematic::view::move_interaction::*;
-use crate::schematic::view::requests::editor_request_source;
-use crate::schematic::view::schematic_symbol_context;
-use crate::workbench::app::cancel_armed_move_selection_in;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::schematic::view::move_interaction::*;
+use rspice_app_design::schematic::view::requests::editor_request_source;
+use rspice_app_design::schematic::view::schematic_symbol_context;
+use rspice_app_design::workbench::app::dialogs::selection::move_selection::cancel_armed_move_selection_in;
 use rspice_app_state::state::ComponentType;
 use rspice_app_state::state::Point;
 use rspice_app_state::state::Tool;
@@ -14,7 +14,7 @@ use rspice_schematic_editor::view::transform_input::TransformInputTransition;
 
 fn arm_test_move(state: &mut AppState, mode: rspice_app_state::state::MoveSelectionMode) {
     state.design.move_selection.mode = mode;
-    crate::workbench::app::arm_move_selection_in(
+    rspice_app_design::workbench::app::dialogs::selection::move_selection::arm_move_selection_in(
         &mut state.design.move_selection,
         &mut state.design.stretch_selection,
         &mut state.design.array_selection,

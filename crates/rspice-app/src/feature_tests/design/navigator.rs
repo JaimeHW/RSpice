@@ -2,16 +2,16 @@
 //! lends, or through the whole frame: the hierarchy tree, the library rows and
 //! what their gestures open.
 
-use crate::schematic::view::sheet_visibility::{self, SheetScope};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design::navigator::tests::{
+use crate::workbench::framework::requests::FocusNavigatorSearch;
+use crate::workbench::state::{NavigatorTreeNode, Workspace};
+use rspice_app_design::schematic::view::sheet_visibility::{self, SheetScope};
+use rspice_app_design::workbench::design::navigator::tests::{
     add_master, announced_name, click_events, key_event, painted_panel, painted_runs, painted_text,
     placed, port, run_rect,
 };
-use crate::workbench::design::navigator::*;
-use crate::workbench::framework::requests::FocusNavigatorSearch;
-use crate::workbench::state::{NavigatorTreeNode, Workspace};
+use rspice_app_design::workbench::design::navigator::*;
 use rspice_app_state::state::{
     CellViewRef, ComponentType, InstancePath, PortDirection, SchematicState,
 };

@@ -23,8 +23,6 @@ mod design_test_support;
 mod execution_context;
 mod full_screen;
 #[cfg(test)]
-pub(in crate::workbench) use rspice_app_design::workbench::app_state::interaction_state;
-#[cfg(test)]
 mod modal_gate_tests;
 pub(crate) use rspice_app_state::workbench::app_state::model;
 mod model_access;
@@ -43,13 +41,10 @@ pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::slots::{
-    CloudState, CodeState, DesignState, HardcopyState, ModelsState, ProjectState, ResultsState,
-    RunsState, SettingsState, SheetsState, ShellState, SimulateState,
+    CloudState, CodeState, HardcopyState, ModelsState, ProjectState, ResultsState, RunsState,
+    SettingsState, SheetsState, ShellState, SimulateState,
 };
-#[cfg(test)]
-pub use interaction_state::ContextTarget;
-#[cfg(test)]
-pub use interaction_state::DragType;
+use rspice_app_design::workbench::slots::design::DesignState;
 use rspice_app_services::services::recent_files::RecentKind;
 use rspice_app_services::workbench::slots::platform::remember_recent_file;
 #[cfg(test)]

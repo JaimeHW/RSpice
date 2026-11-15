@@ -1,10 +1,12 @@
 //! Placing a bus tap, drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::placement::bus_tap::tests::{self as form, key_event};
-use crate::workbench::app::dialogs::placement::bus_tap::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::placement::bus_tap::tests::{
+    self as form, key_event,
+};
+use rspice_app_design::workbench::app::dialogs::placement::bus_tap::*;
 use rspice_app_state::state::Tool;
 use rspice_app_state::state::{Bus, BusDeclaration, Point};
 
@@ -161,7 +163,7 @@ fn rendered_primary_revalidates_publishes_and_arms_the_bus_tap_tool() {
     assert!(
         pending
             .authority
-            .matches(&crate::workbench::app::schematic_editor_request_source(
+            .matches(&rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
                 &app.state
             ))
     );

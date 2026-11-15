@@ -7,9 +7,9 @@ use std::collections::HashMap;
 
 use crate::feature_tests::design::symbol_actions_drawn::open_symbol;
 use crate::workbench::RSpiceApp;
-use crate::workbench::chrome::status_bar::design::symbol_tool_hint;
-use crate::workbench::design::commands::DesignCommand;
 use egui::epaint::ColorMode;
+use rspice_app_design::workbench::chrome::status_bar::design::symbol_tool_hint;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::{Point, SymbolEditorMetadata, SymbolShape};
 use rspice_schematic_editor::symbol_editor::SymbolViewport;
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
@@ -91,7 +91,11 @@ impl Canvas {
                     egui::vec2(editor.pan.0, editor.pan.1),
                 );
                 app.handle_shortcuts(ui.ctx());
-                crate::schematic::symbol_editor::show(ui, &mut app.state.canvas_frame(), None);
+                rspice_app_design::schematic::symbol_editor::show(
+                    ui,
+                    &mut app.state.canvas_frame(),
+                    None,
+                );
             },
         );
         // What a row raised runs once the surface has drawn, as in the

@@ -1,9 +1,9 @@
 //! The bulk-edit dialog drawn and committed through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::selection::bulk_edit::tests::component;
-use crate::workbench::app::dialogs::selection::bulk_edit::*;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::selection::bulk_edit::tests::component;
+use rspice_app_design::workbench::app::dialogs::selection::bulk_edit::*;
 
 /// Draw the dialog as its dialog step does.
 fn render(app: &mut RSpiceApp, ctx: &Context) {

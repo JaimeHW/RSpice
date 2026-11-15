@@ -3,22 +3,24 @@
 //! draft never cancels the replacement.
 
 use super::app_state_of;
-use crate::schematic::view::requests::editor_request_source;
-use crate::schematic::view::schematic_symbol_context;
-use crate::schematic::view::stretch_interaction::*;
-use crate::workbench::app::cancel_armed_stretch_selection_in;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::schematic::view::requests::editor_request_source;
+use rspice_app_design::schematic::view::schematic_symbol_context;
+use rspice_app_design::schematic::view::stretch_interaction::*;
+use rspice_app_design::workbench::app::dialogs::selection::stretch::cancel_armed_stretch_selection_in;
 use rspice_app_state::state::Point;
 use rspice_app_state::state::Tool;
 use rspice_schematic_editor::view::transform_input::TransformInputTransition;
 
-/// [`selected_stretch_wire`](crate::schematic::view::stretch_interaction::tests::selected_stretch_wire) made a whole application.
+/// [`selected_stretch_wire`](rspice_app_design::schematic::view::stretch_interaction::tests::selected_stretch_wire) made a whole application.
 fn selected_stretch_wire() -> AppState {
-    app_state_of(crate::schematic::view::stretch_interaction::tests::selected_stretch_wire())
+    app_state_of(
+        rspice_app_design::schematic::view::stretch_interaction::tests::selected_stretch_wire(),
+    )
 }
 
 fn arm_test_stretch(state: &mut AppState) {
-    crate::workbench::app::arm_stretch_selection_in(
+    rspice_app_design::workbench::app::dialogs::selection::stretch::arm_stretch_selection_in(
         &mut state.design.stretch_selection,
         &mut state.design.move_selection,
         &mut state.design.array_selection,

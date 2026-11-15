@@ -145,7 +145,7 @@ impl Fixture {
             .find(|pin| pin.name == name)
             .expect("the pin is drawn");
         pin.position = pin.position.map(|at| at + by);
-        crate::workbench::app::record_symbol_edit(
+        rspice_app_design::workbench::app::actions::workspace::symbol_document::record_symbol_edit(
             &mut self.app.state.design.symbol,
             &self.app.state.model,
             &before,
@@ -169,13 +169,13 @@ impl Fixture {
             .find(|pin| pin.name == from)
             .expect("the pin is drawn")
             .name = to.to_owned();
-        crate::workbench::app::record_symbol_edit(
+        rspice_app_design::workbench::app::actions::workspace::symbol_document::record_symbol_edit(
             &mut self.app.state.design.symbol,
             &self.app.state.model,
             &before,
             "Rename pin",
         );
-        crate::workbench::app::actions::workspace::symbol_document::commit_active_symbol_edit(
+        rspice_app_design::workbench::app::actions::workspace::symbol_document::commit_active_symbol_edit(
             &mut self.app.state.design.symbol,
             &mut self.app.state.model,
             &mut self.app.state.workbench,

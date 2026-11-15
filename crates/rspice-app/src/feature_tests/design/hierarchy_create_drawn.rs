@@ -1,9 +1,9 @@
 //! Creating a hierarchy block, drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::hierarchy::create::*;
-use crate::workbench::app::open_create_hierarchy_dialog;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::hierarchy::create::open_create_hierarchy_dialog;
+use rspice_app_design::workbench::app::dialogs::hierarchy::create::*;
 
 /// Create hierarchy is a command form: its ports table on the labels'
 /// edge, and none of the explainer lines under its labels.

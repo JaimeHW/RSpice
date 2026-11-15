@@ -29,8 +29,8 @@ use std::fmt::Write as _;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::Bench;
-use crate::schematic::view::selection_transform::SelectionTransform;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::schematic::view::selection_transform::SelectionTransform;
 use rspice_app_state::state::{
     Component, ComponentType, Junction, MoveSelectionMode, Point, Rotation, Wire,
 };
@@ -1102,7 +1102,10 @@ fn dot_paste_lands(sheet: SchematicDocument, clipboard: &ClipboardData, at: Poin
     if !dots_alone {
         return None;
     }
-    let at = crate::workbench::app::on_grid(at, sheet.grid_size);
+    let at = rspice_app_design::workbench::app::dialogs::selection::commands::floating::on_grid(
+        at,
+        sheet.grid_size,
+    );
     let mut sheet = Schematic::from_document(sheet);
     Some(matches!(
         sheet.paste_at(clipboard, at, |_| false),

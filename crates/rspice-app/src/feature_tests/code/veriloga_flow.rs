@@ -822,7 +822,7 @@ mod size_and_zoom;
 /// the sheet around it, and a pin moved there takes the instance's wire.
 #[test]
 fn a_placed_devices_symbol_is_edited_in_place() {
-    use crate::workbench::design::commands::DesignCommand;
+    use rspice_app_design::workbench::design::commands::DesignCommand;
     use rspice_app_state::state::Point;
 
     let (mut user, device) = wired_device();
@@ -858,8 +858,11 @@ fn a_placed_devices_symbol_is_edited_in_place() {
     let state = &user.app.state;
     assert_eq!(state.model.workspace.content.active_view, symbol);
     let session =
-        crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
-            .expect("the device's symbol is edited in place");
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
+            &state.design.symbol.in_place,
+            &state.model,
+        )
+        .expect("the device's symbol is edited in place");
     assert_eq!((session.instance_id, &session.parent), (instance, &top));
 
     let wires = |user: &User| {

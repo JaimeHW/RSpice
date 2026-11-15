@@ -1,8 +1,8 @@
 //! Creating a hierarchy block through the whole application: its commit is undone and
 //! redone as one step of the project's design history.
 
-use crate::workbench::app::dialogs::hierarchy::create::*;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::workbench::app::dialogs::hierarchy::create::*;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::state::{ComponentType, Point, SymbolDocument};
 

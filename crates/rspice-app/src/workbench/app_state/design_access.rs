@@ -8,11 +8,11 @@
 
 use super::AppState;
 use super::waivers::{StoredWaiverEdit, WaiverTarget};
-use crate::workbench::app::actions::property_edit::open_property_editor_in;
-use crate::workbench::app::actions::workspace::symbol_document::{
+use rspice_app_design::workbench::app::actions::property_edit::open_property_editor_in;
+use rspice_app_design::workbench::app::actions::workspace::symbol_document::{
     record_symbol_edit, run_active_symbol_pin_checks, store_active_symbol_document,
 };
-use crate::workbench::app::actions::workspace::{
+use rspice_app_design::workbench::app::actions::workspace::{
     NavigationParts, bump_active_schematic_epoch, commit_inline_component_edit,
     commit_pending_inspector_edit, new_schematic_document, restore_active_schematic_from_workspace,
     sync_active_schematic,

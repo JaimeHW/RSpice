@@ -1,12 +1,12 @@
 //! The object properties dialog drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::object_properties::tests::{
-    self as dialog, declared_bus, key_event,
-};
-use crate::workbench::app::dialogs::object_properties::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::object_properties::tests::{
+    self as dialog, declared_bus, key_event,
+};
+use rspice_app_design::workbench::app::dialogs::object_properties::*;
 use rspice_app_state::state::Bus;
 use rspice_app_state::state::BusDeclaration;
 use rspice_app_state::state::DesignNote;
@@ -27,7 +27,7 @@ fn render(app: &mut RSpiceApp, ctx: &Context) {
 
 /// Why the open edit can no longer apply, over what the form reads.
 fn object_property_session_error(state: &AppState) -> Option<String> {
-    crate::workbench::app::dialogs::object_properties::object_property_session_error(
+    rspice_app_design::workbench::app::dialogs::object_properties::object_property_session_error(
         &state.design.object_properties,
         &state.model,
     )
@@ -47,7 +47,7 @@ fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
 fn open_bus_dialog(app: &mut RSpiceApp, bus: &Bus) {
     app.state.design.object_properties.open_bus(
         bus,
-        crate::workbench::app::schematic_editor_request_source(&app.state),
+        rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(&app.state),
         app.state.model.workspace.content.active_view.display_path(),
     );
 }
@@ -384,5 +384,8 @@ pub(crate) fn draft_resolution_key(
     state: &AppState,
     draft: &ObjectPropertiesDraft,
 ) -> DraftResolutionKey {
-    crate::workbench::app::dialogs::object_properties::draft_resolution_key(&state.model, draft)
+    rspice_app_design::workbench::app::dialogs::object_properties::draft_resolution_key(
+        &state.model,
+        draft,
+    )
 }

@@ -1,7 +1,7 @@
 //! The stimulus surface drawn through a whole application.
 
 use super::stimulus_surface::seeded;
-use crate::workbench::surfaces::stimulus::tests::adopter;
+use rspice_app_design::workbench::surfaces::stimulus::tests::adopter;
 use rspice_app_state::state::ComponentType;
 use rspice_app_state::state::stimulus_library::definition::StimulusFamily;
 
@@ -19,7 +19,7 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
         .params
         .clone();
 
-    crate::workbench::app::actions::stimulus::edit_family(
+    rspice_app_design::workbench::app::actions::stimulus::edit_family(
         app.state.design.selected_stimulus_definition.as_deref(),
         &mut app.state.design.stimulus_editor,
         &app.state.model,
@@ -37,11 +37,13 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
     );
     assert_eq!(draft.working().params, "");
 
-    assert!(crate::workbench::app::actions::stimulus::undo_draft(
-        app.state.design.selected_stimulus_definition.as_deref(),
-        &mut app.state.design.stimulus_editor,
-        &app.state.model,
-    ));
+    assert!(
+        rspice_app_design::workbench::app::actions::stimulus::undo_draft(
+            app.state.design.selected_stimulus_definition.as_deref(),
+            &mut app.state.design.stimulus_editor,
+            &app.state.model,
+        )
+    );
     let draft = app
         .state
         .design
@@ -61,13 +63,13 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
 fn applying_a_rename_repoints_every_adopter() {
     let mut app = seeded("bridge_cal_step");
     let id = adopter(&mut app.state.model, "bridge_cal_step", "V1");
-    crate::workbench::app::actions::stimulus::edit_name(
+    rspice_app_design::workbench::app::actions::stimulus::edit_name(
         app.state.design.selected_stimulus_definition.as_deref(),
         &mut app.state.design.stimulus_editor,
         &app.state.model,
         "bridge_cal_pulse",
     );
-    crate::workbench::app::actions::stimulus::apply_draft(
+    rspice_app_design::workbench::app::actions::stimulus::apply_draft(
         &mut app.state.design.selected_stimulus_definition,
         &mut app.state.design.stimulus_editor,
         &mut app.state.model,

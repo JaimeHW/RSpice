@@ -1,12 +1,12 @@
 //! Placing a pin or port, drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::placement::pin_port::tests::{
-    self as form, dialog_input, key_event,
-};
-use crate::workbench::app::dialogs::placement::pin_port::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::placement::pin_port::tests::{
+    self as form, dialog_input, key_event,
+};
+use rspice_app_design::workbench::app::dialogs::placement::pin_port::*;
 use rspice_app_state::state::ComponentType;
 use rspice_app_state::state::Tool;
 use rspice_app_state::state::{Point, PortDirection, PortDiscipline, PortSignalType};
@@ -31,7 +31,10 @@ fn published(app: &mut RSpiceApp) -> Vec<(egui::accesskit::Role, String, egui::R
 
 /// What the names declare, over the model they are declared in.
 fn declaration_line(state: &AppState, names: &[String]) -> Option<String> {
-    crate::workbench::app::dialogs::placement::pin_port::declaration_line(&state.model, names)
+    rspice_app_design::workbench::app::dialogs::placement::pin_port::declaration_line(
+        &state.model,
+        names,
+    )
 }
 
 fn open_with(state: &mut AppState, names: &str) {

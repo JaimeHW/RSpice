@@ -2,8 +2,8 @@
 //! what order.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::navigator::shelf::search::{ShelfQuery, ShelfTerms};
-use crate::workbench::design::navigator::shelf::*;
+use rspice_app_design::workbench::design::navigator::shelf::search::{ShelfQuery, ShelfTerms};
+use rspice_app_design::workbench::design::navigator::shelf::*;
 
 fn hits(app: &RSpiceApp, raw: &str) -> Vec<ShelfHit> {
     let query = ShelfQuery::new(raw);

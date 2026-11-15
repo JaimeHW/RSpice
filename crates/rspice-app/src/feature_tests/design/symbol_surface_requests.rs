@@ -1,8 +1,8 @@
 //! The symbol surface's requests answered through the whole application: each one
 //! rechecks the open view and the project's write authority before it acts.
 
-use crate::schematic::symbol_editor::*;
 use crate::workbench::AppState;
+use rspice_app_design::schematic::symbol_editor::*;
 use rspice_schematic_editor::symbol_editor::surface::SymbolSurfaceAction;
 use rspice_schematic_editor::symbol_editor::surface::SymbolSurfaceRequest;
 
@@ -24,7 +24,7 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
             state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
             let before = state.model.load_active_symbol_document().unwrap();
             let request = SymbolSurfaceRequest {
-                source: crate::workbench::app::symbol_editor_request_source(
+                source: rspice_app_design::workbench::app::actions::workspace::symbol_document::symbol_editor_request_source(
                     &state.model,
                     &state.workbench,
                 ),
@@ -54,7 +54,7 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
                 .content
                 .set_active_read_only_reference(false);
             let request = SymbolSurfaceRequest {
-                source: crate::workbench::app::symbol_editor_request_source(
+                source: rspice_app_design::workbench::app::actions::workspace::symbol_document::symbol_editor_request_source(
                     &state.model,
                     &state.workbench,
                 ),

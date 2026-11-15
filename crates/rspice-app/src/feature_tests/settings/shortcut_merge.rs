@@ -8,11 +8,11 @@ use crate::feature_tests::settings::shortcut_merge_rollback::{
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::results::commands::ResultsCommand;
 use egui::Key;
 use egui::os::OperatingSystem;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_settings::workbench::shortcuts::artifacts::merge::*;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
 use rspice_app_state::state::shortcuts::ProtectedShortcutPolicy;

@@ -3,22 +3,22 @@
 //! project session and the documents it closes.
 
 use super::app_state_of;
-use crate::schematic::symbol_editor::interaction::tests::viewport;
-use crate::schematic::symbol_editor::interaction::*;
 use crate::workbench::AppState;
 use crate::workbench::SymbolTool;
+use rspice_app_design::schematic::symbol_editor::interaction::tests::viewport;
+use rspice_app_design::schematic::symbol_editor::interaction::*;
 use rspice_app_state::state::{CellViewRef, Point};
 use rspice_schematic_editor::symbol_editor::interaction::SymbolCanvasInput;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolCanvasRequest;
 
-/// [`open_symbol`](crate::schematic::symbol_editor::interaction::tests::open_symbol) made a whole application.
+/// [`open_symbol`](rspice_app_design::schematic::symbol_editor::interaction::tests::open_symbol) made a whole application.
 fn open_symbol() -> AppState {
-    app_state_of(crate::schematic::symbol_editor::interaction::tests::open_symbol())
+    app_state_of(rspice_app_design::schematic::symbol_editor::interaction::tests::open_symbol())
 }
 
 fn request(state: &AppState, input: SymbolCanvasInput) -> SymbolCanvasRequest {
     SymbolCanvasRequest {
-        source: crate::workbench::app::symbol_editor_request_source(&state.model, &state.workbench),
+        source: rspice_app_design::workbench::app::actions::workspace::symbol_document::symbol_editor_request_source(&state.model, &state.workbench),
         tool: state.design.symbol.editor.tool,
         selection: state.design.symbol.editor.effective_selection(),
         viewport: viewport(),
@@ -29,7 +29,7 @@ fn request(state: &AppState, input: SymbolCanvasInput) -> SymbolCanvasRequest {
 fn apply(state: &mut AppState, request: SymbolCanvasRequest) {
     let mut document = state.model.load_active_symbol_document().unwrap();
     let mut metadata =
-        crate::workbench::app::load_active_symbol_editor_metadata(&state.model, &document).unwrap();
+        rspice_app_design::workbench::app::actions::workspace::symbol_document::load_active_symbol_editor_metadata(&state.model, &document).unwrap();
     apply_canvas_request(
         &mut state.canvas_parts(),
         &mut document,
@@ -61,7 +61,7 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
         );
         if change == "revision" {
             let mut metadata =
-                crate::workbench::app::load_active_symbol_editor_metadata(&state.model, &before)
+                rspice_app_design::workbench::app::actions::workspace::symbol_document::load_active_symbol_editor_metadata(&state.model, &before)
                     .unwrap();
             metadata.revision += 1;
             state

@@ -2,7 +2,7 @@
 //! design slot's drag the model and the session it runs over.
 
 #[cfg(test)]
-use super::interaction_state::DragType;
+use rspice_app_design::workbench::app_state::interaction_state::DragType;
 
 impl super::AppState {
     /// [`DragState::begin`] for the session.

@@ -69,9 +69,6 @@ const LAYERS: &[(&str, u32)] = &[
     // It references nothing, so the bottom layer clears every inbound edge
     // at once.
     ("source_guard", 0),
-    // Editors and inspectors.
-    ("properties", 7),
-    ("schematic", 8),
     // The application shell: `RSpiceApp`, chrome, dialogs, surfaces, and the
     // workflows that mutate them. Its interior is ordered separately by
     // [`WORKBENCH_LAYERS`] — see `workbench_references_respect_the_layer_order`.
@@ -815,7 +812,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     ("app", "chrome"),
     ("app", "workflows/file_actions"),
     ("app", "frame"),
-    ("app", "cross_probe"),
     // The source find and source document dialogs' tests that only seed and
     // read code's state run over the code feature's harness, as code's own
     // seeders do. The dialogs compile in rspice-app-code at their application

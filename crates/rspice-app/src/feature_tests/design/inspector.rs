@@ -2,23 +2,23 @@
 //! lends, or through the whole frame: the component, net, sheet and selection
 //! cards and what their edits do.
 
-use crate::workbench::app::actions::workspace::inline_edit_authority;
-use crate::workbench::design::inspector::component::{
+use crate::workbench::framework::feature::SimulatePort as _;
+use crate::workbench::state::{InlineEditField, InlineEditSession, Workspace};
+use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_design::workbench::app::actions::workspace::inline_edit_authority;
+use rspice_app_design::workbench::design::inspector::component::{
     TEMPERATURE_PARAM, apply_bound_model_choice, apply_bound_model_section, bound_model_choices,
     component_checks, component_panel, editing_identity_field, editing_parameter_field,
     terminals_section,
 };
-use crate::workbench::design::inspector::inline_instance::{
+use rspice_app_design::workbench::design::inspector::inline_instance::{
     begin_edit, component_tuning_action_block_reason, field_value, net_panel, update_edit,
 };
-use crate::workbench::design::inspector::model_evidence::component_model_evidence;
-use crate::workbench::design::inspector::tests::{
+use rspice_app_design::workbench::design::inspector::model_evidence::component_model_evidence;
+use rspice_app_design::workbench::design::inspector::tests::{
     accesskit_nodes, painted_panel, seed_two_components,
 };
-use crate::workbench::design::inspector::*;
-use crate::workbench::framework::feature::SimulatePort as _;
-use crate::workbench::state::{InlineEditField, InlineEditSession, Workspace};
-use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_design::workbench::design::inspector::*;
 use rspice_app_state::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use rspice_app_state::state::{
     CellViewRef, Component, ComponentType, LibraryCellInstance, Point, SchematicProbe, ViewType,

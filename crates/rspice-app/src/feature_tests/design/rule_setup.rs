@@ -1,14 +1,14 @@
 //! The rule setup dialog drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::rule_setup::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::rule_setup::*;
 
 /// Draw the dialog as the frame's step does, over the whole state.
 fn render_rule_setup_dialog(ctx: &Context, state: &mut AppState) -> bool {
     let review_markers = state.design.schematic_visibility.review_markers;
-    crate::workbench::app::dialogs::rule_setup::render_rule_setup_dialog(
+    rspice_app_design::workbench::app::dialogs::rule_setup::render_rule_setup_dialog(
         &mut state.design.rule_setup,
         review_markers,
         &mut state.model,

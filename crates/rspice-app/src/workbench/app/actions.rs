@@ -8,17 +8,7 @@
 
 pub(in crate::workbench) mod export_image;
 pub(in crate::workbench) mod file;
-#[cfg(test)]
-pub(in crate::workbench) use rspice_app_design::workbench::app::actions::hierarchy_net_highlight;
-pub(in crate::workbench) use rspice_app_design::workbench::app::actions::property_edit;
 pub(in crate::workbench) mod reveal;
-#[cfg(test)]
-pub(crate) use rspice_app_design::workbench::app::actions::stimulus;
-#[cfg(test)]
-pub(in crate::workbench) use rspice_app_design::workbench::app::actions::stimulus_placement;
-#[cfg(test)]
-pub(crate) use rspice_app_design::workbench::app::actions::symbol;
-pub(crate) use rspice_app_design::workbench::app::actions::workspace;
 
 use egui::{Context, Popup};
 
@@ -46,7 +36,7 @@ impl RSpiceApp {
         let active_view = self.state.model.workspace.content.active_view_type();
         let canvas_focus =
             engineering_canvas_has_focus(ctx, self.state.workbench.workspace, active_view);
-        if crate::schematic::view::handle_pre_render_placement_transform(
+        if rspice_app_design::schematic::view::handle_pre_render_placement_transform(
             ctx,
             &mut self.state.canvas_parts(),
             canvas_focus,
@@ -548,7 +538,7 @@ mod shortcut_ownership_tests {
             .select_only_bus(87);
 
         app.execute_command_key(
-            crate::workbench::design::commands::DesignCommand::ObjectProperties.key(),
+            rspice_app_design::workbench::design::commands::DesignCommand::ObjectProperties.key(),
         );
         assert!(matches!(
             app.state.design.object_properties.draft,
@@ -611,7 +601,8 @@ mod shortcut_ownership_tests {
         let identities = app.state.model.design_rule_finding_identities(&subject);
         assert_eq!(identities.len(), 2, "both findings were published");
 
-        let next = crate::workbench::design::commands::DesignCommand::NextViolation.key();
+        let next =
+            rspice_app_design::workbench::design::commands::DesignCommand::NextViolation.key();
         app.execute_command_key(next);
         assert_eq!(
             app.state.workbench.workspace,
@@ -667,7 +658,7 @@ mod shortcut_ownership_tests {
 #[cfg(test)]
 mod symbol_action_tests {
     use super::*;
-    use crate::workbench::design::commands::DesignCommand;
+    use rspice_app_design::workbench::design::commands::DesignCommand;
     use rspice_app_state::state::{
         Cell, CellViewRef, Library, Point, PortDirection, SymbolDocument, SymbolPin, View, ViewType,
     };
@@ -696,7 +687,8 @@ mod symbol_action_tests {
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
 
-        let select = crate::workbench::design::commands::DesignCommand::SelectTool.key();
+        let select =
+            rspice_app_design::workbench::design::commands::DesignCommand::SelectTool.key();
         assert!(app.command_availability(select).is_available());
         for command in [
             DesignCommand::SymbolPinTool.key(),

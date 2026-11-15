@@ -1,8 +1,8 @@
 //! The design check run through the whole application: a check that finds errors warns
 //! in the notices and opens the Problems page.
 
-use crate::workbench::app::actions::workspace::design_checks::*;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::workbench::app::actions::workspace::design_checks::*;
 use rspice_app_state::diagnostics::LogSeverity;
 use rspice_design::drc::DrcResult;
 use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation, DrcViolationType};

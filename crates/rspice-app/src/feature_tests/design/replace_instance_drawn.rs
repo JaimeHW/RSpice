@@ -1,10 +1,10 @@
 //! Replacing an instance, drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::replace_instance::*;
-use crate::workbench::app::open_replace_instance_dialog;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::replace_instance::open_replace_instance_dialog;
+use rspice_app_design::workbench::app::dialogs::replace_instance::*;
 use rspice_app_state::state::ComponentType;
 use rspice_app_state::state::Point;
 

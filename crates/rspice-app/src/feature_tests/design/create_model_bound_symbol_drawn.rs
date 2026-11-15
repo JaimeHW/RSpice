@@ -4,11 +4,11 @@ use crate::feature_tests::design::create_model_bound_symbol::{
     open_create_model_bound_symbol_dialog, state_with_bound_mos_model,
 };
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::create_model_bound_symbol::state::*;
-use crate::workbench::app::dialogs::create_model_bound_symbol::tests::{
+use egui::{Context, Rect, vec2};
+use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::state::*;
+use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::tests::{
     self as dialog, node_bounds,
 };
-use egui::{Context, Rect, vec2};
 
 /// Draw the dialog as its dialog step does.
 fn render(app: &mut RSpiceApp, ctx: &Context) {

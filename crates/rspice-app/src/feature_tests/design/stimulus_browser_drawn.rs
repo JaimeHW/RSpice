@@ -1,9 +1,9 @@
 //! The navigator's stimulus browser drawn through a whole application.
 
 use super::stimulus_browser::library;
-use crate::workbench::app::actions::stimulus as stimulus_verbs;
-use crate::workbench::state::PURPOSE_FIELD;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_design::workbench::app::actions::stimulus as stimulus_verbs;
+use rspice_app_design::workbench::state::stimulus_editor::PURPOSE_FIELD;
 use rspice_app_state::state::ComponentType;
 
 /// Whether the console holds a user line containing `fragment`.

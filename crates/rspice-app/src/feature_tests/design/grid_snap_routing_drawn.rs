@@ -1,8 +1,8 @@
 //! The grid, snap and routing dialog drawn through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::grid_snap_routing::*;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::grid_snap_routing::*;
 
 /// Draw the dialog as its dialog step does.
 fn render(app: &mut RSpiceApp, ctx: &Context) {

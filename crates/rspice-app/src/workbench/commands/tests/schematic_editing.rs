@@ -7,7 +7,7 @@
 //! empty or read-only selection has already lied to the user.
 
 use super::*;
-use crate::workbench::design::commands::DesignCommand;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 
 #[test]
 fn descend_requires_a_resolved_schematic_master() {
@@ -129,8 +129,8 @@ fn transform_commands_keep_wires_attached_to_authored_symbol_pins() {
             (rotation, mirror_h, mirror_v),
             "{command:?}"
         );
-        let pins =
-            crate::schematic::view::schematic_symbol_context(&app.state).terminal_points(part);
+        let pins = rspice_app_design::schematic::view::schematic_symbol_context(&app.state)
+            .terminal_points(part);
         let end = document.wires[0].points[0];
         assert!(
             pins.contains(&end),
@@ -149,7 +149,7 @@ fn app_with_selected_resistor_pair() -> (RSpiceApp, u64) {
     app.state.workbench.activate(Workspace::Design);
     let first = Component::new(1, ComponentType::Resistor, Point::new(0, 0));
     let second = Component::new(2, ComponentType::Resistor, Point::new(200, 0));
-    let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&app.state);
     let first_pins = symbols.terminal_points(&first);
     let second_pins = symbols.terminal_points(&second);
     let document = app.state.model.schematic.document_mut_for_test();
@@ -204,7 +204,7 @@ fn rotate_turns_the_whole_selection_as_one_body() {
         rotated_cw(before.net_labels[0].pos - pos(&before, 1)),
         "the label turns with the parts"
     );
-    let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&app.state);
     let pins: Vec<_> = after
         .components
         .iter()
@@ -258,7 +258,7 @@ fn a_wire_attached_to_a_turned_part_keeps_square_corners() {
         "the attached wire went slanted: {:?}",
         wire.points
     );
-    let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&app.state);
     let turned = after
         .components
         .iter()
@@ -303,7 +303,7 @@ fn turning_a_part_off_a_pin_it_touched_wires_the_two_pins() {
 
     app.execute_command_key(DesignCommand::RotateSelection.key());
 
-    let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
+    let symbols = rspice_app_design::schematic::view::schematic_symbol_context(&app.state);
     let document = app.state.model.schematic.document();
     let turned = document
         .components
@@ -359,7 +359,7 @@ fn rotate_and_mirror_have_their_keys_on_the_canvas() {
 #[test]
 fn plain_r_turns_the_selection_while_move_carries_it() {
     let (mut app, _) = app_with_selected_resistor_pair();
-    crate::workbench::app::arm_move_selection_in(
+    rspice_app_design::workbench::app::dialogs::selection::move_selection::arm_move_selection_in(
         &mut app.state.design.move_selection,
         &mut app.state.design.stretch_selection,
         &mut app.state.design.array_selection,
@@ -383,7 +383,7 @@ fn plain_r_turns_the_selection_while_move_carries_it() {
             ..Default::default()
         },
         |ctx| {
-            handled = crate::schematic::view::handle_pre_render_placement_transform(
+            handled = rspice_app_design::schematic::view::handle_pre_render_placement_transform(
                 ctx,
                 &mut app.state.canvas_parts(),
                 true,
@@ -684,7 +684,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
 
     Command::Duplicate.execute(&mut app);
     assert!(!app.state.dialog_modal_open());
-    assert!(crate::workbench::app::place_floating_paste(
+    assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
         &mut app.state.design.floating_paste,
         &mut app.state.model,
         &mut app.state.workbench
@@ -879,7 +879,7 @@ fn rename_command_opens_the_stable_target_dialog() {
     assert!(app.state.design.rename_selection.open);
     assert!(matches!(
         app.state.design.rename_selection.target.as_ref(),
-        Some(crate::workbench::app::RenameSelectionTarget::Component(component))
+        Some(rspice_app_design::workbench::app::dialogs::selection::rename::RenameSelectionTarget::Component(component))
             if component.id == id
     ));
 }
@@ -1319,7 +1319,7 @@ fn a_pasted_wire_ending_inside_another_splits_it_and_dots_the_t() {
     let mut app = app_with_copied_wire(vec![through.clone(), stub.clone()], 2, (10.0, 5.0));
 
     Command::Paste.execute(&mut app);
-    assert!(crate::workbench::app::place_floating_paste(
+    assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
         &mut app.state.design.floating_paste,
         &mut app.state.model,
         &mut app.state.workbench
@@ -1384,7 +1384,7 @@ fn a_pasted_pin_landing_inside_a_wire_splits_it() {
     app.state.design.canvas_hover = Some((f64::from(target.x) / grid, f64::from(target.y) / grid));
 
     Command::Paste.execute(&mut app);
-    assert!(crate::workbench::app::place_floating_paste(
+    assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
         &mut app.state.design.floating_paste,
         &mut app.state.model,
         &mut app.state.workbench
@@ -1483,7 +1483,7 @@ fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
     );
 
     Command::Paste.execute(&mut app);
-    assert!(crate::workbench::app::place_floating_paste(
+    assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
         &mut app.state.design.floating_paste,
         &mut app.state.model,
         &mut app.state.workbench

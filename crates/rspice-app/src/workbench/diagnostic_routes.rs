@@ -24,12 +24,12 @@ use egui::Context;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::{DrawnObject, PreflightRemediation};
 

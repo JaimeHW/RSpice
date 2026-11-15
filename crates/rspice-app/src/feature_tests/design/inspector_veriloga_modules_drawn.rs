@@ -2,7 +2,7 @@
 //! temperature row and the title that names what it instantiates.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::inspector::component::{
+use rspice_app_design::workbench::design::inspector::component::{
     TEMPERATURE_PARAM, component_title_kind, inline_parameter_contract,
     supports_instance_temperature,
 };

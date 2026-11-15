@@ -1,7 +1,7 @@
 //! Placing a stimulus drawn through a whole application.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::arm_placement_from_definition;
+use rspice_app_design::workbench::app::actions::stimulus_placement::arm_placement_from_definition;
 use rspice_app_state::state::Tool;
 use rspice_app_state::state::stimulus_library::definition::StimulusDefinition;
 use rspice_app_state::state::stimulus_library::provenance::ProvenanceState;

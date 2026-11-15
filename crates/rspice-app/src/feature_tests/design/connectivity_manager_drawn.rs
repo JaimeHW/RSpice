@@ -1,8 +1,8 @@
 //! The connectivity manager drawn through a whole application.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::dialogs::connectivity_manager::*;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::connectivity_manager::*;
 use std::collections::HashMap;
 
 /// Every node the manager publishes, after enough passes for the surface to

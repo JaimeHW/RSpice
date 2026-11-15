@@ -1,17 +1,17 @@
 //! The canvas context menu driven through a whole application.
 
-use crate::schematic::view::SchematicSymbolContext;
-use crate::schematic::view::context_menu::{ARRANGE_ENTRIES, ContextEntry};
-use crate::schematic::view::schematic_symbol_context;
 use crate::workbench::ResultViewer;
-use crate::workbench::app::duplicate_schematic_selection_at;
-use crate::workbench::app::replace_instance_available;
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::ContextTarget;
 use crate::workbench::commands::answer_surface_requests;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
 use egui::{Context, Key, Modifiers, Rect, Ui, pos2, vec2};
+use rspice_app_design::schematic::view::SchematicSymbolContext;
+use rspice_app_design::schematic::view::context_menu::{ARRANGE_ENTRIES, ContextEntry};
+use rspice_app_design::schematic::view::schematic_symbol_context;
+use rspice_app_design::workbench::app::dialogs::replace_instance::replace_instance_available;
+use rspice_app_design::workbench::app::dialogs::selection::commands::duplicate_schematic_selection_at;
+use rspice_app_design::workbench::app_state::interaction_state::ContextTarget;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::Point;
 use rspice_app_state::state::Tool;
 use rspice_app_state::state::{
@@ -50,23 +50,29 @@ fn the_descend_shortcut_opens_a_veriloga_instances_view_as_its_row_does() {
 // the menu asked of another workspace as the shell does.
 
 fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'static str) {
-    crate::schematic::view::context_menu::action_availability(action, &state.canvas_facts())
+    rspice_app_design::schematic::view::context_menu::action_availability(
+        action,
+        &state.canvas_facts(),
+    )
 }
 
 fn menu_entries(state: &AppState, target: ContextTarget) -> Vec<ContextEntry> {
-    crate::schematic::view::context_menu::menu_entries(&state.canvas_facts(), target)
+    rspice_app_design::schematic::view::context_menu::menu_entries(&state.canvas_facts(), target)
 }
 
 fn selection_summary(state: &AppState, target: ContextTarget) -> String {
-    crate::schematic::view::context_menu::selection_summary(&state.canvas_facts(), target)
+    rspice_app_design::schematic::view::context_menu::selection_summary(
+        &state.canvas_facts(),
+        target,
+    )
 }
 
 fn context_menu_binding(state: &AppState) -> Option<ContextMenuBinding> {
-    crate::schematic::view::context_menu::context_menu_binding(&state.canvas_facts())
+    rspice_app_design::schematic::view::context_menu::context_menu_binding(&state.canvas_facts())
 }
 
 fn context_menu_view(state: &AppState, ctx: &Context) -> Option<ContextMenuView> {
-    crate::schematic::view::context_menu::context_menu_view(&state.canvas_facts(), ctx)
+    rspice_app_design::schematic::view::context_menu::context_menu_view(&state.canvas_facts(), ctx)
 }
 
 fn execute_context_action(
@@ -75,7 +81,7 @@ fn execute_context_action(
     click_pos: Point,
     symbol_context: &SchematicSymbolContext,
 ) {
-    crate::schematic::view::context_menu::execute_context_action(
+    rspice_app_design::schematic::view::context_menu::execute_context_action(
         action,
         &mut state.canvas_parts(),
         click_pos,
@@ -89,7 +95,7 @@ fn apply_context_request(
     request: ContextMenuRequest,
     symbol_context: &SchematicSymbolContext,
 ) {
-    crate::schematic::view::context_menu::apply_context_request(
+    rspice_app_design::schematic::view::context_menu::apply_context_request(
         &mut state.canvas_parts(),
         request,
         symbol_context,
@@ -98,12 +104,17 @@ fn apply_context_request(
 }
 
 fn open_operating_point(state: &mut AppState) {
-    crate::schematic::view::context_menu::open_operating_point(&mut state.canvas_parts());
+    rspice_app_design::schematic::view::context_menu::open_operating_point(
+        &mut state.canvas_parts(),
+    );
     answer_surface_requests(state);
 }
 
 fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) -> ContextTarget {
-    crate::schematic::view::context_menu::select_context_target(&mut state.canvas_parts(), target)
+    rspice_app_design::schematic::view::context_menu::select_context_target(
+        &mut state.canvas_parts(),
+        target,
+    )
 }
 
 fn context_key_input(key: Key) -> egui::RawInput {
@@ -278,7 +289,7 @@ fn a_dialog_the_menu_asked_for_holds_the_canvas_modal_until_it_opens() {
     let mut state = AppState::default();
     let symbol_context = schematic_symbol_context(&state);
     assert!(!state.canvas_parts().application_modal_open());
-    crate::schematic::view::context_menu::execute_context_action(
+    rspice_app_design::schematic::view::context_menu::execute_context_action(
         ContextAction::NewVerilogADevice,
         &mut state.canvas_parts(),
         Point::origin(),
@@ -963,7 +974,7 @@ fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
         Point::new(60, 30),
         &symbol_context,
     );
-    assert!(crate::workbench::app::place_floating_paste(
+    assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
         &mut state.design.floating_paste,
         &mut state.model,
         &mut state.workbench
@@ -992,7 +1003,7 @@ fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
 /// selection top to bottom.
 #[test]
 fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
-    use crate::schematic::view::selection_transform::SelectionTransform;
+    use rspice_app_design::schematic::view::selection_transform::SelectionTransform;
 
     let mut state = AppState::default();
     state
@@ -1056,7 +1067,7 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
     let click = Point::new(200, 100);
     let offset = click - state.design.schematic_clipboard.origin;
     execute_context_action(ContextAction::Paste, &mut state, click, &symbol_context);
-    assert!(crate::workbench::app::place_floating_paste(
+    assert!(rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
         &mut state.design.floating_paste,
         &mut state.model,
         &mut state.workbench
@@ -1186,7 +1197,7 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
     }
     fn click(state: &mut AppState, id: u64) {
         let request = EditorRequest {
-            source: crate::schematic::view::requests::editor_request_source(state),
+            source: rspice_app_design::schematic::view::requests::editor_request_source(state),
             selection: state.model.schematic.session.editor.selection.clone(),
             action: EditorAction::SelectPointer {
                 target: Some(PointerTarget::Component(id)),
@@ -1194,7 +1205,10 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
                 alt_held: false,
             },
         };
-        crate::schematic::view::requests::apply_editor_request(&mut state.canvas_parts(), request);
+        rspice_app_design::schematic::view::requests::apply_editor_request(
+            &mut state.canvas_parts(),
+            request,
+        );
     }
 
     let reference = hierarchy_reference::build();
@@ -1254,8 +1268,11 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
         .components
         .iter()
         .find(|component| {
-            crate::workbench::app::hierarchy_master_for_component(&state.model, component.id)
-                .is_none()
+            rspice_app_design::workbench::app::actions::workspace::hierarchy_master_for_component(
+                &state.model,
+                component.id,
+            )
+            .is_none()
         })
         .map(|component| component.id)
         .expect("top places an ordinary part");

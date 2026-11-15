@@ -5,9 +5,9 @@
 //! bounded, so two schematic subjects cannot inherit each other's offset.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::inspector::bind_component_model_from_catalog;
 use crate::workbench::docks::inspector::*;
 use crate::workbench::state::Workspace;
+use rspice_app_design::workbench::design::inspector::bind_component_model_from_catalog;
 use rspice_app_state::state::{Component, ComponentType};
 
 fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {

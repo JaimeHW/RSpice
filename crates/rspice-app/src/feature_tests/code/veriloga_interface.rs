@@ -920,7 +920,9 @@ fn an_instance_placed_before_a_port_change_is_repaired_and_the_run_proceeds() {
         .editor
         .selection
         .select_only_component(placed);
-    let update = crate::workbench::design::commands::DesignCommand::UpdateInstanceInterface.key();
+    let update =
+        rspice_app_design::workbench::design::commands::DesignCommand::UpdateInstanceInterface
+            .key();
     assert!(app.command_key_enabled(update));
     app.execute_command_key(update);
 

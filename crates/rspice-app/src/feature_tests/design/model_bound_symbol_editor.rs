@@ -10,17 +10,17 @@ use crate::feature_tests::design::create_model_bound_symbol::{
     open_create_model_bound_symbol_dialog, state_with_bound_mos_model,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::dialogs::create_model_bound_symbol::state::PRIMARY;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame_with, themed_context};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRoute};
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::lifecycle::project_lifecycle::{
     DestinationAuthority, SaveScope, has_unsaved_changes,
 };
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::state::PRIMARY;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::diagnostics::LogAnchor;
 use rspice_app_state::state::{
     CellViewRef, ModelBoundSymbolDefinition, Point, PortDirection, SymbolDocument,
@@ -188,7 +188,7 @@ impl Fixture {
         let metadata = self.metadata();
         let mut edited = before.clone();
         edit(&mut edited);
-        crate::workbench::app::record_symbol_edit(
+        rspice_app_design::workbench::app::actions::workspace::symbol_document::record_symbol_edit(
             &mut self.app.state.design.symbol,
             &self.app.state.model,
             &before,
@@ -347,7 +347,7 @@ fn generate_draws_a_bound_symbol_from_its_model() {
         document.body.clear();
     });
 
-    crate::workbench::app::generate_active_symbol_document(
+    rspice_app_design::workbench::app::actions::workspace::symbol_document::generate_active_symbol_document(
         &mut fixture.app.state.design.symbol,
         &mut fixture.app.state.model,
     )

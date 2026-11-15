@@ -8,18 +8,18 @@ use rspice_design::drc::DrcResult;
 
 use super::AppState;
 use super::waivers::StoredWaivers;
-use crate::workbench::app::actions::hierarchy_net_highlight::light_net_named;
-use crate::workbench::app::actions::workspace::design_checks::check_active_cellview;
-use crate::workbench::app::actions::workspace::history::{
+use crate::workbench::state::InlineEditAuthority;
+use rspice_app_design::workbench::app::actions::hierarchy_net_highlight::light_net_named;
+use rspice_app_design::workbench::app::actions::workspace::design_checks::check_active_cellview;
+use rspice_app_design::workbench::app::actions::workspace::history::{
     activate_history_document, redo_project_design, undo_project_design,
 };
-use crate::workbench::app::actions::workspace::inline_edit_authority;
-use crate::workbench::app::actions::workspace::symbol_document::{
+use rspice_app_design::workbench::app::actions::workspace::inline_edit_authority;
+use rspice_app_design::workbench::app::actions::workspace::symbol_document::{
     active_symbol_pin_finding_count, can_undo_active_symbol_document, redo_active_symbol_document,
     run_active_symbol_pin_checks, store_active_symbol_editor_bundle, undo_active_symbol_document,
 };
-use crate::workbench::app::actions::workspace::waivers::restate_waived_findings;
-use crate::workbench::state::InlineEditAuthority;
+use rspice_app_design::workbench::app::actions::workspace::waivers::restate_waived_findings;
 use rspice_app_state::state::{CellViewRef, SymbolDocument, SymbolEditorMetadata};
 
 impl AppState {

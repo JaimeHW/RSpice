@@ -2,16 +2,16 @@
 //! values shown are the transient's at the results' cursor A.
 
 use super::app_state_of;
-use crate::schematic::view::scene::tests::text;
-use crate::schematic::view::scene::*;
-use crate::schematic::view::transient_annotation_status;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::schematic::view::scene::tests::text;
+use rspice_app_design::schematic::view::scene::*;
+use rspice_app_design::schematic::view::transient_annotation_status;
 use rspice_app_state::state::SchematicAnnotationVisibility;
 use rspice_app_state::state::{AnalysisResult, AnalysisType};
 
-/// [`state_with_operating_point`](crate::schematic::view::scene::tests::state_with_operating_point) made a whole application.
+/// [`state_with_operating_point`](rspice_app_design::schematic::view::scene::tests::state_with_operating_point) made a whole application.
 fn state_with_operating_point() -> AppState {
-    app_state_of(crate::schematic::view::scene::tests::state_with_operating_point())
+    app_state_of(rspice_app_design::schematic::view::scene::tests::state_with_operating_point())
 }
 
 /// Transient voltages badge the nets and the selected device as the DC

@@ -4,8 +4,8 @@
 //! transient's voltages.
 
 use super::*;
-use crate::schematic::view::sheet_visibility::SchematicObjectKind;
 use crate::workbench::framework::requests::ClipboardImage;
+use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_state::state::{
     ComponentType, DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry,
@@ -129,7 +129,13 @@ fn canvas_frame(ctx: &Context, app: &mut RSpiceApp, time: f64) {
             time: Some(time),
             ..Default::default()
         },
-        |ui| crate::schematic::view::render_schematic_view(ui, &mut app.state.canvas_frame(), None),
+        |ui| {
+            rspice_app_design::schematic::view::render_schematic_view(
+                ui,
+                &mut app.state.canvas_frame(),
+                None,
+            )
+        },
     );
 }
 
@@ -312,7 +318,7 @@ fn highlight_net_lights_the_net_the_selection_is_on() {
     assert!(highlight.highlighted_wires.contains(&wire));
     assert_eq!(
         highlight.selected_net_name.as_deref(),
-        crate::schematic::view::selected_net(
+        rspice_app_design::schematic::view::selected_net(
             &app.state.model,
             app.state.design.schematic_visibility.net_highlighting,
         )

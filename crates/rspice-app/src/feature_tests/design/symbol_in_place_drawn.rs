@@ -4,7 +4,7 @@ use egui::accesskit::Role;
 
 use crate::feature_tests::replay::{Control, Replay};
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design::commands::DesignCommand;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::{CellViewRef, Point, Rotation};
 
 use super::symbol_in_place::amp_project;
@@ -56,7 +56,7 @@ impl InPlace {
     }
 
     fn in_place_zoom(&self) -> f64 {
-        crate::workbench::app::in_place_session(
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
             &self.replay.app.state.design.symbol.in_place,
             &self.replay.app.state.model,
         )
@@ -370,8 +370,11 @@ fn shift_x_edits_the_selected_instance_in_place() {
     let state = &fixture.replay.app.state;
     assert_eq!(state.model.workspace.content.active_view, fixture.symbol);
     let session =
-        crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
-            .expect("Shift+X edits the symbol in place");
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
+            &state.design.symbol.in_place,
+            &state.model,
+        )
+        .expect("Shift+X edits the symbol in place");
     assert_eq!(session.instance_id, fixture.instance);
 }
 
@@ -409,11 +412,12 @@ fn return_to_parent_leaves_the_in_place_edit() {
 fn entering_frames_the_instance_only_when_the_sheet_leaves_it_out() {
     let mut fixture = InPlace::new();
     fixture.enter();
-    let session = crate::workbench::app::in_place_session(
-        &fixture.replay.app.state.design.symbol.in_place,
-        &fixture.replay.app.state.model,
-    )
-    .unwrap();
+    let session =
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
+            &fixture.replay.app.state.design.symbol.in_place,
+            &fixture.replay.app.state.model,
+        )
+        .unwrap();
     assert_eq!(
         (session.zoom, session.pan),
         (2.0, (60.0, 40.0)),
@@ -427,13 +431,17 @@ fn entering_frames_the_instance_only_when_the_sheet_leaves_it_out() {
     let output = fixture.replay.frame(vec![]);
     let canvas = canvas_rect(&output);
     let model = &fixture.replay.app.state.model;
-    let session = crate::workbench::app::in_place_session(
-        &fixture.replay.app.state.design.symbol.in_place,
-        model,
-    )
-    .unwrap();
+    let session =
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
+            &fixture.replay.app.state.design.symbol.in_place,
+            model,
+        )
+        .unwrap();
     let (min_x, min_y, max_x, max_y) =
-        crate::workbench::app::in_place_bounds(session, model).unwrap();
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_bounds(
+            session, model,
+        )
+        .unwrap();
     let screen = |x: f64, y: f64| {
         egui::pos2(
             canvas.min.x + (session.pan.0 + x * session.zoom) as f32,
@@ -533,7 +541,7 @@ impl InPlace {
     fn screen(&mut self, point: Point) -> egui::Pos2 {
         let output = self.replay.frame(vec![]);
         let canvas = canvas_rect(&output);
-        let session = crate::workbench::app::in_place_session(
+        let session = rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
             &self.replay.app.state.design.symbol.in_place,
             &self.replay.app.state.model,
         )
@@ -644,7 +652,7 @@ fn reverting_in_place_brings_the_instance_and_its_wire_back() {
     assert_eq!(fixture.pin_a(), Some(Point::new(-40, -10)), "the saved pin");
     assert_eq!(fixture.wire_end(), Point::new(60, 70), "the wire came back");
     assert!(
-        crate::workbench::app::in_place_session(
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
             &fixture.replay.app.state.design.symbol.in_place,
             &fixture.replay.app.state.model,
         )
@@ -675,7 +683,7 @@ fn saving_in_place_writes_the_edit_and_reopens_without_the_session() {
         .execute_command_key(ProjectCommand::Save.key());
     fixture.replay.frames(vec![]);
     assert!(
-        crate::workbench::app::in_place_session(
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
             &fixture.replay.app.state.design.symbol.in_place,
             &fixture.replay.app.state.model,
         )
@@ -891,8 +899,11 @@ fn descend_with_options_edits_a_symbol_only_cell_in_place() {
     let state = &fixture.replay.app.state;
     assert_eq!(state.model.workspace.content.active_view, fixture.symbol);
     assert!(
-        crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
-            .is_some(),
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
+            &state.design.symbol.in_place,
+            &state.model
+        )
+        .is_some(),
         "the symbol is edited in place"
     );
 }
@@ -918,7 +929,7 @@ fn the_layout_saved_in_place_is_the_sheets() {
     fixture.replay.frames(vec![]);
     fixture.enter();
     let in_place_view = {
-        let session = crate::workbench::app::in_place_session(
+        let session = rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
             &fixture.replay.app.state.design.symbol.in_place,
             &fixture.replay.app.state.model,
         )
@@ -1092,8 +1103,11 @@ fn the_instance_menu_edits_its_symbol_in_place() {
     let state = &fixture.replay.app.state;
     assert_eq!(state.model.workspace.content.active_view, fixture.symbol);
     let session =
-        crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
-            .expect("the menu edits the symbol in place");
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
+            &state.design.symbol.in_place,
+            &state.model,
+        )
+        .expect("the menu edits the symbol in place");
     assert_eq!(session.instance_id, fixture.instance);
     assert_eq!((session.zoom, session.pan), (2.0, (60.0, 40.0)));
 }
@@ -1410,22 +1424,33 @@ fn a_symbol_finding_followed_in_place_selects_and_shows_its_pin() {
 
     // A camera moved well off the instance.
     let state = &mut fixture.replay.app.state;
-    crate::workbench::app::in_place_session_mut(&mut state.design.symbol.in_place, &state.model)
-        .expect("the symbol is edited in place")
-        .pan = (-4000.0, -4000.0);
+    rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session_mut(
+        &mut state.design.symbol.in_place,
+        &state.model,
+    )
+    .expect("the symbol is edited in place")
+    .pan = (-4000.0, -4000.0);
     click_at(&mut fixture.replay, row);
     let output = fixture.replay.frame(vec![]);
     let canvas = canvas_rect(&output);
     let state = &fixture.replay.app.state;
     let session =
-        crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
-            .expect("following the finding keeps the in-place edit");
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(
+            &state.design.symbol.in_place,
+            &state.model,
+        )
+        .expect("following the finding keeps the in-place edit");
     assert_eq!(
         state.design.symbol.editor.selection.pins,
         ["B".to_owned()].into_iter().collect(),
         "the finding's pin is selected"
     );
-    let placement = crate::workbench::app::in_place_placement(session, &state.model).unwrap();
+    let placement =
+        rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_placement(
+            session,
+            &state.model,
+        )
+        .unwrap();
     let on_sheet = placement.place(off_grid);
     let on_screen = egui::pos2(
         canvas.min.x + (session.pan.0 + f64::from(on_sheet.x) * session.zoom) as f32,

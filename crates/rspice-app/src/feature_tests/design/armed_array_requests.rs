@@ -2,10 +2,10 @@
 //! request rechecks the source, the draft and the operation it was armed under, and one refused for a replaced
 //! draft never cancels the replacement.
 
-use crate::schematic::view::array_interaction::*;
-use crate::schematic::view::requests::editor_request_source;
-use crate::schematic::view::schematic_symbol_context;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::schematic::view::array_interaction::*;
+use rspice_app_design::schematic::view::requests::editor_request_source;
+use rspice_app_design::schematic::view::schematic_symbol_context;
 use rspice_app_state::state::Tool;
 use rspice_app_state::state::{ComponentType, Point};
 use rspice_schematic_editor::view::transform_input::TransformInputTransition;
@@ -38,7 +38,7 @@ fn array_requests_recheck_the_source_draft_and_operation_without_cancelling_a_re
             .selection
             .select_only_component(id);
         state.model.schematic.clear_undo_history();
-        crate::workbench::app::open_array_selection_dialog_in(
+        rspice_app_design::workbench::app::dialogs::selection::array::open_array_selection_dialog_in(
             &mut state.design.array_selection,
             &mut state.design.move_selection,
             &mut state.design.stretch_selection,
@@ -72,11 +72,11 @@ fn array_requests_recheck_the_source_draft_and_operation_without_cancelling_a_re
             "read-only" => state.model.schematic.session.read_only = true,
             "tool" => state.model.schematic.arm_tool(Tool::Select),
             "replacement" => {
-                crate::workbench::app::cancel_armed_array_selection_in(
+                rspice_app_design::workbench::app::dialogs::selection::array::cancel_armed_array_selection_in(
                     &mut state.design.array_selection,
                     &mut state.model,
                 );
-                crate::workbench::app::open_array_selection_dialog_in(
+                rspice_app_design::workbench::app::dialogs::selection::array::open_array_selection_dialog_in(
                     &mut state.design.array_selection,
                     &mut state.design.move_selection,
                     &mut state.design.stretch_selection,

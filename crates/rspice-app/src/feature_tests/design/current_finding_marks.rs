@@ -3,9 +3,9 @@
 //! project session's design check, and every source in it is marked where it
 //! is drawn.
 
-use crate::schematic::view::violations::related_marks;
 use crate::workbench::app_state::AppState;
 use crate::workbench::diagnostic_routes::tests::{draw_source_loop, loop_finding};
+use rspice_app_design::schematic::view::violations::related_marks;
 use rspice_app_state::state::Point;
 use rspice_design::drc::DrcViolationType;
 

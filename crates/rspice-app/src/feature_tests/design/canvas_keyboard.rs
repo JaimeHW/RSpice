@@ -2,11 +2,11 @@
 //! and popup owners hold the keys, and Backspace on a focused select canvas deletes at
 //! once in one undo entry.
 
-use crate::schematic::view::keyboard_navigation::tests::{components, key_input};
-use crate::schematic::view::keyboard_navigation::*;
-use crate::schematic::view::schematic_symbol_context;
 use crate::workbench::app_state::AppState;
 use egui::{Context, Id, Key, Modifiers, Popup, Sense};
+use rspice_app_design::schematic::view::keyboard_navigation::tests::{components, key_input};
+use rspice_app_design::schematic::view::keyboard_navigation::*;
+use rspice_app_design::schematic::view::schematic_symbol_context;
 
 fn run_navigation_frame(
     ctx: &Context,

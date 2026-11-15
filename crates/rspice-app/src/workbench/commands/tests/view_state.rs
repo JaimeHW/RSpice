@@ -6,7 +6,7 @@
 //! window or the dock layout moves.
 
 use super::*;
-use crate::workbench::design::commands::DesignCommand;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 
 #[test]
 fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
@@ -189,7 +189,7 @@ fn draw_schematic_canvas(state: &mut AppState, width: f32, height: f32) {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    crate::schematic::view::render_schematic_view(
+                    rspice_app_design::schematic::view::render_schematic_view(
                         ui,
                         &mut state.canvas_frame(),
                         None,
@@ -335,8 +335,8 @@ fn zoom_to_selection_frames_what_is_selected() {
         .document_mut_for_test()
         .components
         .push(resistor.clone());
-    let (min, max) =
-        crate::schematic::view::schematic_symbol_context(&app.state).component_bounds(&resistor);
+    let (min, max) = rspice_app_design::schematic::view::schematic_symbol_context(&app.state)
+        .component_bounds(&resistor);
     let (min_x, min_y, max_x, max_y) = (min.x, min.y, max.x, max.y);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert!(
@@ -383,7 +383,7 @@ fn drive_schematic_canvas(state: &mut AppState, ctx: &egui::Context, events: Vec
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
-                    crate::schematic::view::render_schematic_view(
+                    rspice_app_design::schematic::view::render_schematic_view(
                         ui,
                         &mut state.canvas_frame(),
                         None,

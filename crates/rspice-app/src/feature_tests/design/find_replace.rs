@@ -1,11 +1,11 @@
 //! Find and replace drawn and applied through a whole application.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::find_replace::tests::part;
-use crate::workbench::app::dialogs::find_replace::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 use egui::Context;
+use rspice_app_design::workbench::app::dialogs::find_replace::tests::part;
+use rspice_app_design::workbench::app::dialogs::find_replace::*;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::state::Point;
 use rspice_app_state::state::{LibraryCellInstance, NetLabel, SchematicState};
@@ -213,7 +213,7 @@ fn replace_all_renames_an_instance_as_the_rename_form_does() {
 
 /// The matches, over what the form reads.
 fn find_replace_matches(state: &AppState) -> Result<Vec<DocumentMatches>, String> {
-    crate::workbench::app::dialogs::find_replace::find_replace_matches(
+    rspice_app_design::workbench::app::dialogs::find_replace::find_replace_matches(
         &state.design.find_replace,
         &state.model,
     )
@@ -222,7 +222,7 @@ fn find_replace_matches(state: &AppState) -> Result<Vec<DocumentMatches>, String
 /// Replace all, over the parts it reads and edits.
 pub(crate) fn replace_all(state: &mut AppState) -> Result<(usize, usize), String> {
     let edit_in_progress = state.schematic_edit_in_progress();
-    crate::workbench::app::dialogs::find_replace::replace_all(
+    rspice_app_design::workbench::app::dialogs::find_replace::replace_all(
         &state.design.find_replace,
         edit_in_progress,
         &mut state.model,

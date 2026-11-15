@@ -4,7 +4,7 @@
 use egui::Key;
 
 use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
-use crate::workbench::design::commands::DesignCommand;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::command_catalog::CommandPlatform;
 use rspice_app_state::state::shortcuts::{
     ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence, ShortcutStroke,

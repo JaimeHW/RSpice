@@ -1,7 +1,7 @@
 //! The symbol editor's inspector drawn through a whole application.
 
 use crate::feature_tests::design::symbol_inspector_drawn::Editor;
-use crate::workbench::design::inspector::symbol::*;
+use rspice_app_design::workbench::design::inspector::symbol::*;
 use rspice_app_state::state::{Library, Point};
 
 #[test]

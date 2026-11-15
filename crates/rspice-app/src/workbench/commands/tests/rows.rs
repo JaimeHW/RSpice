@@ -14,7 +14,6 @@ use super::*;
 use crate::workbench::commands::vocabulary::{
     COMMAND_REGISTRY, CommandRegistry, command_registry, legacy_command,
 };
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::{CommandFlags, CommandSpec, ids};
 use crate::workbench::framework::host::Host;
 use crate::workbench::models::commands::ModelsCommand;
@@ -22,6 +21,7 @@ use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_state::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutKind,

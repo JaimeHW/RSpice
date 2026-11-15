@@ -1,10 +1,10 @@
 //! The symbol editor's actions run through a whole application.
 
 use crate::feature_tests::design::symbol_actions_drawn::open_symbol;
-use crate::workbench::app::actions::symbol::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design::commands::DesignCommand;
+use rspice_app_design::workbench::app::actions::symbol::*;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::Point;
 use rspice_app_state::state::{CellViewRef, SymbolEditorMetadata, SymbolShape};
 use rspice_design::symbol::{SYMBOL_EDITOR_METADATA_KEY, SymbolAttributeKind};
@@ -154,7 +154,7 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     );
     assert_eq!(after.name_anchor, Point::new(-20, 50));
     assert_eq!(
-        crate::workbench::app::load_active_symbol_editor_metadata(&app.state.model, &after)
+        rspice_app_design::workbench::app::actions::workspace::symbol_document::load_active_symbol_editor_metadata(&app.state.model, &after)
             .unwrap()
             .attribute(SymbolAttributeKind::Reference)
             .unwrap()
@@ -360,7 +360,7 @@ fn placing_text_is_one_edit_and_a_stale_request_places_nothing() {
     );
 
     let source =
-        crate::workbench::app::symbol_editor_request_source(&app.state.model, &app.state.workbench);
+        rspice_app_design::workbench::app::actions::workspace::symbol_document::symbol_editor_request_source(&app.state.model, &app.state.workbench);
     bind_canvas_source(&mut app.state.design.symbol.editor, source);
     app.state.design.symbol.editor.text_draft = Some(draft());
     let pending = symbol_edit_request(

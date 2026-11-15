@@ -3,14 +3,14 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::chrome::toolbar::*;
-use crate::workbench::design::commands::DesignCommand;
-use crate::workbench::design::toolbar::{
-    DESIGN_DIRECT_TOOLBAR_COMMANDS, SCHEMATIC_TOOLBAR, STIMULUS_TOOLBAR, SYMBOL_TOOLBAR,
-    design_toolbar_command_selected,
-};
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use egui::Vec2;
+use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_design::workbench::design::toolbar::{
+    DESIGN_DIRECT_TOOLBAR_COMMANDS, SCHEMATIC_TOOLBAR, STIMULUS_TOOLBAR, SYMBOL_TOOLBAR,
+    design_toolbar_command_selected,
+};
 use rspice_app_results::workbench::chrome::toolbar::results::{
     results_document_is_historical, run_has_current_success_authority,
 };
@@ -200,8 +200,8 @@ fn run_control_label_tracks_stable_execution_and_cancellation_lifecycle() {
 /// registered.
 #[test]
 fn every_design_toolbar_the_shell_chooses_is_registered_once() {
-    use crate::workbench::design::DesignFeature;
     use crate::workbench::features::Registered;
+    use rspice_app_design::workbench::design::DesignFeature;
 
     assert_eq!(
         DesignFeature::registry().validate_toolbars([

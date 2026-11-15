@@ -4,7 +4,7 @@
 //! what the step should leave.
 
 use super::{Bench, Dots, Nets, dots, nets};
-use crate::schematic::view::selection_transform::SelectionTransform;
+use rspice_app_design::schematic::view::selection_transform::SelectionTransform;
 use rspice_app_state::state::{ComponentType, MoveSelectionMode, Point, Rotation};
 
 fn p(x: i32, y: i32) -> Point {

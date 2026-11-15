@@ -2,9 +2,10 @@
 //! whole application.
 
 use crate::workbench::app::*;
-use crate::workbench::app_state::{AppState, DragType};
+use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 use egui::Context;
+use rspice_app_design::workbench::app_state::interaction_state::DragType;
 use rspice_app_state::state::{ComponentType, Point, SchematicState, Tool, Wire};
 
 #[test]
@@ -828,9 +829,13 @@ impl Fixture {
                 if app.state.model.workspace.content.active_view_type()
                     == Some(rspice_app_state::state::ViewType::Symbol)
                 {
-                    crate::schematic::symbol_editor::show(ui, &mut app.state.canvas_frame(), None);
+                    rspice_app_design::schematic::symbol_editor::show(
+                        ui,
+                        &mut app.state.canvas_frame(),
+                        None,
+                    );
                 } else {
-                    crate::schematic::view::render_schematic_view(
+                    rspice_app_design::schematic::view::render_schematic_view(
                         ui,
                         &mut app.state.canvas_frame(),
                         None,

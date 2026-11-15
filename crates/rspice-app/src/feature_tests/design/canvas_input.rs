@@ -2,8 +2,8 @@
 //! the shell has since replaced edits nothing, and a requirement link opens only the
 //! results' own specifications or a safe external address.
 
-use crate::schematic::view::interaction::*;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::schematic::view::interaction::*;
 use rspice_app_state::state::Point;
 use rspice_app_state::state::{
     DesignNoteKind, DocumentationShapeKind, PendingDocumentationShapePlacement, Tool,
@@ -28,9 +28,9 @@ fn queued_shape_input_cannot_edit_a_replaced_gesture_or_changed_context() {
                 state.model.schematic.topology_version(),
                 &[],
             )
-            .with_source(crate::schematic::view::requests::editor_request_source(
-                &state,
-            )),
+            .with_source(
+                rspice_app_design::schematic::view::requests::editor_request_source(&state),
+            ),
         );
         state.model.schematic.session.editor.tool = Tool::DocumentationShape;
         let drawing = &mut state

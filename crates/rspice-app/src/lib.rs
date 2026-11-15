@@ -40,14 +40,8 @@
 )]
 
 // =============================================================================
-// Domain Modules (Organized by Feature)
+// Modules
 // =============================================================================
-
-/// Application binding for schematic and symbol editors.
-pub(crate) use rspice_app_design::schematic;
-
-/// Project-bound property editing workflows.
-pub(crate) use rspice_app_design::properties;
 
 /// The contract-driven application workbench. This is the only owner of
 /// application chrome, responsive composition, and top-level navigation.

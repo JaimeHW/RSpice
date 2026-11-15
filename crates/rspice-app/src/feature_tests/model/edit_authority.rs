@@ -1,8 +1,10 @@
 //! [`SchematicEditAuthority`] against a whole session: the authority is
 //! captured from and validated against the model an `AppState` holds.
 
-use crate::workbench::app::{SchematicEditAuthority, schematic_editor_request_source};
 use crate::workbench::app_state::AppState;
+use rspice_app_design::workbench::app::schematic::edit_authority::{
+    SchematicEditAuthority, schematic_editor_request_source,
+};
 use rspice_app_state::state::write_policy::LocalSafeModeOptions;
 use rspice_app_state::state::{ComponentType, Point};
 

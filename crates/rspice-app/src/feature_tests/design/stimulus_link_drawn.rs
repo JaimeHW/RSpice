@@ -1,11 +1,11 @@
 //! Linking a stimulus, drawn through a whole application.
 
-use crate::properties::source_preview::MiniCache;
-use crate::properties::source_preview::ensure_minis;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::stimulus_link::adopt::{adopt_groups, stepped};
-use crate::workbench::app::dialogs::stimulus_link::*;
 use crate::workbench::app_state::AppState;
+use rspice_app_design::properties::source_preview::MiniCache;
+use rspice_app_design::properties::source_preview::ensure_minis;
+use rspice_app_design::workbench::app::dialogs::stimulus_link::adopt::{adopt_groups, stepped};
+use rspice_app_design::workbench::app::dialogs::stimulus_link::*;
 use rspice_app_state::simulation::stimulus_realize::PreviewTiming;
 use rspice_app_state::state::Component;
 use rspice_app_state::state::stimulus_library::definition::StimulusDefinition;
@@ -17,7 +17,7 @@ use rspice_app_workbench::ui::tokens::Mode;
 /// Save the instance's card as the dialog's primary does, over the whole
 /// state.
 fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, String> {
-    crate::workbench::app::dialogs::stimulus_link::commit_extraction(
+    rspice_app_design::workbench::app::dialogs::stimulus_link::commit_extraction(
         &state.design.stimulus_link,
         &mut state.design.selected_stimulus_definition,
         &mut state.model,
@@ -567,7 +567,7 @@ fn adopt_opens_on_the_definition_the_instance_already_carries() {
 
 /// Draw the dialog as the frame's step does, over the whole state.
 fn render_stimulus_link_dialog(ctx: &egui::Context, state: &mut AppState) {
-    crate::workbench::app::dialogs::stimulus_link::render_stimulus_link_dialog(
+    rspice_app_design::workbench::app::dialogs::stimulus_link::render_stimulus_link_dialog(
         &mut state.design.stimulus_link,
         &mut state.design.selected_stimulus_definition,
         &mut state.model,

@@ -1,8 +1,8 @@
 //! The layout editor drawn through a whole application.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::surface::layout_editor::*;
 use egui::{Pos2, Rect, Vec2};
+use rspice_app_design::workbench::design::surface::layout_editor::*;
 use rspice_app_state::state::CellViewRef;
 
 /// One frame of the layout editor over a whole application's canvas, at

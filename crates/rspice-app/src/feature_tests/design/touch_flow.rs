@@ -26,7 +26,8 @@ impl Finger {
         rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
-        app.symbol_library = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
+        app.symbol_library =
+            rspice_app_design::schematic::symbols::SymbolLibrary::load_embedded().ok();
         app.state.open_project_session();
         app.state.workbench.activate(Workspace::Design);
         app.state.model.schematic = SchematicState::default();

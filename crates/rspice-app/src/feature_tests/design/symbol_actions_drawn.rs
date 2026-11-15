@@ -1,7 +1,7 @@
 //! The symbol actions drawn through a whole application.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::actions::symbol::*;
+use rspice_app_design::workbench::app::actions::symbol::*;
 use rspice_app_state::state::Point;
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, PortDirection, SymbolDocument, SymbolPin, SymbolShape, View,

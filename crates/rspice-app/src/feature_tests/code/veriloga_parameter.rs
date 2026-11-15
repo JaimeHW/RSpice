@@ -111,7 +111,7 @@ fn set_params(state: &mut AppState, id: u64, params: &str) {
 }
 
 fn sheet_of(state: &AppState, id: u64) -> PropertySheet {
-    crate::workbench::app::authoritative_component_property_sheet(
+    rspice_app_design::workbench::app::actions::property_edit::authoritative_component_property_sheet(
         &state.design.property_registry,
         &state.model,
         &placed(state, id),
@@ -412,8 +412,10 @@ fn each_module_parameter_is_a_typed_range_checked_property() {
     // fields too.
     let mut component = placed(&app.state, id);
     component.params = "gain=5 stages=1.5".to_owned();
-    let refusals =
-        crate::properties::property_bridge::validate_component_properties(&component, Some(&sheet));
+    let refusals = rspice_app_design::properties::property_bridge::validate_component_properties(
+        &component,
+        Some(&sheet),
+    );
     assert!(
         refusals
             .iter()

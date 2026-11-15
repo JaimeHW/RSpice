@@ -9,8 +9,8 @@ use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 
 use crate::feature_tests::replay::{Control, Replay, only};
 use crate::workbench::RSpiceApp;
-use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, Point, PortDirection, SymbolDocument, SymbolPin, SymbolPinSide,
     SymbolShape, View, ViewType,

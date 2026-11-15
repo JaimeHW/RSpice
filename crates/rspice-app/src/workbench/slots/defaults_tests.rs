@@ -7,12 +7,12 @@
 //! enum, or a derived default replacing the written one, changes what every
 //! new session shows.
 
-use super::DesignPanel;
 use super::*;
 use crate::workbench::project::workspace_state::{
     LibraryCellviewPage, ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
     ProjectPage,
 };
+use rspice_app_design::workbench::slots::design::{DesignPanel, DesignState};
 use rspice_app_state::state::{SimulationPage, VerificationPage};
 
 #[test]

@@ -51,7 +51,7 @@ use rspice_project::ProjectIoError;
 #[cfg(target_arch = "wasm32")]
 use rspice_project::lifecycle::SaveContinuationEvent;
 
-use crate::workbench::app::actions::workspace::symbol_document::run_active_symbol_pin_checks;
+use rspice_app_design::workbench::app::actions::workspace::symbol_document::run_active_symbol_pin_checks;
 use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::{
     Leaving, show_configuration_page_in,
 };

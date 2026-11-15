@@ -50,23 +50,16 @@ pub(crate) mod browser {
     pub(crate) use rspice_app_services::workbench::browser::file_import;
 }
 pub(crate) mod chrome {
-    pub(crate) mod document_bar {
-        pub(crate) use rspice_app_design::workbench::chrome::document_bar::design;
-    }
+    pub(crate) mod document_bar {}
     pub(crate) mod status_bar {
-        pub(crate) use rspice_app_design::workbench::chrome::status_bar::design;
         pub(in crate::workbench) mod shell;
     }
-    pub(crate) mod title_bar {
-        pub(in crate::workbench) use rspice_app_design::workbench::chrome::title_bar::design;
-    }
+    pub(crate) mod title_bar {}
     pub(crate) mod toolbar {
         pub use rspice_app_workbench::workbench::chrome::toolbar::*;
     }
 }
 pub(crate) mod commands;
-use rspice_app_design::workbench::cross_probe;
-pub(crate) use rspice_app_design::workbench::design;
 pub(crate) mod diagnostic_routes;
 pub(crate) use rspice_ui_kit::panels as design_system;
 mod dispatch;
@@ -76,8 +69,6 @@ pub(crate) mod docks {
         pub use rspice_app_workbench::workbench::docks::inspector::*;
     }
     pub(crate) mod navigator {
-        #[cfg(test)]
-        pub(crate) use rspice_app_design::workbench::docks::navigator::stimulus_browser_state;
         #[cfg(test)]
         pub(crate) use rspice_app_workbench::workbench::docks::navigator::show;
     }
@@ -136,12 +127,9 @@ pub(crate) mod shell_host;
 pub(crate) use rspice_app_simulate::workbench::simulate;
 pub(crate) mod slots;
 pub(crate) mod state;
-pub(crate) mod surfaces {
-    pub(crate) use rspice_app_design::workbench::surfaces::stimulus;
-}
+pub(crate) mod surfaces {}
 pub(crate) mod workflows;
 
-pub(crate) use cross_probe::synchronize_schematic_cross_probe;
 pub use documents::result_document::ResultViewer;
 pub use lifecycle::window_session::ApplicationWindowId;
 #[cfg(test)]

@@ -1,10 +1,10 @@
 //! Creating a model-bound symbol through the whole application: the dialog reads the
 //! models slot's library, and its commit publishes into an open project session.
 
-use crate::workbench::app::dialogs::create_model_bound_symbol::controller::open_create_subcircuit_bound_symbol_dialog;
-use crate::workbench::app::dialogs::create_model_bound_symbol::state::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::requests::OpenInDesign;
+use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::controller::open_create_subcircuit_bound_symbol_dialog;
+use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::state::*;
 use rspice_app_state::state::{
     CellViewRef, ComponentType, Library, Point, SymbolSourceContract, ViewType,
     model_library::{DeviceModel, ModelType},
@@ -15,7 +15,7 @@ use std::path::PathBuf;
 /// Open Create symbol over `state`'s slots, from the model the models
 /// workspace has selected.
 pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
-    crate::workbench::app::dialogs::create_model_bound_symbol::controller::open_create_model_bound_symbol_dialog(
+    rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::controller::open_create_model_bound_symbol_dialog(
         &mut state.design.create_model_bound_symbol,
         &state.model,
         &mut state.workbench,
@@ -25,7 +25,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
 
 /// Check the draft as the dialog does, over the whole state.
 fn validate_create_symbol_draft(state: &AppState) -> Result<(), String> {
-    crate::workbench::app::dialogs::create_model_bound_symbol::controller::validate_create_symbol_draft(
+    rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::controller::validate_create_symbol_draft(
         &state.design.create_model_bound_symbol,
         &state.model,
     )
@@ -35,7 +35,7 @@ fn validate_create_symbol_draft(state: &AppState) -> Result<(), String> {
 fn build_create_symbol_definition(
     state: &AppState,
 ) -> Result<rspice_app_state::state::ModelBoundSymbolDefinition, String> {
-    crate::workbench::app::dialogs::create_model_bound_symbol::controller::build_symbol_definition(
+    rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::controller::build_symbol_definition(
         &state.model,
         &state.design.create_model_bound_symbol,
     )
@@ -44,7 +44,7 @@ fn build_create_symbol_definition(
 /// Create the symbol as the dialog's primary does, then open what it created
 /// as the shell answers the dialog's request.
 fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(), String> {
-    crate::workbench::app::dialogs::create_model_bound_symbol::controller::commit_create_model_bound_symbol(
+    rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::controller::commit_create_model_bound_symbol(
         &mut state.design.create_model_bound_symbol,
         &mut state.model,
         &mut state.workbench,

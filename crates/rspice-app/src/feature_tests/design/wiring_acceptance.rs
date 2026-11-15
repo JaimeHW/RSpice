@@ -7,19 +7,20 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::schematic::view::gesture_commits;
-use crate::schematic::view::schematic_symbol_context;
-use crate::schematic::view::selection_transform::{
-    SelectionTransform, transform_selection_on_active_sheet,
-};
-use crate::schematic::view::sheet_visibility::finish_wire_on_active_sheet;
-use crate::workbench::app::{
-    RSpiceApp, copy_active_schematic_selection, delete_schematic_selection,
-    paste_schematic_clipboard_at,
-};
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::Workspace;
+use rspice_app_design::schematic::view::gesture_commits;
+use rspice_app_design::schematic::view::schematic_symbol_context;
+use rspice_app_design::schematic::view::selection_transform::{
+    SelectionTransform, transform_selection_on_active_sheet,
+};
+use rspice_app_design::schematic::view::sheet_visibility::finish_wire_on_active_sheet;
+use rspice_app_design::workbench::app::{
+    actions::workspace::copy_active_schematic_selection,
+    dialogs::selection::commands::{delete_schematic_selection, paste_schematic_clipboard_at},
+};
 use rspice_app_state::state::{
     BusDeclaration, BusSlice, BusTapOrientation, Cell, CellViewRef, ComponentType, Library,
     MoveSelectionMode, Point, Rotation, Selection, SheetDefinition, SheetId, SheetPortPolicy,
@@ -199,7 +200,7 @@ impl Bench {
     pub(super) fn move_selection(&mut self, delta: Point, mode: MoveSelectionMode) {
         let state = &mut self.app.state;
         state.design.move_selection.mode = mode;
-        crate::workbench::app::arm_move_selection_in(
+        rspice_app_design::workbench::app::dialogs::selection::move_selection::arm_move_selection_in(
             &mut state.design.move_selection,
             &mut state.design.stretch_selection,
             &mut state.design.array_selection,
@@ -216,7 +217,7 @@ impl Bench {
     /// preview there and press Enter.
     pub(super) fn stretch_selection(&mut self, delta: Point) {
         let state = &mut self.app.state;
-        crate::workbench::app::arm_stretch_selection_in(
+        rspice_app_design::workbench::app::dialogs::selection::stretch::arm_stretch_selection_in(
             &mut state.design.stretch_selection,
             &mut state.design.move_selection,
             &mut state.design.array_selection,
@@ -384,7 +385,7 @@ impl Bench {
             ),
             Ok(true)
         ) {
-            crate::workbench::app::place_floating_paste(
+            rspice_app_design::workbench::app::dialogs::selection::commands::floating::place_floating_paste(
                 &mut state.design.floating_paste,
                 &mut state.model,
                 &mut state.workbench,

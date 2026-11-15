@@ -2,11 +2,11 @@
 //! open_property_editor takes the whole application, and a commit is undone as a step of the
 //! project's design history.
 
-use crate::workbench::app::dialogs::design_request::DesignRequest;
-use crate::workbench::app::dialogs::property_dialog::{
+use crate::workbench::app_state::AppState;
+use rspice_app_design::workbench::app::dialogs::design_request::DesignRequest;
+use rspice_app_design::workbench::app::dialogs::property_dialog::{
     PropertyDialog, component_property_session_error,
 };
-use crate::workbench::app_state::AppState;
 use rspice_app_state::state::{CellViewRef, Component, ComponentType, Point, PropertyValue};
 use rspice_design::schematic::document_policy::PropertyCommitPolicy;
 use rspice_schematic_editor::component_properties::ComponentPropertyDialogResult;
@@ -153,7 +153,7 @@ fn retained_component_properties_reject_changed_context_without_committing() {
         state.open_property_editor(44);
         assert_eq!(
             state.design.tabbed_property_dialog.source,
-            Some(crate::workbench::app::schematic_editor_request_source(
+            Some(rspice_app_design::workbench::app::schematic::edit_authority::schematic_editor_request_source(
                 &state
             ))
         );
