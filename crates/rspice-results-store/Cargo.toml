@@ -15,5 +15,8 @@ workspace = true
 # output is only deterministic for one encoder version.
 lz4_flex = { version = "=0.13.1", default-features = false, features = ["std", "checked-decode"] }
 crc32fast = "=1.5.0"
-# The logical digest, as rspice-results hashes its own.
-sha2.workspace = true
+# The logical digest. sha2 0.11 (in Cargo.lock already, through lopdf) runs the
+# ARMv8 SHA-2 instructions when the CPU has them; 0.10 runs them only with its
+# `asm` feature, whose sha2-asm package the lock does not have, and its software
+# rounds cost the writer about 20 ns a sample on Apple silicon.
+sha2 = { version = "=0.11.0", default-features = false }
