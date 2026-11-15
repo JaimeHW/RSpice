@@ -954,7 +954,7 @@ mod tests {
     #[test]
     fn the_preview_reads_sources_by_the_plans_compatibility_and_source_program() {
         use rspice_simulation_contract::options::{SimulationCompatibility, SourceSimulator};
-        let mut state = AppState::default();
+        let mut state = DesignTestHost::default();
         assert_eq!(
             stimulus_preview_timing(&state.model).rules,
             rspice_core::netlist::SourceRules::default()
