@@ -1621,3 +1621,209 @@ fn a_held_sub_network_only_gmin_would_place_is_refused_by_every_analysis() {
         .to_string();
     assert_eq!(hb, op);
 }
+
+/// The PSTB spectrum of `deck`'s orbit read at inductor `probe`, the
+/// multipliers sorted by magnitude, largest first, and the orbit.
+fn pstb_spectrum(
+    deck: &str,
+    config: PssConfig,
+    probe: &str,
+) -> (Vec<Complex64>, rspice_core::engine::PssOperatingPoint) {
+    let netlist = Netlist::parse(deck).expect("parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let point = engine
+        .run_pss_operating_point_with_abort(&netlist, config, &rspice_core::NoAbort)
+        .unwrap_or_else(|error| panic!("PSS must solve: {error}\n{deck}"));
+    let card = rspice_core::netlist::PstbCard {
+        probe_instance: probe.to_owned(),
+        max_harmonics: 4,
+        stability_threshold: 1.0 + 1e-6,
+        detect_subharmonics: true,
+    };
+    let stability = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &rspice_core::NoAbort)
+        .unwrap_or_else(|error| panic!("PSTB must run: {error}\n{deck}"));
+    let mut multipliers: Vec<Complex64> = stability
+        .result
+        .multipliers
+        .iter()
+        .map(|mode| mode.value)
+        .collect();
+    multipliers.sort_by(|a, b| b.norm().total_cmp(&a.norm()));
+    (multipliers, point)
+}
+
+/// The probe loop every PSTB contract deck carries beside its subject: V2
+/// drives L2 through R2, an RL whose period maps a current deviation by
+/// exp(−T·R2/L2) = exp(−1).
+const PROBE_LOOP: &str = "V2 p 0 SIN(0 1 1meg)\nR2 p q 100\nL2 q 0 100u\n";
+
+fn assert_multipliers(name: &str, actual: &[Complex64], expected: &[f64], tolerance: f64) {
+    eprintln!("{name}: multipliers {actual:?} against {expected:?}");
+    assert_eq!(actual.len(), expected.len(), "{name}: {actual:?}");
+    for (got, want) in actual.iter().zip(expected) {
+        assert!(
+            (got.re / want - 1.0).abs() <= tolerance && got.im.abs() <= tolerance * want,
+            "{name}: {got} against {want}"
+        );
+    }
+}
+
+/// PSTB takes a runtime Verilog-A module's integration state where its PSS
+/// route carries it: native shooting integrates a `ddt` charge from the node
+/// voltages the period starts at. A driven RC whose capacitor is the module
+/// `I(p, n) <+ ddt(C·V(p, n))`, C = 500 pF behind R1 = 1 kΩ, maps a voltage
+/// deviation over the period by exp(−T/RC) = exp(−2); the probe loop adds
+/// exp(−1). The native twin's capacitor gives the same spectrum.
+#[test]
+fn pstb_reads_a_veriloga_capacitors_charge_from_its_period_map() {
+    let model = write_model(
+        "pstb_cap",
+        "`include \"disciplines.vams\"\n\
+         module va_pstb_cap(p, n);\n\
+         inout p, n;\n\
+         electrical p, n;\n\
+         analog I(p, n) <+ ddt(500.0e-12 * V(p, n));\n\
+         endmodule\n",
+    );
+    let deck = |capacitor: &str| {
+        format!(
+            "* pstb of a driven RC\nV1 in 0 SIN(0 1 1meg)\nR1 in a 1k\n{capacitor}\n{PROBE_LOOP}.end\n"
+        )
+    };
+    let config = || {
+        PssConfig::new(F0)
+            .with_points_per_period(512)
+            .with_tolerance(1e-9)
+    };
+    let expected = [(-1.0_f64).exp(), (-2.0_f64).exp()];
+    let (twin, twin_point) = pstb_spectrum(&deck("C1 a 0 500p"), config(), "L2");
+    let (module, point) = pstb_spectrum(
+        &deck(&format!(".va \"{model}\" va_pstb_cap\nXC1 a 0 va_pstb_cap")),
+        config(),
+        "L2",
+    );
+    let _ = std::fs::remove_file(model);
+    assert!(!point.shooting_state_basis()[0].starts_with("event:"));
+    assert!(!twin_point.shooting_state_basis()[0].starts_with("event:"));
+    assert_multipliers("Verilog-A ddt RC", &module, &expected, 1.0e-4);
+    assert_multipliers("native RC twin", &twin, &expected, 1.0e-4);
+    for (a, b) in module.iter().zip(&twin) {
+        assert!((a - b).norm() <= 1.0e-9, "Verilog-A {a} against native {b}");
+    }
+}
+
+/// PSTB takes an `idt` integrator's state where event shooting carries it:
+/// `V(out) <+ idt(k·(V(in) − V(out)), 0)` closes a leaky loop
+/// y' = k·(u − y), whose period maps a deviation by exp(−k·T) = exp(−2) at
+/// k = 2/T. Native shooting does not carry `idt`, so the orbit is event
+/// shooting's, its coordinates the whole solution and the integrator's
+/// state; the spectrum is read over those the period remembers. The native
+/// twin is the RC with RC = 1/k, on native shooting.
+#[test]
+fn pstb_reads_an_idt_integrators_state_on_an_event_orbit() {
+    let model = write_model(
+        "pstb_idt",
+        "`include \"disciplines.vams\"\n\
+         module va_pstb_leaky(inp, out);\n\
+         inout inp, out;\n\
+         electrical inp, out;\n\
+         analog V(out) <+ idt(2.0e6 * (V(inp) - V(out)), 0.0);\n\
+         endmodule\n",
+    );
+    let deck = |integrator: &str| {
+        format!(
+            "* pstb of a leaky integrator\nV1 in 0 SIN(0 1 1meg)\n{integrator}\n{PROBE_LOOP}.end\n"
+        )
+    };
+    let expected = [(-1.0_f64).exp(), (-2.0_f64).exp()];
+    let (module, point) = pstb_spectrum(
+        &deck(&format!(
+            ".va \"{model}\" va_pstb_leaky\nXI1 in out va_pstb_leaky\nRL out 0 1meg"
+        )),
+        PssConfig::new(F0).with_tstab(20.0e-6),
+        "L2",
+    );
+    let _ = std::fs::remove_file(model);
+    assert!(point.shooting_state_basis()[0].starts_with("event:"));
+    let (twin, _) = pstb_spectrum(
+        &deck("R1 in out 1k\nC1 out 0 500p"),
+        PssConfig::new(F0)
+            .with_points_per_period(512)
+            .with_tolerance(1e-9),
+        "L2",
+    );
+    assert_multipliers("Verilog-A idt loop", &module, &expected, 1.0e-3);
+    assert_multipliers("native RC twin", &twin, &expected, 1.0e-4);
+}
+
+/// PSTB of an autonomous orbit a runtime module sustains: the cubic
+/// conductance `I(p, n) <+ −g1·V + g3·V³` (g1 = 2 mS, g3 = 8/3 mS/V²) across
+/// a 10 µH ∥ 1 nF tank is a van der Pol oscillator. One multiplier is the
+/// phase's, 1 within the solver's tolerance; the other follows from
+/// Liouville's formula, λ1·λ2 = exp(∮ tr A dt), with tr A = −f'(v)/C on the
+/// tank (the inductor's row has no diagonal), so
+/// λ2 = exp(−(1/C)·∮(−g1 + 3·g3·v²) dt), integrated over the solved orbit.
+/// The native twin's behavioral current source gives the same spectrum. A
+/// 0.5 V kick at 1 µs, after the orbit's window, starts the oscillation in
+/// the stabilization.
+#[test]
+fn pstb_reads_a_veriloga_oscillators_orbit_with_its_phase_multiplier() {
+    let model = write_model(
+        "pstb_vdp",
+        "`include \"disciplines.vams\"\n\
+         module va_pstb_cubic(p, n);\n\
+         inout p, n;\n\
+         electrical p, n;\n\
+         analog I(p, n) <+ -2.0e-3 * V(p, n) + 2.6666666666666667e-3 * V(p, n) * V(p, n) * V(p, n);\n\
+         endmodule\n",
+    );
+    let deck = |conductance: &str| {
+        format!(
+            "* van der Pol\nL2 p 0 10u\nC1 p 0 1n\nI0 0 p PULSE(0 10m 1u 1n 1n 50n 1)\n{conductance}\n.end\n"
+        )
+    };
+    let config = || {
+        PssConfig::autonomous()
+            .with_period_guess(std::f64::consts::TAU * (10.0e-6_f64 * 1.0e-9).sqrt())
+            .with_oscillator_node("p")
+            .with_tstab_periods(40)
+            .with_points_per_period(512)
+            .with_tolerance(1e-9)
+    };
+    let (module, point) = pstb_spectrum(
+        &deck(&format!(
+            ".va \"{model}\" va_pstb_cubic\nXG1 p 0 va_pstb_cubic"
+        )),
+        config(),
+        "L2",
+    );
+    let _ = std::fs::remove_file(model);
+    let (twin, _) = pstb_spectrum(
+        &deck("B1 p 0 I=-2m*V(p)+2.6666666666666667m*V(p)*V(p)*V(p)"),
+        config(),
+        "L2",
+    );
+    let orbit = &point.analysis().result;
+    let p = orbit
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("p"))
+        .expect("p is retained");
+    let v = &orbit.waveforms[p].values;
+    let divergence: f64 = orbit
+        .time
+        .windows(2)
+        .zip(v.windows(2))
+        .map(|(t, v)| {
+            let slope = |v: f64| -2.0e-3 + 3.0 * 2.6666666666666667e-3 * v * v;
+            0.5 * (t[1] - t[0]) * (slope(v[0]) + slope(v[1]))
+        })
+        .sum();
+    let expected = [1.0, (-divergence / 1.0e-9).exp()];
+    assert_multipliers("Verilog-A van der Pol", &module, &expected, 2.0e-3);
+    assert_multipliers("native van der Pol twin", &twin, &expected, 2.0e-3);
+    for (a, b) in module.iter().zip(&twin) {
+        assert!((a - b).norm() <= 1.0e-9, "Verilog-A {a} against native {b}");
+    }
+}

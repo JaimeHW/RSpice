@@ -464,6 +464,27 @@ const fn pss_admissible_veriloga() -> CellSupport {
     }
 }
 
+const PSTB_VERILOGA_EVIDENCE: &[&str] = &[
+    "tests/veriloga/veriloga_hb.rs::pstb_reads_a_veriloga_capacitors_charge_from_its_period_map",
+    "tests/veriloga/veriloga_hb.rs::pstb_reads_an_idt_integrators_state_on_an_event_orbit",
+    "tests/veriloga/veriloga_hb.rs::pstb_reads_a_veriloga_oscillators_orbit_with_its_phase_multiplier",
+];
+
+/// PSTB reads the monodromy of the orbit PSS solves, so it takes the runtime
+/// modules PSS takes: on native shooting the charges the period map
+/// integrates, and on a driven orbit event shooting's coordinates, which
+/// carry each module's integrator states and retained variables. Where PSS
+/// refuses (an operator whose history no coordinate carries, a discrete
+/// state) there is no monodromy to read.
+const fn pstb_admissible_veriloga() -> CellSupport {
+    CellSupport::Restricted {
+        gate: InstanceGate::PssAdmissibleVerilogA,
+        token: PSS_VERILOGA_OPERATOR,
+        condition: "every Verilog-A module PSS admits, read through the monodromy of the orbit it solves: by native shooting, a module whose state is the charges it contributes, autonomous orbits included; on a driven orbit, by event shooting, every other module without laplace_*, absdelay, idtmod or zi_* whose events and the values they write come back every period, its ddt and idt states and real retained variables coordinates of the period map",
+        evidence: PSTB_VERILOGA_EVIDENCE,
+    }
+}
+
 /// The native and XSPICE analog devices PSS and the analyses on its orbit
 /// take: what their declared periodic contracts admit, and on a driven orbit
 /// the voltage- and current-controlled switches native shooting does not
@@ -670,6 +691,7 @@ pub const fn capability_cell(
             F::VerilogARuntime if matches!(analysis, A::Pnoise) => {
                 carrier_admits_veriloga_noise(false)
             }
+            F::VerilogARuntime if matches!(analysis, A::Pstb) => pstb_admissible_veriloga(),
             F::VerilogARuntime => CellSupport::Refused {
                 token: PERIODIC_VERILOGA,
                 reason: periodic_veriloga_reason(analysis, false),
@@ -721,7 +743,6 @@ const fn periodic_veriloga_reason(analysis: CapabilityAnalysis, generated: bool)
             "runtime Verilog-A devices without exact HB charge/noise capability metadata"
         }
         (A::Hb | A::QuasiPeriodic, true) => "generated Verilog-A compact-model equations",
-        (A::Pss | A::Pstb, false) => "Verilog-A integration state is not part of a period map",
         (A::Pss | A::Pstb, true) => "generated Verilog-A integration state",
         (A::Envelope, false) => "Verilog-A integration state is not part of an envelope",
         (A::Envelope, true) => "generated Verilog-A integration state",
