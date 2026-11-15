@@ -3,7 +3,10 @@
 #   smoke                Explicit execution-only coverage. The deck must still
 #                        parse, build, and complete the requested analyses.
 #   scripted_control     Upstream ngspice deck carries validation logic in a
-#                        .control script that RSpice does not yet interpret.
+#                        .control script. The case runner judges its
+#                        declarative analyses; crates/rspice-cli/tests/
+#                        ngspice_control_decks.rs runs the script through
+#                        `rspice run`, and the deck's own checks must pass.
 #   expected_unsupported The deck intentionally exercises an unimplemented
 #                        feature. The runner must report a named unsupported
 #                        feature; if it does not, the contract is stale.

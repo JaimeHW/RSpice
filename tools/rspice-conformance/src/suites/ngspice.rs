@@ -301,8 +301,10 @@ enum ValidationContract {
     /// Execution-only coverage: the deck must parse, build, and complete
     /// its analyses; no comparable reference output exists.
     Smoke,
-    /// Upstream deck whose validation lives in a `.control` script RSpice
-    /// does not interpret.
+    /// Upstream deck whose validation lives in a `.control` script. This
+    /// runner judges its declarative analyses; the script and the checks it
+    /// makes run through `rspice run` in rspice-cli's
+    /// `ngspice_control_decks` test, the path users take.
     ScriptedControl,
     /// The deck intentionally exercises a simulator feature that has not
     /// been implemented in RSpice yet. The unsupported feature detector
