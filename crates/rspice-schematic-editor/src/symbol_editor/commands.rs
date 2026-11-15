@@ -1,6 +1,8 @@
 //! Symbol clipboard and command edits over local drafts; the app owns authority and publication.
 
-use super::arrange::selection_pivot;
+use super::arrange::{
+    SymbolArrangeOutcome, lay_out_selection, selection_pivot, snap_selection_to_grid,
+};
 use super::interaction::{SymbolEditCapabilities, SymbolEditOutcome, SymbolRequestSource};
 use super::session::{
     SymbolClipboard, SymbolEditorSession, SymbolSelection, SymbolTool, label_name,
@@ -8,6 +10,7 @@ use super::session::{
     rotate_point_ccw_about, rotate_point_cw_about, rotate_shape_ccw_about, rotate_shape_cw_about,
     selection_subject,
 };
+use crate::view::selection_layout::SelectionLayoutCommand;
 use rspice_design::symbol::{
     MAX_SYMBOL_PIN_NAME_BYTES, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
     SymbolShape, SymbolTextAlign, SymbolTextSize,
@@ -72,6 +75,10 @@ pub enum SymbolEditAction {
         cut: bool,
     },
     Transform(SymbolTransform),
+    /// Line up or space out the selected pins, shapes and labels.
+    Layout(SelectionLayoutCommand),
+    /// Put each selected object back on the grid.
+    SnapToGrid,
     /// Place the text typed into the text tool's entry at `anchor`.
     PlaceText {
         anchor: Point,
@@ -149,6 +156,30 @@ pub fn apply_edit(
                     &transform.motion(),
                     &mut outcome,
                 );
+            }
+        }
+        SymbolEditAction::Layout(command) => {
+            if let Some(metadata) = metadata {
+                let before = document.clone();
+                let arranged =
+                    lay_out_selection(document, metadata, &selection, command, body_grid(session));
+                let unchanged = format!("{} produced no geometry change.", command.label());
+                arrange_outcome(before, arranged, command.label(), unchanged, &mut outcome);
+            }
+        }
+        SymbolEditAction::SnapToGrid => {
+            if let Some(metadata) = metadata {
+                let before = document.clone();
+                let arranged =
+                    snap_selection_to_grid(document, metadata, &selection, body_grid(session));
+                if let SymbolArrangeOutcome::Moved(moved) = arranged {
+                    outcome.report = Some(format!(
+                        "Snapped {} to the grid.",
+                        rspice_ui_kit::accessibility::counted(moved, "object", "objects")
+                    ));
+                }
+                let unchanged = "The selection is on the grid already.".to_owned();
+                arrange_outcome(before, arranged, "Snap to grid", unchanged, &mut outcome);
             }
         }
         SymbolEditAction::RenamePlacedPin { pin, name } => {
@@ -367,6 +398,36 @@ fn delete(
         session.clear_selection();
     }
     outcome.changed = changed;
+}
+
+/// The step artwork and labels move by on this canvas: the grid drawn, when
+/// the author snaps to it, else a single unit.
+fn body_grid(session: &SymbolEditorSession) -> i32 {
+    if session.snap_to_grid {
+        session.grid_spacing.model_step()
+    } else {
+        1
+    }
+}
+
+/// Carry an Arrange command's result into `outcome`: one undo step named
+/// `step` when it moved something, else what the host tells the author.
+fn arrange_outcome(
+    before: SymbolDocument,
+    arranged: SymbolArrangeOutcome,
+    step: &str,
+    unchanged: String,
+    outcome: &mut SymbolEditOutcome,
+) {
+    match arranged {
+        SymbolArrangeOutcome::Moved(_) => {
+            outcome.step = step.to_owned();
+            outcome.undo_before = Some(Box::new(before));
+            outcome.changed = true;
+        }
+        SymbolArrangeOutcome::Unchanged => outcome.refusal = Some(unchanged),
+        SymbolArrangeOutcome::Refused(reason) => outcome.refusal = Some(reason),
+    }
 }
 
 /// Turn or mirror the selection about its pivot (see [`selection_pivot`]).

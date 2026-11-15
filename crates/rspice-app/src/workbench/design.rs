@@ -13,7 +13,9 @@ pub(crate) mod test_host;
 pub(crate) mod toolbar;
 
 use egui::Context;
-use rspice_schematic_editor::symbol_editor::commands::{SymbolTransform, activate_tool};
+use rspice_schematic_editor::symbol_editor::commands::{
+    SymbolEditAction, SymbolTransform, activate_tool,
+};
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
 use crate::schematic::view::grid_snap_selection::run_snap_selection_to_grid;
@@ -45,9 +47,7 @@ use crate::workbench::app::actions::workspace::{
     NavigationParts, new_schematic_document, selected_hierarchy_master,
     selected_instance_veriloga_source,
 };
-use crate::workbench::app::actions::{
-    activate_symbol_tool, stimulus, transform_selected_symbol_item,
-};
+use crate::workbench::app::actions::{activate_symbol_tool, edit_selected_symbol_items, stimulus};
 use crate::workbench::app::dialogs::connectivity_manager::{
     ConnectivityManager, open_connectivity_manager,
 };
@@ -326,6 +326,7 @@ impl CommandSet for DesignCommand {
             | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
+            | Self::SnapSelectionToGrid
                 if routed::symbol_editor(reads.wb.workspace, reads.model) =>
             {
                 if reads.model.active_view_read_only() {
@@ -333,6 +334,29 @@ impl CommandSet for DesignCommand {
                 } else {
                     (reads.state.symbol.editor.effective_selection().is_empty())
                         .then_some("select an editable object")
+                }
+            }
+            // A symbol lines up and spaces out its own pins, shapes and labels.
+            Self::AlignSelectionLeft
+            | Self::AlignSelectionCenter
+            | Self::AlignSelectionRight
+            | Self::AlignSelectionTop
+            | Self::AlignSelectionMiddle
+            | Self::AlignSelectionBottom
+            | Self::DistributeSelectionHorizontal
+            | Self::DistributeSelectionVertical
+                if routed::symbol_editor(reads.wb.workspace, reads.model) =>
+            {
+                let selected = reads.state.symbol.editor.effective_selection().len();
+                let required = layout_command(self).map_or(2, |command| command.minimum_objects());
+                if reads.model.active_view_read_only() {
+                    Some("the symbol is read-only")
+                } else if selected >= required {
+                    None
+                } else if required > 2 {
+                    Some("select at least three objects")
+                } else {
+                    Some("select at least two objects")
                 }
             }
             Self::RotateSelection
@@ -825,12 +849,12 @@ impl CommandSet for DesignCommand {
                 if routed::symbol_editor(cx.wb.workspace, cx.model) =>
             {
                 let modal_open = cx.application_modal_open();
-                transform_selected_symbol_item(
+                edit_selected_symbol_items(
                     &mut cx.state.symbol,
                     cx.model,
                     cx.wb,
                     modal_open,
-                    symbol_transform(self),
+                    SymbolEditAction::Transform(symbol_transform(self)),
                 );
             }
             // A copy floating under the pointer is what these act on.
@@ -846,6 +870,29 @@ impl CommandSet for DesignCommand {
             }
             Self::JoinCollinearWires => {
                 join_collinear_wires_on_active_sheet(cx.model, cx.wb);
+            }
+            // A symbol in front arranges its own pins, shapes and labels.
+            Self::SnapSelectionToGrid
+            | Self::AlignSelectionLeft
+            | Self::AlignSelectionCenter
+            | Self::AlignSelectionRight
+            | Self::AlignSelectionTop
+            | Self::AlignSelectionMiddle
+            | Self::AlignSelectionBottom
+            | Self::DistributeSelectionHorizontal
+            | Self::DistributeSelectionVertical
+                if routed::symbol_editor(cx.wb.workspace, cx.model) =>
+            {
+                let action = layout_command(self)
+                    .map_or(SymbolEditAction::SnapToGrid, SymbolEditAction::Layout);
+                let modal_open = cx.application_modal_open();
+                edit_selected_symbol_items(
+                    &mut cx.state.symbol,
+                    cx.model,
+                    cx.wb,
+                    modal_open,
+                    action,
+                );
             }
             Self::SnapSelectionToGrid => {
                 let symbols = cx.model.schematic_symbol_context();

@@ -8,9 +8,7 @@ use crate::workbench::app::actions::workspace::symbol_document::{
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::state::WorkbenchSession;
-use rspice_schematic_editor::symbol_editor::commands::{
-    self, SymbolEditAction, SymbolEditRequest, SymbolTransform,
-};
+use rspice_schematic_editor::symbol_editor::commands::{self, SymbolEditAction, SymbolEditRequest};
 use rspice_schematic_editor::symbol_editor::interaction::{
     SymbolEditCapabilities, bind_canvas_source,
 };
@@ -87,20 +85,20 @@ pub(crate) fn symbol_pin_name_request(
     ))
 }
 
-/// Turn or flip the selected pins and shapes as one edit. `modal_open` is
-/// whether anything holding the application modal is open, which refuses
-/// the edit.
-pub(crate) fn transform_selected_symbol_item(
+/// Turn, flip, line up, space out or snap to the grid the selected pins,
+/// shapes and labels as one edit. `modal_open` is whether anything holding
+/// the application modal is open, which refuses the edit.
+pub(crate) fn edit_selected_symbol_items(
     symbol: &mut SymbolUiState,
     model: &mut Model,
     wb: &mut WorkbenchSession,
     modal_open: bool,
-    transform: SymbolTransform,
+    action: SymbolEditAction,
 ) {
     if symbol.editor.effective_selection().is_empty() || deny_read_only_edit(model, wb) {
         return;
     }
-    let request = symbol_edit_request(symbol, model, wb, SymbolEditAction::Transform(transform));
+    let request = symbol_edit_request(symbol, model, wb, action);
     apply_symbol_edit_request(symbol, model, wb, modal_open, request);
 }
 
@@ -324,6 +322,9 @@ fn apply_current_symbol_edit_request(
         request.action,
         capabilities,
     );
+    if let Some(refusal) = outcome.refusal {
+        wb.prompt(refusal);
+    }
     if let Some(before) = outcome.undo_before {
         record_symbol_edit(symbol, model, &before, &outcome.step);
     }
@@ -334,8 +335,13 @@ fn apply_current_symbol_edit_request(
             }
             None => store_active_symbol_document(symbol, model, &document),
         };
-        if let Err(error) = stored {
-            wb.prompt(error);
+        match stored {
+            Err(error) => wb.prompt(error),
+            Ok(_) => {
+                if let Some(report) = outcome.report {
+                    wb.prompt(report);
+                }
+            }
         }
     }
 }

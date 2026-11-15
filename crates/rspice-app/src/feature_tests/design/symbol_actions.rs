@@ -136,12 +136,12 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     app.state.design.symbol.editor.set_selection(selection);
     let modal_open = app.state.application_modal_open();
     let state = &mut app.state;
-    transform_selected_symbol_item(
+    edit_selected_symbol_items(
         &mut state.design.symbol,
         &mut state.model,
         &mut state.workbench,
         modal_open,
-        SymbolTransform::Rotate,
+        SymbolEditAction::Transform(SymbolTransform::Rotate),
     );
     let after = app.state.model.load_active_symbol_document().unwrap();
     // The selection spans x -40 to 30 and y -10 to 40, so it turns about
@@ -207,6 +207,75 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     );
     assert!(app.state.undo_active_symbol_document().unwrap());
     assert_eq!(pin_at(&app), (placed, crate::state::SymbolPinSide::Top));
+}
+
+/// Align and Snap to grid act on the symbol's own selection, each as one
+/// undo step; Align with one object selected is unavailable and says why.
+#[test]
+fn align_and_snap_act_on_the_symbol_selection_as_one_step() {
+    use crate::workbench::framework::command_registry::CommandAvailability;
+    let mut app = open_symbol();
+    let key = app.state.model.workspace.content.active_key();
+    let before = app.state.model.load_active_symbol_document().unwrap();
+
+    app.state.design.symbol.editor.select_shape(0);
+    assert_eq!(
+        app.command_availability(DesignCommand::AlignSelectionLeft.key()),
+        CommandAvailability::Disabled("select at least two objects")
+    );
+
+    let mut selection = SymbolSelection::single_pin("IN");
+    selection.shapes.insert(0);
+    app.state.design.symbol.editor.set_selection(selection);
+    app.execute_command_key(DesignCommand::AlignSelectionLeft.key());
+    let aligned = app.state.model.load_active_symbol_document().unwrap();
+    // The IN tip at x -40 is the leftmost edge: the circle comes to it.
+    assert_eq!(
+        aligned.body[0],
+        SymbolShape::Circle {
+            center: Point::new(-30, 0),
+            radius: 10,
+        }
+    );
+    assert_eq!(aligned.pins, before.pins);
+    assert_eq!(
+        app.state.design.symbol.history.undo_step(&key),
+        Some("Align left")
+    );
+    assert!(app.state.undo_active_symbol_document().unwrap());
+    assert_eq!(
+        app.state.model.load_active_symbol_document().unwrap(),
+        before
+    );
+
+    let mut off_grid = before.clone();
+    off_grid.body[1] = SymbolShape::Dot {
+        center: Point::new(23, 12),
+        radius: 2,
+    };
+    app.state
+        .store_active_symbol_editor_bundle(
+            &off_grid,
+            &SymbolEditorMetadata::for_document(&off_grid),
+        )
+        .unwrap();
+    app.state.design.symbol.editor.select_shape(1);
+    app.execute_command_key(DesignCommand::SnapSelectionToGrid.key());
+    assert_eq!(
+        app.state.model.load_active_symbol_document().unwrap().body[1],
+        SymbolShape::Dot {
+            center: Point::new(20, 10),
+            radius: 2,
+        }
+    );
+    assert_eq!(
+        app.state.design.symbol.history.undo_step(&key),
+        Some("Snap to grid")
+    );
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("Snapped 1 object to the grid.")
+    );
 }
 
 /// Escape lets go of the shape being drawn and leaves its tool armed; a

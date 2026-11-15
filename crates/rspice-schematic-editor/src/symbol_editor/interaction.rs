@@ -177,6 +177,9 @@ pub struct SymbolEditOutcome {
     pub edit_denied: bool,
     /// Why a requested edit was refused, for the host to tell the author.
     pub refusal: Option<String>,
+    /// What a completed edit did, where the canvas does not show it at a
+    /// glance: "Snapped 3 objects to the grid."
+    pub report: Option<String>,
 }
 
 pub fn edit_canvas(
