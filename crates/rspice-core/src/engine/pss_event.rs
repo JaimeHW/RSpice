@@ -379,15 +379,19 @@ impl Prepared {
 }
 
 impl Engine {
-    /// Solve a driven periodic steady state by event shooting.
+    /// Solve a driven periodic steady state by event shooting. `built`, when
+    /// given, is the circuit [`Engine::build_circuit_with_abort`] built of
+    /// `netlist`, which the stabilization integrates rather than building it
+    /// again.
     pub(in crate::engine) fn run_event_pss(
         &self,
         netlist: &Netlist,
+        built: Option<CircuitData>,
         config: &PssConfig,
         dc_seed: Option<&crate::engine::PssDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
     ) -> Result<EventPss, SimulationError> {
-        let prepared = self.prepare_event_orbit(netlist, None, config, dc_seed, abort)?;
+        let prepared = self.prepare_event_orbit(netlist, built, config, dc_seed, abort)?;
         let orbit = prepared.orbit(netlist, config, abort);
         let (image, solved, mesh, discrete_iterations) = orbit.solve_discrete(
             prepared.image.clone(),

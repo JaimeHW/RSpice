@@ -71,7 +71,7 @@ fn event_shooting_holds_the_switched_capacitor_sample_on_its_orbit() {
     assert!(point.is_event_orbit(), "a switched circuit is event-shot");
     let result = &point.analysis().result;
     let event = engine
-        .run_event_pss(&netlist, &config, None, &NoAbort)
+        .run_event_pss(&netlist, None, &config, None, &NoAbort)
         .expect("the same orbit");
     eprintln!("certified: {:?}", event.certification);
     let held = mean(result, "out");
@@ -124,7 +124,7 @@ c1 out 0 1n
         .expect("native PSS");
     assert!(!native.is_event_orbit());
     let event = engine
-        .run_event_pss(&netlist, &config, None, &NoAbort)
+        .run_event_pss(&netlist, None, &config, None, &NoAbort)
         .expect("event PSS");
     let (native, event) = (&native.analysis().result, &event.analysis.result);
     let peak = waveform(native, "out")
@@ -207,7 +207,7 @@ fn event_shooting_meets_native_shooting_on_a_veriloga_rc() {
         .expect("native shooting takes the charge-form module");
     assert!(!native.is_event_orbit());
     let event = engine
-        .run_event_pss(&netlist, &config, None, &NoAbort)
+        .run_event_pss(&netlist, None, &config, None, &NoAbort)
         .expect("event shooting takes it too");
     assert!(
         event.basis.iter().any(|name| name.contains("XVA")),
@@ -1193,7 +1193,7 @@ s1 a 0 a 0 swm
     let netlist = Netlist::parse(deck).unwrap();
     let engine = Engine::new(SimulationConfig::default());
     let event = engine
-        .run_event_pss(&netlist, &config, None, &NoAbort)
+        .run_event_pss(&netlist, None, &config, None, &NoAbort)
         .expect("the orbit certifies");
     let result = &event.analysis.result;
     // The published orbit's time is absolute time modulo the period.

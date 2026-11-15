@@ -80,8 +80,9 @@ fn update_reaches_rounding(update: Value, previous: Value, reltol: Value) -> boo
 
 /// Which shooting solves a PSS.
 enum PssRoute {
-    /// Event shooting, whose stabilization builds the transient's own circuit.
-    Event,
+    /// Event shooting, whose stabilization integrates the circuit the choice
+    /// built.
+    Event(Box<CircuitData>),
     /// Native shooting, on the circuit the choice built.
     Native(Box<CircuitData>),
 }
@@ -1825,9 +1826,9 @@ impl Engine {
     ) -> Result<PssAnalysisResult, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
         let circuit = match engine.pss_route(netlist, &config, abort)? {
-            PssRoute::Event => {
+            PssRoute::Event(circuit) => {
                 return engine
-                    .run_event_pss(netlist, &config, None, abort)
+                    .run_event_pss(netlist, Some(*circuit), &config, None, abort)
                     .map(|event| event.analysis);
             }
             PssRoute::Native(circuit) => *circuit,
@@ -1860,9 +1861,9 @@ impl Engine {
     ) -> Result<PssAnalysisResult, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
         let circuit = match engine.pss_route(netlist, &config, abort)? {
-            PssRoute::Event => {
+            PssRoute::Event(circuit) => {
                 return engine
-                    .run_event_pss(netlist, &config, Some(dc_seed), abort)
+                    .run_event_pss(netlist, Some(*circuit), &config, Some(dc_seed), abort)
                     .map(|event| event.analysis);
             }
             PssRoute::Native(circuit) => *circuit,
@@ -1893,8 +1894,8 @@ impl Engine {
         let producer =
             PssOperatingPointIdentity::capture(netlist, &engine.config, &retained_config)?;
         let circuit = match engine.pss_route(netlist, &config, abort)? {
-            PssRoute::Event => {
-                return engine.event_pss_operating_point(netlist, config, None, abort);
+            PssRoute::Event(circuit) => {
+                return engine.event_pss_operating_point(netlist, *circuit, config, None, abort);
             }
             PssRoute::Native(circuit) => *circuit,
         };
@@ -1948,8 +1949,14 @@ impl Engine {
         let producer =
             PssOperatingPointIdentity::capture(netlist, &engine.config, &retained_config)?;
         let circuit = match engine.pss_route(netlist, &config, abort)? {
-            PssRoute::Event => {
-                return engine.event_pss_operating_point(netlist, config, Some(dc_seed), abort);
+            PssRoute::Event(circuit) => {
+                return engine.event_pss_operating_point(
+                    netlist,
+                    *circuit,
+                    config,
+                    Some(dc_seed),
+                    abort,
+                );
             }
             PssRoute::Native(circuit) => *circuit,
         };
@@ -2237,8 +2244,8 @@ impl Engine {
 
     /// Which shooting solves this netlist's PSS: event shooting when native
     /// shooting refuses it only for state event shooting carries and event
-    /// shooting's own preflight admits it, else native shooting on the
-    /// circuit built here. A circuit the preflight refuses is refused here, by
+    /// shooting's own preflight admits it, else native shooting; either on
+    /// the circuit built here. A circuit the preflight refuses is refused here, by
     /// name, before any solver work.
     fn pss_route(
         &self,
@@ -2252,7 +2259,7 @@ impl Engine {
         }
         match super::pss_event::admission_refusal(&circuit, netlist, config) {
             Some(refusal) => Err(refusal),
-            None => Ok(PssRoute::Event),
+            None => Ok(PssRoute::Event(Box::new(circuit))),
         }
     }
 
@@ -2261,12 +2268,13 @@ impl Engine {
     fn event_pss_operating_point(
         &self,
         netlist: &Netlist,
+        circuit: CircuitData,
         config: PssConfig,
         dc_seed: Option<&PssDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
     ) -> Result<PssOperatingPoint, SimulationError> {
         let producer = PssOperatingPointIdentity::capture(netlist, &self.config, &config)?;
-        let event = self.run_event_pss(netlist, &config, dc_seed, abort)?;
+        let event = self.run_event_pss(netlist, Some(circuit), &config, dc_seed, abort)?;
         log::debug!(
             "PSS event shooting: {} corrections, certified {:?}",
             event.analysis.iterations,
