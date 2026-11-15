@@ -2764,7 +2764,10 @@ impl StaticMatrix {
         if row >= self.nrows {
             return false;
         }
-        (first_column..self.ncols).any(|col| find_csc_offset(&self.csc, row, col).is_some())
+        let layout = &self.residual_layout;
+        layout.col_idx[layout.row_ptr[row]..layout.row_ptr[row + 1]]
+            .iter()
+            .any(|&col| col >= first_column)
     }
 
     /// Replace one existing row with a node-voltage clamp.
@@ -2795,12 +2798,14 @@ impl StaticMatrix {
             )));
         }
 
+        // The row-major view of the frozen pattern visits only the row's own
+        // positions: a clamp per startup-constrained node then costs that
+        // node's degree, not a search of every column.
         let mut diagonal_index = None;
         let mut carries_branch_current = false;
-        for col in 0..self.ncols {
-            let Some(index) = find_csc_offset(&self.csc, row, col) else {
-                continue;
-            };
+        for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1] {
+            let col = self.residual_layout.col_idx[position];
+            let index = self.residual_layout.csc_idx[position];
             if col >= first_current_column {
                 carries_branch_current = true;
                 continue;
