@@ -1123,6 +1123,69 @@ fn a_rectangle_prints_as_its_closed_outline() {
     assert_eq!(scene(&rectangle), scene(&resolved_symbol()));
 }
 
+/// A symbol printed on its own is held by its origin, as its page is: one
+/// whose origin was moved prints the drawing it printed before the move.
+#[test]
+fn a_symbol_whose_origin_moved_prints_the_same_drawing() {
+    let held_at = |origin: SchematicPoint| {
+        let document = SymbolDocument {
+            pins: vec![
+                rspice_design::symbol::SymbolPin::new(
+                    "IN",
+                    rspice_design_model::port::PortDirection::In,
+                    Some(SchematicPoint::new(-40, 0)),
+                )
+                .with_side(rspice_design_model::symbol_pin::SymbolPinSide::Left),
+            ],
+            body: vec![
+                SymbolShape::Rectangle {
+                    min: SchematicPoint::new(-20, -15),
+                    max: SchematicPoint::new(20, 15),
+                    style: Default::default(),
+                },
+                SymbolShape::Arc {
+                    center: SchematicPoint::new(0, 0),
+                    radius: 8,
+                    start_degrees: 0,
+                    sweep_degrees: 180,
+                    style: Default::default(),
+                },
+            ],
+            origin,
+            name_anchor: SchematicPoint::new(-20, -25),
+            value_anchor: SchematicPoint::new(-20, 25),
+            ..SymbolDocument::default()
+        };
+        let source = resolve_symbol_document(
+            HardcopySourceIdentity::try_new(
+                "test-symbol",
+                HardcopyDocumentId::try_from_uuid(Uuid::from_u128(77)).unwrap(),
+                ObjectRevision::INITIAL,
+                "Comparator symbol",
+            )
+            .unwrap(),
+            document,
+            HardcopyScope::ActiveDocument,
+        )
+        .unwrap();
+        let plan = plan_for_resolved(&source, OutputFormat::SvgVector);
+        scene_from_resolved(
+            &source,
+            source.default_print_mapping(),
+            plan.setup().schematic(),
+            resolved_metadata(),
+        )
+        .expect("a symbol prints wherever its origin stands")
+        .primitives()
+        .to_vec()
+    };
+
+    assert_eq!(
+        held_at(SchematicPoint::new(25, -15)),
+        held_at(SchematicPoint::origin())
+    );
+}
+
 /// A shape's style reaches the page: its weight scales the body's stroke, a
 /// broken outline prints broken in symbol units, and only a shape with an
 /// inside prints filled, in its outline's ink. The SVG export draws what the

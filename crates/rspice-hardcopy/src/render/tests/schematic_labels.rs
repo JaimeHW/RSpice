@@ -527,6 +527,88 @@ fn a_placed_symbol_prints_each_pins_lead_and_the_mark_of_its_style() {
     );
 }
 
+/// A placed part prints held by its symbol's origin, as the canvas draws it
+/// and as its wires reach it: a symbol whose origin was moved prints its
+/// body, its curves and its pins where the canvas does.
+#[test]
+fn a_placed_part_prints_held_by_its_symbols_origin() {
+    let mut symbol = cell_symbol();
+    symbol.origin = SchematicPoint::new(10, -20);
+    symbol.pins = vec![
+        SymbolPin::new(
+            "A",
+            PortDirection::InOut,
+            Some(SchematicPoint::new(-50, 0)),
+        )
+        .with_side(SymbolPinSide::Left),
+    ];
+    symbol.body.push(SymbolShape::Arc {
+        center: SchematicPoint::new(0, 0),
+        radius: 10,
+        start_degrees: 0,
+        sweep_degrees: 180,
+        style: Default::default(),
+    });
+    let mut carried = sheet(Vec::new());
+    carried.components.push(SemanticComponent {
+        symbol_source: Some(SemanticSymbolSource::Authored),
+        component: part(2, ComponentType::CellInstance, (40, 40), "", ""),
+        resolved_symbol: Some(symbol),
+    });
+    // The wire ends on the terminal the canvas and the netlist put the pin
+    // at: the part's position, plus the pin, less the origin.
+    carried.wires = vec![Wire::segment(
+        9,
+        SchematicPoint::new(-60, 60),
+        SchematicPoint::new(-20, 60),
+    )];
+    let compiled = compile(&carried);
+    let um = |point: &ScenePoint| (point.x.micrometres() as i64, point.y.micrometres() as i64);
+
+    let body = compiled
+        .primitives
+        .iter()
+        .find_map(|primitive| match primitive {
+            ScenePrimitive::Polyline {
+                points,
+                closed: true,
+                ..
+            } => Some(points.iter().map(um).collect::<Vec<_>>()),
+            _ => None,
+        })
+        .expect("the body prints");
+    assert_eq!(body[0], compiled.at(0.0, 40.0), "the body's top-left corner");
+    let arc = compiled
+        .primitives
+        .iter()
+        .find_map(|primitive| match primitive {
+            ScenePrimitive::Ellipse { center, .. } => Some(um(center)),
+            _ => None,
+        })
+        .expect("the arc prints");
+    assert_eq!(arc, compiled.at(30.0, 60.0), "the arc's centre");
+    let lead = compiled
+        .primitives
+        .iter()
+        .find_map(|primitive| match primitive {
+            ScenePrimitive::Line { from, to, .. } => Some((um(from), um(to))),
+            _ => None,
+        })
+        .expect("the pin's lead prints");
+    assert_eq!(lead, (compiled.at(-20.0, 60.0), compiled.at(0.0, 60.0)));
+    let terminal = compiled
+        .primitives
+        .iter()
+        .find_map(|primitive| match primitive {
+            ScenePrimitive::Circle { center, radius, .. } if radius.micrometres() == 500 => {
+                Some(um(center))
+            }
+            _ => None,
+        })
+        .expect("the pin's terminal prints");
+    assert_eq!(terminal, compiled.at(-20.0, 60.0), "where the wire ends");
+}
+
 fn line_widths(compiled: &Compiled) -> BTreeSet<u64> {
     compiled
         .primitives

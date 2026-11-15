@@ -87,15 +87,18 @@ impl SemanticSceneCompiler<'_> {
                 None,
             )?,
         );
+        // The symbol is held by its origin: an instance stands that point on
+        // its position, as the canvas and the wires it connects do.
+        let held = |point: SchematicPoint| point - symbol.origin;
         let convert = |this: &Self, point: SchematicPoint| {
             let world = if let Some(component) = component {
-                let local = component.transform_point(point);
+                let local = component.transform_point(held(point));
                 SchematicPoint::new(
                     component.pos.x.saturating_add(local.x),
                     component.pos.y.saturating_add(local.y),
                 )
             } else {
-                point
+                held(point)
             };
             this.schematic_point(world)
         };
@@ -170,10 +173,16 @@ impl SemanticSceneCompiler<'_> {
                     sweep_degrees,
                     ..
                 } => {
-                    let arc = SymbolCurve::of_arc(*center, *radius, *start_degrees, *sweep_degrees);
+                    let arc =
+                        SymbolCurve::of_arc(held(*center), *radius, *start_degrees, *sweep_degrees);
                     self.symbol_curve(&arc, component, stroke)?;
                 }
-                SymbolShape::Curve { curve, .. } => self.symbol_curve(curve, component, stroke)?,
+                SymbolShape::Curve { curve, .. } => {
+                    let mut curve = *curve;
+                    curve.center[0] -= f64::from(symbol.origin.x);
+                    curve.center[1] -= f64::from(symbol.origin.y);
+                    self.symbol_curve(&curve, component, stroke)?;
+                }
                 SymbolShape::Arrow {
                     tip,
                     rotation_quarters,
