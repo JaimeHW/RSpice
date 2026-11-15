@@ -304,8 +304,13 @@ fn a_copied_pin_takes_the_next_free_name() {
 fn a_turn_pivots_on_the_selection_not_the_origin() {
     use rspice_design_model::symbol_pin::SymbolPinSide::{Left, Top};
     let document = SymbolDocument {
-        pins: vec![SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 10))).with_side(Left)],
-        body: vec![SymbolShape::rectangle(Point::new(60, 40), Point::new(100, 60))],
+        pins: vec![
+            SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 10))).with_side(Left),
+        ],
+        body: vec![SymbolShape::rectangle(
+            Point::new(60, 40),
+            Point::new(100, 60),
+        )],
         ..SymbolDocument::default()
     };
     let turn = |selection: SymbolSelection, transform: SymbolTransform| {
@@ -330,7 +335,10 @@ fn a_turn_pivots_on_the_selection_not_the_origin() {
 
     // A pin on the left mirrored left to right across its own tip faces
     // right; mirrored top to bottom it is the same pin, and no edit.
-    let (mirrored, outcome) = turn(SymbolSelection::single_pin("IN"), SymbolTransform::MirrorVertical);
+    let (mirrored, outcome) = turn(
+        SymbolSelection::single_pin("IN"),
+        SymbolTransform::MirrorVertical,
+    );
     assert_eq!(mirrored, document);
     assert!(!outcome.changed && outcome.undo_before.is_none());
 

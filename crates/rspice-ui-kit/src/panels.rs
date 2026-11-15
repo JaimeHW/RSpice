@@ -1789,7 +1789,8 @@ pub fn property_row_pair_input(
     let action = action.zip(action_rect).map(|(action, rect)| {
         let response = ui.interact(
             rect,
-            ui.id().with(("property-row-pair-action", label, action.label)),
+            ui.id()
+                .with(("property-row-pair-action", label, action.label)),
             if action.enabled {
                 Sense::click()
             } else {

@@ -688,7 +688,11 @@ fn vertex_table(
             if field.changed() {
                 let typed = buffers[axis].clone();
                 ui.data_mut(|data| data.insert_temp(id.with(axis), typed.clone()));
-                let value = if axis == 0 { &mut point.x } else { &mut point.y };
+                let value = if axis == 0 {
+                    &mut point.x
+                } else {
+                    &mut point.y
+                };
                 if let Ok(number) = typed.trim().parse::<i32>()
                     && number != *value
                 {
