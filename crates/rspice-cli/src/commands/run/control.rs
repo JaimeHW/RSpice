@@ -81,13 +81,14 @@ pub(super) fn run(
     let mut presentation_ordinal = 0usize;
     let mut control_files = output::ControlFiles::default();
     let mut post_ordinals = std::collections::BTreeMap::new();
+    // The transients the host ran, whose trajectories it published itself.
+    let mut hosted = std::collections::HashSet::new();
 
     let execution = (|| -> Result<(), CliError> {
         while let Some(command) = session
             .next_command(&mut circuit.evaluator(&engine), &crate::abort::ProcessAbort)
             .map_err(|error| map_command(error, script, args))?
         {
-            let previous = circuit.datasets().len();
             let effect = circuit
                 .execute_with_transient_runner(
                     &engine,
@@ -95,6 +96,7 @@ pub(super) fn run(
                     session.variables(),
                     &crate::abort::ProcessAbort,
                     &mut |engine, snapshot, analysis, analysis_id, _| -> Result<_, HostError> {
+                        hosted.insert(analysis_id);
                         let completed = transient::run(
                             engine,
                             snapshot,
@@ -124,11 +126,24 @@ pub(super) fn run(
                 })?;
             match effect {
                 ControlCommandEffect::CircuitChanged => {}
-                ControlCommandEffect::Analyses(_) => {
-                    for dataset in &circuit.datasets()[previous..] {
+                ControlCommandEffect::Analyses(names) => {
+                    for name in &names {
+                        // A destroyed plot keeps its dataset and frees its name, so
+                        // the plot this command filled is the latest of that name.
+                        let Some(dataset) = circuit
+                            .datasets()
+                            .iter()
+                            .rev()
+                            .find(|dataset| dataset.name == *name)
+                        else {
+                            continue;
+                        };
                         // The transient callback already published the exact trajectory
-                        // it returned to the shared script dataset store.
-                        if matches!(dataset.result, ControlAnalysisResult::Transient(_)) {
+                        // it returned to the shared script dataset store. A run a stop
+                        // interrupted is published once `resume` completes it.
+                        if matches!(dataset.result, ControlAnalysisResult::Transient(_))
+                            && (hosted.contains(&dataset.analysis_id) || circuit.is_paused(name))
+                        {
                             continue;
                         }
                         let mut snapshot = circuit.netlist().clone();
@@ -256,8 +271,23 @@ pub(super) fn run(
                                     table,
                                 )?;
                             }
-                            ControlAnalysisResult::Transient(_) => {
-                                unreachable!("published by the transient host")
+                            ControlAnalysisResult::Transient(result) => {
+                                let AnalysisCommand::Tran { start, stop, .. } = &dataset.command
+                                else {
+                                    return Err(CliError::InternalError {
+                                        message:
+                                            "control transient dataset lost its authored command"
+                                                .into(),
+                                    });
+                                };
+                                basic::finish_transient_result(
+                                    &ctx,
+                                    result,
+                                    start.unwrap_or(0.0),
+                                    *stop,
+                                    None,
+                                    None,
+                                )?;
                             }
                         }
                         report_budget.admit_measurements(&ctx.measurements.borrow())?;

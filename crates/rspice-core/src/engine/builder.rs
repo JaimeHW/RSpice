@@ -1724,6 +1724,67 @@ fn check_netlist_source_resource_limits(
 /// is DC alone: zero at the transient's operating point, a straight line to
 /// its DC value at `ramp`, and that value from then on. The operating point
 /// and every small-signal analysis keep the DC value.
+impl Engine {
+    /// What an independent source of `spec` named `name` drives with in a
+    /// circuit this engine builds from `netlist`: its DC value, its AC
+    /// excitation, the waveform a transient plays, and the external PWL data
+    /// that waveform reads, loaded.
+    pub(in crate::engine) fn independent_source_excitation(
+        &self,
+        netlist: &Netlist,
+        name: &str,
+        spec: &crate::netlist::SourceSpec,
+    ) -> Result<
+        (
+            SourceExcitation,
+            Option<std::sync::Arc<crate::device::pwl_file::PwlWaveform>>,
+        ),
+        SimulationError,
+    > {
+        let pwl_waveform = validate_source_inputs(
+            name,
+            spec,
+            self.config.spice_dialect,
+            self.config.resource_limits,
+        )?;
+        let dc_value = extract_dc_value_with_limits(
+            spec,
+            self.config.spice_dialect,
+            self.config.resource_limits,
+        );
+        let (ac_magnitude, ac_phase) = super::extract_ac_value(spec);
+        let transient_spec = match spec {
+            crate::netlist::SourceSpec::Distortion { .. }
+            | crate::netlist::SourceSpec::RfPort { .. }
+            | crate::netlist::SourceSpec::Pulse { .. }
+            | crate::netlist::SourceSpec::Sin { .. }
+            | crate::netlist::SourceSpec::Pwl { .. }
+            | crate::netlist::SourceSpec::PwlFile { .. }
+            | crate::netlist::SourceSpec::Pat { .. }
+            | crate::netlist::SourceSpec::DcTransient { .. }
+            | crate::netlist::SourceSpec::AcTransient { .. }
+            | crate::netlist::SourceSpec::DcAcTransient { .. }
+            | crate::netlist::SourceSpec::Exp { .. }
+            | crate::netlist::SourceSpec::ExpTrain(_)
+            | crate::netlist::SourceSpec::Sffm { .. }
+            | crate::netlist::SourceSpec::Am { .. }
+            | crate::netlist::SourceSpec::TrNoise { .. }
+            | crate::netlist::SourceSpec::TrRandom { .. } => Some(spec.clone()),
+            _ => None,
+        }
+        .or_else(|| startup_ramp(netlist.options.transient_startup_ramp, dc_value));
+        Ok((
+            SourceExcitation {
+                dc_value,
+                ac_magnitude,
+                ac_phase,
+                source_spec: transient_spec,
+            },
+            pwl_waveform,
+        ))
+    }
+}
+
 fn startup_ramp(ramp: Option<Value>, dc_value: Value) -> Option<crate::netlist::SourceSpec> {
     ramp.map(|ramp| crate::netlist::SourceSpec::Pwl {
         points: vec![(0.0, 0.0), (ramp, dc_value)],
@@ -7722,62 +7783,25 @@ impl Engine {
                     )?;
                 }
                 ElementKind::VoltageSource(spec) => {
-                    let pwl_waveform = validate_source_inputs(
-                        &element.name,
-                        spec,
-                        self.config.spice_dialect,
-                        self.config.resource_limits,
-                    )?;
+                    let (excitation, pwl_waveform) =
+                        self.independent_source_excitation(netlist, &element.name, spec)?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let branch = circuit.allocate_branch_named(&element.name);
-                    let dc_value = extract_dc_value_with_limits(
-                        spec,
-                        self.config.spice_dialect,
-                        self.config.resource_limits,
-                    );
-                    let (ac_mag, ac_phase) = super::extract_ac_value(spec);
                     log::debug!(
                         "VoltageSource {}: DC={}, AC_mag={}, AC_phase={}, spec={:?}",
                         element.name,
-                        dc_value,
-                        ac_mag,
-                        ac_phase,
+                        excitation.dc_value,
+                        excitation.ac_magnitude,
+                        excitation.ac_phase,
                         spec
                     );
-                    // Clone spec for transient analysis if it's a time-varying source
-                    let transient_spec = match spec {
-                        crate::netlist::SourceSpec::Distortion { .. }
-                        | crate::netlist::SourceSpec::RfPort { .. }
-                        | crate::netlist::SourceSpec::Pulse { .. }
-                        | crate::netlist::SourceSpec::Sin { .. }
-                        | crate::netlist::SourceSpec::Pwl { .. }
-                        | crate::netlist::SourceSpec::PwlFile { .. }
-                        | crate::netlist::SourceSpec::Pat { .. }
-                        | crate::netlist::SourceSpec::DcTransient { .. }
-                        | crate::netlist::SourceSpec::AcTransient { .. }
-                        | crate::netlist::SourceSpec::DcAcTransient { .. }
-                        | crate::netlist::SourceSpec::Exp { .. }
-                        | crate::netlist::SourceSpec::ExpTrain(_)
-                        | crate::netlist::SourceSpec::Sffm { .. }
-                        | crate::netlist::SourceSpec::Am { .. }
-                        | crate::netlist::SourceSpec::TrNoise { .. }
-                        | crate::netlist::SourceSpec::TrRandom { .. } => Some(spec.clone()),
-                        _ => None,
-                    };
-                    let transient_spec = transient_spec
-                        .or_else(|| startup_ramp(netlist.options.transient_startup_ramp, dc_value));
                     circuit.voltage_sources.add_with_ac_spec_and_pwl_waveform(
                         element.name.clone(),
                         np,
                         nn,
                         branch,
-                        SourceExcitation {
-                            dc_value,
-                            ac_magnitude: ac_mag,
-                            ac_phase,
-                            source_spec: transient_spec,
-                        },
+                        excitation,
                         pwl_waveform,
                     );
                     if self.config.spice_dialect == SpiceDialect::Xyce {
@@ -7789,51 +7813,15 @@ impl Engine {
                     }
                 }
                 ElementKind::CurrentSource(spec) => {
-                    let pwl_waveform = validate_source_inputs(
-                        &element.name,
-                        spec,
-                        self.config.spice_dialect,
-                        self.config.resource_limits,
-                    )?;
+                    let (excitation, pwl_waveform) =
+                        self.independent_source_excitation(netlist, &element.name, spec)?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    let dc_value = extract_dc_value_with_limits(
-                        spec,
-                        self.config.spice_dialect,
-                        self.config.resource_limits,
-                    );
-                    let (ac_mag, ac_phase) = super::extract_ac_value(spec);
-                    let transient_spec = match spec {
-                        crate::netlist::SourceSpec::Distortion { .. }
-                        | crate::netlist::SourceSpec::RfPort { .. }
-                        | crate::netlist::SourceSpec::Pulse { .. }
-                        | crate::netlist::SourceSpec::Sin { .. }
-                        | crate::netlist::SourceSpec::Pwl { .. }
-                        | crate::netlist::SourceSpec::PwlFile { .. }
-                        | crate::netlist::SourceSpec::Pat { .. }
-                        | crate::netlist::SourceSpec::DcTransient { .. }
-                        | crate::netlist::SourceSpec::AcTransient { .. }
-                        | crate::netlist::SourceSpec::DcAcTransient { .. }
-                        | crate::netlist::SourceSpec::Exp { .. }
-                        | crate::netlist::SourceSpec::ExpTrain(_)
-                        | crate::netlist::SourceSpec::Sffm { .. }
-                        | crate::netlist::SourceSpec::Am { .. }
-                        | crate::netlist::SourceSpec::TrNoise { .. }
-                        | crate::netlist::SourceSpec::TrRandom { .. } => Some(spec.clone()),
-                        _ => None,
-                    };
-                    let transient_spec = transient_spec
-                        .or_else(|| startup_ramp(netlist.options.transient_startup_ramp, dc_value));
                     circuit.current_sources.add_with_ac_spec_and_pwl_waveform(
                         element.name.clone(),
                         np,
                         nn,
-                        SourceExcitation {
-                            dc_value,
-                            ac_magnitude: ac_mag,
-                            ac_phase,
-                            source_spec: transient_spec,
-                        },
+                        excitation,
                         pwl_waveform,
                     );
                     if self.config.spice_dialect == SpiceDialect::Xyce {

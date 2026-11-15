@@ -1406,6 +1406,99 @@ impl TransientResult {
     /// the same reason: the hook publishes node ids and the declaration
     /// carries node names, so the run resolves the table once and lends it at
     /// every point instead of resolving it at each.
+    /// Continue this trajectory with `resumed`, the run a control script's
+    /// `resume` continued it with: its points after this run's last, as
+    /// ngspice appends the resumed run to the plot the interrupted run filled
+    /// (frontend/runcoms2.c:146 runs it into the same plot). Both runs must
+    /// record the same signals.
+    pub(crate) fn extend_resumed(&mut self, resumed: TransientResult) -> Result<(), String> {
+        let same_signals = self.node_names == resumed.node_names
+            && self.branch_names == resumed.branch_names
+            && self.voltages.len() == resumed.voltages.len()
+            && self.branch_currents.len() == resumed.branch_currents.len()
+            && self
+                .device_op_traces
+                .iter()
+                .map(|trace| (&trace.device_name, &trace.parameter))
+                .eq(resumed
+                    .device_op_traces
+                    .iter()
+                    .map(|trace| (&trace.device_name, &trace.parameter)))
+            && self
+                .store_traces
+                .iter()
+                .map(|trace| &trace.name)
+                .eq(resumed.store_traces.iter().map(|trace| &trace.name))
+            && self
+                .digital_traces
+                .iter()
+                .map(|trace| &trace.node_name)
+                .eq(resumed.digital_traces.iter().map(|trace| &trace.node_name))
+            && self
+                .real_traces
+                .iter()
+                .map(|trace| &trace.node_name)
+                .eq(resumed.real_traces.iter().map(|trace| &trace.node_name));
+        if !same_signals {
+            return Err(
+                "the resumed run does not record the signals of the run it continues".into(),
+            );
+        }
+        let impulses = self.current_impulses.is_some()
+            || self.voltage_impulses.is_some()
+            || resumed.current_impulses.is_some()
+            || resumed.voltage_impulses.is_some();
+        if impulses || !self.fft_results.is_empty() || !resumed.fft_results.is_empty() {
+            return Err(
+                "a resumed run cannot continue impulse traces or spectra of the run it continues"
+                    .into(),
+            );
+        }
+        let last = self.time.last().copied().unwrap_or(Value::NEG_INFINITY);
+        let skip = resumed
+            .time
+            .iter()
+            .take_while(|&&time| time <= last)
+            .count();
+        let mut columns = Vec::new();
+        columns.push((&mut self.time, resumed.time));
+        columns.push((&mut self.step_sizes, resumed.step_sizes));
+        columns.extend(self.voltages.iter_mut().zip(resumed.voltages));
+        columns.extend(self.branch_currents.iter_mut().zip(resumed.branch_currents));
+        columns.extend(
+            self.device_op_traces
+                .iter_mut()
+                .zip(resumed.device_op_traces)
+                .map(|(trace, resumed)| (&mut trace.values, resumed.values)),
+        );
+        columns.extend(
+            self.store_traces
+                .iter_mut()
+                .zip(resumed.store_traces)
+                .map(|(trace, resumed)| (&mut trace.values, resumed.values)),
+        );
+        for (column, resumed) in columns {
+            // A column output projection left out is empty in both runs.
+            if column.is_empty() != resumed.is_empty() {
+                return Err(
+                    "the resumed run does not record the signals of the run it continues".into(),
+                );
+            }
+            column.extend(resumed.into_iter().skip(skip));
+        }
+        for (trace, resumed) in self.digital_traces.iter_mut().zip(resumed.digital_traces) {
+            trace
+                .points
+                .extend(resumed.points.into_iter().filter(|point| point.time > last));
+        }
+        for (trace, resumed) in self.real_traces.iter_mut().zip(resumed.real_traces) {
+            trace
+                .points
+                .extend(resumed.points.into_iter().filter(|point| point.time > last));
+        }
+        Ok(())
+    }
+
     pub(crate) fn observable_sample<'a>(
         &'a self,
         digital_values: &'a [(NodeId, crate::abort_signal::DigitalEventCode)],

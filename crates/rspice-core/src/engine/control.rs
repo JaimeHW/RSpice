@@ -93,6 +93,8 @@ pub enum ControlCommandEffect {
 enum PreparedCommand {
     Complete(ControlCommandEffect),
     Analyses(Vec<(AnalysisCommand, Option<usize>)>),
+    /// `resume`: continue the transient a `stop` interrupted.
+    Resume(Box<transient::PausedTransient>),
 }
 
 enum CommandKind {
@@ -107,6 +109,10 @@ enum CommandKind {
     Reset,
     /// `remcirc`: remove the circuit; its plots stay.
     RemoveCircuit,
+    /// `stop when time = t`: interrupt the transients that reach `t`.
+    Stop,
+    /// `resume`: continue the interrupted transient.
+    Resume,
     Alter,
     /// `altermod`: set a parameter of a model card.
     AlterModel,
@@ -191,6 +197,8 @@ impl CommandKind {
                 | Self::Analysis
                 | Self::Run
                 | Self::Listing
+                | Self::Stop
+                | Self::Resume
         )
     }
 
@@ -204,6 +212,8 @@ impl CommandKind {
             "unlet" => Self::Unlet,
             "reset" => Self::Reset,
             "remcirc" => Self::RemoveCircuit,
+            "stop" => Self::Stop,
+            "resume" => Self::Resume,
             "alter" => Self::Alter,
             "altermod" => Self::AlterModel,
             "alterparam" => Self::AlterParam,
@@ -297,6 +307,11 @@ pub struct ControlCircuit {
     /// Whether `remcirc` removed the circuit: the plots stay readable, and
     /// a command that needs the circuit is refused.
     removed: bool,
+    /// The times `stop when time = t` interrupts a transient at, as given
+    /// (ngspice's breakpoint list, frontend/breakp.c:178).
+    stops: Vec<Value>,
+    /// The transient a stop interrupted, which `resume` continues.
+    paused: Option<Box<transient::PausedTransient>>,
 }
 
 impl ControlCircuit {
@@ -324,6 +339,8 @@ impl ControlCircuit {
             directory: None,
             shell: BTreeMap::new(),
             removed: false,
+            stops: Vec::new(),
+            paused: None,
         })
     }
 
@@ -564,6 +581,10 @@ impl ControlCircuit {
                 self.netlist = self.authored.clone();
                 self.device_state = None;
                 self.runtime_options = crate::netlist::SimulationOptions::default();
+                // It removes the circuit as `remcirc` does, its breakpoints
+                // and interrupted run with it.
+                self.stops.clear();
+                self.paused = None;
                 Ok(Self::batch_output(
                     command,
                     ControlPresentationKind::Text(format!(
@@ -588,10 +609,24 @@ impl ControlCircuit {
                 self.device_state = None;
                 self.instance_quantities.clear();
                 self.runtime_options = crate::netlist::SimulationOptions::default();
+                self.stops.clear();
+                self.paused = None;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
             }
+            CommandKind::Stop => {
+                self.stop(command, variables, abort)?;
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
+            }
+            // ngspice `resume` (frontend/runcoms2.c:86) with no run in
+            // progress starts one, as `run` does.
+            CommandKind::Resume => match self.paused.take() {
+                Some(paused) => Ok(PreparedCommand::Resume(paused)),
+                None => self.prepare_kind(CommandKind::Run, engine, command, variables, abort),
+            },
             CommandKind::Unlet => {
                 self.unlet(command)?;
                 Ok(PreparedCommand::Complete(
@@ -944,6 +979,9 @@ impl ControlCircuit {
         engine
             .ensure_batch_runs(self.datasets.len().saturating_add(1))
             .map_err(|error| simulation_error(line, error))?;
+        // A new run abandons the one a stop interrupted (frontend/runcoms.c:256
+        // warns that it loses the old state).
+        self.paused = None;
         let configured = self.analysis_config(engine);
         let mut bounded = if matches!(
             analysis,
@@ -973,6 +1011,7 @@ impl ControlCircuit {
         let netlist =
             transient::analysis_netlist(&self.netlist, &analysis, authored_index, line, abort)?;
         let mut device_op_report = None;
+        let mut paused_run = None;
         let (kind, result, count) = match &analysis {
             AnalysisCommand::Op => {
                 let (result, report) = bounded
@@ -1028,7 +1067,21 @@ impl ControlCircuit {
                 (kind, result, count)
             }
             AnalysisCommand::Tran { .. } => {
-                let result = runner(&bounded, &netlist, &analysis, analysis_id, abort)?;
+                let result = match self.next_stop(&analysis, None) {
+                    Some(stop) => {
+                        let (result, paused) = self.run_until_stop(
+                            &bounded,
+                            &netlist,
+                            &analysis,
+                            (authored_index, &name),
+                            (stop, line),
+                            abort,
+                        )?;
+                        paused_run = paused;
+                        result
+                    }
+                    None => runner(&bounded, &netlist, &analysis, analysis_id, abort)?,
+                };
                 let count = Engine::transient_result_value_count(&result);
                 (
                     "tran",
@@ -1181,6 +1234,7 @@ impl ControlCircuit {
             command: analysis,
             result,
         });
+        self.paused = paused_run;
         self.current = Some(self.datasets.len() - 1);
         self.vectors.leave_plot();
         self.ordinals.insert(kind, ordinal);

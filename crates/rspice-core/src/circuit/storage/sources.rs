@@ -419,6 +419,37 @@ macro_rules! shared_source_methods {
             }
         }
 
+        /// Drive the source named `name` with `excitation` from here on, as
+        /// a control script's `alter` does to a run it resumes: its DC value,
+        /// its AC excitation, the waveform a transient plays and that
+        /// waveform's external PWL data. Answers whether the source exists.
+        pub(crate) fn replace_excitation(
+            &mut self,
+            name: &str,
+            excitation: SourceExcitation,
+            pwl_waveform: Option<Arc<crate::device::pwl_file::PwlWaveform>>,
+        ) -> bool {
+            let Some(index) = self
+                .names
+                .iter()
+                .position(|source_name| source_name.eq_ignore_ascii_case(name))
+            else {
+                return false;
+            };
+            let SourceExcitation {
+                dc_value,
+                ac_magnitude,
+                ac_phase,
+                source_spec,
+            } = excitation;
+            self.dc_values[index] = dc_value;
+            self.ac_magnitudes[index] = ac_magnitude;
+            self.ac_phases[index] = ac_phase;
+            self.source_specs[index] = source_spec;
+            self.pwl_waveforms[index] = pwl_waveform;
+            true
+        }
+
         pub fn len(&self) -> usize {
             self.names.len()
         }

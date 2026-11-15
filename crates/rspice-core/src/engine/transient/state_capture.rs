@@ -102,6 +102,17 @@ impl<'a> TransientStateCapture<'a> {
         Self::with_end(times, tstop, true)
     }
 
+    /// The same request, for a segment that continues the live `image`.
+    pub(in crate::engine) fn from_image(
+        times: &'a [Value],
+        tstop: Value,
+        image: &'a CapturedTransientState,
+    ) -> Result<Self, SimulationError> {
+        let mut capture = Self::new(times, tstop)?;
+        capture.start = Some(image);
+        Ok(capture)
+    }
+
     /// The same request, for a run that continues to its stop time.
     fn through_stop(times: &'a [Value], tstop: Value) -> Result<Self, SimulationError> {
         Self::with_end(times, tstop, false)
@@ -425,8 +436,7 @@ impl Engine {
         }
         validate_transient_window(tstop, max_step)?;
         let times = [tstop];
-        let mut capture = TransientStateCapture::new(&times, tstop)?;
-        capture.start = Some(image);
+        let mut capture = TransientStateCapture::from_image(&times, tstop, image)?;
         capture.observer = observer;
         let mut engine = self.resolved_for_netlist(netlist);
         engine.small_signal_state = None;
