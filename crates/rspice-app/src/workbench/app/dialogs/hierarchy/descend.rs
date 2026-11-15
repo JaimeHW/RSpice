@@ -44,6 +44,9 @@ pub(crate) struct DescendHierarchyDialogState {
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) parent_dirty: bool,
     pub(crate) validation_error: Option<String>,
+    /// The instance's cell has a symbol and no schematic master: its symbol
+    /// edited in place is the one way in.
+    pub(crate) symbol_only: bool,
 }
 
 impl DescendHierarchyDialogState {
@@ -63,6 +66,27 @@ impl DescendHierarchyDialogState {
             authority: Some(authority),
             parent_dirty,
             validation_error: None,
+            symbol_only: false,
+        };
+    }
+
+    /// Open over an instance whose cell has only a symbol, which the form
+    /// offers to edit in place and nothing else.
+    pub(crate) fn open_symbol_only(
+        &mut self,
+        instance_name: String,
+        authority: SchematicEditAuthority,
+        parent_dirty: bool,
+    ) {
+        *self = Self {
+            open: true,
+            instance_name,
+            reference: None,
+            edit_mode: HierarchyDescendEditMode::EditSymbolInPlace,
+            authority: Some(authority),
+            parent_dirty,
+            validation_error: None,
+            symbol_only: true,
         };
     }
 
@@ -84,12 +108,18 @@ pub(crate) fn open_descend_hierarchy_dialog(
     if dialog.open {
         return false;
     }
+    let authority = SchematicEditAuthority::capture(model);
+    let parent_dirty = model.schematic.session.is_dirty;
     let Some((instance_name, reference)) = selected_hierarchy_master(model) else {
+        // A cell with a symbol and no schematic master has no level below to
+        // open, but its symbol can still be edited where it stands.
+        if let Some(instance_name) = selected_symbol_only_instance(model) {
+            dialog.open_symbol_only(instance_name, authority, parent_dirty);
+            return true;
+        }
         workbench.prompt("Select one instance with a resolved schematic master first.");
         return false;
     };
-    let authority = SchematicEditAuthority::capture(model);
-    let parent_dirty = model.schematic.session.is_dirty;
     let preferred_edit_mode = if hierarchical_edit_in_place_enabled(model) {
         HierarchyDescendEditMode::EditInPlace
     } else {
@@ -103,6 +133,22 @@ pub(crate) fn open_descend_hierarchy_dialog(
         preferred_edit_mode,
     );
     true
+}
+
+/// The name of the selected instance when its cell has no schematic master
+/// to descend into but has a symbol that can be edited in place.
+pub(crate) fn selected_symbol_only_instance(model: &Model) -> Option<String> {
+    if selected_hierarchy_master(model).is_some() {
+        return None;
+    }
+    let (id, _) = selected_symbol_in_place_target(model).ok()?;
+    model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .map(|component| component.name.clone())
 }
 
 /// Draw Descend into hierarchy over its draft and the model it reads. A
@@ -141,12 +187,12 @@ pub(crate) fn render_descend_hierarchy_dialog(
         .label_column(136.0)
         .status(error.as_deref().map_or(Ok(None), Err))
         .show(ctx, |rows| {
-            Some(descend_rows(
+            descend_rows(
                 rows,
                 draft,
                 &occurrence_path,
                 target.as_deref().map_err(|reason| *reason),
-            ))
+            )
         });
 
     match choice {
@@ -279,7 +325,7 @@ fn descend_rows(
     draft: &mut DescendHierarchyDialogState,
     occurrence_path: &str,
     target: Result<&str, &str>,
-) -> egui::Id {
+) -> Option<egui::Id> {
     rows.value_mono("Instance", occurrence_path);
     match target {
         Ok(target) => rows.value_mono("Cell view", target),
@@ -292,6 +338,14 @@ fn descend_rows(
         "Edit symbol in place",
     ]
     .map(str::to_owned);
+    if draft.symbol_only {
+        // One way in is a fact, not a choice.
+        rows.value("Edit mode", edit_mode_label(draft.edit_mode));
+        if draft.parent_dirty {
+            rows.value("Unsaved parent changes", "Kept as a working checkpoint");
+        }
+        return None;
+    }
     let edit_mode = rows.select_with_response(
         "Edit mode",
         "descend-hierarchy-edit-mode",
@@ -311,7 +365,7 @@ fn descend_rows(
     if draft.parent_dirty {
         rows.value("Unsaved parent changes", "Kept as a working checkpoint");
     }
-    edit_mode.response.id
+    Some(edit_mode.response.id)
 }
 
 const fn edit_mode_label(mode: HierarchyDescendEditMode) -> &'static str {

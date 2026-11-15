@@ -316,9 +316,11 @@ impl CommandSet for DesignCommand {
             Self::DescendHierarchy | Self::DescendHierarchyDirect if !schematic => {
                 Some("open a schematic or testbench")
             }
-            Self::DescendHierarchy => selected_hierarchy_master(reads.model)
-                .is_none()
-                .then_some("select one hierarchical instance"),
+            // A cell with only a symbol opens the form too, to edit that
+            // symbol in place.
+            Self::DescendHierarchy => (selected_hierarchy_master(reads.model).is_none()
+                && descend::selected_symbol_only_instance(reads.model).is_none())
+            .then_some("select one hierarchical instance"),
             // The direct route opens what the instance is an instance of, as
             // its context-menu row does: a Verilog-A instance's module opens
             // as its cell view.

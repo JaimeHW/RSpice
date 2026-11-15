@@ -744,6 +744,58 @@ fn saving_the_symbol_view_writes_the_sheet_its_pin_move_rewired() {
     assert_eq!(fixture.saved_wire_end(&reopened), Point::new(60, 100));
 }
 
+/// An instance whose cell has a symbol and no schematic master opens Descend
+/// with options too, its symbol in place the one way in, stated rather than
+/// offered as a choice of one; the form commits to the in-place edit.
+#[test]
+fn descend_with_options_edits_a_symbol_only_cell_in_place() {
+    let mut fixture = InPlace::new();
+    let schematic = CellViewRef::new(&fixture.symbol.library, &fixture.symbol.cell, "schematic");
+    let state = &mut fixture.replay.app.state;
+    assert!(
+        state
+            .model
+            .library_manager
+            .get_library_mut(&schematic.library)
+            .and_then(|library| library.get_cell_mut(&schematic.cell))
+            .expect("the amp cell")
+            .remove_view(&schematic.view)
+    );
+    state
+        .model
+        .workspace
+        .remove_schematic_editor(&schematic.key());
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(fixture.instance);
+    fixture.replay.frames(vec![]);
+
+    let form = fixture.replay.choose_command("Descend with options");
+    assert!(
+        form.iter().any(|control| control.role == Role::Label
+            && control.label == "Edit mode"
+            && control.value == "Edit symbol in place"),
+        "the form states the one mode"
+    );
+    assert!(
+        !form.iter().any(|control| control.role == Role::ComboBox
+            && control.value.contains("Edit symbol in place")),
+        "a single way in is not a choice"
+    );
+    fixture.replay.click("Open edit context", Role::Button);
+    let state = &fixture.replay.app.state;
+    assert_eq!(state.model.workspace.content.active_view, fixture.symbol);
+    assert!(
+        crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
+            .is_some(),
+        "the symbol is edited in place"
+    );
+}
+
 /// The layout saved while a symbol is edited in place is the sheet's: the
 /// project reopens on the parent sheet, which opens as it does saved without
 /// the edit rather than at the edit's view, and the tab the session opened
