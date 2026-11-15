@@ -62,8 +62,8 @@ pub use event_projection::{
 };
 pub use fingerprint::{topology_fingerprint, topology_fingerprint_with_abort};
 pub use materialized::{
-    ArtifactNamespace, DeckPlanMaterializer, MaterializedAnalysis, MaterializedRun,
-    MaterializedRunError,
+    ArtifactNamespace, DeckPlanMaterializer, MaterializedAnalysis, MaterializedCoordinate,
+    MaterializedRun, MaterializedRunError,
 };
 pub use plan::{
     AnalysisRequest, AxisAssignment, AxisKind, DataBinding, DeckPlan, DeckPlanError,

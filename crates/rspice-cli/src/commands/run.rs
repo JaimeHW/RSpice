@@ -72,7 +72,7 @@ use crate::cli::{
 use crate::commands::publish;
 use rspice_core::execution::{
     AnalysisInstanceId, AxisAssignment, AxisKind, DeckPlan, DeckPlanError, DeckPlanMaterializer,
-    MaterializedAnalysis, MaterializedRun, MaterializedRunError, PlannedPostProcess,
+    MaterializedAnalysis, MaterializedCoordinate, MaterializedRunError, PlannedPostProcess,
     PostProcessSource, RunAxisValue, RunCoordinate, StepAxisTarget,
 };
 use rspice_core::netlist::AnalysisCommand;
@@ -821,6 +821,9 @@ struct ConcreteDeckOutcome {
     report: SimulationReport,
     outputs: Vec<PathBuf>,
     published: Vec<PublishedResult>,
+    /// The structural fingerprint the run published under or was asked to
+    /// name, if it has one.
+    topology: Option<rspice_core::execution::TopologyFingerprint>,
 }
 
 /// Run one concrete deck (all of its analyses) and assemble its report.
@@ -881,16 +884,18 @@ fn run_recorded_deck(
     }
 
     let engine = build_observed_engine(args, config, netlist, quiet)?;
-    let scalar = identity.topology.is_none();
+    let unnamed = identity.topology.is_none();
+    let name_topology = identity.name_topology;
     let ctx = RunContext::new(
         &engine, netlist, args, config, verbose, quiet, run_label, identity,
     )?;
     xyce_files::record_coordinate(&ctx);
-    // A scalar deck's typed and HDF5 results name the topology of the circuit
-    // its analyses build. Keeping that build's topology means naming it does
-    // not elaborate the deck a second time.
-    let _built_topology = (scalar && matches!(ctx.format, OutputFormat::Json | OutputFormat::Hdf5))
-        .then(|| engine.retain_built_topology(netlist));
+    // Typed and HDF5 results, and a coordinate set's manifest, name the
+    // topology of the circuit the analyses build. Keeping that build's
+    // topology means naming it does not elaborate the deck a second time.
+    let built_topology = (unnamed
+        && (name_topology || matches!(ctx.format, OutputFormat::Json | OutputFormat::Hdf5)))
+    .then(|| engine.retain_built_topology(netlist));
 
     let base_name = args
         .input
@@ -983,6 +988,14 @@ fn run_recorded_deck(
         }
     }
 
+    // Named from the circuit the analyses built, while the build they kept
+    // is still held; a failed run publishes nothing that needs the name.
+    let topology = if name_topology && simulation_error.is_none() {
+        ctx.topology_fingerprint()?
+    } else {
+        *ctx.topology.borrow()
+    };
+    drop(built_topology);
     let duration = start_time.elapsed().as_secs_f64();
     let measurements = ctx.measurements.borrow().clone();
     let passed = simulation_error.is_none() && measurements.iter().all(|meas| meas.passed);
@@ -1000,6 +1013,7 @@ fn run_recorded_deck(
         },
         published: ctx.published.into_inner(),
         outputs: ctx.outputs.into_inner(),
+        topology,
     })
 }
 

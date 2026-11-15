@@ -277,6 +277,7 @@ impl<'a> RunContext<'a> {
         let RunIdentity {
             coordinate,
             topology,
+            name_topology: _,
             analyses: planned,
         } = identity;
         let format = match args.format {
@@ -646,8 +647,7 @@ impl<'a> RunContext<'a> {
 
     /// Structural fingerprint of this run's elaborated circuit.
     ///
-    /// An axis coordinate arrives with the fingerprint its materialization
-    /// already computed. A scalar deck computes it once, on the first request,
+    /// A run that arrives without one computes it once, on the first request,
     /// so a run that publishes no typed artifact never pays for a circuit
     /// build it does not use.
     pub(super) fn topology_fingerprint(
@@ -1135,7 +1135,7 @@ impl<'a> RunContext<'a> {
                 *analysis_type,
             )?,
             // `.STEP` and `.TEMP` are run axes. `DeckPlan` turns both into
-            // Cartesian coordinates and `MaterializedRun` strips them from the
+            // Cartesian coordinates and `MaterializedCoordinate` strips them from the
             // coordinate-local netlist, so neither can reach a dispatcher that
             // executes one concrete deck.
             AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => {
@@ -1348,9 +1348,12 @@ pub(super) struct RunIdentity<'a> {
     /// coordinate deliberately does not namespace artifact paths, so this
     /// stays `None` there.
     pub(super) coordinate: Option<&'a RunCoordinate>,
-    /// Structural fingerprint the coordinate's materialization computed. A
-    /// scalar deck computes its own on demand.
+    /// Structural fingerprint already computed for this run. Without one, the
+    /// run names the circuit its own analyses build, on demand.
     pub(super) topology: Option<rspice_core::execution::TopologyFingerprint>,
+    /// Whether the caller needs the run's fingerprint back even when no
+    /// artifact of the run itself publishes it.
+    pub(super) name_topology: bool,
     pub(super) analyses: PlannedAnalysisIdentities,
 }
 

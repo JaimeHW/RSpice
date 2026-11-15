@@ -145,6 +145,7 @@ pub(super) fn run(
                             RunIdentity {
                                 coordinate: identity.coordinate,
                                 topology: identity.topology,
+                                name_topology: false,
                                 analyses: PlannedAnalysisIdentities::from_pairs(
                                     [(&dataset.command, dataset.analysis_id)],
                                     &[],
@@ -342,6 +343,7 @@ pub(super) fn run(
             RunIdentity {
                 coordinate: identity.coordinate,
                 topology: identity.topology,
+                name_topology: false,
                 analyses: PlannedAnalysisIdentities::default(),
             },
         )?;
@@ -401,6 +403,7 @@ pub(super) fn run(
         },
         outputs,
         published,
+        topology: identity.topology,
     })
 }
 

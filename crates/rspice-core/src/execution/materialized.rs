@@ -98,20 +98,20 @@ impl MaterializedAnalysis {
     }
 }
 
-/// One immutable, fully elaborated member of a [`DeckPlan`].
+/// One member of a [`DeckPlan`] with its coordinate-local netlist and
+/// analysis identities, before any circuit is elaborated from it.
 ///
 /// [`Self::analyses`] contains planned physical/implicit analyses only. The
 /// retained netlist is also the authoritative source for attached `.FOUR`
 /// and `.FFT` post-processing requests.
 #[derive(Debug, Clone)]
-pub struct MaterializedRun {
+pub struct MaterializedCoordinate {
     coordinate: RunCoordinate,
     netlist: Netlist,
-    topology: super::TopologyFingerprint,
     analyses: Vec<MaterializedAnalysis>,
 }
 
-impl MaterializedRun {
+impl MaterializedCoordinate {
     pub const fn coordinate(&self) -> &RunCoordinate {
         &self.coordinate
     }
@@ -120,12 +120,41 @@ impl MaterializedRun {
         &self.netlist
     }
 
+    pub fn analyses(&self) -> &[MaterializedAnalysis] {
+        &self.analyses
+    }
+
+    /// Consume this coordinate without cloning its netlist or analysis
+    /// configurations.
+    pub fn into_parts(self) -> (RunCoordinate, Netlist, Vec<MaterializedAnalysis>) {
+        (self.coordinate, self.netlist, self.analyses)
+    }
+}
+
+/// One immutable, fully elaborated member of a [`DeckPlan`]: a
+/// [`MaterializedCoordinate`] and the structural fingerprint of the circuit
+/// its netlist elaborates to.
+#[derive(Debug, Clone)]
+pub struct MaterializedRun {
+    materialized: MaterializedCoordinate,
+    topology: super::TopologyFingerprint,
+}
+
+impl MaterializedRun {
+    pub const fn coordinate(&self) -> &RunCoordinate {
+        self.materialized.coordinate()
+    }
+
+    pub const fn netlist(&self) -> &Netlist {
+        self.materialized.netlist()
+    }
+
     pub const fn topology_fingerprint(&self) -> super::TopologyFingerprint {
         self.topology
     }
 
     pub fn analyses(&self) -> &[MaterializedAnalysis] {
-        &self.analyses
+        self.materialized.analyses()
     }
 
     /// Consume this run without cloning its coordinate-local netlist or
@@ -142,7 +171,8 @@ impl MaterializedRun {
         super::TopologyFingerprint,
         Vec<MaterializedAnalysis>,
     ) {
-        (self.coordinate, self.netlist, self.topology, self.analyses)
+        let (coordinate, netlist, analyses) = self.materialized.into_parts();
+        (coordinate, netlist, self.topology, analyses)
     }
 }
 
@@ -294,6 +324,51 @@ impl<'a> DeckPlanMaterializer<'a> {
         run_index: usize,
         abort: &dyn AbortSignal,
     ) -> Result<MaterializedRun, MaterializedRunError> {
+        let materialized = self.materialize_coordinate_with_abort(run_index, abort)?;
+        let topology = super::fingerprint::topology_fingerprint_with_abort(
+            self.engine,
+            materialized.netlist(),
+            abort,
+        )
+        .map_err(materialization_simulation_error)?;
+        if abort.is_aborted() {
+            return Err(MaterializedRunError::Aborted);
+        }
+        Ok(MaterializedRun {
+            materialized,
+            topology,
+        })
+    }
+
+    /// Elaborate a materialized coordinate's circuit and refuse it on every
+    /// error [`Self::materialize_run_with_abort`] would, without naming its
+    /// topology: a caller that refuses unbuildable coordinates before
+    /// solving any, then names each topology from its own solve's build.
+    pub fn validate_coordinate_build_with_abort(
+        &self,
+        materialized: &MaterializedCoordinate,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), MaterializedRunError> {
+        super::fingerprint::validate_topology_with_abort(
+            self.engine,
+            materialized.netlist(),
+            abort,
+        )
+        .map_err(materialization_simulation_error)?;
+        if abort.is_aborted() {
+            return Err(MaterializedRunError::Aborted);
+        }
+        Ok(())
+    }
+
+    /// Materialize a coordinate's netlist and analysis identities without
+    /// elaborating a circuit from it: what a caller that names the topology
+    /// from the circuit its own analyses build needs to execute it.
+    pub fn materialize_coordinate_with_abort(
+        &self,
+        run_index: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<MaterializedCoordinate, MaterializedRunError> {
         let netlist = self
             .materialize_netlist_with_abort(run_index, abort)?
             .into_owned();
@@ -347,17 +422,9 @@ impl<'a> DeckPlanMaterializer<'a> {
             }
         }
 
-        let topology =
-            super::fingerprint::topology_fingerprint_with_abort(self.engine, &netlist, abort)
-                .map_err(materialization_simulation_error)?;
-        if abort.is_aborted() {
-            return Err(MaterializedRunError::Aborted);
-        }
-
-        Ok(MaterializedRun {
+        Ok(MaterializedCoordinate {
             coordinate,
             netlist,
-            topology,
             analyses,
         })
     }

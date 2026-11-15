@@ -1743,13 +1743,13 @@ Q1 o g 0 NPN1
     }
 }
 
-/// The preflight elaborates every coordinate before anything solves, and
-/// execution runs against what it established instead of preflighting again.
-/// A plan of one coordinate solves the circuit its preflight elaborated, so it
-/// is elaborated once to check and once to solve. A larger plan elaborates each
-/// coordinate again as it runs, keeping one coordinate in memory at a time.
+/// The preflight elaborates every coordinate before anything solves, so a
+/// coordinate that cannot build refuses the set first. Execution then names
+/// each coordinate's topology from the circuit its own solve built instead of
+/// elaborating it a third time, so every coordinate is elaborated once to
+/// check and once to solve.
 #[test]
-fn axis_coordinates_are_elaborated_once_by_their_preflight() {
+fn axis_coordinates_are_elaborated_once_to_check_and_once_to_solve() {
     let one = elaborated_circuits(
         "* One temperature
 V1 in 0 1
@@ -1774,8 +1774,52 @@ R2 out 0 1k
 ",
         "elaborations_three",
     );
-    assert_eq!(
-        three, 9,
-        "per coordinate: preflight, materialization for execution, then the solve"
+    assert_eq!(three, 6, "per coordinate: preflight, then the solve");
+}
+
+/// A coordinate whose circuit cannot take its value refuses the whole set
+/// before any coordinate solves, even when it comes last: LTspice 26.1.1
+/// refuses this deck with no iteration taken and an empty raw file.
+#[test]
+fn a_coordinate_that_cannot_build_refuses_the_set_before_anything_solves() {
+    let dir = test_dir("unbuildable_coordinate");
+    let deck = dir.join("deck.sp");
+    std::fs::write(
+        &deck,
+        "* the last coordinate's diode area is invalid only once it is built
+.param ar=1
+V1 in 0 DC 1
+R1 in a 1k
+D1 a 0 dmod area={ar}
+.model dmod D(IS=1e-14)
+.step param ar list 1 2 -1
+.op
+.end
+",
+    )
+    .expect("write deck");
+    let output = dir.join("out.csv");
+    let run = run_rspice(&[
+        "--log-level",
+        "debug",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert_eq!(run.status.code(), Some(80), "stderr: {stderr}");
+    assert!(
+        stderr.contains("(PARAM ar = -1) preflight")
+            && stderr.contains("invalid AREA=-1 (must be finite and > 0)"),
+        "stderr: {stderr}"
     );
+    assert_eq!(
+        stderr.matches("Building circuit with").count(),
+        3,
+        "each coordinate is built once to check, and nothing is built to solve: {stderr}"
+    );
+    assert!(directory_contents(&dir).iter().all(|path| path == &deck));
 }

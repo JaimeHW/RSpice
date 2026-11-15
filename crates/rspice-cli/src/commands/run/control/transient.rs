@@ -54,6 +54,7 @@ pub(super) fn run(
         RunIdentity {
             coordinate: identity.coordinate,
             topology: identity.topology,
+            name_topology: false,
             analyses: PlannedAnalysisIdentities::from_pairs([(command, analysis)], &posts),
         },
     )?;

@@ -2,7 +2,7 @@
 //! transaction for the set.
 //!
 //! Every coordinate is materialized from the canonical plan, preflighted for
-//! its topology and result schema, and executed into its own artifact. The
+//! its circuit and result schema, and executed into its own artifact. The
 //! whole set is staged in one transaction and committed only once every
 //! coordinate has completed, so a failure or a cancellation leaves the
 //! destination exactly as it was rather than a directory that looks like a
@@ -115,34 +115,36 @@ fn canonical_assignment_target(assignment: &AxisAssignment) -> String {
 
 /// The contract one axis coordinate declared before any solver work began.
 ///
-/// The preflight materializes every coordinate once, so this is where its
-/// child-analysis signature and its structural fingerprint are captured. The
-/// execution pass re-materializes to run, and checks what it gets against this
-/// rather than re-deriving it, so a coordinate whose topology moved between the
-/// two passes fails instead of publishing under a contract it no longer meets.
+/// The preflight materializes every coordinate once, and builds its circuit
+/// so a coordinate that cannot build refuses the set before anything solves,
+/// as LTspice refuses a `.STEP` value its circuit cannot take. This is where
+/// its child-analysis signature is captured; the execution pass
+/// re-materializes to run and checks what it gets against this. Like a scalar
+/// deck, a coordinate names its structural fingerprint from the circuit its
+/// own solve built, and only when something publishes it, so the topology a
+/// manifest records is the one that coordinate ran.
 ///
-/// A plan of one coordinate keeps the run its preflight materialized, and the
-/// execution runs that instead of elaborating the same coordinate again. A
-/// larger plan re-materializes each coordinate as it runs, so no more than
-/// one elaborated coordinate is held at a time.
+/// A plan of one coordinate keeps the coordinate its preflight materialized,
+/// and the execution runs that instead of materializing it again. A larger
+/// plan re-materializes each coordinate as it runs, so no more than one
+/// coordinate netlist is held at a time.
 pub(super) struct StepCoordinateContract {
     signature: Vec<&'static str>,
-    pub(super) topology: rspice_core::execution::TopologyFingerprint,
-    materialized: Option<MaterializedRun>,
+    materialized: Option<MaterializedCoordinate>,
 }
 
 impl StepCoordinateContract {
-    /// The coordinate's run: the one the preflight kept, or a fresh
-    /// materialization checked against this contract.
+    /// The coordinate to run: the one the preflight kept, or a fresh
+    /// materialization of the same coordinate.
     fn run<'a>(
         &'a self,
         materializer: &DeckPlanMaterializer<'_>,
         run_index: usize,
-    ) -> Result<std::borrow::Cow<'a, MaterializedRun>, MaterializedRunError> {
+    ) -> Result<std::borrow::Cow<'a, MaterializedCoordinate>, MaterializedRunError> {
         match &self.materialized {
             Some(materialized) => Ok(std::borrow::Cow::Borrowed(materialized)),
             None => materializer
-                .materialize_run_with_abort(run_index, &crate::abort::ProcessAbort)
+                .materialize_coordinate_with_abort(run_index, &crate::abort::ProcessAbort)
                 .map(std::borrow::Cow::Owned),
         }
     }
@@ -172,18 +174,22 @@ pub(super) fn preflight_step_coordinates(
     }
     for (run_index, canonical_coordinate) in materializer.coordinates().iter().enumerate() {
         let coordinate = canonical_coordinate_description(canonical_coordinate);
+        let preflight_error = |error| {
+            map_materialized_run_error(
+                error,
+                args,
+                format!(
+                    ".STEP {} ({coordinate}) preflight",
+                    canonical_coordinate.stable_tag()
+                ),
+            )
+        };
         let materialized = materializer
-            .materialize_run_with_abort(run_index, &crate::abort::ProcessAbort)
-            .map_err(|error| {
-                map_materialized_run_error(
-                    error,
-                    args,
-                    format!(
-                        ".STEP {} ({coordinate}) preflight",
-                        canonical_coordinate.stable_tag()
-                    ),
-                )
-            })?;
+            .materialize_coordinate_with_abort(run_index, &crate::abort::ProcessAbort)
+            .map_err(preflight_error)?;
+        materializer
+            .validate_coordinate_build_with_abort(&materialized, &crate::abort::ProcessAbort)
+            .map_err(preflight_error)?;
         super::deck::validate_seed_usage(materialized.netlist(), args)?;
         super::sources::protect(materialized.netlist(), engine, args.timeout)?;
         let label = compose_run_label(run_label, Some(&canonical_coordinate.stable_tag()));
@@ -222,7 +228,6 @@ pub(super) fn preflight_step_coordinates(
         }
         contracts.push(StepCoordinateContract {
             signature,
-            topology: materialized.topology_fingerprint(),
             materialized: (materializer.len() == 1).then_some(materialized),
         });
 
@@ -344,6 +349,7 @@ fn run_implicit_step_op_table(
         RunIdentity {
             coordinate: None,
             topology: None,
+            name_topology: false,
             analyses: PlannedAnalysisIdentities::default(),
         },
     )?;
@@ -388,7 +394,9 @@ fn run_implicit_step_op_table(
             });
         }
         let coordinate_engine = build_observed_engine(args, config, materialized.netlist(), quiet)?;
-        let topology = materialized.topology_fingerprint();
+        // Aggregation compares every coordinate's topology, which each
+        // coordinate names from the circuit its operating point built.
+        let retained_topology = coordinate_engine.retain_built_topology(materialized.netlist());
         // The device operating-point report is taken at every coordinate, not
         // only for a scalar deck: it is what carries the complete typed
         // device-observable inventory into the coordinate's typed document, and
@@ -416,6 +424,27 @@ fn run_implicit_step_op_table(
                 ));
             }
         };
+        let topology = match rspice_core::execution::topology_fingerprint_with_abort(
+            &coordinate_engine,
+            materialized.netlist(),
+            &crate::abort::ProcessAbort,
+        ) {
+            Ok(topology) => topology,
+            Err(rspice_core::SimulationError::Aborted) if crate::abort::reason().is_some() => {
+                break;
+            }
+            Err(error) => {
+                return Err(map_step_core_error(
+                    error,
+                    args.timeout,
+                    format!(
+                        ".STEP {} topology fingerprint",
+                        canonical_coordinate.stable_tag()
+                    ),
+                ));
+            }
+        };
+        drop(retained_topology);
         let signals = crate::commands::run_signals::dc_operating_point_export_signals(
             materialized.netlist(),
             &result,
@@ -995,6 +1024,7 @@ pub(super) fn run_deck(
             RunIdentity {
                 coordinate: None,
                 topology: None,
+                name_topology: false,
                 analyses: PlannedAnalysisIdentities::from_plan(&canonical_plan, netlist),
             },
         )?;
@@ -1058,6 +1088,9 @@ pub(super) fn run_deck(
     let mut outputs = Vec::new();
     let mut coordinates = Vec::new();
     let mut published = Vec::new();
+    // The schema manifest written beside an output names every coordinate's
+    // topology, whatever format the coordinates themselves publish.
+    let schema_manifest = resolve_output_path(args.output.clone(), config)?.is_some();
     for (run_index, expected) in coordinate_contracts.iter().enumerate() {
         if crate::abort::reason().is_some() {
             break;
@@ -1087,20 +1120,30 @@ pub(super) fn run_deck(
                 ),
             });
         }
-        // The preflight captured this coordinate's structural fingerprint
-        // before any solver work. Executing it a second time must reproduce the
-        // same circuit, or the artifact would be published under a topology
-        // contract it no longer meets.
-        let topology = materialized.topology_fingerprint();
-        if topology != expected.topology {
-            return Err(CliError::InternalError {
-                message: format!(
-                    ".STEP coordinate {} changed its preflight topology fingerprint from {} to {topology}",
-                    run_index + 1,
-                    expected.topology
-                ),
-            });
-        }
+        // A coordinate names the circuit its own solve builds, when anything
+        // publishes the name. A control script can alter that circuit before
+        // it builds it, so a coordinate that runs one is named for the netlist
+        // it materialized instead.
+        let topology = match materialized.netlist().control_script {
+            None => None,
+            Some(_) => match rspice_core::execution::topology_fingerprint_with_abort(
+                &engine,
+                materialized.netlist(),
+                &crate::abort::ProcessAbort,
+            ) {
+                Ok(topology) => Some(topology),
+                Err(rspice_core::SimulationError::Aborted) if crate::abort::reason().is_some() => {
+                    break;
+                }
+                Err(error) => {
+                    return Err(map_step_core_error(
+                        error,
+                        args.timeout,
+                        format!(".STEP coordinate {} topology fingerprint", run_index + 1),
+                    ));
+                }
+            },
+        };
         let coordinate_label = canonical_coordinate.stable_tag();
         let label = compose_run_label(run_label, Some(&coordinate_label)).ok_or_else(|| {
             CliError::InternalError {
@@ -1123,7 +1166,8 @@ pub(super) fn run_deck(
             Some(&label),
             RunIdentity {
                 coordinate: Some(canonical_coordinate),
-                topology: Some(topology),
+                topology,
+                name_topology: schema_manifest,
                 analyses: PlannedAnalysisIdentities::from_materialized(
                     &canonical_plan,
                     canonical_coordinate,
@@ -1136,12 +1180,22 @@ pub(super) fn run_deck(
             Err(error) => return Err(error),
         };
         report_budget.admit_reports(std::slice::from_ref(&outcome.report))?;
+        // A failed coordinate discards the whole set below, so only a set
+        // whose manifest is written needs each coordinate's fingerprint.
+        if schema_manifest && outcome.report.error.is_none() {
+            let topology = outcome.topology.ok_or_else(|| CliError::InternalError {
+                message: format!(
+                    ".STEP coordinate {} did not name the topology its manifest records",
+                    run_index + 1
+                ),
+            })?;
+            published.push(CoordinatePublication {
+                coordinate: canonical_coordinate.clone(),
+                topology,
+                results: outcome.published,
+            });
+        }
         reports.push(outcome.report);
-        published.push(CoordinatePublication {
-            coordinate: canonical_coordinate.clone(),
-            topology,
-            results: outcome.published,
-        });
         coordinates.push(AxisSetCoordinate {
             identity: ArtifactCoordinate::from_run_coordinate(canonical_coordinate),
             artifacts: outcome.outputs.clone(),

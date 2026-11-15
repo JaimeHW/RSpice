@@ -32,6 +32,51 @@ pub fn topology_fingerprint(
     topology_fingerprint_with_abort(engine, netlist, &NoAbort)
 }
 
+/// Elaborate the circuit an engine builds from a parsed netlist, and refuse
+/// it on every error [`topology_fingerprint_with_abort`] would, without
+/// naming its topology.
+///
+/// A planner refuses a deck whose coordinates do not all build before it
+/// solves any of them, as LTspice does a `.STEP` value its circuit cannot
+/// take, and names a coordinate's topology later from the circuit that
+/// coordinate's own solve builds, when something publishes it.
+pub(crate) fn validate_topology_with_abort(
+    engine: &Engine,
+    netlist: &Netlist,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
+    let engine = engine.resolved_for_netlist(netlist);
+    elaborated_topology(&engine, netlist, abort)?;
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
+    Ok(())
+}
+
+/// The matrix is the authoritative elaborated sparsity, including
+/// generated/private unknowns selected by model options. A run that kept the
+/// topology of the circuit its analyses built is named by that build;
+/// otherwise the deck is elaborated here, and its own build has already
+/// reported its topology warnings.
+fn elaborated_topology(
+    engine: &Engine,
+    netlist: &Netlist,
+    abort: &dyn AbortSignal,
+) -> Result<BuiltTopology, SimulationError> {
+    match engine.built_topology(netlist) {
+        Some(built) => Ok(built),
+        None => {
+            let circuit = crate::engine::without_repeated_topology_reports(|| {
+                engine.build_circuit_with_abort(netlist, abort)
+            })?;
+            BuiltTopology::of(engine, &circuit)
+        }
+    }
+}
+
 /// Fingerprint the solver topology while observing cooperative aborts.
 pub fn topology_fingerprint_with_abort(
     engine: &Engine,
@@ -42,21 +87,7 @@ pub fn topology_fingerprint_with_abort(
         return Err(SimulationError::Aborted);
     }
     let engine = engine.resolved_for_netlist(netlist);
-
-    // The matrix is the authoritative elaborated sparsity, including
-    // generated/private unknowns selected by model options. A run that kept
-    // the topology of the circuit its analyses built is named by that build;
-    // otherwise the deck is elaborated here, and its own build has already
-    // reported its topology warnings.
-    let built = match engine.built_topology(netlist) {
-        Some(built) => built,
-        None => {
-            let circuit = crate::engine::without_repeated_topology_reports(|| {
-                engine.build_circuit_with_abort(netlist, abort)
-            })?;
-            BuiltTopology::of(&engine, &circuit)?
-        }
-    };
+    let built = elaborated_topology(&engine, netlist, abort)?;
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
