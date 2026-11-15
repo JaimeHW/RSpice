@@ -2,13 +2,16 @@
 //! point of the deck's `.DC` sweep, or at its operating point when it has
 //! none (N_NLS_Sensitivity.C, run once per converged DC step).
 
-use super::super::dc::bounded_dc_sweep_points;
-use super::{AcSensitivityLocation, AcSensitivityTarget, Engine, SimulationError};
+use super::super::dc::{DcSweepPoint, DcSweepVariable, bounded_dc_sweep_points};
+use super::{
+    AcSensitivityLocation, AcSensitivityTarget, DcSensitivityDeck, DcSensitivityPointDeck, Engine,
+    ResidualProbeCache, SimulationError,
+};
 use crate::abort_signal::AbortSignal;
 use crate::analysis::sensitivity::{AcSensitivityOutput, ElementType, SensitivityResult};
-use crate::netlist::{AnalysisCommand, DcSweepSpec};
-use crate::solver::SimulationResult;
-use crate::{Netlist, Value};
+use crate::netlist::{AnalysisCommand, DcSecondSweep, DcSweepSpec};
+use crate::solver::{SimulationResult, StaticMatrix};
+use crate::{CircuitData, Netlist, Value};
 
 /// One point of a Xyce `.SENS` study.
 #[derive(Debug, Clone)]
@@ -121,6 +124,14 @@ impl Engine {
             objectives.push((output, columns, selected));
         }
 
+        let outputs = objectives
+            .iter()
+            .map(|(output, _, _)| output.clone())
+            .collect::<Vec<_>>();
+        let filters = objectives
+            .iter()
+            .map(|(_, _, selected)| selected.as_slice())
+            .collect::<Vec<_>>();
         let sweep = netlist.analyses.iter().find_map(|analysis| match analysis {
             AnalysisCommand::Dc {
                 source,
@@ -129,7 +140,7 @@ impl Engine {
                 step,
                 mode,
                 sweep2,
-                ..
+                restart,
             } => Some((
                 source,
                 DcSweepSpec {
@@ -137,92 +148,195 @@ impl Engine {
                     stop: *stop,
                     step: *step,
                     mode: mode.clone(),
-                    restart: false,
+                    restart: *restart,
                 },
-                sweep2,
+                sweep2.as_ref(),
             )),
             _ => None,
         });
-        let (inner, outer) = match sweep {
+        let studies = match sweep {
             Some((source, spec, sweep2)) => {
-                let inner = (
-                    engine.dc_sweep_variable(netlist, source),
-                    bounded_dc_sweep_points(&engine, &spec, abort)?,
-                );
-                let outer = sweep2
-                    .as_ref()
-                    .map(|sweep2| {
-                        Ok::<_, SimulationError>((
-                            engine.dc_sweep_variable(netlist, &sweep2.source),
-                            bounded_dc_sweep_points(&engine, &sweep2.spec(), abort)?,
-                        ))
-                    })
-                    .transpose()?;
-                (Some(inner), outer)
+                engine.dc_sensitivity_sweep(netlist, source, &spec, sweep2, &outputs, &filters, abort)?
             }
-            None => (None, None),
+            None => {
+                let (studies, result) =
+                    engine.dc_sensitivity_operating_point(netlist, &outputs, &filters, abort)?;
+                vec![(0.0, result, studies)]
+            }
         };
-        let inner_count = inner.as_ref().map_or(1, |(_, points)| points.len());
-        let outer_count = outer.as_ref().map_or(1, |(_, points)| points.len());
-        let point_count = inner_count.checked_mul(outer_count).ok_or_else(|| {
-            SimulationError::Circuit(
-                ".SENS sweep point count overflows the platform address space".to_owned(),
-            )
-        })?;
-        engine.ensure_result_values(point_count)?;
-
-        let mut points = Vec::with_capacity(point_count);
-        let outer_values = outer
-            .as_ref()
-            .map(|(_, points)| points.iter().copied().map(Some).collect::<Vec<_>>())
-            .unwrap_or_else(|| vec![None]);
-        for outer_value in outer_values {
-            let (outer_netlist, outer_engine) = match (&outer, outer_value) {
-                (Some((variable, _)), Some(value)) => {
-                    engine.dc_sweep_point(netlist, variable, value, abort)?
-                }
-                _ => (netlist.clone(), None),
-            };
-            let base = outer_engine.as_ref().unwrap_or(&engine);
-            let inner_values = inner
-                .as_ref()
-                .map(|(_, points)| points.iter().copied().map(Some).collect::<Vec<_>>())
-                .unwrap_or_else(|| vec![None]);
-            for inner_value in inner_values {
-                if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
-                }
-                let (swept, inner_engine) = match (&inner, inner_value) {
-                    (Some((variable, _)), Some(value)) => {
-                        base.dc_sweep_point(&outer_netlist, variable, value, abort)?
-                    }
-                    _ => (outer_netlist.clone(), None),
-                };
-                let point_engine = inner_engine.as_ref().unwrap_or(base);
-                let mut operating_point = None;
-                let mut results = Vec::with_capacity(objectives.len());
-                for (output, columns, selected) in &objectives {
-                    let (study, result) = point_engine.dc_sensitivity_with_operating_point(
-                        &swept,
-                        output.clone(),
-                        selected,
-                        abort,
-                    )?;
-                    results.push(Self::xyce_sensitivity_rows(study, columns)?);
-                    operating_point.get_or_insert(result);
-                }
-                let result = match operating_point {
-                    Some(result) => result,
-                    None => point_engine.run_dc_op_with_abort(&swept, abort)?,
-                };
-                points.push(DcSweepSensitivityPoint {
-                    sweep_value: inner_value.unwrap_or(0.0),
+        studies
+            .into_iter()
+            .map(|(sweep_value, result, studies)| {
+                Ok(DcSweepSensitivityPoint {
+                    sweep_value,
                     result,
-                    objectives: results,
-                });
+                    objectives: studies
+                        .into_iter()
+                        .zip(&objectives)
+                        .map(|(study, (_, columns, _))| Self::xyce_sensitivity_rows(study, columns))
+                        .collect::<Result<_, _>>()?,
+                })
+            })
+            .collect()
+    }
+
+    /// Each objective's rows at every point of a `.DC` sweep, solved exactly
+    /// as the `.DC` analysis solves them: one sweep, each point continuing
+    /// from the last, and every row read at the point it converged to, as
+    /// Xyce takes its sensitivities at each successful DC step
+    /// (N_ANP_DCSweep.C, `DCSweep::doProcessSuccessfulStep`).
+    ///
+    /// A point's rows are read from the tangents of [`DcSensitivityDeck`],
+    /// built for each deck the sweep builds a circuit from. A row that
+    /// re-solves its point (a design parameter, a linear deck's passive
+    /// value, a row no tangent reaches) rebuilds the point's deck as the
+    /// sweep defines it.
+    #[allow(clippy::too_many_arguments)]
+    fn dc_sensitivity_sweep(
+        &self,
+        netlist: &Netlist,
+        source: &str,
+        primary: &DcSweepSpec,
+        sweep2: Option<&DcSecondSweep>,
+        outputs: &[AcSensitivityOutput],
+        filters: &[&[String]],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(Value, SimulationResult, Vec<SensitivityResult>)>, SimulationError> {
+        let inner = (
+            self.dc_sweep_variable(netlist, source),
+            bounded_dc_sweep_points(self, primary, abort)?,
+        );
+        let outer = sweep2
+            .map(|sweep2| {
+                Ok::<_, SimulationError>((
+                    self.dc_sweep_variable(netlist, &sweep2.source),
+                    bounded_dc_sweep_points(self, &sweep2.spec(), abort)?,
+                ))
+            })
+            .transpose()?;
+        let inner_count = inner.1.len();
+        let point_count = inner_count
+            .checked_mul(outer.as_ref().map_or(1, |(_, points)| points.len()))
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    ".SENS sweep point count overflows the platform address space".to_owned(),
+                )
+            })?;
+        self.ensure_result_values(point_count)?;
+
+        let mut decks = Vec::new();
+        let mut cache = ResidualProbeCache::default();
+        let mut tangents = Vec::with_capacity(point_count);
+        let poll = |_: usize| {
+            if abort.is_aborted() {
+                Err(SimulationError::Aborted)
+            } else {
+                Ok(())
             }
+        };
+        let mut linearize = |point: DcSweepPoint<'_>,
+                             circuit: &mut CircuitData,
+                             matrix: &mut StaticMatrix,
+                             solution: &[Value]|
+         -> Result<(), SimulationError> {
+            if point.rebuilt || decks.is_empty() {
+                decks.push(point.engine.dc_sensitivity_deck(point.deck, filters, abort)?);
+                cache = ResidualProbeCache::default();
+            }
+            let index = decks.len() - 1;
+            let deck: &DcSensitivityDeck = &decks[index];
+            let point_tangents = if deck.has_tangent_rows() {
+                deck.point_tangents(
+                    &mut cache,
+                    point.engine,
+                    circuit,
+                    matrix,
+                    solution,
+                    outputs,
+                    &poll,
+                    abort,
+                )?
+            } else {
+                Vec::new()
+            };
+            tangents.push((index, point_tangents));
+            Ok(())
+        };
+        let points = self.run_dc_sweep2_spec_with_linearization_and_abort(
+            netlist,
+            source,
+            primary,
+            sweep2,
+            Some(&mut linearize),
+            abort,
+        )?;
+        if tangents.len() != points.len() {
+            return Err(SimulationError::Circuit(format!(
+                ".SENS sweep linearized {} of its {} point(s); a circuit with no unknowns has \
+                 no DC sensitivities",
+                tangents.len(),
+                points.len()
+            )));
         }
-        Ok(points)
+
+        let swept_source = match &inner.0 {
+            DcSweepVariable::Source(name) => Some(name.as_str()),
+            _ => None,
+        };
+        points
+            .into_iter()
+            .zip(tangents)
+            .enumerate()
+            .map(|(index, (point, (deck, point_tangents)))| {
+                let deck = &decks[deck];
+                let sweep_value = point.sweep_value;
+                let outer_value = outer
+                    .as_ref()
+                    .map(|(variable, values)| (variable, values[index / inner_count]));
+                let inner = &inner.0;
+                let build = move |abort: &dyn AbortSignal| {
+                    let (outer_netlist, outer_engine) = match outer_value {
+                        Some((variable, value)) => {
+                            self.dc_sweep_point(netlist, variable, value, abort)?
+                        }
+                        None => (netlist.clone(), None),
+                    };
+                    let (swept, inner_engine) = outer_engine
+                        .as_ref()
+                        .unwrap_or(self)
+                        .dc_sweep_point(&outer_netlist, inner, sweep_value, abort)?;
+                    let engine = inner_engine.or(outer_engine);
+                    let flat = engine
+                        .as_ref()
+                        .unwrap_or(self)
+                        .flattened_sensitivity_netlist(&swept, abort)?;
+                    Ok((engine, swept, flat))
+                };
+                let mut point_deck = DcSensitivityPointDeck::Swept {
+                    base: self,
+                    build: &build,
+                    built: None,
+                };
+                let studies = outputs
+                    .iter()
+                    .enumerate()
+                    .map(|(objective, output)| {
+                        self.dc_sensitivity_objective(
+                            deck,
+                            objective,
+                            point_tangents.get(objective),
+                            &mut point_deck,
+                            swept_source.map(|name| (name, sweep_value)),
+                            &point.result,
+                            output,
+                            None,
+                            abort,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((sweep_value, point.result, studies))
+            })
+            .collect()
     }
 
     /// The printed columns of one objective's `PARAM` list, in card order.

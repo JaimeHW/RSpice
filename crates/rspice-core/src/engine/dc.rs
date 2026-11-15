@@ -29,6 +29,33 @@ pub(in crate::engine) type DcOperatingPointLinearization<'a> =
         &[Value],
     ) -> Result<(), SimulationError>;
 
+/// A converged DC sweep point as a [`DcSweepLinearization`] is shown it: the
+/// resolved engine and the deck that solved it, and whether the sweep built
+/// the point's circuit from that deck. Every point a sweep solves as its own
+/// operating point is built so (a temperature, parameter or `RESTART=YES`
+/// point), as is the first point of each source sweep; every later point of a
+/// source sweep continues the previous point's circuit with only the swept
+/// source's value moved, a value the deck does not carry.
+pub(in crate::engine) struct DcSweepPoint<'a> {
+    pub engine: &'a Engine,
+    pub deck: &'a Netlist,
+    pub rebuilt: bool,
+}
+
+/// [`DcOperatingPointLinearization`] for each converged point of a DC sweep,
+/// run before the point is accepted. A point with no unknowns has nothing to
+/// linearize and is not shown.
+pub(in crate::engine) type DcSweepLinearization<'a, 'f> = &'a mut DcSweepLinearizer<'f>;
+
+/// The function a [`DcSweepLinearization`] borrows.
+pub(in crate::engine) type DcSweepLinearizer<'f> = dyn FnMut(
+        DcSweepPoint<'_>,
+        &mut CircuitData,
+        &mut StaticMatrix,
+        &[Value],
+    ) -> Result<(), SimulationError>
+    + 'f;
+
 /// One converged operating point together with the solver state that produced
 /// it.
 pub(in crate::engine) struct DcOperatingPointState {
@@ -299,6 +326,36 @@ fn dc_event_only_nodes(
     (1..=node_count)
         .map(|node| circuit.event_only_net_kind(node))
         .collect()
+}
+
+/// The operating-point linearization of a sweep point the sweep solves as its
+/// own operating point: the sweep's, shown that point's deck as rebuilt.
+#[allow(clippy::type_complexity)]
+fn rebuilt_point<'a>(
+    linearize: &'a mut Option<DcSweepLinearization<'_, '_>>,
+    deck: &'a Netlist,
+) -> Option<
+    impl FnMut(&Engine, &mut CircuitData, &mut StaticMatrix, &[Value]) -> Result<(), SimulationError>
+    + 'a,
+> {
+    let linearize = linearize.as_deref_mut()?;
+    Some(
+        move |engine: &Engine,
+              circuit: &mut CircuitData,
+              matrix: &mut StaticMatrix,
+              solution: &[Value]| {
+            linearize(
+                DcSweepPoint {
+                    engine,
+                    deck,
+                    rebuilt: true,
+                },
+                circuit,
+                matrix,
+                solution,
+            )
+        },
+    )
 }
 
 fn populate_public_dc_solution(
@@ -1209,7 +1266,9 @@ impl Engine {
         startup: DcOpStartup<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
-        self.run_dc_op_with_startup_and_lifecycle_report_and_abort(netlist, startup, None, abort)
+        self.run_dc_op_with_startup_and_lifecycle_report_and_abort(
+            netlist, startup, None, None, abort,
+        )
     }
 
     /// The operating point every public `.OP` entry and every sweep point
@@ -1221,10 +1280,11 @@ impl Engine {
         netlist: &Netlist,
         startup: DcOpStartup<'_>,
         lifecycle: Option<&mut DcSweepLifecycle>,
+        linearize: Option<DcOperatingPointLinearization<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
         self.solved_dc_op_with_startup_and_lifecycle_report_and_abort(
-            netlist, startup, lifecycle, None, abort,
+            netlist, startup, lifecycle, linearize, abort,
         )
         .map(|state| (state.result, state.report))
         .map_err(SimulationError::into_exhausted_circuit_error)
@@ -1621,15 +1681,37 @@ impl Engine {
         sweep2: Option<&crate::netlist::DcSecondSweep>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        self.run_dc_sweep2_spec_with_linearization_and_abort(
+            netlist,
+            source_name,
+            primary,
+            sweep2,
+            None,
+            abort,
+        )
+    }
+
+    /// [`Self::run_dc_sweep2_spec_with_report_and_abort`], with `linearize`
+    /// run against every converged point before it is accepted.
+    pub(in crate::engine) fn run_dc_sweep2_spec_with_linearization_and_abort(
+        &self,
+        netlist: &Netlist,
+        source_name: &str,
+        primary: &crate::netlist::DcSweepSpec,
+        sweep2: Option<&crate::netlist::DcSecondSweep>,
+        mut linearize: Option<DcSweepLinearization<'_, '_>>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
         self.reset_convergence_quality();
         let Some(sweep2) = sweep2 else {
-            return self.run_dc_sweep_spec_with_report_and_abort(
+            return self.run_dc_sweep_spec_with_linearization_and_abort(
                 netlist,
                 source_name,
                 primary,
+                linearize,
                 abort,
             );
         };
@@ -1711,6 +1793,7 @@ impl Engine {
                     source_name,
                     &inner_points,
                     &mut lifecycle,
+                    linearize.as_deref_mut(),
                     abort,
                 )?;
             retained_values = inner.iter().fold(retained_values, |total, point| {
@@ -1831,6 +1914,17 @@ impl Engine {
         spec: &crate::netlist::DcSweepSpec,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        self.run_dc_sweep_spec_with_linearization_and_abort(netlist, source_name, spec, None, abort)
+    }
+
+    fn run_dc_sweep_spec_with_linearization_and_abort(
+        &self,
+        netlist: &Netlist,
+        source_name: &str,
+        spec: &crate::netlist::DcSweepSpec,
+        linearize: Option<DcSweepLinearization<'_, '_>>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
@@ -1848,6 +1942,7 @@ impl Engine {
             source_name,
             &sweep_points,
             &mut lifecycle,
+            linearize,
             abort,
         )?;
         lifecycle.ensure_complete()?;
@@ -1860,6 +1955,7 @@ impl Engine {
         source_name: &str,
         sweep_points: &[Value],
         lifecycle: &mut DcSweepLifecycle,
+        mut linearize: Option<DcSweepLinearization<'_, '_>>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
@@ -1869,6 +1965,7 @@ impl Engine {
                 source_name,
                 sweep_points,
                 lifecycle,
+                linearize,
                 abort,
             );
         }
@@ -1892,6 +1989,9 @@ impl Engine {
                             use_hints: lifecycle.next_public_point == 0,
                         },
                         Some(&mut *lifecycle),
+                        rebuilt_point(&mut linearize, &swept)
+                            .as_mut()
+                            .map(|point| point as _),
                         abort,
                     )?;
                 let point = DcSweepPointResult {
@@ -1916,6 +2016,7 @@ impl Engine {
                 source_name,
                 sweep_points,
                 lifecycle,
+                linearize,
                 abort,
             );
         }
@@ -1926,6 +2027,7 @@ impl Engine {
                 &device_parameter,
                 sweep_points,
                 lifecycle,
+                linearize,
                 abort,
             );
         }
@@ -2037,6 +2139,8 @@ impl Engine {
             // Use previous solution as initial guess for next point.
             // For the first point, apply .NODESET/.IC hints if present.
             let mut prev_solution: Option<Vec<Value>> = None;
+            // Only the first point solves the circuit as `netlist` built it.
+            let mut rebuilt = true;
             let mut prev_sweep_value: Option<Value> = None;
             let mut dc_sweep_subdivisions = 2;
 
@@ -2155,6 +2259,19 @@ impl Engine {
                         "XSPICE evaluation failed: {message}"
                     )));
                 }
+                if let Some(linearize) = linearize.as_deref_mut() {
+                    linearize(
+                        DcSweepPoint {
+                            engine: &engine,
+                            deck: netlist,
+                            rebuilt,
+                        },
+                        &mut circuit,
+                        &mut matrix,
+                        &solution,
+                    )?;
+                }
+                rebuilt = false;
 
                 let solution = engine.finalize_dc_sweep_candidate(
                     netlist,
@@ -2227,6 +2344,7 @@ impl Engine {
         source_name: &str,
         sweep_points: &[Value],
         lifecycle: &mut DcSweepLifecycle,
+        mut linearize: Option<DcSweepLinearization<'_, '_>>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
         let variable = self.dc_sweep_variable(netlist, source_name);
@@ -2247,6 +2365,9 @@ impl Engine {
                     &swept,
                     DcOpStartup::Automatic { use_hints: true },
                     None,
+                    rebuilt_point(&mut linearize, &swept)
+                        .as_mut()
+                        .map(|point| point as _),
                     abort,
                 )?;
             lifecycle.next_public_point += 1;
@@ -2321,6 +2442,7 @@ impl Engine {
         param_name: &str,
         sweep_points: &[Value],
         lifecycle: &mut DcSweepLifecycle,
+        mut linearize: Option<DcSweepLinearization<'_, '_>>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
         lifecycle.sweep_label = format!("parameter '{param_name}'");
@@ -2349,6 +2471,9 @@ impl Engine {
                         use_hints: lifecycle.next_public_point == 0,
                     },
                     Some(&mut *lifecycle),
+                    rebuilt_point(&mut linearize, &swept)
+                        .as_mut()
+                        .map(|point| point as _),
                     abort,
                 )
                 .map_err(|error| match error {

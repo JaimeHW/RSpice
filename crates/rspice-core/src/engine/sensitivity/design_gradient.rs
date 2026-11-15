@@ -256,11 +256,7 @@ impl Engine {
         if netlist.source_text.is_none() {
             return refuse_all("the deck retains no source to replay with a parameter moved");
         }
-        let layout = (
-            circuit.matrix_size(),
-            circuit.node_names_sorted(),
-            circuit.branch_names_sorted(),
-        );
+        let layout = UnknownLayout::of(circuit);
         let Some(nominal) = Self::dc_rebuilt_residual(engine, netlist, &layout, solution, abort)?
         else {
             return refuse_all("the solved circuit cannot be reassembled at its operating point");
@@ -382,7 +378,7 @@ impl Engine {
         netlist: &Netlist,
         parameter: &str,
         value: Value,
-        layout: &(usize, Vec<String>, Vec<String>),
+        layout: &UnknownLayout,
         solution: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Result<Vec<Value>, &'static str>, SimulationError> {
@@ -433,12 +429,7 @@ impl Engine {
         if !Self::linear_capture_complete(&capture, false) {
             return Ok(Err("some owning element has no captured direction"));
         }
-        if (
-            built.matrix_size(),
-            built.node_names_sorted(),
-            built.branch_names_sorted(),
-        ) != *layout
-        {
+        if UnknownLayout::of(&built) != *layout {
             return Ok(Err(
                 "the replayed circuit's unknowns differ from the solved ones",
             ));

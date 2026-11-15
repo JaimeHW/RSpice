@@ -419,35 +419,10 @@ impl Engine {
         runs: &mut usize,
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Complex64>>, SimulationError> {
-        let AcSensitivityLocation::ElementField {
-            element_index,
-            field,
-        } = target.location
-        else {
+        let AcSensitivityLocation::ElementField { element_index, .. } = target.location else {
             return Ok(None);
         };
-        if !matches!(
-            field,
-            AcSensitivityElementField::ResistorValue
-                | AcSensitivityElementField::CapacitorValue
-                | AcSensitivityElementField::InductorValue
-        ) || !netlist.spectre_statistics.variations.is_empty()
-            // These construction stages change or remove the captured owner's
-            // connections. Until they capture native field directions, use the
-            // constructed-circuit refinement path, as design replay does.
-            || netlist.options.topology_supernode.unwrap_or(false)
-            || !netlist.ast_overlay().terminal_current_probes.is_empty()
-            || !netlist.elements.iter().all(|element| {
-                linear_element(&element.kind, frequencies.is_some())
-                    && !matches!(
-                        &element.kind,
-                        ElementKind::Resistor {
-                            value_expr: Some(_),
-                            ..
-                        }
-                    )
-            })
-        {
+        if !Self::is_linear_device_row(netlist, target, frequencies.is_some()) {
             return Ok(None);
         }
         let element = &netlist.elements[element_index];
@@ -489,6 +464,40 @@ impl Engine {
                 abort,
             )
             .map(|(_, derivatives)| Some(derivatives))
+    }
+
+    /// Whether a row is a passive value of a linear deck, which
+    /// [`Self::linear_device_sensitivity`] differentiates exactly. The deck's
+    /// structure alone decides it, never a value.
+    pub(super) fn is_linear_device_row(
+        netlist: &Netlist,
+        target: &AcSensitivityTarget,
+        ac: bool,
+    ) -> bool {
+        let AcSensitivityLocation::ElementField { field, .. } = target.location else {
+            return false;
+        };
+        matches!(
+            field,
+            AcSensitivityElementField::ResistorValue
+                | AcSensitivityElementField::CapacitorValue
+                | AcSensitivityElementField::InductorValue
+        ) && netlist.spectre_statistics.variations.is_empty()
+            // These construction stages change or remove the captured owner's
+            // connections. Until they capture native field directions, use the
+            // constructed-circuit refinement path, as design replay does.
+            && !netlist.options.topology_supernode.unwrap_or(false)
+            && netlist.ast_overlay().terminal_current_probes.is_empty()
+            && netlist.elements.iter().all(|element| {
+                linear_element(&element.kind, ac)
+                    && !matches!(
+                        &element.kind,
+                        ElementKind::Resistor {
+                            value_expr: Some(_),
+                            ..
+                        }
+                    )
+            })
     }
 
     #[allow(clippy::too_many_arguments)]
