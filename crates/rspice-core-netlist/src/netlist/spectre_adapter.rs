@@ -143,6 +143,17 @@ pub(crate) fn is_native_spectre_source(path: &Path, source: &str) -> bool {
     // The probe reads each line through the adapter's own comment rules but
     // keeps none of it, since every included source passes through here.
     const BOUNDARY: &[u8] = b"simulator lang=";
+    // Until a block comment opens, the text kept from a line is its start, up
+    // to a `//` comment. So a source with no `/*` can hold a boundary in kept
+    // text only where its own bytes spell one, and a byte search settles it.
+    let bytes = source.as_bytes();
+    if !bytes.windows(2).any(|pair| pair == b"/*")
+        && !bytes
+            .windows(BOUNDARY.len())
+            .any(|window| window.eq_ignore_ascii_case(BOUNDARY))
+    {
+        return false;
+    }
     let mut in_block_comment = false;
     source.lines().enumerate().any(|(line_index, line)| {
         // Characters of the boundary matched so far, after the line's leading
@@ -2964,6 +2975,23 @@ mod tests {
         assert!(!is_native_spectre_source(
             Path::new("model.lib"),
             "// simulator lang=spectre\n/*\nsimulator lang=spectre\n*/\n* simulator lang=spectre\n"
+        ));
+        // Without a block comment the bytes decide; with one, the kept text.
+        assert!(!is_native_spectre_source(
+            Path::new("model.lib"),
+            "* plain deck\nR1 a 0 1k\nsimulator  lang=spectre\n"
+        ));
+        assert!(is_native_spectre_source(
+            Path::new("model.lib"),
+            "* plain deck\r\n  simulator lang=spectre\r\n"
+        ));
+        assert!(is_native_spectre_source(
+            Path::new("model.lib"),
+            "simulator/* a comment */lang=spectre\n"
+        ));
+        assert!(!is_native_spectre_source(
+            Path::new("model.lib"),
+            "R1 a 0 1k simulator lang=spectre\n"
         ));
     }
 
