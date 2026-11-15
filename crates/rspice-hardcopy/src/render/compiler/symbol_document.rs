@@ -229,8 +229,9 @@ impl SemanticSceneCompiler<'_> {
                     )?;
                 }
                 // An instance letters its own value of the parameter, or the
-                // default where it sets none; the symbol printed alone
-                // letters the default.
+                // default where it sets none, in its value's ink as the canvas
+                // letters it; the symbol printed alone letters the default in
+                // its body's ink.
                 SymbolShape::Label {
                     anchor,
                     parameter,
@@ -249,12 +250,17 @@ impl SemanticSceneCompiler<'_> {
                     if !*shown || value.is_empty() {
                         continue;
                     }
+                    let ink = if component.is_some() {
+                        SemanticColor::Exact(super::schematic_text::VALUE_INK)
+                    } else {
+                        body_stroke.color
+                    };
                     self.placed_lines(
                         placed_run(world(*anchor), *align, *rotation, component),
                         &rspice_design::symbol::symbol_label_text(parameter, &value),
                         SceneFont::Monospace,
                         size.height() as f32,
-                        body_stroke.color,
+                        ink,
                     )?;
                 }
             }

@@ -151,6 +151,46 @@ fn a_placed_symbols_lettering_hangs_off_its_anchor_as_the_canvas_hangs_it() {
     assert_eq!(turned.text("AMP"), (x, y, TextAnchor::Middle, size));
 }
 
+/// A placed symbol's label is lettered in the ink of the part's value, as
+/// the canvas letters it: it letters the part's value of a parameter.
+#[test]
+fn a_placed_symbols_label_prints_in_its_values_ink() {
+    use rspice_design::symbol::{SymbolTextAlign, SymbolTextRotation, SymbolTextSize};
+
+    let mut symbol = cell_symbol();
+    symbol.body.push(SymbolShape::Label {
+        anchor: SchematicPoint::new(-30, 50),
+        parameter: "W".to_owned(),
+        default: "1u".to_owned(),
+        size: SymbolTextSize::Normal,
+        align: SymbolTextAlign::Left,
+        rotation: SymbolTextRotation::R0,
+        shown: true,
+    });
+    let mut printed = sheet(Vec::new());
+    printed.components.push(SemanticComponent {
+        symbol_source: Some(SemanticSymbolSource::Authored),
+        component: part(1, ComponentType::CellInstance, (0, 0), "X1", "amp"),
+        resolved_symbol: Some(symbol),
+    });
+    let compiled = compile(&printed);
+    let ink = |wanted: &str| {
+        compiled
+            .primitives
+            .iter()
+            .find_map(|primitive| match primitive {
+                ScenePrimitive::Text { text, color, .. } if text == wanted => Some(*color),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{wanted} prints"))
+    };
+    assert_eq!(
+        ink("W=1u"),
+        ink("amp"),
+        "a label is lettered as the value is"
+    );
+}
+
 fn semantic(component: Component) -> SemanticComponent {
     let resolved_symbol = (component.kind == ComponentType::CellInstance).then(cell_symbol);
     SemanticComponent {
