@@ -868,6 +868,10 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked -p rspice-viewer --target wasm32-unknown-unknown
+      - name: Check rspice-results-store
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked -p rspice-results-store --target wasm32-unknown-unknown
       - name: Qualify generated Verilog-A shard in WebAssembly
         env:
           RUSTFLAGS: -D warnings
