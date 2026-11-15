@@ -36,6 +36,11 @@ fn documented_model_counts(readme: &str) -> Vec<usize> {
     let words: Vec<&str> = readme.split_whitespace().collect();
     let mut counts = Vec::new();
     for (index, word) in words.iter().enumerate() {
+        // A parenthesised number is a footnote marker, as the support
+        // table's "if (1)" and its "- (1) every native device model" key.
+        if word.starts_with('(') && word.ends_with(')') {
+            continue;
+        }
         let Ok(number) = bare(word).parse::<usize>() else {
             continue;
         };
@@ -273,6 +278,9 @@ fn a_number_that_counts_something_else_is_not_a_catalog_claim() {
     assert!(documented_model_counts("exits 80 on failure").is_empty());
     // A count and its noun never straddle a sentence boundary.
     assert!(documented_model_counts("runs 4 analyses. Every device stamps").is_empty());
+    // A footnote marker and the note it keys.
+    assert!(documented_model_counts("- (1) every native device model whose").is_empty());
+    assert!(documented_model_counts("| AC analysis | if (1) | yes |").is_empty());
 }
 
 #[test]
