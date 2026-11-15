@@ -230,7 +230,7 @@ pub(crate) fn breadcrumb(ctx: &Context, canvas: &mut CanvasFrame<'_>, content_re
 
     match focused_level {
         // A level of the parent is a way out of the in-place edit, which
-        // asks first when it holds unsaved edits.
+        // holds while something is still being drawn.
         Some(level) if leaves_in_place => {
             canvas
                 .design

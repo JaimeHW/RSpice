@@ -65,6 +65,104 @@ impl InPlace {
     }
 }
 
+/// Press and let go of the primary button at `at`, a frame each.
+fn click_at(replay: &mut Replay, at: egui::Pos2) -> Vec<Control> {
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    replay.frames(vec![egui::Event::PointerMoved(at), button(true)]);
+    replay.frames(vec![button(false)])
+}
+
+/// The centre of the canvas the frame announces.
+fn canvas_centre(controls: &[Control]) -> egui::Pos2 {
+    controls
+        .iter()
+        .find(|control| control.role == Role::Canvas)
+        .expect("the canvas is announced")
+        .center
+}
+
+/// The status bar's prompt.
+fn prompt(controls: &[Control]) -> String {
+    controls
+        .iter()
+        .find(|control| control.role == Role::Status)
+        .map(|control| control.value.clone())
+        .unwrap_or_default()
+}
+
+/// A line half drawn in place holds the session when the breadcrumb is
+/// pressed: the prompt names what is in flight, the line keeps its point,
+/// and Escape then cancels the line, as it would anywhere.
+#[test]
+fn a_shape_in_flight_holds_the_in_place_edit_by_name() {
+    let mut fixture = InPlace::new();
+    let entered = fixture.enter();
+    // The first press gives the canvas the keyboard; the second, with the
+    // line tool armed, sets the line's first point.
+    click_at(&mut fixture.replay, canvas_centre(&entered));
+    fixture.replay.key(egui::Key::L, egui::Modifiers::NONE);
+    click_at(&mut fixture.replay, canvas_centre(&entered));
+    assert_eq!(
+        fixture
+            .replay
+            .app
+            .state
+            .design
+            .symbol
+            .editor
+            .draft_activity(),
+        Some("a shape is being drawn")
+    );
+
+    let after = fixture.replay.click("top", Role::Link);
+    assert_eq!(
+        fixture.replay.app.state.model.workspace.content.active_view, fixture.symbol,
+        "the breadcrumb did not leave"
+    );
+    assert_eq!(
+        fixture
+            .replay
+            .app
+            .state
+            .design
+            .symbol
+            .editor
+            .pending_polyline
+            .len(),
+        1,
+        "the line kept its point"
+    );
+    assert!(
+        prompt(&after).contains("a shape is being drawn"),
+        "{}",
+        prompt(&after)
+    );
+
+    fixture.replay.key(egui::Key::Escape, egui::Modifiers::NONE);
+    assert_eq!(
+        fixture
+            .replay
+            .app
+            .state
+            .design
+            .symbol
+            .editor
+            .draft_activity(),
+        None,
+        "Escape cancelled the line"
+    );
+    fixture.replay.click("top", Role::Link);
+    assert_eq!(
+        fixture.replay.app.state.model.workspace.content.active_view, fixture.parent,
+        "with nothing in flight the breadcrumb leaves"
+    );
+}
+
 /// The status bar's zoom chip: the one button whose name is a percentage.
 fn zoom_chip(controls: &[Control]) -> String {
     let chips: Vec<&str> = controls

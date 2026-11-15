@@ -359,11 +359,20 @@ impl NavigationParts<'_> {
         true
     }
 
-    /// Leave the in-place edit for `exit`. Every edit made in it stays.
+    /// Leave the in-place edit for `exit`. Every edit made in it stays; a
+    /// shape, text or pin name still in flight holds the session, by name,
+    /// rather than being dropped on the way out.
     pub(crate) fn request_symbol_in_place_exit(&mut self, exit: SymbolInPlaceExit) {
-        if in_place_session(&self.restore.symbol.in_place, self.model).is_none()
-            || !commit_pending_inspector_edit(self.model, self.wb)
-        {
+        if in_place_session(&self.restore.symbol.in_place, self.model).is_none() {
+            return;
+        }
+        if let Some(activity) = self.restore.symbol.editor.draft_activity() {
+            self.wb.prompt(format!(
+                "Still editing the symbol: {activity}. Finish it, or press Esc to cancel it."
+            ));
+            return;
+        }
+        if !commit_pending_inspector_edit(self.model, self.wb) {
             return;
         }
         self.finish_symbol_in_place(exit);
