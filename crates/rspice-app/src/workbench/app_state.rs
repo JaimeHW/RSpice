@@ -50,6 +50,8 @@ use crate::workbench::slots::{
 use rspice_app_services::workbench::slots::platform::remember_recent_file;
 #[cfg(test)]
 use rspice_app_services::workbench::slots::platform::trim_recent_files;
+use rspice_app_settings::workbench::app_state::session::preferences_file::PreferencesFileParts;
+use rspice_app_settings::workbench::app_state::session::shortcut_library::ShortcutLibraryParts;
 
 #[cfg(test)]
 pub(crate) use design_checks::DesignCheckStatus;
@@ -306,10 +308,8 @@ impl AppState {
     }
 
     /// What the preferences file reads and writes, borrowed from this state.
-    pub fn preferences_file_parts(
-        &mut self,
-    ) -> crate::workbench::app_state::session::preferences_file::PreferencesFileParts<'_> {
-        crate::workbench::app_state::session::preferences_file::PreferencesFileParts {
+    pub fn preferences_file_parts(&mut self) -> PreferencesFileParts<'_> {
+        PreferencesFileParts {
             file: &mut self.settings.preferences_file,
             browser_spoken_feedback: &mut self.settings.browser_spoken_feedback,
             model: &mut self.model,
@@ -320,10 +320,8 @@ impl AppState {
 
     /// What the shortcut library's persistence reads and writes, borrowed
     /// from this state.
-    pub(crate) fn shortcut_library_parts(
-        &mut self,
-    ) -> crate::workbench::app_state::session::shortcut_library::ShortcutLibraryParts<'_> {
-        crate::workbench::app_state::session::shortcut_library::ShortcutLibraryParts {
+    pub(crate) fn shortcut_library_parts(&mut self) -> ShortcutLibraryParts<'_> {
+        ShortcutLibraryParts {
             persistence: &mut self.settings.shortcut_library_persistence,
             model: &mut self.model,
             outbox: &mut self.workbench.outbox,

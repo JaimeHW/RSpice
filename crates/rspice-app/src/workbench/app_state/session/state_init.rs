@@ -5,8 +5,10 @@
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::session::preferences_file::PreferencesStore;
+use rspice_app_models::workbench::app_state::session::pdk_settings::PdkSettingsDialogState;
+use rspice_app_results::workbench::app_state::session::calculator::CalculatorPanel;
 use rspice_app_results::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
+use rspice_app_settings::workbench::app_state::session::preferences_file::PreferencesStore;
 use rspice_app_state::workbench::workspace::restore_session_model_library_manager;
 
 impl AppState {
@@ -112,9 +114,8 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     // The slots derive their `Default`; these are the values a new session
     // was always built with, set where they always were.
     state.design.property_registry = crate::properties::PropertyEditorSchema::new();
-    state.results.calculator_panel =
-        rspice_app_results::workbench::app_state::session::calculator::CalculatorPanel::new();
-    *state.models.pdk_settings_dialog = super::pdk_settings::PdkSettingsDialogState::new();
+    state.results.calculator_panel = CalculatorPanel::new();
+    *state.models.pdk_settings_dialog = PdkSettingsDialogState::new();
     *state.results.analysis = analysis;
     state.design.schematic_snap.grid_size = snap_grid_size;
     crate::workbench::documents::code_workspace::bootstrap_automation(

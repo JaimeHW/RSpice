@@ -2,8 +2,8 @@
 //! keeps, what it sets aside, when it is written, and what an import may
 //! change. Nothing here reads or writes the real settings folder.
 
-use crate::workbench::app_state::session::preferences_file::SHOWN_FOLDERS;
 use crate::workbench::commands::vocabulary::command_registry;
+use rspice_app_settings::workbench::app_state::session::preferences_file::SHOWN_FOLDERS;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -14,10 +14,10 @@ use crate::ui::Mode;
 use crate::ui::Theme;
 use crate::workbench::UserPreferences;
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::session::preferences_file::*;
 use crate::workbench::{
     ChoicePreference, FolderListPreference, ScalarPreference, TogglePreference,
 };
+use rspice_app_settings::workbench::app_state::session::preferences_file::*;
 use std::time::Duration;
 
 /// A preferences file in a folder of its own, never the real settings folder.
@@ -652,7 +652,7 @@ fn a_settings_file_carries_preferences_and_shortcuts_to_another_machine() {
         target
             .shortcut_library_parts()
             .publish_shortcut_library_candidate(&shortcuts, &ctx, command_registry()),
-        Ok(crate::workbench::app_state::session::shortcut_library::ShortcutLibraryPublication::Published)
+        Ok(rspice_app_settings::workbench::app_state::session::shortcut_library::ShortcutLibraryPublication::Published)
     ));
     target
         .preferences_file_parts()
