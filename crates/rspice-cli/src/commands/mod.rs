@@ -267,7 +267,7 @@ pub(crate) fn emit_netlist_diagnostics(netlist: &rspice_core::Netlist, quiet: bo
                 crate::observability::diagnostic(
                     &diagnostic.code,
                     Some(diagnostic.line),
-                    &format!("note: {}", diagnostic.message),
+                    format!("note: {}", diagnostic.message),
                 );
             }
         }
