@@ -962,6 +962,47 @@ $end
     assert_eq!(&text[start..], ICARUS);
 }
 
+/// A run that ends without `$finish` closes its dump with the time it ended
+/// at, its last event's, as `$finish` does: unless that time is already the
+/// last written or the dump is off. The expected text is Icarus Verilog
+/// 13.0's from time zero on.
+#[test]
+fn a_run_that_ends_without_finish_closes_its_dump_as_icarus_does() {
+    let cases = [
+        // The run ends on a delay that wakes nothing.
+        ("a = 0;\n    #5 a = 1;\n    #7;", "#5\n1!\n#12\n"),
+        // The run ends on another process's event.
+        (
+            "a = 0;\n    #5 a = 1;\n  end\n  initial begin\n    #9 $display(\"still running\");",
+            "#5\n1!\n#9\n",
+        ),
+        // The run ends on the last change: its time is already written.
+        ("a = 0;\n    #5 a = 1;", "#5\n1!\n"),
+        // The dump is off when the run ends.
+        (
+            "a = 0;\n    #5 a = 1;\n    #2 $dumpoff;\n    #5;",
+            "#5\n1!\n#7\n$dumpoff\nx!\n$end\n",
+        ),
+    ];
+    for (index, (body, ending)) in cases.into_iter().enumerate() {
+        let source = format!(
+            "`timescale 1ns/1ns\nmodule tb;\n  reg a;\n  initial begin\n    \
+             $dumpfile(\"work/end.vcd\");\n    $dumpvars(0, tb);\n    {body}\n  end\nendmodule\n"
+        );
+        let directory = run_directory(&format!("dump-run-end-{index}"));
+        let report = bench_in(&directory, &source, false);
+        let text = written(&report, "work/end.vcd");
+        let start = text
+            .find("#0\n")
+            .unwrap_or_else(|| panic!("no time zero in\n{text}"));
+        assert_eq!(
+            &text[start..],
+            format!("#0\n$dumpvars\n0!\n$end\n{ending}"),
+            "{source}"
+        );
+    }
+}
+
 /// A write that would leave the run directory fails as
 /// section 17.2.1 prescribes, with a located warning; the run may lift the
 /// confinement.

@@ -6645,6 +6645,42 @@ fn the_designs_own_dump_names_its_ports_as_the_source_does() {
     assert!(rises("in") > 0 && rises("o") > 0, "{text}");
 }
 
+/// A mixed run that reaches its stop time without `$finish` closes the
+/// design's dump with that time, as a digital run closes it with its last
+/// event's (Icarus Verilog writes the end time at the end of simulation
+/// however it ends). The stop time is dated as the transient's trials are,
+/// floored to the design's precision, so 12.0004 ns is `#12000` at `1 ps`.
+#[test]
+fn a_mixed_run_that_reaches_its_stop_time_closes_the_dump_there() {
+    let model = ModelFile::new(
+        "dump_to_stop",
+        "`timescale 1ns/1ps\n\
+         module dump_to_stop(o);\n\
+         \x20 output o; reg o;\n\
+         \x20 initial begin $dumpfile(\"stop.vcd\"); $dumpvars(0, dump_to_stop); o = 0; #5 o = 1; end\n\
+         endmodule\n",
+    );
+    let deck = format!(
+        "* a design that dumps until the stop time\n\
+         x1 o dump_to_stop\nr1 o 0 1k\n\
+         .hdl \"{}\" module=dump_to_stop\n.end\n",
+        model.deck_path()
+    );
+    let directory =
+        std::env::temp_dir().join(format!("rspice-hdl-dump-stop-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    let mut config = SimulationConfig::default();
+    config.hdl.run_directory = Some(directory.clone());
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    Engine::new(config)
+        .run_tran(&netlist, 12.0004e-9, 0.5e-9)
+        .expect("the run completes");
+    let text = std::fs::read_to_string(directory.join("stop.vcd")).unwrap();
+    let _ = std::fs::remove_dir_all(&directory);
+    assert!(text.ends_with("#5000\n1!\n#12000\n"), "{text}");
+}
+
 // ---------------------------------------------------------------------------
 // Cross-domain events and values
 // ---------------------------------------------------------------------------

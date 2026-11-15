@@ -1022,15 +1022,36 @@ impl HdlEffects {
     pub(super) fn dump_end(
         &mut self,
         plan: &CanonicalDigitalPlan,
-        site: &DigitalSystemCall,
+        site: Option<&DigitalSystemCall>,
         clock: Option<DigitalClock>,
     ) {
         if !self.dump.watching() {
             return;
         }
         if let Some(text) = self.timestamp(clock.map_or(0, |clock| clock.tick)) {
-            self.dump_write(plan, Some(site), clock, text);
+            self.dump_write(plan, site, clock, text);
         }
+    }
+
+    /// The run ended at `clock`'s time without `$finish`, `$stop` or
+    /// `$fatal`: its last event's time for a digital run, its stop time for a
+    /// mixed one. The dump closes as `$finish` closes it, as Icarus Verilog
+    /// closes a dump at the end of simulation however it ends.
+    pub(crate) fn dump_run_end(
+        &mut self,
+        plan: &CanonicalDigitalPlan,
+        clock: Option<DigitalClock>,
+    ) {
+        let tick = clock.map_or(0, |clock| clock.tick);
+        if self.dump_open_at_run_end() && self.dump.time.is_none_or(|last| last < tick) {
+            self.dump_end(plan, None, clock);
+        }
+    }
+
+    /// Whether the run's end has a dump to close: one still recording that
+    /// no `$finish`, `$stop` or `$fatal` closed.
+    pub(crate) fn dump_open_at_run_end(&self) -> bool {
+        self.finish.is_none() && self.dump.watching()
     }
 
     /// Append dump text to the dump file.

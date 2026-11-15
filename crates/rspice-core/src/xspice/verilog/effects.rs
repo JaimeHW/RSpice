@@ -785,7 +785,7 @@ impl HdlEffects {
         message: Option<String>,
     ) {
         if self.finish.is_none() {
-            self.dump_end(plan, site, clock);
+            self.dump_end(plan, Some(site), clock);
             let (tick, seconds) =
                 clock.map_or((0, 0.0), |clock| (clock.tick, clock.absolute_seconds));
             self.finish = Some(HdlFinishRequest {

@@ -1783,6 +1783,15 @@ impl CircuitData {
     /// The traced HDL variables' publications since the last accepted
     /// point, then each one's value at `time`; a publication's `node` is its
     /// slot.
+    /// The transient ended at `time` without the design's `$finish`: the HDL
+    /// dump closes there.
+    pub(crate) fn end_mixed_digital_run(&mut self, time: Value) -> Result<(), SimulationError> {
+        if let Some(digital) = &mut self.scheduler.mixed_digital_coordinator {
+            digital.end_hdl_run(time).map_err(shared_error)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn drain_hdl_variable_traces(
         &mut self,
         time: Value,

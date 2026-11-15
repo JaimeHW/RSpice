@@ -1987,6 +1987,20 @@ impl MixedDigitalCoordinator {
         cursor.rollback = None;
     }
 
+    /// The transient ended at `time`, its stop time, without the design's
+    /// `$finish`, `$stop` or `$fatal`. The design's dump closes with the tick
+    /// that time reached, as a digital run's closes with its last event's,
+    /// and the closing line is released with the run's output.
+    pub(crate) fn end_hdl_run(&mut self, time: f64) -> Result<(), MixedSignalError> {
+        if !self.digital.hdl_dump_open() {
+            return Ok(());
+        }
+        let tick = hdl_tick(time, |at| at.floor_tick(self.resolution))?;
+        self.digital.make_mut().end_hdl_run(tick, time);
+        self.release_hdl_output(crate::config::HdlPoint::Transient { time });
+        Ok(())
+    }
+
     /// Hand the digital host's journal to the run's sink, stamped with the
     /// point that accepted it.
     fn release_hdl_output(&mut self, point: crate::config::HdlPoint) {

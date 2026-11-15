@@ -837,6 +837,23 @@ impl DigitalHost {
         self.effects.has_journal()
     }
 
+    /// The run ended at `tick`, `seconds` into it, without the design's
+    /// `$finish`, `$stop` or `$fatal`: close its dump with that time.
+    pub(crate) fn end_hdl_run(&mut self, tick: u64, seconds: f64) {
+        self.effects.dump_run_end(
+            &self.plan,
+            Some(rspice_veriloga::canonical_ir::DigitalClock {
+                tick,
+                absolute_seconds: seconds,
+            }),
+        );
+    }
+
+    /// Whether [`Self::end_hdl_run`] has a dump to close.
+    pub(crate) fn hdl_dump_open(&self) -> bool {
+        self.effects.dump_open_at_run_end()
+    }
+
     /// The `$finish`, `$stop` or `$fatal` the design executed, if any.
     pub(crate) fn hdl_finish(&self) -> Option<&super::effects::HdlFinishRequest> {
         self.effects.finish()

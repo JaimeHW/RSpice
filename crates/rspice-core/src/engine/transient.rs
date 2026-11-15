@@ -13599,6 +13599,9 @@ impl Engine {
         };
         #[cfg(feature = "veriloga")]
         {
+            // The checkpoint above is the state still running at `t`; the
+            // closing line ends this run's dump only.
+            circuit.end_mixed_digital_run(t)?;
             circuit.mark_hdl_observed_traces(&mut result.digital_traces, &result.node_names);
             hdl_variables.mark_precision(&mut result, circuit.hdl_trace_precision());
             hdl_variables.record_sources(&mut result, &circuit);

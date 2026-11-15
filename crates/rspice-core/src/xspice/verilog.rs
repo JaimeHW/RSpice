@@ -1081,6 +1081,7 @@ pub fn run_digital_testbench(
         };
     }
     let end_seconds = resolution.ticks_to_seconds(end_tick)?;
+    host.end_hdl_run(end_tick, end_seconds);
     records.append(&mut host.drain_hdl_output());
     for record in &mut records {
         record.point = crate::config::HdlPoint::Transient {
