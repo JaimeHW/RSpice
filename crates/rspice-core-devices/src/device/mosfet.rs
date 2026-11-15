@@ -1,7 +1,8 @@
 //! MOSFET and FET device models
 //!
 //! Includes various MOSFET models (Level 1-3, BSIM3, BSIM4, EKV, VDMOS) and JFETs.
-//! Also contains the shared smooth region transitions and ngspice FET step limiters.
+//! Also contains the shared smooth region transitions and the ngspice and Xyce FET
+//! step limiters.
 
 use crate::Value;
 
@@ -39,8 +40,42 @@ pub(crate) fn dev_limvds(vnew: Value, vold: Value) -> Value {
 /// the threshold `vto`.
 #[inline]
 pub(crate) fn dev_fetlim(vnew: Value, vold: Value, vto: Value) -> Value {
+    fetlim(vnew, vold, vto, (vold - vto).abs() + 1.0)
+}
+
+/// Xyce's `DeviceSupport::fetlim`: ngspice's limiter with a turn-on step two
+/// volts longer, half the high step plus two (N_DEV_DeviceSupport.C:309).
+#[inline]
+pub(crate) fn xyce_fetlim(vnew: Value, vold: Value, vto: Value) -> Value {
+    fetlim(vnew, vold, vto, (vold - vto).abs() + 3.0)
+}
+
+/// Xyce's `DeviceSupport::pnjlim`, the original SPICE junction limiter:
+/// ngspice's later one adds a reverse-voltage clamp and another forward
+/// logarithm (N_DEV_DeviceSupport.C:188).
+#[inline]
+pub(crate) fn xyce_pnjlim(vnew: Value, vold: Value, vt: Value, vcrit: Value) -> Value {
+    if vnew > vcrit && (vnew - vold).abs() > 2.0 * vt {
+        if vold > 0.0 {
+            let arg = 1.0 + (vnew - vold) / vt;
+            if arg > 0.0 {
+                vold + vt * arg.ln()
+            } else {
+                vcrit
+            }
+        } else {
+            vt * (vnew / vt).ln()
+        }
+    } else {
+        vnew
+    }
+}
+
+/// The FET gate-step limiter both simulators share, given the step it allows
+/// a device turning on (`vtstlo`).
+#[inline]
+fn fetlim(vnew: Value, vold: Value, vto: Value, vtstlo: Value) -> Value {
     let vtsthi = (2.0 * (vold - vto)).abs() + 2.0;
-    let vtstlo = (vold - vto).abs() + 1.0;
     let vtox = vto + 3.5;
     let delv = vnew - vold;
 

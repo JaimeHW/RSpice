@@ -823,21 +823,7 @@ impl Jfet {
         {
             return vnew;
         }
-
-        if (vnew > vcrit) && ((vnew - vold).abs() > 2.0 * vt) {
-            if vold > 0.0 {
-                let argument = 1.0 + (vnew - vold) / vt;
-                if argument > 0.0 {
-                    vold + vt * argument.ln()
-                } else {
-                    vcrit
-                }
-            } else {
-                vt * (vnew / vt).ln()
-            }
-        } else {
-            vnew
-        }
+        crate::device::mosfet::xyce_pnjlim(vnew, vold, vt, vcrit)
     }
 
     /// Xyce's native FET limiter (`DeviceSupport::fetlim`).
@@ -846,52 +832,7 @@ impl Jfet {
         if !vnew.is_finite() || !vold.is_finite() || !vto.is_finite() {
             return vnew;
         }
-
-        let high_step = (2.0 * (vold - vto)).abs() + 2.0;
-        let low_step = high_step / 2.0 + 2.0;
-        let high_gate_voltage = vto + 3.5;
-        let delta = vnew - vold;
-
-        if vold >= vto {
-            if vold >= high_gate_voltage {
-                if delta <= 0.0 {
-                    if vnew >= high_gate_voltage {
-                        if -delta > low_step {
-                            vold - low_step
-                        } else {
-                            vnew
-                        }
-                    } else {
-                        vnew.max(vto + 2.0)
-                    }
-                } else if delta >= high_step {
-                    vold + high_step
-                } else {
-                    vnew
-                }
-            } else if delta <= 0.0 {
-                vnew.max(vto - 0.5)
-            } else {
-                vnew.min(vto + 4.0)
-            }
-        } else if delta <= 0.0 {
-            if -delta > high_step {
-                vold - high_step
-            } else {
-                vnew
-            }
-        } else {
-            let transition_voltage = vto + 0.5;
-            if vnew <= transition_voltage {
-                if delta > low_step {
-                    vold + low_step
-                } else {
-                    vnew
-                }
-            } else {
-                transition_voltage
-            }
-        }
+        crate::device::mosfet::xyce_fetlim(vnew, vold, vto)
     }
 
     #[inline]

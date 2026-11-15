@@ -5,7 +5,7 @@
 
 use super::legacy_bsim::{LegacyBsimModel, LegacyBsimRegion, LegacyBsimSizedModel};
 use super::smooth::{SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step};
-use super::{dev_fetlim, dev_limvds};
+use super::{dev_fetlim, dev_limvds, xyce_fetlim, xyce_pnjlim};
 use crate::constants::VT_REFERENCE;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, CscPatternToken, StaticMatrix};
@@ -522,9 +522,10 @@ pub struct Mosfet {
     /// Report Xyce's transient device-convergence status (no junction
     /// limiting) instead of the SPICE current-prediction test.
     native_xyce_transient_convergence: bool,
-    /// Follow ngspice's classic-MOS convergence test where Xyce's differs
-    /// (the ngspice and default dialects): its convTest on the drain and bulk
-    /// currents alone, not Xyce's branch-voltage step test.
+    /// Follow ngspice's classic-MOS convergence test and step limiters where
+    /// Xyce's differ (the ngspice and default dialects): its convTest on the
+    /// drain and bulk currents alone, not Xyce's branch-voltage step test,
+    /// and its DEVfetlim and DEVpnjlim, not Xyce's DeviceSupport ones.
     ngspice_dialect: bool,
     /// Cut a level-2 channel without fast surface states off at VBIN, as
     /// ngspice does (the ngspice dialect), not at VON as QSPICE, LTspice and
@@ -768,11 +769,13 @@ impl Mosfet {
             enabled && matches!(self.level, 1..=3) && !self.uses_legacy_bsim();
     }
 
-    /// Select ngspice's classic-MOS convergence test for this instance where
-    /// Xyce's differs: convTest on the drain and bulk currents alone, as in
-    /// every ngspice MOS1/2/3/6/9 and BSIM1 convTest (mos2conv.c:42-95,
-    /// b1cvtest.c); Xyce keeps its branch-voltage step test. The engine
-    /// clears it in the Xyce dialect.
+    /// Select ngspice's classic-MOS convergence test and step limiters for
+    /// this instance where Xyce's differ: convTest on the drain and bulk
+    /// currents alone, as in every ngspice MOS1/2/3/6/9 and BSIM1 convTest
+    /// (mos2conv.c:42-95, b1cvtest.c), where Xyce keeps its branch-voltage
+    /// step test; and DEVfetlim and DEVpnjlim (devsup.c), where Xyce limits
+    /// with the original SPICE pnjlim and a longer fetlim turn-on step. The
+    /// engine clears it in the Xyce dialect.
     #[doc(hidden)]
     pub fn set_ngspice_dialect(&mut self, enabled: bool) {
         self.ngspice_dialect = enabled;

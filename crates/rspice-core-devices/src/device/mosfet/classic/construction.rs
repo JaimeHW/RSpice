@@ -464,13 +464,19 @@ impl Mosfet {
             self.model_space_onset_voltage(old_vgs, old_vds, old_vbs)
         };
 
+        // The Xyce dialect limits with Xyce's own fetlim and pnjlim.
+        let fetlim = if self.ngspice_dialect {
+            dev_fetlim
+        } else {
+            xyce_fetlim
+        };
         if vold_vds >= 0.0 {
-            vgs_m = dev_fetlim(vgs_m, vold_vgs, von);
+            vgs_m = fetlim(vgs_m, vold_vgs, von);
             vds_m = vgs_m - vgd_initial_m;
             vds_m = dev_limvds(vds_m, vold_vds);
         } else {
             let mut vgd_m = vgd_initial_m;
-            vgd_m = dev_fetlim(vgd_m, vgdo, von);
+            vgd_m = fetlim(vgd_m, vgdo, von);
             vds_m = vgs_m - vgd_m;
             vds_m = -dev_limvds(-vds_m, -vold_vds);
             vgs_m = vgd_m + vds_m;
@@ -480,20 +486,25 @@ impl Mosfet {
         // pnjlim sets `Check` exactly when its forward arm limits.
         let forward_limited =
             |vnew: Value, vold: Value, vcrit: Value| vnew > vcrit && (vnew - vold).abs() > 2.0 * vt;
+        let pnjlim = if self.ngspice_dialect {
+            Self::dev_pnjlim
+        } else {
+            xyce_pnjlim
+        };
         let junction_limited;
         if vds_m >= 0.0 {
             let vcrit = constants
                 .map(|constants| constants.source_body_vcrit)
                 .unwrap_or_else(|| self.source_body_vcrit());
             junction_limited = forward_limited(vbs_m, vold_vbs, vcrit);
-            vbs_m = Self::dev_pnjlim(vbs_m, vold_vbs, vt, vcrit);
+            vbs_m = pnjlim(vbs_m, vold_vbs, vt, vcrit);
         } else {
             let vold_vbd = vold_vbs - vold_vds;
             let vcrit = constants
                 .map(|constants| constants.drain_body_vcrit)
                 .unwrap_or_else(|| self.drain_body_vcrit());
             junction_limited = forward_limited(vbd_m, vold_vbd, vcrit);
-            vbd_m = Self::dev_pnjlim(vbd_m, vold_vbd, vt, vcrit);
+            vbd_m = pnjlim(vbd_m, vold_vbd, vt, vcrit);
             vbs_m = vbd_m + vds_m;
         }
 
