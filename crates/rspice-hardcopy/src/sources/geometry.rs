@@ -367,7 +367,12 @@ pub(super) fn include_symbol_document_bounds(
                 bounds.include(map(least));
                 bounds.include(map(greatest));
             }
-            SymbolShape::Arrow { tip, .. } => bounds.include(map(*tip)),
+            SymbolShape::Arrow {
+                tip,
+                rotation_quarters,
+            } => rspice_design::symbol::arrow_corners(*tip, *rotation_quarters)
+                .into_iter()
+                .for_each(|corner| bounds.include(map(corner))),
             SymbolShape::Text {
                 anchor,
                 text,

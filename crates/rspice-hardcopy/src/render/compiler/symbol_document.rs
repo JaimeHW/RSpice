@@ -187,21 +187,8 @@ impl SemanticSceneCompiler<'_> {
                     tip,
                     rotation_quarters,
                 } => {
-                    let direction = rotation_quarters.rem_euclid(4);
-                    let mut local = [
-                        SchematicPoint::new(0, 0),
-                        SchematicPoint::new(-8, -4),
-                        SchematicPoint::new(-8, 4),
-                    ];
-                    for point in &mut local {
-                        for _ in 0..direction {
-                            *point = SchematicPoint::new(-point.y, point.x);
-                        }
-                        point.x = point.x.saturating_add(tip.x);
-                        point.y = point.y.saturating_add(tip.y);
-                    }
                     self.primitives.push(ScenePrimitive::Polyline {
-                        points: local
+                        points: rspice_design::symbol::arrow_corners(*tip, *rotation_quarters)
                             .into_iter()
                             .map(|point| convert(self, point))
                             .collect::<Result<_, _>>()?,

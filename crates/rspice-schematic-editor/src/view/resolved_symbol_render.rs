@@ -24,7 +24,7 @@ use rspice_design::{
     },
     symbol::{
         SymbolCurve, SymbolDash, SymbolDocument, SymbolFill, SymbolShape, SymbolStyle,
-        SymbolTextAlign, SymbolTextPlacement, SymbolTextRotation, rectangle_corners,
+        SymbolTextAlign, SymbolTextPlacement, SymbolTextRotation, arrow_corners, rectangle_corners,
         symbol_label_text, symbol_text_bounds, symbol_text_hang,
     },
     symbol_generation::fit_pin_name,
@@ -174,7 +174,7 @@ fn draw_symbol_body(
                 tip,
                 rotation_quarters,
             } => {
-                let points: Vec<Pos2> = arrow_points(*tip, *rotation_quarters)
+                let points: Vec<Pos2> = arrow_corners(*tip, *rotation_quarters)
                     .into_iter()
                     .map(|point| to_screen_symbol(origin, scale, component, symbol, point))
                     .collect();
@@ -677,21 +677,6 @@ fn placed_curve_points(
         .collect()
 }
 
-fn arrow_points(tip: Point, rotation_quarters: i32) -> [Point; 3] {
-    let (dx, dy) = match rotation_quarters.rem_euclid(4) {
-        0 => (1, 0),
-        1 => (0, 1),
-        2 => (-1, 0),
-        _ => (0, -1),
-    };
-    let (sx, sy) = (-dy, dx);
-    [
-        tip,
-        Point::new(tip.x - dx * 12 + sx * 6, tip.y - dy * 12 + sy * 6),
-        Point::new(tip.x - dx * 12 - sx * 6, tip.y - dy * 12 - sy * 6),
-    ]
-}
-
 fn fold_symbol_extent_points(symbol: &ResolvedCellSymbol, mut include: impl FnMut(Point)) {
     include(Point::origin());
     include(symbol.effective_point(symbol.document().name_anchor));
@@ -757,7 +742,7 @@ fn fold_symbol_artwork_points(symbol: &ResolvedCellSymbol, mut include: impl FnM
                 tip,
                 rotation_quarters,
             } => {
-                for point in arrow_points(*tip, *rotation_quarters) {
+                for point in arrow_corners(*tip, *rotation_quarters) {
                     include(symbol.effective_point(point));
                 }
             }

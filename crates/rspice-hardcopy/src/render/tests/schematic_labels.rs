@@ -715,6 +715,65 @@ fn a_layer_the_print_mapping_leaves_out_keeps_its_dots_and_fills() {
     );
 }
 
+/// A symbol's arrowhead prints the size and the way the canvas draws it,
+/// turned with its part, and the page makes room for the whole of it.
+#[test]
+fn a_placed_symbols_arrow_prints_as_the_canvas_draws_it() {
+    let mut symbol = cell_symbol();
+    // Its back corners stand clear of everything else the part draws.
+    symbol.body.push(SymbolShape::Arrow {
+        tip: SchematicPoint::new(-60, 0),
+        rotation_quarters: 0,
+    });
+    let printed = |component: Component| {
+        let mut printed = sheet(Vec::new());
+        printed.components.push(SemanticComponent {
+            symbol_source: Some(SemanticSymbolSource::Authored),
+            component,
+            resolved_symbol: Some(symbol.clone()),
+        });
+        compile(&printed)
+    };
+    let arrow = |compiled: &Compiled| {
+        let um = |point: &ScenePoint| (point.x.micrometres() as i64, point.y.micrometres() as i64);
+        compiled
+            .primitives
+            .iter()
+            .find_map(|primitive| match primitive {
+                ScenePrimitive::Polyline {
+                    points,
+                    closed: true,
+                    fill: Some(_),
+                    ..
+                } if points.len() == 3 => Some(points.iter().map(um).collect::<Vec<_>>()),
+                _ => None,
+            })
+            .expect("the arrow prints")
+    };
+
+    let upright = printed(part(1, ComponentType::CellInstance, (0, 0), "X1", "amp"));
+    assert_eq!(
+        arrow(&upright),
+        [
+            upright.at(-60.0, 0.0),
+            upright.at(-72.0, 6.0),
+            upright.at(-72.0, -6.0)
+        ]
+    );
+    // A quarter turn points it up the sheet from (0, -60).
+    let turned = printed(
+        part(2, ComponentType::CellInstance, (200, 0), "X2", "amp").with_rotation(Rotation::R90),
+    );
+    assert_eq!(
+        arrow(&turned),
+        [
+            turned.at(200.0, -60.0),
+            turned.at(194.0, -72.0),
+            turned.at(206.0, -72.0)
+        ]
+    );
+}
+
 /// A placed part prints held by its symbol's origin, as the canvas draws it
 /// and as its wires reach it: a symbol whose origin was moved prints its
 /// body, its curves and its pins where the canvas does.

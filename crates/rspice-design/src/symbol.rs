@@ -23,9 +23,9 @@ use sha2::{Digest as ShaDigest, Sha256};
 use rspice_vocabulary::product::ContentDigest;
 
 pub use rspice_design_model::symbol_geometry::{
-    SymbolCurve, SymbolDash, SymbolFill, SymbolShape, SymbolStroke, SymbolStyle, SymbolTextAlign,
-    SymbolTextPlacement, SymbolTextRotation, SymbolTextSize, rectangle_corners,
-    symbol_label_sample, symbol_label_text, symbol_text_bounds,
+    ARROW_LENGTH, SymbolCurve, SymbolDash, SymbolFill, SymbolShape, SymbolStroke, SymbolStyle,
+    SymbolTextAlign, SymbolTextPlacement, SymbolTextRotation, SymbolTextSize, arrow_corners,
+    rectangle_corners, symbol_label_sample, symbol_label_text, symbol_text_bounds,
 };
 
 use crate::library::View;

@@ -575,6 +575,30 @@ pub fn rectangle_corners(min: Point, max: Point) -> [Point; 4] {
     [min, Point::new(max.x, min.y), max, Point::new(min.x, max.y)]
 }
 
+/// How far an arrowhead reaches back from its tip, and across it.
+pub const ARROW_LENGTH: i32 = 12;
+
+/// An arrowhead's corners, its tip first: [`ARROW_LENGTH`] back from the tip
+/// and as wide across, pointing along +x turned `rotation_quarters`
+/// clockwise on screen. Every renderer draws the mark from these, so it is
+/// the same size in the editor, on a sheet and on paper.
+pub fn arrow_corners(tip: Point, rotation_quarters: i32) -> [Point; 3] {
+    let (dx, dy) = match rotation_quarters.rem_euclid(4) {
+        0 => (1, 0),
+        1 => (0, 1),
+        2 => (-1, 0),
+        _ => (0, -1),
+    };
+    let (back, half) = (ARROW_LENGTH, ARROW_LENGTH / 2);
+    let (sx, sy) = (-dy * half, dx * half);
+    let base = Point::new(tip.x - dx * back, tip.y - dy * back);
+    [
+        tip,
+        Point::new(base.x + sx, base.y + sy),
+        Point::new(base.x - sx, base.y - sy),
+    ]
+}
+
 impl SymbolShape {
     /// The rectangle with `a` and `b` as opposite corners, in either order.
     pub fn rectangle(a: Point, b: Point) -> Self {
