@@ -739,7 +739,20 @@ impl Host for RSpiceApp {
 
     fn menu_label(&self, key: CommandKey) -> std::borrow::Cow<'static, str> {
         legacy_command(key).map_or_else(
-            || self.label(key).into(),
+            || {
+                let label = self.label(key);
+                // Check and save with a symbol in front is the save itself:
+                // no dialog follows it, so its row promises none.
+                if key == crate::workbench::project::commands::ProjectCommand::CheckAndSave.key()
+                    && self.state.workbench.workspace == Workspace::Design
+                    && self.state.model.workspace.content.active_view_type()
+                        == Some(ViewType::Symbol)
+                {
+                    label.trim_end_matches('\u{2026}').into()
+                } else {
+                    label.into()
+                }
+            },
             |command| crate::workbench::commands::menu_label(command, self),
         )
     }
