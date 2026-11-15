@@ -46,6 +46,9 @@ pub struct RunOptions {
     /// Where each cell's last wall time on this machine is kept, to start the
     /// slowest cells first. A scheduling hint only; `None` keeps none.
     pub timings: Option<PathBuf>,
+    /// Run only the designs of one shard, `(k, n)`: the k-th of n, counted
+    /// from 1. `None` runs every selected design.
+    pub shard: Option<(usize, usize)>,
 }
 
 impl RunOptions {
@@ -117,6 +120,54 @@ pub fn selected_designs(designs: &[String]) -> Result<Vec<Design>, String> {
     Ok(selected)
 }
 
+/// The cells of `design` this run selects, each with its declared budget.
+fn selected_cells(options: &RunOptions, design: &Design) -> Vec<(String, String, u64)> {
+    design
+        .cells()
+        .into_iter()
+        .filter_map(|(variant, analysis)| {
+            if options
+                .variant
+                .as_ref()
+                .is_some_and(|wanted| *wanted != variant)
+                || options
+                    .analysis
+                    .as_ref()
+                    .is_some_and(|wanted| *wanted != analysis)
+            {
+                return None;
+            }
+            let entry = design.analysis(&analysis).expect("declared");
+            (!entry.extended || options.extended).then_some((variant, analysis, entry.timeout_s))
+        })
+        .collect()
+}
+
+/// Which of `count` shards each design runs in, given each design's weight:
+/// heaviest first, each to the shard holding the least weight so far (on a
+/// tie, the one with fewer designs, then the first; equal weights keep
+/// declared order). The run weighs a design by the declared budgets of the
+/// cells it selects, so the corpus's long designs spread over the shards.
+/// Every design lands in exactly one shard, whatever the corpus holds, and
+/// the assignment depends only on the designs and their budgets.
+fn shard_assignment(weights: &[u64], count: usize) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..weights.len()).collect();
+    order.sort_by(|&a, &b| weights[b].cmp(&weights[a]));
+    // Each shard's weight so far and its number of designs, which spreads
+    // designs that weigh nothing.
+    let mut loads = vec![(0u64, 0usize); count.max(1)];
+    let mut assignment = vec![0; weights.len()];
+    for design in order {
+        let shard = (0..loads.len())
+            .min_by_key(|&shard| loads[shard])
+            .expect("at least one shard");
+        loads[shard].0 += weights[design];
+        loads[shard].1 += 1;
+        assignment[design] = shard;
+    }
+    assignment
+}
+
 /// One selected cell: its design (an index into the selection) and budget.
 #[derive(Debug, Clone)]
 struct Task {
@@ -135,7 +186,24 @@ struct Task {
 /// order.
 pub fn run(options: &RunOptions) -> Result<Vec<DesignReport>, String> {
     fs::create_dir_all(&options.work).map_err(|error| error.to_string())?;
-    let designs = selected_designs(&options.designs)?;
+    let mut designs = selected_designs(&options.designs)?;
+    if let Some((shard, count)) = options.shard {
+        let weights: Vec<u64> = designs
+            .iter()
+            .map(|design| {
+                selected_cells(options, design)
+                    .iter()
+                    .map(|cell| cell.2)
+                    .sum()
+            })
+            .collect();
+        designs = designs
+            .into_iter()
+            .zip(shard_assignment(&weights, count))
+            .filter(|(_, assigned)| assigned + 1 == shard)
+            .map(|(design, _)| design)
+            .collect();
+    }
     let mut reports: Vec<Option<DesignReport>> = Vec::with_capacity(designs.len());
     let mut tasks = Vec::new();
     let mut pending = vec![0usize; designs.len()];
@@ -152,28 +220,13 @@ pub fn run(options: &RunOptions) -> Result<Vec<DesignReport>, String> {
             continue;
         }
         reports.push(None);
-        for (variant, analysis) in design.cells() {
-            if options
-                .variant
-                .as_ref()
-                .is_some_and(|wanted| *wanted != variant)
-                || options
-                    .analysis
-                    .as_ref()
-                    .is_some_and(|wanted| *wanted != analysis)
-            {
-                continue;
-            }
-            let entry = design.analysis(&analysis).expect("declared");
-            if entry.extended && !options.extended {
-                continue;
-            }
+        for (variant, analysis, timeout_s) in selected_cells(options, design) {
             pending[index] += 1;
             tasks.push(Task {
                 design: index,
                 variant,
                 analysis,
-                timeout_s: entry.timeout_s,
+                timeout_s,
             });
         }
     }
@@ -1530,6 +1583,51 @@ mod tests {
             order,
             ["new-big", "new-small", "slow", "tie-a", "tie-b", "fast"]
         );
+    }
+
+    #[test]
+    fn the_heaviest_designs_go_to_different_shards() {
+        // Heaviest first, each to the lightest shard; equal weights keep
+        // declared order, and a tie between shards goes to the first.
+        assert_eq!(
+            shard_assignment(&[100, 900, 300, 300, 50], 2),
+            [1, 0, 1, 1, 1]
+        );
+        assert_eq!(
+            shard_assignment(&[100, 900, 300, 300, 50], 3),
+            [1, 0, 1, 2, 2]
+        );
+        assert_eq!(shard_assignment(&[7, 7], 1), [0, 0]);
+        assert_eq!(shard_assignment(&[7], 4), [0]);
+        assert_eq!(shard_assignment(&[5, 0, 0], 3), [0, 1, 2]);
+    }
+
+    #[test]
+    fn every_design_runs_in_exactly_one_shard() {
+        let options = RunOptions {
+            extended: true,
+            ..Default::default()
+        };
+        let designs = selected_designs(&[]).expect("corpus loads");
+        let weights: Vec<u64> = designs
+            .iter()
+            .map(|design| {
+                selected_cells(&options, design)
+                    .iter()
+                    .map(|cell| cell.2)
+                    .sum()
+            })
+            .collect();
+        for count in 1..=designs.len() + 1 {
+            let assignment = shard_assignment(&weights, count);
+            assert_eq!(assignment.len(), designs.len());
+            assert!(assignment.iter().all(|&shard| shard < count), "{count}");
+            if count <= designs.len() {
+                for shard in 0..count {
+                    assert!(assignment.contains(&shard), "{count} shards: {shard} empty");
+                }
+            }
+        }
     }
 
     /// Run fake cells through the real queue and assembly at `jobs`; each

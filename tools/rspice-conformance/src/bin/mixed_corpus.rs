@@ -4,6 +4,7 @@
 //! rspice-mixed-corpus run [--design C1,C5] [--variant v] [--analysis a] [--record] [--extended]
 //!                         [--producer "<cmd>"] [--worker <web-dir>]
 //!                         [--expect-route interp|native|worker] [--jobs N] [--cases <dir>]
+//!                         [--shard K/N]
 //! rspice-mixed-corpus case <design-dir> <variant> <analysis> <out.json> [--budget-s N] [--o5]
 //!                          [--worker <web-dir>]
 //! rspice-mixed-corpus capture --oracle O1|O4|O2|O5-O1|O5-O4|O8 [--design C1] [--update] [--jobs N]
@@ -20,6 +21,9 @@
 //! `runner::default_jobs()`. `--cases` keeps each cell's case result file in
 //! the directory it names, to compare two routes' values afterwards; by
 //! default they go to a temporary directory removed when the run ends.
+//! `--shard K/N` runs the K-th of N disjoint sets of designs, balanced by
+//! their declared budgets; the N shards together run every selected design
+//! once, so one build can serve N machines.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -62,6 +66,8 @@ enum Commands {
         jobs: Option<usize>,
         #[arg(long)]
         cases: Option<PathBuf>,
+        #[arg(long, value_parser = shard)]
+        shard: Option<(usize, usize)>,
     },
     /// Run one case in this process and write case-result.json.
     Case {
@@ -105,6 +111,18 @@ fn job_count(text: &str) -> Result<usize, String> {
         Ok(0) | Err(_) => Err(format!("{text} is not a positive job count")),
         Ok(count) => Ok(count),
     }
+}
+
+/// `--shard K/N`: the K-th of N shards, 1 <= K <= N.
+fn shard(text: &str) -> Result<(usize, usize), String> {
+    let invalid = || format!("{text} is not a shard K/N with 1 <= K <= N");
+    let (index, count) = text.split_once('/').ok_or_else(invalid)?;
+    let index: usize = index.parse().map_err(|_| invalid())?;
+    let count: usize = count.parse().map_err(|_| invalid())?;
+    if index == 0 || index > count {
+        return Err(invalid());
+    }
+    Ok((index, count))
 }
 
 fn main() -> ExitCode {
@@ -156,6 +174,7 @@ fn run() -> Result<ExitCode, String> {
             expect_route,
             jobs,
             cases,
+            shard,
         } => {
             let route = if worker.is_some() {
                 Route::Worker
@@ -175,6 +194,7 @@ fn run() -> Result<ExitCode, String> {
                     producer,
                     worker,
                     jobs: jobs.unwrap_or_default(),
+                    shard,
                     work: cases.unwrap_or_else(|| defaults.work.clone()),
                     ..defaults
                 },
