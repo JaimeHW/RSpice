@@ -276,6 +276,9 @@ pub(super) struct RoutineScope<'a> {
     /// Lower for a constant function call (section 10.4.5): every variable
     /// in a frame slot, and nothing that runs during simulation.
     pub constant: bool,
+    /// The storage hierarchical references gave this scope's routine items,
+    /// by `(routine, item)` (section 12.5); such an item lives there.
+    pub local_storage: &'a HashMap<(SmolStr, SmolStr), DigitalSignalId>,
 }
 
 /// Lower one routine of a scope.
@@ -302,6 +305,7 @@ pub(super) fn lower_routine(
         routines,
         prefix,
         constant,
+        local_storage,
     } = scope;
     let mut lowerer = ProcessLowerer {
         calls: calls.tables_for(Some(scope)),
@@ -364,6 +368,9 @@ pub(super) fn lower_routine(
     // storage before any statement is lowered.
     let mut frame_slots = Vec::new();
     let path = format!("{prefix}{}", routine.name);
+    // An item a hierarchical reference names keeps the storage the reference
+    // gave it; the routine's outermost declaration of the name is the item.
+    let mut referenced = HashSet::new();
     for id in 0..lowerer.locals.len() {
         let local = &lowerer.locals[id];
         let Some(name) = local.name.clone() else {
@@ -384,7 +391,25 @@ pub(super) fn lower_routine(
             frame_slots.push(shape.value_type());
         } else {
             let span = local.span;
-            let signal = static_signal(lowerer.signals, format!("{path}.{name}"), shape, span);
+            let signal = match local_storage
+                .get(&(routine.name.clone(), name.clone()))
+                .filter(|_| referenced.insert(name.clone()))
+            {
+                Some(&signal) => {
+                    let storage = &lowerer.signals[usize::from(signal)];
+                    if storage.width != shape.width()
+                        || storage.kind.is_real() != shape.real
+                        || storage.signed != shape.signed
+                    {
+                        lowerer.invariant(
+                            "a routine item's referenced storage differs from its declaration",
+                            span,
+                        );
+                    }
+                    signal
+                }
+                None => static_signal(lowerer.signals, format!("{path}.{name}"), shape, span),
+            };
             lowerer.locals[id].shared = Some(signal);
         }
     }

@@ -56,6 +56,9 @@ pub(super) struct CallTables {
     /// Every module instance scope of the plan, by full path, for a call that
     /// names one (`$printtimescale(top.u1)`).
     pub module_scopes: Arc<HashMap<SmolStr, DigitalScopeId>>,
+    /// The module instance each hierarchical scope argument names, by the
+    /// referring module scope and the parser's symbol.
+    pub scope_references: Arc<HashMap<(DigitalScopeId, SmolStr), DigitalScopeId>>,
     /// `disable` lowering: the names some `disable` targets, the disabled
     /// named blocks around the statement being lowered, and the routine
     /// being lowered.
@@ -72,6 +75,7 @@ pub(super) struct PlanCalls {
     pub observers: Vec<DigitalObserver>,
     pub overrides: Vec<super::super::digital::DigitalOverride>,
     pub module_scopes: Arc<HashMap<SmolStr, DigitalScopeId>>,
+    pub scope_references: Arc<HashMap<(DigitalScopeId, SmolStr), DigitalScopeId>>,
     /// Every name a `disable` of the design targets.
     pub disabled: Arc<std::collections::HashSet<SmolStr>>,
     /// The `disable`s that name a block outside their own, resolved once
@@ -119,6 +123,7 @@ impl PlanCalls {
             override_base: self.overrides.len() as u32,
             stack: scope.cloned().into_iter().collect(),
             module_scopes: Arc::clone(&self.module_scopes),
+            scope_references: Arc::clone(&self.scope_references),
             threads: super::disable::ThreadTables::new(Arc::clone(&self.disabled)),
             ..Default::default()
         }
@@ -406,6 +411,17 @@ impl ProcessLowerer<'_> {
             }
             return DigitalSystemArgument::Empty;
         };
+        let module = self
+            .calls
+            .stack
+            .first()
+            .cloned()
+            .unwrap_or_else(|| scope.clone());
+        let named = (module.id, identifier.name.clone());
+        if let Some(&id) = self.calls.scope_references.get(&named) {
+            // `$dumpvars(0, top.u1)`: resolved during elaboration.
+            return DigitalSystemArgument::Scope(id);
+        }
         if crate::ast::is_reference_symbol(&identifier.name) {
             // IEEE 1364-2005 section 18.1.2 dumps such a signal under the
             // scopes of its own path, which the dump writer does not lay out.
@@ -422,14 +438,6 @@ impl ProcessLowerer<'_> {
             return DigitalSystemArgument::Signal(signal);
         }
         let name = identifier.name.as_str();
-        // The frame's module scope is the bottom of the stack; a block scope
-        // only extends its path.
-        let module = self
-            .calls
-            .stack
-            .first()
-            .cloned()
-            .unwrap_or_else(|| scope.clone());
         // A library binding's module is known by `library.cell`, and its
         // source names the cell. Only a binding's name drops a prefix: a
         // module declared `\a.u ` is named `a.u`, and its child `u` is not it.

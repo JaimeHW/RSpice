@@ -96,7 +96,19 @@ impl Bindings {
     ) -> HashMap<SmolStr, SmolStr> {
         // Directly nested conditionals are transparent; merge into their actual scope.
         let mut members = HashMap::new();
-        let mut names: Vec<_> = module.declared_names().into_iter().collect();
+        // A task or function a generate block declares is a member of the
+        // block's scope too (IEEE 1364-2005 section 12.4): `blk.f(x)` and
+        // `blk.t;` name it from outside, its bare name from inside.
+        let mut names: Vec<_> = module
+            .declared_names()
+            .into_iter()
+            .chain(
+                module
+                    .digital_routines
+                    .iter()
+                    .map(|routine| routine.name.clone()),
+            )
+            .collect();
         names.sort();
         let mut state = self.state.borrow_mut();
         for name in names {

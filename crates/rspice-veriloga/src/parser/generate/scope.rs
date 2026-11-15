@@ -1,7 +1,7 @@
 //! Concrete declarations and lexical substitutions in generated scopes.
 use super::*;
 
-type Shadow = (SmolStr, Option<SmolStr>, Option<i64>, Option<SmolStr>);
+pub(super) type Shadow = (SmolStr, Option<SmolStr>, Option<i64>, Option<SmolStr>);
 
 impl Unroller<'_> {
     pub(super) fn expand_scoped_declarations(&mut self, items: &Module, out: &mut Module) {
@@ -150,7 +150,7 @@ impl Unroller<'_> {
         }
     }
 
-    fn hide(&mut self, names: Vec<SmolStr>) -> Vec<Shadow> {
+    pub(super) fn hide(&mut self, names: Vec<SmolStr>) -> Vec<Shadow> {
         names
             .into_iter()
             .map(|name| {
@@ -162,7 +162,7 @@ impl Unroller<'_> {
             .collect()
     }
 
-    fn restore(&mut self, shadows: Vec<Shadow>) {
+    pub(super) fn restore(&mut self, shadows: Vec<Shadow>) {
         for (name, scoped, index, string) in shadows.into_iter().rev() {
             if let Some(scoped) = scoped {
                 self.scoped_names.insert(name.clone(), scoped);

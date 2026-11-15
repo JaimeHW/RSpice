@@ -266,6 +266,7 @@ pub(super) fn lower(
                 routines: &table,
                 prefix: "",
                 constant: true,
+                local_storage: &HashMap::new(),
             },
         )?);
     }

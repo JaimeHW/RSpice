@@ -61,6 +61,10 @@ pub struct AnalyzedDigital {
     /// 1364-2005 sections 12.5 and 12.6), by the symbol of the declaration
     /// borrowed for each. Lowering binds the symbol to the target's signal.
     pub signal_references: std::collections::BTreeMap<SmolStr, DigitalSignalReference>,
+    /// Module instances this module names hierarchically as a scope argument
+    /// of a system task (IEEE 1364-2005 sections 12.5, 17.4.2 and 18.1.2), by
+    /// the parser's symbol.
+    pub scope_references: std::collections::BTreeMap<SmolStr, DigitalScopeReference>,
     /// Continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
     /// Module path delays (IEEE 1364-2005 section 14), one per source and
@@ -124,6 +128,37 @@ pub struct DigitalSignalReference {
     /// The reference as written, for diagnostics: `u1.q`.
     pub written: SmolStr,
     pub span: Span,
+    /// Set when the target is an item of a task, function or named block.
+    pub local: Option<DigitalLocalReference>,
+}
+
+/// The module instance a hierarchical scope argument names.
+#[derive(Debug, Clone)]
+pub struct DigitalScopeReference {
+    /// The instance's path. Below the compiled root when `absolute`;
+    /// otherwise below the referring scope.
+    pub path: SmolStr,
+    pub absolute: bool,
+    /// The reference as written, for diagnostics: `top.u1`.
+    pub written: SmolStr,
+    pub span: Span,
+}
+
+/// An item of a task, function or named block that a hierarchical reference
+/// names (IEEE 1364-2005 section 12.5). A static routine's items and a named
+/// block's variables have one copy per module instance (sections 10.2.1 and
+/// 9.8.1), which digital lowering allocates once a reference names it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DigitalLocalReference {
+    /// An argument, variable or function result of the static routine
+    /// `routine`, by the item's name in the routine.
+    Routine { routine: SmolStr, item: SmolStr },
+    /// A variable a named block declares, by its declaration's span, in a
+    /// process written in `generate_scope`.
+    Block {
+        generate_scope: Option<SmolStr>,
+        declaration: Span,
+    },
 }
 
 /// A scalar parameter retained exactly outside the analog numeric ABI.
@@ -641,6 +676,9 @@ pub struct ElaboratedDigitalInstance {
     /// The instance's hierarchical signal references, every path below the
     /// compiled root.
     pub signal_references: std::collections::BTreeMap<SmolStr, DigitalSignalReference>,
+    /// The instance's hierarchical scope arguments, every path below the
+    /// compiled root.
+    pub scope_references: std::collections::BTreeMap<SmolStr, DigitalScopeReference>,
     /// The instance's continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
     /// The implicit continuous assignments of this instance's variable output
@@ -932,6 +970,33 @@ impl SemanticAnalyzer {
                             name: reference.name.clone(),
                             written: written.into(),
                             span: reference.span,
+                            local: reference.local.clone(),
+                        },
+                    )
+                })
+                .collect(),
+            scope_references: module
+                .foreign_scopes
+                .iter()
+                .map(|(symbol, path)| {
+                    let written = module.hierarchical_names.get(symbol).map_or_else(
+                        || path.to_string(),
+                        |name| {
+                            let segments = name.segments.iter().map(|s| s.name.as_str());
+                            segments.collect::<Vec<_>>().join(".")
+                        },
+                    );
+                    let span = module
+                        .hierarchical_names
+                        .get(symbol)
+                        .map_or(module.span, |name| name.span);
+                    (
+                        symbol.clone(),
+                        DigitalScopeReference {
+                            path: path.clone(),
+                            absolute: module.reference_context.is_some(),
+                            written: written.into(),
+                            span,
                         },
                     )
                 })

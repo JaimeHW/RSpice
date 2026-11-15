@@ -5,6 +5,7 @@ use super::elaboration::parameters::{ParameterDependencies, SourceParameters};
 pub(super) mod context;
 mod digital;
 mod functions;
+mod local;
 mod physical;
 mod unnamed;
 use super::*;
@@ -284,8 +285,8 @@ impl Resolver {
             ));
         }
         if let Some(branch) = &reference.source.branch {
-            let (target, scope) = self.target_scope(owner, &reference)?;
-            if !scope.is_empty() {
+            let (target, scope, local) = self.target_scope(owner, &reference)?;
+            if !scope.is_empty() || local.is_some() {
                 return Err(error(
                     "branch() must select a module instance",
                     reference.source.span,
@@ -293,14 +294,36 @@ impl Resolver {
             }
             self.import_unnamed(owner, target, branch, symbol, reference.source.span)?;
         } else {
-            let (target, name) = self.target(owner, &reference)?;
-            self.import_symbol(
-                owner,
-                target,
-                &name,
-                Some(symbol.clone()),
-                reference.source.span,
-            )?;
+            let (target, scope, local) = self.target_scope(owner, &reference)?;
+            if let Some(local) = local {
+                self.import_local(owner, target, &scope, &local, &reference, symbol)?;
+            } else {
+                let name = self.terminal(target, &scope, &reference)?;
+                let terminal = reference.source.segments.last().expect("parsed terminal");
+                if let Some(&ordinal) = self.frames[target].instances.get(&name)
+                    && terminal.index.is_none()
+                {
+                    // A module instance named whole, as a scope argument
+                    // takes one (`$dumpvars(0, top.u1)`, IEEE 1364-2005
+                    // sections 17.4.2 and 18.1.2).
+                    let child = self.child(target, ordinal, reference.source.span)?;
+                    let path = self.reference_path(owner, child);
+                    self.frames[owner]
+                        .source
+                        .foreign_scopes
+                        .insert(symbol.clone(), path);
+                    self.active.remove(&key);
+                    self.resolved.insert(key);
+                    return Ok(());
+                }
+                self.import_symbol(
+                    owner,
+                    target,
+                    &name,
+                    Some(symbol.clone()),
+                    reference.source.span,
+                )?;
+            }
         }
         let dependencies = SourceParameters::new(&self.frames[owner].source)
             .dependencies(reference.index_dependencies.iter())?;
@@ -496,7 +519,23 @@ impl Resolver {
         owner: usize,
         reference: &ScopedHierarchicalReference,
     ) -> CompileResult<(usize, SmolStr)> {
-        let (frame, scope) = self.target_scope(owner, reference)?;
+        let (frame, scope, local) = self.target_scope(owner, reference)?;
+        if local.is_some() {
+            return Err(error(
+                "a task, function or named block has no continuous-domain items",
+                reference.source.span,
+            ));
+        }
+        Ok((frame, self.terminal(frame, &scope, reference)?))
+    }
+
+    /// The name, in `scope` of `frame`, of the declaration `reference` ends at.
+    fn terminal(
+        &self,
+        frame: usize,
+        scope: &[HierarchicalScopeKey],
+        reference: &ScopedHierarchicalReference,
+    ) -> CompileResult<SmolStr> {
         let span = reference.source.span;
         let terminal = &reference
             .source
@@ -510,22 +549,47 @@ impl Resolver {
                 .digital_routines
                 .iter()
                 .any(|routine| routine.name == *terminal);
-        let name = self.frames[frame]
-            .member(&scope, terminal)
+        self.frames[frame]
+            .member(scope, terminal)
             .or_else(|| routine.then(|| terminal.clone()))
-            .ok_or_else(|| self.undeclared_terminal(frame, &scope, terminal, span))?;
-        Ok((frame, name))
+            .ok_or_else(|| self.undeclared_terminal(frame, scope, terminal, span))
     }
 
+    /// The occurrence and the generate scope in it that `reference`'s scopes
+    /// lead to, and the task, function or named block they end inside, if
+    /// any (IEEE 1364-2005 section 12.5).
     fn target_scope(
         &mut self,
         owner: usize,
         reference: &ScopedHierarchicalReference,
-    ) -> CompileResult<(usize, Vec<HierarchicalScopeKey>)> {
+    ) -> CompileResult<(usize, Vec<HierarchicalScopeKey>, Option<local::LocalScope>)> {
         let span = reference.source.span;
         let (mut frame, mut scope, consumed) = self.start_scope(owner, reference)?;
+        let mut local: Option<local::LocalScope> = None;
         for (position, key) in reference.scopes.iter().enumerate().skip(consumed) {
+            if let Some(entered) = &mut local {
+                // Only a named block nested in the block entered last
+                // continues the path; a routine's own named blocks are not
+                // followed.
+                if self.enter_local(frame, entered, key) {
+                    continue;
+                }
+                let last = position + 1 == reference.scopes.len();
+                return Err(self.unentered_scope(frame, &scope, key, last, reference));
+            }
             if let Some(member) = self.frames[frame].member(&scope, &key.name) {
+                if self.frames[frame]
+                    .source
+                    .digital_routines
+                    .iter()
+                    .any(|routine| routine.name == member)
+                    && key.index.is_none()
+                {
+                    // A task or function a generate block declares, by the
+                    // name expansion qualified it with.
+                    local = Some(local::LocalScope::Routine(member));
+                    continue;
+                }
                 let instance = self.frames[frame]
                     .instances
                     .get(&member)
@@ -545,6 +609,16 @@ impl Resolver {
                 frame = self.child(frame, instance, span)?;
                 scope.clear();
             } else {
+                let full = [scope.as_slice(), std::slice::from_ref(key)].concat();
+                if !self.frames[frame]
+                    .source
+                    .hierarchical_scopes
+                    .contains_key(&full)
+                    && let Some(entered) = self.local_scope(frame, &scope, key)
+                {
+                    local = Some(entered);
+                    continue;
+                }
                 scope.push(key.clone());
                 let allowed = self.frames[frame]
                     .source
@@ -561,7 +635,7 @@ impl Resolver {
                 }
             }
         }
-        Ok((frame, scope))
+        Ok((frame, scope, local))
     }
 
     fn child(&mut self, parent: usize, ordinal: usize, span: Span) -> CompileResult<usize> {

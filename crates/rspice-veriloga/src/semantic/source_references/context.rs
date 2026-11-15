@@ -87,6 +87,7 @@ impl Resolver {
                 .find(|scope| {
                     current.member(scope, &first.name).is_some()
                         || current.has_scope(scope, &first.name)
+                        || self.local_scope(frame, scope, first).is_some()
                 })
             {
                 return Ok((frame, scope, 0));
@@ -381,7 +382,7 @@ impl Resolver {
 }
 
 /// Where `scope` is, for a message: the module, or a generate block below it.
-fn scope_place(source: &Module, scope: &[HierarchicalScopeKey]) -> String {
+pub(super) fn scope_place(source: &Module, scope: &[HierarchicalScopeKey]) -> String {
     if scope.is_empty() {
         return format!("module `{}`", source.name);
     }
@@ -456,7 +457,10 @@ fn construct_blocks(construct: &GenerateConstruct) -> Vec<&GenerateBlock> {
 
 /// The named blocks a body opens directly, through unnamed blocks and control
 /// statements but not into another named block, which is a scope of its own.
-fn outer_named_blocks<'a>(statement: &'a DigitalStatement, blocks: &mut Vec<&'a DigitalBlock>) {
+pub(super) fn outer_named_blocks<'a>(
+    statement: &'a DigitalStatement,
+    blocks: &mut Vec<&'a DigitalBlock>,
+) {
     match statement {
         DigitalStatement::Block(block) | DigitalStatement::Fork(block) => {
             if block.name.is_some() {

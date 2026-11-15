@@ -109,8 +109,9 @@ use super::diagnostic::{CompilerPhase, IrDiagnostic, SourceSpanRef};
 use super::digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalAnalogProbe, DigitalDriver, DigitalDriverId,
     DigitalEdge, DigitalProcessKind, DigitalRealResolution, DigitalSchedulingRegion,
-    DigitalScopeKind, DigitalSensitivityOrigin, DigitalSensitivityTerm, DigitalSignal,
-    DigitalSignalKind, DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
+    DigitalScopeId, DigitalScopeKind, DigitalSensitivityOrigin, DigitalSensitivityTerm,
+    DigitalSignal, DigitalSignalKind, DigitalStaticSensitivity, DigitalWriteSelect,
+    DigitalWriteTarget,
 };
 use super::digital_value::{
     ArithmeticOp, BitwiseOp, DigitalCaseMatch, FourStateValue, LogicalOp, RealArithmeticOp,
@@ -599,7 +600,13 @@ fn lower_with_analog_variables(
         }
         frame_signal_ids.push(ids);
     }
-    references::bind(digital, &mut root_signal_ids, &mut frame_signal_ids)?;
+    let locals = references::bind(
+        digital,
+        &mut root_signal_ids,
+        &mut frame_signal_ids,
+        &mut signals,
+        &mut arrays,
+    )?;
     // Net types other than `wire` (IEEE 1364-2005 section 4.6), by the signal
     // each declaration lowered to; `uwire`s are checked once drivers exist.
     let mut typed_nets = Vec::new();
@@ -742,22 +749,27 @@ fn lower_with_analog_variables(
     // unmodified against its own scope, which is what keeps two instances of
     // one module two separately addressable things rather than one body
     // rewritten twice.
+    // A named block's variable that a hierarchical reference gave storage
+    // is resolved by that storage's name, which no authored name can spell.
     let module_scope: HashMap<&str, DigitalSignalId> = digital
         .signals
         .iter()
         .zip(&root_signal_ids)
         .map(|(analyzed, id)| (analyzed.name.as_str(), *id))
+        .chain(locals.block_names(0))
         .collect();
     let frame_scopes: Vec<HashMap<&str, DigitalSignalId>> = digital
         .instances
         .iter()
         .zip(&frame_signal_ids)
-        .map(|(instance, ids)| {
+        .enumerate()
+        .map(|(frame, (instance, ids))| {
             instance
                 .signals
                 .iter()
                 .zip(ids)
                 .map(|(signal, id)| (signal.declared.name.as_str(), *id))
+                .chain(locals.block_names(frame + 1))
                 .collect()
         })
         .collect();
@@ -930,6 +942,13 @@ fn lower_with_analog_variables(
             )
         })
         .collect();
+    calls.scope_references = std::sync::Arc::new(scope_references(
+        digital,
+        root_name,
+        &root_scope,
+        &frame_scope_frames,
+        &calls.module_scopes,
+    ));
     // Tasks and functions, numbered per scope before any body is lowered so
     // that a body may call any routine of its scope, itself included.
     let mut routine_count = 0;
@@ -973,13 +992,14 @@ fn lower_with_analog_variables(
                 routines: &root_routines,
                 prefix: "",
                 constant: false,
+                local_storage: locals.routine_items(0),
             },
         ) {
             Ok(lowered) => plan_routines.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
         }
     }
-    for process in &digital.processes {
+    for process in locals.processes(0, &digital.processes).iter() {
         match lower_process(
             process,
             allocate(),
@@ -1019,13 +1039,14 @@ fn lower_with_analog_variables(
             Err(mut errors) => diagnostics.append(&mut errors),
         }
     }
-    for ((((instance, scope), constants), frame_scope), frame_routines) in digital
+    for (frame, ((((instance, scope), constants), frame_scope), frame_routines)) in digital
         .instances
         .iter()
         .zip(&frame_scopes)
         .zip(&instance_constants)
         .zip(&frame_scope_frames)
         .zip(&instance_routines)
+        .enumerate()
     {
         let frame_array_names: HashSet<_> = instance
             .signals
@@ -1066,13 +1087,14 @@ fn lower_with_analog_variables(
                     routines: frame_routines,
                     prefix: &prefix,
                     constant: false,
+                    local_storage: locals.routine_items(frame + 1),
                 },
             ) {
                 Ok(lowered) => plan_routines.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
             }
         }
-        for process in &instance.processes {
+        for process in locals.processes(frame + 1, &instance.processes).iter() {
             match lower_process(
                 process,
                 allocate(),
@@ -6516,4 +6538,37 @@ fn collect_expression_reads(expression: &Expression, reads: &mut BTreeSet<String
             _ => {}
         }
     }
+}
+
+/// The module instance scope each hierarchical scope argument of the root
+/// and its instance frames names. The paths are below the compiled root; an
+/// empty path names the root itself.
+fn scope_references(
+    digital: &AnalyzedDigital,
+    root_name: &str,
+    root_scope: &ScopeFrame,
+    frames: &[ScopeFrame],
+    module_scopes: &HashMap<SmolStr, DigitalScopeId>,
+) -> HashMap<(DigitalScopeId, SmolStr), DigitalScopeId> {
+    let full = |path: &SmolStr| -> SmolStr {
+        if path.is_empty() {
+            root_name.into()
+        } else {
+            format!("{root_name}.{path}").into()
+        }
+    };
+    std::iter::once((root_scope, &digital.scope_references))
+        .chain(
+            frames
+                .iter()
+                .zip(&digital.instances)
+                .map(|(frame, instance)| (frame, &instance.scope_references)),
+        )
+        .flat_map(|(frame, references)| {
+            references.iter().filter_map(|(symbol, reference)| {
+                let target = module_scopes.get(&full(&reference.path)).copied()?;
+                Some(((frame.id, symbol.clone()), target))
+            })
+        })
+        .collect()
 }

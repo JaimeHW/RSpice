@@ -421,6 +421,11 @@ pub struct Module {
     /// Discrete-domain signals of another scope this module names
     /// hierarchically, under the symbol of the declaration borrowed for them.
     pub(crate) foreign_digital: std::collections::BTreeMap<SmolStr, ForeignDigitalReference>,
+    /// Module instances this module names hierarchically as a scope argument
+    /// (`$dumpvars(0, top.u1)`): the symbol, and the instance's path, which
+    /// is root-relative in a selected context and otherwise relative to the
+    /// caller.
+    pub(crate) foreign_scopes: std::collections::BTreeMap<SmolStr, SmolStr>,
     pub(crate) hierarchical_parameter_values: std::collections::HashSet<SmolStr>,
     pub(crate) hierarchical_parameter_given: std::collections::HashSet<SmolStr>,
     /// The library the source declaring this module was read into, when a
@@ -566,6 +571,7 @@ impl Module {
             unspecialized_parameters: None,
             foreign_physical: Default::default(),
             foreign_digital: Default::default(),
+            foreign_scopes: Default::default(),
             hierarchical_parameter_values: Default::default(),
             hierarchical_parameter_given: Default::default(),
             library: None,
@@ -655,6 +661,9 @@ pub(crate) struct ForeignDigitalReference {
     /// The target's name in its own scope.
     pub name: SmolStr,
     pub span: Span,
+    /// The item of a task, function or named block the reference names,
+    /// which takes its storage only once a reference names it.
+    pub local: Option<crate::semantic::DigitalLocalReference>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

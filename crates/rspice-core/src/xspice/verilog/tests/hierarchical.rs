@@ -112,41 +112,85 @@ fn a_scope_named_through_an_escaped_module_name_is_the_child() {
 }
 
 #[test]
-fn a_reference_into_a_named_block_names_the_block() {
+fn a_reference_into_a_named_block_reaches_only_what_the_block_declares() {
     // Icarus rejects the name the block does not declare (`Could not find
-    // variable ``m.b.y'' in ``m''`) and runs the one it does (`x=1`), which
-    // RSpice refuses by name.
-    let run = |source: &str| {
-        super::run_digital_testbench(
-            &[("tb.v".into(), source.into())],
-            &super::HdlTestbenchOptions::default(),
-        )
-        .expect_err("a reference into a named block does not run")
-        .to_string()
-    };
-    let undeclared = run("module m;
+    // variable ``m.b.y'' in ``m''`) and runs the one it does.
+    let undeclared = super::run_digital_testbench(
+        &[(
+            "tb.v".into(),
+            "module m;
   initial begin : b
     reg x;
     x = 0;
   end
   initial #1 m.b.y = 1;
 endmodule
-");
+"
+            .into(),
+        )],
+        &super::HdlTestbenchOptions::default(),
+    )
+    .expect_err("an undeclared name in a named block does not run")
+    .to_string();
     assert!(
         undeclared.contains("`y` is not declared in named block `b` of module `m`"),
         "{undeclared}"
     );
     assert!(!undeclared.contains("Unsupported"), "{undeclared}");
-    let declared = run("module m;
+    let report = bench(
+        "module m;
   initial begin : b
     reg x;
     x = 0;
   end
   initial #1 begin m.b.x = 1; $display(\"x=%b\", m.b.x); end
 endmodule
-");
-    assert!(
-        declared.contains("reaches into named block `b` of module `m`"),
-        "{declared}"
+",
+        &[],
+    );
+    assert_eq!(stdout(&report), "x=1\n");
+}
+
+/// A task's own variable read from another module, a generate block's
+/// functions called by their block's name, a named block's variable read
+/// through the module's name, and an instance named as a scope argument.
+#[test]
+fn references_reach_task_items_generate_routines_and_instance_scopes() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module leaf;
+  reg [3:0] hits;
+  task bump;
+    integer calls;
+    begin calls = calls + 1; hits = hits + 1; end
+  endtask
+  initial begin bump.calls = 0; hits = 0; end
+endmodule
+module top;
+  genvar i;
+  generate for (i = 0; i < 2; i = i + 1) begin : g
+    function [7:0] scaled(input [7:0] v); scaled = v * (i + 2); endfunction
+    reg [7:0] r;
+  end endgenerate
+  leaf u();
+  initial begin : outer
+    reg [7:0] seen;
+    #1 u.bump; u.bump; seen = 8'd7;
+    $display("%0t calls=%0d hits=%0d", $time, u.bump.calls, u.hits);
+    $display("%0t g0=%0d g1=%0d", $time, g[0].scaled(8'd5), g[1].scaled(8'd5));
+    g[1].r = top.outer.seen + 1;
+    $display("%0t r=%0d", $time, g[1].r);
+    $printtimescale(top.u);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "1 calls=2 hits=2\n\
+         1 g0=10 g1=15\n\
+         1 r=8\n\
+         Time scale of (top.u) is 1ns / 1ns\n"
     );
 }

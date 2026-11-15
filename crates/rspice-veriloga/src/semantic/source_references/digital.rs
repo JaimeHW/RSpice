@@ -200,6 +200,7 @@ impl Resolver {
                 path,
                 name: name.clone(),
                 span,
+                local: None,
             },
         );
         self.frames[owner].physical = None;

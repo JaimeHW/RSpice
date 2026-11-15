@@ -744,6 +744,23 @@ impl DigitalElaborator<'_> {
                     (symbol.clone(), reference)
                 })
                 .collect(),
+            scope_references: child
+                .digital
+                .scope_references
+                .iter()
+                .map(|(symbol, reference)| {
+                    let mut reference = reference.clone();
+                    if !reference.absolute {
+                        reference.path = match (path.is_empty(), reference.path.is_empty()) {
+                            (true, _) => reference.path.clone(),
+                            (_, true) => path.into(),
+                            _ => format!("{path}.{}", reference.path).into(),
+                        };
+                        reference.absolute = true;
+                    }
+                    (symbol.clone(), reference)
+                })
+                .collect(),
             continuous_assigns: child.digital.continuous_assigns.clone(),
             port_drivers,
             bit_aliases,

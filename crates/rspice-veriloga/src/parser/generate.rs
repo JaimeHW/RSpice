@@ -508,6 +508,7 @@ fn absorb(module: &mut Module, expanded: Module) {
         .extend(expanded.continuous_assigns);
     module.gate_arrays.extend(expanded.gate_arrays);
     module.digital_processes.extend(expanded.digital_processes);
+    module.digital_routines.extend(expanded.digital_routines);
     for (slot, generated) in [
         (&mut module.analog_block, expanded.analog_block),
         (&mut module.analog_initial, expanded.analog_initial),
@@ -904,6 +905,54 @@ impl Unroller<'_> {
             self.substitute_statement(&mut copy.body);
             out.digital_processes.push(copy);
         }
+
+        // A task or function a generate block declares belongs to the block,
+        // as its nets do: it is copied out under the block's qualified name,
+        // with the block's names and the loop's genvar bound in its body.
+        for routine in &items.digital_routines {
+            let mut copy = routine.clone();
+            self.rename(&mut copy.name);
+            self.substitute_routine(&mut copy);
+            out.digital_routines.push(copy);
+        }
+    }
+
+    /// Bind the enclosing block's names in a routine copied out of it. The
+    /// routine's own arguments and variables shadow them; its name does not,
+    /// because a function's result variable is the function's own name.
+    fn substitute_routine(&mut self, routine: &mut crate::ast::DigitalRoutine) {
+        if let crate::ast::DigitalRoutineKind::Function(ty) = &mut routine.kind {
+            self.substitute_range(&mut ty.range);
+        }
+        for argument in &mut routine.arguments {
+            self.substitute_range(&mut argument.ty.range);
+        }
+        let locals: Vec<SmolStr> =
+            routine
+                .arguments
+                .iter()
+                .map(|argument| argument.name.clone())
+                .chain(
+                    routine.variables.iter().flat_map(|declaration| {
+                        declaration.items.iter().map(|item| item.name.clone())
+                    }),
+                )
+                .chain(
+                    routine.digital_variables.iter().flat_map(|declaration| {
+                        declaration.items.iter().map(|item| item.name.clone())
+                    }),
+                )
+                .collect();
+        let shadows = self.hide(locals);
+        for declaration in &mut routine.variables {
+            self.substitute_variables(declaration, false);
+        }
+        for declaration in &mut routine.digital_variables {
+            self.substitute_range(&mut declaration.range);
+            self.substitute_digital_items(&mut declaration.items, false);
+        }
+        self.substitute_statement(&mut routine.body);
+        self.restore(shadows);
     }
 
     fn constant_environment(&self, span: Span) -> crate::semantic::DigitalConstants {
@@ -1323,6 +1372,7 @@ impl Unroller<'_> {
                 }
             }
             DigitalStatement::TaskEnable(enable) => {
+                self.rename(&mut enable.name);
                 for argument in &mut enable.args {
                     self.substitute(argument);
                 }
