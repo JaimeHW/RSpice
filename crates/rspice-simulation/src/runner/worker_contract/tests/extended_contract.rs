@@ -1031,6 +1031,7 @@ fn worker_request_runs_dc_op() {
         environment: None,
         stream_transient_samples: false,
         execution_limits: rspice_core::ResourceLimits::default(),
+        transient_states: Default::default(),
     };
 
     let response = worker_response_from_request(request);

@@ -470,11 +470,21 @@ pub fn run_worker_request_value(
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 fn run_decoded_worker_request(
-    request: WorkerRequest,
+    mut request: WorkerRequest,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    thread_local! {
+        /// The states a `.TRAN` task captured for the state cards bound to
+        /// it, kept for the tasks after it: the worker session's runner store.
+        static TRANSIENT_STATES: Arc<crate::engine_services::TransientStateStore> =
+            Arc::default();
+    }
     let id = request.id;
     ACTIVE_WORKER_PROGRESS_ID.with(|active| active.set(Some(id)));
     let stream_transient_samples = request.stream_transient_samples;
+    let transient_states = crate::engine_services::TransientStateHandoff::new(
+        TRANSIENT_STATES.with(Arc::clone),
+        std::mem::take(&mut request.transient_states),
+    );
     let (request, input) = request.into_runner_parts();
     install_worker_engine_logger();
     let verbose = super::super::request_asked_for_verbose(&request);
@@ -500,6 +510,7 @@ fn run_decoded_worker_request(
                         .sealed_by(emit_worker_engine_log_seal),
                 ),
                 backends: Some(backends.clone()),
+                transient_states: Some(transient_states),
                 ..Default::default()
             },
         ),

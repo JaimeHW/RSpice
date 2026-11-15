@@ -127,6 +127,12 @@ pub(crate) struct WorkerRequest {
     pub(crate) environment: Option<super::AnalysisExecutionEnvironment>,
     #[serde(default)]
     pub(crate) stream_transient_samples: bool,
+    /// The task's part in a transient's state hand-off. The worker keeps the
+    /// states a `.TRAN` task captured for the cards bound to it, so a card's
+    /// task sent to the same worker linearizes around its transient's state
+    /// instead of running that transient again, as a desktop runner does.
+    #[serde(default)]
+    pub(crate) transient_states: crate::engine_services::TransientStateRole,
 }
 
 /// Browser-worker request split into compact metadata and transferable
@@ -400,7 +406,17 @@ impl WorkerRequest {
             environment: input.environment.clone(),
             stream_transient_samples: input.stream_transient_samples,
             execution_limits: input.execution_limits,
+            transient_states: Default::default(),
         })
+    }
+
+    /// This request playing `role` in its run's transient state hand-off.
+    pub(crate) fn with_transient_states(
+        mut self,
+        role: crate::engine_services::TransientStateRole,
+    ) -> Self {
+        self.transient_states = role;
+        self
     }
 
     #[cfg(any(feature = "browser-worker", test))]

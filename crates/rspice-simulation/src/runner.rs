@@ -553,15 +553,16 @@ impl SimulationRunner {
         // The worker executes in its own wasm instance, so a queue this side
         // of the boundary is not something its run can write: the worker-side
         // run posts each line across the contract and the UI handler pushes it
-        // onto this runner's queue. A captured state does not cross it either,
-        // so each state card there runs its own transient.
+        // onto this runner's queue. A captured state stays on the worker's
+        // side too: the task's role crosses with its request, and the worker
+        // keeps the states a transient captured for the next task it runs.
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = transient_states;
             wasm_worker::start_worker_request(
                 &mut self.worker_handle,
                 request,
                 input,
+                transient_states,
                 wasm_worker::WorkerRequestChannels {
                     progress,
                     abort_flag,

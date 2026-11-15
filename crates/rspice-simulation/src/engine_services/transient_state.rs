@@ -31,7 +31,8 @@ use crate::execution::BoundStateReader;
 /// States a `.TRAN` task's run captured for the state cards bound to it,
 /// waiting for their tasks.
 ///
-/// One per runner. A study runs its tasks one after another on one runner,
+/// One per runner, and one per browser worker, which keeps it for every task
+/// it runs. A study runs its tasks one after another on one runner,
 /// each transient before the cards that depend on it, so a card's task finds
 /// the state its transient captured for it here, and takes it. A state is
 /// read only by a task of the prepared run whose transient captured it, and
@@ -55,8 +56,9 @@ impl TransientStateStore {
 
 /// The part a task plays in the hand-off: the prepared run it belongs to,
 /// the task itself, the transient whose captured state it reads, and the
-/// tasks it captures states for.
-#[derive(Debug, Clone, Default)]
+/// tasks it captures states for. A browser run carries it across to the
+/// worker, whose store is the worker session's.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TransientStateRole {
     run: Option<ContentDigest>,
     task: Option<AnalysisInstanceId>,
@@ -88,7 +90,6 @@ pub(crate) struct TransientStateHandoff {
 }
 
 impl TransientStateHandoff {
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) const fn new(store: Arc<TransientStateStore>, role: TransientStateRole) -> Self {
         Self { store, role }
     }

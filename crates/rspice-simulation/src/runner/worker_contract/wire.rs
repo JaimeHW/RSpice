@@ -52,9 +52,11 @@ pub fn worker_wire_request(
     id: u64,
     dispatch: ResolvedTaskDispatch,
 ) -> Result<WorkerWireRequest, SimulationError> {
+    let transient_states = dispatch.transient_state_role();
     let (request, input) = crate::runner::prepared_request(dispatch, false);
     let limits = input.execution_limits;
-    let request = WorkerRequest::from_runner_parts(id, &request, &input)?;
+    let request = WorkerRequest::from_runner_parts(id, &request, &input)?
+        .with_transient_states(transient_states);
     let transport =
         WorkerRequestTransport::from_request(request).map_err(SimulationError::InvalidConfig)?;
     let metadata = serde_json::to_string(&transport.request).map_err(|error| {

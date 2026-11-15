@@ -30,7 +30,9 @@ pub struct AnalysisExecutionEnvironment {
 ///     compiled under when that is not `typ`.
 /// 48: a transient names the Monte Carlo trial or `.STEP` point it solves and
 ///     the checkpoint time it resumes from.
-pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 48;
+/// 49: a task names its part in its run's transient state hand-off, so a card
+///     bound to a `.TRAN` task reads the state that task captured in the worker.
+pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 49;
 
 /// Browser response protocol revisions.
 /// 18: transient-source convergence evidence survives result transport.

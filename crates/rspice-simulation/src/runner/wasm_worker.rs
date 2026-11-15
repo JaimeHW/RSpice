@@ -346,6 +346,7 @@ mod browser {
         handle: &mut WorkerHandle,
         request: SimulationRequest,
         input: NetlistInput,
+        transient_states: crate::engine_services::TransientStateRole,
         channels: WorkerRequestChannels,
     ) -> Result<(), SimulationError> {
         let WorkerRequestChannels {
@@ -366,7 +367,8 @@ mod browser {
         mark_worker_started(&progress);
 
         let id = handle.allocate_request_id();
-        let worker_request = WorkerRequest::from_runner_parts(id, &request, &input)?;
+        let worker_request = WorkerRequest::from_runner_parts(id, &request, &input)?
+            .with_transient_states(transient_states);
         let message = worker_message(worker_request)?;
         {
             let mut state = handle.state.borrow_mut();

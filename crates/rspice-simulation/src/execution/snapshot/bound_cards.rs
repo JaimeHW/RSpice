@@ -100,7 +100,7 @@ pub(crate) fn attach_bound_observation_cards(
 
 /// A small-signal task that reads its state from the run of the transient
 /// it is bound to, at its card's one time.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct BoundStateReader {
     pub(crate) reader: rspice_vocabulary::product::AnalysisInstanceId,
     pub(crate) time_s: f64,
