@@ -2,11 +2,13 @@
 //!
 //! A complete segment opens from the superblock's `END` pointer alone: `END` carries a copy of
 //! every index entry, so no index frame is read however long the run. Without a valid `END`, the
-//! reader walks back from the last durable index the superblock names, then scans
-//! forward frame by frame, accepting a frame while its magic, length and CRC check out and it
-//! continues its stream (the next chunk index and row, the next index in the chain). A provisional
-//! frame is accepted as the last data; nothing real may follow it. What a crash leaves readable is
-//! therefore always a prefix of the rows written.
+//! reader walks back from the last durable index the superblock names, checks every frame that
+//! chain names whole against its CRC (writes before `END` reach the device in no order, so an
+//! index can outlive the chunks it names), then scans forward frame by frame, accepting a frame
+//! while its magic, length and CRC check out and it continues its stream (the next chunk index and
+//! row, the next index in the chain). A provisional frame is accepted as the last data; nothing
+//! real may follow it. What a crash leaves readable is therefore always a prefix of the rows
+//! written.
 
 use crate::codec::{self, Codec};
 use crate::digest::{Digest, LogicalDigest};
@@ -130,6 +132,27 @@ impl Catalogue {
             frames.push(summary);
         }
         fits
+    }
+
+    /// Drop every frame at `offset` or after it: what is left is the prefix of the stream before
+    /// that point.
+    fn truncate_at(&mut self, offset: u64) {
+        self.chunks.retain(|chunk| chunk.offset < offset);
+        self.rows = self.chunks.last().map_or(0, ChunkRef::end_row);
+        let rows = self.rows;
+        for frames in &mut self.summaries {
+            frames.retain(|summary| {
+                summary.offset < offset && summary.first_row + summary.rows <= rows
+            });
+        }
+        while self.summaries.last().is_some_and(Vec::is_empty) {
+            self.summaries.pop();
+        }
+        for (frames, count) in self.events.iter_mut().zip(&mut self.event_counts) {
+            frames.retain(|frame| frame.offset < offset);
+            *count = frames.iter().map(|frame| u64::from(frame.count)).sum();
+        }
+        self.last_index = self.last_index.filter(|&index| index < offset);
     }
 }
 
@@ -503,6 +526,11 @@ impl<I: SegmentIo> SegmentReader<I> {
     }
 
     /// Rebuild what a crash left: the durable index chain, then a forward scan.
+    ///
+    /// Writes before `END` reach the device in no particular order, so after a power loss an index
+    /// can name frames that never did. Every frame the chain names is read whole and checked
+    /// against its CRC here, before any row is served from it; the first that fails ends the
+    /// readable prefix, and nothing after it is scanned.
     fn recover(&mut self, durable_index: u64, body: u64) {
         let (mut catalogue, mut at) = (Catalogue::default(), body);
         if durable_index >= body
@@ -510,6 +538,12 @@ impl<I: SegmentIo> SegmentReader<I> {
         {
             catalogue = chain;
             at = after;
+            if let Some(unsound) = self.first_unsound_frame(&catalogue) {
+                catalogue.truncate_at(unsound);
+                self.catalogue = catalogue;
+                self.state = SegmentState::Recovered;
+                return;
+            }
         }
         let end = self.scan(&mut catalogue, at);
         self.catalogue = catalogue;
@@ -520,6 +554,66 @@ impl<I: SegmentIo> SegmentReader<I> {
             },
             None => SegmentState::Recovered,
         };
+    }
+
+    /// The offset of the first frame `catalogue` names that is not, whole and checked, the frame
+    /// its index entry describes; `None` when every one is.
+    fn first_unsound_frame(&self, catalogue: &Catalogue) -> Option<u64> {
+        let mut named: Vec<(u64, FrameKind, u64, u64)> = Vec::new();
+        named.extend(catalogue.chunks.iter().map(|chunk| {
+            (
+                chunk.offset,
+                FrameKind::Chunk,
+                chunk.first_row,
+                u64::from(chunk.rows),
+            )
+        }));
+        for summary in catalogue.summaries.iter().flatten() {
+            named.push((
+                summary.offset,
+                FrameKind::Summary,
+                summary.first_row,
+                summary.rows,
+            ));
+        }
+        for frame in catalogue.events.iter().flatten() {
+            named.push((
+                frame.offset,
+                FrameKind::Events,
+                frame.first,
+                u64::from(frame.count),
+            ));
+        }
+        named.sort_unstable_by_key(|&(offset, ..)| offset);
+        named.into_iter().find_map(|(offset, kind, first, count)| {
+            let sound = self.read_frame(offset).is_ok_and(|(header, payload)| {
+                header.kind == kind
+                    && !header.partial()
+                    && Self::frame_covers(kind, &payload, first, count)
+            });
+            (!sound).then_some(offset)
+        })
+    }
+
+    /// Whether a checked frame's own header covers `first` and `count` (rows, or changes).
+    fn frame_covers(kind: FrameKind, payload: &[u8], first: u64, count: u64) -> bool {
+        let u32_at = |at: usize| {
+            payload
+                .get(at..at + 4)
+                .map(|b| u64::from(u32::from_le_bytes(b.try_into().unwrap_or_default())))
+        };
+        let u64_at = |at: usize| {
+            payload
+                .get(at..at + 8)
+                .map(|b| u64::from_le_bytes(b.try_into().unwrap_or_default()))
+        };
+        let (at_first, at_count) = match kind {
+            FrameKind::Chunk => (u64_at(8), u32_at(16)),
+            FrameKind::Summary => (u64_at(16), u64_at(24)),
+            FrameKind::Events => (u64_at(8), u32_at(16)),
+            _ => return false,
+        };
+        at_first == Some(first) && at_count == Some(count)
     }
 
     /// Accept frames from `at` while they check out and continue their streams.

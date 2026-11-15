@@ -14,8 +14,8 @@
 //! real tail, so the final bytes do not depend on when, or whether, flushes happened. A flush is a
 //! plain write handed to the operating system, which survives the process dying; the device is
 //! synced only at `END` and when the writer stops on an error. After a power loss the superblock
-//! may name an index that never reached the disk: the reader finds that by its CRC and scans
-//! forward instead.
+//! may name an index that never reached the disk, or an index that did while frames it names did
+//! not: the reader finds either by its CRC and keeps the prefix before it.
 
 use crate::digest::{Digest, LogicalDigest};
 use crate::events::{EventBuffer, EventChange, EventKind, EventScratch};

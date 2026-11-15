@@ -3,7 +3,7 @@
 use std::io;
 
 use super::support::{meta, mixed_schema, rows, u64_at, walk};
-use crate::format::{FrameKind, POINTERS_AT};
+use crate::format::{FRAME_HEADER_LEN, FrameKind, POINTERS_AT};
 use crate::{
     MemoryIo, RunStatus, SegmentIo, SegmentReader, SegmentState, SegmentWriter, StopReason,
 };
@@ -245,6 +245,48 @@ fn a_superblock_naming_lost_or_garbage_bytes_opens_as_the_longest_prefix() {
     let at = POINTERS_AT as usize;
     past[at..at + 8].copy_from_slice(&(bytes.len() as u64 + 4096).to_le_bytes());
     assert_eq!(readable_prefix(&past, &x, &values, slots), Some(64 * 70));
+}
+
+#[test]
+fn an_index_naming_a_chunk_that_never_reached_the_disk_opens_as_the_prefix_before_it() {
+    let schema = mixed_schema();
+    let slots = schema.slots();
+    let (x, values) = rows(64 * 70, slots, 9);
+    let mut writer = SegmentWriter::with_chunk_rows(MemoryIo::new(), &schema, &meta(), 64).unwrap();
+    writer.push_rows(&x, &values).unwrap();
+    writer.sync().unwrap();
+    let bytes = writer.io().bytes().to_vec();
+    let frames = walk(&bytes);
+    let index = frames
+        .iter()
+        .find(|frame| frame.kind == FrameKind::Index)
+        .unwrap();
+    assert_eq!(u64_at(&bytes, POINTERS_AT as usize), index.offset);
+    // The superblock and the index it names reached the disk; the eleventh chunk, which the index
+    // names, did not, and its bytes are garbage.
+    let chunk = frames
+        .iter()
+        .filter(|frame| frame.kind == FrameKind::Chunk)
+        .nth(10)
+        .unwrap();
+    assert!(chunk.offset < index.offset);
+    let mut garbage = bytes.clone();
+    let middle = chunk.offset as usize + FRAME_HEADER_LEN + chunk.payload.len() / 2;
+    garbage[middle..middle + 16].fill(0xa5);
+    assert_eq!(readable_prefix(&garbage, &x, &values, slots), Some(10 * 64));
+    let reader = SegmentReader::open(MemoryIo::from_bytes(garbage)).unwrap();
+    assert_eq!(reader.state(), &SegmentState::Recovered);
+    // A chunk the index names that holds the provisional copy an earlier flush left there.
+    let mut stale = bytes.clone();
+    // The flags byte follows the magic and the kind.
+    stale[chunk.offset as usize + 5] |= crate::format::FLAG_PARTIAL;
+    let header: [u8; FRAME_HEADER_LEN] = stale[chunk.offset as usize..][..FRAME_HEADER_LEN]
+        .try_into()
+        .unwrap();
+    let crc = crate::format::frame_crc(&header, &chunk.payload);
+    let crc_at = chunk.offset as usize + FRAME_HEADER_LEN - 4;
+    stale[crc_at..crc_at + 4].copy_from_slice(&crc.to_le_bytes());
+    assert_eq!(readable_prefix(&stale, &x, &values, slots), Some(10 * 64));
 }
 
 #[test]
