@@ -20,14 +20,9 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
                 closed: true,
             }],
             SymbolGraphicTemplate::RectangularIc | SymbolGraphicTemplate::RfNPort => {
-                vec![SymbolShape::Polyline {
-                    points: vec![
-                        Point::new(-half_width, -half_height),
-                        Point::new(half_width, -half_height),
-                        Point::new(half_width, half_height),
-                        Point::new(-half_width, half_height),
-                    ],
-                    closed: true,
+                vec![SymbolShape::Rectangle {
+                    min: Point::new(-half_width, -half_height),
+                    max: Point::new(half_width, half_height),
                 }]
             }
         }

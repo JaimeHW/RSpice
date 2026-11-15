@@ -395,6 +395,14 @@ mod tests {
             "Polygon, 3 points"
         );
         assert_eq!(
+            shape_summary(&SymbolShape::Rectangle {
+                min: Point::origin(),
+                max: Point::new(60, 40),
+            }),
+            "Rectangle 60 \u{00d7} 40"
+        );
+        // A drawing's box comes in as a closed outline and reads as one.
+        assert_eq!(
             shape_summary(&SymbolShape::Polyline {
                 points: vec![
                     Point::origin(),
@@ -404,7 +412,7 @@ mod tests {
                 ],
                 closed: true,
             }),
-            "Rectangle 60 \u{00d7} 40"
+            "Polygon, 4 points"
         );
         assert_eq!(
             shape_summary(&SymbolShape::Text {

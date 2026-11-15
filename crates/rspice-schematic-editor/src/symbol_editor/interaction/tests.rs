@@ -374,6 +374,28 @@ fn press_drag_draws_a_segment_a_rectangle_and_a_circle() {
     }
 }
 
+/// The rectangle tool draws the rectangle kind, named by its least and
+/// greatest corners whichever way the pointer went.
+#[test]
+fn the_rectangle_tool_draws_a_rectangle_whichever_way_it_is_dragged() {
+    let mut document = SymbolDocument::default();
+    let mut session = armed(SymbolTool::Rectangle);
+    drag(
+        &mut session,
+        &mut document,
+        Point::new(30, 20),
+        Point::new(-10, -20),
+    );
+
+    assert_eq!(
+        document.body,
+        vec![SymbolShape::Rectangle {
+            min: Point::new(-10, -20),
+            max: Point::new(30, 20),
+        }]
+    );
+}
+
 /// Each canvas edit names the step Undo and Redo take: drawing a rectangle
 /// is "Add rectangle", dragging it is "Move rectangle".
 #[test]

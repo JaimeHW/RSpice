@@ -332,6 +332,10 @@ pub(super) fn include_symbol_document_bounds(
                     .map(map)
                     .for_each(|point| bounds.include(point));
             }
+            SymbolShape::Rectangle { min, max } => {
+                bounds.include(map(*min));
+                bounds.include(map(*max));
+            }
             SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
                 let center = map(*center);
                 let radius = radius.unsigned_abs().min(i32::MAX as u32) as i32;

@@ -647,6 +647,7 @@ fn shape_kind(shape: &SymbolShape) -> &'static str {
     match shape {
         SymbolShape::Polyline { closed: true, .. } => "polygon",
         SymbolShape::Polyline { .. } => "polyline",
+        SymbolShape::Rectangle { .. } => "rectangle",
         SymbolShape::Circle { .. } => "circle",
         SymbolShape::Arc { .. } | SymbolShape::Curve(_) => "arc",
         SymbolShape::Arrow { .. } => "arrow",
@@ -690,6 +691,17 @@ fn shape_section(
                     }
                     changed = true;
                 }
+            }
+        }
+        SymbolShape::Rectangle { min, max } => {
+            let mut anchor = *min;
+            let moved = coordinate_row(ui, edit, &before, "Position X", &mut anchor.x)
+                | coordinate_row(ui, edit, &before, "Position Y", &mut anchor.y);
+            if moved {
+                let delta = Point::new(anchor.x - min.x, anchor.y - min.y);
+                *min = *min + delta;
+                *max = *max + delta;
+                changed = true;
             }
         }
         SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {

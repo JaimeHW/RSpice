@@ -317,6 +317,13 @@ pub enum SymbolShape {
         points: Vec<Point>,
         closed: bool,
     },
+    /// An axis-aligned box between two opposite corners, `min` never right
+    /// of or below `max`. Its own kind rather than a closed polyline, so an
+    /// edit that drags one corner keeps it a rectangle.
+    Rectangle {
+        min: Point,
+        max: Point,
+    },
     Circle {
         center: Point,
         radius: i32,
@@ -349,7 +356,21 @@ pub enum SymbolShape {
     },
 }
 
+/// A rectangle's outline, clockwise on screen from its top-left corner: the
+/// order every renderer draws it in, so a box reads the same everywhere.
+pub fn rectangle_corners(min: Point, max: Point) -> [Point; 4] {
+    [min, Point::new(max.x, min.y), max, Point::new(min.x, max.y)]
+}
+
 impl SymbolShape {
+    /// The rectangle with `a` and `b` as opposite corners, in either order.
+    pub fn rectangle(a: Point, b: Point) -> Self {
+        SymbolShape::Rectangle {
+            min: Point::new(a.x.min(b.x), a.y.min(b.y)),
+            max: Point::new(a.x.max(b.x), a.y.max(b.y)),
+        }
+    }
+
     pub fn translate(&mut self, delta: Point) {
         self.map_points(delta, Point::new(1, 0), Point::new(0, 1));
     }
@@ -427,6 +448,12 @@ impl SymbolShape {
                 for point in points {
                     *point = transform(*point);
                 }
+            }
+            // A turn or a mirror swaps which corner is least; name them again.
+            SymbolShape::Rectangle { min, max } => {
+                let (a, b) = (transform(*min), transform(*max));
+                *min = Point::new(a.x.min(b.x), a.y.min(b.y));
+                *max = Point::new(a.x.max(b.x), a.y.max(b.y));
             }
             SymbolShape::Circle { center, .. }
             | SymbolShape::Arc { center, .. }
@@ -573,6 +600,61 @@ mod tests {
         };
         assert!((0..360).contains(&start_degrees));
         assert!((0..4).contains(&rotation_quarters));
+    }
+
+    /// A turned or mirrored rectangle is the same box carried over, still
+    /// named by its least and greatest corners.
+    #[test]
+    fn transformed_rectangles_stay_rectangles_with_ordered_corners() {
+        let original = SymbolShape::rectangle(Point::new(30, 20), Point::new(-10, -5));
+        assert_eq!(
+            original,
+            SymbolShape::Rectangle {
+                min: Point::new(-10, -5),
+                max: Point::new(30, 20),
+            }
+        );
+
+        let mut turned = original.clone();
+        turned.rotate_cw();
+        assert_eq!(
+            turned,
+            SymbolShape::Rectangle {
+                min: Point::new(-20, -10),
+                max: Point::new(5, 30),
+            }
+        );
+        let mut mirrored = original.clone();
+        mirrored.mirror_h();
+        assert_eq!(
+            mirrored,
+            SymbolShape::Rectangle {
+                min: Point::new(-30, -5),
+                max: Point::new(10, 20),
+            }
+        );
+        let mut flipped = original.clone();
+        flipped.mirror_v();
+        assert_eq!(
+            flipped,
+            SymbolShape::Rectangle {
+                min: Point::new(-10, -20),
+                max: Point::new(30, 5),
+            }
+        );
+        for _ in 0..3 {
+            turned.rotate_cw();
+        }
+        assert_eq!(turned, original);
+        assert_eq!(
+            rectangle_corners(Point::new(-10, -5), Point::new(30, 20)),
+            [
+                Point::new(-10, -5),
+                Point::new(30, -5),
+                Point::new(30, 20),
+                Point::new(-10, 20),
+            ]
+        );
     }
 
     /// T13: four quarter turns and two horizontal mirrors are the identity on

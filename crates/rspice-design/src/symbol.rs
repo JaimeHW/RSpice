@@ -24,7 +24,7 @@ use rspice_vocabulary::product::ContentDigest;
 
 pub use rspice_design_model::symbol_geometry::{
     SymbolCurve, SymbolShape, SymbolTextAlign, SymbolTextPlacement, SymbolTextSize,
-    symbol_text_bounds,
+    rectangle_corners, symbol_text_bounds,
 };
 
 use crate::library::View;
@@ -928,11 +928,7 @@ impl SymbolDocument {
     /// The document of a generated symbol, pins on the edges it assigns and
     /// lettered as it says.
     pub fn from_generated(generated: GeneratedSymbol) -> Self {
-        let body = generated
-            .artwork_outline()
-            .into_iter()
-            .map(|(points, closed)| SymbolShape::Polyline { points, closed })
-            .collect();
+        let body = generated.body_shapes();
         let name_anchor = generated.name_anchor();
         let value_anchor = generated.value_anchor();
         let body_box = generated.body_bounds();
@@ -1136,6 +1132,15 @@ impl SymbolDocument {
                             point,
                             &format!("polyline {ordinal} point {}", point_index + 1),
                         )?;
+                    }
+                }
+                SymbolShape::Rectangle { min, max } => {
+                    validate_symbol_point(*min, &format!("rectangle {ordinal} corner"))?;
+                    validate_symbol_point(*max, &format!("rectangle {ordinal} corner"))?;
+                    if min.x > max.x || min.y > max.y {
+                        return Err(format!(
+                            "Invalid symbol metadata: rectangle {ordinal} names its corners out of order"
+                        ));
                     }
                 }
                 SymbolShape::Curve(curve) => validate_symbol_curve(curve, ordinal)?,
@@ -1486,6 +1491,10 @@ fn shapes_bounds<'a>(shapes: impl IntoIterator<Item = &'a SymbolShape>) -> Optio
                     ys.push(point.y);
                 }
             }
+            SymbolShape::Rectangle { min, max } => {
+                xs.extend([min.x, max.x]);
+                ys.extend([min.y, max.y]);
+            }
             SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
                 xs.extend([
                     center.x.saturating_sub(*radius),
@@ -1714,6 +1723,28 @@ mod validation_tests {
             Some("retained")
         );
         assert!(!view.modified);
+    }
+
+    #[test]
+    fn a_rectangle_loads_only_with_its_corners_in_order() {
+        let document = |min: Point, max: Point| SymbolDocument {
+            body: vec![SymbolShape::Rectangle { min, max }],
+            ..SymbolDocument::default()
+        };
+
+        assert!(
+            document(Point::new(-20, -10), Point::new(20, 10))
+                .validate()
+                .is_ok()
+        );
+        let error = document(Point::new(20, -10), Point::new(-20, 10))
+            .validate()
+            .expect_err("a rectangle's corners are stored least first");
+        assert!(error.contains("rectangle 1"), "{error}");
+        assert_eq!(
+            document(Point::new(-20, -10), Point::new(20, 10)).body_bounds(),
+            (Point::new(-20, -10), Point::new(20, 10))
+        );
     }
 
     #[test]

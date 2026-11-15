@@ -263,6 +263,34 @@ fn rails_stand_a_grid_beyond_the_side_pins() {
     assert_eq!(symbol.value_anchor(), Point::new(-30, 58));
 }
 
+/// A block's box is generated as the rectangle kind, the same box the
+/// outline draws; a triangle stays a closed line.
+#[test]
+fn a_generated_block_body_is_a_rectangle_and_a_triangle_is_not() {
+    let block = generate_symbol(&[
+        spec("clk", PortDirection::In),
+        spec("q", PortDirection::Out),
+    ]);
+    let (min, max) = block.body_bounds();
+    let shapes = block.body_shapes();
+    assert_eq!(shapes[0], SymbolShape::Rectangle { min, max });
+    assert_eq!(
+        block.body_outline()[0],
+        (rectangle_corners(min, max).to_vec(), true)
+    );
+    assert_eq!(shapes.len(), block.body_outline().len());
+
+    let amplifier = generate_symbol(&[
+        spec("inp", PortDirection::In),
+        spec("inn", PortDirection::In),
+        spec("out", PortDirection::Out),
+    ]);
+    assert!(matches!(
+        amplifier.body_shapes()[0],
+        SymbolShape::Polyline { closed: true, .. }
+    ));
+}
+
 #[test]
 fn a_name_too_long_for_the_nominal_body_widens_the_block_onto_the_grid() {
     let symbol = generate_symbol(&[

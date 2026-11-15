@@ -23,7 +23,7 @@ use rspice_design::{
     },
     symbol::{
         SymbolCurve, SymbolDocument, SymbolShape, SymbolTextAlign, SymbolTextPlacement,
-        symbol_text_bounds,
+        rectangle_corners, symbol_text_bounds,
     },
     symbol_generation::fit_pin_name,
 };
@@ -119,6 +119,18 @@ fn draw_symbol_body(
                     if rest.len() >= 2 {
                         painter.add(egui::Shape::line(rest.to_vec(), stroke));
                     }
+                }
+            }
+            SymbolShape::Rectangle { min, max } => {
+                let mut screen_points: Vec<Pos2> = rectangle_corners(*min, *max)
+                    .into_iter()
+                    .map(|point| to_screen_symbol(origin, scale, component, symbol, point))
+                    .collect();
+                screen_points.dedup();
+                if screen_points.len() > 2 {
+                    painter.add(egui::Shape::closed_line(screen_points, stroke));
+                } else if screen_points.len() == 2 {
+                    painter.add(egui::Shape::line(screen_points, stroke));
                 }
             }
             SymbolShape::Circle { center, radius } => {
@@ -565,6 +577,10 @@ fn fold_symbol_artwork_points(symbol: &ResolvedCellSymbol, mut include: impl FnM
                     include(symbol.effective_point(*point));
                 }
             }
+            SymbolShape::Rectangle { min, max } => {
+                include(symbol.effective_point(*min));
+                include(symbol.effective_point(*max));
+            }
             SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
                 for point in cardinal_bounds(symbol.effective_point(*center), *radius) {
                     include(point);
@@ -739,6 +755,57 @@ mod tests {
             })
             .count();
         (columns, rows)
+    }
+
+    /// A rectangle draws on an instance exactly as the closed outline of
+    /// its four corners did, at every orientation, so a generated block
+    /// keeps its look now that its box is a rectangle.
+    #[test]
+    fn a_rectangle_draws_as_its_closed_outline_on_every_orientation() {
+        let symbol = |shape: SymbolShape| {
+            ResolvedCellSymbol::from_authored_document(
+                SymbolDocument {
+                    body: vec![shape],
+                    ..SymbolDocument::default()
+                },
+                &[],
+            )
+        };
+        let rectangle = symbol(SymbolShape::Rectangle {
+            min: Point::new(-20, -10),
+            max: Point::new(15, 25),
+        });
+        let outline = symbol(SymbolShape::Polyline {
+            points: rspice_design::symbol::rectangle_corners(
+                Point::new(-20, -10),
+                Point::new(15, 25),
+            )
+            .to_vec(),
+            closed: true,
+        });
+        for rotation in [Rotation::R0, Rotation::R90, Rotation::R180, Rotation::R270] {
+            for mirror_h in [false, true] {
+                let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
+                component.rotation = rotation;
+                component.mirror_h = mirror_h;
+                let drawn = |symbol: &ResolvedCellSymbol| {
+                    let canvas = raster_instance(&component, symbol, pos2(160.0, 160.0));
+                    let painted = painted_pixels(
+                        &canvas,
+                        egui::Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(320.0, 320.0)),
+                    )
+                    .1;
+                    (canvas.regression_fingerprint(320), painted)
+                };
+                let (rectangle_print, painted) = drawn(&rectangle);
+                assert!(painted > 0, "the box drew nothing");
+                assert_eq!(
+                    rectangle_print,
+                    drawn(&outline).0,
+                    "{rotation:?} mirrored {mirror_h}"
+                );
+            }
+        }
     }
 
     fn symbol_with_shifted_origin() -> ResolvedCellSymbol {

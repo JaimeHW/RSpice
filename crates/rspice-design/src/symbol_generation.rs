@@ -17,6 +17,7 @@
 //! is published here, so the canvas and the printed sheet cannot drift
 //! apart.
 
+use rspice_design_model::symbol_geometry::{SymbolShape, rectangle_corners};
 use rspice_design_model::symbol_pin::SymbolPinSide;
 
 use rspice_design_model::Point;
@@ -231,12 +232,37 @@ impl GeneratedSymbol {
     fn outline(&self, clock_wedges: bool) -> Vec<(Vec<Point>, bool)> {
         let (min, max) = self.body_extent;
         let mut outline = match self.body {
-            GeneratedBody::Block => vec![(
-                vec![min, Point::new(max.x, min.y), max, Point::new(min.x, max.y)],
-                true,
-            )],
+            GeneratedBody::Block => vec![(rectangle_corners(min, max).to_vec(), true)],
             GeneratedBody::Amplifier => amplifier_outline(&self.pins, min, max),
         };
+        outline.extend(self.mark_outlines(clock_wedges));
+        outline
+    }
+
+    /// The body as symbol shapes: a block's box is a rectangle, so editing
+    /// it keeps it one; the triangle and the pin marks are lines.
+    pub fn body_shapes(&self) -> Vec<SymbolShape> {
+        let (min, max) = self.body_extent;
+        let body = match self.body {
+            GeneratedBody::Block => vec![SymbolShape::Rectangle { min, max }],
+            GeneratedBody::Amplifier => amplifier_outline(&self.pins, min, max)
+                .into_iter()
+                .map(|(points, closed)| SymbolShape::Polyline { points, closed })
+                .collect(),
+        };
+        body.into_iter()
+            .chain(
+                self.mark_outlines(false)
+                    .into_iter()
+                    .map(|(points, closed)| SymbolShape::Polyline { points, closed }),
+            )
+            .collect()
+    }
+
+    /// The thermal bars the pins carry, and their clock wedges when
+    /// `clock_wedges` asks for them.
+    fn mark_outlines(&self, clock_wedges: bool) -> Vec<(Vec<Point>, bool)> {
+        let mut outline = Vec::new();
         for (pin, mark) in self.pins.iter().zip(&self.marks) {
             let at = lead_inner(pin.offset, pin.side, Some(self.body_extent));
             let step = inward_step(pin.side);

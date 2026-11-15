@@ -114,6 +114,17 @@ impl SemanticSceneCompiler<'_> {
                         });
                     }
                 }
+                SymbolShape::Rectangle { min, max } => {
+                    self.primitives.push(ScenePrimitive::Polyline {
+                        points: rectangle_corners(*min, *max)
+                            .into_iter()
+                            .map(|point| convert(self, point))
+                            .collect::<Result<_, _>>()?,
+                        closed: true,
+                        stroke: body_stroke,
+                        fill: None,
+                    });
+                }
                 SymbolShape::Circle { center, radius } => {
                     self.primitives.push(ScenePrimitive::Circle {
                         center: convert(self, *center)?,

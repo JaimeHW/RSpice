@@ -375,17 +375,21 @@ fn scene_titled(content: ContentExtent, title: &str) -> HardcopyScene {
 }
 
 fn resolved_symbol() -> ResolvedHardcopyDocument {
+    resolved_symbol_with_body(vec![SymbolShape::Polyline {
+        points: vec![
+            SchematicPoint::new(-20, -15),
+            SchematicPoint::new(20, -15),
+            SchematicPoint::new(20, 15),
+            SchematicPoint::new(-20, 15),
+        ],
+        closed: true,
+    }])
+}
+
+fn resolved_symbol_with_body(body: Vec<SymbolShape>) -> ResolvedHardcopyDocument {
     let document = SymbolDocument {
         pins: Vec::new(),
-        body: vec![SymbolShape::Polyline {
-            points: vec![
-                SchematicPoint::new(-20, -15),
-                SchematicPoint::new(20, -15),
-                SchematicPoint::new(20, 15),
-                SchematicPoint::new(-20, 15),
-            ],
-            closed: true,
-        }],
+        body,
         origin: SchematicPoint::origin(),
         name_anchor: SchematicPoint::new(-20, -25),
         value_anchor: SchematicPoint::new(-20, 25),
@@ -1090,6 +1094,30 @@ fn resolved_source_compiles_to_semantic_scene_and_deterministic_preview() {
     assert_eq!(first.page_number(), 1);
     assert_eq!(first.dpi(), 72);
     assert_eq!(first.rgba().len(), 792 * 612 * 4);
+}
+
+/// A rectangle prints exactly as the closed outline of its four corners
+/// did, so a box keeps its look on paper and in an SVG.
+#[test]
+fn a_rectangle_prints_as_its_closed_outline() {
+    let scene = |source: &ResolvedHardcopyDocument| {
+        let plan = plan_for_resolved(source, OutputFormat::SvgVector);
+        scene_from_resolved(
+            source,
+            plan.setup().print_mapping(),
+            plan.setup().schematic(),
+            resolved_metadata(),
+        )
+        .unwrap()
+        .primitives()
+        .to_vec()
+    };
+    let rectangle = resolved_symbol_with_body(vec![SymbolShape::Rectangle {
+        min: SchematicPoint::new(-20, -15),
+        max: SchematicPoint::new(20, 15),
+    }]);
+
+    assert_eq!(scene(&rectangle), scene(&resolved_symbol()));
 }
 
 #[test]

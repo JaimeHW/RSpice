@@ -24,6 +24,7 @@ use rspice_design::{
     symbol::{
         PinDrawing, SYMBOL_PIN_LENGTH, SYMBOL_TERMINAL_GRID, SymbolAttributeKind, SymbolCurve,
         SymbolDocument, SymbolEditorMetadata, SymbolShape, SymbolTextAlign, pin_drawing,
+        rectangle_corners,
     },
 };
 use rspice_design_model::{
@@ -551,6 +552,16 @@ fn draw_body(
                     );
                 }
             }
+            SymbolShape::Rectangle { min, max } => {
+                let corners =
+                    rectangle_corners(*min, *max).map(|point| viewport.world_to_screen(point));
+                for index in 0..corners.len() {
+                    painter.line_segment(
+                        [corners[index], corners[(index + 1) % corners.len()]],
+                        stroke,
+                    );
+                }
+            }
             SymbolShape::Circle { center, radius } => {
                 painter.circle_stroke(
                     viewport.world_to_screen(*center),
@@ -1038,6 +1049,17 @@ fn shape_hit(shape: &SymbolShape, viewport: SymbolViewport, pos: Pos2) -> bool {
                         ) <= HIT_PX
                     }))
         }
+        SymbolShape::Rectangle { min, max } => {
+            let corners =
+                rectangle_corners(*min, *max).map(|point| viewport.world_to_screen(point));
+            (0..corners.len()).any(|index| {
+                distance_to_screen_segment(
+                    pos,
+                    corners[index],
+                    corners[(index + 1) % corners.len()],
+                ) <= HIT_PX
+            })
+        }
         SymbolShape::Circle { center, radius } => {
             let center = viewport.world_to_screen(*center);
             let radius = *radius as f32 * viewport.zoom;
@@ -1239,6 +1261,10 @@ fn document_bounds(document: &SymbolDocument) -> (Point, Point) {
                     xs.push(point.x);
                     ys.push(point.y);
                 }
+            }
+            SymbolShape::Rectangle { min, max } => {
+                xs.extend([min.x, max.x]);
+                ys.extend([min.y, max.y]);
             }
             SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => {
                 xs.extend([center.x - radius, center.x + radius]);

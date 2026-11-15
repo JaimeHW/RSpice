@@ -389,6 +389,12 @@ fn body_ink(symbol: &SymbolDocument, component: &Component) -> Vec<Ink> {
                     ink.push(Ink::Stroke(*last, *first));
                 }
             }
+            SymbolShape::Rectangle { min, max } => {
+                let corners = crate::symbol::rectangle_corners(*min, *max).map(at);
+                ink.extend(
+                    (0..4).map(|index| Ink::Stroke(corners[index], corners[(index + 1) % 4])),
+                );
+            }
             SymbolShape::Circle { center, radius }
             | SymbolShape::Dot { center, radius }
             | SymbolShape::Arc { center, radius, .. } => {

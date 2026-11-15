@@ -607,6 +607,7 @@ pub fn symbol_shape_bounds(
                 rspice_design_model::Point::new(max_x, max_y),
             )
         }
+        SymbolShape::Rectangle { min, max } => (*min, *max),
         SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => (
             rspice_design_model::Point::new(center.x - radius, center.y - radius),
             rspice_design_model::Point::new(center.x + radius, center.y + radius),
@@ -629,17 +630,15 @@ pub fn symbol_shape_bounds(
     }
 }
 
-/// What a body shape is, in a word: "Rectangle", "Line", "Text". A closed
-/// four-corner outline with square corners is a rectangle, as the rectangle
-/// tool draws it.
+/// What a body shape is, in a word: "Rectangle", "Line", "Text". Only the
+/// rectangle kind reads "Rectangle"; a closed outline of four square corners
+/// is a polygon, as an imported drawing's box is.
 pub fn shape_kind(shape: &rspice_design::symbol::SymbolShape) -> &'static str {
     use rspice_design::symbol::SymbolShape;
     match shape {
-        SymbolShape::Polyline { points, closed } => match rectangle_size(points, *closed) {
-            Some(_) => "Rectangle",
-            None if *closed => "Polygon",
-            None => "Line",
-        },
+        SymbolShape::Polyline { closed: true, .. } => "Polygon",
+        SymbolShape::Polyline { .. } => "Line",
+        SymbolShape::Rectangle { .. } => "Rectangle",
         SymbolShape::Circle { .. } => "Circle",
         SymbolShape::Arc { .. } => "Arc",
         SymbolShape::Curve(curve) if curve.radii[0] != curve.radii[1] => {
@@ -663,10 +662,10 @@ pub fn shape_summary(shape: &rspice_design::symbol::SymbolShape) -> String {
     use rspice_design::symbol::SymbolShape;
     let kind = shape_kind(shape);
     match shape {
-        SymbolShape::Polyline { points, closed } => match rectangle_size(points, *closed) {
-            Some((width, height)) => format!("{kind} {width} \u{00d7} {height}"),
-            None => format!("{kind}, {} points", points.len()),
-        },
+        SymbolShape::Polyline { points, .. } => format!("{kind}, {} points", points.len()),
+        SymbolShape::Rectangle { min, max } => {
+            format!("{kind} {} \u{00d7} {}", max.x - min.x, max.y - min.y)
+        }
         SymbolShape::Circle { radius, .. } => format!("{kind} r {radius}"),
         SymbolShape::Arc {
             radius,
@@ -694,38 +693,6 @@ pub fn shape_summary(shape: &rspice_design::symbol::SymbolShape) -> String {
             words => format!("{kind} \"{words}\""),
         },
     }
-}
-
-/// The width and height of a closed outline that is an upright rectangle.
-fn rectangle_size(points: &[rspice_design_model::Point], closed: bool) -> Option<(i32, i32)> {
-    let corners: &[rspice_design_model::Point] = match points {
-        // An outline may repeat its first corner to close itself.
-        [first, rest @ .., last] if rest.len() == 3 && first == last => &points[..4],
-        _ if points.len() == 4 => points,
-        _ => return None,
-    };
-    let closes = closed || points.len() == 5;
-    // Each side runs straight across or straight down, and the two kinds take
-    // turns round the outline.
-    let across = |index: usize| {
-        let (from, to) = (corners[index % 4], corners[(index + 1) % 4]);
-        (from.y == to.y && from.x != to.x)
-            .then_some(true)
-            .or((from.x == to.x && from.y != to.y).then_some(false))
-    };
-    let square = (0..4).all(|index| match (across(index), across(index + 1)) {
-        (Some(this), Some(next)) => this != next,
-        _ => false,
-    });
-    let (min, max) = corners
-        .iter()
-        .fold((corners[0], corners[0]), |(min, max), point| {
-            (
-                rspice_design_model::Point::new(min.x.min(point.x), min.y.min(point.y)),
-                rspice_design_model::Point::new(max.x.max(point.x), max.y.max(point.y)),
-            )
-        });
-    (closes && square).then_some((max.x - min.x, max.y - min.y))
 }
 
 /// A measure as it reads: whole when it is, otherwise to a tenth.
@@ -945,14 +912,14 @@ mod tests {
             }),
             "Polygon, 3 points"
         );
-        // Four corners that do not square up are a polygon, and so is a
-        // square outline left open.
+        // Only the rectangle kind is a rectangle: a closed outline of four
+        // square corners, as an imported drawing brings a box in, is a polygon.
         assert_eq!(
             summary(SymbolShape::Polyline {
                 points: vec![
                     Point::origin(),
                     Point::new(10, 0),
-                    Point::new(12, 10),
+                    Point::new(10, 10),
                     Point::new(0, 10)
                 ],
                 closed: true,

@@ -785,17 +785,10 @@ fn add_rectangle(edit: &mut CanvasEdit<'_>, document: &mut SymbolDocument, point
     true
 }
 
-/// The closed outline from `start` to the opposite corner `end`.
+/// The rectangle from `start` to the opposite corner `end`, whichever way
+/// the pointer went.
 pub fn rectangle_shape(start: Point, end: Point) -> SymbolShape {
-    SymbolShape::Polyline {
-        points: vec![
-            start,
-            Point::new(end.x, start.y),
-            end,
-            Point::new(start.x, end.y),
-        ],
-        closed: true,
-    }
+    SymbolShape::rectangle(start, end)
 }
 
 /// The radius of a circle about `center` through `point`, in whole units.

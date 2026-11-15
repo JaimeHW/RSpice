@@ -333,6 +333,12 @@ fn artwork_lead_end(
                     .chain(closing)
                     .collect::<Vec<_>>()
             }
+            SymbolShape::Rectangle { min, max } => {
+                let corners = crate::symbol::rectangle_corners(*min, *max);
+                (0..4)
+                    .map(|index| (corners[index], corners[(index + 1) % 4]))
+                    .collect::<Vec<_>>()
+            }
             _ => Vec::new(),
         })
         .filter(|(from, to)| on_axis(*from) && on_axis(*to))
