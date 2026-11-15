@@ -859,6 +859,109 @@ b1100 ,
     }
 }
 
+/// Section 18.2.3.8: a named event is an `event` variable, listed before a
+/// scope's nets, that writes `1` in every value block and at each step it
+/// fires, once however often it fires in the step, and nothing at
+/// `$dumpoff`. The expected text is Icarus Verilog 13.0's from `$scope` on.
+#[test]
+fn a_named_event_dumps_as_icarus_dumps_it() {
+    const SOURCE: &str = r#"`timescale 1ns/1ns
+module sub;
+  event ping;
+  reg seen;
+  initial seen = 0;
+  always @ping seen = ~seen;
+endmodule
+module tb;
+  parameter P = 3;
+  event go;
+  reg a;
+  wire w;
+  integer n;
+  assign w = a;
+  sub u1();
+  initial begin
+    $dumpfile("work/ev.vcd");
+    $dumpvars(0, tb);
+    a = 0; n = 0;
+    #5 -> go;
+    #3 a = 1;
+    #2 -> go; -> go; -> u1.ping;
+    #5 $dumpoff;
+    #5 -> go;
+    #5 $dumpon;
+    #5 -> u1.ping;
+    #5 $finish;
+  end
+  always @go n = n + 1;
+endmodule
+"#;
+    const ICARUS: &str = r#"$scope module tb $end
+$var event 1 ! go $end
+$var wire 1 " w $end
+$var parameter 32 # P $end
+$var reg 1 $ a $end
+$var integer 32 % n [31:0] $end
+$scope module u1 $end
+$var event 1 & ping $end
+$var reg 1 ' seen $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+$comment Show the parameter values. $end
+$dumpall
+b11 #
+$end
+#0
+$dumpvars
+0'
+1&
+b0 %
+0$
+0"
+1!
+$end
+#5
+b1 %
+1!
+#8
+1"
+1$
+#10
+1'
+b10 %
+1&
+1!
+#15
+$dumpoff
+x'
+bx %
+x$
+x"
+$end
+#25
+$dumpon
+1'
+1&
+b11 %
+1$
+1"
+1!
+$end
+#30
+0'
+1&
+#35
+"#;
+    let directory = run_directory("dump-event");
+    let report = bench_in(&directory, SOURCE, false);
+    let text = written(&report, "work/ev.vcd");
+    let start = text
+        .find("$scope")
+        .unwrap_or_else(|| panic!("no scope in\n{text}"));
+    assert_eq!(&text[start..], ICARUS);
+}
+
 /// A write that would leave the run directory fails as
 /// section 17.2.1 prescribes, with a located warning; the run may lift the
 /// confinement.

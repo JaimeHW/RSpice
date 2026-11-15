@@ -4342,6 +4342,7 @@ mod tests {
                 signed: false,
                 integer: false,
                 procedurally_assignable: true,
+                event: false,
                 span: SourceSpanRef {
                     source_file_id: 0,
                     start: 0,

@@ -83,6 +83,7 @@ fn signal(index: u32, name: String, real: bool, width: u32) -> DigitalSignal {
         signed: true,
         integer: false,
         procedurally_assignable: true,
+        event: false,
         span: SourceSpanRef {
             source_file_id: 0,
             start: 0,

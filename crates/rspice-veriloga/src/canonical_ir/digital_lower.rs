@@ -2447,6 +2447,10 @@ fn lower_signal(
             crate::semantic::DigitalSignalClass::Variable(crate::ast::DigitalVariableKind::Integer)
         ),
         procedurally_assignable: signal.class.is_variable(),
+        event: matches!(
+            signal.class,
+            crate::semantic::DigitalSignalClass::Variable(crate::ast::DigitalVariableKind::Event)
+        ),
         span: signal.span.into(),
         origin: None,
     }

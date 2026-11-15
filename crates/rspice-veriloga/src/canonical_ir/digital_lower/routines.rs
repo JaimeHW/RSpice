@@ -420,6 +420,7 @@ fn static_signal(
         signed: shape.signed,
         integer: shape.integer,
         procedurally_assignable: true,
+        event: false,
         span: span.into(),
         origin: None,
     });

@@ -281,7 +281,10 @@ use smol_str::SmolStr;
 /// generate loop indices with their values, by scope
 /// (`CanonicalDigitalPlan::dump_parameters`). An earlier artifact's dump
 /// listed none.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 194;
+/// Version 195 marks a named event's storage (`DigitalSignal::event`), which
+/// a value change dump declares as an `event`. An earlier artifact's dump
+/// declared it as a `reg`.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 195;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

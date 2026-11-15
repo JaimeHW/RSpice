@@ -497,6 +497,11 @@ pub struct DigitalSignal {
     pub integer: bool,
     /// Whether a procedural assignment may drive it (`reg` can, `wire` cannot).
     pub procedurally_assignable: bool,
+    /// A named event's storage (IEEE 1364-2005 section 9.7.3): a one-bit
+    /// variable each trigger toggles, which a value change dump declares as an
+    /// `event` (section 18.2.3.8) and writes as `1` at each step it fires.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub event: bool,
     pub span: SourceSpanRef,
     /// Where the signal was declared, once a source map has resolved the
     /// span; what a waveform's "go to declaration" opens.

@@ -87,6 +87,11 @@ pub(crate) struct DumpVar {
     /// parameter block writes once; `signal` is then unused.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameter: Option<u32>,
+    /// A named event, which carries no value: each value block and each step
+    /// it fires write `1`, and `$dumpoff` writes nothing for it, as Icarus
+    /// Verilog dumps one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub event: bool,
 }
 
 /// One line of the header, laid out as the `$dumpvars` calls ask.
@@ -286,8 +291,8 @@ fn hierarchy(plan: &CanonicalDigitalPlan, name: &str, linked: bool) -> (String, 
 
 /// The design's scopes and variables as a dump lays them out (IEEE 1364-2005
 /// section 18.2.3.4). Each scope lists its variables and then its scopes,
-/// each group in the order Icarus Verilog lists it: nets, parameters,
-/// variables, then integers and reals; functions, generate blocks, module
+/// each group in the order Icarus Verilog lists it: named events, nets,
+/// parameters, variables, then integers and reals; functions, generate blocks, module
 /// instances, named blocks, then tasks; by name within each.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct DumpTree {
@@ -359,8 +364,7 @@ impl DumpTree {
             let index = index as u32;
             let real = signal.kind.is_real();
             // Storage a process keeps without a name a dump can list it by,
-            // memories (section 18.1.2) and named events, which have no value
-            // to dump, are left out.
+            // and memories (section 18.1.2), are left out.
             if (signal.local.is_some() && signal.name.starts_with('$'))
                 || memories.contains(&index)
                 || (!real && signal.width == 0)
@@ -372,19 +376,21 @@ impl DumpTree {
             {
                 continue;
             }
-            let (rank, kind) = if real {
-                (3, "real")
+            let (rank, kind) = if signal.event {
+                (0, "event")
+            } else if real {
+                (4, "real")
             } else if signal.integer {
-                (3, "integer")
+                (4, "integer")
             } else if signal.procedurally_assignable {
-                (2, "reg")
+                (3, "reg")
             } else {
-                (0, "wire")
+                (1, "wire")
             };
             tree.member(plan, &signal.name, rank, kind, index);
         }
         for alias in &plan.signal_aliases {
-            tree.member(plan, &alias.name, 0, "wire", alias.signal.index());
+            tree.member(plan, &alias.name, 1, "wire", alias.signal.index());
         }
         // Parameters follow the nets, as Icarus Verilog lists them; a real
         // one is a `real`, the VCD having no real parameter type.
@@ -400,7 +406,7 @@ impl DumpTree {
             let scope = &mut tree.nodes[node];
             if !scope.vars.iter().any(|var| var.name == parameter.name) {
                 scope.vars.push(DumpMember {
-                    rank: 1,
+                    rank: 2,
                     name: parameter.name.to_string(),
                     kind,
                     item: DumpItem::Parameter(index as u32),
@@ -533,7 +539,9 @@ fn spell(value: &FourStateValue, vector: bool) -> String {
 
 fn current(store: &DigitalSignalStore, var: &DumpVar) -> Option<Dumped> {
     let signal = DigitalSignalId::new(var.signal);
-    if var.real {
+    if var.event {
+        Some(Dumped::Bits("1".to_owned()))
+    } else if var.real {
         store
             .read_real_signal(signal)
             .map(|value| Dumped::Real(value.to_bits()))
@@ -978,6 +986,7 @@ impl HdlEffects {
                         range: declared.bounds.filter(|_| !real),
                         real,
                         parameter: None,
+                        event: declared.event,
                     });
                     self.dump.vars.len() - 1
                 })
@@ -996,6 +1005,7 @@ impl HdlEffects {
                     range: None,
                     real,
                     parameter: Some(index),
+                    event: false,
                 });
                 self.dump.vars.len() - 1
             }
@@ -1102,7 +1112,9 @@ impl HdlEffects {
             let Some(value) = current(store, var) else {
                 continue;
             };
-            if self.dump.last[index].as_ref() == Some(&value) {
+            // An event fired in this step however many times its storage
+            // toggled, back to its old level or not.
+            if !var.event && self.dump.last[index].as_ref() == Some(&value) {
                 continue;
             }
             text.push_str(&change_line(
@@ -1140,8 +1152,8 @@ impl HdlEffects {
             let identifier = crate::io::vcd::canonical_identifier(index);
             if block == "dumpoff" {
                 // Section 18.1.3: every variable is dumped as `x`; a real has
-                // no unknown, and keeps its value.
-                if !var.real {
+                // no unknown, and keeps its value, and an event has no value.
+                if !var.real && !var.event {
                     let vector = var.width > 1 || var.range.is_some();
                     text.push_str(&if vector {
                         format!("bx {identifier}\n")

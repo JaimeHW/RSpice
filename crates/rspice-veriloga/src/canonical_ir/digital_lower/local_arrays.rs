@@ -240,6 +240,7 @@ impl ProcessLowerer<'_> {
                 signed: declaration.signed,
                 integer: declaration.integer,
                 procedurally_assignable: true,
+                event: false,
                 span: declaration.span.into(),
                 origin: None,
             });
