@@ -243,7 +243,106 @@ fn add_element_direction(
     Ok(())
 }
 
+/// Assemble one captured parameter direction's forcing `db - dA*x` at
+/// `solution`: every owning element's field derivative, then the RSHUNT
+/// conductances and, at a frequency, the CSHUNT capacitors the builder
+/// generated from a parameter-dependent option. `frequency` is `None` for the
+/// operating-point equations.
+pub(super) fn add_parameter_forcing(
+    rhs: &mut [ComplexDirection],
+    circuit: &CircuitData,
+    capture: &crate::netlist::ParameterDirectionCapture,
+    rshunt: Option<Value>,
+    solution: &[Complex64],
+    frequency: Option<Value>,
+    abort: &dyn AbortSignal,
+) -> Result<(), SimulationError> {
+    for (index, element) in capture.owners.iter().enumerate() {
+        if index.is_multiple_of(64) && abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        add_element_direction(
+            rhs,
+            circuit,
+            element,
+            capture.elements[&element.name],
+            solution,
+            frequency.is_some(),
+            frequency.unwrap_or(0.0),
+        )?;
+    }
+    if let (Some(direction), Some(resistance)) = (capture.rshunt, rshunt)
+        && direction != 0.0
+    {
+        let conductance_direction = -direction / resistance / resistance;
+        for row in 0..circuit.num_nodes() {
+            if row.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if !circuit.is_non_electrical_state_matrix_index(row) {
+                rhs[row] = rhs[row] - times_phasor(conductance_direction, solution[row]);
+            }
+        }
+    }
+    if let Some(frequency) = frequency
+        && let Some(direction) = capture.cshunt
+    {
+        let susceptance_direction = direction * std::f64::consts::TAU * frequency;
+        for (index, &row) in capture.cshunt_rows.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let value = solution[row];
+            rhs[row] =
+                rhs[row] - times_phasor(susceptance_direction, Complex64::new(-value.im, value.re));
+        }
+    }
+    Ok(())
+}
+
 impl Engine {
+    /// Why a parameter's captured direction cannot stand for its whole effect
+    /// on this deck before any replay, or `None` when the deck qualifies: the
+    /// deck must replay from source with nothing the replay does not capture,
+    /// and every element must be a qualified linear one.
+    pub(super) fn linear_parameter_refusal(
+        netlist: &Netlist,
+        parameter: &str,
+        ac: bool,
+    ) -> Option<&'static str> {
+        if netlist.source_text.is_none() {
+            Some("the deck retains no source to replay")
+        } else if !netlist.params.has_any_parameter_binding(parameter) {
+            Some("the parameter has no binding to replay")
+        } else if !netlist.ast_overlay().device_parameters.is_empty()
+            || !netlist.ast_overlay().model_parameters.is_empty()
+            || !netlist.ast_overlay().terminal_current_probes.is_empty()
+            || netlist.ast_overlay().control_options.is_some()
+            || !netlist.spectre_statistics.variations.is_empty()
+        {
+            Some("the deck carries overrides or variations the replay captures no direction for")
+        } else if !netlist.elements.iter().all(|element| {
+            linear_element(&element.kind, ac)
+                || matches!(element.kind, ElementKind::Subcircuit { .. })
+        }) {
+            Some("the deck has elements other than qualified linear ones")
+        } else {
+            None
+        }
+    }
+
+    /// Whether a built circuit's capture holds a direction for every flat
+    /// owner, each of them a qualified linear element.
+    pub(super) fn linear_capture_complete(
+        capture: &crate::netlist::ParameterDirectionCapture,
+        ac: bool,
+    ) -> bool {
+        !capture.has_uncaptured_dependencies
+            && capture.owners.iter().all(|element| {
+                linear_element(&element.kind, ac) && capture.elements.contains_key(&element.name)
+            })
+    }
+
     /// None means that some owning fields or structural effects still require
     /// the existing replay/refinement path; absence is never proof of zero.
     #[allow(clippy::too_many_arguments)]
@@ -257,18 +356,7 @@ impl Engine {
         runs: &mut usize,
         abort: &dyn AbortSignal,
     ) -> Result<Option<LinearParameterResponse>, SimulationError> {
-        if netlist.source_text.is_none()
-            || !netlist.params.has_any_parameter_binding(parameter)
-            || !netlist.ast_overlay().device_parameters.is_empty()
-            || !netlist.ast_overlay().model_parameters.is_empty()
-            || !netlist.ast_overlay().terminal_current_probes.is_empty()
-            || netlist.ast_overlay().control_options.is_some()
-            || !netlist.spectre_statistics.variations.is_empty()
-            || !netlist.elements.iter().all(|element| {
-                linear_element(&element.kind, frequencies.is_some())
-                    || matches!(element.kind, ElementKind::Subcircuit { .. })
-            })
-        {
+        if Self::linear_parameter_refusal(netlist, parameter, frequencies.is_some()).is_some() {
             return Ok(None);
         }
         let (directed, _) = Self::replay_parameter_overrides(
@@ -302,12 +390,7 @@ impl Engine {
         let Some(capture) = circuit.parameter_direction.take() else {
             return Ok(None);
         };
-        if capture.has_uncaptured_dependencies
-            || !capture.owners.iter().all(|element| {
-                linear_element(&element.kind, frequencies.is_some())
-                    && capture.elements.contains_key(&element.name)
-            })
-        {
+        if !Self::linear_capture_complete(&capture, frequencies.is_some()) {
             return Ok(None);
         }
         engine
@@ -489,46 +572,15 @@ impl Engine {
                 .solve_transpose_into(&observation, &mut adjoint)
                 .map_err(SimulationError::Solver)?;
             rhs.fill(ComplexDirection::zero());
-            for (index, element) in capture.owners.iter().enumerate() {
-                if index.is_multiple_of(64) && abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
-                }
-                add_element_direction(
-                    &mut rhs,
-                    &prepared.circuit,
-                    element,
-                    capture.elements[&element.name],
-                    &solution,
-                    frequencies.is_some(),
-                    frequency,
-                )?;
-            }
-            if let (Some(direction), Some(resistance)) = (capture.rshunt, netlist.options.rshunt)
-                && direction != 0.0
-            {
-                let conductance_direction = -direction / resistance / resistance;
-                for row in 0..prepared.circuit.num_nodes() {
-                    if row.is_multiple_of(64) && abort.is_aborted() {
-                        return Err(SimulationError::Aborted);
-                    }
-                    if !prepared.circuit.is_non_electrical_state_matrix_index(row) {
-                        rhs[row] = rhs[row] - times_phasor(conductance_direction, solution[row]);
-                    }
-                }
-            }
-            if frequencies.is_some()
-                && let Some(direction) = capture.cshunt
-            {
-                let susceptance_direction = direction * std::f64::consts::TAU * frequency;
-                for (index, &row) in capture.cshunt_rows.iter().enumerate() {
-                    if index.is_multiple_of(64) && abort.is_aborted() {
-                        return Err(SimulationError::Aborted);
-                    }
-                    let value = solution[row];
-                    rhs[row] = rhs[row]
-                        - times_phasor(susceptance_direction, Complex64::new(-value.im, value.re));
-                }
-            }
+            add_parameter_forcing(
+                &mut rhs,
+                &prepared.circuit,
+                capture,
+                netlist.options.rshunt,
+                &solution,
+                frequencies.is_some().then_some(frequency),
+                abort,
+            )?;
             let mut derivative = ComplexDirection::zero();
             for (forcing, weight) in rhs.iter().zip(&adjoint) {
                 derivative = derivative
