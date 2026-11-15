@@ -4,7 +4,7 @@
 //! external change.
 
 use crate::workbench::FolderListPreference;
-use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
+use crate::workbench::code::netlist_validation::validate_visible_netlist_source;
 use crate::workbench::features::cx;
 use crate::workbench::workflows::netlist_workflow::fixtures::seed_owned_strategy;
 use crate::workbench::workflows::netlist_workflow::fixtures::vendor_profiles::{cases, source};

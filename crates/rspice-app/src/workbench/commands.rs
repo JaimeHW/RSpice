@@ -15,7 +15,6 @@ use crate::workbench::{AppState, RSpiceApp};
 use super::state::{ConsoleChannel, ConsolePage, Workspace};
 
 mod enablement;
-pub(crate) use rspice_app_code::workbench::code::netlist_validation;
 mod registry;
 pub(crate) use rspice_app_results::workbench::commands::result_navigation;
 mod veriloga_commits;
@@ -477,8 +476,8 @@ mod command_helpers;
 pub(crate) use command_helpers::menu_label;
 use command_helpers::*;
 pub(in crate::workbench) use command_helpers::{
-    active_schematic_editor, answer_code_request, answer_netlist_editor_request,
-    answer_project_request, answer_void_veriloga_evidence, file_action, run_project_file_action,
+    active_schematic_editor, answer_project_request, carry_out_code_hand_off, file_action,
+    run_project_file_action,
 };
 mod design_requests;
 #[cfg(test)]

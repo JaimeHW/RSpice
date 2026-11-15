@@ -518,9 +518,7 @@ impl CodeFeature {
 /// context.
 impl CodeFeature {
     /// The code workspace's parts, lent from `cx` for one call.
-    pub(in crate::workbench) fn workspace_parts<'c>(
-        cx: &'c mut Cx<'_, Self>,
-    ) -> CodeWorkspaceParts<'c> {
+    pub fn workspace_parts<'c>(cx: &'c mut Cx<'_, Self>) -> CodeWorkspaceParts<'c> {
         Self::automation_parts(cx).0
     }
 

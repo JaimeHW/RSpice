@@ -6,14 +6,11 @@ use crate::state::ViewType;
 use crate::workbench::app::actions::workspace::{HistoryStepParts, take_history_step};
 use crate::workbench::app::dialogs::project::configuration_dialogs::Leaving;
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
-use crate::workbench::app::dialogs::source_document;
-use crate::workbench::code::commands::{
-    AutomationRequest, CodeCommand, CodeRequest, NetlistEditorRequest, SourceDocumentRequest,
-};
+use crate::workbench::code::commands::CodeHandOff;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::framework::feature::ModelsPort;
-use crate::workbench::framework::requests::{ProjectFileAction, StandardCommand};
+use crate::workbench::framework::requests::ProjectFileAction;
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::session::project_transactions::go_on_leaving;
@@ -158,17 +155,18 @@ pub(in crate::workbench) fn active_schematic_editor(app: &RSpiceApp) -> bool {
         )
 }
 
-/// Take a history step `direction`: the netlist page's own, over the whole
-/// application, where that page is in front with a step to take that way;
-/// otherwise the design feature's, routed. What either raised is answered
-/// as the step returns, as a feature's command has what it raised answered.
+/// Take a history step `direction`: the netlist page's own, which the code
+/// feature takes in its context, where that page is in front with a step to
+/// take that way; otherwise the design feature's, routed. What either raised
+/// is answered as the step returns, as a feature's command has what it
+/// raised answered.
 // Interim: until code takes a part in Undo and Redo.
 pub(super) fn history_command(app: &mut RSpiceApp, direction: HistoryDirection) {
     if netlist_history_steps(&app.state, direction) {
         take_history_step(
             app,
             app_history_parts,
-            Some(netlist_history_step),
+            Some(RSpiceApp::take_netlist_history_step),
             direction,
         );
     } else {
@@ -213,26 +211,6 @@ fn app_history_parts(app: &mut RSpiceApp) -> HistoryStepParts<'_> {
     }
 }
 
-/// The netlist page's own history step `direction`, over the whole
-/// application.
-fn netlist_history_step(
-    app: &mut RSpiceApp,
-    direction: HistoryDirection,
-) -> Result<Option<String>, String> {
-    match direction {
-        HistoryDirection::Undo => crate::workbench::documents::netlist_document::undo_netlist_edit(
-            &mut app.state.model,
-            &mut app.state.code.netlist,
-            &mut app.state.code.netlist_open_documents,
-        ),
-        HistoryDirection::Redo => crate::workbench::documents::netlist_document::redo_netlist_edit(
-            &mut app.state.model,
-            &mut app.state.code.netlist,
-            &mut app.state.code.netlist_open_documents,
-        ),
-    }
-}
-
 pub(in crate::workbench) fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
     dispatch_file_menu_action(&mut app.state, action, app.file_workflow_io.as_ref());
 }
@@ -257,270 +235,43 @@ pub(in crate::workbench) fn run_project_file_action(
     );
 }
 
-/// Carry out what the netlist page's editor raised in its frame, as the
-/// editor did in place: commit the text it showed, or take the undo or redo
-/// step past its own history, saying why when the deck refuses it.
-// Interim: each answer is the body the editor ran, until the code feature
-// carries it out over its own parts.
-pub(in crate::workbench) fn answer_netlist_editor_request(
-    app: &mut RSpiceApp,
-    request: NetlistEditorRequest,
-) {
-    let state = &mut app.state;
-    match request {
-        NetlistEditorRequest::Commit {
-            buffer,
-            cursor_line,
-            now,
-        } => crate::workbench::documents::netlist_document::commit_editor_edit(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
-            &mut state.workbench,
-            &mut state.runs,
-            &buffer,
-            cursor_line,
-            now,
-        ),
-        NetlistEditorRequest::StepHistory(step) => {
-            let stepped = if step == StandardCommand::Undo {
-                crate::workbench::documents::netlist_document::undo_netlist_edit(
-                    &mut state.model,
-                    &mut state.code.netlist,
-                    &mut state.code.netlist_open_documents,
-                )
-            } else {
-                crate::workbench::documents::netlist_document::redo_netlist_edit(
-                    &mut state.model,
-                    &mut state.code.netlist,
-                    &mut state.code.netlist_open_documents,
-                )
-            };
-            if let Err(error) = stepped {
-                state.prompt(error);
-            }
-        }
-    }
-}
-
-/// Carry out what the code feature handed over, as the shell's table did in
-/// place: open or import a netlist or a Verilog-A file through the file
-/// workflow, import an LTspice or QSPICE schematic, export the deck from
-/// outside the netlist page, export the bill of materials, open the
-/// generated deck, show the selected instance in it, and
-/// open the Code workspace's find, validation and document tools,
-/// language navigation from the caret, the Verilog-A compile, its build
-/// settings and the symbol of the module it compiles.
-// Interim: each answer is the body the shell's table ran for the command,
-// until the code feature carries it out over its own parts.
-pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: CodeRequest) {
-    match request {
-        CodeRequest::OpenNetlist => file_action(app, FileMenuAction::OpenNetlist),
-        CodeRequest::ImportNetlist => file_action(app, FileMenuAction::ImportNetlist),
-        CodeRequest::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
-        CodeRequest::ImportLtspiceSchematic => {
+/// Carry out what the code feature handed back from a request because it
+/// reaches past the feature's context, as the shell's table did in place:
+/// open or import a netlist or a Verilog-A file through the file workflow,
+/// import an LTspice or QSPICE schematic, show the selected instance in the
+/// generated deck, open the symbol of the module the Verilog-A view
+/// compiles, create the drafted device or the imported cells and open them
+/// in Design, open a placed instance of the cell, and the netlist import's
+/// transactions over the whole project.
+pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_off: CodeHandOff) {
+    match hand_off {
+        CodeHandOff::OpenNetlist => file_action(app, FileMenuAction::OpenNetlist),
+        CodeHandOff::ImportNetlist => file_action(app, FileMenuAction::ImportNetlist),
+        CodeHandOff::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
+        CodeHandOff::ImportLtspiceSchematic => {
             import_foreign_schematic(app, rspice_design::foreign_schematic::ForeignTool::Ltspice)
         }
-        CodeRequest::ImportQspiceSchematic => {
+        CodeHandOff::ImportQspiceSchematic => {
             import_foreign_schematic(app, rspice_design::foreign_schematic::ForeignTool::Qspice)
         }
-        CodeRequest::ExportNetlist(format) => {
-            crate::workbench::menu_bar::action_export_netlist_with_io(
-                &mut app.state.model,
-                &mut app.state.workbench,
-                format,
-                app.export_workflow_io.as_ref(),
-            );
-        }
-        CodeRequest::ExportBillOfMaterials => {
-            crate::workbench::menu_bar::action_export_bill_of_materials_with_io(
-                &mut app.state.model,
-                &mut app.state.workbench,
-                app.export_workflow_io.as_ref(),
-            );
-        }
-        CodeRequest::GenerateNetlist => {
-            crate::workbench::menu_bar::action_view_netlist(
-                &mut app.state.model,
-                &mut app.state.workbench,
-            );
-            activate_workspace(app, Workspace::Netlist);
-        }
-        CodeRequest::ShowInNetlist => app.state.show_selected_instance_in_netlist(),
-        CodeRequest::FindCodeDocument => {
-            if let Err(error) =
-                crate::workbench::documents::code_workspace::open_active_source_search(&mut app.code_workspace_parts())
-            {
-                app.state.prompt(error);
-            }
-        }
-        CodeRequest::ValidateCodeDocument => app.validate_visible_netlist(),
-        CodeRequest::ManageSourceDocument => {
-            if let Err(error) = source_document::open_source_document_dialog_in(
-                app.state.workbench.workspace,
-                &app.state.model,
-                &mut app.state.code.code_workspace,
-                &app.state.code.netlist,
-                &app.state.platform,
-            ) {
-                app.state.prompt(error);
-            }
-        }
-        CodeRequest::GoToDefinition => navigate_active_source(app, CodeCommand::GoToDefinition),
-        CodeRequest::FindReferences => navigate_active_source(app, CodeCommand::FindReferences),
-        CodeRequest::RenameSymbol => navigate_active_source(app, CodeCommand::RenameSymbol),
-        CodeRequest::CompileVerilogA => {
-            // The command compiles the active Verilog-A cell view and
-            // takes the reader to where its result is shown: the view is
-            // edited in Design, so that is where a compile of it lands,
-            // whichever workspace offered the command.
-            activate_workspace(app, Workspace::Design);
-            // The closure is taken now, at the click; the frame loop
-            // starts the compile on its next pass. Nothing is asked.
-            if let Err(error) =
-                crate::workbench::documents::code_workspace::request_veriloga_compile(&mut app.code_workspace_parts())
-            {
-                app.state.prompt(error);
-            }
-        }
-        CodeRequest::VerilogABuildSettings => {
-            activate_workspace(app, Workspace::Design);
-            if let Err(error) = crate::workbench::app::open_veriloga_build_settings(
-                &app.state.model,
-                &mut app.state.code.veriloga_build_settings,
-            ) {
-                app.state.prompt(error);
-            }
-        }
-        CodeRequest::VerilogAOpenSymbol => {
+        CodeHandOff::ShowInNetlist => app.state.show_selected_instance_in_netlist(),
+        CodeHandOff::VerilogAOpenSymbol => {
             activate_workspace(app, Workspace::Design);
             crate::workbench::app::code_adapters::open_veriloga_symbol(&mut app.state);
         }
-        CodeRequest::CreateVerilogADevice => {
+        CodeHandOff::CreateVerilogADevice => {
             if let Err(error) = app.commit_new_veriloga_device() {
                 app.state.code.new_veriloga_device.error = Some(error);
             }
         }
-        CodeRequest::ImportVerilogACells => {
+        CodeHandOff::ImportVerilogACells => {
             if let Err(error) = app.commit_veriloga_import()
                 && let Some(form) = app.state.code.code_workspace.veriloga.import_form.as_mut()
             {
                 form.error = Some(error);
             }
         }
-        CodeRequest::SaveVerilogABuildSettings { compile } => {
-            let state = &mut app.state;
-            match crate::workbench::app::dialogs::veriloga_build_settings::save_veriloga_build_settings(
-                &mut state.model,
-                &mut state.code.code_workspace,
-                &mut state.code.veriloga_build_settings,
-                state.workbench.messages(),
-            ) {
-                Ok(_) if compile => {
-                    if let Err(error) =
-                        crate::workbench::documents::code_workspace::request_veriloga_compile(&mut app.code_workspace_parts())
-                    {
-                        app.state.prompt(error);
-                    }
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    if let Some(draft) = app.state.code.veriloga_build_settings.as_mut() {
-                        draft.error = Some(error);
-                    }
-                }
-            }
-        }
-        CodeRequest::ReplaceVerilogASource => {
-            if let Err(error) =
-                crate::workbench::documents::code_workspace::commit_veriloga_source_replacement(&mut app.code_workspace_parts())
-            {
-                app.state.record(
-                    crate::diagnostics::LogSeverity::Error,
-                    crate::diagnostics::LogSource::Studio,
-                    error,
-                );
-            }
-        }
-        CodeRequest::ReplaceSourceSearchMatches => {
-            if let Err(error) =
-                crate::workbench::documents::code_workspace::commit_source_search_replace(&mut app.code_workspace_parts())
-            {
-                if let Some(search) = app.state.code.code_workspace.source_search.as_mut() {
-                    search.error = Some(error);
-                } else {
-                    app.state.prompt(error);
-                }
-            }
-        }
-        CodeRequest::SourceDocument(request) => answer_source_document_request(app, request),
-        CodeRequest::CommitSymbolRename => {
-            if let Err(error) =
-                crate::workbench::documents::code_workspace::commit_language_rename(&mut app.code_workspace_parts())
-                && let Some(open) = app.state.code.code_workspace.language_tools.as_mut()
-            {
-                open.error = Some(error);
-            }
-        }
-        CodeRequest::UseLibSection {
-            dependency,
-            original,
-            replacement,
-            selected,
-        } => {
-            use crate::workbench::documents::netlist_document::{
-                OwnedNetlistReplacement, replace_owned_sources_atomically,
-            };
-            let edit = match dependency.as_deref() {
-                Some(identity) => {
-                    OwnedNetlistReplacement::dependency(identity, &original, replacement, 1)
-                }
-                None => OwnedNetlistReplacement::root(&original, replacement, 1),
-            };
-            match replace_owned_sources_atomically(
-                &mut app.state.model,
-                &mut app.state.code.netlist,
-                &mut app.state.code.netlist_open_documents,
-                vec![edit],
-            ) {
-                Ok(_) => app.state.prompt(selected),
-                Err(error) => app.state.prompt(error),
-            }
-        }
-        CodeRequest::RelinkNetlistDependency(identity) => {
-            crate::workbench::workflows::netlist_workflow::request_dependency_relink(
-                &mut app.state.model,
-                &mut app.state.code.netlist,
-                &mut app.state.code.netlist_open_documents,
-                &mut app.state.runs,
-                &mut app.state.workbench,
-                &identity,
-            );
-        }
-        CodeRequest::SourceFileAction {
-            language,
-            bundle_id,
-            action,
-            path,
-        } => {
-            let opened =
-                crate::workbench::documents::code_workspace::open_source_file_dialog_in_bundle(&mut app.code_workspace_parts(), language, bundle_id, action, &path, &path,
-                )
-                .and_then(|()| {
-                    source_document::open_source_document_dialog_in(
-                        app.state.workbench.workspace,
-                        &app.state.model,
-                        &mut app.state.code.code_workspace,
-                        &app.state.code.netlist,
-                        &app.state.platform,
-                    )
-                });
-            if let Err(error) = opened {
-                app.state.code.code_workspace.source_file_dialog = None;
-                app.state.prompt(error);
-            }
-        }
-        CodeRequest::OpenCellInstance(usage) => {
+        CodeHandOff::OpenCellInstance(usage) => {
             app.state.open_workspace_view(usage.schematic.clone());
             let position = app
                 .state
@@ -536,349 +287,16 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             editor.net_highlight.clear();
             editor.center_request = position;
         }
-        // Interim: each of the netlist page's transactions commits through a
-        // candidate copy of the whole state, so the shell runs the body the
-        // dialog ran in place over what the dialog stored.
-        CodeRequest::CommitNetlistRename => {
-            let messages = app.state.workbench.messages();
-            match crate::workbench::documents::netlist_document::language::commit_rename(
-                &mut app.state.model,
-                &mut app.state.code.netlist,
-                &mut app.state.code.netlist_open_documents,
-            ) {
-                Ok(count) => app.state.prompt(messages.format(
-                    crate::workbench::MessageId::NetlistRenameSucceeded,
-                    &[("count", &count.to_string())],
-                )),
-                Err(error) => app.state.code.netlist.rename_dialog.error = Some(error),
-            }
-        }
-        CodeRequest::RestoreOwnedNetlistRevision => {
-            let index = app.state.code.netlist.comparison_dialog.selected_history_index;
-            match crate::workbench::documents::netlist_document::restore_owned_revision(
-                &mut app.state.model,
-                &mut app.state.code.netlist,
-                &mut app.state.code.netlist_open_documents,
-                index,
-            ) {
-                Ok(()) => app.state.code.netlist.comparison_dialog.open = false,
-                Err(error) => app.state.prompt(error),
-            }
-        }
-        CodeRequest::ApplyExternalNetlistChange => {
-            match crate::workbench::workflows::netlist_workflow::apply_staged_external_netlist_change(
-                &mut app.state.model,
-                &mut app.state.code.netlist,
-                &mut app.state.code.netlist_open_documents,
-                &app.state.workbench,
-            ) {
-                Ok(()) => {
-                    app.state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        "Applied the resolved external change to the SPICE source.",
-                    );
-                }
-                Err(error) => {
-                    if let Some(current) = app.state.code.netlist.external_change.as_mut() {
-                        current.error = Some(error);
-                    }
-                }
-            }
-        }
-        CodeRequest::CommitNetlistImport => {
+        CodeHandOff::CommitNetlistImport => {
             app.state.commit_staged_netlist_import();
         }
-        CodeRequest::ApplyNetlistFind => {
-            if let Some(step) = app.state.code.netlist.find.pending.take() {
-                crate::workbench::workflows::netlist_workflow::apply_netlist_find_step(
-                    &mut app.state.model,
-                    &mut app.state.code.netlist,
-                    &mut app.state.code.netlist_open_documents,
-                    &mut app.state.runs,
-                    &mut app.state.workbench,
-                    step,
-                );
-            }
-        }
-        CodeRequest::CopyNetlistDependency => {
-            let messages = app.state.workbench.messages();
-            match crate::workbench::documents::netlist_document::copy_active_dependency_to_project(
-                &mut app.state.model,
-                &mut app.state.code.netlist,
-                &mut app.state.code.netlist_open_documents,
-            ) {
-                Ok(_) => {
-                    app.state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        messages.text(crate::workbench::MessageId::NetlistCopySucceeded),
-                    );
-                }
-                Err(error) => {
-                    app.state
-                        .record(LogSeverity::Error, LogSource::Studio, error);
-                }
-            }
-        }
-        CodeRequest::ApplyNetlistQuickFix => {
-            let answer =
-                crate::workbench::documents::netlist_document::language::apply_preferred_quick_fix(
-                    &mut app.state.model,
-                    &mut app.state.code.netlist,
-                    &mut app.state.code.netlist_open_documents,
-                );
-            app.state.prompt(answer.unwrap_or_else(|refusal| refusal));
-        }
-        CodeRequest::BeginNetlistProfileReview => {
+        CodeHandOff::BeginNetlistProfileReview => {
             app.state.begin_owned_netlist_profile_review();
         }
-        CodeRequest::FormatNetlistDocument => app.format_owned_netlist(),
-        CodeRequest::ImportDroppedNetlist(dropped) => {
+        CodeHandOff::ImportDroppedNetlist(dropped) => {
             app.state.import_dropped_netlist(dropped);
         }
-        CodeRequest::Automation(request) => answer_automation_request(app, request),
     }
-}
-
-/// Carry out what the Automation page asked, as the page did where it drew.
-// Interim, as `answer_code_request`: each answer is the body the page ran,
-// until the code feature carries it out over its own parts.
-fn answer_automation_request(app: &mut RSpiceApp, request: AutomationRequest) {
-    use crate::workbench::documents::code_workspace;
-
-    match request {
-        AutomationRequest::ImportDropped(dropped) => {
-            let application_modal_open = app.state.application_modal_open();
-            code_workspace::import_dropped_automation_files(
-                &mut app.code_workspace_parts(),
-                application_modal_open,
-                dropped,
-            );
-        }
-        AutomationRequest::CreateWorkspace => {
-            if let Err(error) =
-                code_workspace::open_source_workspace_dialog(&mut app.code_workspace_parts())
-            {
-                app.state.prompt(error);
-            }
-        }
-        AutomationRequest::Validate => {
-            code_workspace::validate_automation_workspace(&mut app.code_workspace_parts())
-        }
-        AutomationRequest::DryRun => app.dry_run_automation_workflow(),
-        AutomationRequest::Run => app.start_automation_workflow(),
-        AutomationRequest::Stop => {
-            code_workspace::cancel_automation_workflow(&mut app.code_workspace_parts())
-        }
-        AutomationRequest::OpenGeneratedNetlist => {
-            let _ = crate::workbench::documents::netlist_document::open_generated_primary_in(
-                &mut app.state.model,
-                &mut app.state.code.netlist,
-            );
-            app.state.code.code_workspace.page = code_workspace::CodeWorkspacePage::Netlist;
-        }
-        AutomationRequest::ToggleBreakpoint(line) => {
-            code_workspace::toggle_automation_breakpoint(&mut app.code_workspace_parts(), line);
-        }
-        AutomationRequest::FormatDocument { bundle_id, path } => {
-            if let Err(error) = code_workspace::format_language_document(
-                &mut app.code_workspace_parts(),
-                crate::state::ProjectSourceLanguage::RSpiceAutomation,
-                bundle_id,
-                &path,
-            ) {
-                app.state.prompt(error);
-            }
-        }
-        AutomationRequest::FindInBundle { path } => {
-            if let Err(error) = code_workspace::open_source_search(
-                &mut app.code_workspace_parts(),
-                crate::state::ProjectSourceLanguage::RSpiceAutomation,
-                &path,
-            ) {
-                app.state.prompt(error);
-            }
-        }
-        AutomationRequest::ExportArtifact(kind) => {
-            code_workspace::export_automation_artifact(&mut app.code_workspace_parts(), kind);
-        }
-        AutomationRequest::StartDebugger => {
-            code_workspace::start_automation_debugger(&mut app.code_workspace_parts())
-        }
-        AutomationRequest::ContinueDebugger => {
-            code_workspace::continue_automation_debugger(&mut app.code_workspace_parts())
-        }
-        AutomationRequest::PauseDebugger => {
-            code_workspace::pause_automation_debugger(&mut app.code_workspace_parts())
-        }
-        AutomationRequest::StepOver => {
-            code_workspace::step_over_automation_debugger(&mut app.code_workspace_parts())
-        }
-        AutomationRequest::StepInto => {
-            code_workspace::step_into_automation_debugger(&mut app.code_workspace_parts())
-        }
-        AutomationRequest::StepOut => {
-            code_workspace::step_out_automation_debugger(&mut app.code_workspace_parts())
-        }
-        AutomationRequest::RestartDebugger => {
-            code_workspace::restart_automation_debugger(&mut app.code_workspace_parts())
-        }
-        AutomationRequest::StopDebugger => {
-            code_workspace::stop_automation_debugger(&mut app.code_workspace_parts())
-        }
-        AutomationRequest::RemoveBreakpoint { document_id, line } => {
-            code_workspace::remove_automation_breakpoint(
-                &mut app.code_workspace_parts(),
-                document_id,
-                line,
-            );
-        }
-        AutomationRequest::SyncBreakpoints => {
-            code_workspace::sync_automation_debugger(&mut app.code_workspace_parts())
-        }
-        AutomationRequest::SelectFrame(frame_id) => {
-            code_workspace::select_automation_debug_frame(
-                &mut app.code_workspace_parts(),
-                frame_id,
-            );
-        }
-        AutomationRequest::RefreshWatches => {
-            code_workspace::refresh_automation_debugger(&mut app.code_workspace_parts())
-        }
-    }
-}
-
-/// Drop what the last Verilog-A compile proved, and stop a compile still
-/// running, as a history step that put back another source asks.
-// Interim, as `answer_code_request`: until the code feature answers it over
-// its own parts.
-pub(in crate::workbench) fn answer_void_veriloga_evidence(app: &mut RSpiceApp) {
-    app.state.code.code_workspace.veriloga.void_evidence();
-}
-
-/// Carry out what a source document dialog handed over: create the
-/// Automation workspace its draft describes or the top deck its creation
-/// form drafted, or a lifecycle choice on the document it manages, then the
-/// close the same frame asked for.
-// Interim: each answer is the body the dialog ran in place, until the code
-// feature carries it out over its own parts.
-fn answer_source_document_request(app: &mut RSpiceApp, request: SourceDocumentRequest) {
-    match request {
-        SourceDocumentRequest::CreateWorkspace => {
-            match crate::workbench::documents::code_workspace::commit_source_workspace_dialog(
-                &mut app.code_workspace_parts(),
-            ) {
-                Ok(message) => {
-                    app.state
-                        .record(LogSeverity::Info, LogSource::Studio, message);
-                }
-                Err(error) => {
-                    if let Some(state) = app
-                        .state
-                        .code
-                        .code_workspace
-                        .source_workspace_dialog
-                        .as_mut()
-                    {
-                        state.error = Some(error);
-                    }
-                }
-            }
-        }
-        SourceDocumentRequest::Document {
-            action,
-            language,
-            logical_path,
-            close,
-        } => {
-            source_document::apply_lifecycle_action(
-                &mut app.code_workspace_parts(),
-                action,
-                language,
-                &logical_path,
-            );
-            if close {
-                source_document::close_document_lifecycle(&mut app.state.code.code_workspace);
-            }
-        }
-        SourceDocumentRequest::Netlist { action, close } => {
-            crate::workbench::app::netlist_lifecycle::apply_netlist_lifecycle_action(
-                &mut app.state.code.code_workspace,
-                &mut app.state.code.netlist,
-                &mut app.state.code.netlist_open_documents,
-                &mut app.state.model,
-                &mut app.state.workbench,
-                action,
-                close,
-            );
-        }
-        SourceDocumentRequest::CreateTopDeck => {
-            crate::workbench::app::netlist_lifecycle::commit_new_top_deck(
-                &mut app.state.code.code_workspace,
-                &mut app.state.code.netlist,
-                &mut app.state.code.netlist_open_documents,
-                &mut app.state.model,
-            );
-        }
-    }
-}
-
-/// Go to definition, Find references or Rename symbol from the caret of the
-/// source editor on screen, saying why not when it cannot.
-/// Go to definition, Find references and Rename symbol from the caret of the
-/// source editor on screen. Verilog-A and Automation answer through the
-/// project source index, over the code workspace's parts; a netlist answers
-/// through its own language service.
-fn navigate_active_source(app: &mut RSpiceApp, command: CodeCommand) {
-    let language = crate::workbench::documents::code_workspace::active_source_language(
-        app.state.workbench.workspace,
-        &app.state.model.workspace,
-        app.state.code.code_workspace.page,
-    );
-    let result = match language {
-        Some(language) => crate::workbench::app::navigate_source_bundle(
-            &mut app.code_workspace_parts(),
-            language,
-            command,
-        ),
-        None => navigate_netlist(&mut app.state, command),
-    };
-    if let Err(error) = result {
-        app.state.prompt(error);
-    }
-}
-
-/// Go to definition, Find references and Rename symbol from the caret of the
-/// netlist editor, through the deck's own language service. Held in the
-/// shell until that service runs over the code feature's parts: its answers
-/// take the whole application state today.
-fn navigate_netlist(state: &mut AppState, command: CodeCommand) -> Result<(), String> {
-    use crate::workbench::documents::netlist_document::language as netlist;
-
-    let message = match command {
-        CodeCommand::GoToDefinition => Some(netlist::go_to_definition_at_cursor_in(
-            &mut state.model,
-            &mut state.code.netlist,
-            &mut state.code.netlist_open_documents,
-            &mut state.runs,
-            &mut state.workbench,
-        )?),
-        CodeCommand::FindReferences => Some(netlist::find_references_at_cursor_in(
-            &state.model,
-            &mut state.code.netlist,
-            &mut state.workbench,
-        )?),
-        CodeCommand::RenameSymbol => {
-            netlist::begin_rename_at_cursor_in(&state.model, &mut state.code.netlist)?;
-            None
-        }
-        _ => None,
-    };
-    if let Some(message) = message {
-        state.prompt(message);
-    }
-    Ok(())
 }
 
 /// Carry out what the project feature handed over, as the feature did in

@@ -185,6 +185,31 @@ impl Request for CodeRequest {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// What answering a [`CodeRequest`] leaves to the shell, because it reaches
+/// past the code feature's context: opening or importing a netlist or a
+/// Verilog-A file through the file workflow, importing an LTspice or QSPICE
+/// schematic, showing design's selected instance in the generated deck,
+/// opening the compiled module's symbol, creating the drafted device or the
+/// imported cells as Design documents, opening a placed instance of the
+/// cell, and the netlist import's transactions over the whole project. Each
+/// carries out the request of the same name.
+#[derive(Debug)]
+pub enum CodeHandOff {
+    OpenNetlist,
+    ImportNetlist,
+    ImportVerilogA,
+    ImportLtspiceSchematic,
+    ImportQspiceSchematic,
+    ShowInNetlist,
+    VerilogAOpenSymbol,
+    CreateVerilogADevice,
+    ImportVerilogACells,
+    OpenCellInstance(rspice_app_state::workbench::app_state::cell_usage::CellInstanceUse),
+    CommitNetlistImport,
+    BeginNetlistProfileReview,
+    ImportDroppedNetlist(Vec<egui::DroppedFile>),
+}
+
 /// What the netlist page's editor typed, undid or redid in its frame, which
 /// the shell carries out before anything else the frame raised: the editor
 /// made its commit while the page drew, so everything answered after the

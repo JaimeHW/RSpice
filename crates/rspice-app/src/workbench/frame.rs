@@ -23,7 +23,6 @@ use crate::workbench::state::pane_focus::Pane;
 
 // The shell's submodules and re-exports, as this code saw them when it lived
 // in `workbench.rs` itself.
-use super::commands::netlist_validation;
 use super::features;
 use super::framework::dialogs::DialogKey;
 use super::framework::requests::{
@@ -277,28 +276,6 @@ impl RSpiceApp {
     /// still holds, in its context.
     pub(in crate::workbench) fn terminate_code_runtime_after_project_change(&mut self) {
         CodeFeature::terminate_after_project_change(&mut features::cx(self));
-    }
-
-    /// Have the code feature start the Automation workflow's run, in its
-    /// context.
-    pub(in crate::workbench) fn start_automation_workflow(&mut self) {
-        CodeFeature::start_automation_workflow(&mut features::cx(self));
-    }
-
-    /// Have the code feature dry-run the Automation workflow, in its context.
-    pub(in crate::workbench) fn dry_run_automation_workflow(&mut self) {
-        CodeFeature::dry_run_automation_workflow(&mut features::cx(self));
-    }
-
-    /// Have the code feature validate the deck its page shows, in its
-    /// context.
-    pub(in crate::workbench) fn validate_visible_netlist(&mut self) {
-        netlist_validation::validate_visible_netlist_source(&mut features::cx(self));
-    }
-
-    /// Have the code feature format the netlist it owns, in its context.
-    pub(in crate::workbench) fn format_owned_netlist(&mut self) {
-        netlist_validation::format_owned_netlist(&mut features::cx(self));
     }
 
     /// Have the code feature follow the Automation run in flight, in its
@@ -2358,7 +2335,7 @@ mod tests {
     #[test]
     fn the_run_history_primary_runs_the_netlist_deck_on_the_netlist_workspace() {
         use crate::state::SimulationRunIntent;
-        use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
+        use crate::workbench::code::netlist_validation::validate_visible_netlist_source;
         use crate::workbench::features::cx;
 
         let ctx = Context::default();

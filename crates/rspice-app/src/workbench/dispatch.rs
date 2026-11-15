@@ -19,16 +19,18 @@
 use crate::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::HardcopyWorkflow;
+use crate::workbench::app::actions::workspace::HistoryDirection;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app_state::PlatformState;
+use crate::workbench::code::CodeFeature;
 use crate::workbench::code::commands::{CodeRequest, NetlistEditorRequest, VerilogAStripRequest};
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
 use crate::workbench::commands::{
-    active_schematic_editor, answer_code_request, answer_netlist_editor_request,
-    answer_project_request, answer_surface_request, answer_void_veriloga_evidence,
-    command_edits_schematic, file_action, run_project_file_action, select_probed_trace,
+    active_schematic_editor, answer_project_request, answer_surface_request,
+    carry_out_code_hand_off, command_edits_schematic, file_action, run_project_file_action,
+    select_probed_trace,
 };
 use crate::workbench::design::inspector::CommitSheetSection;
 use crate::workbench::features;
@@ -51,6 +53,8 @@ use crate::workbench::menu_bar::FileMenuAction;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, WorkbenchSession};
+
+mod code_requests;
 
 /// The dispatcher by key: where a key becomes the command it names, a
 /// feature's first and the shell's legacy table's otherwise.
@@ -621,6 +625,43 @@ pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u
     false
 }
 
+/// Have the code feature carry out what the netlist page's editor raised,
+/// in its context.
+fn answer_netlist_editor_request(app: &mut RSpiceApp, request: NetlistEditorRequest) {
+    code_requests::answer_netlist_editor(&mut features::cx(app), request);
+}
+
+/// Have the code feature drop what the last Verilog-A compile proved, in its
+/// context.
+fn answer_void_veriloga_evidence(app: &mut RSpiceApp) {
+    code_requests::void_veriloga_evidence(&mut features::cx(app));
+}
+
+/// Have the code feature answer what it raised, in its context, holding
+/// whether an application-modal dialog is open, taken as the answer starts.
+/// What reaches past the feature the shell carries out straight after.
+fn answer_code_request(app: &mut RSpiceApp, request: CodeRequest) {
+    let modal_open = app.state.application_modal_open();
+    let hand_off = code_requests::answer(
+        &mut features::cx::<CodeFeature>(app).with_application_modal(modal_open),
+        request,
+    );
+    if let Some(hand_off) = hand_off {
+        carry_out_code_hand_off(app, hand_off);
+    }
+}
+
+impl RSpiceApp {
+    /// Have the code feature take the netlist page's own history step
+    /// `direction`, in its context.
+    pub(in crate::workbench) fn take_netlist_history_step(
+        &mut self,
+        direction: HistoryDirection,
+    ) -> Result<Option<String>, String> {
+        code_requests::step_history(&mut features::cx(self), direction == HistoryDirection::Undo)
+    }
+}
+
 impl Command {
     /// Carry this command out behind the prologue every command shares.
     pub(super) fn dispatch(self, app: &mut RSpiceApp) {
@@ -775,7 +816,7 @@ mod tests {
     fn run_on_the_netlist_workspace_runs_the_deck_and_not_the_plan() {
         use crate::state::SimulationRunIntent;
         use crate::workbench::RSpiceApp;
-        use crate::workbench::commands::netlist_validation::validate_visible_netlist_source;
+        use crate::workbench::code::netlist_validation::validate_visible_netlist_source;
         use crate::workbench::features::cx;
         use crate::workbench::framework::command_registry::{CommandAvailability, ids};
         use crate::workbench::state::Workspace;

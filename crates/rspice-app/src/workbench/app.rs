@@ -113,9 +113,6 @@ pub(crate) use dialogs::selection::bulk_edit::SelectionBulkEditDialogState;
 
 pub(crate) use dialogs::design_review_comments::DesignReviewCommentsDialogState;
 
-pub(crate) use dialogs::source_language_tools::navigate_source_bundle;
-
-pub(crate) use dialogs::veriloga_build_settings::open_veriloga_build_settings;
 #[cfg(test)]
 pub(crate) use dialogs::veriloga_build_settings::{
     VerilogABuildSettingsDraft, save_veriloga_build_settings,
