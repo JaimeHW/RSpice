@@ -50,14 +50,14 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
+      # Reads the per-push test-linux cache, which holds the release and
+      # debug rspice-conformance dependency builds these gates share; only
+      # the release rspice-core suites' dependencies build here.
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          shared-key: conformance-${{ steps.deps.outputs.digest }}
+          shared-key: test-linux-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          # Saved when the job fails too; otherwise a job that stays red
-          # starts every night from an empty cache.
-          cache-on-failure: true
+          save-if: false
       - name: Install independent Verilog reference simulators
         run: |
           sudo apt-get update
@@ -214,12 +214,13 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
+      # Reads the per-push test-linux cache: the release rspice-conformance
+      # dependency set, which veriloga-builtins leaves unchanged.
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          shared-key: veriloga-corpus-${{ steps.deps.outputs.digest }}
+          shared-key: test-linux-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          save-if: false
       - name: Corpus golden gates on every generated model
         # The four correctness gates: finite evaluation at every probe point,
         # gmin reaching the devices that read it, stamped Jacobians against a
@@ -413,12 +414,13 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
+      # Reads the per-push wasm-tests cache for its pinned wasm-bindgen-cli
+      # install; no per-push job builds the release wasm32 suite.
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          shared-key: browser-jit-shipped-sources-${{ steps.deps.outputs.digest }}
+          shared-key: wasm-tests-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          save-if: false
       - name: Install pinned wasm-bindgen CLI
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
       - name: Build the walk over every shipped source
@@ -455,11 +457,13 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
+      # Reads the per-push test-linux-native cache, which holds the
+      # Verilog-A engine dependency set these suites build.
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          shared-key: mixed-determinism-${{ steps.deps.outputs.digest }}
+          shared-key: test-linux-native-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: false
       # Serial test threads and --nocapture for both runs: the comparison is
       # over printed lines, and a key printed by two threads at once is a
       # difference in the log rather than in the engine. The `tri_family`
@@ -565,13 +569,15 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
+      # x64 reads the per-push test-linux cache: the corpus runner's release
+      # dependency set is the one test-linux builds for rspice-conformance's
+      # release suites (cargo tree: identical crates and features on every
+      # route). The two ARM64 routes build that same set and share one cache.
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          shared-key: mixed-corpus-${{ matrix.route }}-${{ steps.deps.outputs.digest }}
+          shared-key: ${{ matrix.os == 'ubuntu-24.04-arm' && 'mixed-corpus' || 'test-linux' }}-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          # A cell that drifted still built everything; keep the build.
-          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.os == 'ubuntu-24.04-arm' }}
       # The shipped browser worker image and its bindings, where the
       # application's simulation-worker.js loads them. Built as ci.yml builds
       # the production image, with the generated compact-model catalog: C5's
@@ -698,12 +704,13 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
+      # Reads the per-push test-linux cache: the release rspice-conformance
+      # dependency set the ivtest runner and suite build.
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          shared-key: ivtest-${{ steps.deps.outputs.digest }}
+          shared-key: test-linux-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          save-if: false
       # Icarus Verilog and its ivtest suite are GPL. The job builds the v13_0
       # source tag outside the repository for this run only; nothing of it is
       # redistributed, and the repository keeps only test names and RSpice's

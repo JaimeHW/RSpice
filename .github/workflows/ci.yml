@@ -224,11 +224,14 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
+      # Every suite here builds the Verilog-A engine dependency set that
+      # test-linux-native builds (cargo tree: the same crates and
+      # features), so it reads that job's cache and stores none.
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          shared-key: test-linux-veriloga-${{ steps.deps.outputs.digest }}
+          shared-key: test-linux-native-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: false
       # Every core integration test file gated on `veriloga` compiles to
       # nothing under the default feature set, so the core lane above runs
       # nothing for any of them. They are named here, one cargo invocation, on

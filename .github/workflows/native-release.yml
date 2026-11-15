@@ -342,11 +342,13 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
+      # Reads the cache security.yml saves from main: the same pinned
+      # cargo-deny and cargo-cyclonedx installs.
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          shared-key: native-release-supply-chain-${{ steps.deps.outputs.digest }}
+          shared-key: rust-supply-chain-${{ env.CARGO_DENY_VERSION }}-${{ env.CARGO_CYCLONEDX_VERSION }}-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: false
       - name: Install pinned security tooling
         run: |
           cargo install cargo-deny --version "$CARGO_DENY_VERSION" --locked
