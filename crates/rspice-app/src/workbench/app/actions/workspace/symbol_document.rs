@@ -650,6 +650,46 @@ fn apply_symbol_parent_edit(
     }
 }
 
+/// What the held edit leaves unconnected on the sheets that place the
+/// symbol: the wire ends a pin held there before the edit deleted the pin or
+/// took it off the drawing. Those ends stay where they were, open, and are
+/// said so rather than joined to anything else; `None` when no held end was
+/// let go.
+fn wire_ends_left_by_removed_pins(
+    symbol: &SymbolUiState,
+    model: &Model,
+    document: &SymbolDocument,
+    renames: &BTreeMap<String, String>,
+) -> Option<String> {
+    let edit = symbol
+        .history
+        .parent_edit(&model.workspace.content.active_key())?;
+    let mut removed: BTreeMap<&str, usize> = BTreeMap::new();
+    for end in edit.parents.iter().flat_map(|parent| parent.wiring.ends()) {
+        let Some(pin) = edit
+            .base
+            .pins
+            .iter()
+            .find(|pin| pin.name.eq_ignore_ascii_case(&end.terminal))
+        else {
+            continue;
+        };
+        let now = renames.get(&pin.name).unwrap_or(&pin.name);
+        if document.pin(now).and_then(|pin| pin.position).is_none() {
+            *removed.entry(pin.name.as_str()).or_default() += 1;
+        }
+    }
+    let ends: usize = removed.values().sum();
+    (ends > 0).then(|| {
+        let pins = removed.keys().copied().collect::<Vec<_>>().join(", ");
+        format!(
+            "{} left unconnected where {} {pins} stood.",
+            counted(ends, "wire end", "wire ends"),
+            if removed.len() == 1 { "pin" } else { "pins" }
+        )
+    })
+}
+
 /// Close the held edit: each parent it changed gets one undo record
 /// spanning the whole edit.
 pub(crate) fn finish_symbol_parent_edit(symbol: &mut SymbolUiState, model: &mut Model) {
@@ -739,6 +779,9 @@ fn publish_active_symbol_edit(
     };
 
     apply_symbol_parent_edit(symbol, model, document, &intent.renames);
+    if let Some(left) = wire_ends_left_by_removed_pins(symbol, model, document, &intent.renames) {
+        wb.prompt(left);
+    }
     let renamed = apply_symbol_pin_renames(model, &reference, &intent.renames);
     if renamed > 0 {
         wb.prompt(format!(

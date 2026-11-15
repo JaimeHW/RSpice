@@ -311,3 +311,41 @@ fn the_placed_preview_is_not_offered_in_place() {
         "the symbol's own view offers the preview"
     );
 }
+
+/// Deleting a pin in place lets go of the wire it held: the wire stays where
+/// it was, open, joined to nothing, and the status bar says how many ends
+/// were left and where.
+#[test]
+fn a_deleted_pin_leaves_its_wire_open_and_says_so() {
+    let mut fixture = InPlace::new();
+    fixture.wire_pin_a();
+    let wire = vec![Point::new(60, 70), Point::new(0, 70)];
+    fixture.enter();
+    // A press on the pin's tip selects it and gives the canvas the keyboard.
+    let tip = fixture.screen(Point::new(60, 70));
+    click_at(&mut fixture.replay, tip);
+    let after = fixture.replay.key(egui::Key::Delete, egui::Modifiers::NONE);
+    let document = fixture
+        .replay
+        .app
+        .state
+        .model
+        .load_symbol_document(&fixture.symbol)
+        .unwrap();
+    assert!(document.pin("A").is_none(), "the pin is deleted");
+    assert_eq!(
+        prompt(&after),
+        "1 wire end left unconnected where pin A stood."
+    );
+    let parent = fixture
+        .replay
+        .app
+        .state
+        .model
+        .workspace
+        .content
+        .schematic_buffers
+        .get(&fixture.parent.key())
+        .unwrap();
+    assert_eq!(parent.document().wires[0].points, wire, "the wire stayed");
+}
