@@ -395,6 +395,9 @@ pub struct StaticMatrix {
     residual_gross_scratch: Vec<Value>,
     residual_compensation_scratch: Vec<Value>,
     residual_row_nnz_scratch: Vec<usize>,
+    /// Each right-hand side's first-pass acceptance ratio in a batched solve,
+    /// measured in one pass over the matrix.
+    block_acceptance_scratch: Vec<Value>,
     /// Retained KLU iterative-refinement correction. This path is uncommon,
     /// but keeping its buffer makes even ill-scaled repeated solves allocation
     /// free after the first accepted system.
@@ -846,8 +849,13 @@ fn apply_klu_numeric_action(
 impl BackwardError {
     #[inline]
     fn accepted(self) -> bool {
-        self.acceptance_ratio <= 1.0
+        ratio_accepted(self.acceptance_ratio)
     }
+}
+
+#[inline]
+fn ratio_accepted(acceptance_ratio: Value) -> bool {
+    acceptance_ratio <= 1.0
 }
 
 /// Set unknowns to exact zero when homogeneous equations prove they are zero.
@@ -1705,6 +1713,124 @@ fn fast_componentwise_backward_error(
     })
 }
 
+/// [`fast_componentwise_backward_error`]'s acceptance ratio for each of a
+/// block of `rhs_count` solutions of one matrix, in one pass over the
+/// matrix. `acceptance_ratio[k]` is, bit for bit, the ratio that function
+/// returns for column `k` alone: each column's residual and denominator take
+/// the same expressions over an equation's nonzeros, in the same order. A
+/// column that function refuses with an overflow, and every column when the
+/// dimensions disagree, holds infinity instead, so a column whose ratio is
+/// accepted is one the single-column check accepts on its first pass.
+///
+/// The single-column check refuses an overflowing term at once; here only an
+/// equation's finished residual is tested. A product's magnitude is the
+/// product of the magnitudes, so a term that is not finite has a magnitude
+/// that is not finite, and a residual that subtracts it, or that starts from
+/// a right-hand side that is not finite, never becomes finite again.
+#[allow(clippy::too_many_arguments)]
+fn fast_componentwise_acceptance_block(
+    csc: &SymbolicSparseColMat<usize>,
+    residual_layout: &ResidualLayout,
+    values: &[Value],
+    solution: &[Value],
+    rhs: &[Value],
+    rhs_count: usize,
+    interleaved: &mut Vec<Value>,
+    sums: &mut Vec<Value>,
+    acceptance_ratio: &mut Vec<Value>,
+    operation: RealSolveOp,
+) {
+    let n = csc.nrows();
+    acceptance_ratio.clear();
+    acceptance_ratio.resize(rhs_count, Value::INFINITY);
+    if csc.ncols() != n
+        || n.checked_mul(rhs_count) != Some(rhs.len())
+        || solution.len() != rhs.len()
+        || values.len() != csc.row_idx().len()
+        || residual_layout.row_ptr.len() != n + 1
+        || residual_layout.col_idx.len() != values.len()
+        || residual_layout.csc_idx.len() != values.len()
+    {
+        return;
+    }
+    acceptance_ratio.fill(0.0);
+    if n == 0 {
+        return;
+    }
+    // Each unknown's values across the block, side by side.
+    interleaved.clear();
+    interleaved.resize(rhs.len(), 0.0);
+    for (column, x) in solution.chunks_exact(n).enumerate() {
+        for (unknown, &value) in x.iter().enumerate() {
+            interleaved[unknown * rhs_count + column] = value;
+        }
+    }
+    sums.clear();
+    sums.resize(2 * rhs_count, 0.0);
+    let (residuals, denominators) = sums.split_at_mut(rhs_count);
+    let (col_ptr, row_idx) = (csc.col_ptr(), csc.row_idx());
+    for equation in 0..n {
+        // The normal check walks a layout row in ascending column order, the
+        // transposed one a CSC column, as the single-column check does.
+        let span = match operation {
+            RealSolveOp::Normal => {
+                residual_layout.row_ptr[equation]..residual_layout.row_ptr[equation + 1]
+            }
+            RealSolveOp::Transpose => col_ptr[equation]..col_ptr[equation + 1],
+        };
+        for (column, (residual, denominator)) in residuals
+            .iter_mut()
+            .zip(denominators.iter_mut())
+            .enumerate()
+        {
+            let rhs_value = rhs[column * n + equation];
+            *residual = rhs_value;
+            *denominator = rhs_value.abs();
+        }
+        let mut nonzeros = 0usize;
+        for position in span {
+            let (index, unknown) = match operation {
+                RealSolveOp::Normal => (
+                    residual_layout.csc_idx[position],
+                    residual_layout.col_idx[position],
+                ),
+                RealSolveOp::Transpose => (position, row_idx[position]),
+            };
+            let value = values[index];
+            if value != 0.0 {
+                nonzeros = nonzeros.saturating_add(1);
+            }
+            let x = &interleaved[unknown * rhs_count..(unknown + 1) * rhs_count];
+            for ((residual, denominator), &x) in
+                residuals.iter_mut().zip(denominators.iter_mut()).zip(x)
+            {
+                let term = value * x;
+                let magnitude = value.abs() * x.abs();
+                *residual -= term;
+                *denominator = (*denominator + magnitude).min(Value::MAX);
+            }
+        }
+        let safe1 = (nonzeros.saturating_add(1) as Value) * Value::MIN_POSITIVE;
+        let rounding_bound = 4.0 * (nonzeros.saturating_add(1) as Value) * Value::EPSILON;
+        let tolerance = backward_error_tolerance(nonzeros);
+        for ((ratio, &residual), &denominator) in acceptance_ratio
+            .iter_mut()
+            .zip(residuals.iter())
+            .zip(denominators.iter())
+        {
+            let residual_abs = residual.abs();
+            if !residual_abs.is_finite() || !denominator.is_finite() {
+                *ratio = Value::INFINITY;
+                continue;
+            }
+            let scale = denominator.max(0.0);
+            let row_error = residual_abs / scale.max(safe1);
+            let certified_error = row_error + rounding_bound;
+            *ratio = ratio.max(certified_error / tolerance);
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compensated_componentwise_backward_error(
     csc: &SymbolicSparseColMat<usize>,
@@ -1976,6 +2102,7 @@ impl StaticMatrix {
             residual_gross_scratch: Vec::new(),
             residual_compensation_scratch: Vec::new(),
             residual_row_nnz_scratch: Vec::new(),
+            block_acceptance_scratch: Vec::new(),
             klu_correction_scratch: Vec::new(),
             correction_rhs_lo_scratch: Vec::new(),
             add_sequences: Default::default(),
@@ -2159,6 +2286,7 @@ impl StaticMatrix {
             residual_gross_scratch: Vec::new(),
             residual_compensation_scratch: Vec::new(),
             residual_row_nnz_scratch: Vec::new(),
+            block_acceptance_scratch: Vec::new(),
             klu_correction_scratch: Vec::new(),
             correction_rhs_lo_scratch: Vec::new(),
             add_sequences: Default::default(),
@@ -3561,6 +3689,7 @@ impl StaticMatrix {
             residual_gross_scratch,
             residual_compensation_scratch,
             residual_row_nnz_scratch,
+            block_acceptance_scratch,
             ..
         } = self;
         let n = *nrows;
@@ -3626,7 +3755,33 @@ impl StaticMatrix {
             }
             return Ok(true);
         }
+        // One pass over the matrix gives every column's first-pass ratio. A
+        // column it accepts is one the single-column check accepts on its
+        // first pass; only the others take that check, in column order.
+        let block_checked = rhs_count > 1;
+        if block_checked {
+            fast_componentwise_acceptance_block(
+                csc,
+                residual_layout,
+                values,
+                solution,
+                rhs,
+                rhs_count,
+                residual_scratch,
+                residual_gross_scratch,
+                block_acceptance_scratch,
+                operation,
+            );
+        }
         for rhs_index in 0..rhs_count {
+            if block_checked
+                && block_acceptance_scratch
+                    .get(rhs_index)
+                    .copied()
+                    .is_some_and(ratio_accepted)
+            {
+                continue;
+            }
             let begin = rhs_index * n;
             let end = begin + n;
             let error = componentwise_backward_error_with_layout(
@@ -9841,6 +9996,96 @@ mod tests {
             .unwrap();
             let actual = matrix.solve_transpose(&rhs).unwrap();
             assert_relative_solution(&actual, &expected);
+        }
+    }
+
+    #[test]
+    fn block_backward_error_check_matches_each_column_on_its_own() {
+        let matrix = StaticMatrix::from_triplets(
+            3,
+            3,
+            &[
+                (0, 0, 4.0),
+                (0, 1, 1.0),
+                (1, 0, 2.0),
+                (1, 1, 3.0),
+                (1, 2, 1.0),
+                (2, 1, 1.0),
+                (2, 2, 5.0),
+            ],
+        )
+        .unwrap();
+        // Accepted, rejected, an overflowing term, an overflowing sum of
+        // finite terms, and a right-hand side that is not finite.
+        let solution = [
+            1.0,
+            2.0,
+            3.0,
+            1.0 + 1.0e-6,
+            2.0,
+            3.0,
+            1.0e308,
+            2.0,
+            3.0,
+            4.0e307,
+            1.7e308,
+            3.0,
+            1.0,
+            2.0,
+            3.0,
+        ];
+        for (operation, exact) in [
+            (RealSolveOp::Normal, [6.0, 11.0, 17.0]),
+            (RealSolveOp::Transpose, [8.0, 10.0, 17.0]),
+        ] {
+            let mut rhs = exact.repeat(5);
+            rhs[12] = Value::NAN;
+            let (mut interleaved, mut sums, mut ratios) = (Vec::new(), Vec::new(), Vec::new());
+            fast_componentwise_acceptance_block(
+                &matrix.csc,
+                &matrix.residual_layout,
+                &matrix.values,
+                &solution,
+                &rhs,
+                5,
+                &mut interleaved,
+                &mut sums,
+                &mut ratios,
+                operation,
+            );
+            let (mut residual, mut denominator, mut row_nnz) = (Vec::new(), Vec::new(), Vec::new());
+            let mut accepted = Vec::new();
+            for (column, &ratio) in ratios.iter().enumerate() {
+                let span = column * 3..column * 3 + 3;
+                match fast_componentwise_backward_error(
+                    &matrix.csc,
+                    Some(&matrix.residual_layout),
+                    &matrix.values,
+                    &solution[span.clone()],
+                    &rhs[span],
+                    None,
+                    &mut residual,
+                    &mut denominator,
+                    &mut row_nnz,
+                    operation,
+                ) {
+                    Ok(error) => assert_eq!(
+                        ratio.to_bits(),
+                        error.acceptance_ratio.to_bits(),
+                        "{operation:?} column {column}"
+                    ),
+                    Err(SolverError::Overflow) => {
+                        assert_eq!(ratio, Value::INFINITY, "{operation:?} column {column}")
+                    }
+                    Err(error) => panic!("{operation:?} column {column}: {error:?}"),
+                }
+                accepted.push(ratio_accepted(ratio));
+            }
+            assert_eq!(
+                accepted,
+                [true, false, false, false, false],
+                "{operation:?}"
+            );
         }
     }
 
