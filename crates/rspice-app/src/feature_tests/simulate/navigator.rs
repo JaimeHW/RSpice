@@ -308,7 +308,7 @@ fn the_excitations_rail_counts_the_design_that_the_page_it_opens_lists() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_simulation_rail_derives_what_it_states_once_a_frame() {
-    use crate::simulation::cost_probe::{Derivation, count, reset};
+    use rspice_simulation_contract::cost_probe::{Derivation, count, reset};
 
     let mut app = RSpiceApp::test_instance();
     rspice_app_state::workbench::examples::load_example(

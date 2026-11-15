@@ -3,17 +3,17 @@
 use std::collections::HashMap;
 
 use super::session_of;
-use crate::simulation::config::AnalysisConfig;
 use crate::simulation::controller::SimulationController;
 use crate::simulation::controller::prepared_run::fixtures::{definition, runnable_state};
 use crate::simulation::controller::test_execution::run_resolved_task;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::{SimulationRunIntent, SpecificationDefinition};
+use rspice_simulation_contract::config::AnalysisConfig;
 
 #[test]
 fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
-    use crate::simulation::execution::PreparedRunAuthorization;
     use crate::state::workspace::MeasurementReferenceSource;
+    use rspice_simulation::execution::PreparedRunAuthorization;
     let mut state = session_of(runnable_state());
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let transient = plan
@@ -210,7 +210,7 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         snapshot.metadata().source_digest
     );
     let snapshot_digest = snapshot.digest();
-    let dispatch = crate::simulation::execution::PreparedRunAuthorization::default()
+    let dispatch = rspice_simulation::execution::PreparedRunAuthorization::default()
         .authorize_campaign_member(snapshot)
         .unwrap();
     let task = dispatch

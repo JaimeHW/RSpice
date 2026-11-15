@@ -5,7 +5,7 @@ use super::engine::{add_operating_point, binned_library, enable_only, inverter_o
 use super::*;
 
 use crate::simulation::controller::PreflightStage;
-use crate::simulation::execution::PreparationProgress;
+use rspice_simulation::execution::PreparationProgress;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
 /// The inverter on a binned PDK over three process sections and three
@@ -353,7 +353,7 @@ impl RSpiceApp {
         self.state.request_run_set_simulation();
         assert_eq!(
             thread_preparations::take(),
-            [crate::simulation::execution::SimulationRunIntent::SimulateRunSet],
+            [rspice_simulation::execution::SimulationRunIntent::SimulateRunSet],
             "Automation prepares its run in its own frame"
         );
         (prepared.snapshot_digest, inputs)
@@ -364,8 +364,8 @@ impl RSpiceApp {
         &self,
         inputs: &crate::simulation::controller::PreparedRunSetInputs,
     ) -> (
-        Result<(), crate::simulation::execution::PreparationError>,
-        Vec<crate::simulation::execution::SimulationRunIntent>,
+        Result<(), rspice_simulation::execution::PreparationError>,
+        Vec<rspice_simulation::execution::SimulationRunIntent>,
     ) {
         use crate::simulation::controller::prepared_run::thread_preparations;
 
@@ -391,7 +391,7 @@ impl RSpiceApp {
     /// The frame that dispatches a queued run, with the preparations it ran.
     pub(super) fn dispatch_frame(
         &mut self,
-    ) -> Vec<crate::simulation::execution::SimulationRunIntent> {
+    ) -> Vec<rspice_simulation::execution::SimulationRunIntent> {
         use crate::simulation::controller::prepared_run::thread_preparations;
 
         let earlier = thread_preparations::take();
@@ -930,7 +930,7 @@ fn an_edit_after_automation_prepared_its_run_is_named_by_its_evidence_check() {
     let error = verdict.expect_err("the edited design is not the one the run solves");
     assert_eq!(
         error.stage(),
-        crate::simulation::execution::PreparationStage::Authorization
+        rspice_simulation::execution::PreparationStage::Authorization
     );
     assert_eq!(
         error.message(),

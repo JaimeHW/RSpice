@@ -1220,7 +1220,7 @@ fn a_source_loop_the_design_rule_does_not_see_is_the_engines_refusal() {
 /// Every preparation stage is repaired where the thing it failed on lives.
 #[test]
 fn a_preparation_failure_names_the_destination_that_repairs_it() {
-    use crate::simulation::execution::PreparationStage;
+    use rspice_simulation::execution::PreparationStage;
     for stage in [
         PreparationStage::DesignChecks,
         PreparationStage::SourceChecks,
@@ -1335,7 +1335,7 @@ fn a_configuration_honoured_differently_than_it_reads_is_a_preflight_advisory() 
 
 #[test]
 fn a_model_binding_blocker_remediates_to_corners_and_sections() {
-    use crate::simulation::execution::PreparationStage;
+    use rspice_simulation::execution::PreparationStage;
 
     // Both model-binding blockers filed `DesignChecks`, whose button says
     // "Run source checks" and opens Verify. Re-running the checks that
@@ -1651,7 +1651,7 @@ fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
 /// netlist stage at all, and Yield names nothing about the deck.
 #[test]
 fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks() {
-    use crate::simulation::execution::PreparationStage;
+    use rspice_simulation::execution::PreparationStage;
 
     let remediation = preparation_remediation(PreparationStage::Netlist, Some(42));
     assert_eq!(

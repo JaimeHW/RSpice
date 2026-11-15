@@ -11,9 +11,9 @@ use super::session_of;
 use crate::simulation::controller::SimulationController;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::simulation::controller::prepared_run::fixtures::{fixture_dir, manual_deck_state};
-use crate::simulation::execution::PreparationStage;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::model::compile_project_bundle_receipt;
+use rspice_simulation::execution::PreparationStage;
 
 #[test]
 fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {

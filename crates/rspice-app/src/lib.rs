@@ -47,30 +47,17 @@
 pub(crate) mod schematic;
 
 pub(crate) mod simulation {
-    //! Application simulation setup, source preparation and dispatch
-    //! coordination.
-    //!
-    //! Commercial-grade simulation execution and configuration. Manages the
-    //! complete simulation workflow from netlist generation to result display.
+    //! The run and state tiers' simulation modules, at the paths the shell's
+    //! not-yet-moved readers still name. Every other reader names the owning
+    //! crate's module.
 
     pub(crate) use rspice_app_runs::simulation::controller;
     pub(crate) use rspice_app_state::simulation::placed_sources;
     pub(crate) use rspice_app_state::simulation::plan;
     pub(crate) use rspice_app_state::simulation::stimulus_realize;
     pub(crate) use rspice_app_state::simulation::table_route;
-    #[cfg(test)]
-    pub(crate) use rspice_simulation::execution;
-    #[cfg(test)]
-    pub(crate) use rspice_simulation_contract::config;
-    #[cfg(test)]
-    pub(crate) use rspice_simulation_contract::cost_probe;
 
-    // The netlist generator, options translator, and
-    // engine bridge are all reached through their own modules; flattening their
-    // types here duplicated the path without shortening any call site.
     pub use controller::SimulationController;
-    #[cfg(test)]
-    pub use rspice_simulation::results::SampledWaveform;
 }
 
 /// Project-bound property editing workflows.
@@ -95,21 +82,15 @@ use rspice_app_services::automation_runtime;
 // =============================================================================
 
 pub(crate) mod services {
-    //! Application service adapters and platform integration.
-    //!
-    //! Services Module
-    //!
-    //! Backend services for the RSpice UI application.
-    //! Contains specialized processing and analysis utilities.
+    //! The service modules at the paths the shell's not-yet-moved readers
+    //! still name, and the design rule checks' tests. Every other reader names
+    //! the owning crate's module.
 
     #[cfg(test)]
     mod drc_tests;
     pub(crate) use rspice_app_cloud::services::license;
     pub(crate) use rspice_app_services::services::model_hub;
     pub(crate) use rspice_app_services::services::recent_files;
-
-    // No flattening re-exports: every consumer of a service type names the module
-    // that defines it, so the owner of a name is readable at the use site.
 }
 
 /// Application file workflows and platform I/O adapters.

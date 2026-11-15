@@ -25,7 +25,7 @@ use crate::workbench::RSpiceApp;
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_analyses_route_expands_the_declared_space_once_a_frame() {
-    use crate::simulation::cost_probe::{Derivation, count, reset};
+    use rspice_simulation_contract::cost_probe::{Derivation, count, reset};
 
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -74,7 +74,7 @@ fn the_analyses_route_expands_the_declared_space_once_a_frame() {
 /// frame's cost is exactly what this returns.
 #[cfg(not(target_arch = "wasm32"))]
 fn derivations_for_route(page: crate::state::SimulationPage) -> (usize, usize, usize) {
-    use crate::simulation::cost_probe::{Derivation, count, reset};
+    use rspice_simulation_contract::cost_probe::{Derivation, count, reset};
 
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);

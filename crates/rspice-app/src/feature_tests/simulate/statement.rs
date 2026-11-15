@@ -209,7 +209,7 @@ fn reading_a_statement_leaves_the_plan_exactly_as_it_found_it() {
 #[test]
 fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
     use crate::product::AnalysisInstanceId;
-    use crate::simulation::config::NoiseSweepType;
+    use rspice_simulation_contract::config::NoiseSweepType;
 
     let mut app = RSpiceApp::test_instance();
     rspice_app_state::workbench::examples::load_example(
