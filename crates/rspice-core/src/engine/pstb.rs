@@ -342,6 +342,9 @@ impl Engine {
 /// for an algebraic coordinate are its traversals' Newton tolerance.
 const REMEMBERED: Value = 1.0e-6;
 
+/// A reduced monodromy and the probe's projection onto its coordinates.
+type Reduction = (Vec<Vec<Value>>, Vec<(usize, Value)>);
+
 /// The monodromy over the coordinates the period remembers, the probe's
 /// first, with the probe's projection there. An event orbit always takes the
 /// reduction; a native orbit takes it only where its map is singular by
@@ -359,7 +362,7 @@ fn remembered_coordinates(
     basis: &[String],
     probe: &ResolvedPstbProbe,
     event_orbit: bool,
-) -> Result<Option<(Vec<Vec<Value>>, Vec<(usize, Value)>)>, SimulationError> {
+) -> Result<Option<Reduction>, SimulationError> {
     let n = monodromy.len();
     let structurally_singular = (0..n).any(|k| {
         monodromy[k].iter().all(|value| *value == 0.0) || monodromy.iter().all(|row| row[k] == 0.0)
