@@ -187,6 +187,10 @@ fn evaluate_optimization_objective(
     voltage_objective(netlist, config, &dc, abort).map(|(objective, _)| objective)
 }
 
+/// Each configured variable's objective derivative or the reason it has
+/// none; or, as `Err`, the reason the deck gives no variable one.
+type VariableDerivatives = Result<Vec<Result<Value, String>>, String>;
+
 /// The V(node, ref) objective at one candidate and its derivative with
 /// respect to each configured variable, all from one operating-point solve:
 /// each derivative is a difference of the operating point's tangent with
@@ -197,7 +201,7 @@ fn evaluate_voltage_objective_with_derivatives(
     config: &OptimizationRunConfig,
     context: ServiceContext<'_>,
     variables: &HashMap<String, Value>,
-) -> ServiceRunResult<(Value, Result<Vec<Result<Value, String>>, String>)> {
+) -> ServiceRunResult<(Value, VariableDerivatives)> {
     let abort = context.abort;
     ensure_not_aborted(abort)?;
     let engine = Engine::new(context.engine_config(netlist));
