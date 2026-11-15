@@ -6,8 +6,8 @@
 //! shared [`crate::theme`] palettes. Schematic panes add pan and zoom —
 //! the reason a sheet hydrates at all.
 
-use egui::epaint::TextShape;
-use egui::{Align2, Pos2, Rect, Sense, Shape, Stroke as EguiStroke, Vec2};
+use egui::epaint::{Mesh, TextShape};
+use egui::{Align2, Color32, Pos2, Rect, Sense, Shape, Stroke as EguiStroke, Vec2};
 use rspice_publication_contract::{
     PathSegment, Point, Primitive, Scene, Stroke, StrokePattern, TextAnchor,
 };
@@ -126,6 +126,116 @@ fn flatten_arc(
     }
 }
 
+/// The inside of the closed outline `points` painted in `color`, as the
+/// page's static figure fills it. A convex outline takes egui's own smoothed
+/// polygon; a concave one (an arrowhead's notch, an L-shaped body) is cut
+/// into ears, where a fan from its first corner would paint across the
+/// notch and lay a tint twice where its triangles overlap.
+fn fill_shape(points: &[Pos2], color: Color32) -> Option<Shape> {
+    let mut outline = points.to_vec();
+    outline.dedup();
+    if outline.len() > 2 && outline.first() == outline.last() {
+        outline.pop();
+    }
+    if outline.len() < 3 {
+        return None;
+    }
+    let count = outline.len();
+    let turns = (0..count).map(|at| {
+        turn(
+            outline[at],
+            outline[(at + 1) % count],
+            outline[(at + 2) % count],
+        )
+    });
+    let (left, right) = turns.fold((false, false), |(left, right), turn| {
+        (left || turn > 0.0, right || turn < 0.0)
+    });
+    if !(left && right) {
+        return Some(Shape::convex_polygon(outline, color, EguiStroke::NONE));
+    }
+    let triangles = triangulate(&outline);
+    if triangles.is_empty() {
+        return None;
+    }
+    let mut mesh = Mesh::default();
+    for point in &outline {
+        mesh.colored_vertex(*point, color);
+    }
+    for [a, b, c] in triangles {
+        mesh.add_triangle(a as u32, b as u32, c as u32);
+    }
+    Some(Shape::mesh(mesh))
+}
+
+/// Triangles covering the polygon `points`, as indices into it, clipped one
+/// ear at a time. An outline that crosses itself may have no ear left to
+/// clip; what remains of it is then fanned, so it is never left empty.
+fn triangulate(points: &[Pos2]) -> Vec<[usize; 3]> {
+    let count = points.len();
+    if count < 3 {
+        return Vec::new();
+    }
+    let twice_area: f32 = (0..count)
+        .map(|index| {
+            let (a, b) = (points[index], points[(index + 1) % count]);
+            a.x * b.y - b.x * a.y
+        })
+        .sum();
+    if twice_area == 0.0 {
+        return Vec::new();
+    }
+    let winding = twice_area.signum();
+    let mut remaining = (0..count).collect::<Vec<_>>();
+    let mut triangles = Vec::with_capacity(count - 2);
+    while remaining.len() > 3 {
+        let corners = remaining.len();
+        let around = |at: usize| {
+            (
+                remaining[(at + corners - 1) % corners],
+                remaining[at],
+                remaining[(at + 1) % corners],
+            )
+        };
+        let ear = (0..corners).find(|&at| {
+            let (a, b, c) = around(at);
+            let (pa, pb, pc) = (points[a], points[b], points[c]);
+            turn(pa, pb, pc) * winding > 0.0
+                && remaining.iter().all(|&other| {
+                    other == a
+                        || other == b
+                        || other == c
+                        || !inside_triangle(points[other], pa, pb, pc, winding)
+                })
+        });
+        let Some(at) = ear else {
+            triangles.extend(
+                (1..corners - 1).map(|next| [remaining[0], remaining[next], remaining[next + 1]]),
+            );
+            return triangles;
+        };
+        let (a, b, c) = around(at);
+        triangles.push([a, b, c]);
+        remaining.remove(at);
+    }
+    triangles.push([remaining[0], remaining[1], remaining[2]]);
+    triangles
+}
+
+/// Twice the signed area of the triangle `a b c`: which way the path turns
+/// at `b`.
+fn turn(a: Pos2, b: Pos2, c: Pos2) -> f32 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+/// Whether `point` lies in the triangle `a b c` wound the way `winding` says,
+/// its edges included.
+fn inside_triangle(point: Pos2, a: Pos2, b: Pos2, c: Pos2, winding: f32) -> bool {
+    turn(a, b, point) * winding >= 0.0
+        && turn(b, c, point) * winding >= 0.0
+        && turn(c, a, point) * winding >= 0.0
+}
+
 /// Pan/zoom state for an interactive scene pane. Stored per figure.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SceneCamera {
@@ -228,12 +338,10 @@ pub fn paint_scene(
                     let mut subpath: Vec<Pos2> = Vec::new();
                     let emit = |points: &mut Vec<Pos2>| {
                         if points.len() >= 2 {
-                            if let Some(fill) = path.fill {
-                                painter.add(Shape::convex_polygon(
-                                    points.clone(),
-                                    palette.resolve(fill),
-                                    EguiStroke::NONE,
-                                ));
+                            if let Some(fill) = path.fill
+                                && let Some(inside) = fill_shape(points, palette.resolve(fill))
+                            {
+                                painter.add(inside);
                             }
                             if let Some((stroke, array)) = &stroke {
                                 if array.is_empty() {
@@ -378,6 +486,47 @@ mod tests {
             [2.51, 9.99]
         ));
         assert!(near(dash_array(&stroke(None), 0.01), [2.5, 7.5]));
+    }
+
+    /// A concave body is filled exactly, its notch left bare: the mesh's
+    /// triangles add up to the outline's own area, which a fan from the
+    /// first corner of an L overshoots. A convex one keeps egui's smoothed
+    /// polygon.
+    #[test]
+    fn a_concave_fill_leaves_its_notch_bare() {
+        let l_shape = [
+            Pos2::new(0.0, 0.0),
+            Pos2::new(40.0, 0.0),
+            Pos2::new(40.0, 10.0),
+            Pos2::new(10.0, 10.0),
+            Pos2::new(10.0, 40.0),
+            Pos2::new(0.0, 40.0),
+            Pos2::new(0.0, 0.0),
+        ];
+        let Some(Shape::Mesh(mesh)) = fill_shape(&l_shape, Color32::RED) else {
+            panic!("a concave outline fills as a mesh of ears");
+        };
+        let area: f32 = mesh
+            .indices
+            .chunks(3)
+            .map(|corners| {
+                let [a, b, c] = [0, 1, 2].map(|at| mesh.vertices[corners[at] as usize].pos);
+                turn(a, b, c).abs() / 2.0
+            })
+            .sum();
+        assert_eq!(area, 40.0 * 10.0 + 10.0 * 30.0);
+
+        let square = [
+            Pos2::new(0.0, 0.0),
+            Pos2::new(10.0, 0.0),
+            Pos2::new(10.0, 10.0),
+            Pos2::new(0.0, 10.0),
+            Pos2::new(0.0, 0.0),
+        ];
+        assert!(matches!(
+            fill_shape(&square, Color32::RED),
+            Some(Shape::Path(_))
+        ));
     }
 
     #[test]
