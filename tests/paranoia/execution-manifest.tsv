@@ -21,9 +21,6 @@ control_structs/repeat3.sp	library_fragment	control-script driver, no analysis c
 control_structs/repeat_no_one_goto.sp	library_fragment	control-script driver
 control_structs/repeat_one_goto.sp	library_fragment	control-script driver
 control_structs/repeat_s.sp	library_fragment	control-script driver
-pll/f-p-det-d-sub.cir	library_fragment	phase-frequency detector subcircuit
-pll/loop-filter-2.cir	library_fragment	loop-filter subcircuit
-pll/vco_sub_new.cir	library_fragment	VCO subcircuit
 various/FFT_tests.cir	library_fragment	control-script driver
 various/agauss_reduced.cir	library_fragment	statistical-parameter fragment
 various/agauss_test.cir	library_fragment	statistical-parameter fragment

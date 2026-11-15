@@ -673,9 +673,9 @@ rload out 0 1k
 /// side's initialization. ngspice loads every device once at TIME==0 even
 /// under MODEUIC, which is the only place a code model reads its own
 /// initial-state parameters. Measured against
-/// `tests/paranoia/pll/pll-xspice.cir`, whose `tran ... uic` reference has
-/// the unclocked `d_dff ic=2` outputs at `out_undef` and the `d_fdiv`
-/// output already high from its first printed row.
+/// `tests/paranoia/xspice/pll/pll-xspice.cir`, whose `tran ... uic`
+/// reference has the unclocked `d_dff ic=2` outputs at `out_undef` and the
+/// `d_fdiv` output already high from its first printed row.
 #[test]
 fn uic_transient_still_initializes_xspice_code_models_at_time_zero() {
     let deck = "\
