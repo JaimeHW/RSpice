@@ -456,6 +456,20 @@ impl SymbolEditorSession {
             || self.pin_name_draft.is_some()
     }
 
+    /// What is in flight, as a command refused meanwhile names it: "a pin
+    /// is being named", "text is being typed" or "a shape is being drawn".
+    pub fn draft_activity(&self) -> Option<&'static str> {
+        if self.pin_name_draft.is_some() {
+            Some("a pin is being named")
+        } else if self.text_draft.is_some() {
+            Some("text is being typed")
+        } else if self.has_draft() {
+            Some("a shape is being drawn")
+        } else {
+            None
+        }
+    }
+
     /// Let go of the shape or text being drawn. The document never held it.
     pub fn clear_draft(&mut self) {
         self.pending_polyline.clear();
@@ -781,6 +795,31 @@ mod tests {
     use super::*;
     use rspice_design::symbol::{SymbolDocument, SymbolPin, SymbolShape};
     use rspice_design_model::{Point, port::PortDirection};
+
+    /// A command refused while something is in flight names what it is, so
+    /// a pin name being typed is not called a shape being drawn.
+    #[test]
+    fn the_draft_in_flight_is_named_for_what_it_is() {
+        let mut session = SymbolEditorSession::default();
+        assert_eq!(session.draft_activity(), None);
+        session.pending_polyline.push(Point::origin());
+        assert_eq!(session.draft_activity(), Some("a shape is being drawn"));
+        session.clear_draft();
+        session.text_draft = Some(SymbolTextDraft {
+            anchor: Point::origin(),
+            text: String::new(),
+            caret_placed: false,
+        });
+        assert_eq!(session.draft_activity(), Some("text is being typed"));
+        session.clear_draft();
+        session.pin_name_draft = Some(SymbolPinNameDraft {
+            pin: "PIN1".to_owned(),
+            text: "PIN1".to_owned(),
+            caret_placed: false,
+        });
+        assert_eq!(session.draft_activity(), Some("a pin is being named"));
+    }
+
     /// Select All reaches authored text because text is a body shape, not a
     /// category beside one.
     #[test]

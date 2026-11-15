@@ -480,13 +480,8 @@ impl CommandSet for DesignCommand {
                 {
                     Some("no symbol is being edited in place")
                 } else {
-                    // Return finishes the line being drawn first.
-                    reads
-                        .state
-                        .symbol
-                        .editor
-                        .has_draft()
-                        .then_some("a shape is being drawn")
+                    // Return finishes what is being drawn or typed first.
+                    reads.state.symbol.editor.draft_activity()
                 }
             }
             _ if self.places() && !schematic => Some("open an editable schematic or testbench"),
