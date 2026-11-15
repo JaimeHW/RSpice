@@ -535,12 +535,8 @@ fn a_placed_part_prints_held_by_its_symbols_origin() {
     let mut symbol = cell_symbol();
     symbol.origin = SchematicPoint::new(10, -20);
     symbol.pins = vec![
-        SymbolPin::new(
-            "A",
-            PortDirection::InOut,
-            Some(SchematicPoint::new(-50, 0)),
-        )
-        .with_side(SymbolPinSide::Left),
+        SymbolPin::new("A", PortDirection::InOut, Some(SchematicPoint::new(-50, 0)))
+            .with_side(SymbolPinSide::Left),
     ];
     symbol.body.push(SymbolShape::Arc {
         center: SchematicPoint::new(0, 0),
@@ -577,7 +573,11 @@ fn a_placed_part_prints_held_by_its_symbols_origin() {
             _ => None,
         })
         .expect("the body prints");
-    assert_eq!(body[0], compiled.at(0.0, 40.0), "the body's top-left corner");
+    assert_eq!(
+        body[0],
+        compiled.at(0.0, 40.0),
+        "the body's top-left corner"
+    );
     let arc = compiled
         .primitives
         .iter()
