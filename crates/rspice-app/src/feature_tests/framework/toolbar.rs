@@ -140,11 +140,31 @@ fn missing_current_generated_source_never_authenticates_a_retained_dataset() {
     assert!(results_document_is_historical(app.state.results_reads()));
 }
 
+/// A labelled tool is as wide as its label drawn in its button's font, with
+/// no floor under a short one, wider drawn selected, and a long label stops
+/// at the widest any text-bearing toolbar control grows.
 #[test]
 fn long_toolbar_labels_remain_bounded() {
-    assert_eq!(explicit_label_width("Run"), 76.0);
-    assert!(explicit_label_width("Run schematic checks (Ctrl+E)") > 162.0);
-    assert!(explicit_label_width("A very long engineering command label") <= 224.0);
+    let ctx = egui::Context::default();
+    rspice_ui_kit::fonts::install(&ctx);
+    let mut widths = Vec::new();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        widths = vec![
+            explicit_label_width(ui, "Run", false),
+            explicit_label_width(ui, "Run schematic checks (Ctrl+E)", false),
+            explicit_label_width(ui, "Run schematic checks (Ctrl+E)", true),
+            explicit_label_width(ui, "A very long engineering command label, clipped", false),
+        ];
+    });
+    let [short, label, selected, long] = widths[..] else {
+        panic!("four widths: {widths:?}");
+    };
+    assert!(
+        short < 76.0,
+        "a short label takes only its own room: {short}"
+    );
+    assert!(label > short && selected > label, "{widths:?}");
+    assert_eq!(long, crate::workbench::layout::RUN_CONFIG_CHIP_MAX_WIDTH);
 }
 
 #[test]

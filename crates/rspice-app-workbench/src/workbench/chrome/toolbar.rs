@@ -18,7 +18,9 @@ use crate::workbench::framework::workbench_host::WorkbenchHost;
 
 use super::super::layout::{LayoutSpec, RUN_CONFIG_CHIP_MAX_WIDTH};
 use super::super::state::{Drawer, Workspace};
-use crate::ui::panels::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
+use crate::ui::panels::{
+    WorkbenchIcon, icon_button, labeled_icon_button_sized, labeled_icon_button_width,
+};
 use crate::workbench::framework::command_registry::CommandAvailability;
 
 pub const TOOLBAR_CONTEXT_GAP: f32 = 3.0;
@@ -621,7 +623,7 @@ fn toolbar_command(
         format!("{base_label} ({shortcut})")
     };
     let enabled = availability == CommandAvailability::Available;
-    let label_width = explicit_label_width(&label);
+    let label_width = explicit_label_width(ui, &label, selected);
     // A labelled tool with no room for its label shows its icon, which
     // carries the same command and the same tooltip.
     let show_label = show_label && fits_the_lane(ui, layout, label_width);
@@ -839,9 +841,15 @@ pub fn panel_toggle_size(layout: LayoutSpec) -> Vec2 {
     }
 }
 
-pub fn explicit_label_width(label: &str) -> f32 {
-    (label.chars().count() as f32 * 6.7 + 36.0).clamp(76.0, 224.0)
+/// How wide a labelled toolbar tool is: all of `label`, drawn `selected` or
+/// not, in the font its button draws it in, past the icon, up to the widest
+/// any text-bearing toolbar control grows, past which its label is clipped.
+pub fn explicit_label_width(ui: &egui::Ui, label: &str, selected: bool) -> f32 {
+    labeled_icon_button_width(ui, label, selected).min(LABELLED_TOOL_MAX_WIDTH)
 }
+
+/// The widest a labelled toolbar tool grows, as wide as the plan chip may.
+const LABELLED_TOOL_MAX_WIDTH: f32 = RUN_CONFIG_CHIP_MAX_WIDTH;
 
 #[cfg(test)]
 mod tests {

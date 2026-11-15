@@ -93,7 +93,8 @@ fn archive_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: Layo
     let availability = archive_availability(state.results_reads(), document_id);
     let archived = availability == ArchiveAvailability::Archived;
     let label = if archived { "Archived" } else { "Archive" };
-    if !take_tool_slot(ui, layout, explicit_label_width(label)) {
+    let width = explicit_label_width(ui, label, archived);
+    if !take_tool_slot(ui, layout, width) {
         return true;
     }
     let enabled = !matches!(availability, ArchiveAvailability::Unavailable(_));
@@ -104,7 +105,7 @@ fn archive_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: Layo
                 WorkbenchIcon::Save,
                 label,
                 archived,
-                explicit_label_width(label),
+                width,
                 layout.toolbar_control_height,
             )
         })
@@ -142,13 +143,14 @@ fn tracking_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: Lay
         return false;
     };
     if results_document_is_historical(state.results_reads()) {
-        if take_tool_slot(ui, layout, explicit_label_width("Historical")) {
+        let width = explicit_label_width(ui, "Historical", false);
+        if take_tool_slot(ui, layout, width) {
             labeled_icon_button_sized(
                 ui,
                 WorkbenchIcon::History,
                 "Historical",
                 false,
-                explicit_label_width("Historical"),
+                width,
                 layout.toolbar_control_height,
             )
             .on_hover_text(
@@ -176,7 +178,8 @@ fn tracking_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: Lay
     };
     let pinned = tracking.mode == ResultDocumentTrackingMode::Pinned;
     let label = if pinned { "Pinned" } else { "Latest" };
-    if !take_tool_slot(ui, layout, explicit_label_width(label)) {
+    let width = explicit_label_width(ui, label, pinned);
+    if !take_tool_slot(ui, layout, width) {
         return true;
     }
     let tooltip = if pinned {
@@ -189,7 +192,7 @@ fn tracking_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: Lay
         WorkbenchIcon::Pin,
         label,
         pinned,
-        explicit_label_width(label),
+        width,
         layout.toolbar_control_height,
     );
     let response = response.on_hover_text(tooltip);

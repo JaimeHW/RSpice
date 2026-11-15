@@ -138,7 +138,7 @@ fn generated_netlist_tool(cx: &mut Cx<'_, CodeFeature>, ui: &mut egui::Ui, layou
             WorkbenchIcon::Netlist,
             &label,
             false,
-            explicit_label_width(&label),
+            explicit_label_width(ui, &label, false),
             layout.toolbar_control_height,
         )
     } else {

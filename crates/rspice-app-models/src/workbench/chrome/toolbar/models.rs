@@ -27,13 +27,13 @@ const MODELS_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, Option<&str>); 4] = 
 pub fn model_editor_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     if let Some(origin) = app.workbench().previous_route() {
         let label = format!("Source: {}", origin.surface_id().label());
-        if take_tool_slot(ui, layout, explicit_label_width(&label))
+        if take_tool_slot(ui, layout, explicit_label_width(ui, &label, false))
             && labeled_icon_button_sized(
                 ui,
                 WorkbenchIcon::ArrowLeft,
                 &label,
                 false,
-                explicit_label_width(&label),
+                explicit_label_width(ui, &label, false),
                 layout.toolbar_control_height,
             )
             .clicked()

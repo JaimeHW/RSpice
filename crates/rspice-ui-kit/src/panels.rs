@@ -844,6 +844,41 @@ pub fn labeled_icon_button(
     labeled_icon_button_sized(ui, icon, label, selected, width, height)
 }
 
+/// Where a labelled icon button starts its label, past its icon.
+const LABELED_BUTTON_TEXT_START: f32 = 29.0;
+/// How far a labelled icon button's label stops short of its right edge.
+const LABELED_BUTTON_TEXT_END: f32 = 8.0;
+
+/// The font a labelled icon button draws its label in.
+fn labeled_button_font(selected: bool) -> egui::FontId {
+    theme::sans(
+        // `.tool-text-button` inherits the mockup's 12 px body type;
+        // compactness comes from its 29 px box, not smaller copy.
+        tokens::FS_1,
+        if selected {
+            FontWeight::SemiBold
+        } else {
+            FontWeight::Regular
+        },
+    )
+}
+
+/// How wide a labelled icon button is that shows all of `label`: its icon,
+/// the label in the font the button draws it in, and the padding after it,
+/// to the next whole point.
+pub fn labeled_icon_button_width(ui: &Ui, label: &str, selected: bool) -> f32 {
+    let text = ui
+        .painter()
+        .layout_no_wrap(
+            label.to_owned(),
+            labeled_button_font(selected),
+            Color32::PLACEHOLDER,
+        )
+        .size()
+        .x;
+    (LABELED_BUTTON_TEXT_START + text + LABELED_BUTTON_TEXT_END).ceil()
+}
+
 pub fn labeled_icon_button_sized(
     ui: &mut Ui,
     icon: WorkbenchIcon,
@@ -881,23 +916,14 @@ pub fn labeled_icon_button_sized(
                 t.color.text_dim
             },
         );
-        let label_font = theme::sans(
-            // `.tool-text-button` inherits the mockup's 12 px body type;
-            // compactness comes from its 29 px box, not smaller copy.
-            tokens::FS_1,
-            if selected {
-                FontWeight::SemiBold
-            } else {
-                FontWeight::Regular
-            },
-        );
+        let label_font = labeled_button_font(selected);
         let text_rect = Rect::from_min_max(
-            Pos2::new(rect.left() + 29.0, rect.top()),
-            Pos2::new(rect.right() - 8.0, rect.bottom()),
+            Pos2::new(rect.left() + LABELED_BUTTON_TEXT_START, rect.top()),
+            Pos2::new(rect.right() - LABELED_BUTTON_TEXT_END, rect.bottom()),
         );
         let visible_label = elide_text(ui, label, &label_font, text_rect.width().max(0.0));
         ui.painter().with_clip_rect(text_rect).text(
-            Pos2::new(rect.left() + 29.0, rect.center().y),
+            Pos2::new(rect.left() + LABELED_BUTTON_TEXT_START, rect.center().y),
             Align2::LEFT_CENTER,
             visible_label,
             label_font,
