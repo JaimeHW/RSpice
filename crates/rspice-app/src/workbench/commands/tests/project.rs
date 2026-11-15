@@ -54,7 +54,10 @@ fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
 
 #[test]
 fn project_operation_gate_covers_every_mutating_project_command() {
-    for command in [Command::RevertActiveDocument, Command::CloseActiveDocument] {
+    for command in [
+        ShellCommand::RevertActiveDocument,
+        ShellCommand::CloseActiveDocument,
+    ] {
         assert!(
             command.blocked_by_project_operation(),
             "ungated: {command:?}"
@@ -210,7 +213,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         );
     }
 
-    let commands: Vec<_> = vocabulary::COMMAND_REGISTRY
+    let commands: Vec<_> = vocabulary::ShellCommand::ALL
         .iter()
         .copied()
         .filter(|command| command.requires_open_project())
@@ -472,7 +475,7 @@ fn standalone_schematic_save_remains_available_without_a_project() {
 /// commits no inspector edit and is not repeated.
 #[test]
 fn the_configuration_chip_passes_the_guards_the_command_does() {
-    let command = Command::ConfigurationSets;
+    let command = ShellCommand::ConfigurationSets;
     assert!(command.requires_open_project());
     assert!(command.blocked_by_project_operation());
     // Only the workbench's routed commands are handed to a source editor.

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use egui::{Event, Key, Modifiers};
 
-use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
+use crate::workbench::commands::vocabulary::{CommandRegistry, ShellCommand};
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
@@ -91,7 +91,7 @@ fn focused_source_editor() -> ShortcutEnvironment {
     }
 }
 
-fn bind(profile: &mut ShortcutPreferences, command: Command, strokes: Vec<ShortcutStroke>) {
+fn bind(profile: &mut ShortcutPreferences, command: ShellCommand, strokes: Vec<ShortcutStroke>) {
     bind_key(profile, command.key(), strokes);
 }
 
@@ -112,7 +112,7 @@ fn two_stroke_sequence_waits_and_dispatches_at_most_one_command() {
     let mut profile = ShortcutPreferences::default();
     bind(
         &mut profile,
-        Command::CommandPalette,
+        ShellCommand::CommandPalette,
         vec![
             ShortcutStroke::new(Key::K, true, false, false),
             ShortcutStroke::new(Key::P, true, false, false),
@@ -145,7 +145,7 @@ fn two_stroke_sequence_waits_and_dispatches_at_most_one_command() {
         Duration::from_millis(100),
         |_| true,
     );
-    assert_eq!(second.command, Some(Command::CommandPalette.key()));
+    assert_eq!(second.command, Some(ShellCommand::CommandPalette.key()));
     assert_eq!(second.consume.len(), 2);
     assert_eq!(second.deferred_start, 1);
     let deferred = state.resolve(
@@ -303,7 +303,7 @@ fn repeat_release_and_wrong_platform_do_not_resolve() {
     let mut desktop_only = ShortcutPreferences::default();
     bind(
         &mut desktop_only,
-        Command::CommandPalette,
+        ShellCommand::CommandPalette,
         vec![ShortcutStroke::new(Key::F12, false, false, false)],
     );
     let browser = state.resolve(
@@ -326,7 +326,7 @@ fn repeat_release_and_wrong_platform_do_not_resolve() {
         Duration::from_millis(2),
         |_| true,
     );
-    assert_eq!(desktop.command, Some(Command::CommandPalette.key()));
+    assert_eq!(desktop.command, Some(ShellCommand::CommandPalette.key()));
 }
 
 #[test]
@@ -339,7 +339,7 @@ fn disabled_higher_candidate_does_not_consume_lower_eligible_command() {
     );
     bind(
         &mut profile,
-        Command::CommandPalette,
+        ShellCommand::CommandPalette,
         vec![ShortcutStroke::new(Key::K, true, false, false)],
     );
     profile
@@ -355,7 +355,7 @@ fn disabled_higher_candidate_does_not_consume_lower_eligible_command() {
         Duration::ZERO,
         |command| command != ids::ZOOM_FIT,
     );
-    assert_eq!(resolved.command, Some(Command::CommandPalette.key()));
+    assert_eq!(resolved.command, Some(ShellCommand::CommandPalette.key()));
     assert_eq!(resolved.consume.len(), 1);
 }
 
@@ -364,7 +364,7 @@ fn disabled_only_candidate_does_not_consume_the_key() {
     let mut profile = ShortcutPreferences::default();
     bind(
         &mut profile,
-        Command::CommandPalette,
+        ShellCommand::CommandPalette,
         vec![ShortcutStroke::new(Key::K, true, false, false)],
     );
     let mut state = ShortcutResolverState::default();
@@ -395,7 +395,7 @@ fn invalid_whole_profile_executes_immutable_defaults_only() {
                 "platforms": ["desktop"],
                 "sequence": [{"key": "DefinitelyNotAKey"}]
             }]},
-            Command::CommandPalette.stable_id(): {"bindings": [{
+            ShellCommand::CommandPalette.stable_id(): {"bindings": [{
                 "slot": "primary",
                 "platforms": ["desktop"],
                 "sequence": [{"key": "F12"}]
@@ -414,7 +414,7 @@ fn invalid_whole_profile_executes_immutable_defaults_only() {
         Duration::ZERO,
         |_| true,
     );
-    assert_eq!(fallback.command, Some(Command::CommandPalette.key()));
+    assert_eq!(fallback.command, Some(ShellCommand::CommandPalette.key()));
     let rejected_override = state.resolve(
         &snapshot(&[event(Key::F12, Modifiers::NONE, false)], false),
         &profile,
@@ -681,7 +681,7 @@ fn result_context_beats_global_only_when_enabled() {
     );
     bind(
         &mut profile,
-        Command::CommandPalette,
+        ShellCommand::CommandPalette,
         vec![ShortcutStroke::new(Key::K, true, false, false)],
     );
     let mut state = ShortcutResolverState::default();
@@ -1018,7 +1018,7 @@ fn non_canvas_focus_suppresses_editor_but_not_global_context() {
         Duration::from_millis(1),
         |_| true,
     );
-    assert_eq!(global.command, Some(Command::CommandPalette.key()));
+    assert_eq!(global.command, Some(ShellCommand::CommandPalette.key()));
 }
 
 #[test]

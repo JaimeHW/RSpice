@@ -4,7 +4,7 @@
 //! command is omitted from a menu when its behavior is not implemented; the
 //! UI does not advertise speculative or placeholder capability.
 
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_design::workbench::app::actions::workspace::HistoryDirection;
@@ -26,26 +26,26 @@ mod veriloga_commits;
 pub(crate) mod vocabulary;
 
 /// A test seam on the dispatch boundary. While a recording is open,
-/// [`Command::execute`] notes the command it was handed and returns before
+/// [`ShellCommand::execute`] notes the command it was handed and returns before
 /// acting, so a test can prove a route reaches the boundary without carrying
 /// the command out.
 #[cfg(test)]
 pub(crate) mod dispatch_probe {
-    use super::Command;
+    use super::ShellCommand;
     use std::cell::RefCell;
 
     thread_local! {
-        static REACHED: RefCell<Option<Vec<Command>>> = const { RefCell::new(None) };
+        static REACHED: RefCell<Option<Vec<ShellCommand>>> = const { RefCell::new(None) };
     }
 
-    /// Run `route` and return every command it handed to `Command::execute`.
-    pub(crate) fn reached(route: impl FnOnce()) -> Vec<Command> {
+    /// Run `route` and return every command it handed to `ShellCommand::execute`.
+    pub(crate) fn reached(route: impl FnOnce()) -> Vec<ShellCommand> {
         REACHED.with(|reached| *reached.borrow_mut() = Some(Vec::new()));
         route();
         REACHED.with(|reached| reached.borrow_mut().take().unwrap_or_default())
     }
 
-    pub(in crate::workbench) fn intercept(command: Command) -> bool {
+    pub(in crate::workbench) fn intercept(command: ShellCommand) -> bool {
         REACHED.with(|reached| {
             reached
                 .borrow_mut()
@@ -56,7 +56,7 @@ pub(crate) mod dispatch_probe {
     }
 }
 
-impl Command {
+impl ShellCommand {
     /// Shared by menu/palette dispatch and the keyboard dispatcher.
     pub(crate) const fn commits_inspector_edit(self) -> bool {
         matches!(
@@ -126,7 +126,7 @@ impl Command {
     }
 
     /// The shell's legacy table: what each command does once the
-    /// dispatcher's prologue has let it through. [`Command::dispatch`] is
+    /// dispatcher's prologue has let it through. [`ShellCommand::dispatch`] is
     /// its one caller, so no command skips the prologue.
     pub(super) fn run_legacy_arm(self, app: &mut RSpiceApp) {
         match self {

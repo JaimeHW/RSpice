@@ -2,7 +2,7 @@
 //! renderer draws and a test can read. The source editor's right-click menu
 //! is the code feature's (`code::SOURCE_EDITOR_MENU`).
 
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
@@ -27,12 +27,12 @@ use rspice_app_workbench::workbench::framework::command_registry::WorkbenchComma
 use rspice_ui_kit::panels::WorkbenchIcon;
 
 /// The command's row under the vocabulary's label.
-const fn command(command: Command) -> MenuEntry {
+const fn command(command: ShellCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
 /// The command's row under a label of the menu's own.
-const fn command_as(command: Command, label: &'static str) -> MenuEntry {
+const fn command_as(command: ShellCommand, label: &'static str) -> MenuEntry {
     MenuEntry::command_as(command.key(), label)
 }
 
@@ -141,15 +141,15 @@ const FILE_MENU: &[MenuEntry] = &[
     code(CodeCommand::OpenNetlist).access('T'),
     MenuEntry::submenu("Open recent", OPEN_RECENT_MENU).access('R'),
     Separator,
-    command(Command::CloseActiveDocument).access('C'),
-    command(Command::CloseOtherDocuments).access('H'),
-    command(Command::CloseAllDocuments).access('L'),
+    command(ShellCommand::CloseActiveDocument).access('C'),
+    command(ShellCommand::CloseOtherDocuments).access('H'),
+    command(ShellCommand::CloseAllDocuments).access('L'),
     project(ProjectCommand::CloseProject).access('J'),
     Separator,
     project(ProjectCommand::Save).access('S'),
     project(ProjectCommand::SaveAs).access('A'),
     project(ProjectCommand::SaveAll),
-    command(Command::RevertActiveDocument).access('D'),
+    command(ShellCommand::RevertActiveDocument).access('D'),
     project(ProjectCommand::RevisionHistory).access('Y'),
     Separator,
     MenuEntry::submenu("Import", IMPORT_MENU).access('I'),
@@ -161,7 +161,7 @@ const FILE_MENU: &[MenuEntry] = &[
     hardcopy(HardcopyCommand::PrintHardcopy).access('P'),
     MenuEntry::Only(
         MenuContext::ExitInFileMenu,
-        &[Separator, command(Command::Exit).access('X')],
+        &[Separator, command(ShellCommand::Exit).access('X')],
     ),
 ];
 
@@ -238,7 +238,7 @@ const EDIT_MENU: &[MenuEntry] = &[
     workbench(WorkbenchCommand::Redo).access('R'),
     MenuEntry::Only(
         MenuContext::Drawing,
-        &[command(Command::RepeatLastCommand).access('L')],
+        &[command(ShellCommand::RepeatLastCommand).access('L')],
     ),
     Separator,
     workbench(WorkbenchCommand::Cut).access('T'),
@@ -379,19 +379,19 @@ const VIEW_MENU: &[MenuEntry] = &[
         &[design(DesignCommand::SymbolPlacedPreview).access('A')],
     ),
     Separator,
-    command_as(Command::ToggleNavigator, "Navigator").access('N'),
-    command_as(Command::ToggleInspector, "Inspector").access('E'),
-    command_as(Command::ToggleConsole, "Console").access('C'),
+    command_as(ShellCommand::ToggleNavigator, "Navigator").access('N'),
+    command_as(ShellCommand::ToggleInspector, "Inspector").access('E'),
+    command_as(ShellCommand::ToggleConsole, "Console").access('C'),
     results(ResultsCommand::ToggleResultsSplit).access('R'),
-    command_as(Command::OpenProblems, "Problems").access('P'),
+    command_as(ShellCommand::OpenProblems, "Problems").access('P'),
     Separator,
     // Folding, offered while a source editor is the document on screen.
     MenuEntry::Only(
         MenuContext::SourceEditor,
         &[MenuEntry::submenu("Folding", FOLDING_MENU).access('L')],
     ),
-    command_as(Command::ToggleFocusMode, "Focus mode").access('M'),
-    command_as(Command::ToggleFullScreen, "Full screen").access('U'),
+    command_as(ShellCommand::ToggleFocusMode, "Focus mode").access('M'),
+    command_as(ShellCommand::ToggleFullScreen, "Full screen").access('U'),
 ];
 
 /// The grid's styles, one of which is drawn; G steps through them.
@@ -649,9 +649,9 @@ const SETUP_MENU: &[MenuEntry] = &[
     simulate(SimulateCommand::Page(SimulationPage::Solver)).access('S'),
     simulate(SimulateCommand::Page(SimulationPage::Save)).access('P'),
     Separator,
-    command(Command::ConfigurationSets).access('C'),
+    command(ShellCommand::ConfigurationSets).access('C'),
     command_as(
-        Command::OpenWorkspace(Workspace::Stimulus),
+        ShellCommand::OpenWorkspace(Workspace::Stimulus),
         "Stimulus library",
     )
     .access('L'),
@@ -747,7 +747,7 @@ const TOOLS_MENU: &[MenuEntry] = &[
     models(ModelsCommand::RescanModelLibraries).access('R'),
     Separator,
     command_as(
-        Command::OpenWorkspace(Workspace::Netlist),
+        ShellCommand::OpenWorkspace(Workspace::Netlist),
         "Netlist and script editor",
     )
     .access('N'),
@@ -761,57 +761,57 @@ const WINDOW_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::MacApplication,
         &[
-            command(Command::MinimizeWindow),
-            command(Command::ZoomWindow),
+            command(ShellCommand::MinimizeWindow),
+            command(ShellCommand::ZoomWindow),
             Separator,
         ],
     ),
-    command(Command::NewApplicationWindow).access('N'),
+    command(ShellCommand::NewApplicationWindow).access('N'),
     MenuEntry::submenu("Move document to", MOVE_DOCUMENT_MENU).access('T'),
-    command(Command::ReattachDocument).access('R'),
+    command(ShellCommand::ReattachDocument).access('R'),
     // Gathering windows back and finding ones left off screen are a desktop
     // application's: the browser and a tablet show one window.
     MenuEntry::Only(
         MenuContext::DesktopApplication,
         &[
-            command(Command::ConsolidateWindows).access('M'),
-            command(Command::MonitorRecovery).access('O'),
+            command(ShellCommand::ConsolidateWindows).access('M'),
+            command(ShellCommand::MonitorRecovery).access('O'),
         ],
     ),
     Separator,
     MenuEntry::submenu("Workspace", WORKSPACE_MENU).access('W'),
-    command(Command::PreviousDocument).access('P'),
-    command(Command::NextDocument).access('D'),
-    command(Command::PreviousPane).access('V'),
-    command(Command::NextPane).access('X'),
+    command(ShellCommand::PreviousDocument).access('P'),
+    command(ShellCommand::NextDocument).access('D'),
+    command(ShellCommand::PreviousPane).access('V'),
+    command(ShellCommand::NextPane).access('X'),
     Separator,
     MenuEntry::submenu("Layout", LAYOUT_MENU).access('L'),
-    command_as(Command::WindowManager, "Windows\u{2026}").access('S'),
+    command_as(ShellCommand::WindowManager, "Windows\u{2026}").access('S'),
 ];
 
 /// Where the document in front goes: a window of its own, or one of the
 /// windows already open, chosen in the dialog.
 const MOVE_DOCUMENT_MENU: &[MenuEntry] = &[
-    command_as(Command::DetachDocument, "New window\u{2026}").access('N'),
-    command_as(Command::MoveDocumentToWindow, "Another window\u{2026}").access('A'),
+    command_as(ShellCommand::DetachDocument, "New window\u{2026}").access('N'),
+    command_as(ShellCommand::MoveDocumentToWindow, "Another window\u{2026}").access('A'),
 ];
 
 /// The eight workspaces in the order of their keys, Alt+1 to Alt+8: the
 /// Stimulus library, fourth on the rail, kept the key it was given last.
 const WORKSPACE_MENU: &[MenuEntry] = &[
-    command_as(Command::OpenWorkspace(Workspace::Project), "Project").access('P'),
-    command_as(Command::OpenWorkspace(Workspace::Design), "Design").access('D'),
-    command_as(Command::OpenWorkspace(Workspace::Simulate), "Simulate").access('S'),
-    command_as(Command::OpenWorkspace(Workspace::Results), "Results").access('R'),
-    command_as(Command::OpenWorkspace(Workspace::Verify), "Verify").access('V'),
-    command_as(Command::OpenWorkspace(Workspace::Models), "Models").access('M'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Project), "Project").access('P'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Design), "Design").access('D'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Simulate), "Simulate").access('S'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Results), "Results").access('R'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Verify), "Verify").access('V'),
+    command_as(ShellCommand::OpenWorkspace(Workspace::Models), "Models").access('M'),
     command_as(
-        Command::OpenWorkspace(Workspace::Netlist),
+        ShellCommand::OpenWorkspace(Workspace::Netlist),
         "Netlist and script editor",
     )
     .access('N'),
     command_as(
-        Command::OpenWorkspace(Workspace::Stimulus),
+        ShellCommand::OpenWorkspace(Workspace::Stimulus),
         "Stimulus library",
     )
     .access('L'),
@@ -825,18 +825,18 @@ const LAYOUT_MENU: &[MenuEntry] = &[
         "Saved layouts\u{2026}",
     )
     .access('S'),
-    command(Command::ResetLayout).access('R'),
+    command(ShellCommand::ResetLayout).access('R'),
 ];
 
 /// Help: reading about RSpice and learning it from examples, getting help
 /// with a problem, the licence and updates, then the notices and the version.
 const HELP_MENU: &[MenuEntry] = &[
-    command(Command::HelpCenter).access('H'),
-    command(Command::KeyboardShortcuts).access('K'),
-    command(Command::Examples).access('E'),
-    command(Command::ReleaseNotes).access('N'),
+    command(ShellCommand::HelpCenter).access('H'),
+    command(ShellCommand::KeyboardShortcuts).access('K'),
+    command(ShellCommand::Examples).access('E'),
+    command(ShellCommand::ReleaseNotes).access('N'),
     Separator,
-    command(Command::SystemDiagnostics).access('R'),
+    command(ShellCommand::SystemDiagnostics).access('R'),
     cloud(CloudCommand::License).access('L'),
     // On macOS the RSpice menu checks for updates.
     MenuEntry::Only(
@@ -844,24 +844,24 @@ const HELP_MENU: &[MenuEntry] = &[
         &[cloud(CloudCommand::CheckForUpdates).access('C')],
     ),
     Separator,
-    command(Command::LegalPrivacy).access('T'),
+    command(ShellCommand::LegalPrivacy).access('T'),
     // On macOS, About is the RSpice menu's.
     MenuEntry::Only(
         MenuContext::NoApplicationMenu,
-        &[command(Command::About).access('A')],
+        &[command(ShellCommand::About).access('A')],
     ),
 ];
 
 /// The RSpice menu the brand opens at the bar's left on the macOS desktop:
 /// the application itself and its updates, its settings, and quitting it.
 pub(in crate::workbench) const APPLICATION_MENU: &[MenuEntry] = &[
-    command(Command::About),
+    command(ShellCommand::About),
     cloud(CloudCommand::CheckForUpdates),
     Separator,
     MenuEntry::command_as(SettingsCommand::Preferences.key(), "Settings\u{2026}"),
     Separator,
     // macOS answers ⌘Q itself, from the menu every application has.
-    command_as(Command::Exit, "Quit RSpice").shows_key("\u{2318}Q"),
+    command_as(ShellCommand::Exit, "Quit RSpice").shows_key("\u{2318}Q"),
 ];
 
 /// What the compact layout's Menu button holds: every application menu,

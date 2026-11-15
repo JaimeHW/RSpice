@@ -9,7 +9,7 @@
 //! command's owner carry it out: the feature that declares it, in its
 //! context; for one of the workbench's routed commands, the part the shell's
 //! edit target sends it to; or for a key neither declares the shell's legacy
-//! table [`Command::run_legacy_arm`]. A command a feature's command raised
+//! table [`ShellCommand::run_legacy_arm`]. A command a feature's command raised
 //! runs as soon as that one returns, behind the same prologue.
 //!
 //! The dispatcher is handed a command value or a key. A key names a command
@@ -20,7 +20,7 @@
 use crate::workbench::RSpiceApp;
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
-use crate::workbench::commands::vocabulary::{Command, legacy_command};
+use crate::workbench::commands::vocabulary::{ShellCommand, legacy_command};
 use crate::workbench::commands::{
     active_schematic_editor, answer_project_request, answer_surface_request,
     carry_out_code_hand_off, file_action, run_project_file_action, select_probed_trace,
@@ -711,7 +711,7 @@ impl RSpiceApp {
     }
 }
 
-impl Command {
+impl ShellCommand {
     /// Carry this command out behind the prologue every command shares.
     pub(super) fn dispatch(self, app: &mut RSpiceApp) {
         #[cfg(test)]
@@ -749,63 +749,9 @@ impl Command {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
+    use crate::workbench::commands::vocabulary::{CommandRegistry, ShellCommand};
     use rspice_app_design::workbench::design::commands::DesignCommand;
     use rspice_app_state::state::command_catalog::CommandCatalog;
-
-    fn variant(command: Command) -> String {
-        let name = format!("{command:?}");
-        name.split('(').next().unwrap_or_default().to_owned()
-    }
-
-    /// Every variant `enum Command` declares, read from its source, so a
-    /// variant added there is seen here without being listed anywhere.
-    fn declared_variants() -> BTreeSet<String> {
-        const VOCABULARY: &str = include_str!("commands/vocabulary.rs");
-        let body = VOCABULARY
-            .split_once("pub enum Command {")
-            .and_then(|(_, rest)| rest.split_once("\n}"))
-            .map(|(body, _)| body)
-            .expect("vocabulary.rs declares `pub enum Command`");
-        body.lines()
-            .filter_map(|line| line.strip_prefix("    "))
-            .filter(|line| line.starts_with(|c: char| c.is_ascii_uppercase()))
-            .filter_map(|line| line.split(|c: char| !c.is_ascii_alphanumeric()).next())
-            .map(str::to_owned)
-            .collect()
-    }
-
-    /// A command the registry leaves out is a feature's, declared in its
-    /// command set; the legacy enum lists every command it declares.
-    #[test]
-    fn the_registry_lists_every_command_the_enum_declares() {
-        let declared = declared_variants();
-        // The figure is the legacy commands COMMAND_REGISTRY lists at run
-        // time. The parse finds exactly that many, so it stays exact as the
-        // features take the enum's commands, and a parse that broke cannot
-        // pass for an enum that shrank.
-        let registered: BTreeSet<String> = COMMAND_REGISTRY
-            .iter()
-            .map(|command| variant(*command))
-            .collect();
-        assert!(
-            !registered.is_empty(),
-            "COMMAND_REGISTRY lists no legacy command: `enum Command` goes, and this test with it"
-        );
-        assert_eq!(
-            declared.len(),
-            registered.len(),
-            "`enum Command` parsed as {} variants; COMMAND_REGISTRY lists {} at run time",
-            declared.len(),
-            registered.len()
-        );
-        assert_eq!(
-            registered, declared,
-            "a new command goes in COMMAND_REGISTRY"
-        );
-    }
 
     /// Create pins and the seven kinds the registry lists are the design
     /// feature's, each under its own id; the id the legacy table answered for
@@ -825,7 +771,7 @@ mod tests {
             let key = command.key();
             assert_eq!(CommandRegistry.resolve(key.as_str()), Some(key));
             assert_eq!(DesignCommand::from_key(key), Some(command));
-            assert_eq!(Command::from_stable_id(key.as_str()), None, "{key:?}");
+            assert_eq!(ShellCommand::from_stable_id(key.as_str()), None, "{key:?}");
         }
         assert_eq!(CommandRegistry.resolve("place-component"), None);
     }

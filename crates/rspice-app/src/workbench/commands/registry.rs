@@ -2,12 +2,12 @@
 //!
 //! A command ID is a product-facing identifier: menus, search, accessibility,
 //! shortcuts, telemetry, and portable preferences all refer to the same
-//! [`Command`]. Bindings are typed and platform-scoped so a browser-reserved
+//! [`ShellCommand`]. Bindings are typed and platform-scoped so a browser-reserved
 //! chord can never silently shadow its desktop command.
 
 use egui::Key;
 
-use super::vocabulary::Command;
+use super::vocabulary::ShellCommand;
 use crate::workbench::RSpiceApp;
 use rspice_app_state::state::command_catalog::{
     CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
@@ -134,7 +134,7 @@ const AUTOMATION_WORKSPACE: &[ShortcutBinding] =
 const STIMULUS_WORKSPACE: &[ShortcutBinding] =
     &[primary(chord(Key::Num8, false, true, false, "Alt+8"), ALL)];
 
-impl Command {
+impl ShellCommand {
     /// Commands whose owning surface or dialog has no valid lifecycle without
     /// an open project. Keeping this boundary on the command itself prevents
     /// submenu and command-palette routes from bypassing the workspace gate.
@@ -295,8 +295,8 @@ mod tests {
     use rspice_app_state::state::command_catalog::{CommandCatalog, CommandKey};
     use rspice_app_workbench::workbench::framework::command_registry::CommandFlags;
 
-    fn binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<Command> {
-        crate::workbench::commands::vocabulary::COMMAND_REGISTRY
+    fn binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<ShellCommand> {
+        crate::workbench::commands::vocabulary::ShellCommand::ALL
             .iter()
             .copied()
             .filter(|command| {
@@ -335,18 +335,18 @@ mod tests {
         for platform in CommandPlatform::ALL {
             assert_eq!(
                 binding_owners(RESULTS_WORKSPACE[0].chord, platform),
-                vec![Command::OpenWorkspace(Workspace::Results)]
+                vec![ShellCommand::OpenWorkspace(Workspace::Results)]
             );
             assert_eq!(
-                Command::OpenWorkspace(Workspace::Results).default_shortcut_label(platform),
+                ShellCommand::OpenWorkspace(Workspace::Results).default_shortcut_label(platform),
                 "Alt+4"
             );
             assert_eq!(
                 binding_owners(VERIFICATION_WORKSPACE[0].chord, platform),
-                vec![Command::OpenWorkspace(Workspace::Verify)]
+                vec![ShellCommand::OpenWorkspace(Workspace::Verify)]
             );
             assert_eq!(
-                Command::OpenWorkspace(Workspace::Verify).default_shortcut_label(platform),
+                ShellCommand::OpenWorkspace(Workspace::Verify).default_shortcut_label(platform),
                 "Alt+5"
             );
             // The eighth workspace reads fourth on the rail, so the chord it
@@ -354,10 +354,10 @@ mod tests {
             // unclaimed for that to hold.
             assert_eq!(
                 binding_owners(STIMULUS_WORKSPACE[0].chord, platform),
-                vec![Command::OpenWorkspace(Workspace::Stimulus)]
+                vec![ShellCommand::OpenWorkspace(Workspace::Stimulus)]
             );
             assert_eq!(
-                Command::OpenWorkspace(Workspace::Stimulus).default_shortcut_label(platform),
+                ShellCommand::OpenWorkspace(Workspace::Stimulus).default_shortcut_label(platform),
                 "Alt+8"
             );
         }
@@ -378,10 +378,10 @@ mod tests {
     fn exit_shortcut_is_unambiguous_and_desktop_only() {
         assert_eq!(
             binding_owners(EXIT[0].chord, CommandPlatform::Desktop),
-            vec![Command::Exit]
+            vec![ShellCommand::Exit]
         );
         assert_eq!(
-            Command::Exit.default_shortcut_label(CommandPlatform::Desktop),
+            ShellCommand::Exit.default_shortcut_label(CommandPlatform::Desktop),
             "Alt+F4"
         );
 
@@ -391,7 +391,7 @@ mod tests {
             CommandPlatform::Phone,
         ] {
             assert!(binding_owners(EXIT[0].chord, platform).is_empty());
-            assert_eq!(Command::Exit.default_shortcut_label(platform), "");
+            assert_eq!(ShellCommand::Exit.default_shortcut_label(platform), "");
         }
     }
 

@@ -29,9 +29,7 @@ fn task_focused_menu_can_open_the_palette_in_an_exact_scope() {
     );
     assert_eq!(PaletteScope::from_label("unknown"), None);
 }
-use crate::workbench::commands::vocabulary::{
-    COMMAND_REGISTRY, Command, command_registry, legacy_command,
-};
+use crate::workbench::commands::vocabulary::{ShellCommand, command_registry, legacy_command};
 
 /// What the registry declares about the project feature's `command`.
 fn project_spec(command: ProjectCommand) -> &'static CommandSpec {
@@ -48,14 +46,14 @@ fn code_spec(command: CodeCommand) -> &'static CommandSpec {
 }
 
 /// The commands the palette lists, as values, in its order.
-fn palette_commands_listed() -> Vec<Command> {
+fn palette_commands_listed() -> Vec<ShellCommand> {
     palette_commands(&RSpiceApp::test_instance())
         .filter_map(|command| legacy_command(command.key()))
         .collect()
 }
 
 /// `command`'s entry as the palette lists it.
-fn palette_entry(command: Command) -> PaletteEntry {
+fn palette_entry(command: ShellCommand) -> PaletteEntry {
     palette_entry_for(command.key())
 }
 
@@ -114,7 +112,7 @@ fn desktop_and_phone_layouts_match_the_mockup_contract() {
 #[test]
 fn palette_is_a_typed_registry_projection() {
     let commands = palette_commands_listed();
-    assert!(!commands.contains(&Command::CommandPalette));
+    assert!(!commands.contains(&ShellCommand::CommandPalette));
     assert!(
         !palette_commands(&RSpiceApp::test_instance()).any(|listed| listed.key() == ids::CANCEL)
     );
@@ -129,7 +127,7 @@ fn palette_is_a_typed_registry_projection() {
     assert!(
         commands
             .iter()
-            .all(|command| COMMAND_REGISTRY.contains(command))
+            .all(|command| ShellCommand::ALL.contains(command))
     );
     assert!(commands.iter().all(|command| command.palette_visible()));
 }
@@ -185,7 +183,8 @@ fn a_command_is_found_under_the_menu_that_holds_it() {
         ),
         (ids::SELECT_ALL, PaletteScope::Edit, "Edit"),
         (
-            Command::OpenWorkspace(rspice_app_state::workbench::workspace::Workspace::Design).key(),
+            ShellCommand::OpenWorkspace(rspice_app_state::workbench::workspace::Workspace::Design)
+                .key(),
             PaletteScope::Window,
             "Window \u{203a} Workspace",
         ),
@@ -263,8 +262,8 @@ fn command_scopes_and_metadata_search_only_return_registered_commands() {
         .into_iter()
         .filter(|command| palette_entry(*command).scope() == PaletteScope::Help)
         .collect::<Vec<_>>();
-    assert!(help.contains(&Command::KeyboardShortcuts));
-    assert!(help.contains(&Command::About));
+    assert!(help.contains(&ShellCommand::KeyboardShortcuts));
+    assert!(help.contains(&ShellCommand::About));
 }
 
 #[test]
@@ -486,7 +485,7 @@ fn typing_straight_after_new_configuration_lands_in_its_name() {
             .collect()
     };
 
-    app.execute_command_key(Command::ConfigurationSets.key());
+    app.execute_command_key(ShellCommand::ConfigurationSets.key());
     let tree = run(&mut app, Vec::new());
     let new = named(&tree, Role::Button, "New configuration\u{2026}");
     assert_eq!(new.len(), 1, "the page offers one New configuration button");
@@ -592,7 +591,7 @@ fn opening_input_respects_custom_palette_bindings() {
             .unwrap()
             .set_binding(
                 &crate::workbench::commands::vocabulary::CommandRegistry,
-                Command::CommandPalette.key(),
+                ShellCommand::CommandPalette.key(),
                 ShortcutBindingSlot::Primary,
                 vec![CommandPlatform::Desktop],
                 Some(ShortcutSequence::new(strokes).unwrap()),
@@ -1227,7 +1226,7 @@ fn keyboard_navigation_wraps_and_enter_runs_only_available_commands() {
     assert!(app.state.shell.about);
     assert_eq!(
         app.state.workbench.command_palette.recent.first(),
-        Some(&Command::About.key())
+        Some(&ShellCommand::About.key())
     );
 }
 

@@ -196,7 +196,7 @@ fn dialog_in_front(state: &AppState) -> Option<&'static str> {
 mod tests {
     use super::*;
     use crate::workbench::RSpiceApp;
-    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::commands::vocabulary::ShellCommand;
     use egui::{Context, OpenUrl, OutputCommand, Rect, pos2, vec2};
 
     /// One whole application frame with `events`; the pages it asked the
@@ -259,7 +259,7 @@ mod tests {
         );
         let mut app = RSpiceApp::test_instance();
         assert!(opened_pages(&mut app).is_empty(), "nothing opens unasked");
-        Command::ReleaseNotes.execute(&mut app);
+        ShellCommand::ReleaseNotes.execute(&mut app);
         assert_eq!(
             opened_pages(&mut app),
             [OpenUrl::new_tab(RELEASE_NOTES_URL)]
@@ -361,7 +361,7 @@ mod tests {
     fn help_opens_the_page_for_the_workspace_in_front() {
         let mut app = RSpiceApp::test_instance();
         app.state.close_project_session();
-        Command::HelpCenter.execute(&mut app);
+        ShellCommand::HelpCenter.execute(&mut app);
         assert_eq!(
             opened_pages(&mut app),
             [OpenUrl::new_tab("https://rspice.app/docs/getting-started")]
@@ -374,7 +374,7 @@ mod tests {
             (Workspace::Models, "models-and-pdks"),
         ] {
             let mut app = open_project_on(workspace);
-            Command::HelpCenter.execute(&mut app);
+            ShellCommand::HelpCenter.execute(&mut app);
             assert_eq!(
                 opened_pages(&mut app),
                 [OpenUrl::new_tab(format!("https://rspice.app/docs/{slug}"))],

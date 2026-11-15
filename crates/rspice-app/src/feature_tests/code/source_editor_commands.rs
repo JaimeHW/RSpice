@@ -6,7 +6,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
 };
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::code_workspace::{self, CodeWorkspacePage};
 use rspice_app_state::state::{Point, ProjectSourceId, ProjectSourceLanguage, Wire};
@@ -362,7 +362,7 @@ fn the_palette_lists_toggle_line_comment_with_the_platform_shortcut() {
     ] {
         let (ctx, mut app, _) = veriloga_with_focused_editor();
         ctx.set_os(os);
-        Command::CommandPalette.execute(&mut app);
+        ShellCommand::CommandPalette.execute(&mut app);
         app.state.workbench.command_palette.query = "Toggle line comment".to_owned();
         let mut output = frame(&ctx, &mut app, DESKTOP);
         for _ in 0..6 {

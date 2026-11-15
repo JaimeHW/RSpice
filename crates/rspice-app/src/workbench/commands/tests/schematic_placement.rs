@@ -320,8 +320,8 @@ fn repeat_last_command_rearms_a_feature_placement() {
         rspice_app_state::state::Tool::Select
     );
 
-    assert!(app.command_key_enabled(Command::RepeatLastCommand.key()));
-    Command::RepeatLastCommand.execute(&mut app);
+    assert!(app.command_key_enabled(ShellCommand::RepeatLastCommand.key()));
+    ShellCommand::RepeatLastCommand.execute(&mut app);
     assert_eq!(
         app.state.model.schematic.session.editor.tool,
         rspice_app_state::state::Tool::Wire

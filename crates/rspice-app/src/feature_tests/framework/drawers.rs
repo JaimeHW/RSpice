@@ -3,7 +3,7 @@
 //! account and notification entries, and the floor on very narrow viewports.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use egui::{Area, Context, Id, Order, Sense, UiKind};
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -123,7 +123,7 @@ fn the_phone_sheet_names_a_workspace_once_and_groups_the_rest_as_tools() {
     for workspace in Workspace::ALL {
         assert!(
             WORKSPACE_ACTIONS.iter().any(|action| {
-                action.command == Command::OpenWorkspace(workspace).key()
+                action.command == ShellCommand::OpenWorkspace(workspace).key()
                     && action.label == workspace.label()
             }),
             "{workspace:?} is offered under the name the shell gives it"
@@ -150,24 +150,24 @@ fn mobile_organization_entry_opens_the_canonical_account_manager() {
 fn the_phone_sheet_reaches_notifications_and_counts_what_is_unread() {
     let action = TOOL_ACTIONS
         .iter()
-        .find(|action| action.command == Command::OpenNotifications.key())
+        .find(|action| action.command == ShellCommand::OpenNotifications.key())
         .expect("the sheet offers the notification panel");
     assert_eq!(action.label, "Notifications");
 
     let ctx = Context::default();
     let mut app = RSpiceApp::test_instance();
     assert_eq!(
-        card_meta(Command::OpenNotifications.key(), &app),
+        card_meta(ShellCommand::OpenNotifications.key(), &app),
         None,
         "nothing unread says nothing"
     );
     app.state.workbench.toasts.info(&ctx, "Recovery copy saved");
     app.state.workbench.toasts.info(&ctx, "Library reloaded");
     assert_eq!(
-        card_meta(Command::OpenNotifications.key(), &app).as_deref(),
+        card_meta(ShellCommand::OpenNotifications.key(), &app).as_deref(),
         Some("2 unread")
     );
-    assert_eq!(card_meta(Command::OpenConsole.key(), &app), None);
+    assert_eq!(card_meta(ShellCommand::OpenConsole.key(), &app), None);
 }
 
 #[test]

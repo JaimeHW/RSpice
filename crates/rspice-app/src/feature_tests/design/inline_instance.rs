@@ -2,7 +2,7 @@
 //! offers and what committing them does.
 
 use crate::feature_tests::design::inline_instance_drawn::{Editor, key};
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
@@ -71,7 +71,7 @@ fn switching_fields_in_either_render_order_commits_each_edit_once() {
 fn workspace_and_run_commands_resolve_the_pending_field_first() {
     let mut editor = Editor::new();
     editor.edit("Instance", "invalid name");
-    Command::OpenWorkspace(Workspace::Simulate).execute(&mut editor.app);
+    ShellCommand::OpenWorkspace(Workspace::Simulate).execute(&mut editor.app);
     assert_eq!(editor.app.state.workbench.workspace, Workspace::Design);
     editor.app.execute_command_key(
         rspice_app_workbench::workbench::framework::command_registry::ids::RUN_SIMULATION,
@@ -83,7 +83,7 @@ fn workspace_and_run_commands_resolve_the_pending_field_first() {
     );
     assert!(editor.app.state.workbench.inline_edit.session().is_some());
     editor.replace("V9");
-    Command::OpenWorkspace(Workspace::Simulate).execute(&mut editor.app);
+    ShellCommand::OpenWorkspace(Workspace::Simulate).execute(&mut editor.app);
     assert_eq!(editor.app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
         editor.app.state.model.schematic.document().components[0].name,

@@ -4,7 +4,7 @@
 use egui::{Context, RichText};
 
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
-use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
+use crate::workbench::commands::vocabulary::{CommandRegistry, ShellCommand, command_registry};
 use rspice_app_cloud::services::license::LicenseInfo;
 use rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
@@ -218,7 +218,7 @@ impl RSpiceApp {
 
         if notices {
             self.state.shell.about = false;
-            Command::LegalPrivacy.execute(self);
+            ShellCommand::LegalPrivacy.execute(self);
             return;
         }
         match choice {
@@ -789,7 +789,7 @@ mod tests {
     #[test]
     fn examples_open_from_the_help_menu_and_not_from_the_help_center() {
         let mut app = RSpiceApp::test_instance();
-        Command::Examples.execute(&mut app);
+        ShellCommand::Examples.execute(&mut app);
         assert_eq!(app.state.project.examples_selection, Some(0));
 
         let mut app = RSpiceApp::test_instance();
@@ -848,7 +848,7 @@ mod tests {
     fn about_states_the_build_engine_and_license_in_words() {
         let mut app = RSpiceApp::test_instance();
         assert!(app.state.cloud.license.is_none());
-        Command::About.execute(&mut app);
+        ShellCommand::About.execute(&mut app);
         let shown = shown_nodes(&mut app, RSpiceApp::render_about_dialog);
         let texts: Vec<&str> = shown.iter().map(|shown| shown.text.as_str()).collect();
         for expected in [
@@ -910,7 +910,7 @@ mod tests {
     #[test]
     fn the_legal_page_captions_are_headings() {
         let mut app = RSpiceApp::test_instance();
-        Command::LegalPrivacy.execute(&mut app);
+        ShellCommand::LegalPrivacy.execute(&mut app);
         let shown = shown_nodes(&mut app, RSpiceApp::render_help_center_dialog);
         for caption in [
             "Privacy and support data",
@@ -932,7 +932,7 @@ mod tests {
     #[test]
     fn the_legal_page_shows_the_shipped_license_and_third_party_notices() {
         let mut app = RSpiceApp::test_instance();
-        Command::LegalPrivacy.execute(&mut app);
+        ShellCommand::LegalPrivacy.execute(&mut app);
         let shown = shown_texts(app);
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for name in ["LICENSE", "NOTICE"] {
@@ -954,7 +954,7 @@ mod tests {
     /// report; the Help Center stops offering the two pages it replaced.
     #[test]
     fn report_a_problem_replaces_the_diagnostics_and_support_bundle_pages() {
-        for command in [Command::SystemDiagnostics, Command::SupportBundle] {
+        for command in [ShellCommand::SystemDiagnostics, ShellCommand::SupportBundle] {
             let mut app = RSpiceApp::test_instance();
             command.execute(&mut app);
             let shown = shown_texts(app);

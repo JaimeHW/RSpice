@@ -4,7 +4,7 @@ use egui::Vec2;
 
 use crate::workbench::AppState;
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
@@ -665,15 +665,15 @@ fn the_clear_control_clears_the_visible_page_through_its_command() {
         .warning(LogSource::Run, "visible console warning");
 
     app.state.workbench.console_page = ConsolePage::Problems;
-    assert!(!Command::ClearConsole.is_enabled(&app));
-    Command::ClearConsole.execute(&mut app);
+    assert!(!ShellCommand::ClearConsole.is_enabled(&app));
+    ShellCommand::ClearConsole.execute(&mut app);
     assert!(!app.state.model.log_buffer.is_empty());
 
     app.state.workbench.console_page = ConsolePage::Console;
-    assert!(Command::ClearConsole.is_enabled(&app));
-    Command::ClearConsole.execute(&mut app);
+    assert!(ShellCommand::ClearConsole.is_enabled(&app));
+    ShellCommand::ClearConsole.execute(&mut app);
     assert!(app.state.model.log_buffer.is_empty());
-    assert!(!Command::ClearConsole.is_enabled(&app));
+    assert!(!ShellCommand::ClearConsole.is_enabled(&app));
 }
 
 /// A run's log is a record. Its channel offers no Clear, and the command
@@ -702,8 +702,8 @@ fn a_run_channel_has_no_clear_and_the_command_leaves_the_session_alone() {
         desktop,
         app.state.workbench.console_view.channel
     ));
-    assert!(!Command::ClearConsole.is_enabled(&app));
-    Command::ClearConsole.execute(&mut app);
+    assert!(!ShellCommand::ClearConsole.is_enabled(&app));
+    ShellCommand::ClearConsole.execute(&mut app);
     assert!(!app.state.model.log_buffer.is_empty());
 }
 

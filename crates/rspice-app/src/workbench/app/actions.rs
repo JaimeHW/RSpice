@@ -12,7 +12,7 @@ pub(in crate::workbench) mod reveal;
 
 use egui::{Context, Popup};
 
-use crate::workbench::commands::vocabulary::{Command as ShortcutCommand, CommandRegistry};
+use crate::workbench::commands::vocabulary::{CommandRegistry, ShellCommand};
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -82,7 +82,7 @@ impl RSpiceApp {
         if let Some(delay) = resolution.repaint_after {
             ctx.request_repaint_after(delay);
         }
-        let palette_input = if resolution.command == Some(ShortcutCommand::CommandPalette.key()) {
+        let palette_input = if resolution.command == Some(ShellCommand::CommandPalette.key()) {
             ctx.input(|input| {
                 rspice_app_workbench::ui::input::InputTransition::after_keys(
                     input,
@@ -136,7 +136,7 @@ impl RSpiceApp {
         {
             return;
         }
-        let help = ShortcutCommand::HelpCenter.key();
+        let help = ShellCommand::HelpCenter.key();
         let snapshot = ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, true));
         let now = ctx.input(|input| std::time::Duration::from_secs_f64(input.time.max(0.0)));
         let environment = ShortcutEnvironment {
@@ -170,7 +170,7 @@ impl RSpiceApp {
 
     /// Carry out `command` the way pressing its key does.
     #[cfg(test)]
-    pub(crate) fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
+    pub(crate) fn execute_shortcut_command(&mut self, command: ShellCommand) {
         self.execute_command_key(command.key());
     }
 }
@@ -416,7 +416,7 @@ mod shortcut_ownership_tests {
     #[test]
     fn every_shortcut_command_reaches_the_one_dispatcher() {
         use crate::workbench::commands::dispatch_probe;
-        use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
+        use crate::workbench::commands::vocabulary::ShellCommand;
 
         let mut schematic = RSpiceApp::test_instance();
         schematic
@@ -427,7 +427,7 @@ mod shortcut_ownership_tests {
         for app in [&mut schematic, &mut symbol] {
             let view = app.state.model.workspace.content.active_view_type();
             let mut bypassed = Vec::new();
-            for &command in COMMAND_REGISTRY {
+            for &command in ShellCommand::ALL {
                 let reached = dispatch_probe::reached(|| app.execute_shortcut_command(command));
                 if reached != [command] {
                     bypassed.push(command);
@@ -435,7 +435,7 @@ mod shortcut_ownership_tests {
             }
             assert!(
                 bypassed.is_empty(),
-                "on a {view:?} view these keys bypass Command::execute: {bypassed:?}"
+                "on a {view:?} view these keys bypass ShellCommand::execute: {bypassed:?}"
             );
         }
     }

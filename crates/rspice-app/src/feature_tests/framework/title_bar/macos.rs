@@ -288,12 +288,12 @@ fn f10_reaches_the_rspice_menu_first_on_macos_and_file_elsewhere() {
 #[test]
 fn minimize_and_zoom_ask_the_window_to_change() {
     let mut app = title_test_app();
-    Command::MinimizeWindow.execute(&mut app);
+    ShellCommand::MinimizeWindow.execute(&mut app);
     assert_eq!(
         app.state.workbench.outbox.take::<WindowFrame>(),
         Some(WindowFrame::Minimize)
     );
-    Command::ZoomWindow.execute(&mut app);
+    ShellCommand::ZoomWindow.execute(&mut app);
     assert_eq!(
         app.state.workbench.outbox.take::<WindowFrame>(),
         Some(WindowFrame::Zoom)

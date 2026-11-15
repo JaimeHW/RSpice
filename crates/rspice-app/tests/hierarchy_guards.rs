@@ -678,7 +678,7 @@ const COMMAND_ROUTE_FILES: &[(&str, &str)] = &[
 /// variant, so a scan that included it would answer its own question.
 const COMMAND_DISPATCH_MODULE: &str = "workbench/commands";
 
-/// Where `COMMAND_REGISTRY` declares which commands the product has.
+/// Where `ShellCommand::ALL` declares which commands the shell carries out.
 const COMMAND_REGISTRY_FILE: &str = "workbench/commands/vocabulary.rs";
 
 /// Where the palette exclusions and the shortcut table are declared.
@@ -689,7 +689,7 @@ const COMMAND_ROUTING_FILE: &str = "workbench/commands/registry.rs";
 const COMMAND_IDS_FILE: &str = "workbench/framework/command_registry.rs";
 
 /// Where each registered feature declares its commands. A framework id may
-/// name one of them rather than a `Command` variant.
+/// name one of them rather than a `ShellCommand` variant.
 const FEATURE_COMMAND_FILES: &[&str] = &[
     "workbench/sheets/commands.rs",
     "workbench/settings/commands.rs",
@@ -709,16 +709,13 @@ const FEATURE_COMMAND_FILES: &[&str] = &[
 /// can invoke. There is no such thing: the fix is a route, or deletion.
 const UNROUTED_COMMANDS: &[(&str, &str)] = &[];
 
-/// The variants `enum Command` declares.
-///
-/// Read the way the dispatcher's unit test reads them, and that test binds
-/// the figure to the legacy commands `COMMAND_REGISTRY` lists at run time.
+/// The variants `enum ShellCommand` declares.
 fn declared_commands(code: &str) -> BTreeSet<String> {
     let body = code
-        .split_once("pub enum Command {")
+        .split_once("pub enum ShellCommand {")
         .and_then(|(_, rest)| rest.split_once("\n}"))
         .map(|(body, _)| body)
-        .expect("vocabulary.rs declares `pub enum Command`");
+        .expect("vocabulary.rs declares `pub enum ShellCommand`");
     body.lines()
         .filter_map(|line| line.strip_prefix("    "))
         .filter(|line| line.starts_with(|c: char| c.is_ascii_uppercase()))
@@ -727,26 +724,15 @@ fn declared_commands(code: &str) -> BTreeSet<String> {
         .collect()
 }
 
-/// The `Command` variants `COMMAND_REGISTRY` lists.
+/// The `ShellCommand` variants `ShellCommand::ALL` lists.
 ///
-/// Payloads are dropped: a menu that routes `Command::OpenWorkspace(workspace)`
-/// routes every workspace, so the variant is the unit of reachability.
+/// Payloads are dropped: a menu that routes
+/// `ShellCommand::OpenWorkspace(workspace)` routes every workspace, so the
+/// variant is the unit of reachability.
 fn registered_commands(code: &str) -> BTreeSet<String> {
-    let body = braced_body(code, "pub const COMMAND_REGISTRY: &[Command] = &[")
-        .expect("COMMAND_REGISTRY is declared in vocabulary.rs");
-    let mut variants = BTreeSet::new();
-    let mut rest = body.as_str();
-    while let Some(index) = rest.find("Command::") {
-        rest = &rest[index + "Command::".len()..];
-        let name: String = rest
-            .chars()
-            .take_while(|c| c.is_alphanumeric() || *c == '_')
-            .collect();
-        if !name.is_empty() {
-            variants.insert(name);
-        }
-    }
-    variants
+    let body = braced_body(code, "pub const ALL: &'static [Self] = &[")
+        .expect("ShellCommand::ALL is declared in vocabulary.rs");
+    variant_names(&body)
 }
 
 /// Variants `palette_visible` excludes, and so which ones need another route.
@@ -779,7 +765,7 @@ fn shortcut_bound(code: &str) -> BTreeSet<String> {
     bound
 }
 
-/// `Self::Variant` names appearing in a fragment of an `impl Command` block.
+/// `Self::Variant` names appearing in a fragment of an `impl ShellCommand` block.
 fn variant_names(fragment: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     let mut rest = fragment;
@@ -821,7 +807,7 @@ fn braced_body(code: &str, signature: &str) -> Option<String> {
     None
 }
 
-/// The `Command` variant each framework id names, by id.
+/// The `ShellCommand` variant each framework id names, by id.
 ///
 /// Framework code names a command by an id in the `ids!` block, which holds
 /// the command's key; the variant is the one whose `spec` arm declares that
@@ -837,7 +823,7 @@ fn command_ids(
         registry_production,
         "pub const fn spec(self) -> CommandSpec {",
     )
-    .expect("Command::spec is declared in vocabulary.rs");
+    .expect("ShellCommand::spec is declared in vocabulary.rs");
     let mut variant_by_key = BTreeMap::new();
     let mut rest = specs.as_str();
     while let Some(index) = rest.find("Self::") {
@@ -1101,24 +1087,23 @@ fn every_command_has_a_user_route() {
     let registry_code = registry_code.expect("vocabulary.rs is in the shipped source");
     let routing_code = routing_code.expect("registry.rs is in the shipped source");
     let registered = registered_commands(&registry_code);
-    // The figure is the variants the enum declares, which the dispatcher's
-    // unit test binds to the registry at run time: the parse finds exactly
-    // that many, so it stays exact as the features take the enum's commands.
+    // The figure is the variants the enum declares: two parses that agree on
+    // it cannot both have broken the same way.
     let declared = declared_commands(&registry_code);
     assert!(
         !declared.is_empty(),
-        "`enum Command` declares no variant: it goes, and this check with it"
+        "`enum ShellCommand` declares no variant: it goes, and this check with it"
     );
     assert_eq!(
         registered.len(),
         declared.len(),
-        "COMMAND_REGISTRY parsed as {} variants; `enum Command` declares {}",
+        "ShellCommand::ALL parsed as {} variants; `enum ShellCommand` declares {}",
         registered.len(),
         declared.len()
     );
     assert_eq!(
         registered, declared,
-        "COMMAND_REGISTRY and `enum Command` name the same variants"
+        "ShellCommand::ALL and `enum ShellCommand` name the same variants"
     );
     let excluded = palette_excluded(&routing_code);
     for variant in shortcut_bound(&routing_code) {
@@ -1142,9 +1127,9 @@ fn every_command_has_a_user_route() {
         // visibility is itself a route.
         let routed = !excluded.contains(variant) || routes.contains_key(variant);
         match (routed, allowed.contains_key(variant.as_str())) {
-            (false, false) => unrouted.push(format!("  Command::{variant}")),
+            (false, false) => unrouted.push(format!("  ShellCommand::{variant}")),
             (true, true) => now_routed.push(format!(
-                "  Command::{variant} — reached by {}",
+                "  ShellCommand::{variant} — reached by {}",
                 routes
                     .get(variant)
                     .map(|kinds| kinds.iter().cloned().collect::<Vec<_>>().join(", "))
@@ -1156,7 +1141,7 @@ fn every_command_has_a_user_route() {
     let missing: Vec<String> = allowed
         .keys()
         .filter(|variant| !registered.contains(**variant))
-        .map(|variant| format!("  Command::{variant}"))
+        .map(|variant| format!("  ShellCommand::{variant}"))
         .collect();
 
     let mut failures = String::new();

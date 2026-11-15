@@ -4,7 +4,7 @@
 use rspice_design::drc::DrcSeverity;
 use std::collections::BTreeSet;
 
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
 use crate::workbench::{RSpiceApp, features};
@@ -131,7 +131,7 @@ fn netlist_first_latest_run_leads_to_the_deck_rather_than_a_blocked_simulate() {
     assert_eq!(latest_run.action, "Open deck");
     assert_eq!(
         latest_run.intent,
-        OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist).key())
+        OverviewIntent::Command(ShellCommand::OpenWorkspace(Workspace::Netlist).key())
     );
 
     // Simulate's run preflight reads the schematic a netlist-first project

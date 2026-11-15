@@ -17,7 +17,7 @@ use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 #[test]
 fn command_catalog_has_unique_stable_ids() {
     let mut ids = std::collections::HashSet::new();
-    for command in vocabulary::COMMAND_REGISTRY {
+    for command in vocabulary::ShellCommand::ALL {
         let id = command.spec().id;
         assert!(ids.insert(id), "duplicate command id {}", id);
         assert!(!id.is_empty());
@@ -26,9 +26,9 @@ fn command_catalog_has_unique_stable_ids() {
                 .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'),
             "command id is not a hyphenated product action: {id}"
         );
-        assert_eq!(Command::from_stable_id(id), Some(*command));
+        assert_eq!(ShellCommand::from_stable_id(id), Some(*command));
     }
-    for command in vocabulary::COMMAND_REGISTRY
+    for command in vocabulary::ShellCommand::ALL
         .iter()
         .copied()
         .filter(|command| !command.shortcut_bindings().is_empty())
@@ -54,10 +54,10 @@ fn the_registry_catalog_answers_for_every_command_as_the_command_does() {
         .copied()
         .filter(|key| vocabulary::legacy_command(*key).is_some())
         .collect::<Vec<CommandKey>>();
-    assert_eq!(shell_commands.len(), vocabulary::COMMAND_REGISTRY.len());
+    assert_eq!(shell_commands.len(), vocabulary::ShellCommand::ALL.len());
     for (key, command) in shell_commands
         .into_iter()
-        .zip(vocabulary::COMMAND_REGISTRY.iter().copied())
+        .zip(vocabulary::ShellCommand::ALL.iter().copied())
     {
         assert_eq!(key, command.key());
         assert_eq!(key.as_str(), command.stable_id());
@@ -86,8 +86,9 @@ fn the_registry_catalog_answers_for_every_command_as_the_command_does() {
 /// else entirely. Unique IDs do not cover this: they are never displayed.
 #[test]
 fn command_catalog_titles_name_exactly_one_action() {
-    let mut labels: std::collections::HashMap<&str, Command> = std::collections::HashMap::new();
-    for command in vocabulary::COMMAND_REGISTRY.iter().copied() {
+    let mut labels: std::collections::HashMap<&str, ShellCommand> =
+        std::collections::HashMap::new();
+    for command in vocabulary::ShellCommand::ALL.iter().copied() {
         let label = command.spec().label;
         if let Some(previous) = labels.insert(label, command) {
             panic!("{previous:?} and {command:?} both offer the palette row {label:?}");
@@ -112,52 +113,64 @@ fn legacy_model_metadata_audit_identity_migrates_to_qualification() {
 #[test]
 fn all_workspace_commands_are_discoverable() {
     for workspace in Workspace::ALL {
-        assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::OpenWorkspace(workspace)));
+        assert!(vocabulary::ShellCommand::ALL.contains(&ShellCommand::OpenWorkspace(workspace)));
     }
 }
 
 #[test]
 fn protected_commands_keep_the_exact_mockup_action_ids() {
-    assert_eq!(Command::CommandPalette.spec().id, "command-palette");
-    assert_eq!(Command::ToggleFocusMode.spec().id, "toggle-focus-mode");
+    assert_eq!(ShellCommand::CommandPalette.spec().id, "command-palette");
+    assert_eq!(ShellCommand::ToggleFocusMode.spec().id, "toggle-focus-mode");
     assert_eq!(SimulateCommand::Run.key().as_str(), "start-run");
     assert_eq!(SimulateCommand::Stop.key().as_str(), "stop-run");
     assert_eq!(ProjectCommand::OpenProject.key().as_str(), "open-project");
     assert_eq!(CodeCommand::OpenNetlist.key().as_str(), "open-netlist");
     assert_eq!(ProjectCommand::NewProject.key().as_str(), "new-project");
     assert_eq!(ProjectCommand::Save.key().as_str(), "save-project");
-    assert_eq!(Command::CloseActiveDocument.spec().id, "close-document");
-    assert_eq!(Command::ToggleFullScreen.spec().id, "full-screen");
+    assert_eq!(
+        ShellCommand::CloseActiveDocument.spec().id,
+        "close-document"
+    );
+    assert_eq!(ShellCommand::ToggleFullScreen.spec().id, "full-screen");
     assert_eq!(
         CodeCommand::GenerateNetlist.key().as_str(),
         "generated-netlist"
     );
-    assert_eq!(Command::ToggleConsole.spec().id, "console");
-    assert_eq!(Command::PreviousDocument.spec().id, "previous-document");
-    assert_eq!(Command::NextDocument.spec().id, "next-document");
+    assert_eq!(ShellCommand::ToggleConsole.spec().id, "console");
     assert_eq!(
-        Command::CloseOtherDocuments.spec().id,
+        ShellCommand::PreviousDocument.spec().id,
+        "previous-document"
+    );
+    assert_eq!(ShellCommand::NextDocument.spec().id, "next-document");
+    assert_eq!(
+        ShellCommand::CloseOtherDocuments.spec().id,
         "close-other-documents"
     );
-    assert_eq!(Command::CloseAllDocuments.spec().id, "close-all-documents");
+    assert_eq!(
+        ShellCommand::CloseAllDocuments.spec().id,
+        "close-all-documents"
+    );
     assert_eq!(
         SettingsCommand::WorkspaceLayouts.key().as_str(),
         "workspace-layouts"
     );
-    assert_eq!(Command::WindowManager.spec().id, "window-manager");
-    assert_eq!(Command::HelpCenter.spec().id, "help-center");
-    assert_eq!(Command::ReleaseNotes.spec().id, "release-notes");
+    assert_eq!(ShellCommand::WindowManager.spec().id, "window-manager");
+    assert_eq!(ShellCommand::HelpCenter.spec().id, "help-center");
+    assert_eq!(ShellCommand::ReleaseNotes.spec().id, "release-notes");
 
-    assert_eq!(Command::SystemDiagnostics.spec().id, "system-diagnostics");
-    assert_eq!(Command::SupportBundle.spec().id, "support-bundle");
-    assert_eq!(Command::LegalPrivacy.spec().id, "legal-privacy-center");
-    assert_eq!(Command::OpenConsole.spec().id, "open-console");
-    assert_eq!(Command::OpenProblems.spec().id, "open-problems");
     assert_eq!(
-        Command::ToggleConsoleMaximized.spec().id,
+        ShellCommand::SystemDiagnostics.spec().id,
+        "system-diagnostics"
+    );
+    assert_eq!(ShellCommand::SupportBundle.spec().id, "support-bundle");
+    assert_eq!(ShellCommand::LegalPrivacy.spec().id, "legal-privacy-center");
+    assert_eq!(ShellCommand::OpenConsole.spec().id, "open-console");
+    assert_eq!(ShellCommand::OpenProblems.spec().id, "open-problems");
+    assert_eq!(
+        ShellCommand::ToggleConsoleMaximized.spec().id,
         "console-maximize"
     );
-    assert_eq!(Command::ClearConsole.spec().id, "console-clear");
+    assert_eq!(ShellCommand::ClearConsole.spec().id, "console-clear");
     // A shortcut profile names its commands by these ids.
     assert_eq!(
         DesignCommand::MoveSelection.key().as_str(),
@@ -184,7 +197,10 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(DesignCommand::PlacePin.key().as_str(), "place-pin");
     assert_eq!(DesignCommand::PlaceText.key().as_str(), "place-text");
     assert_eq!(DesignCommand::PlaceShape.key().as_str(), "place-shape");
-    assert_eq!(Command::ConfigurationSets.spec().id, "configuration-sets");
+    assert_eq!(
+        ShellCommand::ConfigurationSets.spec().id,
+        "configuration-sets"
+    );
     assert_eq!(
         ProjectCommand::DesignManagement.key().as_str(),
         "design-management"
@@ -212,26 +228,29 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     );
     // The capability and interoperability matrices were deleted. A shortcut
     // profile that still names them keeps the entry but resolves nothing.
-    assert_eq!(Command::from_stable_id("feature-availability"), None);
-    assert_eq!(Command::from_stable_id("interoperability-matrix"), None);
+    assert_eq!(ShellCommand::from_stable_id("feature-availability"), None);
     assert_eq!(
-        Command::OpenWorkspace(Workspace::Results).spec().id,
+        ShellCommand::from_stable_id("interoperability-matrix"),
+        None
+    );
+    assert_eq!(
+        ShellCommand::OpenWorkspace(Workspace::Results).spec().id,
         "results"
     );
     assert_eq!(
-        Command::OpenWorkspace(Workspace::Verify).spec().id,
+        ShellCommand::OpenWorkspace(Workspace::Verify).spec().id,
         "verify"
     );
     assert_eq!(
-        Command::OpenWorkspace(Workspace::Models).spec().id,
+        ShellCommand::OpenWorkspace(Workspace::Models).spec().id,
         "models"
     );
     assert_eq!(
-        Command::OpenWorkspace(Workspace::Netlist).spec().label,
+        ShellCommand::OpenWorkspace(Workspace::Netlist).spec().label,
         "Open Netlist & Script Editor"
     );
     assert_eq!(
-        Command::OpenWorkspace(Workspace::Stimulus).spec(),
+        ShellCommand::OpenWorkspace(Workspace::Stimulus).spec(),
         CommandSpec {
             id: "stimulus",
             label: "Open Stimulus Library",
@@ -250,7 +269,7 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
 fn command_palette_and_help_commands_own_canonical_routes() {
     let mut palette = RSpiceApp::test_instance();
     let palette_source = palette.state.workbench.current_route();
-    Command::CommandPalette.execute(&mut palette);
+    ShellCommand::CommandPalette.execute(&mut palette);
     assert_eq!(
         palette.state.workbench.current_route(),
         rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(
@@ -266,7 +285,7 @@ fn command_palette_and_help_commands_own_canonical_routes() {
 
     let mut help = RSpiceApp::test_instance();
     let help_source = help.state.workbench.current_route();
-    Command::LegalPrivacy.execute(&mut help);
+    ShellCommand::LegalPrivacy.execute(&mut help);
     assert_eq!(
         help.state.workbench.current_route(),
         rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(

@@ -67,7 +67,7 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
 
     app.state.close_project_session();
     assert_eq!(
-        Command::OpenWorkspace(Workspace::Design).availability(&app),
+        ShellCommand::OpenWorkspace(Workspace::Design).availability(&app),
         CommandAvailability::Disabled("no project is open")
     );
 }
@@ -155,8 +155,8 @@ fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
 #[test]
 fn configurations_opens_the_project_configuration_page() {
     let mut app = RSpiceApp::test_instance();
-    assert!(Command::ConfigurationSets.is_enabled(&app));
-    Command::ConfigurationSets.execute(&mut app);
+    assert!(ShellCommand::ConfigurationSets.is_enabled(&app));
+    ShellCommand::ConfigurationSets.execute(&mut app);
     assert_eq!(
         app.state.workbench.workspace,
         rspice_app_state::workbench::workspace::Workspace::Project
@@ -168,7 +168,7 @@ fn configurations_opens_the_project_configuration_page() {
     assert!(!app.state.dialog_modal_open(), "the page is not a modal");
 
     app.state.close_project_session();
-    assert!(!Command::ConfigurationSets.is_enabled(&app));
+    assert!(!ShellCommand::ConfigurationSets.is_enabled(&app));
 }
 
 #[test]

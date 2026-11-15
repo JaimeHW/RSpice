@@ -10,7 +10,7 @@ use rspice_app_workbench::workbench::framework::command_registry::ids;
 use std::borrow::Cow;
 
 use crate::workbench::chrome::status_bar::shell::platform_label;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use crate::workbench::features;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session;
@@ -97,7 +97,7 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
         order: 1,
         workspace: None,
         content: checks_cell,
-        activate: Some(|app, _| Command::OpenProblems.execute(app)),
+        activate: Some(|app, _| ShellCommand::OpenProblems.execute(app)),
     },
     StatusCell {
         key: StatusKey::Context,

@@ -3,7 +3,7 @@
 use crate::feature_tests::settings::shortcut_vscode_import::{
     assert_every_entry_accounted_for, has_code, vscode,
 };
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use crate::workbench::commands::vocabulary::command_registry;
 use egui::Key;
 use rspice_app_settings::workbench::shortcuts::artifacts::sha256;
@@ -31,7 +31,7 @@ fn jsonc_chord_adaptation_is_deterministic_and_round_trips_as_native() {
     let command_override = first
         .artifact()
         .profile()
-        .command_override(Command::CloseActiveDocument.key())
+        .command_override(ShellCommand::CloseActiveDocument.key())
         .unwrap();
     let strokes = command_override.bindings()[0].sequence().strokes();
     assert_eq!(strokes.len(), 2);

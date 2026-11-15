@@ -869,11 +869,11 @@ fn each_window_has_its_own_bell_to_hang_the_panel_from() {
 /// a registered command is what the palette searches.
 #[test]
 fn the_command_opens_the_panel_for_shells_that_draw_no_bell() {
-    use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
+    use crate::workbench::commands::vocabulary::ShellCommand;
 
-    assert!(COMMAND_REGISTRY.contains(&Command::OpenNotifications));
+    assert!(ShellCommand::ALL.contains(&ShellCommand::OpenNotifications));
     let mut app = RSpiceApp::test_instance();
-    Command::OpenNotifications.execute(&mut app);
+    ShellCommand::OpenNotifications.execute(&mut app);
     assert!(app.state.workbench.notification_center_showing());
 }
 

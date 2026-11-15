@@ -361,7 +361,7 @@ fn alt_with_a_digit_or_a_drag_is_no_tap() {
 fn a_rows_letter_chooses_it_in_an_open_menu() {
     let mut bar = Bar::new(OperatingSystem::Windows);
     bar.settle();
-    let navigator = Command::ToggleNavigator.key();
+    let navigator = ShellCommand::ToggleNavigator.key();
     let shown = bar.app.checked(navigator);
     bar.press(Key::V, Modifiers::ALT);
     bar.settle();

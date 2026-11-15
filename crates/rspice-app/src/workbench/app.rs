@@ -1164,7 +1164,7 @@ mod tests {
 
     #[test]
     fn portrait_toolbar_shelf_search_and_canvas_placement_work_across_frames() {
-        use crate::workbench::commands::vocabulary::Command;
+        use crate::workbench::commands::vocabulary::ShellCommand;
         use rspice_app_state::state::Tool;
         use rspice_app_workbench::workbench::state::workbench_session::Drawer;
 
@@ -1330,7 +1330,7 @@ mod tests {
 
             // A new modal task supersedes a still-pending placement focus request.
             rspice_schematic_editor::view::canvas::request_focus(&fixture.ctx);
-            Command::CommandPalette.execute(&mut fixture.app);
+            ShellCommand::CommandPalette.execute(&mut fixture.app);
             fixture.frame(Vec::new());
             fixture.frame(Vec::new());
             fixture.frame(vec![egui::Event::Text("help".to_owned())]);

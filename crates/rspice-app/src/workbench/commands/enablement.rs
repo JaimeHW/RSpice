@@ -1,10 +1,10 @@
 //! Whether a command can run right now: the one predicate every menu row,
 //! toolbar button, palette entry and shortcut asks before it acts, and the
-//! test [`Command::availability`] builds its reasons on.
+//! test [`ShellCommand::availability`] builds its reasons on.
 
 use super::*;
 
-impl Command {
+impl ShellCommand {
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
         let state = &app.state;
         // The dispatcher's own guards, so what is drawn enabled is what runs.

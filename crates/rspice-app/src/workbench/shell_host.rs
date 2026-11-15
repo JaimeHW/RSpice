@@ -19,7 +19,7 @@ use egui::Ui;
 use egui::os::OperatingSystem;
 
 use crate::workbench::commands::vocabulary::{
-    Command, CommandRegistry, command_registry, legacy_command,
+    CommandRegistry, ShellCommand, command_registry, legacy_command,
 };
 use crate::workbench::features;
 use crate::workbench::{AppState, RSpiceApp};
@@ -868,7 +868,7 @@ impl Host for RSpiceApp {
     }
 
     fn open_workspace(&self, workspace: Workspace) -> CommandKey {
-        Command::OpenWorkspace(workspace).key()
+        ShellCommand::OpenWorkspace(workspace).key()
     }
 
     fn menu_entries(&self, menu: ApplicationMenu) -> &'static [MenuEntry] {
@@ -1278,51 +1278,51 @@ mod tests {
     #[test]
     fn each_framework_id_names_its_command() {
         for (id, command) in [
-            (ids::CLEAR_CONSOLE, Command::ClearConsole),
-            (ids::COMMAND_PALETTE, Command::CommandPalette),
+            (ids::CLEAR_CONSOLE, ShellCommand::ClearConsole),
+            (ids::COMMAND_PALETTE, ShellCommand::CommandPalette),
             (
                 ids::DESIGN_WORKSPACE,
-                Command::OpenWorkspace(Workspace::Design),
+                ShellCommand::OpenWorkspace(Workspace::Design),
             ),
-            (ids::HELP_CENTER, Command::HelpCenter),
-            (ids::LEGAL_PRIVACY, Command::LegalPrivacy),
+            (ids::HELP_CENTER, ShellCommand::HelpCenter),
+            (ids::LEGAL_PRIVACY, ShellCommand::LegalPrivacy),
             (
                 ids::MODELS_WORKSPACE,
-                Command::OpenWorkspace(Workspace::Models),
+                ShellCommand::OpenWorkspace(Workspace::Models),
             ),
             (
                 ids::NETLIST_WORKSPACE,
-                Command::OpenWorkspace(Workspace::Netlist),
+                ShellCommand::OpenWorkspace(Workspace::Netlist),
             ),
-            (ids::OPEN_CONSOLE, Command::OpenConsole),
-            (ids::OPEN_NOTIFICATIONS, Command::OpenNotifications),
+            (ids::OPEN_CONSOLE, ShellCommand::OpenConsole),
+            (ids::OPEN_NOTIFICATIONS, ShellCommand::OpenNotifications),
             (
                 ids::PROJECT_WORKSPACE,
-                Command::OpenWorkspace(Workspace::Project),
+                ShellCommand::OpenWorkspace(Workspace::Project),
             ),
-            (ids::RESET_LAYOUT, Command::ResetLayout),
+            (ids::RESET_LAYOUT, ShellCommand::ResetLayout),
             (
                 ids::RESULTS_WORKSPACE,
-                Command::OpenWorkspace(Workspace::Results),
+                ShellCommand::OpenWorkspace(Workspace::Results),
             ),
             (
                 ids::SIMULATE_WORKSPACE,
-                Command::OpenWorkspace(Workspace::Simulate),
+                ShellCommand::OpenWorkspace(Workspace::Simulate),
             ),
             (
                 ids::STIMULUS_WORKSPACE,
-                Command::OpenWorkspace(Workspace::Stimulus),
+                ShellCommand::OpenWorkspace(Workspace::Stimulus),
             ),
-            (ids::SUPPORT_BUNDLE, Command::SupportBundle),
-            (ids::TOGGLE_CONSOLE, Command::ToggleConsole),
+            (ids::SUPPORT_BUNDLE, ShellCommand::SupportBundle),
+            (ids::TOGGLE_CONSOLE, ShellCommand::ToggleConsole),
             (
                 ids::TOGGLE_CONSOLE_MAXIMIZED,
-                Command::ToggleConsoleMaximized,
+                ShellCommand::ToggleConsoleMaximized,
             ),
-            (ids::TOGGLE_FOCUS_MODE, Command::ToggleFocusMode),
+            (ids::TOGGLE_FOCUS_MODE, ShellCommand::ToggleFocusMode),
             (
                 ids::VERIFY_WORKSPACE,
-                Command::OpenWorkspace(Workspace::Verify),
+                ShellCommand::OpenWorkspace(Workspace::Verify),
             ),
         ] {
             assert_eq!(id, command.key(), "{command:?}");

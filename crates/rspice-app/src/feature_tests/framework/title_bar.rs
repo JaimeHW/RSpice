@@ -7,7 +7,7 @@
 use egui::{Context, Frame, Id, Key, Modifiers, Popup, Rect, Ui};
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::{Command, command_registry};
+use crate::workbench::commands::vocabulary::{ShellCommand, command_registry};
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
@@ -468,10 +468,10 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
         "no menu lists the Automation workspace"
     );
     for command in [
-        Command::WindowManager,
-        Command::ToggleFocusMode,
-        Command::ToggleConsole,
-        Command::HelpCenter,
+        ShellCommand::WindowManager,
+        ShellCommand::ToggleFocusMode,
+        ShellCommand::ToggleConsole,
+        ShellCommand::HelpCenter,
     ] {
         assert!(listed.contains(&command.key()), "no menu lists {command:?}");
     }
@@ -591,7 +591,7 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
             &app,
             rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
-            Command::KeyboardShortcuts.key(),
+            ShellCommand::KeyboardShortcuts.key(),
             Some("")
         ),
         ""
@@ -601,7 +601,7 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
             &app,
             rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
-            Command::KeyboardShortcuts.key(),
+            ShellCommand::KeyboardShortcuts.key(),
             Some("Ctrl+Alt+R")
         ),
         "Ctrl+Alt+R"
@@ -659,7 +659,7 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
             declared
         );
     }
-    for command in [Command::ToggleFullScreen, Command::ToggleConsole] {
+    for command in [ShellCommand::ToggleFullScreen, ShellCommand::ToggleConsole] {
         assert_eq!(
             shortcut_for_occurrence(
                 &app,
@@ -676,7 +676,7 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
             &app,
             platform,
             egui::os::OperatingSystem::Windows,
-            Command::KeyboardShortcuts.key(),
+            ShellCommand::KeyboardShortcuts.key(),
             None
         ),
         ""
@@ -782,7 +782,7 @@ const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 6] = [
     DesignCommand::CreateHierarchy.key(),
     ProjectCommand::DesignManagement.key(),
     DesignCommand::ConnectivityManager.key(),
-    Command::ConfigurationSets.key(),
+    ShellCommand::ConfigurationSets.key(),
     DesignCommand::RuleSetup.key(),
     DesignCommand::ReviewComments.key(),
 ];
@@ -798,15 +798,15 @@ const DESIGN_SHEET_COMMANDS: [SheetsCommand; 4] = [
 #[test]
 fn the_panels_are_switched_from_view_and_not_from_window() {
     let panels = [
-        Command::ToggleNavigator.key(),
-        Command::ToggleInspector.key(),
-        Command::ToggleConsole.key(),
+        ShellCommand::ToggleNavigator.key(),
+        ShellCommand::ToggleInspector.key(),
+        ShellCommand::ToggleConsole.key(),
         ResultsCommand::ToggleResultsSplit.key(),
-        Command::OpenProblems.key(),
+        ShellCommand::OpenProblems.key(),
     ];
     let screen = [
-        Command::ToggleFocusMode.key(),
-        Command::ToggleFullScreen.key(),
+        ShellCommand::ToggleFocusMode.key(),
+        ShellCommand::ToggleFullScreen.key(),
     ];
     assert_menu_lists(ApplicationMenu::View, &panels);
     assert_menu_lists(ApplicationMenu::View, &screen);
@@ -1423,11 +1423,11 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         Some(WorkbenchIcon::File)
     );
     for command in [
-        Command::LegalPrivacy,
-        Command::About,
-        Command::HelpCenter,
-        Command::Exit,
-        Command::KeyboardShortcuts,
+        ShellCommand::LegalPrivacy,
+        ShellCommand::About,
+        ShellCommand::HelpCenter,
+        ShellCommand::Exit,
+        ShellCommand::KeyboardShortcuts,
     ] {
         assert_eq!(
             app.command_icon(command.key()),
@@ -1696,26 +1696,26 @@ fn a_build_without_cloud_endpoints_leaves_out_live_session_and_publish() {
 fn switching_rows_are_checked_while_their_state_is_on() {
     let mut app = title_test_app();
     let switches = [
-        Command::ToggleNavigator.key(),
-        Command::ToggleInspector.key(),
-        Command::ToggleConsole.key(),
+        ShellCommand::ToggleNavigator.key(),
+        ShellCommand::ToggleInspector.key(),
+        ShellCommand::ToggleConsole.key(),
         ResultsCommand::ToggleResultsSplit.key(),
-        Command::ToggleFocusMode.key(),
-        Command::ToggleFullScreen.key(),
+        ShellCommand::ToggleFocusMode.key(),
+        ShellCommand::ToggleFullScreen.key(),
         ResultsCommand::ToggleLinkedCursors.key(),
     ];
     for key in switches {
         assert!(Host::checked(&app, key).is_some(), "{key:?} reads no state");
     }
     assert_eq!(Host::checked(&app, ProjectCommand::Save.key()), None);
-    assert_eq!(Command::ResetLayout.checked(&app), None);
+    assert_eq!(ShellCommand::ResetLayout.checked(&app), None);
 
     for command in [
-        Command::ToggleNavigator,
-        Command::ToggleInspector,
-        Command::ToggleConsole,
-        Command::ToggleFocusMode,
-        Command::ToggleConsole,
+        ShellCommand::ToggleNavigator,
+        ShellCommand::ToggleInspector,
+        ShellCommand::ToggleConsole,
+        ShellCommand::ToggleFocusMode,
+        ShellCommand::ToggleConsole,
     ] {
         let before = command.checked(&app).expect("a switch");
         command.execute(&mut app);
@@ -1728,11 +1728,11 @@ fn switching_rows_are_checked_while_their_state_is_on() {
 
     app.state.workbench.focus_mode = false;
     app.state.workbench.console_visible = true;
-    Command::ToggleFocusMode.execute(&mut app);
-    assert_eq!(Command::ToggleConsole.checked(&app), Some(false));
-    Command::ToggleConsole.execute(&mut app);
-    assert_eq!(Command::ToggleConsole.checked(&app), Some(true));
-    assert_eq!(Command::ToggleFocusMode.checked(&app), Some(false));
+    ShellCommand::ToggleFocusMode.execute(&mut app);
+    assert_eq!(ShellCommand::ToggleConsole.checked(&app), Some(false));
+    ShellCommand::ToggleConsole.execute(&mut app);
+    assert_eq!(ShellCommand::ToggleConsole.checked(&app), Some(true));
+    assert_eq!(ShellCommand::ToggleFocusMode.checked(&app), Some(false));
 
     for on in [true, false] {
         app.state.workbench.split_with_results = on;
@@ -1740,7 +1740,7 @@ fn switching_rows_are_checked_while_their_state_is_on() {
         app.state.results.results.session.linked_cursors = on;
         for key in [
             ResultsCommand::ToggleResultsSplit.key(),
-            Command::ToggleFullScreen.key(),
+            ShellCommand::ToggleFullScreen.key(),
             ResultsCommand::ToggleLinkedCursors.key(),
         ] {
             assert_eq!(Host::checked(&app, key), Some(on), "{key:?}");

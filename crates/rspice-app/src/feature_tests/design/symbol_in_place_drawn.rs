@@ -4,7 +4,7 @@ use egui::accesskit::Role;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 use crate::feature_tests::replay::{Control, Replay};
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::{CellViewRef, Point, Rotation};
 
@@ -1412,7 +1412,7 @@ fn a_symbol_finding_followed_in_place_selects_and_shows_its_pin() {
     fixture
         .replay
         .app
-        .execute_command_key(Command::OpenProblems.key());
+        .execute_command_key(ShellCommand::OpenProblems.key());
     let controls = fixture.replay.frames(vec![]);
     let row = controls
         .iter()
@@ -1523,7 +1523,7 @@ fn a_pin_on_another_pins_terminal_is_found_and_goes_from_its_finding() {
         fixture
             .replay
             .app
-            .execute_command_key(Command::OpenProblems.key());
+            .execute_command_key(ShellCommand::OpenProblems.key());
         let controls = fixture.replay.frames(vec![]);
         let row = controls
             .iter()

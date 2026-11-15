@@ -1651,17 +1651,17 @@ fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
 /// (audit G-11).
 #[test]
 fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
-    use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, last_repeatable};
+    use crate::workbench::commands::vocabulary::{ShellCommand, last_repeatable};
     use rspice_app_state::state::command_catalog::{CommandPlatform, ShortcutContext};
     use rspice_app_workbench::workbench::framework::command_registry::CommandFlags;
 
-    let repeat = Command::RepeatLastCommand;
+    let repeat = ShellCommand::RepeatLastCommand;
     assert_eq!(repeat.default_shortcut_label(CommandPlatform::Desktop), ".");
     assert_eq!(
         repeat.shortcut_context(),
         ShortcutContext::EngineeringCanvas
     );
-    let sharing: Vec<Command> = COMMAND_REGISTRY
+    let sharing: Vec<ShellCommand> = ShellCommand::ALL
         .iter()
         .copied()
         .filter(|command| {

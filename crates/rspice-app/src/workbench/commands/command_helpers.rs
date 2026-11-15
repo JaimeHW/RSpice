@@ -55,10 +55,10 @@ pub(super) fn open_help_center(state: &mut AppState, page: crate::workbench::app
 
 /// The label a menu row shows for `command` right now: Repeat names the
 /// command it repeats, and every other row reads the vocabulary's label.
-pub(crate) fn menu_label(command: Command, app: &RSpiceApp) -> std::borrow::Cow<'static, str> {
+pub(crate) fn menu_label(command: ShellCommand, app: &RSpiceApp) -> std::borrow::Cow<'static, str> {
     let label = command.spec().label;
     let named = match command {
-        Command::RepeatLastCommand => {
+        ShellCommand::RepeatLastCommand => {
             vocabulary::last_repeatable(app.state.workbench.last_repeatable_command.as_deref())
                 .map(|spec| format!("Repeat {}", lower_first_word(spec.label)))
         }
@@ -340,7 +340,7 @@ pub(in crate::workbench) fn carry_out_code_hand_off(app: &mut RSpiceApp, hand_of
 /// in the order the change once did it.
 pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request: ProjectRequest) {
     match request {
-        ProjectRequest::ConfigurationSets => Command::ConfigurationSets.execute(app),
+        ProjectRequest::ConfigurationSets => ShellCommand::ConfigurationSets.execute(app),
         ProjectRequest::OpenView(reference, view_type) => {
             app.state.open_workspace_view(reference);
             // Source views are cell views too: Design shows a Verilog-A module's
@@ -352,7 +352,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
                 }
                 _ => Workspace::Design,
             };
-            Command::OpenWorkspace(workspace).execute(app);
+            ShellCommand::OpenWorkspace(workspace).execute(app);
         }
         ProjectRequest::SaveMigrationCopy => {
             let saved = app.state.save_project_as();
@@ -366,7 +366,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
         }
         ProjectRequest::OpenRootAndCheck(root) => {
             app.state.open_workspace_view(root);
-            Command::OpenWorkspace(Workspace::Design).execute(app);
+            ShellCommand::OpenWorkspace(Workspace::Design).execute(app);
             let check = DesignCommand::CheckDesign.key();
             if app.command_key_enabled(check) {
                 app.execute_command_key(check);

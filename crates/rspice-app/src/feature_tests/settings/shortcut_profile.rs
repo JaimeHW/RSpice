@@ -2,8 +2,8 @@
 //! the shipped bindings, and the cases that edit or audit a profile through
 //! the commands this build ships.
 
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use egui::Key;
 use egui::os::OperatingSystem;
 use rspice_app_design::workbench::design::commands::DesignCommand;
@@ -32,7 +32,7 @@ fn immutable_workspace_ownership_projects_to_results_and_verify() {
     assert_eq!(
         preferences.resolved_bindings(
             &CommandRegistry,
-            Command::OpenWorkspace(Workspace::Results).key()
+            ShellCommand::OpenWorkspace(Workspace::Results).key()
         )[0]
         .sequence()
         .display_label_for(OperatingSystem::Windows),
@@ -41,7 +41,7 @@ fn immutable_workspace_ownership_projects_to_results_and_verify() {
     assert_eq!(
         preferences.resolved_bindings(
             &CommandRegistry,
-            Command::OpenWorkspace(Workspace::Verify).key()
+            ShellCommand::OpenWorkspace(Workspace::Verify).key()
         )[0]
         .sequence()
         .display_label_for(OperatingSystem::Windows),
@@ -404,7 +404,7 @@ fn unknown_execution_policy_is_preserved_but_fails_closed_until_repaired() {
     }"#;
     let mut preferences: ShortcutPreferences = serde_json::from_str(source).unwrap();
     assert_eq!(
-        preferences.resolved_bindings(&CommandRegistry, Command::ToggleNavigator.key())[0]
+        preferences.resolved_bindings(&CommandRegistry, ShellCommand::ToggleNavigator.key())[0]
             .display_label(),
         "F13"
     );
@@ -419,7 +419,7 @@ fn unknown_execution_policy_is_preserved_but_fails_closed_until_repaired() {
     assert_eq!(
         preferences.resolved_label(
             &CommandRegistry,
-            Command::ToggleNavigator.key(),
+            ShellCommand::ToggleNavigator.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows,
         ),
@@ -434,7 +434,7 @@ fn unknown_execution_policy_is_preserved_but_fails_closed_until_repaired() {
     assert_eq!(
         preferences.resolved_label(
             &CommandRegistry,
-            Command::ToggleNavigator.key(),
+            ShellCommand::ToggleNavigator.key(),
             CommandPlatform::Desktop,
             OperatingSystem::Windows,
         ),

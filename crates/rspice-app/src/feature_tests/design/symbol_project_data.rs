@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     ProjectDocumentId, dirty_documents, has_unsaved_changes,
@@ -348,7 +348,7 @@ fn symbol_edits_are_unsaved_project_work_until_the_project_is_saved() {
         .app
         .state
         .open_workspace_view(fixture.symbol.clone());
-    Command::CloseActiveDocument.execute(&mut fixture.app);
+    ShellCommand::CloseActiveDocument.execute(&mut fixture.app);
     assert!(
         !fixture
             .app
@@ -597,7 +597,7 @@ fn reverting_the_symbol_restores_it_and_its_placed_instances() {
     assert!(
         !fixture
             .app
-            .command_availability(Command::RevertActiveDocument.key())
+            .command_availability(ShellCommand::RevertActiveDocument.key())
             .is_available(),
         "nothing to revert before an edit"
     );
@@ -611,7 +611,7 @@ fn reverting_the_symbol_restores_it_and_its_placed_instances() {
     assert!(
         fixture
             .app
-            .command_availability(Command::RevertActiveDocument.key())
+            .command_availability(ShellCommand::RevertActiveDocument.key())
             .is_available(),
         "Revert to saved is offered once the symbol has changed"
     );
@@ -635,7 +635,7 @@ fn reverting_the_symbol_restores_it_and_its_placed_instances() {
     assert!(
         !fixture
             .app
-            .command_availability(Command::RevertActiveDocument.key())
+            .command_availability(ShellCommand::RevertActiveDocument.key())
             .is_available(),
         "the symbol is as saved again"
     );

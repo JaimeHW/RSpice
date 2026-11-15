@@ -475,8 +475,8 @@ fn escape_lets_go_of_an_armed_zoom_box() {
 #[test]
 fn only_exactly_implemented_reset_actions_are_discoverable() {
     let searchable = command_catalog().collect::<Vec<_>>();
-    assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::ResetLayout));
-    assert!(searchable.contains(&Command::ResetLayout));
+    assert!(vocabulary::ShellCommand::ALL.contains(&ShellCommand::ResetLayout));
+    assert!(searchable.contains(&ShellCommand::ResetLayout));
 }
 
 #[test]
@@ -485,14 +485,14 @@ fn full_screen_command_enters_in_the_same_frame_with_no_dialog() {
     assert!(!app.state.workbench.full_screen_presentation);
     assert_eq!(take_full_screen_request(&mut app), None);
 
-    Command::ToggleFullScreen.execute(&mut app);
+    ShellCommand::ToggleFullScreen.execute(&mut app);
 
     assert!(!app.state.dialog_modal_open());
     assert!(app.state.workbench.full_screen_presentation);
     assert!(app.state.workbench.full_screen);
     assert_eq!(take_full_screen_request(&mut app), Some(true));
 
-    Command::ToggleFullScreen.execute(&mut app);
+    ShellCommand::ToggleFullScreen.execute(&mut app);
 
     assert!(!app.state.workbench.full_screen_presentation);
     assert!(!app.state.workbench.full_screen);

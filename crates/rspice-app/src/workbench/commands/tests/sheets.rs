@@ -149,7 +149,7 @@ fn paging_chords_have_exactly_one_owner_on_every_platform() {
         // The document strip reaches the same keys only with Ctrl+Alt, so a
         // bare Page Up/Down can never mean two things at once.
         assert_eq!(
-            Command::NextDocument.default_shortcut_label(platform),
+            ShellCommand::NextDocument.default_shortcut_label(platform),
             if platform == CommandPlatform::Desktop {
                 "Ctrl+Tab"
             } else {

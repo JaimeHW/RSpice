@@ -22,7 +22,7 @@
 use egui::Context;
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
@@ -118,11 +118,11 @@ fn open_code_document(
     let language = match &owner {
         ProjectSourceOwner::CellView { reference } => {
             app.state.open_workspace_view(reference.clone());
-            Command::OpenWorkspace(Workspace::Design).execute(app);
+            ShellCommand::OpenWorkspace(Workspace::Design).execute(app);
             ProjectSourceLanguage::VerilogA
         }
         ProjectSourceOwner::CodeWorkspace { language } => {
-            Command::OpenWorkspace(Workspace::Netlist).execute(app);
+            ShellCommand::OpenWorkspace(Workspace::Netlist).execute(app);
             app.state.code.code_workspace.page = code_workspace::CodeWorkspacePage::Automation;
             *language
         }
@@ -183,11 +183,11 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                 .content
                 .simulation_root_reference();
             app.state.open_workspace_view(root.clone());
-            Command::OpenWorkspace(Workspace::Design).execute(app);
+            ShellCommand::OpenWorkspace(Workspace::Design).execute(app);
             if let Some(worst) = app.state.model.worst_design_rule_finding(&root) {
                 app.state.model.diagnostics.set_current_finding(Some(worst));
             }
-            Command::OpenProblems.execute(app);
+            ShellCommand::OpenProblems.execute(app);
         }
         // The analysis the finding is about, selected before the page opens
         // so its first frame shows it. One the plan no longer holds is said

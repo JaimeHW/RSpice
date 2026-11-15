@@ -40,7 +40,7 @@ use rspice_app_workbench::workbench::framework::command_registry::{self, Command
 // preferences show the user. Trimming it to `Palette` to stop repeating the
 // enum would rename a thing that exists.
 #[allow(clippy::enum_variant_names)]
-pub enum Command {
+pub enum ShellCommand {
     OpenWorkspace(Workspace),
     RevertActiveDocument,
     CloseActiveDocument,
@@ -99,7 +99,7 @@ pub struct CommandSpec {
     pub group: &'static str,
 }
 
-impl Command {
+impl ShellCommand {
     /// Stable product identity used by portable command profiles.
     pub const fn stable_id(self) -> &'static str {
         self.spec().id
@@ -254,59 +254,60 @@ pub(in crate::workbench) const fn spec(
     CommandSpec { id, label, group }
 }
 
-/// Every command registered with application chrome. Search, menus,
-/// accessibility help, and keyboard resolution all project from this list.
-/// Context-only commands are retained here but can opt out of search.
-pub const COMMAND_REGISTRY: &[Command] = &[
-    Command::RevertActiveDocument,
-    Command::CloseActiveDocument,
-    Command::Exit,
-    Command::RepeatLastCommand,
-    Command::OpenWorkspace(Workspace::Project),
-    Command::OpenWorkspace(Workspace::Design),
-    Command::OpenWorkspace(Workspace::Simulate),
-    Command::OpenWorkspace(Workspace::Stimulus),
-    Command::OpenWorkspace(Workspace::Results),
-    Command::OpenWorkspace(Workspace::Verify),
-    Command::OpenWorkspace(Workspace::Models),
-    Command::OpenWorkspace(Workspace::Netlist),
-    Command::ToggleFullScreen,
-    Command::ToggleNavigator,
-    Command::ToggleInspector,
-    Command::ToggleConsole,
-    Command::OpenConsole,
-    Command::OpenProblems,
-    Command::OpenNotifications,
-    Command::ToggleConsoleMaximized,
-    Command::ClearConsole,
-    Command::ToggleFocusMode,
-    Command::NewApplicationWindow,
-    Command::DetachDocument,
-    Command::MoveDocumentToWindow,
-    Command::ReattachDocument,
-    Command::ConsolidateWindows,
-    Command::MonitorRecovery,
-    Command::PreviousDocument,
-    Command::NextDocument,
-    Command::NextPane,
-    Command::PreviousPane,
-    Command::CloseOtherDocuments,
-    Command::CloseAllDocuments,
-    Command::WindowManager,
-    Command::MinimizeWindow,
-    Command::ZoomWindow,
-    Command::ResetLayout,
-    Command::ConfigurationSets,
-    Command::CommandPalette,
-    Command::KeyboardShortcuts,
-    Command::HelpCenter,
-    Command::Examples,
-    Command::ReleaseNotes,
-    Command::SystemDiagnostics,
-    Command::SupportBundle,
-    Command::LegalPrivacy,
-    Command::About,
-];
+impl ShellCommand {
+    /// Every command the shell carries out itself, in the order the
+    /// registry lists them among the features' commands.
+    pub const ALL: &'static [Self] = &[
+        Self::RevertActiveDocument,
+        Self::CloseActiveDocument,
+        Self::Exit,
+        Self::RepeatLastCommand,
+        Self::OpenWorkspace(Workspace::Project),
+        Self::OpenWorkspace(Workspace::Design),
+        Self::OpenWorkspace(Workspace::Simulate),
+        Self::OpenWorkspace(Workspace::Stimulus),
+        Self::OpenWorkspace(Workspace::Results),
+        Self::OpenWorkspace(Workspace::Verify),
+        Self::OpenWorkspace(Workspace::Models),
+        Self::OpenWorkspace(Workspace::Netlist),
+        Self::ToggleFullScreen,
+        Self::ToggleNavigator,
+        Self::ToggleInspector,
+        Self::ToggleConsole,
+        Self::OpenConsole,
+        Self::OpenProblems,
+        Self::OpenNotifications,
+        Self::ToggleConsoleMaximized,
+        Self::ClearConsole,
+        Self::ToggleFocusMode,
+        Self::NewApplicationWindow,
+        Self::DetachDocument,
+        Self::MoveDocumentToWindow,
+        Self::ReattachDocument,
+        Self::ConsolidateWindows,
+        Self::MonitorRecovery,
+        Self::PreviousDocument,
+        Self::NextDocument,
+        Self::NextPane,
+        Self::PreviousPane,
+        Self::CloseOtherDocuments,
+        Self::CloseAllDocuments,
+        Self::WindowManager,
+        Self::MinimizeWindow,
+        Self::ZoomWindow,
+        Self::ResetLayout,
+        Self::ConfigurationSets,
+        Self::CommandPalette,
+        Self::KeyboardShortcuts,
+        Self::HelpCenter,
+        Self::Examples,
+        Self::ReleaseNotes,
+        Self::SystemDiagnostics,
+        Self::SupportBundle,
+        Self::LegalPrivacy,
+        Self::About,
+    ];
+}
 
 /// Every command the registry lists, by key, in the order menus list them
 /// and the shortcut resolver breaks ties by: the shell's own commands and the
@@ -318,8 +319,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ProjectCommand::Save.key(),
     ProjectCommand::SaveAs.key(),
     ProjectCommand::SaveAll.key(),
-    Command::RevertActiveDocument.key(),
-    Command::CloseActiveDocument.key(),
+    ShellCommand::RevertActiveDocument.key(),
+    ShellCommand::CloseActiveDocument.key(),
     ProjectCommand::CloseProject.key(),
     ProjectCommand::NewCell.key(),
     ProjectCommand::NewView.key(),
@@ -341,7 +342,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     SheetsCommand::SheetDefaults.key(),
     HardcopyCommand::PrintHardcopy.key(),
     HardcopyCommand::ExportActiveView.key(),
-    Command::Exit.key(),
+    ShellCommand::Exit.key(),
     WorkbenchCommand::Undo.key(),
     WorkbenchCommand::Redo.key(),
     WorkbenchCommand::Cut.key(),
@@ -362,16 +363,16 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::ObjectProperties.key(),
     WorkbenchCommand::FindInDesign.key(),
     DesignCommand::FindReplace.key(),
-    Command::RepeatLastCommand.key(),
+    ShellCommand::RepeatLastCommand.key(),
     SettingsCommand::Preferences.key(),
-    Command::OpenWorkspace(Workspace::Project).key(),
-    Command::OpenWorkspace(Workspace::Design).key(),
-    Command::OpenWorkspace(Workspace::Simulate).key(),
-    Command::OpenWorkspace(Workspace::Stimulus).key(),
-    Command::OpenWorkspace(Workspace::Results).key(),
-    Command::OpenWorkspace(Workspace::Verify).key(),
-    Command::OpenWorkspace(Workspace::Models).key(),
-    Command::OpenWorkspace(Workspace::Netlist).key(),
+    ShellCommand::OpenWorkspace(Workspace::Project).key(),
+    ShellCommand::OpenWorkspace(Workspace::Design).key(),
+    ShellCommand::OpenWorkspace(Workspace::Simulate).key(),
+    ShellCommand::OpenWorkspace(Workspace::Stimulus).key(),
+    ShellCommand::OpenWorkspace(Workspace::Results).key(),
+    ShellCommand::OpenWorkspace(Workspace::Verify).key(),
+    ShellCommand::OpenWorkspace(Workspace::Models).key(),
+    ShellCommand::OpenWorkspace(Workspace::Netlist).key(),
     ProjectCommand::Page(ProjectPage::Overview).key(),
     ProjectCommand::Page(ProjectPage::Library).key(),
     ProjectCommand::Page(ProjectPage::Configuration).key(),
@@ -419,35 +420,35 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::SymbolPlacedPreview.key(),
     DesignCommand::SymbolSnapToGrid.key(),
     DesignCommand::SymbolCycleGridSpacing.key(),
-    Command::ToggleFullScreen.key(),
+    ShellCommand::ToggleFullScreen.key(),
     DesignCommand::EngineeringTableView.key(),
-    Command::ToggleNavigator.key(),
-    Command::ToggleInspector.key(),
-    Command::ToggleConsole.key(),
+    ShellCommand::ToggleNavigator.key(),
+    ShellCommand::ToggleInspector.key(),
+    ShellCommand::ToggleConsole.key(),
     ResultsCommand::ToggleResultsSplit.key(),
-    Command::OpenConsole.key(),
-    Command::OpenProblems.key(),
-    Command::OpenNotifications.key(),
-    Command::ToggleConsoleMaximized.key(),
-    Command::ClearConsole.key(),
-    Command::ToggleFocusMode.key(),
-    Command::NewApplicationWindow.key(),
-    Command::DetachDocument.key(),
-    Command::MoveDocumentToWindow.key(),
-    Command::ReattachDocument.key(),
-    Command::ConsolidateWindows.key(),
-    Command::MonitorRecovery.key(),
-    Command::PreviousDocument.key(),
-    Command::NextDocument.key(),
-    Command::NextPane.key(),
-    Command::PreviousPane.key(),
-    Command::CloseOtherDocuments.key(),
-    Command::CloseAllDocuments.key(),
+    ShellCommand::OpenConsole.key(),
+    ShellCommand::OpenProblems.key(),
+    ShellCommand::OpenNotifications.key(),
+    ShellCommand::ToggleConsoleMaximized.key(),
+    ShellCommand::ClearConsole.key(),
+    ShellCommand::ToggleFocusMode.key(),
+    ShellCommand::NewApplicationWindow.key(),
+    ShellCommand::DetachDocument.key(),
+    ShellCommand::MoveDocumentToWindow.key(),
+    ShellCommand::ReattachDocument.key(),
+    ShellCommand::ConsolidateWindows.key(),
+    ShellCommand::MonitorRecovery.key(),
+    ShellCommand::PreviousDocument.key(),
+    ShellCommand::NextDocument.key(),
+    ShellCommand::NextPane.key(),
+    ShellCommand::PreviousPane.key(),
+    ShellCommand::CloseOtherDocuments.key(),
+    ShellCommand::CloseAllDocuments.key(),
     SettingsCommand::WorkspaceLayouts.key(),
-    Command::WindowManager.key(),
-    Command::MinimizeWindow.key(),
-    Command::ZoomWindow.key(),
-    Command::ResetLayout.key(),
+    ShellCommand::WindowManager.key(),
+    ShellCommand::MinimizeWindow.key(),
+    ShellCommand::ZoomWindow.key(),
+    ShellCommand::ResetLayout.key(),
     DesignCommand::SelectTool.key(),
     DesignCommand::PlaceInstance.key(),
     DesignCommand::PlaceWire.key(),
@@ -474,7 +475,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     DesignCommand::SelectionBulkEdit.key(),
     DesignCommand::ConnectivityManager.key(),
     DesignCommand::HighlightNet.key(),
-    Command::ConfigurationSets.key(),
+    ShellCommand::ConfigurationSets.key(),
     DesignCommand::RuleSetup.key(),
     DesignCommand::ReviewComments.key(),
     ProjectCommand::RevisionHistory.key(),
@@ -708,21 +709,21 @@ static COMMAND_ORDER: &[CommandKey] = &[
     CodeCommand::VerilogABuildSettings.key(),
     CodeCommand::VerilogAOpenSymbol.key(),
     CodeCommand::AutomationConsole.key(),
-    Command::CommandPalette.key(),
-    Command::KeyboardShortcuts.key(),
+    ShellCommand::CommandPalette.key(),
+    ShellCommand::KeyboardShortcuts.key(),
     CloudCommand::AccountOrganization.key(),
     CloudCommand::License.key(),
     CloudCommand::CheckForUpdates.key(),
     HardcopyCommand::ReportAuthoring.key(),
     ResultsCommand::AddVisualizationPane.key(),
     ResultsCommand::VisualizationDocumentProperties.key(),
-    Command::HelpCenter.key(),
-    Command::Examples.key(),
-    Command::ReleaseNotes.key(),
-    Command::SystemDiagnostics.key(),
-    Command::SupportBundle.key(),
-    Command::LegalPrivacy.key(),
-    Command::About.key(),
+    ShellCommand::HelpCenter.key(),
+    ShellCommand::Examples.key(),
+    ShellCommand::ReleaseNotes.key(),
+    ShellCommand::SystemDiagnostics.key(),
+    ShellCommand::SupportBundle.key(),
+    ShellCommand::LegalPrivacy.key(),
+    ShellCommand::About.key(),
     WorkbenchCommand::Cancel.key(),
 ];
 
@@ -756,13 +757,13 @@ const LEGACY_ALIASES: &[(&str, CommandKey)] = &[
 ];
 
 /// The registry of every command in [`COMMAND_ORDER`]: the shell's own in
-/// [`COMMAND_REGISTRY`] and the ones the features declare. Built on first use
+/// [`ShellCommand::ALL`] and the ones the features declare. Built on first use
 /// and checked as it is built.
 pub(crate) fn command_registry() -> &'static Registry {
     static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
         let registry = Registry::new(
             COMMAND_ORDER,
-            COMMAND_REGISTRY
+            ShellCommand::ALL
                 .iter()
                 .map(|command| command.registry_spec())
                 .chain(WorkbenchCommand::ALL.map(WorkbenchCommand::declared_spec))
@@ -804,10 +805,10 @@ pub(crate) fn last_repeatable(
 
 /// The command a registered key names. Every registered command is still
 /// declared by this enum, and this table is how a key reaches it.
-pub(crate) fn legacy_command(key: CommandKey) -> Option<Command> {
-    static BY_KEY: LazyLock<HashMap<CommandKey, Command>> = LazyLock::new(|| {
-        let mut commands = HashMap::with_capacity(COMMAND_REGISTRY.len());
-        for command in COMMAND_REGISTRY {
+pub(crate) fn legacy_command(key: CommandKey) -> Option<ShellCommand> {
+    static BY_KEY: LazyLock<HashMap<CommandKey, ShellCommand>> = LazyLock::new(|| {
+        let mut commands = HashMap::with_capacity(ShellCommand::ALL.len());
+        for command in ShellCommand::ALL {
             commands.entry(command.key()).or_insert(*command);
         }
         commands
@@ -847,7 +848,7 @@ impl CommandCatalog for CommandRegistry {
 /// the palette lists. The command palette itself and context-only
 /// cancellation are intentionally not self-referential rows.
 #[cfg(test)]
-pub fn command_catalog() -> impl Iterator<Item = Command> {
+pub fn command_catalog() -> impl Iterator<Item = ShellCommand> {
     let registry = command_registry();
     registry
         .order()

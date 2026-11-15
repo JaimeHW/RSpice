@@ -1,8 +1,8 @@
 //! A shortcut profile projected to its portable artifact, in the case that
 //! binds the product's own commands.
 
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use crate::workbench::commands::vocabulary::command_registry;
 use egui::os::OperatingSystem;
 use rspice_app_settings::workbench::shortcuts::artifacts::projection::*;
@@ -21,7 +21,7 @@ fn user_override_json_is_deterministic_private_and_platform_sliced() {
     profile
         .set_binding(
             &CommandRegistry,
-            Command::ToggleNavigator.key(),
+            ShellCommand::ToggleNavigator.key(),
             ShortcutBindingSlot::Primary,
             CommandPlatform::ALL.to_vec(),
             Some(ShortcutSequence::single(ShortcutStroke::new(

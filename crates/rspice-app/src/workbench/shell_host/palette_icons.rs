@@ -1,7 +1,7 @@
 //! The glyphs the command palette gives commands of its own, before it falls
 //! back to the glyph of a command's scope.
 
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
@@ -14,9 +14,9 @@ use rspice_app_workbench::ui::icons::Icon;
 
 /// The glyph the palette gives `command`; `None` for a command that wears its
 /// scope's.
-pub(super) fn palette_icon(command: Command) -> Option<Icon> {
+pub(super) fn palette_icon(command: ShellCommand) -> Option<Icon> {
     let icon = match command {
-        Command::ConfigurationSets => Icon::Grid,
+        ShellCommand::ConfigurationSets => Icon::Grid,
         _ => return None,
     };
     Some(icon)

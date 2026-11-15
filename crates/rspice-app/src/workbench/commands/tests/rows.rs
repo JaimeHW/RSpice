@@ -1,7 +1,7 @@
 //! The command catalogue as rows: everything a registered command declares
 //! about itself, and what it answers in three canonical application states.
 //!
-//! A replacement for the closed `Command` enum must reproduce these rows
+//! A replacement for the closed `ShellCommand` enum must reproduce these rows
 //! exactly — identity, label, group, every flag, shortcut context, default
 //! bindings, registry order, availability and check state. The comparison is
 //! a live equality between two builders, never a recorded file, so the rows
@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use super::*;
 use crate::workbench::commands::vocabulary::{
-    COMMAND_REGISTRY, CommandRegistry, command_registry, legacy_command,
+    CommandRegistry, ShellCommand, command_registry, legacy_command,
 };
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
@@ -50,7 +50,7 @@ pub(crate) const LEGACY_ALIASES: &[(&str, &str)] = &[
     ("run-checks", "check-cellview"),
 ];
 
-/// A command's answer to [`Command::availability`], in a form that does not
+/// A command's answer to [`ShellCommand::availability`], in a form that does not
 /// name the type that produced it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AvailabilityRow {
@@ -113,7 +113,7 @@ pub(crate) struct CommandRow {
 }
 
 /// One row per command the registry orders, in order: a shell command read
-/// from its [`Command`] value, a feature's from what its command set
+/// from its [`ShellCommand`] value, a feature's from what its command set
 /// declares.
 pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
     let no_project = no_project_app();
@@ -221,7 +221,7 @@ fn registry_command_rows() -> Vec<CommandRow> {
             let spec = registry
                 .spec(key)
                 .unwrap_or_else(|| panic!("{id} is ordered but has no spec"));
-            let Some(command) = Command::from_stable_id(id) else {
+            let Some(command) = ShellCommand::from_stable_id(id) else {
                 return feature_row(index, spec, apps);
             };
             let context = catalog
@@ -319,7 +319,7 @@ fn feature_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> Comma
     }
 }
 
-fn state_row(command: Command, app: &RSpiceApp) -> StateRow {
+fn state_row(command: ShellCommand, app: &RSpiceApp) -> StateRow {
     StateRow {
         availability: command.availability(app).into(),
         enabled: command.is_enabled(app),
@@ -419,10 +419,10 @@ fn legacy_rows_cover_the_registry_in_order() {
 #[test]
 fn legacy_row_ids_are_unique_and_resolve_to_their_command() {
     let mut ids = HashSet::new();
-    for command in COMMAND_REGISTRY.iter().copied() {
+    for command in ShellCommand::ALL.iter().copied() {
         let id = command.stable_id();
         assert!(ids.insert(id), "duplicate command id {id}");
-        assert_eq!(Command::from_stable_id(id), Some(command), "{id}");
+        assert_eq!(ShellCommand::from_stable_id(id), Some(command), "{id}");
     }
 }
 
@@ -496,7 +496,7 @@ fn the_registry_answers_every_legacy_alias_with_a_live_key() {
 
 /// The shortcut resolver breaks equal-precedence ties by position in the
 /// registry's order, which lists the shell's own commands in
-/// [`COMMAND_REGISTRY`]'s order, so ties among them break as they always did.
+/// [`ShellCommand::ALL`]'s order, so ties among them break as they always did.
 // Refactor scaffolding: deleted when the split completes.
 #[test]
 fn the_registry_order_breaks_ties_as_the_command_registry_does() {
@@ -506,8 +506,8 @@ fn the_registry_order_breaks_ties_as_the_command_registry_does() {
         .copied()
         .filter(|key| legacy_command(*key).is_some())
         .collect::<Vec<_>>();
-    assert_eq!(shell_order.len(), COMMAND_REGISTRY.len());
-    for (index, (key, command)) in shell_order.iter().zip(COMMAND_REGISTRY).enumerate() {
+    assert_eq!(shell_order.len(), ShellCommand::ALL.len());
+    for (index, (key, command)) in shell_order.iter().zip(ShellCommand::ALL).enumerate() {
         assert_eq!(*key, command.key(), "position {index} is {command:?}");
     }
     let position = |key: CommandKey| {
