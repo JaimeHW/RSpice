@@ -29,9 +29,10 @@ use super::{
     DuplicateSubcircuitPortBindingError, Element, ElementKind, GlobalSubcircuitPortBindingError,
     InitialCondition, ModelDef, Netlist, NodeSet, ParamContext, ParameterRedefinitionPolicy,
     ParametricValue, ParseError, ParseWithAbortError, RandomState, SourceMultiplicity, SourceSpec,
-    StartupDirectiveDisposition, StartupDirectiveRecord, StartupDirectiveScope, StateMachine,
-    SubcircuitDef, UndefinedSubcircuitError, ensure_parse_not_aborted, finish_non_aborting_parse,
-    poll_parse_abort, validate_mutual_inductor_references,
+    StartupDirectiveDisposition, StartupDirectiveEntry, StartupDirectiveRecord,
+    StartupDirectiveScope, StateMachine, SubcircuitDef, UndefinedSubcircuitError,
+    ensure_parse_not_aborted, finish_non_aborting_parse, poll_parse_abort,
+    validate_mutual_inductor_references,
 };
 use super::{ElementParameterDirection, NetlistSourceLocation, ParameterDirectionCapture};
 use crate::Value;
@@ -1707,32 +1708,54 @@ impl<'a> Flattener<'a> {
             .enumerate()
         {
             poll_parse_abort(abort, index)?;
-            let mut elaborated = record.clone();
-            elaborated.scope = StartupDirectiveScope::Subcircuit {
-                qualified_definition: subckt.name.clone(),
-                qualified_instances: vec![prefix.replace(':', ".")],
-            };
-            for entry in &mut elaborated.entries {
-                entry.voltage = self.resolve_startup_voltage(
-                    entry.voltage,
-                    entry.voltage_expr.as_deref(),
-                    scope,
-                    record.kind.as_spice_directive(),
-                    &entry.execution_node,
-                    abort,
-                )?;
-                entry.voltage_expr = None;
-                entry.qualified_nodes = vec![
-                    self.remap_node(&entry.execution_node, prefix, node_map)
-                        .replace(':', "."),
-                ];
-                entry.qualified_references =
-                    vec![entry.execution_reference.as_ref().map(|reference| {
-                        self.remap_node(reference, prefix, node_map)
-                            .replace(':', ".")
-                    })];
-            }
-            self.scoped_startup_directives.push(elaborated);
+            // The card is rebuilt for this one instance rather than cloned: a
+            // card that an earlier elaboration already expanded carries every
+            // instance and target of the deck, and copying those lists into
+            // each instance makes elaboration quadratic in the instance count.
+            let entries = record
+                .entries
+                .iter()
+                .map(|entry| {
+                    Ok(StartupDirectiveEntry {
+                        authored_node: entry.authored_node.clone(),
+                        execution_node: entry.execution_node.clone(),
+                        authored_reference: entry.authored_reference.clone(),
+                        execution_reference: entry.execution_reference.clone(),
+                        canonical_node: entry.canonical_node.clone(),
+                        canonical_reference: entry.canonical_reference.clone(),
+                        qualified_nodes: vec![
+                            self.remap_node(&entry.execution_node, prefix, node_map)
+                                .replace(':', "."),
+                        ],
+                        qualified_references: vec![entry.execution_reference.as_ref().map(
+                            |reference| {
+                                self.remap_node(reference, prefix, node_map)
+                                    .replace(':', ".")
+                            },
+                        )],
+                        disposition: entry.disposition,
+                        voltage: self.resolve_startup_voltage(
+                            entry.voltage,
+                            entry.voltage_expr.as_deref(),
+                            scope,
+                            record.kind.as_spice_directive(),
+                            &entry.execution_node,
+                            abort,
+                        )?,
+                        voltage_expr: None,
+                    })
+                })
+                .collect::<Result<Vec<_>, ParseWithAbortError>>()?;
+            self.scoped_startup_directives.push(StartupDirectiveRecord {
+                kind: record.kind,
+                origin: record.origin.clone(),
+                scope: StartupDirectiveScope::Subcircuit {
+                    qualified_definition: subckt.name.clone(),
+                    qualified_instances: vec![prefix.replace(':', ".")],
+                },
+                entries,
+                disposition: record.disposition,
+            });
         }
 
         Ok(())
