@@ -2081,16 +2081,24 @@ impl Netlist {
         let execution_dir = execution_dir
             .or(default_execution_dir.as_deref())
             .expect("explicit or process execution directory is available");
-        let include_processor =
-            IncludeProcessor::new_with_execution_dir(file_path, Some(execution_dir))
-                .with_resource_limits(options.resource_limits);
+        // A replay that reads the root as its first parse did resolves from
+        // the directory that parse found.
+        let base_dir = replay_source
+            .as_deref()
+            .and_then(|source| source.base_dir_reading(input, file_path, &options))
+            .map(std::path::Path::to_path_buf);
+        let processor = || match &base_dir {
+            Some(base_dir) => {
+                IncludeProcessor::with_base_dir(base_dir.clone(), Some(execution_dir))
+            }
+            None => IncludeProcessor::new_with_execution_dir(file_path, Some(execution_dir)),
+        };
+        let include_processor = processor().with_resource_limits(options.resource_limits);
         let mut initcond_resource_limits = options.resource_limits;
         initcond_resource_limits.max_dependency_source_bytes = initcond_resource_limits
             .max_dependency_source_bytes
             .min(MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES);
-        let initcond_source_provider =
-            IncludeProcessor::new_with_execution_dir(file_path, Some(execution_dir))
-                .with_resource_limits(initcond_resource_limits);
+        let initcond_source_provider = processor().with_resource_limits(initcond_resource_limits);
         Self::parse_with_source_providers_and_abort(
             input,
             file_path,

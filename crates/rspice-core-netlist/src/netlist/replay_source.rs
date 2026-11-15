@@ -26,6 +26,8 @@ use crate::resource::ResourceLimits;
 pub(crate) struct ReplaySource {
     input: Box<str>,
     file_path: PathBuf,
+    /// The directory the reading resolved the root's includes from.
+    base_dir: PathBuf,
     expression_dialect: ExpressionDialect,
     retain_control_script: bool,
     resource_limits: ResourceLimits,
@@ -66,6 +68,7 @@ impl ReplaySource {
         Ok(Arc::new(Self {
             input: input.into(),
             file_path: file_path.to_path_buf(),
+            base_dir: processor.base_dir().to_path_buf(),
             expression_dialect: options.expression_dialect,
             retain_control_script: options.retain_control_script,
             resource_limits: options.resource_limits,
@@ -76,6 +79,18 @@ impl ReplaySource {
             control_script,
             scans: Default::default(),
         }))
+    }
+
+    /// The directory this reading resolved its root's includes from, when
+    /// reading `input` from `file_path` under `options` reads what it read.
+    pub(super) fn base_dir_reading(
+        &self,
+        input: &str,
+        file_path: &Path,
+        options: &NetlistParseOptions,
+    ) -> Option<&Path> {
+        self.reads(input, file_path, options)
+            .then_some(self.base_dir.as_path())
     }
 
     /// Whether reading `input` from `file_path` under `options` reads what

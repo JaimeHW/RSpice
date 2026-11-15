@@ -820,6 +820,12 @@ impl IncludeProcessor {
         } else {
             base_path.to_path_buf()
         };
+        Self::with_base_dir(base_dir, execution_dir)
+    }
+
+    /// A processor for a root whose directory, `base_dir`, an earlier reading
+    /// of it found, so the filesystem is not asked again.
+    pub(crate) fn with_base_dir(base_dir: PathBuf, execution_dir: Option<&Path>) -> Self {
         let execution_dir = execution_dir
             .map(Path::to_path_buf)
             .unwrap_or_else(|| base_dir.clone());
@@ -839,6 +845,11 @@ impl IncludeProcessor {
             source_text_filter: None,
             prepared_sources: HashMap::new(),
         }
+    }
+
+    /// The directory the root's includes resolve from first.
+    pub(crate) fn base_dir(&self) -> &Path {
+        &self.base_dir
     }
 
     /// Apply an explicit resource policy to subsequent expansion work.
