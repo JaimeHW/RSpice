@@ -8,6 +8,7 @@ pub mod commands;
 mod docks;
 pub mod netlist_first;
 pub mod netlist_validation;
+pub mod requests;
 pub mod toolbar;
 
 use egui::Context;
@@ -518,7 +519,9 @@ impl CodeFeature {
 /// context.
 impl CodeFeature {
     /// The code workspace's parts, lent from `cx` for one call.
-    pub fn workspace_parts<'c>(cx: &'c mut Cx<'_, Self>) -> CodeWorkspaceParts<'c> {
+    pub(in crate::workbench) fn workspace_parts<'c>(
+        cx: &'c mut Cx<'_, Self>,
+    ) -> CodeWorkspaceParts<'c> {
         Self::automation_parts(cx).0
     }
 

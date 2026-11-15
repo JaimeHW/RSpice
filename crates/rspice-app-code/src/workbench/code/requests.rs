@@ -34,7 +34,7 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
         CodeRequest::ImportLtspiceSchematic => return Some(CodeHandOff::ImportLtspiceSchematic),
         CodeRequest::ImportQspiceSchematic => return Some(CodeHandOff::ImportQspiceSchematic),
         CodeRequest::ExportNetlist(format) => {
-            crate::workbench::menu_bar::action_export_netlist_with_io(
+            crate::workbench::menu_bar::netlist_actions::action_export_netlist_with_io(
                 cx.model,
                 cx.wb,
                 format,
@@ -42,14 +42,14 @@ pub fn answer(cx: &mut Cx<'_, CodeFeature>, request: CodeRequest) -> Option<Code
             );
         }
         CodeRequest::ExportBillOfMaterials => {
-            crate::workbench::menu_bar::action_export_bill_of_materials_with_io(
+            crate::workbench::menu_bar::bom_export::action_export_bill_of_materials_with_io(
                 cx.model,
                 cx.wb,
                 cx.handles.export_io,
             );
         }
         CodeRequest::GenerateNetlist => {
-            crate::workbench::menu_bar::action_view_netlist(cx.model, cx.wb);
+            crate::workbench::menu_bar::netlist_actions::action_view_netlist(cx.model, cx.wb);
             cx.wb.activate(Workspace::Netlist);
         }
         CodeRequest::ShowInNetlist => return Some(CodeHandOff::ShowInNetlist),

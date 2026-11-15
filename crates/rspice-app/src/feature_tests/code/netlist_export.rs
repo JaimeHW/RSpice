@@ -2,8 +2,8 @@
 //! File ▸ Export ▸ Netlist on the application.
 
 use crate::workbench::app::veriloga_flow_tests::{CELL, MODULE, wired_device};
-use crate::workbench::menu_bar::action_export_netlist_with_io;
 use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
+use rspice_app_code::workbench::menu_bar::netlist_actions::action_export_netlist_with_io;
 
 /// A save dialog that answers with `self.0` and writes that reach the disk.
 struct SavesTo(std::path::PathBuf);

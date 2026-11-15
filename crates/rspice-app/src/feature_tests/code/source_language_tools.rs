@@ -3,10 +3,10 @@
 //! the next frame.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app::dialogs::source_language_tools::RENAME_TITLE;
 use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::documents::code_workspace;
 use egui::Context;
+use rspice_app_code::workbench::app::dialogs::source_language_tools::RENAME_TITLE;
 
 /// `resolve_veriloga_compile` was written to gate the compile command and
 /// never attached to it, so the button stayed enabled while a compile was

@@ -24,6 +24,7 @@ use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app_state::PlatformState;
 use crate::workbench::code::CodeFeature;
 use crate::workbench::code::commands::{CodeRequest, NetlistEditorRequest, VerilogAStripRequest};
+use crate::workbench::code::requests as code_requests;
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
@@ -53,8 +54,6 @@ use crate::workbench::menu_bar::FileMenuAction;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, WorkbenchSession};
-
-mod code_requests;
 
 /// The dispatcher by key: where a key becomes the command it names, a
 /// feature's first and the shell's legacy table's otherwise.
