@@ -217,6 +217,7 @@ pub(crate) fn run_optimization_with_context(
                 cost: total,
                 objectives: observations,
                 constraints,
+                gradient: Vec::new(),
             });
         }
         let observation = result
@@ -233,6 +234,7 @@ pub(crate) fn run_optimization_with_context(
             cost,
             objectives: config.objective_observations(&base.measurements[0], value, cost),
             constraints,
+            gradient: Vec::new(),
         })
     };
     let target_cost = if base.objective_terms.is_empty() {

@@ -8,7 +8,9 @@ use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_p
 use rspice_core::{Value, abort_signal::AbortSignal};
 use rspice_results::optimization::OptimizationScore;
 use rspice_simulation_contract::mc_statistics::is_parameter_name;
-use rspice_simulation_contract::optimization_search::{OptimizerAlgo, OptimizerConfig};
+use rspice_simulation_contract::optimization_search::{
+    OptimizationVariableDomain, OptimizerAlgo, OptimizerConfig,
+};
 use search::{DesignVar, OptimizerEngine};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -221,6 +223,19 @@ pub struct OptimizationEvaluation {
     pub cost: Value,
     pub objectives: Vec<rspice_results::optimization::OptimizationObjectiveObservation>,
     pub constraints: Vec<rspice_results::optimization::OptimizationConstraintObservation>,
+    /// d cost / d variable in each variable's physical unit, in configuration
+    /// order, when the search asked for it. `None` marks a variable the
+    /// evaluator has no exact derivative for; the search differentiates it by
+    /// finite differences. Empty when no gradient was asked for or none exists.
+    pub gradient: Vec<Option<Value>>,
+}
+
+/// One objective value and, when the search asked for it, its derivatives.
+pub struct ObjectiveSample {
+    pub value: Value,
+    /// d value / d variable, with the meaning of
+    /// [`OptimizationEvaluation::gradient`].
+    pub gradient: Vec<Option<Value>>,
 }
 
 /// Optimization output data.
@@ -254,6 +269,29 @@ pub fn run_optimization_with_evaluator<F>(
 where
     F: FnMut(&HashMap<String, Value>) -> ServiceRunResult<Value>,
 {
+    run_optimization_with_gradient_evaluator(config, limits, abort, |variables, _| {
+        Ok(ObjectiveSample {
+            value: evaluate(variables)?,
+            gradient: Vec::new(),
+        })
+    })
+}
+
+/// [`run_optimization_with_evaluator`] for an evaluator that can also take
+/// the objective's derivatives. The search passes `true` when it wants them
+/// with the value: gradient descent, at each iterate. Where an evaluator
+/// returns a derivative, the search uses it in place of two finite-difference
+/// evaluations; where it returns `None`, the search takes the finite
+/// difference as it always has.
+pub fn run_optimization_with_gradient_evaluator<F>(
+    config: &OptimizationRunConfig,
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn AbortSignal,
+    mut evaluate: F,
+) -> ServiceRunResult<OptimizationData>
+where
+    F: FnMut(&HashMap<String, Value>, bool) -> ServiceRunResult<ObjectiveSample>,
+{
     ensure_not_aborted(abort)?;
     let mut limits = limits;
     if !config.objective_unit.trim().is_empty() {
@@ -270,18 +308,24 @@ where
         .objective_expression
         .clone()
         .unwrap_or_else(|| format!("V({},{})", config.objective_node, config.objective_ref));
-    run_optimization_with_cost_evaluator(
+    run_optimization_with_cost_gradient_evaluator(
         config,
         limits,
         abort,
         optimizer_target_cost(config.goal),
-        |variables| {
-            let value = evaluate(variables)?;
-            let cost = objective_to_cost(value, config.goal, config.target)?;
+        |variables, gradient| {
+            let sample = evaluate(variables, gradient)?;
+            let cost = objective_to_cost(sample.value, config.goal, config.target)?;
+            let slope = objective_cost_slope(sample.value, config.goal, config.target);
             Ok(OptimizationEvaluation {
                 cost,
-                objectives: config.objective_observations(&name, value, cost),
+                objectives: config.objective_observations(&name, sample.value, cost),
                 constraints: Vec::new(),
+                gradient: sample
+                    .gradient
+                    .into_iter()
+                    .map(|derivative| derivative.map(|derivative| derivative * slope))
+                    .collect(),
             })
         },
     )
@@ -297,6 +341,23 @@ pub fn run_optimization_with_cost_evaluator<F>(
 ) -> ServiceRunResult<OptimizationData>
 where
     F: FnMut(&HashMap<String, Value>) -> ServiceRunResult<OptimizationEvaluation>,
+{
+    run_optimization_with_cost_gradient_evaluator(config, limits, abort, target_cost, |vars, _| {
+        evaluate(vars)
+    })
+}
+
+/// [`run_optimization_with_cost_evaluator`] for an evaluator that can also
+/// return [`OptimizationEvaluation::gradient`] when the search passes `true`.
+pub fn run_optimization_with_cost_gradient_evaluator<F>(
+    config: &OptimizationRunConfig,
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn AbortSignal,
+    target_cost: Option<Value>,
+    mut evaluate: F,
+) -> ServiceRunResult<OptimizationData>
+where
+    F: FnMut(&HashMap<String, Value>, bool) -> ServiceRunResult<OptimizationEvaluation>,
 {
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
@@ -360,14 +421,35 @@ where
             DesignVar::new(var.name.clone(), mapping.initial, mapping.min, mapping.max)
                 .with_quantum(mapping.quantum()),
         );
-        coordinates.push((var.name.clone(), mapping));
+        coordinates.push((var.name.clone(), mapping, domain));
     }
     let physical_vars = |vars: &HashMap<String, Value>| -> HashMap<String, Value> {
         coordinates
             .iter()
-            .map(|(name, mapping)| (name.clone(), mapping.physical(vars[name])))
+            .map(|(name, mapping, _)| (name.clone(), mapping.physical(vars[name])))
             .collect()
     };
+    // The search moves coordinates; an evaluator differentiates with respect
+    // to physical values. A linear coordinate is the value, a logarithmic one
+    // its logarithm (d value / d coordinate = value), and a grid has no
+    // derivative, which gradient descent never searches.
+    let coordinate_gradient =
+        |vars: &HashMap<String, Value>, physical: &[Option<Value>]| -> Vec<Option<Value>> {
+            coordinates
+                .iter()
+                .enumerate()
+                .map(|(index, (name, mapping, domain))| {
+                    let derivative = physical.get(index).copied().flatten()?;
+                    let scale = match domain {
+                        OptimizationVariableDomain::Linear => 1.0,
+                        OptimizationVariableDomain::Logarithmic => mapping.physical(vars[name]),
+                        OptimizationVariableDomain::Quantized { .. }
+                        | OptimizationVariableDomain::Discrete { .. } => return None,
+                    };
+                    Some(derivative * scale).filter(|value| value.is_finite())
+                })
+                .collect()
+        };
     let mut variable_traces: HashMap<String, Vec<Value>> = HashMap::new();
     for (variable_index, var) in config.variables.iter().enumerate() {
         poll_periodically(abort, variable_index)?;
@@ -382,9 +464,13 @@ where
     let abort_seen = Cell::new(false);
     let fatal_error_seen = Cell::new(false);
     let mut evaluations = 0usize;
-    let mut cost_fn = |vars: &HashMap<String, Value>| -> OptimizationScore {
+    // One evaluation of a candidate: its score and, when `want_gradient`,
+    // the exact d cost / d coordinate the evaluator could take.
+    let mut score = |vars: &HashMap<String, Value>,
+                     want_gradient: bool|
+     -> (OptimizationScore, Vec<Option<Value>>) {
         if abort_seen.get() || fatal_error_seen.get() {
-            return Value::INFINITY.into();
+            return (Value::INFINITY.into(), Vec::new());
         }
         let evaluation = if evaluations >= limits.max_batch_runs {
             Err(ServiceRunError::resource_limit(
@@ -394,7 +480,7 @@ where
             ))
         } else {
             evaluations += 1;
-            evaluate(&physical_vars(vars)).and_then(|evaluation| {
+            evaluate(&physical_vars(vars), want_gradient).and_then(|evaluation| {
                 if evaluation.cost.is_finite() {
                     let violation =
                         rspice_results::optimization::validate_optimization_constraints(
@@ -403,10 +489,18 @@ where
                         .map_err(ServiceRunError::Failure)?;
                     *evaluated_objectives.borrow_mut() = evaluation.objectives;
                     *evaluated_constraints.borrow_mut() = evaluation.constraints;
-                    Ok(OptimizationScore {
-                        cost: evaluation.cost,
-                        violation,
-                    })
+                    let gradient = if want_gradient {
+                        coordinate_gradient(vars, &evaluation.gradient)
+                    } else {
+                        Vec::new()
+                    };
+                    Ok((
+                        OptimizationScore {
+                            cost: evaluation.cost,
+                            violation,
+                        },
+                        gradient,
+                    ))
                 } else {
                     Err(ServiceRunError::Failure(
                         "Optimization cost must be finite".into(),
@@ -415,17 +509,17 @@ where
             })
         };
         match evaluation {
-            Ok(cost) => cost,
+            Ok(scored) => scored,
             Err(ServiceRunError::Aborted) => {
                 abort_seen.set(true);
-                Value::INFINITY.into()
+                (Value::INFINITY.into(), Vec::new())
             }
             Err(
                 error @ (ServiceRunError::ResourceLimit(_) | ServiceRunError::ResourceFailure(_)),
             ) => {
                 fatal_error_seen.set(true);
                 *eval_error.borrow_mut() = Some(error);
-                Value::INFINITY.into()
+                (Value::INFINITY.into(), Vec::new())
             }
             Err(
                 error @ (ServiceRunError::Failure(_)
@@ -437,13 +531,13 @@ where
                 }
                 // A failed circuit or expression must never outrank a valid
                 // finite objective, regardless of that objective's scale.
-                Value::INFINITY.into()
+                (Value::INFINITY.into(), Vec::new())
             }
         }
     };
 
     let initial_vars = optimizer.current_vars();
-    let initial_cost = cost_fn(&initial_vars);
+    let initial_cost = score(&initial_vars, false).0;
     propagate_optimization_fatal_error(&fatal_error_seen, &eval_error)?;
     ensure_optimization_not_aborted(abort, &abort_seen)?;
     if !initial_cost.is_valid() {
@@ -471,11 +565,18 @@ where
         && !optimizer.search_finished(target_cost)
     {
         ensure_optimization_not_aborted(abort, &abort_seen)?;
-        optimizer.step(&mut cost_fn);
+        if config.algorithm == OptimizationAlgorithmMode::GradientDescent {
+            // The step would evaluate the iterate first anyway; evaluated
+            // here, it carries whatever exact gradient the evaluator has.
+            let current = optimizer.current_vars();
+            let (current_score, gradient) = score(&current, true);
+            optimizer.provide_current_point(current, current_score, gradient);
+        }
+        optimizer.step(&mut |vars: &HashMap<String, Value>| score(vars, false).0);
         propagate_optimization_fatal_error(&fatal_error_seen, &eval_error)?;
         ensure_optimization_not_aborted(abort, &abort_seen)?;
         let vars = optimizer.current_vars();
-        let cost = cost_fn(&vars);
+        let cost = score(&vars, false).0;
         propagate_optimization_fatal_error(&fatal_error_seen, &eval_error)?;
         ensure_optimization_not_aborted(abort, &abort_seen)?;
         // The last evaluation is this accepted iterate, not a gradient probe
@@ -587,6 +688,22 @@ pub fn objective_to_cost(
     }
 }
 
+/// d cost / d objective of [`objective_to_cost`] at `objective`.
+fn objective_cost_slope(
+    objective: Value,
+    goal: OptimizationGoalMode,
+    target: Option<Value>,
+) -> Value {
+    match goal {
+        OptimizationGoalMode::Minimize => 1.0,
+        OptimizationGoalMode::Maximize => -1.0,
+        OptimizationGoalMode::Target => {
+            2.0 * (objective
+                - target.expect("validated target optimization must carry a target value"))
+        }
+    }
+}
+
 fn optimizer_target_cost(goal: OptimizationGoalMode) -> Option<Value> {
     (goal == OptimizationGoalMode::Target).then_some(0.0)
 }
@@ -645,6 +762,50 @@ mod tests {
         let gradient = optimizer.compute_gradient(&mut |vars| vars["X"] * vars["X"]);
 
         assert_eq!(gradient, vec![1.0]);
+    }
+
+    #[test]
+    fn a_provided_exact_gradient_replaces_only_its_own_finite_differences() {
+        let cost =
+            |vars: &HashMap<String, f64>| (vars["X"] - 0.3).powi(2) + (vars["Y"] - 0.6).powi(2);
+        let step = |provided: Option<Vec<Option<f64>>>| {
+            let mut optimizer = OptimizerEngine::with_config(OptimizerConfig {
+                algorithm: OptimizerAlgo::GradientDescent,
+                ..OptimizerConfig::default()
+            });
+            optimizer.add_var(DesignVar::new("X", 0.5, 0.0, 1.0));
+            optimizer.add_var(DesignVar::new("Y", 0.5, 0.0, 1.0));
+            if let Some(gradient) = provided {
+                let current = optimizer.current_vars();
+                let score = cost(&current);
+                optimizer.provide_current_point(current, score, gradient);
+            }
+            let calls = Cell::new(0);
+            let vars = optimizer.step(&mut |vars: &HashMap<String, f64>| {
+                calls.set(calls.get() + 1);
+                cost(vars)
+            });
+            (vars, calls.get())
+        };
+        // d cost / dX = 0.4 and d cost / dY = -0.2 at (0.5, 0.5). One line
+        // search trial is accepted and the step evaluates its new point.
+        let (fd, fd_calls) = step(None);
+        let (exact, exact_calls) = step(Some(vec![Some(0.4), Some(-0.2)]));
+        let (mixed, mixed_calls) = step(Some(vec![Some(0.4), None]));
+        // The current point, two probes per variable, the trial, the new point.
+        assert_eq!(fd_calls, 1 + 4 + 1 + 1);
+        assert_eq!(exact_calls, 1 + 1);
+        assert_eq!(mixed_calls, 2 + 1 + 1);
+        for name in ["X", "Y"] {
+            assert!(
+                (exact[name] - fd[name]).abs() < 1e-9,
+                "{name}: {exact:?} {fd:?}"
+            );
+            assert!(
+                (mixed[name] - fd[name]).abs() < 1e-9,
+                "{name}: {mixed:?} {fd:?}"
+            );
+        }
     }
 
     #[test]

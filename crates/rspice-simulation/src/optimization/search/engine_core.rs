@@ -23,6 +23,8 @@ impl OptimizerEngine {
             best_vars: HashMap::new(),
             gradient: Vec::new(),
             cost_history: Vec::new(),
+            provided: None,
+            exact_gradient: Vec::new(),
         }
     }
 
@@ -67,6 +69,25 @@ impl OptimizerEngine {
         }
     }
 
+    /// Hand the next [`Self::step`] the current point's score, which the
+    /// caller already evaluated, and the exact d cost / d coordinate it took
+    /// there (`None` for a variable it has no derivative for). The step then
+    /// evaluates the point no second time, and takes finite differences only
+    /// for the variables without an exact derivative. A point that is no
+    /// longer current when the step runs is ignored.
+    pub fn provide_current_point<S: Into<OptimizationScore>>(
+        &mut self,
+        vars: HashMap<String, f64>,
+        score: S,
+        gradient: Vec<Option<f64>>,
+    ) {
+        self.provided = Some(ProvidedPoint {
+            vars,
+            score: score.into(),
+            gradient,
+        });
+    }
+
     pub fn best_score(&self) -> OptimizationScore {
         OptimizationScore {
             cost: self.best_cost,
@@ -99,7 +120,16 @@ impl OptimizerEngine {
         let n = self.variables.len();
         let mut grad = vec![0.0; n];
 
-        for (grad_entry, var) in grad.iter_mut().zip(self.variables.iter()) {
+        for (index, (grad_entry, var)) in grad.iter_mut().zip(self.variables.iter()).enumerate() {
+            // An exact derivative is of the cost; the feasibility phase
+            // descends the violation, which only finite differences measure.
+            if !feasibility
+                && let Some(Some(exact)) = self.exact_gradient.get(index).copied()
+                && exact.is_finite()
+            {
+                *grad_entry = exact;
+                continue;
+            }
             let range = var.max - var.min;
             let h = range * self.config.fd_step;
 
@@ -202,7 +232,14 @@ impl OptimizerEngine {
         F: FnMut(&HashMap<String, f64>) -> S,
         S: Into<OptimizationScore>,
     {
-        let current_cost = cost_fn(&self.current_vars()).into();
+        let current_vars = self.current_vars();
+        let current_cost = match self.provided.take() {
+            Some(point) if point.vars == current_vars => {
+                self.exact_gradient = point.gradient;
+                point.score
+            }
+            _ => cost_fn(&current_vars).into(),
+        };
         self.cost_history.push(current_cost);
 
         // Run the algorithm step
@@ -213,6 +250,8 @@ impl OptimizerEngine {
                 self.step_simulated_annealing(cost_fn, current_cost)
             }
         };
+
+        self.exact_gradient.clear();
 
         // Evaluate cost AFTER the step and update best if improved
         let new_cost = cost_fn(&new_vars).into();

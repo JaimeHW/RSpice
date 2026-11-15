@@ -49,6 +49,19 @@ pub struct OptimizerEngine {
     cost_history: Vec<OptimizationScore>,
     /// RNG state for stochastic algorithms
     rng_state: u64,
+    /// The current point as the caller already evaluated it, for the next
+    /// step to use instead of evaluating it again.
+    provided: Option<ProvidedPoint>,
+    /// Exact d cost / d coordinate per variable for the step in progress;
+    /// `None` entries (and an empty vector) take finite differences.
+    exact_gradient: Vec<Option<f64>>,
+}
+
+/// A point the caller evaluated, with the exact gradient taken there.
+struct ProvidedPoint {
+    vars: HashMap<String, f64>,
+    score: OptimizationScore,
+    gradient: Vec<Option<f64>>,
 }
 
 impl Default for OptimizerEngine {
