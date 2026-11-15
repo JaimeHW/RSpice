@@ -1,5 +1,4 @@
-//! C11 — switched-capacitor low-pass with a Verilog non-overlapping clock
-//! (design §3 C11).
+//! C11 — switched-capacitor low-pass with a Verilog non-overlapping clock.
 //!
 //! T = 1 µs; ph1 high over [20, 480] ns and ph2 over [520, 980] ns of each
 //! period. C1 = 1 pF samples the input on ph1 and shares its charge with
@@ -222,7 +221,7 @@ fn track(context: &Context<'_>) -> Result<Expected, String> {
 }
 
 /// Variant `pulse` pac, sideband −1 (the output at f − f₀ per unit input at
-/// f), design-p7 §5.1: with the sample at t_s, the hold from the update t_u
+/// f): with the sample at t_s, the hold from the update t_u
 /// for one period and H_d(ω) = a/(1 − (1 − a)e^{−jωT}),
 /// Y_m = H_d(ω)·e^{jω(t_s − t_u)}·e^{−jmω₀t_u}·(1 − e^{−jωT})/(j(ω + mω₀)T).
 /// Ron·C1 and Ron·C1C2/(C1 + C2) (about 1 ns each) are neglected: ≤ 0.04°
@@ -246,8 +245,8 @@ fn pac_lsb(context: &Context<'_>) -> Result<Expected, String> {
 }
 
 /// The one-sided spectrum of the twin's output sample sequence on
-/// [0, f₀/2], normalized to integrate to the sample variance (design-p7
-/// §5.1): the samples are AR(1), y_k = 0.9·y_{k−1} + e_k, with innovation
+/// [0, f₀/2], normalized to integrate to the sample variance: the samples
+/// are AR(1), y_k = 0.9·y_{k−1} + e_k, with innovation
 /// variance 0.19·kT/C2, so S_y(f) = (2/f₀)·0.19·(kT/C2)/|1 − 0.9e^{−j2πf/f₀}|².
 fn twin_sample_psd(frequency: f64) -> f64 {
     let pole = 1.0 - SHARE;
@@ -305,7 +304,7 @@ mod tests {
 
     #[test]
     fn z_domain_constants_match_the_design() {
-        // |H(10 kHz)| = 0.85903 for a = 0.1 (design §3 C11).
+        // |H(10 kHz)| = 0.85903 for a = 0.1.
         let omega_t = 2.0 * std::f64::consts::PI * 10e3 * PERIOD;
         let h = SHARE / (1.0 - (1.0 - SHARE) * Complex64::from_polar(1.0, -omega_t));
         assert!((h.norm() - 0.85903).abs() < 2e-5, "{}", h.norm());
@@ -319,7 +318,7 @@ mod tests {
 
     #[test]
     fn the_twin_constants_match_the_design() {
-        // design-p7 §5.1 at 10 kHz: |Y₋₁| = 0.0086755.
+        // The sampled hold's lower sideband at 10 kHz: |Y₋₁| = 0.0086755.
         let lower = {
             let omega = 2.0 * std::f64::consts::PI * 10e3;
             let omega_0 = 2.0 * std::f64::consts::PI / PERIOD;

@@ -579,7 +579,7 @@ fn event_pnoise_of_a_held_switch_rc_is_the_ornstein_uhlenbeck_closed_form() {
 /// charge sharing: the samples C2 holds after S2 opens are AR(1),
 /// y_k = 0.9·y_{k−1} + e_k, with innovation variance 0.19·kT/C2, so the
 /// one-sided spectrum of the sample sequence is
-/// S_y(f) = 2T·0.19·(kT/C2)/|1 − 0.9·e^{−j2πfT}|² (design-p7 §5.1). The
+/// S_y(f) = 2T·0.19·(kT/C2)/|1 − 0.9·e^{−j2πfT}|². The
 /// sample is read at 990 ns, in the hold; 0.556 ns before S2 opens the output
 /// still carries the C1–C2 differential noise of the closed switch, which
 /// adds a nearly white part the AR(1) form leaves out.
