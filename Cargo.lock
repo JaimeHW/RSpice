@@ -6141,6 +6141,8 @@ version = "0.1.0"
 dependencies = [
  "crc32fast",
  "lz4_flex 0.13.1",
+ "rspice-core",
+ "rspice-core-base",
  "sha2 0.11.0",
 ]
 

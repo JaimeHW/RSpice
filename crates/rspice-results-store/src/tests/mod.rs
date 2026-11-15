@@ -5,6 +5,8 @@ mod manifest_tests;
 mod reader_tests;
 #[cfg(not(target_arch = "wasm32"))]
 mod run_writer_tests;
+#[cfg(not(target_arch = "wasm32"))]
+mod sink_tests;
 mod support;
 mod tile_tests;
 mod writer_tests;

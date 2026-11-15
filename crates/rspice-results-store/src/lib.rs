@@ -6,9 +6,9 @@
 //! Memory while writing is one chunk's buffers and one index's entries whatever the run's length;
 //! a reader opens any prefix a crash left behind by scanning forward from the last durable index.
 //!
-//! The crate depends only on `std`, `lz4_flex`, `crc32fast` and `sha2`, and does all I/O through
-//! [`SegmentIo`], so the same code writes a file, a buffer in memory, or a browser's origin-private
-//! file system.
+//! The crate depends on `std`, `lz4_flex`, `crc32fast` and `sha2`, and on the engine base crate
+//! for the result sink trait [`StoreSink`] implements. It does all I/O through [`SegmentIo`], so
+//! the same code writes a file, a buffer in memory, or a browser's origin-private file system.
 
 mod codec;
 mod digest;
@@ -20,6 +20,7 @@ mod manifest;
 mod reader;
 mod run_writer;
 mod schema;
+mod sink;
 mod summary;
 mod tile;
 mod writer;
@@ -39,5 +40,6 @@ pub use manifest::{Manifest, Member};
 pub use reader::{SegmentReader, SegmentState};
 pub use run_writer::{RunIo, RunWriter};
 pub use schema::{Axis, RunMeta, Schema, Signal, SignalKind};
+pub use sink::{StoreSink, sink_stop};
 pub use tile::{Tile, pixel_of};
 pub use writer::{RunStatus, SegmentWriter, StopReason, StoreReceipt};
