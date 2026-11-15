@@ -274,18 +274,20 @@ impl<'a> PreparedEventCircuit<'a> {
             .is_some_and(|descriptor| descriptor.has_impulses()))
     }
 
-    /// Positive R, C and uncoupled L with independent sources form an MNA
-    /// descriptor whose storage no source event can force, unless capacitors
-    /// and voltage sources close a loop through a source (CV-loop) or
-    /// inductors and current sources form a cutset through a source
-    /// (LI-cutset). A cutset of inductors alone (an inductor left open at one
-    /// end, say) is index 2, but its KCL row is homogeneous: it pins the sum
-    /// of its currents at zero whatever the sources do, so like a loop of
-    /// capacitors alone it carries no forcing. Shunts can only remove such a
-    /// cutset, so ignoring them errs toward the descriptor.
+    /// Positive R and C and a positive definite inductance matrix with
+    /// independent sources form an MNA descriptor whose storage no source
+    /// event can force, unless capacitors and voltage sources close a loop
+    /// through a source (CV-loop) or inductors and current sources form a
+    /// cutset through a source (LI-cutset). A cutset of inductors alone (an
+    /// inductor left open at one end, say) is index 2, but its KCL row is
+    /// homogeneous: it pins the sum of its currents at zero whatever the
+    /// sources do, so like a loop of capacitors alone it carries no forcing.
+    /// Shunts can only remove such a cutset, so ignoring them errs toward the
+    /// descriptor.
     fn has_regular_storage(circuit: &crate::CircuitData) -> bool {
         use PeriodicDeviceFamily::{
-            Capacitor, CurrentSource, Inductor, Resistor, ResistorBranch, VoltageSource,
+            Capacitor, CoupledInductorPair, CurrentSource, Inductor, InductorCoupling, Resistor,
+            ResistorBranch, VoltageSource,
         };
         let positive =
             |values: &[Value]| values.iter().all(|value| *value > 0.0 && value.is_finite());
@@ -303,6 +305,8 @@ impl<'a> PreparedEventCircuit<'a> {
                         | ResistorBranch
                         | Capacitor
                         | Inductor
+                        | InductorCoupling
+                        | CoupledInductorPair
                         | VoltageSource
                         | CurrentSource
                 )
@@ -310,7 +314,8 @@ impl<'a> PreparedEventCircuit<'a> {
             && positive(&inductors.inductances)
             && positive(&branches.resistances)
             && positive(&resistors.conductances)
-            && capacitors.ic_branch_indices.iter().all(Option::is_none);
+            && capacitors.ic_branch_indices.iter().all(Option::is_none)
+            && Self::has_diagonally_dominant_inductance(circuit);
         if !regular {
             return false;
         }
@@ -353,6 +358,63 @@ impl<'a> PreparedEventCircuit<'a> {
             && currents
                 .iter()
                 .all(|&(p, n)| joined.joined(p, n) == Some(true))
+    }
+
+    /// Whether the inductance matrix, the self terms with the mutual term of
+    /// every coupled pair, is strictly diagonally dominant once each row and
+    /// column is scaled by the inverse square root of its self-inductance:
+    /// enough for it to be positive definite (Gershgorin). Overlays that do
+    /// not match their canonical inductors answer `false`, which leaves them
+    /// to the exact descriptor and its diagnostics.
+    fn has_diagonally_dominant_inductance(circuit: &crate::CircuitData) -> bool {
+        let inductors = &circuit.inductors;
+        let pairs = &circuit.coupled_inductor_pairs;
+        let authored_pairs = circuit
+            .couplings
+            .iter()
+            .try_fold(0usize, |count, coupling| {
+                let windings = coupling.inductor_names.len();
+                count.checked_add(windings.checked_mul(windings.checked_sub(1)?)? / 2)
+            });
+        if authored_pairs != Some(pairs.len()) {
+            return false;
+        }
+        let by_branch = inductors
+            .branch_indices
+            .iter()
+            .enumerate()
+            .map(|(index, &branch)| (branch, index))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut mutual = vec![(0.0, 0usize); inductors.len()];
+        for pair in pairs {
+            let device = &pair.device;
+            let (Some(&first), Some(&second)) = (
+                by_branch.get(&pair.branch1_ordinal),
+                by_branch.get(&pair.branch2_ordinal),
+            ) else {
+                return false;
+            };
+            if first == second
+                || device.l1 != inductors.inductances[first]
+                || device.l2 != inductors.inductances[second]
+            {
+                return false;
+            }
+            let scaled = device.m.abs() / device.l1.sqrt() / device.l2.sqrt();
+            if !scaled.is_finite() {
+                return false;
+            }
+            for index in [first, second] {
+                mutual[index].0 += scaled;
+                mutual[index].1 += 1;
+            }
+        }
+        // Every scaled term carries a few roundings. The margin covers them,
+        // so a perfectly coupled pair (|k| = 1), whose matrix is singular,
+        // never passes.
+        mutual
+            .iter()
+            .all(|&(sum, terms)| sum < 1.0 - 4.0 * (terms as Value + 4.0) * Value::EPSILON)
     }
 
     /// The ordinary line path can opt into physical events only when every

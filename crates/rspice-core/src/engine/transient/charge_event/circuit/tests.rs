@@ -527,6 +527,10 @@ fn source_event_classification_settles_regular_rlc_storage_by_topology() {
             "RLC sections\nV1 a 0 1\nR1 a b 10\nL1 b c 1n\nC1 c 0 1p\nR2 c d 10\nL2 d e 1n\nC2 e 0 1p\n.end\n",
             false,
         ),
+        (
+            "Coupled RL\nV1 a 0 1\nR1 a b 10\nL1 b 0 1n\nL2 c 0 4n\nR2 c 0 10\nK1 L1 L2 0.5\n.end\n",
+            false,
+        ),
     ] {
         let circuit = build(deck);
         assert_eq!(
@@ -544,6 +548,14 @@ fn source_event_classification_settles_regular_rlc_storage_by_topology() {
             "{deck}"
         );
     }
+    // Perfect coupling leaves the inductance matrix singular, so only the
+    // exact descriptor can classify it.
+    let perfect = build(
+        "Perfect coupling\nV1 a 0 1\nR1 a b 10\nL1 b 0 1n\nL2 c 0 4n\nR2 c 0 10\nK1 L1 L2 1\n.end\n",
+    );
+    assert!(
+        PreparedEventCircuit::has_linear_events(&perfect, 1e-20, &restricted, &NoAbort).is_err()
+    );
 }
 
 #[test]
