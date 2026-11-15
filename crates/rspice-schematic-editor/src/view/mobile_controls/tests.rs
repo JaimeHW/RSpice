@@ -17,6 +17,7 @@ fn source() -> EditorRequestSource {
 }
 
 const EVERYTHING: MobileCanvasCapabilities = MobileCanvasCapabilities {
+    canvas: StripCanvas::Schematic,
     rotate: true,
     mirror: true,
     cancel: false,

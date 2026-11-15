@@ -484,6 +484,22 @@ impl SymbolEditorSession {
         self.drag_undo_recorded = false;
     }
 
+    /// Whether Escape has anything on the canvas to let go of: a handle
+    /// Stretch holds, something being dragged, a selection box, a shape or a
+    /// name part made, or a tool armed to put down.
+    pub fn cancellable(&self) -> bool {
+        self.stretch.is_some()
+            || self.dragging_pin.is_some()
+            || self.dragging_shape.is_some()
+            || self.dragging_label.is_some()
+            || self.dragging_origin
+            || self.dragging_group.is_some()
+            || self.dragging_handle.is_some()
+            || self.marquee_start.is_some()
+            || self.has_draft()
+            || self.tool != SymbolTool::Select
+    }
+
     /// Whether a shape or a text is part drawn, or a placed pin's name is
     /// being typed: what Escape lets go of before it puts the tool down.
     pub fn has_draft(&self) -> bool {

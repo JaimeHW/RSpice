@@ -55,8 +55,8 @@ impl MobileCanvasAction {
         }
     }
 
-    /// The button's accessible name and tooltip.
-    pub const fn label(self) -> &'static str {
+    /// The button's accessible name and tooltip over `canvas`.
+    pub const fn label(self, canvas: StripCanvas) -> &'static str {
         match self {
             Self::SelectBox => "Select with a box",
             Self::SelectAdd => "Add to selection",
@@ -65,7 +65,10 @@ impl MobileCanvasAction {
             Self::Cancel => "Cancel",
             Self::Undo => "Undo",
             Self::Redo => "Redo",
-            Self::Fit => "Fit drawing sheet",
+            Self::Fit => match canvas {
+                StripCanvas::Schematic => "Fit drawing sheet",
+                StripCanvas::Symbol => "Fit symbol",
+            },
         }
     }
 
@@ -167,9 +170,18 @@ impl TouchLatches {
     }
 }
 
+/// What the canvas under the strip draws, which names what Fit frames.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StripCanvas {
+    #[default]
+    Schematic,
+    Symbol,
+}
+
 /// What the strip may offer this frame. The latches are always offered.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MobileCanvasCapabilities {
+    pub canvas: StripCanvas,
     pub rotate: bool,
     pub mirror: bool,
     /// A route, move, placement or box is live.
@@ -268,7 +280,9 @@ pub fn show(
                             let enabled = capabilities.allows(action);
                             let latched = latches.holds(action);
                             let response = ui
-                                .add_enabled_ui(enabled, |ui| strip_button(ui, action, latched))
+                                .add_enabled_ui(enabled, |ui| {
+                                    strip_button(ui, action, capabilities.canvas, latched)
+                                })
                                 .inner;
                             // Keep a held press tied to the document it began on.
                             let press_id = response.id.with("source");
@@ -314,11 +328,16 @@ pub fn show(
 
 const STRIP_LABEL: &str = "Touch editing controls";
 
-fn strip_button(ui: &mut Ui, action: MobileCanvasAction, latched: bool) -> Response {
+fn strip_button(
+    ui: &mut Ui,
+    action: MobileCanvasAction,
+    canvas: StripCanvas,
+    latched: bool,
+) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(Vec2::splat(strip_button_side(ui.ctx())), Sense::click());
-    let label = action.label();
+    let label = action.label(canvas);
     response.widget_info(|| {
         if action.latch() {
             egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), latched, label)

@@ -21,17 +21,19 @@ use super::super::design_system::{Problem, empty_state, paint_problem_mark};
 /// strip, which the shell draws once the document has.
 pub(in crate::workbench) fn show_surface(cx: &mut Cx<'_, DesignFeature>, ui: &mut Ui) {
     let view_type = cx.model.workspace.content.active_view_type();
-    let content_rect = show_document(ui, cx, view_type);
-    cx.state.touch_strip_canvas =
-        matches!(view_type, Some(ViewType::Schematic | ViewType::Testbench))
-            .then_some(content_rect);
+    cx.state.touch_strip_canvas = show_document(ui, cx, view_type);
 }
 
 /// The document in front, in the design feature's context: its banners and
 /// the armed tool's options, the page its view draws, then the crumb of
 /// where it sits in the hierarchy. A Verilog-A view's page is code's, drawn
-/// after; the area the page fills is returned.
-fn show_document(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, view_type: Option<ViewType>) -> Rect {
+/// after. A schematic or a symbol returns the canvas it drew, for the touch
+/// strip to stand on.
+fn show_document(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, DesignFeature>,
+    view_type: Option<ViewType>,
+) -> Option<Rect> {
     if cx.model.active_view_read_only() {
         read_only_banner(ui);
     }
@@ -41,29 +43,31 @@ fn show_document(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, view_type: Option<
     let symbols = cx.handles.symbols;
     let Some(view_type) = view_type else {
         no_open_document(ui, cx.model);
-        return content_rect;
+        return None;
     };
+    let mut canvas = None;
     match view_type {
         ViewType::Schematic | ViewType::Testbench => {
             crate::schematic::view::render_schematic_view(ui, &mut canvas_frame_in(cx), symbols);
             paint_live_cursors(ui, cx.model, cx.peers.cloud_session(), content_rect);
+            canvas = Some(content_rect);
         }
         ViewType::Symbol => {
-            crate::schematic::symbol_editor::show(ui, &mut canvas_frame_in(cx), symbols);
+            canvas = crate::schematic::symbol_editor::show(ui, &mut canvas_frame_in(cx), symbols);
         }
         ViewType::Layout => layout_editor::show(ui, &mut canvas_frame_in(cx)),
         // A Verilog-A view is a document, not a drawing: it is no level of a
         // descent, and its own heading and the navigator's path already name
         // it. A crumb floating over the source would only cover the first
         // line.
-        ViewType::VerilogA => return content_rect,
+        ViewType::VerilogA => return None,
         ViewType::Spice | ViewType::Verilog => {
             source_reference_document(ui, cx.model, view_type);
         }
         view_type => unsupported_document(ui, cx.model, view_type),
     }
     breadcrumb(ui.ctx(), &mut canvas_frame_in(cx), content_rect);
-    content_rect
+    canvas
 }
 
 fn paint_live_cursors(ui: &mut Ui, model: &Model, cloud: &dyn CloudSessionPort, canvas: Rect) {

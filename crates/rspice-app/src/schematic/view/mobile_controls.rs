@@ -1,11 +1,12 @@
 //! App availability and command dispatch for the touch strip.
 //!
-//! The strip shows whenever the canvas is driven by touch, at any width
-//! (audit G-12). Every command button runs the same command the menus and
-//! keys run; the two latches change what a one-finger gesture does.
+//! The strip shows whenever a schematic or symbol canvas is driven by
+//! touch, at any width (audit G-12). Every command button runs the same
+//! command the menus and keys run; the two latches change what a one-finger
+//! gesture does.
 
-use crate::state::Tool;
 use crate::state::command_catalog::CommandKey;
+use crate::state::{Tool, ViewType};
 use crate::workbench::SurfaceId;
 use crate::workbench::design::DesignFeature;
 use crate::workbench::design::commands::DesignCommand;
@@ -13,7 +14,7 @@ use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use egui::{Context, Rect};
 use rspice_schematic_editor::view::mobile_controls::{
-    self, MobileCanvasAction, MobileCanvasCapabilities, MobileCanvasRequest,
+    self, MobileCanvasAction, MobileCanvasCapabilities, MobileCanvasRequest, StripCanvas,
 };
 use rspice_schematic_editor::view::pointer_target::canvas_touch_mode;
 
@@ -33,6 +34,7 @@ pub(crate) fn show(ctx: &Context, cx: &mut Cx<'_, DesignFeature>, content_rect: 
     }
     let source = super::requests::editor_request_source(&canvas_facts_in(cx));
     let capabilities = MobileCanvasCapabilities {
+        canvas: strip_canvas_of(cx.model.workspace.content.active_view_type()).unwrap_or_default(),
         rotate: action_enabled(cx, MobileCanvasAction::Rotate),
         mirror: action_enabled(cx, MobileCanvasAction::Mirror),
         cancel: action_enabled(cx, MobileCanvasAction::Cancel),
@@ -57,9 +59,23 @@ const fn product_command(action: MobileCanvasAction) -> Option<CommandKey> {
     }
 }
 
+/// The canvas the strip stands on, by the view in front; `None` for a view
+/// that draws neither a schematic nor a symbol.
+const fn strip_canvas_of(view_type: Option<ViewType>) -> Option<StripCanvas> {
+    match view_type {
+        Some(ViewType::Schematic | ViewType::Testbench) => Some(StripCanvas::Schematic),
+        Some(ViewType::Symbol) => Some(StripCanvas::Symbol),
+        _ => None,
+    }
+}
+
 /// Whether a route, a move, a placement or a box is live: what Esc would
-/// cancel on the canvas.
+/// cancel on the canvas. On a symbol, whether a tool is armed, a shape or a
+/// name is part made, or something is held.
 pub(crate) fn operation_live(state: &CanvasFacts<'_>) -> bool {
+    if state.model.workspace.content.active_view_type() == Some(ViewType::Symbol) {
+        return state.design.symbol.editor.cancellable();
+    }
     let editor = &state.model.schematic.session.editor;
     state.model.schematic.canvas_settings_change_blocked()
         || editor.tool != Tool::Select
@@ -75,12 +91,17 @@ fn action_enabled(cx: &Cx<'_, DesignFeature>, action: MobileCanvasAction) -> boo
         MobileCanvasAction::SelectBox | MobileCanvasAction::SelectAdd => true,
         MobileCanvasAction::Cancel => operation_live(&canvas_facts_in(cx)),
         MobileCanvasAction::Rotate | MobileCanvasAction::Mirror
-            if super::shelf_drag::something_floats(&canvas_facts_in(cx)) =>
+            if !symbol_in_front(cx)
+                && super::shelf_drag::something_floats(&canvas_facts_in(cx)) =>
         {
             true
         }
         _ => product_command(action).is_some_and(|key| cx.foreign_available(key)),
     }
+}
+
+fn symbol_in_front(cx: &Cx<'_, DesignFeature>) -> bool {
+    cx.model.workspace.content.active_view_type() == Some(ViewType::Symbol)
 }
 
 /// What R or M would turn while something floats under the finger.
@@ -99,10 +120,7 @@ pub(crate) fn execute_action(
 ) {
     if request.source != super::requests::editor_request_source(&canvas_facts_in(cx))
         || cx.wb.current_route().surface_id() != SurfaceId::Design
-        || !matches!(
-            cx.model.workspace.content.active_view_type(),
-            Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
-        )
+        || strip_canvas_of(cx.model.workspace.content.active_view_type()).is_none()
         || canvas_application_modal_open_in(cx)
         || !action_enabled(cx, request.action)
     {
@@ -123,9 +141,10 @@ pub(crate) fn execute_action(
         action => {
             // The placement ghost, or the selection Move carries, turns as
             // R and M turn it; the selection on the sheet turns otherwise.
-            let floated = floating_transform(action).is_some_and(|transform| {
-                super::shelf_drag::turn_what_floats(&mut canvas_parts_in(cx), transform)
-            });
+            let floated = !symbol_in_front(cx)
+                && floating_transform(action).is_some_and(|transform| {
+                    super::shelf_drag::turn_what_floats(&mut canvas_parts_in(cx), transform)
+                });
             if !floated && let Some(key) = product_command(action) {
                 cx.execute(key);
             }

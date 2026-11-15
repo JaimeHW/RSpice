@@ -65,21 +65,27 @@ pub(crate) fn symbol_canvas_accessibility_label(
 }
 
 /// The symbol canvas: in its own view, or in place on a parent schematic
-/// whose built-in part symbols `symbol_library` draws.
-pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&SymbolLibrary>) {
+/// whose built-in part symbols `symbol_library` draws. Returns where the
+/// drawing is, beside the placed preview's column, for the touch strip to
+/// stand on; nothing when there is no symbol to draw.
+pub fn show(
+    ui: &mut Ui,
+    canvas: &mut CanvasFrame<'_>,
+    symbol_library: Option<&SymbolLibrary>,
+) -> Option<egui::Rect> {
     let ports = active_symbol_ports(canvas.model);
     let mut document = match canvas.model.load_active_symbol_document() {
         Ok(document) => document,
         Err(error) => {
             surface::invalid_symbol_document_state(ui, &error);
-            return;
+            return None;
         }
     };
     let mut editor = match load_active_symbol_editor_metadata(canvas.model, &document) {
         Ok(metadata) => metadata,
         Err(error) => {
             surface::invalid_symbol_document_state(ui, &error);
-            return;
+            return None;
         }
     };
 
@@ -248,6 +254,7 @@ pub fn show(ui: &mut Ui, canvas: &mut CanvasFrame<'_>, symbol_library: Option<&S
     // After the canvas has taken the keyboard for the click that opened it.
     interaction::show_text_entry(ui.ctx(), &mut canvas.parts(), viewport);
     interaction::show_pin_name_entry(ui.ctx(), &mut canvas.parts(), viewport, &document);
+    Some(viewport.rect)
 }
 
 pub(crate) fn apply_surface_request(
