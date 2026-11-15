@@ -9,10 +9,12 @@ use super::state::{WidthClass, WorkbenchSession};
 /// 137 pt of copy — barely the default name — and the space the chip takes
 /// comes out of the context-tool lane, which already scrolls. This is the same
 /// ceiling `explicit_label_width` gives the toolbar's other text-bearing
-/// controls, and `trailing_controls_width` must reserve exactly it: a
-/// reservation smaller than the paint width lets the scrolling lane run under
-/// the chip. The layout holds it, as it holds the chip's height, because the
-/// toolbar reserves the room before the chip's owner draws in it.
+/// controls. The toolbar gives the run controls the room they drew in the
+/// frame before; before they have drawn, `trailing_controls_width` reserves
+/// exactly this for the chip, since a reservation smaller than the paint width
+/// lets the scrolling lane run under it. The layout holds it, as it holds the
+/// chip's height, because the toolbar reserves the room before the chip's
+/// owner draws in it.
 pub const RUN_CONFIG_CHIP_MAX_WIDTH: f32 = 224.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

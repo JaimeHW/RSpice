@@ -78,18 +78,21 @@ pub fn show<H: WorkbenchHost>(root: &mut Ui, app: &mut H, layout: LayoutSpec) {
                 // Context tools own the flexible middle lane. The mockup
                 // keeps navigator/run/inspector controls reachable and lets
                 // this lane scroll when a dense engineering toolbar exceeds
-                // the tablet or phone budget.
-                let run_width = reserved_run_control_width(ui, app, layout);
-                let pvt_width = reserved_pvt_selector_width(ui, app);
-                let context_width = context_tools_width(
-                    ui.available_width(),
-                    layout,
-                    padding,
-                    outer_gap,
-                    show_simulation_context,
-                    run_width,
-                    pvt_width,
-                );
+                // the tablet or phone budget. The run controls keep the room
+                // they drew in last frame, and the lane takes the rest.
+                let context_width =
+                    match drawn_trailing_width(ui, layout, outer_gap, show_simulation_context) {
+                        Some(trailing) => (ui.available_width() - trailing - padding).max(1.0),
+                        None => context_tools_width(
+                            ui.available_width(),
+                            layout,
+                            padding,
+                            outer_gap,
+                            show_simulation_context,
+                            reserved_run_control_width(ui, app, layout),
+                            reserved_pvt_selector_width(ui, app),
+                        ),
+                    };
                 ui.data_mut(|data| {
                     data.insert_temp(context_lane_width_id(), context_width);
                 });
@@ -134,7 +137,13 @@ pub fn show<H: WorkbenchHost>(root: &mut Ui, app: &mut H, layout: LayoutSpec) {
                         }
                     }
                     if show_simulation_context {
+                        let start = ui.cursor().max.x;
                         app.contribute(Point::Toolbar(ToolbarSlot::Trailing, layout), ui);
+                        remember_run_controls_width(
+                            ui,
+                            layout,
+                            start - ui.cursor().max.x - TOOLBAR_CONTEXT_GAP,
+                        );
                     }
                 });
             });
@@ -303,6 +312,58 @@ fn reserved_pvt_selector_width(ui: &egui::Ui, app: &impl WorkbenchHost) -> f32 {
         .size()
         .x
         + 42.0
+}
+
+/// Where the run controls' width, as they drew it in a layout like
+/// `layout`, is kept from one frame to the next. What they draw depends on
+/// which of them the layout shows and how tall it makes them, so each such
+/// layout keeps its own.
+fn run_controls_width_id(layout: LayoutSpec) -> egui::Id {
+    egui::Id::new((
+        "workbench.context_toolbar.run_controls_width",
+        layout.show_pvt_selector,
+        layout.show_run_config_selector,
+        layout.run_control_height.to_bits(),
+        layout.toolbar_control_height.to_bits(),
+    ))
+}
+
+/// What the trailing group takes from the toolbar, the gap before it
+/// included, when the run controls have drawn in this layout before: as
+/// wide as they drew last frame, and the inspector's toggle beside them.
+/// Before they have, nothing, and the toolbar keeps the room
+/// [`trailing_controls_width`] reserves for them.
+fn drawn_trailing_width(
+    ui: &egui::Ui,
+    layout: LayoutSpec,
+    outer_gap: f32,
+    show_simulation_context: bool,
+) -> Option<f32> {
+    if !show_simulation_context {
+        return None;
+    }
+    let drawn = ui.data(|data| data.get_temp::<f32>(run_controls_width_id(layout)))?;
+    let toggle = if layout.inspector_uses_drawer {
+        panel_toggle_size(layout).x + TOOLBAR_CONTEXT_GAP
+    } else {
+        0.0
+    };
+    Some(drawn + toggle + outer_gap)
+}
+
+/// Keep how wide the run controls drew this frame, for the next frame's
+/// tool lane. A width that changed asks for another frame, so the lane
+/// follows at once and then holds still.
+fn remember_run_controls_width(ui: &egui::Ui, layout: LayoutSpec, drawn: f32) {
+    if drawn <= 0.0 {
+        return;
+    }
+    let id = run_controls_width_id(layout);
+    let kept = ui.data(|data| data.get_temp::<f32>(id));
+    ui.data_mut(|data| data.insert_temp(id, drawn));
+    if kept.is_none_or(|kept| (kept - drawn).abs() > 0.5) {
+        ui.ctx().request_repaint();
+    }
 }
 
 pub fn context_tools_width(

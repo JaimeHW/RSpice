@@ -212,3 +212,67 @@ fn at_1920_a_labelled_tool_takes_exactly_its_labels_room() {
     }
 }
 
+/// The run controls take the room they drew in, and the row's tools the
+/// rest: at every desktop width the lane the tools are measured against
+/// ends one gap before the leftmost run control, and the next frame draws
+/// the toolbar exactly where this one did.
+#[test]
+fn the_tool_lane_reaches_the_run_controls_at_every_desktop_width() {
+    for window in [
+        vec2(1024.0, 768.0),
+        vec2(1280.0, 800.0),
+        vec2(1920.0, 1080.0),
+    ] {
+        let (mut replay, _) = amp_in(window);
+        let controls = assert_no_tool_under_another_in(&mut replay, window);
+        let lane = replay
+            .ctx()
+            .data(|data| {
+                data.get_temp::<f32>(egui::Id::new("workbench.context_toolbar.lane_width"))
+            })
+            .expect("the toolbar measured its lane");
+        let save = controls
+            .iter()
+            .find(|(label, _)| label.starts_with("Save"))
+            .expect("Save stands before the lane")
+            .1;
+        let lane_start = controls
+            .iter()
+            .map(|(_, rect)| rect.left())
+            .filter(|left| *left > save.right())
+            .fold(f32::INFINITY, f32::min);
+        let process = replay
+            .app
+            .state
+            .model
+            .sim_setup
+            .reference_pvt
+            .process
+            .short_name();
+        let run_controls = controls
+            .iter()
+            .filter(|(label, _)| {
+                label.starts_with("Run active simulation plan")
+                    || label.starts_with("Simulation plan")
+                    || (label.starts_with(process) && label.contains(" \u{b7} "))
+            })
+            .map(|(_, rect)| rect.left())
+            .fold(f32::INFINITY, f32::min);
+        let gap = run_controls - (lane_start + lane);
+        assert!(
+            (gap - 5.0).abs() <= 1.0,
+            "at {window:?} the lane ends {gap} before the run controls: {controls:?}"
+        );
+
+        let tree = replay
+            .frame(vec![])
+            .platform_output
+            .accesskit_update
+            .expect("a frame with AccessKit on publishes its tree");
+        assert_eq!(
+            toolbar_controls(&tree),
+            controls,
+            "at {window:?} the next frame draws the toolbar where this one did"
+        );
+    }
+}
