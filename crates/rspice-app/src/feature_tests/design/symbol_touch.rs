@@ -19,6 +19,8 @@ struct Finger {
     time: f64,
     /// What the last frame named for a screen reader, and where.
     named: Vec<(String, Rect)>,
+    /// Whether the last frame's focused widget takes typing.
+    typing: bool,
 }
 
 impl Finger {
@@ -42,6 +44,7 @@ impl Finger {
             size,
             time: 0.0,
             named: Vec::new(),
+            typing: false,
         };
         finger.frame(Vec::new());
         finger.frame(Vec::new());
@@ -77,6 +80,7 @@ impl Finger {
             size,
             time,
             named,
+            typing,
         } = self;
         let output = ctx.run_ui(
             egui::RawInput {
@@ -97,6 +101,9 @@ impl Finger {
                 app.end_frame(&before);
             },
         );
+        // A browser shows its on-screen keyboard while egui reports a text
+        // field under the caret.
+        *typing = output.platform_output.ime.is_some();
         named.clear();
         for (_, node) in output
             .platform_output
@@ -249,6 +256,24 @@ impl Finger {
         self.frame(vec![Self::touch_id(2, TouchPhase::End, b2)]);
         self.up(a2);
         self.frame(Vec::new());
+    }
+
+    /// What the on-screen keyboard types: the characters, then its Return.
+    fn type_on_screen(&mut self, text: &str) {
+        self.frame(vec![Event::Text(text.to_owned())]);
+        self.key(egui::Key::Enter);
+        self.frame(Vec::new());
+    }
+
+    /// One key of the on-screen keyboard.
+    fn key(&mut self, key: egui::Key) {
+        self.frame(vec![Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
     }
 
     /// A touch that lands and lifts with no tap: the shell and the canvas
@@ -575,5 +600,30 @@ fn a_pinch_zooms_the_symbol_about_the_point_between_the_fingers() {
     assert!(
         (after.0 - under.0).abs() < 0.5 && (after.1 - under.1).abs() < 0.5,
         "{under:?} stayed between the fingers, not {after:?}"
+    );
+}
+
+/// The inspector's fields take a tap and the on-screen keyboard: a pin's
+/// name cleared and typed again as one word, the way a keyboard's
+/// suggestion sends it, renames the pin.
+#[test]
+fn the_on_screen_keyboard_renames_a_pin_in_the_inspector() {
+    let mut finger = Finger::new();
+    finger.tap(finger.screen(Point::new(-40, 10)));
+    assert_eq!(
+        finger.selection(),
+        SymbolSelection::single_pin("IN".to_owned())
+    );
+    finger.press("Open inspector");
+    finger.press("Name");
+    assert!(finger.typing, "the name field holds the on-screen keyboard");
+    finger.key(egui::Key::Backspace);
+    finger.key(egui::Key::Backspace);
+    finger.type_on_screen("OUT");
+    let pins = finger.document().pins;
+    assert!(
+        pins.iter().any(|pin| pin.name == "OUT"),
+        "the pin took the typed name: {:?}",
+        pins.iter().map(|pin| &pin.name).collect::<Vec<_>>()
     );
 }

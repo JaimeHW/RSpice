@@ -383,13 +383,16 @@ fn text_row(
     let mut buffer = ui
         .data_mut(|data| data.get_temp::<String>(id))
         .unwrap_or_else(|| value.to_owned());
-    let valid = is_valid(buffer.trim());
-    let response = property_row_input(ui, label, &mut buffer, !valid);
+    let shown_invalid = !is_valid(buffer.trim());
+    let response = property_row_input(ui, label, &mut buffer, shown_invalid);
     let mut accepted = None;
     if response.changed() {
         ui.data_mut(|data| data.insert_temp(id, buffer.clone()));
+        // What the field holds now, not what it held before this frame's
+        // typing: a name typed into an emptied field in one go, as an
+        // on-screen keyboard sends a word, is taken.
         let trimmed = buffer.trim();
-        if valid && trimmed != value {
+        if is_valid(trimmed) && trimmed != value {
             record_once(edit, before);
             accepted = Some(trimmed.to_owned());
         }
