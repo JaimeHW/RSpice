@@ -26,22 +26,7 @@ use crate::workbench::commands::{
     select_probed_trace,
 };
 use crate::workbench::features;
-use crate::workbench::framework::command_registry::{
-    CommandAvailability, CommandFlags, CommandSpec, ids,
-};
-use crate::workbench::framework::feature::{Execute, held_back};
-use crate::workbench::framework::host::{Host, InspectorScope};
-use crate::workbench::framework::requests::{
-    self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, ClearSelectedModel,
-    CloseForLiveMirror, ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites,
-    OpenInDesign, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
-    ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
-    SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels, ShowSchematicAnnotations,
-    ShowWaveforms, SourceEditorRequest, StageComponentTuning, SubcircuitSymbolSource,
-    VoidVerilogAEvidence,
-};
 use crate::workbench::menu_bar::FileMenuAction;
-use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, WorkbenchSession};
 use rspice_app_code::workbench::code::CodeFeature;
@@ -55,7 +40,22 @@ use rspice_app_design::workbench::app::dialogs::design_request::DesignRequest;
 use rspice_app_design::workbench::design::inspector::CommitSheetSection;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use rspice_app_hardcopy::workbench::hardcopy;
+use rspice_app_project::workbench::project::commands::ProjectRequest;
 use rspice_app_state::state::command_catalog::CommandKey;
+use rspice_app_workbench::workbench::framework::command_registry::{
+    CommandAvailability, CommandFlags, CommandSpec, ids,
+};
+use rspice_app_workbench::workbench::framework::feature::{Execute, held_back};
+use rspice_app_workbench::workbench::framework::host::{Host, InspectorScope};
+use rspice_app_workbench::workbench::framework::requests::{
+    self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, ClearSelectedModel,
+    CloseForLiveMirror, ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites,
+    OpenInDesign, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
+    ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
+    SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels, ShowSchematicAnnotations,
+    ShowWaveforms, SourceEditorRequest, StageComponentTuning, SubcircuitSymbolSource,
+    VoidVerilogAEvidence,
+};
 
 /// The dispatcher by key: where a key becomes the command it names, a
 /// feature's first and the shell's legacy table's otherwise.
@@ -314,7 +314,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, SelectAnalysisInstance(instance)| {
-                crate::workbench::simulate::select_analysis_instance(
+                rspice_app_simulate::workbench::simulate::select_analysis_instance(
                     &mut app.state.simulate,
                     instance,
                 );
@@ -329,7 +329,9 @@ impl RSpiceApp {
                  close_manager_on_success,
              }| {
                 if open_task_deck(&mut app.state, seq) && close_manager_on_success {
-                    crate::workbench::simulate::close_jobs_manager(&mut app.state.workbench);
+                    rspice_app_simulate::workbench::simulate::close_jobs_manager(
+                        &mut app.state.workbench,
+                    );
                 }
             },
         );
@@ -364,7 +366,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, StageComponentTuning { component_id }| {
-                if crate::workbench::simulate::SimulateFeature::stage_component_tuning(
+                if rspice_app_simulate::workbench::simulate::SimulateFeature::stage_component_tuning(
                     &mut features::cx(app),
                     component_id,
                 ) {
@@ -390,7 +392,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, SetFamilyFilter(filter)| {
-                crate::workbench::documents::result_document::set_family_filter(
+                rspice_app_results::workbench::documents::result_document::set_family_filter(
                     &mut app.state.results.result_document_dialog,
                     filter,
                 );
@@ -535,7 +537,7 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, ShowProjectModels| {
                 app.state.models.models_view.catalog_scope =
-                    crate::workbench::models::workspace_state::ModelsCatalogScope::Project;
+                    rspice_app_models::workbench::models::workspace_state::ModelsCatalogScope::Project;
                 app.execute_command_key(ids::MODELS_CATALOG);
             },
         );
@@ -548,7 +550,7 @@ impl RSpiceApp {
                  pack_id,
                  version,
              }| {
-                if crate::workbench::models::ModelsFeature::confirm_pack_attach(
+                if rspice_app_models::workbench::models::ModelsFeature::confirm_pack_attach(
                     &mut features::cx(app),
                     part_id,
                     pack_id,
@@ -562,7 +564,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, RevealModel { library, model }| {
-                crate::workbench::models::ModelsFeature::reveal_model(
+                rspice_app_models::workbench::models::ModelsFeature::reveal_model(
                     &mut features::cx(app),
                     &library,
                     model,
@@ -609,7 +611,7 @@ impl RSpiceApp {
 /// it; a second caller spelling a second refusal for the same missing deck is
 /// how one absence acquires two names.
 pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u64) -> bool {
-    if crate::workbench::documents::netlist_document::reveal_executed_deck(
+    if rspice_app_code::workbench::documents::netlist_document::reveal_executed_deck(
         &mut state.model,
         &mut state.code.netlist,
         &state.runs,
@@ -707,8 +709,9 @@ impl Command {
     /// back. Availability asks the same question, so a command the
     /// dispatcher would refuse is drawn disabled.
     pub(crate) fn held_by_project_operation(self, platform: &PlatformState) -> bool {
-        crate::workbench::lifecycle::project_lifecycle::operation_in_progress(platform)
-            && self.blocked_by_project_operation()
+        rspice_app_services::workbench::lifecycle::project_lifecycle::operation_in_progress(
+            platform,
+        ) && self.blocked_by_project_operation()
     }
 
     /// Whether this command needs an open project and none is open.
@@ -820,10 +823,12 @@ mod tests {
     fn run_on_the_netlist_workspace_runs_the_deck_and_not_the_plan() {
         use crate::workbench::RSpiceApp;
         use crate::workbench::features::cx;
-        use crate::workbench::framework::command_registry::{CommandAvailability, ids};
         use crate::workbench::state::Workspace;
         use rspice_app_code::workbench::code::netlist_validation::validate_visible_netlist_source;
         use rspice_app_state::state::SimulationRunIntent;
+        use rspice_app_workbench::workbench::framework::command_registry::{
+            CommandAvailability, ids,
+        };
 
         let mut app = RSpiceApp::test_instance();
         app.state

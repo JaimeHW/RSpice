@@ -39,12 +39,12 @@ mod technology_demand_tests;
 mod transaction;
 pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
-use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::slots::{
     CloudState, CodeState, HardcopyState, ModelsState, ProjectState, ResultsState, RunsState,
     SettingsState, SheetsState, ShellState, SimulateState,
 };
 use rspice_app_design::workbench::slots::design::DesignState;
+use rspice_app_results::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use rspice_app_services::services::recent_files::RecentKind;
 use rspice_app_services::workbench::slots::platform::remember_recent_file;
 #[cfg(test)]
@@ -182,7 +182,7 @@ impl AppState {
     /// Whether any retained application workflow owns exclusive keyboard and
     /// pointer intent for this frame: anything modal the shell lists is open.
     pub(crate) fn application_modal_open(&self) -> bool {
-        crate::workbench::framework::dialogs::application_modal_open(self)
+        rspice_app_workbench::workbench::framework::dialogs::application_modal_open(self)
     }
 
     /// [`run_preflight::simulation_run_block_reason`] for the session's model.
@@ -198,7 +198,7 @@ impl AppState {
 
     /// User-facing reason the Netlist workspace cannot run the current deck.
     pub fn manual_deck_run_block_reason(&self) -> Option<String> {
-        crate::workbench::documents::netlist_document::manual_deck_run_block_reason_in(
+        rspice_app_code::workbench::documents::netlist_document::manual_deck_run_block_reason_in(
             &self.model,
             &self.code.netlist,
             self.workbench.messages(),
@@ -207,7 +207,7 @@ impl AppState {
 
     /// Request a Netlist workspace run, queuing one re-run if the engine is busy.
     pub(crate) fn request_netlist_manual_deck_run(&mut self) {
-        crate::workbench::documents::netlist_document::request_netlist_manual_deck_run_in(
+        rspice_app_code::workbench::documents::netlist_document::request_netlist_manual_deck_run_in(
             &mut self.model,
             &mut self.runs,
             &mut self.workbench,
@@ -267,7 +267,7 @@ impl AppState {
     /// replaces itself with the currently projected primary workspace.
     pub(crate) fn close_route_owned_transient(
         &mut self,
-        surface: crate::workbench::SurfaceId,
+        surface: rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId,
         label: &str,
     ) {
         self.workbench.close_route_owned_transient(surface, label);
@@ -325,10 +325,10 @@ impl AppState {
     /// settings feature asked. The shell takes this straight after each of
     /// its calls that can put a library in use.
     pub fn take_shortcut_resolver_reset(&mut self) {
-        crate::workbench::framework::requests::drain(
+        rspice_app_workbench::workbench::framework::requests::drain(
             self,
             |state| &mut state.workbench.outbox,
-            |state, crate::workbench::framework::requests::ResetShortcutResolver| {
+            |state, rspice_app_workbench::workbench::framework::requests::ResetShortcutResolver| {
                 state.shortcut_resolver.reset();
             },
         );
@@ -464,7 +464,10 @@ mod tests {
         state
             .model
             .preferences
-            .set_scalar(crate::workbench::ScalarPreference::RecentFilesListed, 12)
+            .set_scalar(
+                rspice_app_state::workbench::preferences::ScalarPreference::RecentFilesListed,
+                12,
+            )
             .expect("12 is an offered count");
         for index in 10..20 {
             state.remember_recent_file(RecentKind::Project, &path(index));
@@ -474,7 +477,10 @@ mod tests {
         state
             .model
             .preferences
-            .set_scalar(crate::workbench::ScalarPreference::RecentFilesListed, 5)
+            .set_scalar(
+                rspice_app_state::workbench::preferences::ScalarPreference::RecentFilesListed,
+                5,
+            )
             .expect("5 is an offered count");
         trim_recent_files(&state.model, &mut state.platform);
         let kept = state
@@ -516,8 +522,9 @@ mod tests {
         assert_eq!(document.technology().database_unit().metres(), 1.0e-9);
         assert_eq!(document.technology().stack_id(), "1P2M");
 
-        let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
-            .expect("layout project snapshot validates");
+        let snapshot =
+            rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state)
+                .expect("layout project snapshot validates");
         let encoded = serde_json::to_vec(&snapshot).expect("serialize layout project");
         let restored: rspice_app_services::io::ProjectSnapshot =
             serde_json::from_slice(&encoded).expect("deserialize layout project");

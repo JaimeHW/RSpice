@@ -6,7 +6,6 @@ use crate::feature_tests::settings::shortcut_preferences::input;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::ids;
 use egui::Context;
 use egui::Key;
 use egui::Modifiers;
@@ -21,6 +20,7 @@ use rspice_app_state::state::shortcuts::ShortcutProfileIssueCode;
 use rspice_app_state::state::shortcuts::ShortcutProfileIssueSeverity;
 use rspice_app_state::state::shortcuts::ShortcutSequence;
 use rspice_app_state::state::shortcuts::ShortcutStroke;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 #[test]
 fn capture_platforms_preserve_defaults_and_protected_alternates() {

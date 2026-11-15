@@ -153,7 +153,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
             .is_some(),
         "independent copied layout remains authoritative"
     );
-    crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+    rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("post-copy/rename project snapshot validates end to end");
 }
 

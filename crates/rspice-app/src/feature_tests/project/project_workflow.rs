@@ -11,14 +11,14 @@ use std::path::Path;
 
 use crate::workbench::app::project_transactions::apply_loaded_project;
 use crate::workbench::app_state::AppState;
-use crate::workbench::lifecycle::project_lifecycle::{
-    DestinationAuthority, ProjectCloseDestination, SaveScope,
-};
 use rspice_app_project::workbench::workflows::project_workflow::{
     LiveProjectApply, NewProjectParams, ProjectLoadOrigin, SaveRequestOutcome,
     live_mirror_save_block, project_save_dialog_default_name,
 };
 use rspice_app_services::io::{ProjectExecutionContext, ProjectSimulationResults, ProjectSnapshot};
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+    DestinationAuthority, ProjectCloseDestination, SaveScope,
+};
 use rspice_app_state::state::ActiveViewer;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -61,7 +61,7 @@ fn assert_active_grid_pitch_contract(
 
 #[test]
 fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
-    use crate::workbench::ChoicePreference;
+    use rspice_app_state::workbench::preferences::ChoicePreference;
 
     let mut state = AppState::default();
     state.design.schematic_snap.snap_radius = 8;
@@ -147,7 +147,7 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
     );
     assert_eq!(
         state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::Project
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::Project
     );
 }
 
@@ -157,9 +157,9 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn startup_closes_a_saved_project_only_when_asked_and_nothing_is_lost() {
-    use crate::workbench::ChoicePreference;
-    use crate::workbench::lifecycle::project_lifecycle::{SaveScope, save_native};
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{SaveScope, save_native};
     use rspice_app_state::state::{ComponentType, Point};
+    use rspice_app_state::workbench::preferences::ChoicePreference;
 
     let folder = std::env::temp_dir().join(format!(
         "rspice-startup-choice-{}-{}",
@@ -223,7 +223,7 @@ fn startup_closes_a_saved_project_only_when_asked_and_nothing_is_lost() {
 /// startup says.
 #[test]
 fn a_session_saved_after_close_project_restarts_with_no_project() {
-    use crate::workbench::ChoicePreference;
+    use rspice_app_state::workbench::preferences::ChoicePreference;
 
     let mut state = AppState::default();
     assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
@@ -256,9 +256,9 @@ fn a_session_saved_after_close_project_restarts_with_no_project() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_saved_project_comes_back_through_its_session() {
-    use crate::workbench::ChoicePreference;
-    use crate::workbench::lifecycle::project_lifecycle::{SaveScope, save_native};
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{SaveScope, save_native};
     use rspice_app_state::state::{ComponentType, Point};
+    use rspice_app_state::workbench::preferences::ChoicePreference;
 
     let folder = std::env::temp_dir().join(format!(
         "rspice-startup-session-{}-{}",
@@ -386,7 +386,7 @@ fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
         state.workbench.workspace,
         crate::workbench::state::Workspace::Project
     );
-    use crate::workbench::framework::requests::LiveMirrorEntry;
+    use rspice_app_workbench::workbench::framework::requests::LiveMirrorEntry;
     assert!(state.workbench.outbox.take::<LiveMirrorEntry>().is_some());
     assert!(state.workbench.outbox.take::<LiveMirrorEntry>().is_none());
 }
@@ -399,7 +399,7 @@ fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
         .content
         .project
         .set_path(std::path::PathBuf::from("C:/host-only/design.rspiceproj"));
-    let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&host)
+    let snapshot = rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&host)
         .expect("host state snapshots");
     let text = rspice_app_services::io::project_io::serialize_project_file(&snapshot)
         .expect("snapshot serializes");
@@ -418,15 +418,17 @@ fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
     assert!(guest.model.workspace.content.project.path.is_none());
     #[cfg(not(target_arch = "wasm32"))]
     assert!(
-        crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&guest.platform)
-            .is_none()
+        rspice_app_services::workbench::lifecycle::project_lifecycle::canonical_native_path(
+            &guest.platform
+        )
+        .is_none()
     );
 }
 
 #[test]
 fn live_project_snapshot_waits_out_a_local_run_and_rejects_garbage() {
     let host = AppState::default();
-    let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&host)
+    let snapshot = rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&host)
         .expect("host state snapshots");
     let text = rspice_app_services::io::project_io::serialize_project_file(&snapshot)
         .expect("snapshot serializes");
@@ -900,8 +902,8 @@ fn a_project_whose_plan_needs_no_technology_opens_without_a_blocked_run_warning(
 
 #[test]
 fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
-    use crate::workbench::ChoicePreference;
     use rspice_app_simulate::simulation::dialog::IntegrationMethod;
+    use rspice_app_state::workbench::preferences::ChoicePreference;
 
     let mut state = AppState::default();
     state
@@ -1268,9 +1270,9 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         .insert("stale".to_string(), 99);
     state.model.simulation.view.ground_node = Some("OLD_GND".to_string());
     state.code.code_workspace.page =
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
     state.code.code_workspace.automation.debug.watches.push(
-        crate::workbench::documents::code_workspace::AutomationWatch {
+        rspice_app_code::workbench::documents::code_workspace::AutomationWatch {
             expression: "old_project.signal".to_owned(),
             value: "1.25".to_owned(),
             error: None,
@@ -1313,7 +1315,7 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
     assert_eq!(state.model.simulation.view.waveforms[0].name, "V(out)");
     assert_eq!(
         state.code.code_workspace.page,
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
     );
     assert!(
         state
@@ -1399,7 +1401,7 @@ fn save_project_to_path_writes_simulation_results() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn save_project_to_path_round_trips_result_markers() {
-    use crate::workbench::documents::result_document::AnalysisPresentationKey;
+    use rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey;
 
     let mut state = AppState::default();
     let waveform = rspice_app_state::state::RetainedTrace::new(
@@ -1439,7 +1441,9 @@ fn save_project_to_path_round_trips_result_markers() {
     assert!(anchor.is_none(), "a fresh workspace carries no markers");
     let id = {
         let waveform_anchor =
-            crate::workbench::documents::result_document::marker_anchor_for(analysis, "V(out)");
+            rspice_app_results::workbench::documents::result_document::marker_anchor_for(
+                analysis, "V(out)",
+            );
         state
             .results
             .results
@@ -1473,7 +1477,7 @@ fn save_project_to_path_round_trips_result_markers() {
 
     let mut reopened = AppState::default();
     reopened.model.simulation = state.model.simulation.clone();
-    crate::workbench::documents::result_document::restore_presentation(
+    rspice_app_results::workbench::documents::result_document::restore_presentation(
         &mut reopened.results_parts(),
         loaded.file.result_presentation,
     );
@@ -1493,7 +1497,7 @@ fn save_project_to_path_round_trips_result_markers() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn save_project_to_path_round_trips_logarithmic_panes() {
-    use crate::workbench::documents::result_document::{
+    use rspice_app_results::workbench::documents::result_document::{
         AnalysisPresentationKey, WavePanePresentationKey,
     };
 
@@ -1580,7 +1584,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
     reopened.model.simulation = state.model.simulation.clone();
     let mut older_file = loaded.file.result_presentation.log_y_panes;
     older_file.push(orphan);
-    crate::workbench::documents::result_document::restore_log_y_panes(
+    rspice_app_results::workbench::documents::result_document::restore_log_y_panes(
         &mut reopened.results_parts(),
         older_file,
     );
@@ -1621,7 +1625,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
     let expression_owner =
-        crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
             state.model.simulation.retained.runs[0].dataset_id,
             &state.model.simulation.retained.runs[0].analyses[0],
         );
@@ -1655,16 +1659,18 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
     assert_eq!(loaded.file.result_presentation.expression_groups.len(), 1);
     assert_eq!(
         loaded.file.result_presentation.expression_groups[0].traces,
-        vec![crate::workbench::documents::result_document::ExprTrace {
-            text: "V(out) * 2".to_owned(),
-            complex_policy: rspice_app_state::state::ComplexExpressionPolicy::Rectangular,
-            visible: true,
-        }]
+        vec![
+            rspice_app_results::workbench::documents::result_document::ExprTrace {
+                text: "V(out) * 2".to_owned(),
+                complex_policy: rspice_app_state::state::ComplexExpressionPolicy::Rectangular,
+                visible: true,
+            }
+        ]
     );
 
     let mut reopened = AppState::default();
     reopened.model.simulation = state.model.simulation.clone();
-    crate::workbench::documents::result_document::restore_expression_groups(
+    rspice_app_results::workbench::documents::result_document::restore_expression_groups(
         &mut reopened.results_parts(),
         loaded.file.result_presentation.expression_groups,
     );
@@ -1710,8 +1716,10 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
     let run = &state.model.simulation.retained.runs[0];
     let analysis = &run.analyses[0];
     let source =
-        crate::workbench::documents::result_document::visualization_source_dataset(run, analysis)
-            .expect("source projection");
+        rspice_app_results::workbench::documents::result_document::visualization_source_dataset(
+            run, analysis,
+        )
+        .expect("source projection");
     let analysis_id = analysis.provenance().map_or_else(
         || {
             let name = format!("legacy-analysis-v1/{}", analysis.id);
@@ -1981,7 +1989,7 @@ fn a_named_new_project_seeds_every_owner_of_its_identity() {
 
     // Validated as Save captures it: with its plan, which owns the plan
     // payload the project seeds.
-    crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+    rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("a new project captures")
         .file
         .validate()
@@ -2080,8 +2088,10 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
             .is_some_and(|name| name == "renamed.rspiceproj")
     };
     assert!(names_renamed(
-        crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&state.platform)
-            .as_deref()
+        rspice_app_services::workbench::lifecycle::project_lifecycle::canonical_native_path(
+            &state.platform
+        )
+        .as_deref()
     ));
     assert!(names_renamed(
         state.model.workspace.content.project.path.as_deref()

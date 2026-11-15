@@ -45,7 +45,7 @@ impl super::AppState {
 
     pub(crate) fn cancel_schematic_drag_in_window(
         &mut self,
-        window: crate::workbench::lifecycle::window_session::ApplicationWindowId,
+        window: rspice_app_workbench::workbench::lifecycle::window_session::ApplicationWindowId,
     ) {
         if self
             .design

@@ -6,7 +6,6 @@ use rspice_design_model::sheet_package::{
     encode_package_with_format,
 };
 
-use crate::workbench::DrawingSheetPersonalPreferences;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_presets::model::{
@@ -21,6 +20,7 @@ use rspice_app_state::state::{
     DrawingSheetPresetImportMappingKind, DrawingSheetPresetImportSkipReason,
     DrawingSheetPresetScope,
 };
+use rspice_app_state::workbench::preferences::DrawingSheetPersonalPreferences;
 
 /// The custom sheet size dialogs over the parts of `state`.
 fn preset_dialogs(state: &mut AppState) -> PresetDialogs<'_> {
@@ -303,7 +303,7 @@ fn drawing_sheet_preset_import_receipt_retains_reviewed_outcomes() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn an_empty_library_is_light_on_the_light_theme() {
-    use crate::workbench::preferences::TogglePreference;
+    use rspice_app_state::workbench::preferences::TogglePreference;
 
     let mut app = RSpiceApp::test_instance();
     app.state

@@ -10,8 +10,8 @@
 
 use super::*;
 
-use crate::workbench::lifecycle::project_lifecycle::snapshot;
 use rspice_app_services::io::project_io::{load_project_text, serialize_project_file};
+use rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot;
 use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 

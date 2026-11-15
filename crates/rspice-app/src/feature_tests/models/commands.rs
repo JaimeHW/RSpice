@@ -6,11 +6,13 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags, ids};
-use crate::workbench::models::commands::ModelsCommand;
-use crate::workbench::models::model_editor_workflow::selected_project_model_for_editor;
 use crate::workbench::state::Workspace;
+use rspice_app_models::workbench::models::commands::ModelsCommand;
+use rspice_app_models::workbench::models::model_editor_workflow::selected_project_model_for_editor;
 use rspice_app_state::state::ModelsPage;
+use rspice_app_workbench::workbench::framework::command_registry::{
+    CommandAvailability, CommandFlags, ids,
+};
 
 #[test]
 fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
@@ -91,7 +93,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     assert_eq!(project_copy.technology_node, "45nm");
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::ModelEditor
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ModelEditor
     );
     let draft = app
         .state

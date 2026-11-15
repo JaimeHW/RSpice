@@ -3,8 +3,10 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::examples::hierarchy_reference;
-use crate::workbench::project::configuration_state::{ConfigurationRow, instance_binding};
 use rspice_app_project::workbench::docks::inspector::project::configuration::project_configuration;
+use rspice_app_project::workbench::project::configuration_state::{
+    ConfigurationRow, instance_binding,
+};
 
 fn reference_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();

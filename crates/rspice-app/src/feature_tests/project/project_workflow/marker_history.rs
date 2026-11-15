@@ -2,8 +2,10 @@
 
 use super::*;
 use crate::workbench::app_state::services_access::confirm_revert_active_document;
-use crate::workbench::documents::result_document::{AnalysisPresentationKey, marker_anchor_for};
-use crate::workbench::lifecycle::project_lifecycle::{
+use rspice_app_results::workbench::documents::result_document::{
+    AnalysisPresentationKey, marker_anchor_for,
+};
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     DestinationAuthority, SaveScope, active_document, active_document_is_dirty,
     generated_netlist_input_digest, has_unsaved_changes, prepare_revert_active_document,
     save_native, saved_snapshot_authorizes_continuation,

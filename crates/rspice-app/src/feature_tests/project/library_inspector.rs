@@ -5,9 +5,9 @@ use egui::Ui;
 use rspice_app_state::veriloga_library::{BUILTIN_VERILOGA_MODELS, BuiltinVerilogAModel};
 
 use crate::workbench::app_state::{AppState, SlotFacts};
-use crate::workbench::lifecycle::project_lifecycle::LifecycleView;
-use crate::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::docks::inspector::project::{ProjectInspector, project_library};
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::LifecycleView;
 use rspice_app_state::state::ViewType;
 
 /// Everything the Library page's inspector announces for `state`.

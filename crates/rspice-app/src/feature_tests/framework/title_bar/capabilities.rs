@@ -4,13 +4,13 @@
 //! transient's voltages.
 
 use super::*;
-use crate::workbench::framework::requests::ClipboardImage;
 use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_state::state::{
     ComponentType, DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry,
     Point, Selection,
 };
+use rspice_app_workbench::workbench::framework::requests::ClipboardImage;
 
 /// A sheet holding objects of every kind Edit ▸ Select ▸ names, each kind's
 /// expected selection beside it.
@@ -181,9 +181,9 @@ fn zoom_previous_steps_back_through_the_views_the_canvas_showed() {
 /// sheet with its pane active, and the key of the analysis it draws.
 fn waveform_sheet_app() -> (
     RSpiceApp,
-    crate::workbench::documents::result_document::AnalysisPresentationKey,
+    rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey,
 ) {
-    use crate::workbench::documents::result_document::{
+    use rspice_app_results::workbench::documents::result_document::{
         AnalysisPresentationKey, WavePanePresentationKey,
     };
     use rspice_app_state::state::{AnalysisResult, AnalysisType, RetainedTrace};
@@ -208,7 +208,7 @@ fn waveform_sheet_app() -> (
         .expect("retained run");
     let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
     let session = &mut app.state.results.results.session;
-    session.viewer = crate::workbench::ResultViewer::Waves;
+    session.viewer = rspice_app_results::workbench::documents::result_document::ResultViewer::Waves;
     session.active_wave_pane = Some(WavePanePresentationKey {
         analysis,
         unit: "V".to_owned(),
@@ -229,7 +229,7 @@ fn results_frame(ctx: &Context, app: &mut RSpiceApp, time: f64) {
             ..Default::default()
         },
         |ui| {
-            crate::workbench::documents::result_document::show(
+            rspice_app_results::workbench::documents::result_document::show(
                 ui,
                 &mut app.state.results_parts(),
                 &mut app.simulation_controller,
@@ -249,7 +249,7 @@ fn zoom_previous_steps_a_waveform_sheet_back_through_the_views_it_showed() {
     let (mut app, analysis) = waveform_sheet_app();
     let view = |app: &RSpiceApp| {
         let pane = app.state.results.results.session.analysis_plot_view_pane(
-            crate::workbench::ResultViewer::Waves,
+            rspice_app_results::workbench::documents::result_document::ResultViewer::Waves,
             analysis,
             0,
         );

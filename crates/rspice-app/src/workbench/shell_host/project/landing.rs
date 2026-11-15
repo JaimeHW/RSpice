@@ -2,11 +2,11 @@
 
 use egui::Ui;
 
-use crate::workbench::framework::command_registry::ids;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::project::workspace_state::ProjectLauncherPage;
 use crate::workbench::{RSpiceApp, features};
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_project::workbench::project::workspace_state::ProjectLauncherPage;
 use rspice_app_project::workbench::surfaces::project::landing::{LandingAction, landing};
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 /// The landing, drawn in the project feature's context, with what the reader
 /// asked of it carried out by the shell as soon as it has drawn.
@@ -42,7 +42,7 @@ fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
             }
         }
         LandingAction::ReviewRecovery => {
-            crate::workbench::project::open_project_launcher(
+            rspice_app_project::workbench::project::open_project_launcher(
                 &mut app.state.project,
                 &mut app.state.workbench,
                 &mut app.state.platform,

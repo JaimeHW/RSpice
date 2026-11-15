@@ -9,7 +9,6 @@ use crate::workbench::app::dialogs::check_and_save_validation::{
     CheckAndSaveValidationReport, ValidationReads, run_design_checks,
 };
 use crate::workbench::app_state::AppState;
-use crate::workbench::lifecycle::project_lifecycle::LifecycleSource;
 use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::Leaving;
 use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 #[cfg(test)]
@@ -19,6 +18,7 @@ use rspice_app_project::workbench::workflows::project_workflow::report_lifecycle
 #[cfg(test)]
 use rspice_app_services::io::ProjectSnapshot;
 use rspice_app_services::services::recent_files::RecentKind;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::LifecycleSource;
 use rspice_app_state::state::workspace::{DEFAULT_PROJECT_LIBRARY, DEFAULT_TOP_CELL};
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
@@ -60,7 +60,7 @@ pub(crate) fn apply_loaded_project(
     origin: ProjectLoadOrigin<'_>,
 ) -> bool {
     let transaction =
-        match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
+        match rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(state) {
             Ok(transaction) => transaction,
             Err(error) => {
                 report_lifecycle_error(

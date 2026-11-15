@@ -2,8 +2,6 @@
 //! run's details, observed through a whole application.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::ResultViewer;
-use crate::workbench::docks::inspector::show;
 use crate::workbench::state::Workspace;
 use egui::Color32;
 use egui::Pos2;
@@ -11,7 +9,9 @@ use egui::Rect;
 use egui::Vec2;
 use rspice_app_results::workbench::docks::inspector::results::*;
 use rspice_app_results::workbench::docks::inspector::run_details;
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_workbench::ui::tokens::Tokens;
+use rspice_app_workbench::workbench::docks::inspector::show;
 use rspice_results_ui::session::PaneAxis;
 
 #[test]
@@ -329,22 +329,23 @@ pub(crate) fn waves_details_app() -> RSpiceApp {
         .simulation
         .active_run()
         .expect("retained run");
-    let analysis_key = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
-        run.dataset_id,
-        &run.analyses[0],
-    );
+    let analysis_key =
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
+            run.dataset_id,
+            &run.analyses[0],
+        );
     let selected = rspice_results_ui::selection::SelectedResultTrace::from_run_indices(run, 0, 0)
         .expect("selected retained trace");
     app.state.results.results.session.selected_trace = Some(selected);
     app.state.results.results.session.viewer = ResultViewer::Waves;
     app.state.results.results.session.active_wave_pane = Some(
-        crate::workbench::documents::result_document::WavePanePresentationKey {
+        rspice_app_results::workbench::documents::result_document::WavePanePresentationKey {
             analysis: analysis_key,
             unit: "V".to_owned(),
         },
     );
     // Y held at the 4…6 V the field showed James as `4.0000000 … 6.000`.
-    crate::workbench::documents::result_document::set_active_axis_range(
+    rspice_app_results::workbench::documents::result_document::set_active_axis_range(
         &Tokens::default(),
         &mut app.state.results_parts(),
         PaneAxis::Y,
@@ -594,7 +595,7 @@ fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
 #[test]
 fn the_waves_details_panel_keeps_every_line_inside_the_row_inset() {
     // Where the panel body starts every row's label.
-    let inset = crate::workbench::design_system::PANEL_INSET;
+    let inset = rspice_ui_kit::panels::PANEL_INSET;
     for width in [INSPECTOR_DEFAULT_WIDTH, INSPECTOR_MIN_WIDTH] {
         let mut app = waves_details_app();
         let (shapes, _) = run_inspector(&mut app, width, 2400.0);

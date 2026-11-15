@@ -67,7 +67,7 @@ fn reset_browser_test_state() {
         cancel_browser_shortcut_artifact_import(),
         BrowserShortcutArtifactImportCancelOutcome::StillOwned
     ) {
-        let _ = crate::workbench::browser::file_import::cancel_active_text_import();
+        let _ = rspice_app_services::workbench::browser::file_import::cancel_active_text_import();
     }
     BROWSER_SHORTCUT_ARTIFACT_IMPORT_RESULT.with(|slot| {
         *slot.borrow_mut() = None;
@@ -283,7 +283,7 @@ fn stale_browser_completion_cannot_replace_or_release_current_lease() {
     reset_browser_test_state();
     let stale = begin_browser_shortcut_artifact_import().expect("first lease starts");
     assert_eq!(
-        crate::workbench::browser::file_import::cancel_active_text_import(),
+        rspice_app_services::workbench::browser::file_import::cancel_active_text_import(),
         Some(stale)
     );
     let current = begin_browser_shortcut_artifact_import().expect("replacement starts");
@@ -293,7 +293,7 @@ fn stale_browser_completion_cannot_replace_or_release_current_lease() {
         Ok(ShortcutArtifactImportOutcome::Cancelled)
     ));
     assert!(poll_browser_shortcut_artifact_import().is_none());
-    assert!(crate::workbench::browser::file_import::text_import_is_current(current));
+    assert!(rspice_app_services::workbench::browser::file_import::text_import_is_current(current));
 
     assert!(complete_browser_shortcut_artifact_import(
         current,
@@ -326,12 +326,16 @@ fn owned_browser_cancel_clears_completion_and_makes_late_callback_inert() {
     ));
 
     let replacement = begin_browser_shortcut_artifact_import().expect("replacement starts");
-    assert!(crate::workbench::browser::file_import::text_import_is_current(replacement));
+    assert!(
+        rspice_app_services::workbench::browser::file_import::text_import_is_current(replacement)
+    );
     assert!(!complete_browser_shortcut_artifact_import(
         cancelled,
         Ok(ShortcutArtifactImportOutcome::Cancelled)
     ));
-    assert!(crate::workbench::browser::file_import::text_import_is_current(replacement));
+    assert!(
+        rspice_app_services::workbench::browser::file_import::text_import_is_current(replacement)
+    );
     assert_eq!(
         cancel_browser_shortcut_artifact_import(),
         BrowserShortcutArtifactImportCancelOutcome::Cancelled
@@ -342,8 +346,8 @@ fn owned_browser_cancel_clears_completion_and_makes_late_callback_inert() {
 #[test]
 fn browser_cancel_never_cancels_another_workflows_lease() {
     reset_browser_test_state();
-    let other = crate::workbench::browser::file_import::try_begin_text_import(
-        crate::workbench::browser::file_import::BrowserTextImportKind::Project,
+    let other = rspice_app_services::workbench::browser::file_import::try_begin_text_import(
+        rspice_app_services::workbench::browser::file_import::BrowserTextImportKind::Project,
     )
     .expect("other workflow starts");
 
@@ -351,10 +355,8 @@ fn browser_cancel_never_cancels_another_workflows_lease() {
         cancel_browser_shortcut_artifact_import(),
         BrowserShortcutArtifactImportCancelOutcome::AlreadyReleased
     );
-    assert!(crate::workbench::browser::file_import::text_import_is_current(other));
-    assert!(crate::workbench::browser::file_import::finish_text_import(
-        other
-    ));
+    assert!(rspice_app_services::workbench::browser::file_import::text_import_is_current(other));
+    assert!(rspice_app_services::workbench::browser::file_import::finish_text_import(other));
     reset_browser_test_state();
 }
 
@@ -363,7 +365,7 @@ fn stale_shortcut_picker_cancel_is_a_terminal_released_outcome() {
     reset_browser_test_state();
     let stale = begin_browser_shortcut_artifact_import().expect("shortcut picker starts");
     assert_eq!(
-        crate::workbench::browser::file_import::cancel_active_text_import(),
+        rspice_app_services::workbench::browser::file_import::cancel_active_text_import(),
         Some(stale)
     );
 
@@ -398,7 +400,7 @@ fn browser_read_contract_preserves_typed_limit_utf8_and_detection_failures() {
     let detection = browser_picker_result(
         VscodeHostPlatform::Linux,
         Ok(Some(
-            crate::workbench::browser::file_import::PickedTextFile {
+            rspice_app_services::workbench::browser::file_import::PickedTextFile {
                 name: "keybindings.jsonc".to_owned(),
                 contents: "[invalid]".to_owned(),
                 original_bytes: None,

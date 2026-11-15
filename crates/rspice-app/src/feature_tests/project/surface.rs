@@ -4,17 +4,17 @@
 
 use egui::{Color32, Modifiers, Rect, Ui, pos2};
 
-use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::host::{Host, Point};
-use crate::workbench::lifecycle::project_lifecycle::begin_project_replacement;
-use crate::workbench::project::ProjectFeature;
-use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
 use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, features};
+use rspice_app_project::workbench::project::ProjectFeature;
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::recovery;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement;
 use rspice_app_workbench::ui::tokens::Tokens;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
+use rspice_app_workbench::workbench::framework::host::{Host, Point};
 
 /// The Project workspace as the shell draws it on the stage.
 fn show(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -346,7 +346,8 @@ fn overview_root_actions_open_the_root_in_the_frame_they_were_clicked_in() {
 /// frame's dialogs draw, so it shows in the frame it was asked for in.
 #[test]
 fn model_paths_opens_pdk_settings_before_the_frame_draws_its_dialogs() {
-    let pdk_settings = crate::workbench::framework::dialogs::DialogKey("models.pdk_settings");
+    let pdk_settings =
+        rspice_app_workbench::workbench::framework::dialogs::DialogKey("models.pdk_settings");
     let (ctx, mut app, settled) = settled_on(ProjectPage::Dependencies);
     assert!(!features::dialog_open(&app.state, pdk_settings));
 

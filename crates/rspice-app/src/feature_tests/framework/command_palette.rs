@@ -3,15 +3,15 @@
 use egui::{Context, Id, Key, Modifiers, Order, Rect, pos2, vec2};
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::framework::command_registry::CommandSpec;
-use crate::workbench::framework::command_registry::ids;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::results::commands::ResultsCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
 use rspice_app_workbench::ui::icons::Icon;
 use rspice_app_workbench::workbench::app::command_palette::*;
+use rspice_app_workbench::workbench::framework::command_registry::CommandSpec;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 #[test]
 fn task_focused_menu_can_open_the_palette_in_an_exact_scope() {
@@ -343,7 +343,7 @@ fn test_app() -> RSpiceApp {
         last_window_title: String::new(),
         symbol_library: None,
         simulation_controller: rspice_app_runs::simulation::controller::SimulationController::new(),
-        code: crate::workbench::documents::code_workspace::CodeHandles {
+        code: rspice_app_code::workbench::documents::code_workspace::CodeHandles {
             automation_runtime:
                 rspice_app_services::automation_runtime::NativeAutomationRuntime::discover(),
             automation_runtime_project_id,
@@ -1018,13 +1018,15 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
         "resource rows do not enter command recents"
     );
 
-    app.state.results.results.session.viewer = crate::workbench::ResultViewer::Bode;
-    let hidden_strip = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
-        active_dataset_id,
-        &app.state.model.simulation.retained.runs[1].analyses[1],
-    );
+    app.state.results.results.session.viewer =
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Bode;
+    let hidden_strip =
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
+            active_dataset_id,
+            &app.state.model.simulation.retained.runs[1].analyses[1],
+        );
     let maximized_strip =
-        crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
             active_dataset_id,
             &app.state.model.simulation.retained.runs[1].analyses[0],
         );
@@ -1049,7 +1051,7 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
     assert!(app.state.model.simulation.view.data_version > version_before);
     assert_eq!(
         app.state.results.results.session.viewer,
-        crate::workbench::ResultViewer::Waves
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Waves
     );
     assert!(
         !app.state

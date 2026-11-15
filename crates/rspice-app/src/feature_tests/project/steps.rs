@@ -2,12 +2,12 @@
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::project_transactions::WholeStateValidation;
-use crate::workbench::framework::dialogs::DialogKey;
-use crate::workbench::framework::feature::{CommandSet, FeatureRegistry};
-use crate::workbench::framework::requests::Drain;
-use crate::workbench::project::ProjectFeature;
-use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
+use rspice_app_project::workbench::project::ProjectFeature;
+use rspice_app_project::workbench::project::commands::{ProjectCommand, ProjectRequest};
 use rspice_app_state::state::{Cell, Library, View, ViewType};
+use rspice_app_workbench::workbench::framework::dialogs::DialogKey;
+use rspice_app_workbench::workbench::framework::feature::{CommandSet, FeatureRegistry};
+use rspice_app_workbench::workbench::framework::requests::Drain;
 
 use super::with_cx;
 
@@ -17,8 +17,8 @@ fn design_management_route_hook_opens_and_dismisses_the_transient_dialog_owner()
     app.state
         .workbench
         .replace_route(
-            crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::DesignManagement),
-            crate::workbench::RouteTransitionSource::Restore,
+            rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::DesignManagement),
+            rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource::Restore,
         )
         .expect("Design Management route is executable");
     assert!(!app.state.project.design_management.open);
@@ -32,8 +32,10 @@ fn design_management_route_hook_opens_and_dismisses_the_transient_dialog_owner()
     app.state
         .workbench
         .replace_route(
-            crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Design),
-            crate::workbench::RouteTransitionSource::BrowserPop,
+            rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(
+                rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::Design,
+            ),
+            rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource::BrowserPop,
         )
         .expect("Design workspace route is executable");
     with_cx(

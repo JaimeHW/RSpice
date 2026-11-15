@@ -33,51 +33,14 @@
 //! `tests/module_layering.rs`, not by this file.
 pub(crate) mod app;
 pub(crate) mod app_state;
-pub(crate) mod browser {
-    //! What the browser build has to do differently.
-    //!
-    //! Navigation, file import, and download are the three places where the web
-    //! platform refuses to behave like the desktop: history is a shared mutable
-    //! stack, a file picker is asynchronous and user-gestured, and saving is a
-    //! synthesized anchor click. Each is `#[cfg]`-gated to wasm32 except the
-    //! import token, which the tests exercise on both. A tab also has no taskbar
-    //! to mark when a run ends out of sight, so it asks to notify instead; the
-    //! desktop's answer to that is always "unavailable".
-
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) use rspice_app_services::workbench::browser::accessibility;
-    #[cfg(any(test, target_arch = "wasm32"))]
-    pub(crate) use rspice_app_services::workbench::browser::file_import;
-}
 pub(crate) mod chrome {
-    pub(crate) mod document_bar {}
     pub(crate) mod status_bar {
         pub(in crate::workbench) mod shell;
-    }
-    pub(crate) mod title_bar {}
-    pub(crate) mod toolbar {
-        pub use rspice_app_workbench::workbench::chrome::toolbar::*;
     }
 }
 pub(crate) mod commands;
 pub(crate) mod diagnostic_routes;
-pub(crate) use rspice_ui_kit::panels as design_system;
 mod dispatch;
-pub(crate) mod docks {
-    pub(crate) mod inspector {
-        #[cfg(test)]
-        pub use rspice_app_workbench::workbench::docks::inspector::*;
-    }
-    pub(crate) mod navigator {
-        #[cfg(test)]
-        pub(crate) use rspice_app_workbench::workbench::docks::navigator::show;
-    }
-}
-pub(crate) mod documents {
-    pub(crate) use rspice_app_code::workbench::documents::code_workspace;
-    pub(crate) use rspice_app_code::workbench::documents::netlist_document;
-    pub(crate) use rspice_app_results::workbench::documents::result_document;
-}
 // The bundled circuits Help's Examples dialog opens as projects are model
 // logic in `rspice_app_state::workbench::examples`. The test fixtures beside
 // them build through the application's own APIs, so they stay here.
@@ -93,30 +56,9 @@ pub(crate) mod examples {
 }
 pub(crate) mod features;
 pub(crate) mod frame;
-pub(crate) mod system_contrast;
-pub(crate) use rspice_app_workbench::workbench::framework;
-pub(crate) use rspice_app_workbench::workbench::layout;
-pub(crate) mod lifecycle {
-    //! Opening, checkpointing, and recovering a working session.
-    //!
-    //! `project_lifecycle` owns the transactional document registry and the
-    //! accepted baseline; `project_checkpoint` and `recovery_checkpoint` write
-    //! the crash-recovery record; `recovery` reads it back. `window_session` is
-    //! the runtime state a restart has to reconstruct — open views, selection,
-    //! symbol editor, window bounds — none of which the project file itself
-    //! persists.
-
-    pub(crate) use rspice_app_services::workbench::lifecycle::project_lifecycle;
-    pub(crate) use rspice_app_workbench::workbench::lifecycle::window_session;
-}
-use rspice_app_workbench::workbench::localization;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
-pub(crate) use rspice_app_models::workbench::models;
-pub(crate) use rspice_app_project::workbench::project;
-pub(crate) use rspice_app_results::workbench::results;
-pub(crate) use rspice_app_state::workbench::preferences;
-pub(crate) use rspice_app_workbench::workbench::routing;
+pub(crate) mod system_contrast;
 /// The shell's transactions over the whole project, run where a feature's
 /// work asks for one.
 pub(crate) mod session {
@@ -124,38 +66,10 @@ pub(crate) mod session {
     pub(crate) mod project_transactions;
 }
 pub(crate) mod shell_host;
-pub(crate) use rspice_app_simulate::workbench::simulate;
 pub(crate) mod slots;
 pub(crate) mod state;
-pub(crate) mod surfaces {}
 pub(crate) mod workflows;
 
-pub use documents::result_document::ResultViewer;
-pub use lifecycle::window_session::ApplicationWindowId;
-#[cfg(test)]
-pub(crate) use localization::MessageCatalog;
-pub(crate) use localization::MessageId;
-pub use localization::UiTextLocale;
-#[cfg(test)]
-pub use preferences::ChoicePreference;
-#[cfg(test)]
-pub(crate) use preferences::DrawingSheetPersonalPreferences;
-pub use preferences::{
-    BackgroundTaskAttention, TogglePreference, WorkspacePreferences, WorkspacePreset,
-};
-#[cfg(test)]
-pub use preferences::{
-    ConsoleLaunchBehavior, FolderListPreference, ScalarPreference, UserPreferences,
-};
-#[cfg(any(test, target_arch = "wasm32"))]
-pub use routing::navigation::BrowserHistoryEffect;
-pub use routing::navigation::{RouteTransitionSource, SurfaceNavigation};
-pub use routing::surface_catalog::{SurfaceArchetype, SurfaceId};
-pub use routing::surface_route::SurfaceRoute;
-#[cfg(test)]
-pub use rspice_design::symbol::edit::SymbolCommitIntent;
-#[cfg(test)]
-pub(crate) use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 pub use state::WorkbenchSession;
 
 pub use app::RSpiceApp;

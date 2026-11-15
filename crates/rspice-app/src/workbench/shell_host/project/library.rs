@@ -2,9 +2,9 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::features::{self, render_dialog};
-use crate::workbench::framework::dialogs::DialogKey;
 use egui::Ui;
 use rspice_app_project::workbench::surfaces::project::library::page;
+use rspice_app_workbench::workbench::framework::dialogs::DialogKey;
 
 /// The Library page as the shell composes it: the page in the project
 /// feature's context, with what it raised answered as it returns, then its

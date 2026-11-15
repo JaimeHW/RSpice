@@ -30,9 +30,9 @@ mod surface;
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::feature::{Cx, LowerHandles, Peers};
-use crate::workbench::project::ProjectFeature;
+use rspice_app_project::workbench::project::ProjectFeature;
 use rspice_app_project::workbench::surfaces::project::library_publication;
+use rspice_app_workbench::workbench::framework::feature::{Cx, LowerHandles, Peers};
 
 /// Runs `call` in the project feature's context over `app`, lending it the
 /// application's parts as the frame does.

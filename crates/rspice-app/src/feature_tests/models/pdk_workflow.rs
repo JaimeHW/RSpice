@@ -3,10 +3,10 @@
 //! application's project history step.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::models::pdk_workflow::{
+use rspice_app_models::workbench::models::pdk_workflow::{
     apply_pdk_configuration_with_persistence, configured_root,
 };
-use crate::workbench::models::tests::harness;
+use rspice_app_models::workbench::models::tests::harness;
 use rspice_app_state::state::pdk_config::PdkConfig;
 
 #[test]

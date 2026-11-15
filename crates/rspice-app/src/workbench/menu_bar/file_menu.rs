@@ -2,9 +2,9 @@
 //! exports and application exit. Rendering lives in the workbench title bar.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::framework::feature::ModelsPort;
 use rspice_app_services::io::FileWorkflowIo;
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
+use rspice_app_workbench::workbench::framework::feature::ModelsPort;
 
 /// Every action reachable from the File menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,7 +51,7 @@ pub(crate) fn dispatch_file_menu_action(
         }
         FileMenuAction::SaveAll => {
             state.save_project_scope(
-                crate::workbench::lifecycle::project_lifecycle::SaveScope::AllDocuments,
+                rspice_app_services::workbench::lifecycle::project_lifecycle::SaveScope::AllDocuments,
             );
         }
         FileMenuAction::RevertActiveDocument => {
@@ -79,7 +79,7 @@ pub(crate) fn dispatch_file_menu_action(
         FileMenuAction::Save => {
             if state.platform.project_lifecycle.is_open() {
                 let _ = state.save_project_scope(
-                    crate::workbench::lifecycle::project_lifecycle::SaveScope::ActiveDocument,
+                    rspice_app_services::workbench::lifecycle::project_lifecycle::SaveScope::ActiveDocument,
                 );
             } else {
                 let _ = crate::workbench::workflows::file_actions::action_file_save_with_io(
@@ -126,7 +126,7 @@ pub(crate) fn dispatch_file_menu_action(
 }
 
 fn require_save_confirmation_if_dirty(state: &mut AppState, action: ConfirmationAction) -> bool {
-    if !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
+    if !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
         return false;
     }
 
@@ -173,7 +173,7 @@ fn require_project_save_confirmation_if_dirty(
     ) {
         return true;
     }
-    if !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
+    if !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
         && !ModelsPort::model_editor_has_unsaved_changes(&*state.models)
     {
         return false;

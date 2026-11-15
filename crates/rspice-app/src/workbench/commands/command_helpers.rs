@@ -1,31 +1,34 @@
 //! Command-dispatch helpers that apply concrete workbench state transitions.
 
 use super::*;
-use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
-use crate::workbench::framework::feature::ModelsPort;
-use crate::workbench::framework::requests::ProjectFileAction;
-use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
-use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::session::project_transactions::go_on_leaving;
 use crate::workbench::session::project_transactions::{
     apply_workspace_pruned, void_veriloga_evidence,
 };
 use rspice_app_code::workbench::code::commands::CodeHandOff;
+use rspice_app_code::workbench::documents::code_workspace::persist_global_veriloga_library;
 use rspice_app_design::workbench::app::actions::workspace::{
     HistoryStepParts, project_step_comes_first, take_history_step,
 };
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::Leaving;
 use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
+use rspice_app_project::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::state::ViewType;
+use rspice_app_workbench::workbench::framework::feature::ModelsPort;
+use rspice_app_workbench::workbench::framework::requests::ProjectFileAction;
 
 pub(super) fn open_command_palette(state: &mut AppState) {
-    let route = super::super::SurfaceRoute::surface(super::super::SurfaceId::CommandPalette);
+    let route = rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::CommandPalette,
+    );
     if state.workbench.current_route() != route
-        && let Err(error) = state
-            .workbench
-            .navigate(route, super::super::RouteTransitionSource::User)
+        && let Err(error) = state.workbench.navigate(
+            route,
+            rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource::User,
+        )
     {
         state.prompt(format!("The Command Palette could not be opened: {error}"));
         return;
@@ -34,11 +37,14 @@ pub(super) fn open_command_palette(state: &mut AppState) {
 }
 
 pub(super) fn open_help_center(state: &mut AppState, page: crate::workbench::app::HelpCenterPage) {
-    let route = super::super::SurfaceRoute::surface(super::super::SurfaceId::HelpCenter);
+    let route = rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::HelpCenter,
+    );
     if state.workbench.current_route() != route
-        && let Err(error) = state
-            .workbench
-            .navigate(route, super::super::RouteTransitionSource::User)
+        && let Err(error) = state.workbench.navigate(
+            route,
+            rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource::User,
+        )
     {
         state.prompt(format!("The Help Center could not be opened: {error}"));
         return;
@@ -76,11 +82,11 @@ fn drawing_step_name(app: &RSpiceApp, undo: bool) -> Option<&str> {
     let state = &app.state;
     let netlist = netlist_page_is_visible(state)
         && if undo {
-            crate::workbench::documents::netlist_document::can_undo_netlist_edit(
+            rspice_app_code::workbench::documents::netlist_document::can_undo_netlist_edit(
                 &state.code.netlist,
             )
         } else {
-            crate::workbench::documents::netlist_document::can_redo_netlist_edit(
+            rspice_app_code::workbench::documents::netlist_document::can_redo_netlist_edit(
                 &state.code.netlist,
             )
         };
@@ -134,7 +140,7 @@ fn lower_first_word(text: &str) -> String {
 }
 
 pub(super) fn netlist_page_is_visible(state: &crate::workbench::AppState) -> bool {
-    crate::workbench::documents::code_workspace::netlist_page_shown(
+    rspice_app_code::workbench::documents::code_workspace::netlist_page_shown(
         state.workbench.workspace,
         &state.code.code_workspace,
     )
@@ -199,12 +205,12 @@ pub(super) fn netlist_history_steps(
     netlist_page_is_visible(state)
         && match direction {
             HistoryDirection::Undo => {
-                crate::workbench::documents::netlist_document::can_undo_netlist_edit(
+                rspice_app_code::workbench::documents::netlist_document::can_undo_netlist_edit(
                     &state.code.netlist,
                 )
             }
             HistoryDirection::Redo => {
-                crate::workbench::documents::netlist_document::can_redo_netlist_edit(
+                rspice_app_code::workbench::documents::netlist_document::can_redo_netlist_edit(
                     &state.code.netlist,
                 )
             }

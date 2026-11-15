@@ -1,7 +1,7 @@
 //! Full-screen state transitions shared by commands and platform events.
 
 use super::AppState;
-use crate::workbench::framework::requests::FullScreen;
+use rspice_app_workbench::workbench::framework::requests::FullScreen;
 
 impl AppState {
     /// Put the application window into full screen, keeping the panels the reader

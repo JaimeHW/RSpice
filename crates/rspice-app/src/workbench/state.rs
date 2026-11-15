@@ -47,8 +47,12 @@ pub use rspice_app_state::workbench::workspace::Workspace;
 
 // What the session tests name the routes and presets by.
 #[cfg(test)]
-use super::{
-    BrowserHistoryEffect, RouteTransitionSource, SurfaceId, SurfaceRoute, WorkspacePreset,
+use rspice_app_state::workbench::preferences::WorkspacePreset;
+#[cfg(test)]
+use rspice_app_workbench::workbench::routing::{
+    navigation::{BrowserHistoryEffect, RouteTransitionSource},
+    surface_catalog::SurfaceId,
+    surface_route::SurfaceRoute,
 };
 
 #[cfg(test)]

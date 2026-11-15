@@ -51,10 +51,11 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
             .unwrap();
     let digest = snapshot.digest();
     let generation =
-        crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
+        rspice_app_services::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
             .unwrap();
     let source = snapshot.executable_netlist().to_owned();
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let project =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let loaded = rspice_app_services::io::project_io::load_project_text(
         &rspice_app_services::io::project_io::serialize_project_file(&project).unwrap(),
         None,
@@ -83,7 +84,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     assert_eq!(changed.executable_netlist(), source);
     assert_ne!(changed.digest(), digest);
     assert_ne!(
-        crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
+        rspice_app_services::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
             .unwrap(),
         generation
     );
@@ -162,7 +163,7 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .unwrap();
     let baseline_generation =
-        crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
+        rspice_app_services::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
             .unwrap();
     let mut definitions = vec![
         definition(
@@ -194,7 +195,7 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         SimulationController::prepare_design_netlist_for_inspection(&state.model).unwrap();
     assert_ne!(
         baseline_generation,
-        crate::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
+        rspice_app_services::workbench::lifecycle::project_lifecycle::generated_netlist_input_digest(&state)
             .unwrap()
     );
     for definition in &definitions {
@@ -235,7 +236,8 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         );
         assert_eq!(observed.passed, name != "average");
     }
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let project =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let json = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
     let loaded = rspice_app_services::io::project_io::load_project_text(&json, None).unwrap();
     assert_eq!(

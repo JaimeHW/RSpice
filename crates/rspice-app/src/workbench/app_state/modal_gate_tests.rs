@@ -9,7 +9,9 @@
 
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
-use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+use rspice_app_workbench::workbench::routing::{
+    navigation::RouteTransitionSource, surface_catalog::SurfaceId, surface_route::SurfaceRoute,
+};
 
 fn navigate(state: &mut AppState, surface: SurfaceId) {
     state
@@ -55,7 +57,7 @@ const APPLICATION_GATE: &[GateRow] = &[
     }),
     ("workbench.models_view.dialog", |state| {
         state.models.models_view.dialog = Some(
-            crate::workbench::models::workspace_state::ModelsWorkbenchDialog::SourcePreview {
+            rspice_app_models::workbench::models::workspace_state::ModelsWorkbenchDialog::SourcePreview {
                 title: "nch".to_owned(),
                 subtitle: "foundation.lib".to_owned(),
                 source: ".model nch nmos".to_owned(),
@@ -162,7 +164,7 @@ const OUTSIDE_THE_APPLICATION_GATE: &[GateRow] = &[
     }),
     ("ui.code_workspace.veriloga.import_form", |state| {
         state.code.code_workspace.veriloga.import_form = Some(
-            crate::workbench::documents::code_workspace::VerilogAImportFormState {
+            rspice_app_code::workbench::documents::code_workspace::VerilogAImportFormState {
                 project_id: state.model.workspace.content.project.id(),
                 file_name: "gain.va".to_owned(),
                 files: std::collections::BTreeMap::new(),

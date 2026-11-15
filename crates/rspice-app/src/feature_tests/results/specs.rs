@@ -4,7 +4,7 @@
 //! scrolls it into view.
 
 use crate::workbench::AppState;
-use crate::workbench::documents::result_document::specs::show;
+use rspice_app_results::workbench::documents::result_document::specs::show;
 use rspice_app_state::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_state::state::{SimulationRunLifecycle, SpecPointScope};

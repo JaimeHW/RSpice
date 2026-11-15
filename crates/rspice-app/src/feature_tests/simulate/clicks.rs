@@ -116,7 +116,7 @@ impl Studio {
 
     /// One rendered pass, and the controls it published.
     fn pass(&mut self, events: Vec<egui::Event>) {
-        use crate::workbench::layout::LayoutSpec;
+        use rspice_app_workbench::workbench::layout::LayoutSpec;
 
         let app = &mut self.app;
         let shell = self.shell;
@@ -651,7 +651,7 @@ fn the_editor_clones_reorders_and_removes_the_instance_it_is_open_on() {
 #[test]
 fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_new_instance() {
     use crate::workbench::commands::vocabulary::command_registry;
-    use crate::workbench::simulate::commands::SimulateCommand;
+    use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 
     let app = RSpiceApp::test_instance();
     let before = app

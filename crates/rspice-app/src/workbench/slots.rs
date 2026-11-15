@@ -45,7 +45,7 @@ impl AppState {
     /// that is both current and deterministic at that point in the frame.
     /// The shell lists what the dialog gate counts.
     pub(crate) fn dialog_modal_open(&self) -> bool {
-        crate::workbench::framework::dialogs::dialog_modal_open(self)
+        rspice_app_workbench::workbench::framework::dialogs::dialog_modal_open(self)
     }
 }
 

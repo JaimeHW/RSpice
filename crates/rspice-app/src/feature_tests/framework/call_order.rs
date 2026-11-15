@@ -62,9 +62,9 @@ const UI: &[Step] = &[
         "9",
         &[
             "framework::requests::drain(self,",
-            "ClipboardText(text)| ctx.copy_text(text)",
+            "ClipboardText(text)| { ctx.copy_text(text)",
             "framework::requests::drain(self,",
-            "ClipboardImage(image)| ctx.copy_image(image)",
+            "ClipboardImage(image)| { ctx.copy_image(image)",
         ],
     ),
     ("10", &["autosave::autosave_tick("]),
@@ -123,7 +123,7 @@ const PREPARE_FRAME: &[Step] = &[
     ("5.21", &["self.handle_shortcuts(ctx)"]),
     (
         "5.22",
-        &["file_import::register_text_import_repaint_context(ctx)"],
+        &["file_import::register_text_import_repaint_context(ctx,)"],
     ),
     (
         "5.23",
@@ -244,7 +244,7 @@ const SHOW: &[Step] = &[
     (
         "11.24",
         &[
-            "crate::workbench::project::open_project_launcher(",
+            "rspice_app_project::workbench::project::open_project_launcher(",
             "shell_host::project::launcher::show(ctx, app)",
         ],
     ),
@@ -498,7 +498,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "7",
         &[
             "|app, SelectAnalysisInstance(instance)|",
-            "crate::workbench::simulate::select_analysis_instance(",
+            "rspice_app_simulate::workbench::simulate::select_analysis_instance(",
             "&mut app.state.simulate,",
         ],
     ),
@@ -507,7 +507,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         &[
             "|app, RevealExecutedDeck { seq, close_manager_on_success, }|",
             "if open_task_deck(&mut app.state, seq) && close_manager_on_success {",
-            "crate::workbench::simulate::close_jobs_manager(&mut app.state.workbench);",
+            "rspice_app_simulate::workbench::simulate::close_jobs_manager(&mut app.state.workbench,);",
         ],
     ),
     (
@@ -533,7 +533,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "8.3",
         &[
             "|app, StageComponentTuning { component_id }|",
-            "crate::workbench::simulate::SimulateFeature::stage_component_tuning(",
+            "rspice_app_simulate::workbench::simulate::SimulateFeature::stage_component_tuning(",
             "app.execute_command_key(ids::TUNING);",
         ],
     ),
@@ -550,7 +550,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "10",
         &[
             "|app, SetFamilyFilter(filter)|",
-            "crate::workbench::documents::result_document::set_family_filter(",
+            "rspice_app_results::workbench::documents::result_document::set_family_filter(",
         ],
     ),
     (
@@ -651,7 +651,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         &[
             "|app,",
             "ConfirmPackAttach {",
-            "crate::workbench::models::ModelsFeature::confirm_pack_attach(",
+            "rspice_app_models::workbench::models::ModelsFeature::confirm_pack_attach(",
             "&mut features::cx(app),",
             "app.execute_command_key(ids::MODELS_CATALOG);",
         ],
@@ -660,7 +660,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "20",
         &[
             "|app, RevealModel { library, model }|",
-            "crate::workbench::models::ModelsFeature::reveal_model(",
+            "rspice_app_models::workbench::models::ModelsFeature::reveal_model(",
             "&mut features::cx(app),",
         ],
     ),
@@ -740,19 +740,23 @@ const RESULTS_CONTRIBUTIONS: &[Step] = &[
 const MODELS_CONTRIBUTIONS: &[Step] = &[
     (
         "model editor route",
-        &["== super::SurfaceId::ModelEditor\
+        &[
+            "== rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ModelEditor\
            {\
            ModelsFeature::show_model_editor(&mut features::cx(app), ui);\
            return;\
-           }"],
+           }",
+        ],
     ),
     (
         "measurement correlation route",
-        &["== super::SurfaceId::ModelCorrelation\
+        &[
+            "== rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ModelCorrelation\
            {\
            ModelsFeature::show_model_correlation(&mut features::cx(app), ui);\
            return;\
-           }"],
+           }",
+        ],
     ),
     (
         "workspace surface",
@@ -905,7 +909,7 @@ const SIMULATE_CONTRIBUTIONS: &[Step] = &[
     (
         "trailing",
         &["Point::Toolbar(ToolbarSlot::Trailing, layout) => {\
-           crate::workbench::simulate::chrome::show_trailing(\
+           rspice_app_simulate::workbench::simulate::chrome::show_trailing(\
            &mut features::cx_with_foreign_answers(app, |_| true),\
            ui,\
            layout,\
@@ -974,7 +978,7 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
             "Workspace::Netlist => {\
          features::show_inspector_reading::<CodeFeature>(app, ui, |app| {\
          app.state.code.code_workspace.page\
-         == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist\
+         == rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist\
          });\
          app.after_contribution();\
          }",
@@ -997,7 +1001,8 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
 const PROJECT_CONTRIBUTIONS: &[Step] = &[
     (
         "library and cellview manager route",
-        &["== super::SurfaceId::LibraryCellviewManager\
+        &[
+            "== rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::LibraryCellviewManager\
            {\
            let ctx = ui.ctx().clone();\
            let page = library_cellview_manager::show(ui, &mut features::cx(app));\
@@ -1007,7 +1012,8 @@ const PROJECT_CONTRIBUTIONS: &[Step] = &[
            app.after_contribution();\
            }\
            return;\
-           }"],
+           }",
+        ],
     ),
     (
         "workspace surface",
@@ -1216,7 +1222,7 @@ const END_FRAME: &[Step] = &[
 const SYNC_WINDOW_TITLE: &[Step] = &[
     (
         "5.33.1",
-        &["project_lifecycle::has_unsaved_changes(&self.state)"],
+        &["project_lifecycle::has_unsaved_changes(&self.state,)"],
     ),
     (
         "5.33.2",
@@ -1541,7 +1547,7 @@ fn the_frame_dialogs_draw_in_todays_order() {
     let walk = body(APP, "fn render_frame_dialogs(");
     assert_eq!(
         top_level_calls(&walk),
-        ["framework::dialogs::render"],
+        ["rspice_app_workbench::workbench::framework::dialogs::render"],
         "the frame's dialogs are one walk and nothing else"
     );
     assert!(
@@ -2361,7 +2367,7 @@ fn the_project_feature_takes_the_browser_project_import_where_the_frame_did() {
     assert_eq!(
         without_whitespace(&body(FRAME, "fn poll_browser_project_import(")),
         without_whitespace(
-            "use crate::workbench::project::ProjectFeature;\
+            "use rspice_app_project::workbench::project::ProjectFeature;\
              ProjectFeature::poll_browser_project_import(&mut features::cx(self))"
         ),
         "the frame's browser project import step runs in the project feature's context, \

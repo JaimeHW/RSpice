@@ -42,7 +42,7 @@ fn find_dialog_names(app: &mut RSpiceApp) -> Vec<String> {
 fn a_read_only_deck_is_found_in_but_offers_no_replace() {
     let mut app = RSpiceApp::test_instance();
     app.state.code.code_workspace.page =
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     app.state.code.netlist.find.open = true;
     let names = find_dialog_names(&mut app);
     let says = |text: &str| names.iter().any(|name| name == text);
@@ -55,13 +55,13 @@ fn a_read_only_deck_is_found_in_but_offers_no_replace() {
         "a second status line in the body"
     );
 
-    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
+    rspice_app_code::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
         &app.state.model,
         &mut app.state.code.netlist,
-        crate::workbench::documents::code_workspace::CodeSourceFileAction::New,
+        rspice_app_code::workbench::documents::code_workspace::CodeSourceFileAction::New,
     )
     .unwrap();
-    crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
+    rspice_app_code::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
         &mut app.state.model,
         &mut app.state.code.netlist,
         &mut app.state.code.netlist_open_documents,
@@ -84,7 +84,7 @@ fn the_find_field_is_as_tall_as_the_scope_select() {
     for coarse in [false, true] {
         let mut app = RSpiceApp::test_instance();
         app.state.code.code_workspace.page =
-            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+            rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
         app.state.code.netlist.find.open = true;
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
@@ -133,7 +133,7 @@ fn the_options_start_where_the_fields_do() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.code.code_workspace.page =
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     app.state.code.netlist.find.open = true;
     let ctx = egui::Context::default();
     ctx.enable_accesskit();

@@ -6,19 +6,20 @@
 use egui::accesskit::Role;
 use egui::{Context, Key, Modifiers};
 
-use crate::workbench::project::ProjectFeature;
-use crate::workbench::project::commands::ProjectRequest;
-use crate::workbench::project::library_dialogs::new_view::{
+use crate::workbench::RSpiceApp;
+use rspice_app_project::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
+use rspice_app_project::workbench::project::ProjectFeature;
+use rspice_app_project::workbench::project::commands::ProjectRequest;
+use rspice_app_project::workbench::project::library_dialogs::new_view::{
     CREATABLE_VIEW_TYPES, NEW_VIEW_NAME_MISSING, NameLine, create_new_view, new_view_name_line,
     seeded_symbol_view, view_type_label,
 };
-use crate::workbench::{ChoicePreference, RSpiceApp};
-use rspice_app_project::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
 use rspice_app_state::state::{
     Cell, CellViewRef, ComponentType, Library, NetNamingPolicy, Point, PortDirection, PortSpec,
     ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, SchematicState, SymbolDocument,
     SymbolPin, View, ViewType,
 };
+use rspice_app_state::workbench::preferences::ChoicePreference;
 
 use super::super::replay::Replay;
 use super::{in_front, published, shown, with_cx};
@@ -385,7 +386,7 @@ fn creating_layout_view_atomically_retains_exact_pdk_document_and_opens_it() {
         app.state.workbench.workspace,
         crate::workbench::state::Workspace::Design
     );
-    crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state)
+    rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&app.state)
         .expect("created Layout view and document validate as one project transaction");
 }
 
@@ -554,12 +555,14 @@ fn creating_veriloga_view_atomically_retains_contract_and_opens_exact_editor() {
     );
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::Design,
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::Design,
         "reached through navigation, not by writing the workspace"
     );
     let selected =
-        crate::workbench::documents::code_workspace::selected_veriloga_source_in(&app.state.model)
-            .unwrap();
+        rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
+            &app.state.model,
+        )
+        .unwrap();
     assert_eq!(selected.bundle().id(), bundle.id());
     assert_eq!(selected.selected_module(), Some("precision_amp"));
     assert!(selected.bundle().validation_is_current());

@@ -464,11 +464,13 @@ mod shortcut_ownership_tests {
         let mut app = RSpiceApp::test_instance();
         assert!(!app.state.results.results.session.linked_cursors);
         app.execute_command_key(
-            crate::workbench::results::commands::ResultsCommand::ToggleLinkedCursors.key(),
+            rspice_app_results::workbench::results::commands::ResultsCommand::ToggleLinkedCursors
+                .key(),
         );
         assert!(app.state.results.results.session.linked_cursors);
         app.execute_command_key(
-            crate::workbench::results::commands::ResultsCommand::ToggleLinkedCursors.key(),
+            rspice_app_results::workbench::results::commands::ResultsCommand::ToggleLinkedCursors
+                .key(),
         );
         assert!(!app.state.results.results.session.linked_cursors);
     }
@@ -499,7 +501,7 @@ mod shortcut_ownership_tests {
 
         app.execute_shortcut_command(ShortcutCommand::Copy);
 
-        use crate::workbench::framework::requests::ClipboardText;
+        use rspice_app_workbench::workbench::framework::requests::ClipboardText;
         let ClipboardText(copied) = app
             .state
             .workbench
@@ -709,7 +711,7 @@ mod symbol_action_tests {
         app.execute_command_key(DesignCommand::SymbolPinTool.key());
         assert_eq!(
             app.state.design.symbol.editor.tool,
-            crate::workbench::SymbolTool::PlacePin
+            rspice_schematic_editor::symbol_editor::session::SymbolTool::PlacePin
         );
         assert_eq!(
             app.state.design.symbol.editor.selected_pin.as_deref(),
@@ -720,30 +722,30 @@ mod symbol_action_tests {
         app.execute_command_key(DesignCommand::SymbolPolylineTool.key());
         assert_eq!(
             app.state.design.symbol.editor.tool,
-            crate::workbench::SymbolTool::Line
+            rspice_schematic_editor::symbol_editor::session::SymbolTool::Line
         );
         assert!(app.state.design.symbol.editor.pending_polyline.is_empty());
 
         for (command, expected) in [
             (
                 DesignCommand::SymbolRectangleTool,
-                crate::workbench::SymbolTool::Rectangle,
+                rspice_schematic_editor::symbol_editor::session::SymbolTool::Rectangle,
             ),
             (
                 DesignCommand::SymbolCircleTool,
-                crate::workbench::SymbolTool::Circle,
+                rspice_schematic_editor::symbol_editor::session::SymbolTool::Circle,
             ),
             (
                 DesignCommand::SymbolArcTool,
-                crate::workbench::SymbolTool::Arc,
+                rspice_schematic_editor::symbol_editor::session::SymbolTool::Arc,
             ),
             (
                 DesignCommand::SymbolPolygonTool,
-                crate::workbench::SymbolTool::Polygon,
+                rspice_schematic_editor::symbol_editor::session::SymbolTool::Polygon,
             ),
             (
                 DesignCommand::SymbolTextTool,
-                crate::workbench::SymbolTool::Text,
+                rspice_schematic_editor::symbol_editor::session::SymbolTool::Text,
             ),
         ] {
             app.state.design.symbol.editor.shape_start = Some(Point::new(10, 10));
@@ -762,7 +764,7 @@ mod symbol_action_tests {
         app.execute_command_key(select);
         assert_eq!(
             app.state.design.symbol.editor.tool,
-            crate::workbench::SymbolTool::Select
+            rspice_schematic_editor::symbol_editor::session::SymbolTool::Select
         );
 
         app.state.design.symbol.editor.needs_fit = false;

@@ -14,7 +14,7 @@ use rspice_app_code::workbench::code::commands::CodeCommand;
 /// then appeared unprompted when the user navigated back.
 #[test]
 fn netlist_document_commands_are_not_offered_from_the_sibling_code_pages() {
-    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+    use rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage;
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Netlist;
@@ -41,7 +41,7 @@ fn netlist_document_commands_are_not_offered_from_the_sibling_code_pages() {
 /// netlist-only for exactly as long as the bundle search had no surface.
 #[test]
 fn find_opens_the_window_the_visible_code_page_owns() {
-    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+    use rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage;
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Netlist;
@@ -123,7 +123,7 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::Design
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::Design
     );
     assert_eq!(app.state.model.workspace.content.active_view, reference);
     assert_eq!(app.state.code.code_workspace.page, page_before);

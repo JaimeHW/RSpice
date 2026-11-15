@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::CommandFlags;
+use rspice_app_workbench::workbench::framework::command_registry::CommandFlags;
 
 #[test]
 fn drawing_sheet_file_commands_keep_the_canonical_palette_identities() {

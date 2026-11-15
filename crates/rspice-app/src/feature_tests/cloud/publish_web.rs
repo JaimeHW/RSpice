@@ -4,11 +4,11 @@
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::framework::feature::PublicationDraft;
 use rspice_app_cloud::services::cloud_account::{
     CLOUD_PUBLISHING_FEATURE, CloudAccountAvailability, PublishState,
 };
 use rspice_app_cloud::workbench::app::dialogs::publish_web::*;
+use rspice_app_workbench::workbench::framework::feature::PublicationDraft;
 
 /// What a review build reads, lent from the whole state.
 fn snapshot_source(state: &AppState) -> SnapshotSource<'_> {

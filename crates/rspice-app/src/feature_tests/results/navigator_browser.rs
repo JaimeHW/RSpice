@@ -3,7 +3,6 @@
 //! are on desktop and touch.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::documents::result_document::AnalysisPresentationKey;
 use crate::workbench::state::Workspace;
 use rspice_app_results::workbench::docks::navigator::results_actions::{
     select_result_analysis, select_result_dataset, select_result_signal,
@@ -13,6 +12,7 @@ use rspice_app_results::workbench::docks::navigator::results_rows::{
     responsive_result_control_height,
 };
 use rspice_app_results::workbench::docks::navigator::{results, results_actions, results_rows};
+use rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey;
 use rspice_app_state::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace, SimulationRun,
 };
@@ -275,7 +275,7 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
         .valid_selected_trace(&app.state.model.simulation)
         .expect("signal selection resolves against the active dataset");
     assert_eq!(selected.source_name(), "V(out)");
-    crate::workbench::documents::result_document::prepare_viewer_state(
+    rspice_app_results::workbench::documents::result_document::prepare_viewer_state(
         &mut app.state.results_parts(),
     );
     assert_eq!(
@@ -523,7 +523,7 @@ fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
     );
-    let tsv = crate::workbench::documents::result_document::exact_result_signal_tsv(
+    let tsv = rspice_app_results::workbench::documents::result_document::exact_result_signal_tsv(
         &key,
         &app.state.model.simulation.retained.runs,
     )
@@ -542,7 +542,7 @@ fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
             copied_value_format,
             ..QuantityPresentationPolicy::default()
         };
-        crate::workbench::documents::result_document::exact_result_signal_last_sample(
+        rspice_app_results::workbench::documents::result_document::exact_result_signal_last_sample(
             &key,
             &app.state.model.simulation.retained.runs,
             policy,
@@ -568,7 +568,7 @@ fn exact_browser_copy_fails_closed_on_incoherent_vectors() {
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
     );
-    let error = crate::workbench::documents::result_document::exact_result_signal_tsv(
+    let error = rspice_app_results::workbench::documents::result_document::exact_result_signal_tsv(
         &key,
         &app.state.model.simulation.retained.runs,
     )
@@ -648,9 +648,9 @@ fn browser_kind_facet_admits_only_its_declared_inventory_classes() {
 /// read integrity and completeness as two verdicts on the same evidence check.
 #[test]
 fn analysis_data_state_merges_one_reading_worst_first() {
-    use crate::workbench::documents::result_document::operational_state::ResultCurrentness;
     use results::result_analysis_data_state;
     use results_rows::ResultCompletenessClass;
+    use rspice_app_results::workbench::documents::result_document::operational_state::ResultCurrentness;
 
     let word =
         |currentness, completeness| result_analysis_data_state(currentness, completeness).word;
@@ -765,11 +765,12 @@ fn typed_scalar_payload_is_a_stable_exact_browser_artifact() {
     assert_eq!(artifact.kind, results::ResultArtifactKind::Scalar);
 
     let key = ResultArtifactPresentationKey::new(presentation, "payload/scalar-measurements");
-    let exact = crate::workbench::documents::result_document::exact_result_artifact_text(
-        &key,
-        std::slice::from_ref(&run),
-    )
-    .expect("typed scalar exact adapter resolves");
+    let exact =
+        rspice_app_results::workbench::documents::result_document::exact_result_artifact_text(
+            &key,
+            std::slice::from_ref(&run),
+        )
+        .expect("typed scalar exact adapter resolves");
     assert!(exact.contains("# rspice-result-artifact-v1"));
     assert!(exact.contains("analysis-result-payload-v1"));
     assert!(exact.contains("settling_time"));
@@ -777,7 +778,7 @@ fn typed_scalar_payload_is_a_stable_exact_browser_artifact() {
 
     let selected = ResultBrowserSelectionKey::Artifact(key);
     let bundle =
-        crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
+        rspice_app_results::workbench::documents::result_document::exact_result_browser_selection_bundle(
             &[selected],
             &[run],
         )
@@ -862,7 +863,10 @@ fn periodic_payload_artifacts_report_their_counts_and_verdicts() {
         assert_eq!(artifact.name, expected_name);
         assert_eq!(artifact.kind, results::ResultArtifactKind::Array);
         assert_eq!(artifact.meta, "0 values");
-        assert_eq!(artifact.viewer, crate::workbench::ResultViewer::Table);
+        assert_eq!(
+            artifact.viewer,
+            rspice_app_results::workbench::documents::result_document::ResultViewer::Table
+        );
         let value = artifact.value.as_deref().unwrap();
         assert!(value.starts_with(&format!("0 {noun}")), "{value}");
         assert!(value.contains(" · driven orbit · stable"), "{value}");

@@ -893,7 +893,7 @@ fn every_expression_editor_handoff_opens_the_surface_it_names() {
     app.after_contribution();
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::Results,
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::Results,
         "Add measurement draws over the result viewer, so the hand-off has to arrive there \
          rather than leave the reader on this page"
     );

@@ -7,10 +7,11 @@ use rspice_app_state::state::{Point, SchematicState, Tool};
 
 #[test]
 fn symbol_draft_survives_passive_window_projection() {
-    use crate::workbench::{SymbolTool, state::WorkspaceDocumentId};
+    use crate::workbench::state::WorkspaceDocumentId;
     use rspice_app_state::state::{
         Cell, CellViewRef, SymbolDocument, SymbolEditorMetadata, SymbolShape, View, ViewType,
     };
+    use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
     let mut failures = Vec::new();
     for other_is_symbol in [false, true] {
@@ -258,8 +259,10 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
             .app
             .state
             .reconcile_schematic_drag(&fixture.ctx, true);
-        let snapshot =
-            crate::workbench::lifecycle::project_lifecycle::snapshot(&fixture.app.state).unwrap();
+        let snapshot = rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(
+            &fixture.app.state,
+        )
+        .unwrap();
         assert_eq!(
             snapshot.file.workspace.schematic_buffers[&original.key()]
                 .document()

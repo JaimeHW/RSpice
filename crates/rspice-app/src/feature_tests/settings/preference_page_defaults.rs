@@ -1,16 +1,16 @@
 //! The Preferences pages' shipped values, defaults and search over a whole application.
 
 use crate::feature_tests::settings::preferences_dialogs;
-use crate::workbench::ChoicePreference;
-use crate::workbench::ConsoleLaunchBehavior;
-use crate::workbench::FolderListPreference;
 use crate::workbench::RSpiceApp;
-use crate::workbench::ScalarPreference;
-use crate::workbench::TogglePreference;
 use crate::workbench::app_state::AppState;
 use rspice_app_settings::workbench::app::dialogs::preferences::PreferencePageActions;
 use rspice_app_settings::workbench::app::dialogs::preferences::preference_pages::*;
 use rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
+use rspice_app_state::workbench::preferences::ChoicePreference;
+use rspice_app_state::workbench::preferences::ConsoleLaunchBehavior;
+use rspice_app_state::workbench::preferences::FolderListPreference;
+use rspice_app_state::workbench::preferences::ScalarPreference;
+use rspice_app_state::workbench::preferences::TogglePreference;
 
 /// The page source, with each file's test module cut off its end.
 ///
@@ -86,7 +86,10 @@ fn named_keys(source: &str) -> Vec<String> {
 #[test]
 fn the_shipped_interface_scale_is_one() {
     assert!(
-        (crate::workbench::UserPreferences::default().interface_scale() - 1.0).abs() < f32::EPSILON
+        (rspice_app_state::workbench::preferences::UserPreferences::default().interface_scale()
+            - 1.0)
+            .abs()
+            < f32::EPSILON
     );
 }
 
@@ -94,7 +97,7 @@ fn the_shipped_interface_scale_is_one() {
 #[test]
 fn the_shipped_worker_ceiling_is_the_engines_own() {
     assert_eq!(
-        crate::workbench::UserPreferences::default().solver_worker_limit(),
+        rspice_app_state::workbench::preferences::UserPreferences::default().solver_worker_limit(),
         None
     );
 }
@@ -120,8 +123,9 @@ fn restore_defaults_covers_every_preference_the_pages_expose() {
 /// theme and the session rather than in preferences at all.
 #[test]
 fn restoring_a_page_clears_every_override_behind_it() {
-    let shipped = serde_json::to_value(crate::workbench::UserPreferences::default())
-        .expect("default preferences serialize");
+    let shipped =
+        serde_json::to_value(rspice_app_state::workbench::preferences::UserPreferences::default())
+            .expect("default preferences serialize");
     for category in PreferenceCategory::ALL {
         let mut app = RSpiceApp::test_instance();
         if !override_every_setting_on(category, &mut app.state) {

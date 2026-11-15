@@ -2,7 +2,6 @@
 //! application binds and labels it, so they read the application's command
 //! registry: the schematic canvas's and the symbol canvas's.
 
-use crate::workbench::SymbolTool;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::command_registry;
 use rspice_app_design::schematic::symbol_editor::symbol_canvas_accessibility_label;
@@ -12,6 +11,7 @@ use rspice_app_design::schematic::view::{
 use rspice_app_state::state::{
     Component, ComponentType, Point, PortDirection, SymbolDocument, SymbolPin, SymbolShape,
 };
+use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 use rspice_schematic_editor::view::canvas;
 
 #[test]

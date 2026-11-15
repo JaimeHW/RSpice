@@ -248,7 +248,9 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
-    use crate::workbench::lifecycle::project_lifecycle::{self, DestinationAuthority, SaveScope};
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+        self, DestinationAuthority, SaveScope,
+    };
     let mut fixture = executable_fixture();
     rename(&mut fixture, "V42").unwrap();
     let path = std::env::temp_dir().join(format!(

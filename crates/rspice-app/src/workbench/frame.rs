@@ -10,15 +10,18 @@ use std::time::Duration;
 
 use egui::{CentralPanel, Context, Frame};
 
-#[cfg(target_arch = "wasm32")]
-use crate::workbench::models::ModelsFeature;
-use crate::workbench::results::ResultsFeature;
-use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::session::project_transactions::{open_confirmed, request_example};
 use rspice_app_cloud::workbench::cloud::CloudFeature;
 use rspice_app_code::workbench::code::CodeFeature;
+#[cfg(target_arch = "wasm32")]
+use rspice_app_models::workbench::models::ModelsFeature;
+use rspice_app_results::workbench::results::ResultsFeature;
+use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_runs::workbench::preflight;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_state::workbench::preferences::{
+    BackgroundTaskAttention, TogglePreference, WorkspacePreferences,
+};
 use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::workbench::state::pane_focus::Pane;
 use rspice_app_workbench::workbench::tools;
@@ -27,13 +30,14 @@ use rspice_app_workbench::workbench::{docks, surfaces};
 // The shell's submodules and re-exports, as this code saw them when it lived
 // in `workbench.rs` itself.
 use super::features;
-use super::framework::dialogs::DialogKey;
-use super::framework::requests::{
-    self, ExportCsv, ExportResultQuantities, FullScreen, OpenProducingPlan, Outbox, WindowFrame,
-};
-use super::layout::LayoutSpec;
 use super::*;
 use rspice_app_sheets::workbench::sheets::SheetsFeature;
+use rspice_app_workbench::workbench::framework::dialogs::DialogKey;
+use rspice_app_workbench::workbench::framework::requests::{
+    self, ExportCsv, ExportResultQuantities, FullScreen, OpenProducingPlan, Outbox, WindowFrame,
+};
+use rspice_app_workbench::workbench::layout::LayoutSpec;
+use rspice_app_workbench::workbench::routing::surface_catalog::{SurfaceArchetype, SurfaceId};
 
 pub(in crate::workbench) mod dialog_order;
 
@@ -128,7 +132,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         rspice_app_workbench::workbench::chrome::phone_navigation::show(root, app, layout);
     }
     rspice_app_workbench::workbench::chrome::title_bar::show(root, app, layout);
-    chrome::toolbar::show(root, app, layout);
+    rspice_app_workbench::workbench::chrome::toolbar::show(root, app, layout);
     // egui allocates same-edge side panels from the outside inward in call
     // order. Reserve the canonical 51 px activity rail first, then place the
     // navigator between that rail and the active document surface.
@@ -171,7 +175,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let launcher_route_active =
         app.state.workbench.current_route().surface_id() == SurfaceId::ProjectLauncher;
     if launcher_route_active && !app.state.project.project_launcher_open {
-        crate::workbench::project::open_project_launcher(
+        rspice_app_project::workbench::project::open_project_launcher(
             &mut app.state.project,
             &mut app.state.workbench,
             &mut app.state.platform,
@@ -328,7 +332,7 @@ impl RSpiceApp {
         &mut self,
     ) -> Option<rspice_app_project::workbench::workflows::project_workflow::BrowserProjectOpen>
     {
-        use crate::workbench::project::ProjectFeature;
+        use rspice_app_project::workbench::project::ProjectFeature;
 
         ProjectFeature::poll_browser_project_import(&mut features::cx(self))
     }
@@ -907,7 +911,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
         rspice_app_workbench::workbench::chrome::phone_navigation::show(root, app, layout);
     }
     rspice_app_workbench::workbench::chrome::title_bar::show(root, app, layout);
-    chrome::toolbar::show(root, app, layout);
+    rspice_app_workbench::workbench::chrome::toolbar::show(root, app, layout);
     if layout.show_activity_rail {
         rspice_app_workbench::workbench::chrome::activity_rail::show(root, app);
     }
@@ -1949,7 +1953,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_plan_manager_paints_from_a_workspace_that_is_not_simulate() {
-        use crate::workbench::simulate::commands::SimulateCommand;
+        use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 
         let ctx = Context::default();
         rspice_app_workbench::ui::Theme::default().apply(&ctx);
@@ -1973,14 +1977,16 @@ mod tests {
                 crate::workbench::features::render_dialog(
                     &mut app,
                     ctx,
-                    crate::workbench::framework::dialogs::DialogKey("cloud.account_organization"),
+                    rspice_app_workbench::workbench::framework::dialogs::DialogKey(
+                        "cloud.account_organization",
+                    ),
                 );
-                crate::workbench::simulate::SimulateFeature::render_jobs_manager(
+                rspice_app_simulate::workbench::simulate::SimulateFeature::render_jobs_manager(
                     &mut crate::workbench::features::cx(&mut app),
                     ctx,
                 );
                 app.after_contribution();
-                crate::workbench::simulate::SimulateFeature::render_workflow_dialogs(
+                rspice_app_simulate::workbench::simulate::SimulateFeature::render_workflow_dialogs(
                     &mut crate::workbench::features::cx(&mut app),
                     ctx,
                 );
@@ -2306,7 +2312,10 @@ mod tests {
         let step = dialog_order::DIALOG_ORDER
             .iter()
             .find(|spec| {
-                spec.key == crate::workbench::framework::dialogs::DialogKey("simulate.jobs_manager")
+                spec.key
+                    == rspice_app_workbench::workbench::framework::dialogs::DialogKey(
+                        "simulate.jobs_manager",
+                    )
             })
             .expect("the run history is a step of the frame's dialogs");
         let output = ctx.run_ui(
@@ -2347,7 +2356,10 @@ mod tests {
     /// out against its fonts, and its primary.
     #[cfg(not(target_arch = "wasm32"))]
     fn run_history_over_the_netlist(ctx: &Context, app: &mut RSpiceApp) -> (bool, egui::Rect) {
-        use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+        use rspice_app_workbench::workbench::routing::{
+            navigation::RouteTransitionSource, surface_catalog::SurfaceId,
+            surface_route::SurfaceRoute,
+        };
 
         app.state.workbench.workspace = Workspace::Netlist;
         app.state

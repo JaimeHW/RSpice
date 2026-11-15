@@ -16,23 +16,25 @@ use std::sync::LazyLock;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
-use crate::workbench::framework::dialogs::DialogKey;
-use crate::workbench::framework::feature::{
-    Cx, Feature, FeatureRegistry, ForeignAvailability, LowerHandles, Peers, Reads, RoutedCommand,
-    ToolbarId, ToolbarTool,
-};
-use crate::workbench::models::ModelsFeature;
-use crate::workbench::project::ProjectFeature;
-use crate::workbench::results::ResultsFeature;
-use crate::workbench::simulate::SimulateFeature;
 use rspice_app_cloud::workbench::cloud::CloudFeature;
 use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_design::workbench::design::DesignFeature;
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
+use rspice_app_models::workbench::models::ModelsFeature;
+use rspice_app_project::workbench::project::ProjectFeature;
+use rspice_app_results::workbench::results::ResultsFeature;
 use rspice_app_settings::workbench::settings::SettingsFeature;
 use rspice_app_sheets::workbench::sheets::SheetsFeature;
+use rspice_app_simulate::workbench::simulate::SimulateFeature;
 use rspice_app_state::state::command_catalog::CommandKey;
+use rspice_app_workbench::workbench::framework::command_registry::{
+    CommandAvailability, CommandSpec,
+};
+use rspice_app_workbench::workbench::framework::dialogs::DialogKey;
+use rspice_app_workbench::workbench::framework::feature::{
+    Cx, Feature, FeatureRegistry, ForeignAvailability, LowerHandles, Peers, Reads, RoutedCommand,
+    ToolbarId, ToolbarTool,
+};
 
 /// A feature the shell registers: its registry, and its contexts borrowed
 /// from the application.
@@ -530,10 +532,10 @@ pub(super) fn show_toolbar<F: Registered>(
     app: &mut RSpiceApp,
     ui: &mut egui::Ui,
     id: ToolbarId,
-    layout: crate::workbench::layout::LayoutSpec,
+    layout: rspice_app_workbench::workbench::layout::LayoutSpec,
 ) {
     if let Some(entries) = F::registry().toolbar_entries(id) {
-        crate::workbench::chrome::toolbar::feature_toolbar(
+        rspice_app_workbench::workbench::chrome::toolbar::feature_toolbar(
             ui,
             app,
             entries,
@@ -546,8 +548,13 @@ pub(super) fn show_toolbar<F: Registered>(
 
 /// A toolbar action of `F`'s that More tools carries out runs in `F`'s
 /// context, as its controls draw in it.
-impl<F: Registered> crate::workbench::chrome::toolbar::LendsToolbarRun<F> for RSpiceApp {
-    fn carry_out(&mut self, run: crate::workbench::framework::feature::ToolbarRun<F>) {
+impl<F: Registered> rspice_app_workbench::workbench::chrome::toolbar::LendsToolbarRun<F>
+    for RSpiceApp
+{
+    fn carry_out(
+        &mut self,
+        run: rspice_app_workbench::workbench::framework::feature::ToolbarRun<F>,
+    ) {
         run(&mut cx::<F>(self));
     }
 }
@@ -638,7 +645,7 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::workbench::commands::vocabulary::command_registry;
-    use crate::workbench::framework::feature::CloudSessionPort;
+    use rspice_app_workbench::workbench::framework::feature::CloudSessionPort;
 
     /// A feature's context lends the cloud's sessions as a peer, so what it
     /// signs carries the name the cloud gives.
@@ -711,11 +718,11 @@ mod tests {
             rspice_app_sheets::workbench::sheets::commands::SheetsCommand::ALL.len()
                 + rspice_app_settings::workbench::settings::commands::SettingsCommand::ALL.len()
                 + rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand::LISTED.len()
-                + crate::workbench::results::commands::ResultsCommand::ALL.len()
+                + rspice_app_results::workbench::results::commands::ResultsCommand::ALL.len()
                 + rspice_app_cloud::workbench::cloud::commands::CloudCommand::ALL.len()
-                + crate::workbench::models::commands::ModelsCommand::ALL.len()
-                + crate::workbench::simulate::commands::SimulateCommand::ALL.len()
-                + crate::workbench::project::commands::ProjectCommand::ALL.len()
+                + rspice_app_models::workbench::models::commands::ModelsCommand::ALL.len()
+                + rspice_app_simulate::workbench::simulate::commands::SimulateCommand::ALL.len()
+                + rspice_app_project::workbench::project::commands::ProjectCommand::ALL.len()
                 + rspice_app_design::workbench::design::commands::DesignCommand::ALL.len()
                 + rspice_app_code::workbench::code::commands::CodeCommand::ALL.len()
         );
@@ -818,8 +825,8 @@ mod tests {
     /// key a container holds still reaches it.
     #[test]
     fn a_command_left_out_of_the_registry_is_reached_by_its_key() {
-        use crate::workbench::simulate::commands::SimulateCommand;
         use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
+        use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 
         let registry = command_registry();
         let left_out = HardcopyCommand::REPORT_TOOLBAR
@@ -897,7 +904,7 @@ mod tests {
     /// section into view, as when the sheets feature asks itself.
     #[test]
     fn the_sheet_section_takes_a_reveal_request_as_it_draws() {
-        use crate::workbench::framework::requests::RevealSheetSection;
+        use rspice_app_workbench::workbench::framework::requests::RevealSheetSection;
 
         let mut app = crate::workbench::RSpiceApp::test_instance();
         app.state.workbench.outbox.push(RevealSheetSection);

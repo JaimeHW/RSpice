@@ -1569,7 +1569,7 @@ fn route_speech(screen: Vec2, mode: SimulationPlanManagerMode) -> RouteSpeech {
 /// shipped sources are the discriminator, not a list of exceptions maintained
 /// beside the gate.
 ///
-/// [`elide_text`]: crate::workbench::design_system::elide_text
+/// [`elide_text`]: rspice_ui_kit::panels::elide_text
 #[cfg(not(target_arch = "wasm32"))]
 fn is_authored_whole(text: &str) -> bool {
     PLAN_MANAGER_SOURCES

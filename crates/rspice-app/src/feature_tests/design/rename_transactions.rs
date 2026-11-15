@@ -331,7 +331,9 @@ fn switching_documents_does_not_redirect_rename_history() {
 
 #[test]
 fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
-    use crate::workbench::lifecycle::project_lifecycle::{self, DestinationAuthority, SaveScope};
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+        self, DestinationAuthority, SaveScope,
+    };
 
     let (mut app, expected, configuration, first_plan) = fixture();
     // This test's voltage source is a primitive, not a hierarchical DUT.

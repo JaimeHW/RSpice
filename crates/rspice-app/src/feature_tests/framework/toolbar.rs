@@ -2,8 +2,6 @@
 //! and glyphs, and the responsive widths every breakpoint reserves.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::chrome::toolbar::*;
-use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use egui::Vec2;
 use rspice_app_design::workbench::design::commands::DesignCommand;
@@ -24,6 +22,8 @@ use rspice_app_state::state::{
     Tool,
 };
 use rspice_app_workbench::ui::panels::WorkbenchIcon;
+use rspice_app_workbench::workbench::chrome::toolbar::*;
+use rspice_app_workbench::workbench::layout::LayoutSpec;
 
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
@@ -393,7 +393,7 @@ fn reference_pvt_commit_advances_the_plan_and_invalidates_preflight() {
     });
 
     assert!(
-        crate::workbench::simulate::chrome::commit_reference_pvt(
+        rspice_app_simulate::workbench::simulate::chrome::commit_reference_pvt(
             &mut crate::workbench::features::cx(&mut app),
             rspice_app_state::product::ProcessCorner::FF,
             -40.0,

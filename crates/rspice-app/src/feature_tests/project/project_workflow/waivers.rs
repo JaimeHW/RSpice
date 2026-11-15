@@ -4,7 +4,7 @@
 use super::*;
 use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRecord};
 use crate::workbench::app_state::waivers::WaiverAction;
-use crate::workbench::lifecycle::project_lifecycle::{
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     DestinationAuthority, SaveScope, save_native,
 };
 use rspice_app_state::state::Point;

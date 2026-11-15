@@ -4,7 +4,6 @@
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::ids;
 use egui::os::OperatingSystem;
 use rspice_app_settings::workbench::shortcuts::artifacts::projection::*;
 use rspice_app_settings::workbench::shortcuts::artifacts::schema::ShortcutArtifactScope as ShortcutExportScope;
@@ -13,6 +12,7 @@ use rspice_app_state::state::shortcuts::ShortcutBindingSlot;
 use rspice_app_state::state::shortcuts::ShortcutPreferences;
 use rspice_app_state::state::shortcuts::ShortcutSequence;
 use rspice_app_state::state::shortcuts::ShortcutStroke;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 use serde_json::Value;
 
 #[test]

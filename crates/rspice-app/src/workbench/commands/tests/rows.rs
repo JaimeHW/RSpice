@@ -14,15 +14,13 @@ use super::*;
 use crate::workbench::commands::vocabulary::{
     COMMAND_REGISTRY, CommandRegistry, command_registry, legacy_command,
 };
-use crate::workbench::framework::command_registry::{CommandFlags, CommandSpec, ids};
-use crate::workbench::framework::host::Host;
-use crate::workbench::models::commands::ModelsCommand;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
+use rspice_app_models::workbench::models::commands::ModelsCommand;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutKind,
 };
@@ -34,6 +32,10 @@ use rspice_app_workbench::workbench::app_state::session::shortcuts::ShortcutCont
 use rspice_app_workbench::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
 };
+use rspice_app_workbench::workbench::framework::command_registry::{
+    CommandFlags, CommandSpec, ids,
+};
+use rspice_app_workbench::workbench::framework::host::Host;
 
 /// The retired ids `from_stable_id` still answers, each with the live id it
 /// resolves to. Shortcut profiles written by older builds name them.
@@ -355,7 +357,7 @@ fn no_project_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     assert!(
         app.state.close_project_discard(
-            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+            rspice_app_services::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
         ),
         "an idle test instance closes its project"
     );

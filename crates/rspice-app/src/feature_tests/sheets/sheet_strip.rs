@@ -13,12 +13,12 @@ use egui::{Context, Id, RawInput, Rect, Ui, Vec2, containers::panel::PanelState}
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::app_state::AppState;
-use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
 use rspice_app_sheets::workbench::chrome::sheet_strip::*;
 use rspice_app_state::state::{
     Component, ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
 };
+use rspice_app_workbench::workbench::layout::LayoutSpec;
 
 const VIEWPORT: Vec2 = Vec2::new(1_440.0, 900.0);
 

@@ -7,11 +7,11 @@
 use std::time::{Duration, Instant};
 
 use super::*;
-use crate::workbench::framework::command_registry::ids;
-use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::{CellViewRef, Component, ComponentType, Point, SymbolDocument, Tool};
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_design::library::metadata::{cell_parameter_contract, decode_source_view_ports};
 use rspice_design::symbol::generated::GENERATED_SYMBOL_VIEW;
 

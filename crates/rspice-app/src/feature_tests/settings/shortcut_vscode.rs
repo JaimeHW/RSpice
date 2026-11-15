@@ -5,10 +5,10 @@ use crate::feature_tests::settings::shortcut_vscode_import::{
 };
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::ids;
 use egui::Key;
 use rspice_app_settings::workbench::shortcuts::artifacts::sha256;
 use rspice_app_settings::workbench::shortcuts::artifacts::vscode::*;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 #[test]
 fn jsonc_chord_adaptation_is_deterministic_and_round_trips_as_native() {

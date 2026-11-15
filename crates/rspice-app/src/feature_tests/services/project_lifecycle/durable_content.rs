@@ -1,7 +1,7 @@
 //! Authored annotations and editor policy participate in scoped persistence.
 
 use super::*;
-use crate::workbench::documents::result_document::{
+use rspice_app_results::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultsState, WavePanePresentationKey, marker_anchor_for,
 };
 
@@ -191,7 +191,7 @@ fn result_log_axis_presentation_has_canonical_order_after_restore() {
         units.iter().collect::<Vec<_>>()
     );
     let expected = serde_json::to_value(&presentation).unwrap();
-    crate::workbench::documents::result_document::restore_presentation(
+    rspice_app_results::workbench::documents::result_document::restore_presentation(
         &mut state.results_parts(),
         presentation,
     );

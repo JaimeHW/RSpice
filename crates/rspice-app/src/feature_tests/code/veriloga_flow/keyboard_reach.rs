@@ -5,8 +5,8 @@ use egui::{Key, Modifiers};
 
 use super::language_tools::{NONE, caret_after, op_amp, source};
 use super::*;
-use crate::workbench::MessageId;
-use crate::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_workbench::workbench::localization::MessageId;
 
 const COPY: &str = "Copy";
 const SHIFT: Modifiers = Modifiers {

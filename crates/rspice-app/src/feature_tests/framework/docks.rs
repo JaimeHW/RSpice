@@ -2,11 +2,11 @@
 //! and only a matching explicit resize keeps it, every dock keeps the size it
 //! was dragged to, and the splitter keys step the dock the width class shows.
 
-use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_workbench::workbench::docks::{
     SplitterKeyboardAction, apply_splitter_step, panel_cache_is_stale,
 };
+use rspice_app_workbench::workbench::layout::LayoutSpec;
 
 #[test]
 fn responsive_and_reset_layouts_discard_egui_panel_memory() {

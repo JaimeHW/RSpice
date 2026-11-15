@@ -23,13 +23,13 @@ impl Command {
             }
             Self::RevertActiveDocument => {
                 state.platform.project_lifecycle.accepted().is_some()
-                    && crate::workbench::lifecycle::project_lifecycle::active_document_is_dirty(
+                    && rspice_app_services::workbench::lifecycle::project_lifecycle::active_document_is_dirty(
                         state,
                     )
                     && !state.model.simulation.execution.has_active_execution()
             }
             Self::CloseActiveDocument => {
-                crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
+                rspice_app_services::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
             }
             // The netlist page's own history is the shell's to step; the
             // design feature's part answers for every other.

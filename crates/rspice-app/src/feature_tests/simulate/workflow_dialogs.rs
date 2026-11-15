@@ -5,10 +5,10 @@
 //! one that would change nothing, must not be offered as if it would.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::SimulationWorkflowDialog;
 use egui::Rect;
 use egui::vec2;
+use rspice_app_simulate::workbench::simulate::SimulateFeature;
 use rspice_app_simulate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
 
 /// The simulation plan workflows as the frame's dialog walk draws them, with

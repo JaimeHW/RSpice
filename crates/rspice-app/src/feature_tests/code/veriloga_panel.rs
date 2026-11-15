@@ -7,12 +7,12 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, open_in_design, open_project_app};
 use crate::workbench::app_state::AppState;
-use crate::workbench::{MessageCatalog, MessageId, UiTextLocale};
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, LibraryCellInstance, Point, ProjectSourceDependency,
     ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage, ProjectSourceOwner,
     ProjectSourceRole, ProjectSourceRoleBinding, View, ViewType,
 };
+use rspice_app_workbench::workbench::localization::{MessageCatalog, MessageId, UiTextLocale};
 
 const LIBRARY: &str = "behavioral";
 const ROOT: &str = "gain.va";

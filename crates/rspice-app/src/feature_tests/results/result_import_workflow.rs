@@ -3,7 +3,7 @@
 
 use super::result_import_adapters::apply_imported_result_dataset;
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::result_document::import::ResultImportStage;
+use rspice_app_results::workbench::documents::result_document::import::ResultImportStage;
 use rspice_app_results::workbench::workflows::result_import_workflow::*;
 use rspice_app_services::io::file_exchange::MAX_RESULT_DATASET_BYTES;
 use rspice_app_state::state::AnalysisResultFamilyMetadata;
@@ -13,8 +13,8 @@ use rspice_app_state::state::SimulationRunProvenance;
 
 fn loaded_project_state() -> AppState {
     let mut state = AppState::default();
-    let baseline =
-        crate::workbench::lifecycle::project_lifecycle::snapshot(&state).expect("project snapshot");
+    let baseline = rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state)
+        .expect("project snapshot");
     crate::workbench::app_state::services_access::accept_loaded_project(&mut state, baseline, None);
     state
 }
@@ -25,7 +25,8 @@ fn assert_nullable_import_round_trip(name: &str, bytes: &[u8]) {
     assert_eq!(state.results.result_import.waveforms.len(), 1);
     assert_eq!(state.results.result_import.waveforms[0].sample(1), None);
     commit_result_import_draft(&mut state.results_parts()).unwrap();
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let project =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
     let project = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(
@@ -89,7 +90,8 @@ fn imported_angles_and_temperatures_retain_normalized_values_and_units() {
     }
     let mut state = loaded_project_state();
     apply_imported_result_dataset(&mut state.results_parts(), "units.csv", csv).unwrap();
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let project =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
     let project = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(project.file.simulation_results_warning.is_none());
@@ -144,7 +146,8 @@ fn raw_coordinate_units_survive_import_review_project_reload_and_waveform_projec
             &[0.0, end]
         );
         commit_result_import_draft(&mut state.results_parts()).unwrap();
-        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+        let project =
+            rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
         let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
         let project = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
         assert!(project.file.simulation_results_warning.is_none());
@@ -269,7 +272,8 @@ fn delimited_metadata_survives_review_project_reload_and_reexport() {
     let mut state = loaded_project_state();
     apply_imported_result_dataset(&mut state.results_parts(), "units.csv", text.as_bytes())
         .unwrap();
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let project =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
     let project = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(project.file.simulation_results_warning.is_none());
@@ -351,7 +355,7 @@ fn touchstone_v2_import_retains_complex_matrix_and_reference_authority() {
     assert!(analysis.validate_retained_evidence().is_ok());
     assert_eq!(
         state.results.results.session.viewer,
-        crate::workbench::ResultViewer::Smith
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Smith
     );
     assert_eq!(
         state.results.result_import.source_format_id, "",
@@ -393,7 +397,8 @@ fn touchstone_noise_import_commits_independent_axes_and_persists_units() {
         .find(|waveform| waveform.name == "|S21|")
         .unwrap();
     assert_eq!(network.x.as_slice(), [1e6, 3e6]);
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let project =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
     let project = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(project.file.simulation_results_warning.is_none());
@@ -431,7 +436,8 @@ fn exhausted_run_sequence_retains_the_import_draft_and_existing_dataset() {
     )
     .expect("the last sequence can be imported");
     assert_eq!(state.model.simulation.active_run().unwrap().id, u64::MAX);
-    let baseline = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let baseline =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let workspace = state.workbench.workspace;
     let document = state.workbench.documents.active(workspace).cloned();
     stage_imported_result_dataset(
@@ -454,7 +460,7 @@ fn exhausted_run_sequence_retains_the_import_draft_and_existing_dataset() {
             document.as_ref()
         );
         assert_eq!(
-            crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+            rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state)
                 .unwrap()
                 .file
                 .simulation_results,
@@ -467,7 +473,7 @@ fn exhausted_run_sequence_retains_the_import_draft_and_existing_dataset() {
 fn imported_dataset_is_unattributed_stable_immutable_and_saveable() {
     let mut state = loaded_project_state();
     assert!(
-        !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
+        !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
         "accepted baseline starts clean"
     );
     apply_imported_result_dataset(
@@ -512,10 +518,11 @@ fn imported_dataset_is_unattributed_stable_immutable_and_saveable() {
         Some(&crate::workbench::state::WorkspaceDocumentId::ResultDataset(run.dataset_id))
     );
     assert!(
-        crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
+        rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
         "retaining external evidence must dirty canonical result history"
     );
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let project =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let text = rspice_app_services::io::project_io::serialize_project_file(&project)
         .expect("imported evidence must be saveable");
     let restored = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
@@ -542,7 +549,8 @@ fn event_source_import_format_and_name_survive_project_publication() {
     apply_imported_result_dataset(&mut state.results_parts(), "capture.vcd",
         b"$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n#1\n1!\n")
         .unwrap();
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let project =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
     let restored = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(restored.file.simulation_results_warning.is_none());
@@ -573,7 +581,7 @@ fn staging_and_discarding_import_never_mutates_retained_history() {
     );
     assert_eq!(state.workbench.workspace, initial_workspace);
     assert!(
-        !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
+        !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
         "a review draft is presentation state, not project history"
     );
 
@@ -584,7 +592,9 @@ fn staging_and_discarding_import_never_mutates_retained_history() {
         initial_run_count
     );
     assert_eq!(state.workbench.workspace, initial_workspace);
-    assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));
+    assert!(
+        !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state)
+    );
 }
 
 #[test]
@@ -603,7 +613,9 @@ fn validation_failure_retains_draft_and_leaves_history_unchanged() {
     assert!(error.contains("at least one signal"), "{error}");
     assert!(state.results.result_import.open);
     assert!(state.model.simulation.retained.runs.is_empty());
-    assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));
+    assert!(
+        !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state)
+    );
 }
 
 #[test]

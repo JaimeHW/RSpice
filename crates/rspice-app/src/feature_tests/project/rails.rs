@@ -2,9 +2,9 @@
 //! the reader selects from, and nothing a panel beside it already owns.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::docks::navigator::show;
-use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::state::Workspace;
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_workbench::workbench::docks::navigator::show;
 
 /// A project with two libraries, an active configuration and a recovery
 /// catalog behind it, so every Project rail has rows to show.

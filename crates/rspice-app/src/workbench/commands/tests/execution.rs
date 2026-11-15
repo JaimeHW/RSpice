@@ -7,8 +7,8 @@
 //! keeps advancing rather than restarting once a jump has changed workspace.
 
 use super::*;
-use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 
 #[test]
 fn tuning_command_opens_the_transactional_sandbox() {

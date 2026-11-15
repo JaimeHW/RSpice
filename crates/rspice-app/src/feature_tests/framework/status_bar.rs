@@ -4,8 +4,6 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::listing::DiagnosticCounts;
-use crate::workbench::framework::host::StatusMark;
-use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::chrome::status_bar::design::{
     design_engineering_context, schematic_cursor_summary, selection_summary,
@@ -22,6 +20,8 @@ use rspice_app_workbench::ui::theme::{self, FontWeight};
 use rspice_app_workbench::ui::tokens::{self, Tokens};
 use rspice_app_workbench::ui::widgets::Problem;
 use rspice_app_workbench::workbench::chrome::status_bar::*;
+use rspice_app_workbench::workbench::framework::host::StatusMark;
+use rspice_app_workbench::workbench::layout::LayoutSpec;
 
 /// The counts the bar states, read as the page reads them.
 fn counts(app: &RSpiceApp) -> DiagnosticCounts {
@@ -149,7 +149,7 @@ fn the_checks_segment_counts_every_producer_from_one_list() {
         rspice_app_state::state::netlist_diagnostics::Diagnostic::current(
             "rspice.test",
             "TEST-WARNING",
-            crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning,
+            rspice_app_code::workbench::documents::netlist_document::DiagnosticSeverity::Warning,
             "implicit option",
         ),
     ];

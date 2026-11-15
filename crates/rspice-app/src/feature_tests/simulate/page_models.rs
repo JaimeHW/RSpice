@@ -7,12 +7,12 @@
 //! totals are the sum over the workspace summaries.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::framework::feature::ModelsPort;
-use crate::workbench::framework::ports::QualificationGate;
 use rspice_app_simulate::workbench::surfaces::simulate::page_kit::Tone;
 use rspice_app_simulate::workbench::surfaces::simulate::page_models::{
     ModelBindingAction, ModelGate, apply_model_binding_action, gate_reading, gate_status,
 };
+use rspice_app_workbench::workbench::framework::feature::ModelsPort;
+use rspice_app_workbench::workbench::framework::ports::QualificationGate;
 
 fn active_plan_revision(app: &RSpiceApp) -> rspice_app_state::product::ObjectRevision {
     app.state

@@ -1,10 +1,7 @@
 //! Report authoring in a whole application: its commands, read through the
 //! product's own registry, and the document transactions they commit.
 
-use crate::workbench::SurfaceId;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::feature::Cx;
-use crate::workbench::framework::feature::{LowerHandles, Peers};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
@@ -21,6 +18,9 @@ use rspice_app_state::results::report_document::ReportFigureSourceLocator;
 use rspice_app_state::results::report_document::ReportPageEvidenceBinding;
 use rspice_app_state::results::report_document::ReportSourceId;
 use rspice_app_state::results::report_document::ReportTemplate;
+use rspice_app_workbench::workbench::framework::feature::Cx;
+use rspice_app_workbench::workbench::framework::feature::{LowerHandles, Peers};
+use rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId;
 use rspice_results::report_document::{
     ReportBlockedGateTextPolicy, ReportDraftMarking, ReportOutputFormats, ReportPageInclusion,
     ReportPageNumbering, ReportPublicationPageSize, ReportPublicationProfile,
@@ -82,8 +82,10 @@ fn enabled(app: &RSpiceApp, command: HardcopyCommand) -> bool {
 fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
     let mut app = RSpiceApp::test_instance();
     assert!(
-        crate::workbench::routing::availability::surface_availability(SurfaceId::ReportAuthoring)
-            .can_open()
+        rspice_app_workbench::workbench::routing::availability::surface_availability(
+            SurfaceId::ReportAuthoring
+        )
+        .can_open()
     );
     let registry = command_registry();
     let report = HardcopyCommand::ReportAuthoring.key();

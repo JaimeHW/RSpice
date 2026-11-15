@@ -4,13 +4,13 @@
 //! and deleting a library.
 
 use crate::workbench::app_state::model::LibraryRemoval;
-use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
-use crate::workbench::project::library_dialogs::cell_ops::commit_rename_cell_dialog;
-use crate::workbench::project::library_dialogs::library_ops::{
+use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_project::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
+use rspice_app_project::workbench::project::library_dialogs::cell_ops::commit_rename_cell_dialog;
+use rspice_app_project::workbench::project::library_dialogs::library_ops::{
     commit_delete_library_review, commit_rename_library_dialog,
 };
-use crate::workbench::project::library_dialogs::rename_view::commit_rename_view_dialog;
-use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_project::workbench::project::library_dialogs::rename_view::commit_rename_view_dialog;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, OpenCellView, SchematicState, View, ViewType,

@@ -14,12 +14,12 @@ use egui::accesskit::Role;
 use egui::{Key, Modifiers, Pos2};
 
 use crate::feature_tests::replay::{Control, Replay, controls, only};
-use crate::workbench::documents::code_workspace::{
+use crate::workbench::state::Workspace;
+use rspice_app_code::automation_workflow::{ArtifactKind, RenderedArtifact};
+use rspice_app_code::workbench::documents::code_workspace::{
     self, AutomationArtifactStore, AutomationExecutionState, AutomationRuntimeLaunchMode,
     CodeWorkspacePage, PendingAutomationRuntimeExecution, SourceOperationToken,
 };
-use crate::workbench::state::Workspace;
-use rspice_app_code::automation_workflow::{ArtifactKind, RenderedArtifact};
 use rspice_app_state::state::{ProjectSourceLanguage, ProjectSourceOwner};
 
 /// A session with a project open, on the Automation page.

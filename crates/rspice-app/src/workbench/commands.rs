@@ -5,7 +5,6 @@
 //! UI does not advertise speculative or placeholder capability.
 
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::framework::command_registry::{CommandOwner, ids};
 use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_code::workbench::code::commands::CodeCommand;
@@ -13,6 +12,7 @@ use rspice_app_design::workbench::app::actions::workspace::HistoryDirection;
 use rspice_app_workbench::workbench::app::dialogs::window_session::{
     WindowSessionPage, WindowWorkflow, open_window_workflow,
 };
+use rspice_app_workbench::workbench::framework::command_registry::{CommandOwner, ids};
 use rspice_app_workbench::workbench::state::pane_focus::PaneStep;
 
 use super::state::{ConsoleChannel, ConsolePage, Workspace};
@@ -75,8 +75,10 @@ impl Command {
     /// an edit of the schematic hidden behind it.
     pub(crate) const fn source_editor_request(
         self,
-    ) -> Option<crate::workbench::framework::requests::SourceEditorRequest> {
-        use crate::workbench::framework::requests::{SourceEditorRequest, StandardCommand};
+    ) -> Option<rspice_app_workbench::workbench::framework::requests::SourceEditorRequest> {
+        use rspice_app_workbench::workbench::framework::requests::{
+            SourceEditorRequest, StandardCommand,
+        };
         Some(match self {
             Self::Undo => SourceEditorRequest::Standard(StandardCommand::Undo),
             Self::Redo => SourceEditorRequest::Standard(StandardCommand::Redo),
@@ -356,16 +358,16 @@ impl Command {
                 .workbench
                 .window_session_dialog
                 .open(WindowSessionPage::Windows),
-            Self::MinimizeWindow => app
-                .state
-                .workbench
-                .outbox
-                .push(crate::workbench::framework::requests::WindowFrame::Minimize),
+            Self::MinimizeWindow => {
+                app.state.workbench.outbox.push(
+                    rspice_app_workbench::workbench::framework::requests::WindowFrame::Minimize,
+                )
+            }
             Self::ZoomWindow => app
                 .state
                 .workbench
                 .outbox
-                .push(crate::workbench::framework::requests::WindowFrame::Zoom),
+                .push(rspice_app_workbench::workbench::framework::requests::WindowFrame::Zoom),
             Self::RepeatLastCommand => match vocabulary::last_repeatable(
                 app.state.workbench.last_repeatable_command.as_deref(),
             ) {

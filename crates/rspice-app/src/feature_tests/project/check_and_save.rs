@@ -46,7 +46,7 @@ fn check_and_save_is_a_command_form_without_the_wizard() {
         &mut app.state.model.schematic,
     );
     app.execute_command_key(
-        crate::workbench::project::commands::ProjectCommand::CheckAndSave.key(),
+        rspice_app_project::workbench::project::commands::ProjectCommand::CheckAndSave.key(),
     );
     assert!(app.state.project.check_and_save.open);
 

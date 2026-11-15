@@ -8,10 +8,12 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::{self, command_registry};
-use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags};
-use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
+use rspice_app_results::workbench::results::commands::ResultsCommand;
+use rspice_app_workbench::workbench::framework::command_registry::{
+    CommandAvailability, CommandFlags,
+};
 
 #[test]
 fn edit_specifications_opens_the_real_results_editor() {
@@ -22,7 +24,7 @@ fn edit_specifications_opens_the_real_results_editor() {
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(
         app.state.results.results.session.viewer,
-        crate::workbench::ResultViewer::Specs
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Specs
     );
     assert!(app.state.results.results.session.spec_drafts.is_some());
 }
@@ -30,7 +32,10 @@ fn edit_specifications_opens_the_real_results_editor() {
 #[test]
 fn generic_results_command_opens_the_workspace_without_a_dataset() {
     let mut app = RSpiceApp::test_instance();
-    let command = ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves).key();
+    let command = ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Waves,
+    )
+    .key();
 
     assert!(app.command_key_enabled(command));
     assert_eq!(
@@ -42,7 +47,7 @@ fn generic_results_command_opens_the_workspace_without_a_dataset() {
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(
         app.state.results.results.session.viewer,
-        crate::workbench::ResultViewer::Waves
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Waves
     );
 }
 
@@ -50,7 +55,10 @@ fn generic_results_command_opens_the_workspace_without_a_dataset() {
 fn incompatible_result_viewer_command_is_disabled_and_cannot_navigate() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Project;
-    let command = ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Bode).key();
+    let command = ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Bode,
+    )
+    .key();
 
     assert!(!app.command_key_enabled(command));
     // Bode admits the complete set of frequency-response families its
@@ -67,7 +75,7 @@ fn incompatible_result_viewer_command_is_disabled_and_cannot_navigate() {
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
     assert_eq!(
         app.state.results.results.session.viewer,
-        crate::workbench::ResultViewer::Waves
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Waves
     );
     assert_eq!(
         app.state.prompt_text(),
@@ -91,7 +99,9 @@ fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
     let registry = command_registry();
     for (command, stable_id) in [
         (
-            ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves),
+            ResultsCommand::ResultViewer(
+                rspice_app_results::workbench::documents::result_document::ResultViewer::Waves,
+            ),
             "waveforms",
         ),
         (ResultsCommand::DatasetManifestBrowser, "dataset-browser"),
@@ -185,7 +195,7 @@ fn the_studio_commands_resolve_to_their_result_viewer_successors() {
 /// this replaced went stale for five of the sheets.
 #[test]
 fn every_result_sheet_is_registered_for_commands_and_shortcuts() {
-    use crate::workbench::ResultViewer;
+    use rspice_app_results::workbench::documents::result_document::ResultViewer;
 
     let registry = vocabulary::command_registry();
     for viewer in ResultViewer::all() {

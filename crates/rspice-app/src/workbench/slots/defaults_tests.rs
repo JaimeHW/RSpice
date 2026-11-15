@@ -8,11 +8,11 @@
 //! new session shows.
 
 use super::*;
-use crate::workbench::project::workspace_state::{
+use rspice_app_design::workbench::slots::design::{DesignPanel, DesignState};
+use rspice_app_project::workbench::project::workspace_state::{
     LibraryCellviewPage, ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
     ProjectPage,
 };
-use rspice_app_design::workbench::slots::design::{DesignPanel, DesignState};
 use rspice_app_state::state::{SimulationPage, VerificationPage};
 
 #[test]

@@ -1,12 +1,12 @@
 //! Personal schematic editing behaviour applied to a whole session's open
 //! schematic and to the schematics it creates.
 
-use crate::workbench::ChoicePreference;
 use crate::workbench::app_state::AppState;
 use rspice_app_state::state::{Point, WireRoutingMode};
 use rspice_app_state::workbench::app_state::schematic_preferences::{
     ANY_ANGLE_ROUTING, MANUAL_JUNCTION_DOTS, SELECTION_CROSSING,
 };
+use rspice_app_state::workbench::preferences::ChoicePreference;
 
 /// Changing the row changes the open schematic: its next T-join gets a
 /// dot or not according to the setting, with no new document involved.

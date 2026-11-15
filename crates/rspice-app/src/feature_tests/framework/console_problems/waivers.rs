@@ -327,8 +327,11 @@ fn console_frame(
     input: egui::RawInput,
 ) -> Render {
     collect(harness.ctx.run_ui(input, |ui| {
-        let layout =
-            crate::workbench::layout::LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench);
+        let layout = rspice_app_workbench::workbench::layout::LayoutSpec::resolve(
+            1_280.0,
+            760.0,
+            &app.state.workbench,
+        );
         rspice_app_workbench::workbench::docks::console::show(ui, app, layout);
     }))
 }

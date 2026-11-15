@@ -3,7 +3,6 @@
 //! dependencies the validation seals, and how a save after it meets an
 //! external change.
 
-use crate::workbench::FolderListPreference;
 use crate::workbench::features::cx;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_code::workbench::code::netlist_validation::validate_visible_netlist_source;
@@ -14,6 +13,7 @@ use rspice_app_code::workbench::workflows::netlist_workflow::fixtures::vendor_pr
 use rspice_app_code::workbench::workflows::netlist_workflow::{
     apply_staged_external_netlist_change, save_owned_netlist_source,
 };
+use rspice_app_state::workbench::preferences::FolderListPreference;
 
 #[test]
 fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding() {
@@ -59,7 +59,7 @@ fn validated_owned_source_can_run_before_external_source_synchronization() {
             .apply_imported_netlist(imported.to_owned(), None, "standalone.cir")
     );
     assert!(
-        crate::workbench::documents::netlist_document::replace_owned_source(
+        rspice_app_code::workbench::documents::netlist_document::replace_owned_source(
             &mut app.state.model,
             &mut app.state.code.netlist,
             &mut app.state.code.netlist_open_documents,
@@ -204,7 +204,7 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
     app.state.code.netlist.owned_document =
         app.state.model.workspace.content.netlist_document.clone();
     app.state.code.netlist.active_document =
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
+        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     app.state.code.netlist.active_document_initialized = true;
     app.state.model.simulation.source.netlist_content = parameter_source.to_owned();
 
@@ -247,7 +247,7 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
     app.state.code.netlist.owned_document =
         app.state.model.workspace.content.netlist_document.clone();
     app.state.code.netlist.active_document =
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
+        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     app.state.code.netlist.active_document_initialized = true;
     app.state.model.simulation.source.netlist_content = include_source.to_owned();
 
@@ -308,7 +308,7 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
             .external_change
             .as_mut()
             .unwrap()
-            .resolution = crate::workbench::documents::netlist_document::NetlistExternalChangeResolution::ReloadExternal;
+            .resolution = rspice_app_code::workbench::documents::netlist_document::NetlistExternalChangeResolution::ReloadExternal;
     apply_staged_external_netlist_change(
         &mut app.state.model,
         &mut app.state.code.netlist,

@@ -3,11 +3,11 @@
 
 use crate::feature_tests::hardcopy::publication_reads;
 use crate::workbench::app_state::AppState;
-use crate::workbench::framework::feature::PublicationDraft;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::publication_snapshot::*;
 use rspice_app_state::state::AnalysisResult;
 use rspice_app_state::state::AnalysisType;
 use rspice_app_state::state::RetainedTrace;
+use rspice_app_workbench::workbench::framework::feature::PublicationDraft;
 use rspice_publication_contract::AnalysisRecord;
 use rspice_publication_contract::Dataset;
 use rspice_publication_contract::PublicationSection;

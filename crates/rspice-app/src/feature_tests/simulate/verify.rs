@@ -269,7 +269,9 @@ fn app_retaining_soa_evidence() -> RSpiceApp {
 
 #[test]
 fn the_soa_pane_validate_retained_evidence_once_per_dataset_generation() {
-    use crate::workbench::documents::result_document::frame_work::{DatasetWalk, WorkCounts};
+    use rspice_app_results::workbench::documents::result_document::frame_work::{
+        DatasetWalk, WorkCounts,
+    };
 
     let mut app = app_retaining_soa_evidence();
     let ctx = egui::Context::default();

@@ -249,7 +249,8 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
     fixture.drag(DragType::MoveSelection);
     fixture.app.state.sync_active_schematic_to_workspace();
     let project =
-        crate::workbench::lifecycle::project_lifecycle::snapshot(&fixture.app.state).unwrap();
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&fixture.app.state)
+            .unwrap();
     let key = fixture.app.state.model.workspace.content.active_key();
     assert_eq!(
         project.file.workspace.schematic_buffers[&key]
@@ -277,7 +278,7 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
-    use crate::workbench::lifecycle::project_lifecycle::{
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         DestinationAuthority, SaveScope, has_unsaved_changes, save_native,
     };
     for dirty_before_drag in [false, true] {
@@ -357,7 +358,7 @@ fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
 
 #[test]
 fn gesture_previews_remain_part_of_execution_and_replacement_guards() {
-    use crate::workbench::lifecycle::project_lifecycle::{
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         begin_project_replacement, generated_netlist_input_digest, validate_project_replacement,
     };
     let mut fixture = Fixture::new(false);

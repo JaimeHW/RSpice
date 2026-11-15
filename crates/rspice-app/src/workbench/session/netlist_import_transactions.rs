@@ -8,8 +8,7 @@
 //! import has always run them.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::netlist_document::NetlistImportOperation;
-use crate::workbench::lifecycle::project_lifecycle;
+use rspice_app_code::workbench::documents::netlist_document::NetlistImportOperation;
 #[cfg(test)]
 use rspice_app_code::workbench::workflows::netlist_workflow::sha256;
 #[cfg(not(target_arch = "wasm32"))]
@@ -23,6 +22,7 @@ use rspice_app_code::workbench::workflows::netlist_workflow::{
 use rspice_app_code::workbench::workflows::netlist_workflow::{
     BrowserNetlistImportResult, pick_browser_netlist, take_browser_netlist_completion,
 };
+use rspice_app_services::workbench::lifecycle::project_lifecycle;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 
 /// Committing a reviewed netlist import, over the whole application state.
@@ -313,7 +313,9 @@ impl AppState {
         display_name: String,
     ) -> bool {
         if bytes.len() as u64 > rspice_app_services::io::project_io::MAX_PROJECT_FILE_BYTES {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut self.platform);
+            rspice_app_services::workbench::lifecycle::project_lifecycle::cancel_transaction(
+                &mut self.platform,
+            );
             record_import_failure(
                 &mut self.model,
                 &format!(
@@ -324,12 +326,12 @@ impl AppState {
             return false;
         }
         if let Err(error) =
-            crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
+            rspice_app_services::workbench::lifecycle::project_lifecycle::validate_project_replacement(
                 self,
                 transaction,
             )
         {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut self.platform);
+            rspice_app_services::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut self.platform);
             self.prompt(format!(
                 "{} was cancelled because the project changed: {error}",
                 mode.dialog_title()
@@ -451,7 +453,7 @@ impl AppState {
             return false;
         }
         let transaction =
-            match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
+            match rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
                 Ok(transaction) => transaction,
                 Err(error) => {
                     self.prompt(format!("The dropped SPICE file was not imported: {error}."));
@@ -472,7 +474,7 @@ impl AppState {
             return false;
         }
         let transaction =
-            match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
+            match rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
                 Ok(transaction) => transaction,
                 Err(error) => {
                     self.prompt(format!("{} is unavailable: {error}.", mode.dialog_title()));
@@ -487,12 +489,12 @@ impl AppState {
         match loaded {
             Ok((path, bytes)) => {
                 if let Err(error) =
-                    crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
+                    rspice_app_services::workbench::lifecycle::project_lifecycle::validate_project_replacement(
                         self,
                         transaction,
                     )
                 {
-                    crate::workbench::lifecycle::project_lifecycle::cancel_transaction(
+                    rspice_app_services::workbench::lifecycle::project_lifecycle::cancel_transaction(
                         &mut self.platform,
                     );
                     self.prompt(format!(
@@ -508,7 +510,7 @@ impl AppState {
                 self.stage_netlist_import(transaction, mode, bytes, Some(path), display_name)
             }
             Err(error) => {
-                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(
+                rspice_app_services::workbench::lifecycle::project_lifecycle::cancel_transaction(
                     &mut self.platform,
                 );
                 if error != "cancelled" {
@@ -581,7 +583,7 @@ impl AppState {
     #[cfg(target_arch = "wasm32")]
     fn start_browser_netlist_import(&mut self, mode: NetlistImportMode) -> Result<(), String> {
         let transaction =
-            crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(self)
+            rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(self)
                 .map_err(|error| error.to_string())?;
         pick_browser_netlist(&mut self.platform, transaction, mode)
     }
@@ -592,12 +594,12 @@ impl AppState {
             return false;
         };
         if let Err(error) =
-            crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
+            rspice_app_services::workbench::lifecycle::project_lifecycle::validate_project_replacement(
                 self,
                 completion.transaction,
             )
         {
-            crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+            rspice_app_services::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
                 &mut self.platform,
                 completion.transaction,
             );
@@ -617,7 +619,7 @@ impl AppState {
                 file.name,
             ),
             BrowserNetlistImportResult::Failed(error) => {
-                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                rspice_app_services::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
                     &mut self.platform,
                     completion.transaction,
                 );
@@ -625,7 +627,7 @@ impl AppState {
                 false
             }
             BrowserNetlistImportResult::Cancelled => {
-                crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
+                rspice_app_services::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
                     &mut self.platform,
                     completion.transaction,
                 );

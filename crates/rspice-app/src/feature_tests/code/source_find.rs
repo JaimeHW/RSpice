@@ -2,10 +2,10 @@
 //! command, the dialogs the frame draws, and the bundle search behind it.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::documents::code_workspace;
-use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 use egui::Context;
 use rspice_app_code::workbench::app::dialogs::source_find::{LABEL_COLUMN, LABEL_GAP};
+use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage;
 
 #[test]
 fn initial_focus_accepts_source_search_typing() {

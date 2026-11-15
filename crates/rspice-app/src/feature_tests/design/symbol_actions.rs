@@ -216,7 +216,7 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
 /// undo step; Align with one object selected is unavailable and says why.
 #[test]
 fn align_and_snap_act_on_the_symbol_selection_as_one_step() {
-    use crate::workbench::framework::command_registry::CommandAvailability;
+    use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
     let mut app = open_symbol();
     let key = app.state.model.workspace.content.active_key();
     let before = app.state.model.load_active_symbol_document().unwrap();

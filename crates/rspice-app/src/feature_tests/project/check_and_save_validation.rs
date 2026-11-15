@@ -10,7 +10,7 @@ use crate::workbench::app::dialogs::check_and_save_validation::{
 };
 use crate::workbench::app::project_transactions::run_design_checks_in;
 use crate::workbench::app_state::AppState;
-use crate::workbench::lifecycle::project_lifecycle::SaveScope;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::SaveScope;
 use rspice_app_state::state::{ComponentType, Point};
 
 #[test]

@@ -23,9 +23,8 @@ mod view_state;
 
 use super::vocabulary::{CommandSpec, command_catalog};
 use super::*;
-use crate::workbench::framework::command_registry::CommandAvailability;
-use crate::workbench::project::workspace_state::ProjectPage;
-use crate::workbench::results::commands::ResultsCommand;
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 use rspice_app_state::product::{AnalysisInstanceId, ContentDigest, SimulationPlanId};
@@ -36,6 +35,7 @@ use rspice_app_state::state::{
 };
 use rspice_app_state::state::{ComponentType, ModelsPage, Tool};
 use rspice_app_state::state::{SimulationPage, VerificationPage};
+use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
 
 fn app_with_selected_authored_symbol() -> RSpiceApp {
     use rspice_app_state::state::{

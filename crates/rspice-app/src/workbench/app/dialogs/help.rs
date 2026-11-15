@@ -5,7 +5,6 @@ use egui::{Context, RichText};
 
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
-use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 use rspice_app_cloud::services::license::LicenseInfo;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
@@ -17,6 +16,7 @@ use rspice_app_workbench::ui::widgets::{
 };
 use rspice_app_workbench::workbench::app::dialogs::fact_grid;
 use rspice_app_workbench::workbench::app_state::session::shortcuts::ShortcutCategory;
+use rspice_ui_kit::panels::WorkbenchIcon;
 
 pub(in crate::workbench) mod report_problem;
 pub(in crate::workbench) mod site;
@@ -166,7 +166,7 @@ impl RSpiceApp {
         self.state.shell.help_center.close();
         if route_owned {
             self.state.close_route_owned_transient(
-                crate::workbench::SurfaceId::HelpCenter,
+                rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::HelpCenter,
                 "Legal & privacy",
             );
         }

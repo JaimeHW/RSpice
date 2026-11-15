@@ -42,11 +42,13 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
     );
     assert!(file_exchange::take_opened(&ctx, import_id()).is_none());
 
-    let before = crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
+    let before =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path));
     begin_import(&ctx, &mut app.state.model);
     poll(&ctx, &mut crate::workbench::features::cx(&mut app));
-    let after = crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
+    let after =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
     assert_ne!(
         before.file.simulation_results, after.file.simulation_results,
         "import invalidates cached project results"

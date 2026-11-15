@@ -1,12 +1,12 @@
 //! Distribution selection and publication through the actual worker and renderer.
 
 use crate::feature_tests::hardcopy::source_reads;
-use crate::workbench::ResultViewer;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, prepare_retained_hardcopy_resolution,
 };
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_state::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata,
     SimulationRunLifecycle, SimulationRunProvenance,
@@ -124,9 +124,10 @@ fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_r
         unreachable!()
     };
     assert_eq!(plot.traces[0].label, "gain");
-    let onscreen =
-        crate::workbench::documents::result_document::active_histogram(state.results_reads())
-            .unwrap();
+    let onscreen = rspice_app_results::workbench::documents::result_document::active_histogram(
+        state.results_reads(),
+    )
+    .unwrap();
     assert_eq!(onscreen.name, "gain");
     assert_eq!(onscreen.data_max, 2.0);
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
@@ -138,8 +139,10 @@ fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_r
     };
     variables.remove(0);
     assert!(
-        crate::workbench::documents::result_document::active_histogram(state.results_reads())
-            .is_none()
+        rspice_app_results::workbench::documents::result_document::active_histogram(
+            state.results_reads()
+        )
+        .is_none()
     );
     assert!(
         prepare_retained_hardcopy_resolution(

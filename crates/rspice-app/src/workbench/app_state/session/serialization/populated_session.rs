@@ -12,8 +12,8 @@
 use super::tests::{MemoryStorage, relaunch};
 use super::*;
 
-use crate::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
 use crate::workbench::state::{ConsolePage, Workspace, WorkspaceDocumentId};
+use rspice_app_project::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
 use rspice_app_state::state::ModelsPage;
 use rspice_app_state::state::{SimulationPage, VerificationPage};
 
@@ -128,19 +128,19 @@ pub(super) fn populated_session() -> AppState {
     // Authority over the canonical project, on each host.
     let project_id = state.model.workspace.content.project.id().to_string();
     state.platform.native_project_binding_receipt = Some(
-        crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt {
+        rspice_app_services::workbench::lifecycle::project_lifecycle::NativeBindingReceipt {
             canonical_path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
             project_id: project_id.clone(),
             accepted_digest: rspice_app_state::product::ContentDigest::from_bytes([0x5a; 32]),
         },
     );
     state.platform.browser_project_binding_receipt = Some(
-        crate::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt {
+        rspice_app_services::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt {
             binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
             project_id,
             accepted_generation: 23,
             accepted_digest: "ab".repeat(32).parse().expect("valid digest fixture"),
-            backend: crate::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::Opfs,
+            backend: rspice_app_services::workbench::lifecycle::project_lifecycle::BrowserBindingBackend::Opfs,
         },
     );
     state
@@ -199,7 +199,7 @@ fn populate_ui_session(state: &mut AppState) {
         )
         .expect("valid personal view");
     state.platform.autosave_minutes = 10;
-    let wheel = crate::workbench::preferences::TogglePreference::InvertWheelZoom;
+    let wheel = rspice_app_state::workbench::preferences::TogglePreference::InvertWheelZoom;
     let inverted = !state.model.preferences.toggle(wheel);
     state.model.preferences.set_toggle(wheel, inverted);
     // Read through an untagged storage enum, which keeps a domain it cannot
@@ -210,7 +210,7 @@ fn populate_ui_session(state: &mut AppState) {
         .workspace_mut()
         .expect("the shipped workspace preferences are current")
         .set_background_task_attention(
-            crate::workbench::preferences::BackgroundTaskAttention::Silent,
+            rspice_app_state::workbench::preferences::BackgroundTaskAttention::Silent,
         );
     state
         .model
@@ -219,7 +219,8 @@ fn populate_ui_session(state: &mut AppState) {
         .replace_active(customized_shortcuts())
         .expect("the shipped shortcut library is compatible");
     state.settings.browser_spoken_feedback = true;
-    state.workbench.text_locale = crate::workbench::UiTextLocale::PseudoExpanded;
+    state.workbench.text_locale =
+        rspice_app_workbench::workbench::localization::UiTextLocale::PseudoExpanded;
     state.results.results.session.viewer = rspice_results::result_presentation::ResultViewer::Bode;
     state.results.results.session.eye_timebase.insert(
         rspice_results_ui::eye_diagram::EyeTimebaseKey::Prepared(
@@ -290,7 +291,8 @@ fn populate_workbench(
     // and applies the destination's, so the layout below comes after it.
     workbench.activate(Workspace::Simulate);
     workbench.window_session.set_clamp_restored_windows(false);
-    workbench.set_workspace_preset(crate::workbench::WorkspacePreset::Canvas);
+    workbench
+        .set_workspace_preset(rspice_app_state::workbench::preferences::WorkspacePreset::Canvas);
     workbench.navigator_visible = false;
     workbench.inspector_visible = false;
     workbench.console_visible = true;

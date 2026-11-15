@@ -10,13 +10,13 @@ use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, frame_with, open_in_design, open_project_app, themed_context,
 };
 use crate::workbench::app::veriloga_interface_tests::edit_source;
-use crate::workbench::documents::code_workspace::{
-    VerilogACellSymbol, VerilogASymbolDrift, symbol_standing,
-};
 use crate::workbench::features;
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::documents::code_workspace::{
+    VerilogACellSymbol, VerilogASymbolDrift, symbol_standing,
+};
 use rspice_app_code::workbench::surfaces::veriloga;
 use rspice_app_state::state::{
     CellViewRef, Point, PortDirection, SymbolDocument, SymbolElectricalType,
@@ -449,10 +449,10 @@ fn a_pin_the_module_dropped_is_named_against_the_module() {
 #[test]
 fn a_compiled_symbol_undoes_saves_and_reverts_as_a_drawn_one() {
     use crate::workbench::commands::vocabulary::Command;
-    use crate::workbench::lifecycle::project_lifecycle::{
+    use rspice_app_project::workbench::project::commands::ProjectCommand;
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         has_unsaved_changes, prepare_revert_active_document,
     };
-    use crate::workbench::project::commands::ProjectCommand;
 
     let mut app = open_project_app();
     let reference = compiled_amplifier(&mut app);

@@ -1,9 +1,9 @@
 //! The Netlist surface drawn through the whole application: a problem
 //! step that goes to its finding, and the run strip at every phase.
 
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::{RSpiceApp, features};
 use egui::vec2;
+use rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument;
 use rspice_app_code::workbench::surfaces::netlist::fixtures::seal_manual_run;
 use rspice_app_code::workbench::surfaces::netlist::{
     RUN_STRIP_HEIGHT, RunStripPhase, reveal_in_netlist, run_strip_projection, show_prepared,
@@ -15,8 +15,8 @@ use rspice_app_code::workbench::surfaces::netlist::{
 /// finding of the deck's own file counts though it names that file.
 #[test]
 fn a_problem_step_in_the_deck_goes_to_the_finding_and_says_which() {
-    use crate::workbench::documents::code_workspace::{ProblemStep, queue_problem_step};
-    use crate::workbench::documents::netlist_document;
+    use rspice_app_code::workbench::documents::code_workspace::{ProblemStep, queue_problem_step};
+    use rspice_app_code::workbench::documents::netlist_document;
     use rspice_app_state::state::netlist_diagnostics::{Diagnostic, NetlistDiagnosticCollection};
     use rspice_vocabulary::diagnostics::DiagnosticSeverity;
 
@@ -125,7 +125,7 @@ fn run_strip_band(
         RunStripPhase::Current => {}
         RunStripPhase::Snapshot => {
             assert!(
-                crate::workbench::documents::netlist_document::open_run_deck_snapshot_in(
+                rspice_app_code::workbench::documents::netlist_document::open_run_deck_snapshot_in(
                     &mut app.state.model,
                     &mut app.state.code.netlist,
                     &app.state.runs,

@@ -336,10 +336,10 @@ const EDITED_DECK: &str = "* owned deck\nV1 out 0 2\nR1 out 0 1k\n.op\n.end\n";
 /// with a sealed preview plan and no publication started.
 #[cfg(not(target_arch = "wasm32"))]
 fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
-    use crate::workbench::documents::netlist_document::{
+    use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+    use rspice_app_code::workbench::documents::netlist_document::{
         begin_netlist_lifecycle_action_in, commit_netlist_lifecycle_action,
     };
-    use crate::workbench::state::{Workspace, WorkspaceDocumentId};
     use rspice_app_state::state::{Point, Wire};
     use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
 
@@ -400,8 +400,8 @@ fn assert_export_survived(app: &RSpiceApp, plan: &std::sync::Arc<HardcopyPlan>, 
 #[cfg(not(target_arch = "wasm32"))]
 fn netlist_transactions_keep_an_export_in_flight() {
     use crate::workbench::app_state::model::LiveOwnedSource;
-    use crate::workbench::documents::netlist_document::replace_owned_source;
-    use crate::workbench::framework::feature::CodePort;
+    use rspice_app_code::workbench::documents::netlist_document::replace_owned_source;
+    use rspice_app_workbench::workbench::framework::feature::CodePort;
 
     let mut app = export_open_on_a_netlist_owned_project();
     app.state.hardcopy.hardcopy.busy = true;
@@ -448,7 +448,7 @@ fn reverting_a_document_keeps_an_export_in_flight() {
     use crate::workbench::app_state::services_access::{
         accept_loaded_project, confirm_revert_active_document,
     };
-    use crate::workbench::lifecycle::project_lifecycle::{
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         prepare_revert_active_document, snapshot,
     };
     use rspice_app_state::state::{Point, Wire};
@@ -536,7 +536,9 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
     .expect("the export starts");
 
     let shows_owned_root =
-        crate::workbench::framework::feature::CodePort::shows_owned_root(&*app.state.code);
+        rspice_app_workbench::workbench::framework::feature::CodePort::shows_owned_root(
+            &*app.state.code,
+        );
     assert!(matches!(
         app.state
             .model

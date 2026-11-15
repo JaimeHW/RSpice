@@ -1,10 +1,10 @@
 //! The shortcut reference lists every discoverable command exactly once.
 
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::CommandFlags;
-use crate::workbench::project::commands::ProjectCommand;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_state::state::command_catalog::CommandPlatform;
 use rspice_app_workbench::workbench::app_state::session::shortcuts::category::*;
+use rspice_app_workbench::workbench::framework::command_registry::CommandFlags;
 
 #[test]
 fn command_reference_is_a_lossless_projection_of_discoverable_commands() {

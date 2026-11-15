@@ -12,9 +12,9 @@ use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 fn clearing_design_execution_context_clears_source_runtime_and_keeps_the_console() {
     let mut state = AppState::default();
     state.code.code_workspace.page =
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
     state.code.code_workspace.automation.debug.watches.push(
-        crate::workbench::documents::code_workspace::AutomationWatch {
+        rspice_app_code::workbench::documents::code_workspace::AutomationWatch {
             expression: "project.old_value".to_owned(),
             value: "17".to_owned(),
             error: None,
@@ -39,7 +39,7 @@ fn clearing_design_execution_context_clears_source_runtime_and_keeps_the_console
 
     assert_eq!(
         state.code.code_workspace.page,
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
     );
     assert!(
         state
@@ -144,7 +144,7 @@ fn clearing_design_execution_context_clears_stale_drc_results() {
 
 #[test]
 fn clearing_design_execution_context_clears_project_scoped_results_state() {
-    use crate::workbench::documents::result_document::{
+    use rspice_app_results::workbench::documents::result_document::{
         AnalysisPresentationKey, ExprSeries, ExprTrace, ResultViewer,
     };
     use rspice_results_ui::session::ExprEditor;

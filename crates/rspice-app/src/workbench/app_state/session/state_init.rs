@@ -118,13 +118,13 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     *state.models.pdk_settings_dialog = PdkSettingsDialogState::new();
     *state.results.analysis = analysis;
     state.design.schematic_snap.grid_size = snap_grid_size;
-    crate::workbench::documents::code_workspace::bootstrap_automation(
+    rspice_app_code::workbench::documents::code_workspace::bootstrap_automation(
         &state.model.workspace,
         &mut state.code.code_workspace,
     );
     // A first start opens on this untitled project: until it is edited,
     // New project, Close project and Exit have nothing of it to save.
-    crate::workbench::lifecycle::project_lifecycle::mark_pristine(&mut state);
+    rspice_app_services::workbench::lifecycle::project_lifecycle::mark_pristine(&mut state);
     state
 }
 

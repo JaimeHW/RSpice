@@ -2,14 +2,15 @@
 //! the feature's context lent from RSpiceApp, and the cell it creates there,
 //! with what the creation raised answered as the dialog step answers it.
 
-use crate::workbench::project::ProjectFeature;
-use crate::workbench::project::commands::ProjectRequest;
-use crate::workbench::project::library_dialogs::new_cell::create_new_cell;
-use crate::workbench::{ChoicePreference, RSpiceApp};
+use crate::workbench::RSpiceApp;
 use rspice_app_project::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
+use rspice_app_project::workbench::project::ProjectFeature;
+use rspice_app_project::workbench::project::commands::ProjectRequest;
+use rspice_app_project::workbench::project::library_dialogs::new_cell::create_new_cell;
 use rspice_app_state::state::{
     CellViewRef, ComponentType, Library, NetNamingPolicy, Point, SchematicGridPitch, SymbolDocument,
 };
+use rspice_app_state::workbench::preferences::ChoicePreference;
 
 use super::{in_front, published, shown, with_cx};
 

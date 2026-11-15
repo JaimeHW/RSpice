@@ -9,11 +9,11 @@ use egui::Key;
 
 use super::vocabulary::Command;
 use crate::workbench::RSpiceApp;
-use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::state::Workspace;
 use rspice_app_state::state::command_catalog::{
     CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
+use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
 
 const ALL: &[CommandPlatform] = &CommandPlatform::ALL;
 const DESKTOP: &[CommandPlatform] = &[CommandPlatform::Desktop];
@@ -377,14 +377,14 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::ResultViewer;
-    use crate::workbench::framework::command_registry::CommandFlags;
-    use crate::workbench::results::commands::ResultsCommand;
-    use crate::workbench::simulate::commands::SimulateCommand;
     use rspice_app_code::workbench::code::commands::CodeCommand;
     use rspice_app_design::workbench::design::commands::DesignCommand;
+    use rspice_app_results::workbench::documents::result_document::ResultViewer;
+    use rspice_app_results::workbench::results::commands::ResultsCommand;
+    use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
     use rspice_app_state::state::VerificationPage;
     use rspice_app_state::state::command_catalog::{CommandCatalog, CommandKey};
+    use rspice_app_workbench::workbench::framework::command_registry::CommandFlags;
 
     fn binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<Command> {
         crate::workbench::commands::vocabulary::COMMAND_REGISTRY
@@ -937,7 +937,7 @@ mod tests {
         assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
         assert_eq!(
             app.state.code.netlist.active_document,
-            crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
+            rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
         );
         assert_eq!(app.state.code.netlist.requested_line, Some(3));
         assert_eq!(app.state.code.netlist.cursor_line, 2);

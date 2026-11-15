@@ -4,13 +4,13 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::project_transactions::open_new_project_dialog;
-use crate::workbench::framework::command_registry::ids;
 use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::{
     CellViewRef, Component, ComponentType, PinFindingKind, Point, PortDirection, SymbolDocument,
     SymbolInterface, SymbolPin, SymbolPinSide, ViewType,
 };
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 use super::super::replay::Replay;
 
@@ -618,8 +618,8 @@ fn an_orphaned_pin_goes_in_one_step_from_its_finding() {
 /// palette row that runs it, and the step Undo then takes back.
 #[test]
 fn update_pins_is_named_for_the_schematic_wherever_it_shows() {
-    use crate::workbench::framework::host::Host;
     use egui::accesskit::Role;
+    use rspice_app_workbench::workbench::framework::host::Host;
 
     let mut replay = new_project();
     let schematic = replay.app.state.model.workspace.content.active_view.clone();
@@ -666,8 +666,8 @@ fn update_pins_is_named_for_the_schematic_wherever_it_shows() {
 /// Update pins says so, from the menu row to the step Undo takes back.
 #[test]
 fn update_pins_is_named_for_the_module_of_a_module_defined_cell() {
-    use crate::workbench::framework::host::Host;
     use rspice_app_state::state::{Cell, View};
+    use rspice_app_workbench::workbench::framework::host::Host;
 
     let mut replay = new_project();
     let library = replay

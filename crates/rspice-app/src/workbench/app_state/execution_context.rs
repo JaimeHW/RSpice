@@ -90,7 +90,7 @@ impl AppState {
         &mut self,
         presentation: rspice_app_state::state::result_presentation::ResultPresentation,
     ) {
-        crate::workbench::documents::result_document::restore_presentation(
+        rspice_app_results::workbench::documents::result_document::restore_presentation(
             &mut self.results_parts(),
             presentation,
         );

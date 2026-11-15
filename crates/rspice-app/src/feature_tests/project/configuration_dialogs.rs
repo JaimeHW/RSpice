@@ -5,14 +5,14 @@
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::project_transactions::hold_for_configuration_edits;
 use crate::workbench::examples::hierarchy_reference;
-use crate::workbench::project::commands::ProjectRequest;
-use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::session::project_transactions::go_on_leaving;
 use rspice_app_project::workbench::app::dialogs::project::configuration::delete_refusal;
 use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::{
     ConfigurationDialog, ConfigurationDialogParts, ConfigurationDialogRequest, Leaving,
     LeavingAnswer, answer_leaving, open_configuration_dialog, render_configuration_dialog,
 };
+use rspice_app_project::workbench::project::commands::ProjectRequest;
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_services::services::recent_files::RecentKind;
 use rspice_app_state::state::ConfigurationSetId;
 use rspice_app_workbench::ui::widgets::DialogChoice;
@@ -258,7 +258,11 @@ fn leaving_the_project_asks_about_configuration_edits_first() {
 
     // Discard drops them, then asks about the project's unsaved work as New
     // project always does.
-    assert!(crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&app.state));
+    assert!(
+        rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(
+            &app.state
+        )
+    );
     assert!(hold_for_configuration_edits(
         &mut app.state,
         ConfirmationAction::ProjectNew,

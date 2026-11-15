@@ -382,10 +382,10 @@ fn a_schematic_save_keeps_the_previous_file_only_when_asked() {
     for keep in [true, false] {
         let path = folder.join(format!("design-{keep}.rsch"));
         let mut state = AppState::default();
-        state
-            .model
-            .preferences
-            .set_toggle(crate::workbench::TogglePreference::KeepSaveBackup, keep);
+        state.model.preferences.set_toggle(
+            rspice_app_state::workbench::preferences::TogglePreference::KeepSaveBackup,
+            keep,
+        );
         for _ in 0..2 {
             assert!(state.save_schematic_to_path_with_io(&path, true, &NativeFileWorkflowIo));
         }

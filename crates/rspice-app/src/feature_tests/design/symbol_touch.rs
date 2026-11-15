@@ -6,8 +6,8 @@
 
 use crate::feature_tests::design::symbol_actions_drawn::open_symbol;
 use crate::workbench::app::*;
-use crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes;
 use egui::{Event, Pos2, Rect, TouchId, TouchPhase, Vec2};
+use rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes;
 use rspice_app_state::state::{Point, SymbolDocument, SymbolEditorMetadata, SymbolShape};
 use rspice_schematic_editor::symbol_editor::SymbolViewport;
 use rspice_schematic_editor::symbol_editor::session::{SymbolSelection, SymbolTool};

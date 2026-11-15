@@ -28,10 +28,10 @@ use crate::workbench::commands::vocabulary::command_registry;
 use egui::Context;
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::code_workspace::{
+use rspice_app_code::workbench::documents::code_workspace::{
     restore_global_veriloga_library, save_global_veriloga_library,
 };
-use crate::workbench::framework::feature::{CodePort, ModelsPort};
+use rspice_app_workbench::workbench::framework::feature::{CodePort, ModelsPort};
 
 const CONTEXT_LONG_PRESS_DURATION_SECONDS: f64 = 0.56;
 const CONTEXT_LONG_PRESS_MOVE_TOLERANCE_POINTS: f32 = 9.0;
@@ -86,13 +86,13 @@ pub(crate) mod dialogs;
 pub(crate) mod project_transactions;
 
 #[cfg(target_arch = "wasm32")]
-use crate::workbench::models::pack_persistence;
-#[cfg(target_arch = "wasm32")]
-use crate::workbench::models::pdk_persistence;
-#[cfg(target_arch = "wasm32")]
 use browser_history::{
     initialize_browser_surface_navigation, synchronize_browser_surface_navigation,
 };
+#[cfg(target_arch = "wasm32")]
+use rspice_app_models::workbench::models::pack_persistence;
+#[cfg(target_arch = "wasm32")]
+use rspice_app_models::workbench::models::pdk_persistence;
 
 #[cfg(test)]
 pub(crate) use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ProjectReviewRequest;
@@ -134,7 +134,7 @@ pub struct RSpiceApp {
     pub(crate) simulation_controller: rspice_app_runs::simulation::controller::SimulationController,
     /// What the code feature runs: the automation runtime and the project it
     /// is authorized to serve.
-    pub(crate) code: crate::workbench::documents::code_workspace::CodeHandles,
+    pub(crate) code: rspice_app_code::workbench::documents::code_workspace::CodeHandles,
     /// What the cloud feature runs: the account session boundary and the
     /// live-session engine that drains it.
     pub(crate) cloud: rspice_app_cloud::workbench::live_session::CloudHandles,
@@ -188,8 +188,8 @@ impl RSpiceApp {
     /// and change, lent for the one call.
     pub(crate) fn code_workspace_parts(
         &mut self,
-    ) -> crate::workbench::documents::code_workspace::CodeWorkspaceParts<'_> {
-        crate::workbench::documents::code_workspace::CodeWorkspaceParts {
+    ) -> rspice_app_code::workbench::documents::code_workspace::CodeWorkspaceParts<'_> {
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspaceParts {
             code: &mut self.state.code.code_workspace,
             netlist: &mut self.state.code.netlist,
             handles: &mut self.code,
@@ -249,7 +249,7 @@ impl RSpiceApp {
     }
 
     pub(crate) fn manual_deck_run_block_reason(&self) -> Option<String> {
-        crate::workbench::documents::netlist_document::manual_deck_run_block_reason_for_run(
+        rspice_app_code::workbench::documents::netlist_document::manual_deck_run_block_reason_for_run(
             &self.state.model,
             &self.state.code.netlist,
             self.state.workbench.messages(),
@@ -271,7 +271,7 @@ impl RSpiceApp {
             symbol_library: None,
             simulation_controller:
                 rspice_app_runs::simulation::controller::SimulationController::new(),
-            code: crate::workbench::documents::code_workspace::CodeHandles {
+            code: rspice_app_code::workbench::documents::code_workspace::CodeHandles {
                 #[cfg(not(target_arch = "wasm32"))]
                 automation_runtime:
                     rspice_app_services::automation_runtime::NativeAutomationRuntime::discover(),
@@ -317,7 +317,7 @@ impl RSpiceApp {
             .model
             .preferences
             .workspace()
-            .map(crate::workbench::WorkspacePreferences::console_on_launch)
+            .map(rspice_app_state::workbench::preferences::WorkspacePreferences::console_on_launch)
             .unwrap_or_default()
             .is_open();
         state.workbench.apply_console_launch_behavior(console_open);
@@ -328,7 +328,7 @@ impl RSpiceApp {
             .model
             .preferences
             .workspace()
-            .map(crate::workbench::WorkspacePreferences::preset)
+            .map(rspice_app_state::workbench::preferences::WorkspacePreferences::preset)
             .unwrap_or_default();
         state.workbench.set_workspace_preset(workspace_preset);
         state
@@ -449,7 +449,7 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library,
             simulation_controller,
-            code: crate::workbench::documents::code_workspace::CodeHandles {
+            code: rspice_app_code::workbench::documents::code_workspace::CodeHandles {
                 #[cfg(not(target_arch = "wasm32"))]
                 automation_runtime: rspice_app_services::automation_runtime::NativeAutomationRuntime::discover(),
                 #[cfg(target_arch = "wasm32")]
@@ -488,7 +488,7 @@ impl RSpiceApp {
             // The shell's menus name their commands by key; the registry
             // answers every one before the first menu is drawn.
             debug_assert_eq!(
-                crate::workbench::framework::host::Host::validate_commands(self),
+                rspice_app_workbench::workbench::framework::host::Host::validate_commands(self),
                 Ok(())
             );
         }
@@ -531,7 +531,7 @@ impl RSpiceApp {
 
         self.poll_code(ctx);
         self.poll_automation_workflow();
-        crate::workbench::documents::code_workspace::settle_pending_python_execute(
+        rspice_app_code::workbench::documents::code_workspace::settle_pending_python_execute(
             &mut self.code_workspace_parts(),
         );
         self.poll_managed_automation_runtime();
@@ -558,9 +558,11 @@ impl RSpiceApp {
         self.poll_browser_pack_restore(ctx);
         self.handle_shortcuts(ctx);
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::browser::file_import::register_text_import_repaint_context(ctx);
+        rspice_app_services::workbench::browser::file_import::register_text_import_repaint_context(
+            ctx,
+        );
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::lifecycle::project_lifecycle::poll_browser_binding_restore(
+        rspice_app_services::workbench::lifecycle::project_lifecycle::poll_browser_binding_restore(
             &mut self.state,
         );
         #[cfg(target_arch = "wasm32")]
@@ -607,7 +609,7 @@ impl RSpiceApp {
             );
         }
         #[cfg(target_arch = "wasm32")]
-        crate::workbench::browser::accessibility::publish_workspace_context(
+        rspice_app_services::workbench::browser::accessibility::publish_workspace_context(
             self.state.workbench.workspace.label(),
             &self
                 .state
@@ -645,7 +647,9 @@ impl RSpiceApp {
     /// X1* — project — RSpice` while a symbol is edited in place.
     fn sync_window_title(&mut self, ctx: &Context) {
         let project_has_unsaved_changes =
-            crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state);
+            rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(
+                &self.state,
+            );
         let authoring_has_unsaved_changes =
             ModelsPort::has_unsaved_authoring_changes(&*self.state.models);
         let should_warn_before_unload = should_warn_before_browser_unload(
@@ -694,7 +698,7 @@ impl RSpiceApp {
 
     pub(crate) fn capture_application_window_projection(
         &mut self,
-        window: crate::workbench::ApplicationWindowId,
+        window: rspice_app_workbench::workbench::lifecycle::window_session::ApplicationWindowId,
     ) {
         let workspace = self.state.workbench.workspace;
         let route = self.state.workbench.current_route();
@@ -717,7 +721,7 @@ impl RSpiceApp {
 
     pub(crate) fn project_application_window(
         &mut self,
-        window: crate::workbench::ApplicationWindowId,
+        window: rspice_app_workbench::workbench::lifecycle::window_session::ApplicationWindowId,
         fallback_layout: crate::workbench::state::WorkspaceLayoutState,
     ) -> bool {
         let Some(window_state) = self.state.workbench.window_session.state(window).cloned() else {
@@ -832,7 +836,7 @@ impl RSpiceApp {
     }
 
     pub(crate) fn render_frame_dialogs(&mut self, ctx: &Context) {
-        crate::workbench::framework::dialogs::render(
+        rspice_app_workbench::workbench::framework::dialogs::render(
             self,
             ctx,
             crate::workbench::frame::dialog_order::DIALOG_ORDER,
@@ -846,7 +850,9 @@ impl RSpiceApp {
     pub(in crate::workbench) fn synchronize_route_owned_dialogs(&mut self) {
         let surface = self.state.workbench.current_route().surface_id();
 
-        if surface == crate::workbench::SurfaceId::CommandPalette {
+        if surface
+            == rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::CommandPalette
+        {
             if !self.state.workbench.command_palette.open {
                 self.state.workbench.command_palette.open_routed();
             }
@@ -854,7 +860,9 @@ impl RSpiceApp {
             self.state.workbench.command_palette.close();
         }
 
-        if surface == crate::workbench::SurfaceId::HelpCenter {
+        if surface
+            == rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::HelpCenter
+        {
             if !self.state.shell.help_center.open {
                 self.state
                     .shell
@@ -877,7 +885,7 @@ impl eframe::App for RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         {
             if let Some(enabled) =
-                crate::workbench::browser::accessibility::spoken_feedback_override()
+                rspice_app_services::workbench::browser::accessibility::spoken_feedback_override()
             {
                 self.state.settings.browser_spoken_feedback = enabled;
             }
@@ -899,20 +907,24 @@ impl eframe::App for RSpiceApp {
         self.poll_cloud_account(&ctx);
         self.record_publish_receipt();
         self.pump_live_session();
-        crate::workbench::framework::requests::drain(
+        rspice_app_workbench::workbench::framework::requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
-            |_, crate::workbench::framework::requests::ClipboardText(text)| ctx.copy_text(text),
+            |_, rspice_app_workbench::workbench::framework::requests::ClipboardText(text)| {
+                ctx.copy_text(text)
+            },
         );
-        crate::workbench::framework::requests::drain(
+        rspice_app_workbench::workbench::framework::requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
-            |_, crate::workbench::framework::requests::ClipboardImage(image)| ctx.copy_image(image),
+            |_, rspice_app_workbench::workbench::framework::requests::ClipboardImage(image)| {
+                ctx.copy_image(image)
+            },
         );
-        crate::workbench::framework::requests::drain(
+        rspice_app_workbench::workbench::framework::requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
-            |_, crate::workbench::framework::requests::OpenWebPage(url)| {
+            |_, rspice_app_workbench::workbench::framework::requests::OpenWebPage(url)| {
                 ctx.open_url(egui::OpenUrl::new_tab(url));
             },
         );
@@ -931,11 +943,9 @@ impl eframe::App for RSpiceApp {
         // none waiting, and a feature's dialog step answers only what it
         // raised itself.
         debug_assert!(
-            !self
-                .state
-                .workbench
-                .outbox
-                .waits_at(crate::workbench::framework::requests::Drain::AfterContribution),
+            !self.state.workbench.outbox.waits_at(
+                rspice_app_workbench::workbench::framework::requests::Drain::AfterContribution
+            ),
             "a request raised before the dialog walk was left unanswered"
         );
         self.render_frame_dialogs(&ctx);
@@ -1154,7 +1164,7 @@ mod tests {
         let saved = serde_json::to_value(window).unwrap();
         assert!(saved.get("drawer").is_none());
         assert!(saved.get("console_maximized").is_none());
-        let restored: crate::workbench::lifecycle::window_session::ApplicationWindowState =
+        let restored: rspice_app_workbench::workbench::lifecycle::window_session::ApplicationWindowState =
             serde_json::from_value(saved).unwrap();
         assert_eq!(restored.drawer, None);
         assert!(!restored.console_maximized);
@@ -1831,7 +1841,10 @@ mod tests {
 
     #[test]
     fn direct_command_palette_and_help_routes_restore_their_dialog_owners() {
-        use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+        use rspice_app_workbench::workbench::routing::{
+            navigation::RouteTransitionSource, surface_catalog::SurfaceId,
+            surface_route::SurfaceRoute,
+        };
 
         let mut app = RSpiceApp::test_instance();
         app.state
@@ -1875,7 +1888,10 @@ mod tests {
 
     #[test]
     fn route_owned_transient_close_returns_to_source_or_safe_workspace() {
-        use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+        use rspice_app_workbench::workbench::routing::{
+            navigation::RouteTransitionSource, surface_catalog::SurfaceId,
+            surface_route::SurfaceRoute,
+        };
 
         let source = SurfaceRoute::surface(SurfaceId::Design);
         let palette = SurfaceRoute::surface(SurfaceId::CommandPalette);
@@ -1901,10 +1917,12 @@ mod tests {
 
     #[test]
     fn design_management_close_restores_design_with_canonical_history_effects() {
-        use crate::workbench::{
-            BrowserHistoryEffect, RouteTransitionSource, SurfaceId, SurfaceRoute,
-        };
         use rspice_app_project::workbench::app::dialogs::design_management::close_design_management_dialog_route;
+        use rspice_app_workbench::workbench::routing::{
+            navigation::{BrowserHistoryEffect, RouteTransitionSource},
+            surface_catalog::SurfaceId,
+            surface_route::SurfaceRoute,
+        };
 
         let mut state = AppState::default();
         let design = SurfaceRoute::surface(SurfaceId::Design);

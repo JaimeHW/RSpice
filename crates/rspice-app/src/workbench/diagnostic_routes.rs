@@ -24,12 +24,12 @@ use egui::Context;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::models::commands::ModelsCommand;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::project::workspace_state::ProjectPage;
-use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_models::workbench::models::commands::ModelsCommand;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::{DrawnObject, PreflightRemediation};
 
@@ -49,7 +49,7 @@ pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
         DiagnosticRoute::Anchor(anchor) => app.state.jump_to_log_anchor(anchor),
         DiagnosticRoute::NetlistDiagnostic(diagnostic_id) => {
             if let Err(error) =
-                crate::workbench::documents::netlist_document::open_diagnostic_location(
+                rspice_app_code::workbench::documents::netlist_document::open_diagnostic_location(
                     &mut app.state.model,
                     &mut app.state.code.netlist,
                     &mut app.state.code.netlist_open_documents,
@@ -98,7 +98,7 @@ fn open_code_document(
     line: Option<usize>,
     column: Option<usize>,
 ) {
-    use crate::workbench::documents::code_workspace;
+    use rspice_app_code::workbench::documents::code_workspace;
     use rspice_app_state::state::{ProjectSourceLanguage, ProjectSourceOwner};
 
     let owner = app
@@ -240,7 +240,7 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
             app.execute_command_key(ModelsCommand::Page(page).key());
         }
         PreflightRemediation::NetlistSource { line } => {
-            use crate::workbench::documents::netlist_document;
+            use rspice_app_code::workbench::documents::netlist_document;
 
             // The generated deck is the document the workspace holds for this
             // design, so that is what opens; a project with none is told so

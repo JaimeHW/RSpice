@@ -14,13 +14,13 @@ use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame_with, themed_c
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRoute};
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::lifecycle::project_lifecycle::{
-    DestinationAuthority, SaveScope, has_unsaved_changes,
-};
-use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::state::PRIMARY;
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+    DestinationAuthority, SaveScope, has_unsaved_changes,
+};
 use rspice_app_state::diagnostics::LogAnchor;
 use rspice_app_state::state::{
     CellViewRef, ModelBoundSymbolDefinition, Point, PortDirection, SymbolDocument,
@@ -419,7 +419,7 @@ fn editing_a_bound_symbol_keeps_its_binding_through_undo_save_and_revert() {
             .expect("G");
         pin.position = Some(gate + Point::new(0, 20));
     });
-    let token = crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
+    let token = rspice_app_services::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
         &fixture.app.state,
     )
     .expect("the revert is reviewed");

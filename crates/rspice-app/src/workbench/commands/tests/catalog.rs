@@ -8,11 +8,11 @@
 
 use super::*;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::models::commands::ModelsCommand;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_models::workbench::models::commands::ModelsCommand;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 
 #[test]
 fn command_catalog_has_unique_stable_ids() {
@@ -253,7 +253,9 @@ fn command_palette_and_help_commands_own_canonical_routes() {
     Command::CommandPalette.execute(&mut palette);
     assert_eq!(
         palette.state.workbench.current_route(),
-        crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::CommandPalette)
+        rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(
+            rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::CommandPalette
+        )
     );
     assert!(palette.state.workbench.command_palette.open);
     assert!(palette.state.workbench.command_palette.route_owned);
@@ -267,7 +269,9 @@ fn command_palette_and_help_commands_own_canonical_routes() {
     Command::LegalPrivacy.execute(&mut help);
     assert_eq!(
         help.state.workbench.current_route(),
-        crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::HelpCenter)
+        rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(
+            rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::HelpCenter
+        )
     );
     assert!(help.state.shell.help_center.open);
     assert!(help.state.shell.help_center.route_owned);

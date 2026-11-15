@@ -16,9 +16,9 @@
 use egui::{Pos2, Vec2, pos2, vec2};
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::layout::LayoutSpec;
 use rspice_app_workbench::ui::raster::Canvas;
 use rspice_app_workbench::ui::tokens::Mode;
+use rspice_app_workbench::workbench::layout::LayoutSpec;
 
 /// What is on screen when the render is taken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

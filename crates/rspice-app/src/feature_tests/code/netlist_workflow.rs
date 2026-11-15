@@ -25,7 +25,7 @@ fn launcher_drop_stages_a_new_netlist_project_review() {
         .expect("launcher drop owns a staged review");
     assert_eq!(
         review.operation,
-        crate::workbench::documents::netlist_document::NetlistImportOperation::OpenProject
+        rspice_app_code::workbench::documents::netlist_document::NetlistImportOperation::OpenProject
     );
     assert_eq!(review.display_name, "dropped.cir");
     assert_eq!(review.source.as_bytes(), source);
@@ -95,7 +95,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
         .source_encoding = rspice_app_state::state::NetlistTextEncoding::Latin1;
     let utf8_source = "* caf\u{00e9} and \u{03a9}\nV1 out 0 1\n.op\n.end\n";
     assert!(
-        crate::workbench::documents::netlist_document::replace_owned_source(
+        rspice_app_code::workbench::documents::netlist_document::replace_owned_source(
             &mut app.state.model,
             &mut app.state.code.netlist,
             &mut app.state.code.netlist_open_documents,
@@ -167,8 +167,10 @@ fn authenticated_generated_bundle_stages_and_commits_retained_closure() {
 
     let mut state = AppState::default();
     let transaction =
-        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
-            .expect("replacement transaction starts");
+        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
+            &mut state,
+        )
+        .expect("replacement transaction starts");
     assert!(state.stage_netlist_import(
         transaction,
         NetlistImportMode::ImportIntoProject,
@@ -211,8 +213,10 @@ fn staged_import_is_cancel_safe_and_commits_only_the_reviewed_snapshot() {
     let original_project = state.model.workspace.content.project.id();
     let original_source = state.model.workspace.content.netlist_source.clone();
     let transaction =
-        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
-            .expect("replacement transaction starts");
+        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
+            &mut state,
+        )
+        .expect("replacement transaction starts");
     let source = b"* staged\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
 
     assert!(state.stage_netlist_import(
@@ -263,7 +267,7 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
         .revision_history[0]
         .document_revision;
     assert!(
-        crate::workbench::documents::netlist_document::replace_owned_source(
+        rspice_app_code::workbench::documents::netlist_document::replace_owned_source(
             &mut state.model,
             &mut state.code.netlist,
             &mut state.code.netlist_open_documents,
@@ -282,7 +286,7 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
         .get();
     assert!(modified_revision > baseline_revision);
 
-    crate::workbench::documents::netlist_document::compare_owned_revision(
+    rspice_app_code::workbench::documents::netlist_document::compare_owned_revision(
         &mut state.model,
         &mut state.code.netlist,
         0,
@@ -296,13 +300,13 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
             .netlist_content
             .contains("-V1 out 0 1")
     );
-    crate::workbench::documents::netlist_document::close_revision_comparison(
+    rspice_app_code::workbench::documents::netlist_document::close_revision_comparison(
         &mut state.model,
         &mut state.code.netlist,
     );
     assert_eq!(state.model.simulation.source.netlist_content, modified);
 
-    crate::workbench::documents::netlist_document::restore_owned_revision(
+    rspice_app_code::workbench::documents::netlist_document::restore_owned_revision(
         &mut state.model,
         &mut state.code.netlist,
         &mut state.code.netlist_open_documents,
@@ -378,12 +382,12 @@ fn a_deck_naming_no_dialect_starts_from_the_preferred_one() {
             .model
             .preferences
             .set_choice(
-                crate::workbench::ChoicePreference::ImportedNetlistDialect,
+                rspice_app_state::workbench::preferences::ChoicePreference::ImportedNetlistDialect,
                 1,
             )
             .expect("SPICE3 / ngspice is an importable dialect");
         let transaction =
-            crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
+            rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
                 .expect("replacement transaction starts");
         assert!(state.stage_netlist_import(
             transaction,
@@ -401,8 +405,10 @@ fn a_deck_naming_no_dialect_starts_from_the_preferred_one() {
 fn detected_foreign_dialect_requires_explicit_acceptance() {
     let mut state = AppState::default();
     let transaction =
-        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
-            .expect("replacement transaction starts");
+        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
+            &mut state,
+        )
+        .expect("replacement transaction starts");
     let source = b"* hspice deck\n.option post=2\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
     let retained_source = String::from_utf8(source.clone()).unwrap();
 
@@ -457,8 +463,10 @@ fn only_source_authenticated_import_dialects_can_commit_after_acceptance() {
 
     let mut state = AppState::default();
     let transaction =
-        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
-            .expect("replacement transaction starts");
+        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
+            &mut state,
+        )
+        .expect("replacement transaction starts");
     let source = b"* standard subset\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
     assert!(state.stage_netlist_import(
         transaction,
@@ -519,8 +527,10 @@ fn only_source_authenticated_import_dialects_can_commit_after_acceptance() {
 fn spectre_spice_interoperability_import_preserves_source_and_profile() {
     let mut state = AppState::default();
     let transaction =
-        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
-            .expect("replacement transaction starts");
+        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
+            &mut state,
+        )
+        .expect("replacement transaction starts");
     let source = b"simulator lang=spice\n* SPICE interoperability deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
     let retained_source = String::from_utf8(source.clone()).unwrap();
 
@@ -565,8 +575,10 @@ fn spectre_spice_interoperability_import_preserves_source_and_profile() {
 fn ads_spice_export_import_preserves_source_and_profile() {
     let mut state = AppState::default();
     let transaction =
-        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
-            .expect("replacement transaction starts");
+        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
+            &mut state,
+        )
+        .expect("replacement transaction starts");
     let source = b"Options ResourceUsage=yes UseNutmegFormat=no TopDesignName=\"divider\"\n* ADS SPICE export\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
     let retained_source = String::from_utf8(source.clone()).unwrap();
 
@@ -611,8 +623,10 @@ fn ads_spice_export_import_preserves_source_and_profile() {
 fn qualified_spice3_ngspice_import_persists_exact_versioned_profile() {
     let mut state = AppState::default();
     let transaction =
-        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
-            .expect("replacement transaction starts");
+        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
+            &mut state,
+        )
+        .expect("replacement transaction starts");
     let source = b"* declarative SPICE3 subset\n.param gain=2\nV1 in 0 1\nB1 out 0 V=log(exp({gain}))\nR1 out 0 1k\n.control\nop\nsave v(out)\n.endc\n.end\n".to_vec();
     assert!(state.stage_netlist_import(
         transaction,
@@ -665,8 +679,10 @@ fn qualified_spice3_ngspice_import_persists_exact_versioned_profile() {
 fn qualified_pspice_import_persists_exact_versioned_profile() {
     let mut state = AppState::default();
     let transaction =
-        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
-            .expect("replacement transaction starts");
+        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
+            &mut state,
+        )
+        .expect("replacement transaction starts");
     let source = b"* PSpice declarative subset\nV1 in 0 AC 1\nE1 out 0 CHEBYSHEV {V(in)} = BP (800Hz 1.2kHz 2kHz 3kHz) .1dB 50dB\nR1 out 0 1k\n.probe V(out)\n.ac dec 10 100 10k\n.end\n"
             .to_vec();
     assert!(state.stage_netlist_import(
@@ -770,7 +786,7 @@ fn quarantined_owned_source_requalifies_without_external_file_or_source_replacem
     let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
         review.operation,
-        crate::workbench::documents::netlist_document::NetlistImportOperation::RequalifyOwnedSource
+        rspice_app_code::workbench::documents::netlist_document::NetlistImportOperation::RequalifyOwnedSource
     );
     assert!(review.selected_file_path.is_none());
     assert_eq!(review.source, source.as_deref().unwrap());
@@ -809,7 +825,7 @@ fn owned_profile_review_rejects_source_revision_change_transactionally() {
         .unwrap()
         .compatibility_accepted = true;
     assert!(
-        crate::workbench::documents::netlist_document::replace_owned_source(
+        rspice_app_code::workbench::documents::netlist_document::replace_owned_source(
             &mut state.model,
             &mut state.code.netlist,
             &mut state.code.netlist_open_documents,
@@ -843,8 +859,10 @@ fn owned_profile_review_rejects_source_revision_change_transactionally() {
 fn imperative_ngspice_control_command_cannot_use_declarative_profile() {
     let mut state = AppState::default();
     let transaction =
-        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
-            .expect("replacement transaction starts");
+        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
+            &mut state,
+        )
+        .expect("replacement transaction starts");
     let source =
         b"* imperative ngspice\nV1 out 0 1\n.control\nop\nwrdata out.txt v(out)\n.endc\n.end\n"
             .to_vec();
@@ -869,8 +887,10 @@ fn imperative_ngspice_control_command_cannot_use_declarative_profile() {
 fn semantic_loss_parser_diagnostics_block_import() {
     let mut state = AppState::default();
     let transaction =
-        crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
-            .expect("replacement transaction starts");
+        rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(
+            &mut state,
+        )
+        .expect("replacement transaction starts");
     let source = b"* ignored option is unsafe\n.options definitely_unknown=7\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_vec();
     assert!(state.stage_netlist_import(
         transaction,
@@ -883,7 +903,7 @@ fn semantic_loss_parser_diagnostics_block_import() {
     assert!(review.blocking_issue_count() > 0);
     assert!(review.issues.iter().any(|issue| {
         issue.severity
-            == crate::workbench::documents::netlist_document::NetlistImportIssueSeverity::Blocking
+            == rspice_app_code::workbench::documents::netlist_document::NetlistImportIssueSeverity::Blocking
             && issue.message.contains("unknown-option")
     }));
     assert!(!review.can_commit());

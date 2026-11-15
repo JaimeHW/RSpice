@@ -1,8 +1,8 @@
 //! A result import carried through a project reload by a whole application.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::result_document::ResultsParts;
-use crate::workbench::documents::result_document::test_fixtures::generated_fst;
+use rspice_app_results::workbench::documents::result_document::ResultsParts;
+use rspice_app_results::workbench::documents::result_document::test_fixtures::generated_fst;
 use rspice_app_results::workbench::workflows::result_import_workflow::{
     commit_result_import_draft, stage_imported_result_dataset,
 };
@@ -22,11 +22,13 @@ pub(super) fn apply_imported_result_dataset(
 #[test]
 fn event_source_fst_import_keeps_detected_format_through_project_reload() {
     let mut state = AppState::default();
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let project =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     crate::workbench::app_state::services_access::accept_loaded_project(&mut state, project, None);
     apply_imported_result_dataset(&mut state.results_parts(), "capture.fst", &generated_fst())
         .unwrap();
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let project =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
     let restored = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(restored.file.simulation_results_warning.is_none());

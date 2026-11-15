@@ -10,11 +10,6 @@ use rspice_design::drc::DrcResult;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::serialization::WithoutRuns;
 use crate::workbench::app_state::session::session_store::{Offer, offer, settle};
-use crate::workbench::lifecycle::project_lifecycle::{
-    self, CellViewRevert, LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut,
-    LifecycleView, PersistenceBinding, ProjectDocumentId, ProjectLifecycleError, RevertFollowUp,
-    RevertReviewToken,
-};
 use rspice_app_design::workbench::app::actions::workspace::symbol_document::revert_active_symbol_with;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_project::workbench::workflows::file_workflow;
@@ -24,6 +19,11 @@ use rspice_app_services::io::ProjectSnapshot;
 use rspice_app_services::services::session::SessionKept;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_services::workbench::app_state::session::autosave::{self, AutosaveRestore};
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+    self, CellViewRevert, LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut,
+    LifecycleView, PersistenceBinding, ProjectDocumentId, ProjectLifecycleError, RevertFollowUp,
+    RevertReviewToken,
+};
 use rspice_app_services::workbench::lifecycle::recovery::{self, RecoveryCandidate};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};

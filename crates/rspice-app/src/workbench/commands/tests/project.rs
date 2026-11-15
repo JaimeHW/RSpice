@@ -8,14 +8,14 @@
 
 use super::*;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::CommandFlags;
-use crate::workbench::models::commands::ModelsCommand;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
+use rspice_app_models::workbench::models::commands::ModelsCommand;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
+use rspice_app_workbench::workbench::framework::command_registry::CommandFlags;
 
 #[test]
 fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
@@ -157,7 +157,9 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         ResultsCommand::ExportWaveformsCsv,
         ResultsCommand::WaveformCalculator,
         ResultsCommand::CompareResultDatasets,
-        ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves),
+        ResultsCommand::ResultViewer(
+            rspice_app_results::workbench::documents::result_document::ResultViewer::Waves,
+        ),
         ResultsCommand::EditSpecifications,
     ] {
         assert!(

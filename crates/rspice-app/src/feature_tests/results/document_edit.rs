@@ -1,10 +1,10 @@
 //! Pins for the edits the result viewer makes to a project result document.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::documents::result_document::ResultViewer;
-use crate::workbench::documents::result_document::document_edit::*;
 use crate::workbench::state::Workspace;
 use crate::workbench::state::WorkspaceDocumentId;
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
+use rspice_app_results::workbench::documents::result_document::document_edit::*;
 use rspice_app_state::product::DatasetBinding;
 use rspice_app_state::product::ResultDocumentId;
 use rspice_app_state::results::visualization_document::DocumentEdit;
@@ -49,10 +49,11 @@ fn document_fixture(layout_id: &str) -> (RSpiceApp, ResultDocumentId) {
         layout_id: layout_id.to_owned(),
         validation_error: None,
     };
-    let document_id = crate::workbench::documents::result_document::create_document::commit(
-        &mut app.state.results_parts(),
-    )
-    .expect("the document commits");
+    let document_id =
+        rspice_app_results::workbench::documents::result_document::create_document::commit(
+            &mut app.state.results_parts(),
+        )
+        .expect("the document commits");
     (app, document_id)
 }
 
@@ -68,7 +69,7 @@ fn retained(app: &RSpiceApp, document_id: ResultDocumentId) -> &VisualizationDoc
 fn ordered_panes(app: &RSpiceApp, document_id: ResultDocumentId) -> Vec<Pane> {
     let document = retained(app, document_id);
     let page = &document.pages()[0];
-    crate::workbench::documents::result_document::persistent_document::ordered_page_panes(
+    rspice_app_results::workbench::documents::result_document::persistent_document::ordered_page_panes(
         document.panes(),
         page,
     )
@@ -88,7 +89,7 @@ fn drive_frame(body: impl FnMut(&mut egui::Ui)) {
 fn show_document(app: &mut RSpiceApp, document_id: ResultDocumentId) {
     drive_frame(|ui| {
         super::with_surface_parts(app, |state, run_controller, selected_specification| {
-            crate::workbench::documents::result_document::show_persistent_document(
+            rspice_app_results::workbench::documents::result_document::show_persistent_document(
                 ui,
                 state,
                 run_controller,
@@ -250,7 +251,7 @@ fn fixture_binding(app: &RSpiceApp) -> PaneDataBinding {
     let run = &app.state.model.simulation.retained.runs[0];
     PaneDataBinding {
         analysis_id:
-            crate::workbench::documents::result_document::create_document::source_analysis_identity(
+            rspice_app_results::workbench::documents::result_document::create_document::source_analysis_identity(
                 run,
                 &run.analyses[0],
             ),
@@ -303,7 +304,7 @@ fn a_saved_document_shows_the_second_page_once_it_is_picked() {
         Some(second_page)
     );
 
-    crate::workbench::documents::result_document::persistent_document::select_page(
+    rspice_app_results::workbench::documents::result_document::persistent_document::select_page(
         &mut app.state.results_parts(),
         document_id,
         1,
@@ -727,7 +728,7 @@ fn a_family_slice_over_a_quick_view_draws_only_the_rows_it_keeps() {
     assert_eq!(app.state.results.results.session.family_policies.len(), 1);
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
-            crate::workbench::documents::result_document::show(
+            rspice_app_results::workbench::documents::result_document::show(
                 ui,
                 state,
                 run_controller,
@@ -747,7 +748,7 @@ fn family_document(app: &mut RSpiceApp) -> ResultDocumentId {
     let run = &app.state.model.simulation.retained.runs[0];
     let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
     let analysis_id =
-        crate::workbench::documents::result_document::create_document::source_analysis_identity(
+        rspice_app_results::workbench::documents::result_document::create_document::source_analysis_identity(
             run,
             &run.analyses[0],
         );
@@ -816,7 +817,7 @@ fn family_document(app: &mut RSpiceApp) -> ResultDocumentId {
         .expect("the project keeps the document");
     app.state.workbench.activate(Workspace::Results);
     assert!(
-        crate::workbench::documents::result_document::activate_persistent_document(
+        rspice_app_results::workbench::documents::result_document::activate_persistent_document(
             &mut app.state.results_parts(),
             document_id
         )
@@ -936,7 +937,7 @@ fn a_slice_a_document_cannot_keep_is_refused_before_apply() {
 /// Open Plot properties through its command and set `digits` and `phase`.
 fn apply_properties(app: &mut RSpiceApp, digits: u8, phase_continuous: bool) {
     app.execute_command_key(
-        crate::workbench::results::commands::ResultsCommand::VisualizationDocumentProperties.key(),
+        rspice_app_results::workbench::results::commands::ResultsCommand::VisualizationDocumentProperties.key(),
     );
     let Some(ResultDocumentDialog::Properties(mut draft)) =
         app.state.results.result_document_dialog.clone()
@@ -998,7 +999,7 @@ fn a_document_s_digits_and_phase_are_applied_as_saved() {
 
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
-            crate::workbench::documents::result_document::show(
+            rspice_app_results::workbench::documents::result_document::show(
                 ui,
                 state,
                 run_controller,

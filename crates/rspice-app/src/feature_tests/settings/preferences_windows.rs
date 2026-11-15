@@ -1,16 +1,17 @@
 //! Preferences and the windows it opens over a whole application.
 
 use crate::feature_tests::settings::preferences_dialogs;
-use crate::workbench::RouteTransitionSource;
-use crate::workbench::SurfaceId;
-use crate::workbench::SurfaceRoute;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::{BrowserHistoryEffect, ChoicePreference, TogglePreference};
 use egui::Context;
 use rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
 use rspice_app_settings::workbench::app::dialogs::preferences::*;
 use rspice_app_settings::workbench::app_state::session::preferences_file::SETTINGS_FILE;
+use rspice_app_state::workbench::preferences::{ChoicePreference, TogglePreference};
+use rspice_app_workbench::workbench::routing::navigation::BrowserHistoryEffect;
+use rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource;
+use rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId;
+use rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute;
 
 pub(crate) fn preferences_route() -> SurfaceRoute {
     SurfaceRoute::surface(SurfaceId::Preferences)
@@ -63,8 +64,8 @@ fn direct_deep_link_close_replaces_with_the_retained_workspace() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn menu_and_shortcut_entries_open_the_canonical_preferences_route() {
-    use crate::workbench::framework::command_registry::ids;
-    use crate::workbench::framework::host::Host;
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+    use rspice_app_workbench::workbench::framework::host::Host;
     let mut menu_app = test_app();
     Host::execute(&mut menu_app, ids::PREFERENCES);
     assert_eq!(
@@ -108,7 +109,7 @@ fn route_loss_releases_idle_preferences_child_modals() {
     app.state
         .settings
         .workspace_layout_manager
-        .open(crate::workbench::WorkspacePreset::Engineering);
+        .open(rspice_app_state::workbench::preferences::WorkspacePreset::Engineering);
 
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         preferences_dialogs(&mut app.state).render(ctx);
@@ -220,8 +221,8 @@ fn complete_preference_model_round_trips_through_the_app_session() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_layout_manager_stays_reachable_without_a_preferences_row() {
-    use crate::workbench::framework::command_registry::ids;
-    use crate::workbench::framework::host::Host;
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+    use rspice_app_workbench::workbench::framework::host::Host;
     let mut layout_app = test_app();
     Host::execute(&mut layout_app, ids::WORKSPACE_LAYOUTS);
     assert!(layout_app.state.settings.workspace_layout_manager.open);
@@ -530,8 +531,8 @@ fn restore_defaults_asks_before_it_resets_the_page() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_layout_form_closes_without_applying() {
-    use crate::workbench::framework::command_registry::ids;
-    use crate::workbench::framework::host::Host;
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+    use rspice_app_workbench::workbench::framework::host::Host;
 
     let ctx = Context::default();
     ctx.enable_accesskit();

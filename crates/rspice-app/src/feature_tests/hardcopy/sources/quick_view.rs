@@ -367,9 +367,10 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
     let mut state = quick_view_state(analysis, ResultViewer::Hist);
     state.results.analysis.histogram_state.bin_count = 5;
     state.results.analysis.histogram_state.selected = Some("gain".to_owned());
-    let onscreen =
-        crate::workbench::documents::result_document::active_histogram(state.results_reads())
-            .unwrap();
+    let onscreen = rspice_app_results::workbench::documents::result_document::active_histogram(
+        state.results_reads(),
+    )
+    .unwrap();
 
     let resolved = resolve_quick_view(&state).unwrap();
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
@@ -433,13 +434,15 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
             state.results.analysis.histogram_state.custom_min = 0.0;
             state.results.analysis.histogram_state.custom_max = 2.0;
         }
-        let onscreen =
-            crate::workbench::documents::result_document::active_histogram(state.results_reads())
-                .unwrap();
-        let display = crate::workbench::documents::result_document::active_histogram_display(
+        let onscreen = rspice_app_results::workbench::documents::result_document::active_histogram(
             state.results_reads(),
         )
         .unwrap();
+        let display =
+            rspice_app_results::workbench::documents::result_document::active_histogram_display(
+                state.results_reads(),
+            )
+            .unwrap();
         let resolved = resolve_quick_view(&state).unwrap();
         let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
             unreachable!()
@@ -471,7 +474,7 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
 /// source coordinates travel beside the geometry.
 #[test]
 fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
-    use crate::workbench::documents::result_document::{
+    use rspice_app_results::workbench::documents::result_document::{
         AnalysisPresentationKey, marker_anchor_for,
     };
 
@@ -565,7 +568,7 @@ fn a_trace_hidden_on_the_sheet_is_not_printed() {
     };
     assert_eq!(plot.traces.len(), 2);
 
-    crate::workbench::documents::result_document::toggle_visibility(
+    rspice_app_results::workbench::documents::result_document::toggle_visibility(
         &mut state.results_parts(),
         0,
         1,
@@ -1019,7 +1022,7 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
     assert_eq!(point_count(&state), 5, "the global pin is cleared");
     let analysis_key = {
         let run = state.model.simulation.active_run().expect("active run");
-        crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
             run.dataset_id,
             &run.analyses[0],
         )
@@ -1070,7 +1073,7 @@ fn a_pane_ordinate_does_not_bound_a_page_that_merges_every_pane() {
     let mut state = quick_view_state(analysis, ResultViewer::Waves);
     let analysis_key = {
         let run = state.model.simulation.active_run().expect("active run");
-        crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
             run.dataset_id,
             &run.analyses[0],
         )

@@ -3,12 +3,12 @@
 //! before it goes live, and the waveform defaults reach the viewer.
 
 use crate::feature_tests::settings::preferences_dialogs;
-use crate::workbench::ChoicePreference;
 use crate::workbench::RSpiceApp;
-use crate::workbench::TogglePreference;
 use rspice_app_settings::workbench::app::dialogs::preferences::PreferencePageActions;
 use rspice_app_settings::workbench::app::dialogs::preferences::preference_pages::*;
 use rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
+use rspice_app_state::workbench::preferences::ChoicePreference;
+use rspice_app_state::workbench::preferences::TogglePreference;
 
 /// Shortcuts restore to the shipped bindings and policies, and only by
 /// saving that profile first: the reset hands the page a candidate and
@@ -17,12 +17,12 @@ use rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell
 #[test]
 fn restoring_shortcuts_saves_the_shipped_profile_before_it_goes_live() {
     use crate::workbench::commands::vocabulary::CommandRegistry;
-    use crate::workbench::framework::command_registry::ids;
     use rspice_app_state::state::command_catalog::CommandPlatform;
     use rspice_app_state::state::shortcuts::{
         ChordTimeoutPolicy, ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence,
         ShortcutStroke,
     };
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
 
     let ctx = egui::Context::default();
     let mut app = RSpiceApp::test_instance();

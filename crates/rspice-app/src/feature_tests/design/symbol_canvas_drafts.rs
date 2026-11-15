@@ -4,12 +4,12 @@
 
 use super::app_state_of;
 use crate::workbench::AppState;
-use crate::workbench::SymbolTool;
 use rspice_app_design::schematic::symbol_editor::interaction::tests::viewport;
 use rspice_app_design::schematic::symbol_editor::interaction::*;
 use rspice_app_state::state::{CellViewRef, Point};
 use rspice_schematic_editor::symbol_editor::interaction::SymbolCanvasInput;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolCanvasRequest;
+use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
 /// [`open_symbol`](rspice_app_design::schematic::symbol_editor::interaction::tests::open_symbol) made a whole application.
 fn open_symbol() -> AppState {

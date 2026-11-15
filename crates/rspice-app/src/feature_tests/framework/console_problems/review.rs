@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::workbench::RSpiceApp;
-use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::ConsolePage;
+use rspice_app_workbench::workbench::layout::LayoutSpec;
 
 /// The three findings of a drawing with one stray label and no ground: a
 /// label on no wire, an off-sheet connector with no partner, and the missing

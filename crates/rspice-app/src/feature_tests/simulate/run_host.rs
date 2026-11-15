@@ -4,12 +4,12 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::model::compile_project_bundle_receipt;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
-use crate::workbench::framework::feature::LowerHandles;
-use crate::workbench::framework::feature::{Cx, Peers};
-use crate::workbench::simulate::run_host::{FrozenRun, run_host};
+use rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument;
 use rspice_app_runs::simulation::{RunHost, ViewerHost};
+use rspice_app_simulate::workbench::simulate::run_host::{FrozenRun, run_host};
 use rspice_app_state::state::{RunEvent, RunEventSink};
+use rspice_app_workbench::workbench::framework::feature::LowerHandles;
+use rspice_app_workbench::workbench::framework::feature::{Cx, Peers};
 use std::sync::Arc;
 
 /// What the run tier's host over simulate's context over `app` freezes,

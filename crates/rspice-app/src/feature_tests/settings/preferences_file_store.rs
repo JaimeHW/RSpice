@@ -8,14 +8,14 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::workbench::UserPreferences;
 use crate::workbench::app_state::AppState;
-use crate::workbench::{
-    ChoicePreference, FolderListPreference, ScalarPreference, TogglePreference,
-};
 use rspice_app_settings::workbench::app_state::session::preferences_file::*;
 use rspice_app_state::diagnostics::LogSeverity;
 use rspice_app_state::time_compat::Instant;
+use rspice_app_state::workbench::preferences::UserPreferences;
+use rspice_app_state::workbench::preferences::{
+    ChoicePreference, FolderListPreference, ScalarPreference, TogglePreference,
+};
 use rspice_app_workbench::ui::Mode;
 use rspice_app_workbench::ui::Theme;
 use std::time::Duration;

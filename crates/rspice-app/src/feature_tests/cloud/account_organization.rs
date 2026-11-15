@@ -2,15 +2,18 @@
 //! and closes back from, the actions it offers, and what a signed-in
 //! console paints.
 
-use crate::workbench::{
-    AppState, BrowserHistoryEffect, RSpiceApp, RouteTransitionSource, SurfaceId, SurfaceRoute,
-};
+use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_cloud::services::cloud_account::{
     CloudAccountAvailability, CloudSessionPhase, CloudSessionSnapshot, EntitlementSummary,
     LeaseSummary, NativeLicenseSummary, PrincipalSummary,
 };
 use rspice_app_cloud::services::license::LicenseInfo;
 use rspice_app_cloud::workbench::account_organization::*;
+use rspice_app_workbench::workbench::routing::{
+    navigation::{BrowserHistoryEffect, RouteTransitionSource},
+    surface_catalog::SurfaceId,
+    surface_route::SurfaceRoute,
+};
 
 /// The console's parts in `app`.
 fn console_parts(app: &mut RSpiceApp) -> AccountConsoleParts<'_> {

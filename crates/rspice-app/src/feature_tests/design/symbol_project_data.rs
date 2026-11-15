@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::lifecycle::project_lifecycle::{
+use crate::workbench::state::Workspace;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     ProjectDocumentId, dirty_documents, has_unsaved_changes,
 };
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::state::Workspace;
 use rspice_app_state::state::{
     CellViewRef, ComponentType, Point, PortSpec, SchematicState, SymbolDocument,
     SymbolEditorMetadata, SymbolInterface, View, ViewType,
@@ -181,7 +181,7 @@ impl Fixture {
             &mut self.app.state.workbench,
             &edited,
             &metadata,
-            &crate::workbench::SymbolCommitIntent {
+            &rspice_design::symbol::edit::SymbolCommitIntent {
                 renames: std::collections::BTreeMap::from([(from.to_owned(), to.to_owned())]),
             },
         )
@@ -252,7 +252,7 @@ impl Fixture {
     }
 
     fn revert(&mut self) {
-        let token = crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
+        let token = rspice_app_services::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
             &self.app.state,
         )
         .expect("the revert is reviewed");
@@ -614,7 +614,7 @@ fn reverting_the_symbol_restores_it_and_its_placed_instances() {
         "Revert to saved is offered once the symbol has changed"
     );
 
-    let token = crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
+    let token = rspice_app_services::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
         &fixture.app.state,
     )
     .expect("the revert is reviewed");

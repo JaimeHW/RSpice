@@ -8,13 +8,13 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::tests::{RunOrigin, app_with_prepared_run, plan_binding};
-use crate::workbench::framework::command_registry::CommandAvailability;
-use crate::workbench::framework::host::Host;
-use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::{AnalysisResult, AnalysisType};
 use rspice_app_workbench::ui::widgets::NotificationAction;
+use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
+use rspice_app_workbench::workbench::framework::host::Host;
 
 #[test]
 fn opening_a_run_in_results_needs_a_dataset_and_lands_on_the_selected_one() {
@@ -333,7 +333,7 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
 /// the first would be the studio deciding what was asked for.
 #[test]
 fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
-    use crate::workbench::documents::result_document::AnalysisPresentationKey;
+    use rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey;
     use rspice_app_state::state::AnalysisResultPayload;
     use rspice_results::result_presentation::ResultArtifactPresentationKey;
     use rspice_results_ui::selection::ResultBrowserSelectionKey;

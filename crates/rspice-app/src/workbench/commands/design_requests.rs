@@ -7,8 +7,7 @@
 //! Here too, what the design feature's dialogs hand the shell to carry out
 //! over the whole session.
 
-use crate::workbench::documents::result_document::open_specification_editor;
-use crate::workbench::{AppState, RSpiceApp, ResultViewer};
+use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
 use rspice_app_design::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
 use rspice_app_design::workbench::app::dialogs::connectivity_manager::{
@@ -18,6 +17,8 @@ use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::open_
 use rspice_app_design::workbench::app::dialogs::design_request::DesignRequest;
 use rspice_app_design::workbench::app::dialogs::hierarchy::create::commit_create_hierarchy;
 use rspice_app_design::workbench::app::dialogs::hierarchy::descend::answer_descend_hierarchy;
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
+use rspice_app_results::workbench::documents::result_document::open_specification_editor;
 
 /// Carry out what the design surface asked of another feature's workspace,
 /// as the surface once did in place.
@@ -67,7 +68,7 @@ pub(in crate::workbench) fn select_probed_trace(state: &mut AppState, probed: Se
 /// surface has drawn.
 #[cfg(test)]
 pub(crate) fn answer_surface_requests(state: &mut AppState) {
-    use crate::workbench::framework::requests::drain;
+    use rspice_app_workbench::workbench::framework::requests::drain;
     drain(
         state,
         |state| &mut state.workbench.outbox,
@@ -139,7 +140,7 @@ fn open_connectivity_source_map(state: &mut AppState) {
     state.workbench.navigator_visible = true;
     state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
     state.code.netlist.active_document =
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
+        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
     state.workbench.set_navigator_filter("source mapping");
     if let Some(line) = state
         .model

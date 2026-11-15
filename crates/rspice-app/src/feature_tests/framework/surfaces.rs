@@ -4,8 +4,8 @@
 //! stays equal, bounded at narrow widths and named for assistive technology.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::documents::code_workspace::{self, CodeWorkspacePage};
 use egui::Context;
+use rspice_app_code::workbench::documents::code_workspace::{self, CodeWorkspacePage};
 use rspice_app_state::state::ProjectSourceLanguage;
 use rspice_app_workbench::workbench::surfaces::{register_results_split_region, split_stage_rects};
 

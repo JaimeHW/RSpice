@@ -5,8 +5,10 @@
 use rspice_formats::vcd::encode_result_vcd;
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::result_document::test_fixtures::{MockExportWorkflowIo, waveform};
 use crate::workbench::menu_bar::{DatasetExportChoice, action_export_dataset_with_io};
+use rspice_app_results::workbench::documents::result_document::test_fixtures::{
+    MockExportWorkflowIo, waveform,
+};
 use rspice_app_state::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, SimulationRun,
@@ -25,17 +27,17 @@ fn last_log_message(state: &AppState) -> String {
 
 fn state_with_typed_result(analysis: AnalysisResult) -> AppState {
     let viewer = match analysis.analysis_type {
-        AnalysisType::DcOp => crate::workbench::ResultViewer::Op,
-        AnalysisType::PoleZero => crate::workbench::ResultViewer::PoleZero,
-        AnalysisType::Sensitivity => crate::workbench::ResultViewer::Contribution,
-        AnalysisType::Tf => crate::workbench::ResultViewer::TransferFunction,
-        AnalysisType::Soa => crate::workbench::ResultViewer::Soa,
-        AnalysisType::Optimization => crate::workbench::ResultViewer::Optimization,
-        kind if kind.is_time_domain() => crate::workbench::ResultViewer::Waves,
+        AnalysisType::DcOp => rspice_app_results::workbench::documents::result_document::ResultViewer::Op,
+        AnalysisType::PoleZero => rspice_app_results::workbench::documents::result_document::ResultViewer::PoleZero,
+        AnalysisType::Sensitivity => rspice_app_results::workbench::documents::result_document::ResultViewer::Contribution,
+        AnalysisType::Tf => rspice_app_results::workbench::documents::result_document::ResultViewer::TransferFunction,
+        AnalysisType::Soa => rspice_app_results::workbench::documents::result_document::ResultViewer::Soa,
+        AnalysisType::Optimization => rspice_app_results::workbench::documents::result_document::ResultViewer::Optimization,
+        kind if kind.is_time_domain() => rspice_app_results::workbench::documents::result_document::ResultViewer::Waves,
         kind if kind.is_bode_response() || kind.is_raw_frequency_curve() => {
-            crate::workbench::ResultViewer::Bode
+            rspice_app_results::workbench::documents::result_document::ResultViewer::Bode
         }
-        _ => crate::workbench::ResultViewer::Table,
+        _ => rspice_app_results::workbench::documents::result_document::ResultViewer::Table,
     };
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
@@ -47,7 +49,10 @@ fn state_with_typed_result(analysis: AnalysisResult) -> AppState {
     state
 }
 
-fn activate_result_document(state: &mut AppState, viewer: crate::workbench::ResultViewer) {
+fn activate_result_document(
+    state: &mut AppState,
+    viewer: rspice_app_results::workbench::documents::result_document::ResultViewer,
+) {
     let dataset_id = state
         .model
         .simulation
@@ -71,7 +76,8 @@ fn a_result_export_names_its_file_on_the_status_bar() {
             vec![0.0, 2.0],
         )]),
     );
-    state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
+    state.results.results.session.viewer =
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Waves;
     let io = MockExportWorkflowIo::default();
 
     action_export_dataset_with_io(
@@ -98,7 +104,8 @@ fn a_result_export_that_fails_is_toasted() {
             vec![0.0, 2.0],
         )]),
     );
-    state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
+    state.results.results.session.viewer =
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Waves;
     let io = MockExportWorkflowIo {
         dialog_error: Some("the file picker is unavailable".to_owned()),
         ..MockExportWorkflowIo::default()
@@ -155,12 +162,14 @@ fn event_source_vcd_export_reimport_keeps_levels_and_marks_canonical_strengths()
     });
     let prepared = encode_result_vcd(&analysis).unwrap();
     let mut state = AppState::default();
-    let baseline = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let baseline =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     crate::workbench::app_state::services_access::accept_loaded_project(&mut state, baseline, None);
     stage_imported_result_dataset(&mut state.results_parts(), "roundtrip.vcd", &prepared.bytes)
         .unwrap();
     commit_result_import_draft(&mut state.results_parts()).unwrap();
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+    let project =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
     let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
     let restored = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(restored.file.simulation_results_warning.is_none());

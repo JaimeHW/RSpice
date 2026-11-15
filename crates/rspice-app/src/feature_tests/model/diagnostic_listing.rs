@@ -465,7 +465,7 @@ fn a_clean_validation_reads_as_no_findings() {
     let mut state = open_state();
     assert_eq!(*listing(&state).empty_reason(), EmptyReason::NothingRan);
 
-    use crate::workbench::documents::code_workspace::{
+    use rspice_app_code::workbench::documents::code_workspace::{
         AutomationValidationReceipt, SourceOperationToken,
     };
     let bundle = state

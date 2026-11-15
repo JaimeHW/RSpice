@@ -22,7 +22,7 @@
 //! pipeline it belongs to.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::framework::requests::{self, ExportFigure};
+use rspice_app_workbench::workbench::framework::requests::{self, ExportFigure};
 
 impl RSpiceApp {
     /// Pump a pending figure-export request: the hardcopy feature opens its
@@ -43,8 +43,8 @@ impl RSpiceApp {
 #[cfg(test)]
 mod tests {
     use crate::workbench::app::RSpiceApp;
-    use crate::workbench::framework::requests::ExportFigure;
     use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
+    use rspice_app_workbench::workbench::framework::requests::ExportFigure;
 
     /// The workflow refuses to open without a retained source, so the fixture
     /// has to make the active cell view the active document first — the same

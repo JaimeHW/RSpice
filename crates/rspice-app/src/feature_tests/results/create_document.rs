@@ -2,9 +2,9 @@
 //! family, name and viewer choices, and a commit that the project owns.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::documents::result_document::create_document::*;
 use crate::workbench::state::Workspace;
 use crate::workbench::state::WorkspaceDocumentId;
+use rspice_app_results::workbench::documents::result_document::create_document::*;
 use rspice_app_state::results::visualization_document::ResultDocumentTracking;
 use rspice_app_state::state::AnalysisResult;
 use rspice_app_state::state::AnalysisResultFamilyMetadata;
@@ -181,11 +181,11 @@ fn commit_is_project_owned_dirty_and_stably_selected() {
     );
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::Results
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::Results
     );
     assert_eq!(
         app.state.results.results.session.viewer,
-        crate::workbench::ResultViewer::Waves
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Waves
     );
 }
 
@@ -508,7 +508,7 @@ impl ResultsWindow {
     /// takes a folder of its own: tests that start together can read the
     /// same clock, and two saves into one folder find each other's lease.
     fn save(&mut self) {
-        use crate::workbench::lifecycle::project_lifecycle::{
+        use rspice_app_services::workbench::lifecycle::project_lifecycle::{
             DestinationAuthority, SaveScope, save_native,
         };
         let folder = std::env::temp_dir().join(format!(
@@ -528,7 +528,9 @@ impl ResultsWindow {
     }
 
     fn project_unsaved(&self) -> bool {
-        crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.app.state)
+        rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(
+            &self.app.state,
+        )
     }
 }
 
@@ -753,7 +755,7 @@ fn an_expression_trace_marks_no_document_tab_but_leaves_the_project_unsaved() {
 
     let state = &mut window.app.state;
     state.results.calculator_panel.expression = "V(out)*2".to_owned();
-    crate::workbench::results::calculator::plot_expression(
+    rspice_app_results::workbench::results::calculator::plot_expression(
         &mut state.results,
         &mut state.model,
         &mut state.workbench,

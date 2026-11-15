@@ -11,14 +11,14 @@ use egui::{Key, Modifiers, PointerButton, Pos2};
 
 use super::engine_recovery_path::author_deck;
 use crate::feature_tests::replay::{Replay, controls, only};
-use crate::workbench::documents::netlist_document::language::show_signature_help_at_cursor;
-use crate::workbench::documents::netlist_document::{
+use crate::workbench::features;
+use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_code::workbench::documents::netlist_document::language::show_signature_help_at_cursor;
+use rspice_app_code::workbench::documents::netlist_document::{
     OwnedNetlistReplacement, editor_id_in, replace_owned_sources_atomically,
 };
-use crate::workbench::features;
-use crate::workbench::framework::feature::{Cx, Feature};
-use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_code::workbench::documents::virtual_text_editor::context_menu_may_show;
+use rspice_app_workbench::workbench::framework::feature::{Cx, Feature};
 
 /// A deck whose last instance calls the subcircuit it defines, under a name
 /// long enough that the middle of the call's line falls inside it.

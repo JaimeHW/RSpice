@@ -3,8 +3,8 @@
 //! the working deck.
 
 use crate::workbench::AppState;
-use crate::workbench::documents::netlist_document::fixtures::seed_owned_dependency;
-use crate::workbench::documents::netlist_document::{
+use rspice_app_code::workbench::documents::netlist_document::fixtures::seed_owned_dependency;
+use rspice_app_code::workbench::documents::netlist_document::{
     ActiveNetlistDocument, active_netlist_source_is_editable_in, begin_netlist_lifecycle_action_in,
     close_run_deck_snapshot, commit_netlist_lifecycle_action, open_run_deck_snapshot_in,
 };

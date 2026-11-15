@@ -1,7 +1,7 @@
 //! Failed provider publication retains the rendered transaction for retry.
 
 use super::*;
-use crate::workbench::models::workspace_state::ModelsWorkbenchDialog;
+use rspice_app_models::workbench::models::workspace_state::ModelsWorkbenchDialog;
 use rspice_app_state::state::model_library::ModelConsumerScope;
 
 #[test]

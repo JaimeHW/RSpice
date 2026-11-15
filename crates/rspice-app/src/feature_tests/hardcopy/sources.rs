@@ -6,7 +6,6 @@ mod quick_view;
 
 use crate::feature_tests::hardcopy::{resolve_retained_hardcopy_source, source_reads};
 use crate::workbench::AppState;
-use crate::workbench::documents::result_document::ResultViewer;
 use crate::workbench::state::Workspace;
 use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::RetainedHardcopySourceAvailability;
@@ -17,6 +16,7 @@ use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::prepare_retained
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::quick_result_analysis_index;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::quick_result_availability;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::*;
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_state::product::ContentDigest;
 use rspice_app_state::product::DatasetBinding;
 use rspice_app_state::product::DatasetId;

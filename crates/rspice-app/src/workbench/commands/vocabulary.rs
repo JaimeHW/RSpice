@@ -13,26 +13,26 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
-use crate::workbench::models::commands::ModelsCommand;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::project::workspace_state::ProjectPage;
-use crate::workbench::results::commands::ResultsCommand;
-use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
+use rspice_app_models::workbench::models::commands::ModelsCommand;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_services::io::NetlistFormat;
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::ModelsPage;
 use rspice_app_state::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
 };
 use rspice_app_state::state::{SimulationPage, VerificationPage};
+use rspice_app_workbench::workbench::framework::command_registry::{self, CommandFlags, Registry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 // `CommandPalette` is the feature's name, the same one the shortcut
@@ -441,7 +441,10 @@ static COMMAND_ORDER: &[CommandKey] = &[
     SimulateCommand::Page(SimulationPage::Models).key(),
     SimulateCommand::Page(SimulationPage::Solver).key(),
     SimulateCommand::Page(SimulationPage::Save).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves).key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Waves,
+    )
+    .key(),
     SimulateCommand::Verify(VerificationPage::Yield).key(),
     ModelsCommand::Page(ModelsPage::Models).key(),
     ModelsCommand::ModelCreateProjectCopy.key(),
@@ -637,30 +640,102 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::CompareResultDatasets.key(),
     ResultsCommand::MeasurementLibrary.key(),
     ResultsCommand::FamilySlicing.key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Bode).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::DcSweep).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Fft).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::HarmonicBalance).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::PhaseNoise).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Eye).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Hist).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Op).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::NoiseContrib).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Contribution).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::TransferFunction).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Specs).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Table).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Nyquist).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Smith).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Polar).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::NetworkMatrix).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::PoleZero).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Scatter).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::BoxViolin).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Events).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Soa).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Optimization).key(),
-    ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Manifest).key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Bode,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::DcSweep,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Fft,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::HarmonicBalance,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::PhaseNoise,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Eye,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Hist,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Op,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::NoiseContrib,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Contribution,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::TransferFunction,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Specs,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Table,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Nyquist,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Smith,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Polar,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::NetworkMatrix,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::PoleZero,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Scatter,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::BoxViolin,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Events,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Soa,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Optimization,
+    )
+    .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Manifest,
+    )
+    .key(),
     ResultsCommand::EditSpecifications.key(),
     SimulateCommand::Verify(VerificationPage::Corners).key(),
     SimulateCommand::Verify(VerificationPage::Tuning).key(),

@@ -3,14 +3,14 @@
 //! dialog walk takes it.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::project::ProjectFeature;
-use crate::workbench::project::commands::ProjectRequest;
-use crate::workbench::project::library_dialogs::deletion::library_deletion_impact;
-use crate::workbench::project::workspace_state::{
-    DeletionInstanceResolution, LibraryDeletionTarget,
-};
 use crate::workbench::session::project_transactions::{
     apply_workspace_pruned, void_veriloga_evidence,
+};
+use rspice_app_project::workbench::project::ProjectFeature;
+use rspice_app_project::workbench::project::commands::ProjectRequest;
+use rspice_app_project::workbench::project::library_dialogs::deletion::library_deletion_impact;
+use rspice_app_project::workbench::project::workspace_state::{
+    DeletionInstanceResolution, LibraryDeletionTarget,
 };
 use rspice_app_state::state::{
     Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, OpenCellView, Point,

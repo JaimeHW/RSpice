@@ -79,7 +79,8 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
             .contains("byte limit")
     );
 
-    let before = crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
+    let before =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
     for _ in 0..2 {
         file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
         apply(
@@ -89,7 +90,8 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
         );
         poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     }
-    let after = crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
+    let after =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
     assert_ne!(
         before.file.simulation_results,
         after.file.simulation_results

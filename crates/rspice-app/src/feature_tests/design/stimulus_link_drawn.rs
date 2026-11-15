@@ -462,7 +462,7 @@ fn a_refused_extraction_leaves_both_the_library_and_the_instance_as_they_were() 
 #[test]
 fn an_extraction_leaves_the_project_with_unsaved_changes() {
     use crate::workbench::app_state::services_access::accept_loaded_project;
-    use crate::workbench::lifecycle::project_lifecycle::{
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         ProjectDocumentId, dirty_documents, has_unsaved_changes, snapshot,
     };
 

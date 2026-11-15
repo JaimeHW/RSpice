@@ -9,10 +9,8 @@
 
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::feature::{Cx, LowerHandles, Peers};
-use crate::workbench::framework::requests::ArmPartPlacement;
-use crate::workbench::models::ModelsFeature;
-use crate::workbench::models::workspace_state::ModelsOperationalState;
+use rspice_app_models::workbench::models::ModelsFeature;
+use rspice_app_models::workbench::models::workspace_state::ModelsOperationalState;
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_services::services::model_hub::ModelHubService;
 use rspice_app_state::state::model_hub::tests::{
@@ -24,8 +22,10 @@ use rspice_app_state::state::model_hub::{
 };
 use rspice_app_state::state::model_library::ModelLibraryManager;
 use rspice_app_state::state::{ComponentType, Tool};
+use rspice_app_workbench::workbench::framework::feature::{Cx, LowerHandles, Peers};
+use rspice_app_workbench::workbench::framework::requests::ArmPartPlacement;
 
-use crate::workbench::models::pdk_workflow::model_hub::{
+use rspice_app_models::workbench::models::pdk_workflow::model_hub::{
     ModelHubOutput, ModelHubRequest, emit_model_hub_errors, execute, publish_model_hub_output,
 };
 

@@ -1,8 +1,8 @@
 //! Decoding a portable shortcut artifact, in the case that binds the
 //! product's own commands.
 
-use crate::workbench::framework::command_registry::ids;
 use rspice_app_settings::workbench::shortcuts::artifacts::schema::*;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 #[test]
 fn imported_acknowledgements_and_source_paths_are_stripped() {

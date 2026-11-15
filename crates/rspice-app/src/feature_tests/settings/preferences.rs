@@ -3,10 +3,10 @@
 
 use crate::feature_tests::settings::preferences_dialogs;
 use crate::feature_tests::settings::preferences_windows::{preferences_route, test_app};
-use crate::workbench::RouteTransitionSource;
 use egui::Context;
 use rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell::PreferenceCategory;
 use rspice_app_settings::workbench::app::dialogs::preferences::*;
+use rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource;
 
 /// Restoring Results and precision starts the open waveform view from
 /// the restored defaults in the frame the reader confirms it, as a new
@@ -57,7 +57,7 @@ fn restored_waveform_defaults_reach_the_open_view_in_the_same_frame() {
         app.state
             .workbench
             .outbox
-            .peek::<crate::workbench::framework::requests::ApplyWaveformDefaults>()
+            .peek::<rspice_app_workbench::workbench::framework::requests::ApplyWaveformDefaults>()
             .is_none(),
         "the dialog takes the request it raised before it returns"
     );

@@ -1,6 +1,6 @@
 //! The waveform calculator's Plot through a whole application.
 
-use crate::workbench::results::calculator::*;
+use rspice_app_results::workbench::results::calculator::*;
 
 #[test]
 fn plotting_keeps_the_tool_open_and_never_duplicates_a_trace() {
@@ -116,7 +116,7 @@ fn the_tool_opens_whole_in_the_lower_right_of_the_workspace() {
     let tool = ctx
         .memory(|memory| memory.area_rect(egui::Id::new("workbench.calculator-tool")))
         .expect("the tool is on screen");
-    let layout = crate::workbench::layout::LayoutSpec::resolve_for_shell(
+    let layout = rspice_app_workbench::workbench::layout::LayoutSpec::resolve_for_shell(
         screen.width(),
         screen.height(),
         app.state.workbench.coarse_pointer,

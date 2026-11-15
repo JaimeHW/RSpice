@@ -472,7 +472,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
 
 #[test]
 fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data() {
-    use crate::workbench::documents::result_document::AnalysisPresentationKey;
+    use rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey;
     use rspice_app_state::state::{
         AnalysisResultPayload, DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily,
         DcSweepQuantity, SavedOutputDcMember,
@@ -683,7 +683,7 @@ fn a_run_still_executing_is_named_as_in_progress_rather_than_immutable() {
 #[test]
 fn the_empty_analysis_rail_offers_the_action_that_fills_it() {
     use crate::workbench::commands::vocabulary::command_registry;
-    use crate::workbench::simulate::commands::SimulateCommand;
+    use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 
     let empty = render_with(SimulationPage::Analyses, 1400.0, |state| {
         let ids = state

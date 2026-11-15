@@ -23,31 +23,23 @@ use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::commands::vocabulary::{
     Command, CommandRegistry, command_registry, legacy_command,
 };
-use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::features;
-use crate::workbench::framework::command_registry::CommandAvailability;
-use crate::workbench::framework::command_registry::{Registry, ids};
-use crate::workbench::framework::feature::{CloudSessionPort, ModelsPort};
-use crate::workbench::framework::host::{
-    DocumentHost, Host, InspectorScope, NavigatorSection, Point, ProblemsHost, RailEntry,
-    StatusCell, ToolbarScope, ToolbarSlot,
-};
-use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
-use crate::workbench::layout::LayoutSpec;
-use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, RevertReviewToken};
-use crate::workbench::models::ModelsFeature;
-use crate::workbench::project::ProjectFeature;
-use crate::workbench::project::workspace_state::ProjectPage;
-use crate::workbench::results::ResultsFeature;
-use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
-use crate::workbench::{AppState, MessageId, RSpiceApp};
+use crate::workbench::{AppState, RSpiceApp};
 use menus::{APPLICATION_MENU, COMPACT_MENU, application_menu_entries};
 use rspice_app_cloud::workbench::cloud::CloudFeature;
 use rspice_app_code::workbench::code::{CodeFeature, SOURCE_EDITOR_MENU};
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
+use rspice_app_models::workbench::models::ModelsFeature;
+use rspice_app_project::workbench::project::ProjectFeature;
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_results::workbench::results::ResultsFeature;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+    ProjectCloseDestination, RevertReviewToken,
+};
 use rspice_app_sheets::workbench::sheets::SheetsFeature;
+use rspice_app_simulate::workbench::simulate::SimulateFeature;
 use rspice_app_state::diagnostics::LogAnchor;
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
@@ -60,6 +52,17 @@ use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
     self, ApplicationMenu,
 };
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_keys};
+use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
+use rspice_app_workbench::workbench::framework::command_registry::{Registry, ids};
+use rspice_app_workbench::workbench::framework::feature::{CloudSessionPort, ModelsPort};
+use rspice_app_workbench::workbench::framework::host::{
+    DocumentHost, Host, InspectorScope, NavigatorSection, Point, ProblemsHost, RailEntry,
+    StatusCell, ToolbarScope, ToolbarSlot,
+};
+use rspice_app_workbench::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
+use rspice_app_workbench::workbench::layout::LayoutSpec;
+use rspice_app_workbench::workbench::localization::MessageId;
+use rspice_ui_kit::panels::WorkbenchIcon;
 
 /// A route whose surface brings its own toolbar, in place of its
 /// workspace's.
@@ -83,33 +86,33 @@ impl Host for RSpiceApp {
             // The stage: a route that opens a surface of its own takes it
             // from the workspace's page.
             Point::Surface(workspace) => {
-                use crate::workbench::documents::code_workspace::sync_automation_debugger;
-                use crate::workbench::project::workspace_state::LibraryCellviewPage;
+                use rspice_app_code::workbench::documents::code_workspace::sync_automation_debugger;
                 use rspice_app_code::workbench::surfaces::{automation, netlist, veriloga};
                 use rspice_app_design::workbench::surfaces::stimulus;
+                use rspice_app_project::workbench::project::workspace_state::LibraryCellviewPage;
                 use rspice_app_project::workbench::surfaces::{library_cellview_manager, project};
                 use rspice_app_simulate::workbench::surfaces::{simulate, verify};
 
                 if app.state.workbench.current_route().surface_id()
-                    == super::SurfaceId::ReportAuthoring
+                    == rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ReportAuthoring
                 {
                     features::show_surface::<HardcopyFeature>(app, ui);
                     app.after_contribution();
                     return;
                 }
-                if app.state.workbench.current_route().surface_id() == super::SurfaceId::ModelEditor
+                if app.state.workbench.current_route().surface_id() == rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ModelEditor
                 {
                     ModelsFeature::show_model_editor(&mut features::cx(app), ui);
                     return;
                 }
                 if app.state.workbench.current_route().surface_id()
-                    == super::SurfaceId::ModelCorrelation
+                    == rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ModelCorrelation
                 {
                     ModelsFeature::show_model_correlation(&mut features::cx(app), ui);
                     return;
                 }
                 if app.state.workbench.current_route().surface_id()
-                    == super::SurfaceId::LibraryCellviewManager
+                    == rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::LibraryCellviewManager
                 {
                     // The manager draws in the project feature's context.
                     // What it raised, the symbol editor or a symbol dialog
@@ -203,7 +206,7 @@ impl Host for RSpiceApp {
                         }
                         if let Some(canvas) = app.state.design.touch_strip_canvas.take()
                             && app.state.workbench.current_route().surface_id()
-                                == super::SurfaceId::Design
+                                == rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::Design
                         {
                             let ctx = ui.ctx().clone();
                             rspice_app_design::schematic::view::show_mobile_canvas_controls(
@@ -236,7 +239,7 @@ impl Host for RSpiceApp {
                     Workspace::Netlist => {
                         netlist::prepare_workspace(&mut features::cx(app));
                         match app.state.code.code_workspace.page {
-                            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
+                            rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
                                 // The page's context holds its menu's answers
                                 // only while the source editor's menu is open
                                 // or opening.
@@ -252,7 +255,7 @@ impl Host for RSpiceApp {
                                     }),
                                 );
                             }
-                            crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
+                            rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
                                 // The breakpoints reach the debugger before the
                                 // page draws.
                                 sync_automation_debugger(&mut app.code_workspace_parts());
@@ -405,7 +408,7 @@ impl Host for RSpiceApp {
                     Workspace::Netlist => {
                         features::show_inspector_reading::<CodeFeature>(app, ui, |app| {
                             app.state.code.code_workspace.page
-                                == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+                                == rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
                         });
                         app.after_contribution();
                     }
@@ -420,8 +423,6 @@ impl Host for RSpiceApp {
             Point::Inspector(InspectorScope::Document(_)) => {}
             // The toolbar's lane: the tools of whoever its scope names.
             Point::Toolbar(ToolbarSlot::Tools(scope), layout) => {
-                use crate::workbench::chrome::toolbar::feature_tools;
-                use crate::workbench::chrome::toolbar::{context_separator, toolbar_icon_command};
                 use rspice_app_code::workbench::code::toolbar::{
                     NETLIST_TOOLBAR, VERILOGA_TOOLBAR,
                 };
@@ -440,6 +441,10 @@ impl Host for RSpiceApp {
                 };
                 use rspice_app_simulate::workbench::chrome::toolbar::simulate::{
                     simulation_tools, verification_tools,
+                };
+                use rspice_app_workbench::workbench::chrome::toolbar::feature_tools;
+                use rspice_app_workbench::workbench::chrome::toolbar::{
+                    context_separator, toolbar_icon_command,
                 };
 
                 match scope {
@@ -530,7 +535,7 @@ impl Host for RSpiceApp {
             // simulate feature's context with the dispatcher's answers; what
             // it raised is answered once it has drawn.
             Point::Toolbar(ToolbarSlot::Trailing, layout) => {
-                crate::workbench::simulate::chrome::show_trailing(
+                rspice_app_simulate::workbench::simulate::chrome::show_trailing(
                     &mut features::cx_with_foreign_answers(app, |_| true),
                     ui,
                     layout,
@@ -562,7 +567,7 @@ impl Host for RSpiceApp {
             Workspace::Verify => "Verification flows",
             Workspace::Models => "Library browser",
             Workspace::Netlist => {
-                use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+                use rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage;
                 match app.state.code.code_workspace.page {
                     CodeWorkspacePage::Netlist => "Netlist outline",
                     CodeWorkspacePage::Automation => "Scripts",
@@ -638,10 +643,10 @@ impl Host for RSpiceApp {
             }
             Workspace::Verify => app.state.simulate.verification_page.label().to_owned(),
             Workspace::Netlist => match app.state.code.code_workspace.page {
-                crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
+                rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
                     messages.text(MessageId::CodeInspectorNetlistTitle)
                 }
-                crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
+                rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
                     messages.text(MessageId::CodeInspectorAutomationTitle)
                 }
             },
@@ -662,10 +667,14 @@ impl Host for RSpiceApp {
         if !app.state.platform.project_lifecycle.is_open() {
             return ToolbarScope::NoProject;
         }
-        if app.state.workbench.current_route().surface_id() == super::SurfaceId::ReportAuthoring {
+        if app.state.workbench.current_route().surface_id()
+            == rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ReportAuthoring
+        {
             return ToolbarScope::Surface(SurfaceOwner::ReportAuthoring);
         }
-        if app.state.workbench.current_route().surface_id() == super::SurfaceId::ModelEditor {
+        if app.state.workbench.current_route().surface_id()
+            == rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ModelEditor
+        {
             return ToolbarScope::Surface(SurfaceOwner::ModelEditor);
         }
         ToolbarScope::Workspace(workspace)
@@ -786,7 +795,7 @@ impl Host for RSpiceApp {
                 let label = self.label(key);
                 // Check and save with a symbol in front is the save itself:
                 // no dialog follows it, so its row promises none.
-                if key == crate::workbench::project::commands::ProjectCommand::CheckAndSave.key()
+                if key == rspice_app_project::workbench::project::commands::ProjectCommand::CheckAndSave.key()
                     && self.state.workbench.workspace == Workspace::Design
                     && self.state.model.workspace.content.active_view_type()
                         == Some(ViewType::Symbol)
@@ -831,15 +840,20 @@ impl Host for RSpiceApp {
         )
     }
 
-    fn menu_place(&self, key: CommandKey) -> Option<crate::workbench::framework::host::MenuPlace> {
+    fn menu_place(
+        &self,
+        key: CommandKey,
+    ) -> Option<rspice_app_workbench::workbench::framework::host::MenuPlace> {
         application_menus::ALL_MENUS.into_iter().find_map(|menu| {
             rspice_app_workbench::workbench::chrome::title_bar::menu_entries::submenu_of(
                 application_menu_entries(menu),
                 key,
             )
-            .map(|submenu| crate::workbench::framework::host::MenuPlace {
-                menu: menu.label(),
-                submenu,
+            .map(|submenu| {
+                rspice_app_workbench::workbench::framework::host::MenuPlace {
+                    menu: menu.label(),
+                    submenu,
+                }
             })
         })
     }
@@ -899,7 +913,7 @@ impl Host for RSpiceApp {
 
 impl ProblemsHost for AppState {
     fn apply_quick_fix(&mut self, finding: uuid::Uuid) -> Result<String, String> {
-        crate::workbench::documents::netlist_document::language::apply_quick_fix_for_finding(
+        rspice_app_code::workbench::documents::netlist_document::language::apply_quick_fix_for_finding(
             &mut self.model,
             &mut self.code.netlist,
             &mut self.code.netlist_open_documents,
@@ -1325,8 +1339,8 @@ mod tests {
     /// key that command declares.
     #[test]
     fn each_results_id_names_its_command() {
-        use crate::workbench::ResultViewer;
-        use crate::workbench::results::commands::ResultsCommand;
+        use rspice_app_results::workbench::documents::result_document::ResultViewer;
+        use rspice_app_results::workbench::results::commands::ResultsCommand;
         for (id, command) in [
             (ids::CALCULATOR, ResultsCommand::WaveformCalculator),
             (ids::EDIT_SPECIFICATIONS, ResultsCommand::EditSpecifications),
@@ -1363,7 +1377,7 @@ mod tests {
     /// registry leaves out.
     #[test]
     fn each_simulate_id_names_its_command() {
-        use crate::workbench::simulate::commands::SimulateCommand;
+        use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
         use rspice_app_state::state::{SimulationPage, VerificationPage};
         for (id, command) in [
             (ids::RUN_SIMULATION, SimulateCommand::Run),
@@ -1387,7 +1401,7 @@ mod tests {
     /// key that command declares.
     #[test]
     fn each_project_id_names_its_command() {
-        use crate::workbench::project::commands::ProjectCommand;
+        use rspice_app_project::workbench::project::commands::ProjectCommand;
         for (id, command) in [
             (ids::NEW_CELL, ProjectCommand::NewCell),
             (ids::NEW_PROJECT, ProjectCommand::NewProject),

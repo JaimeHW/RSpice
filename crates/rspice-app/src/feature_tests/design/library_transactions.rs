@@ -715,7 +715,7 @@ fn rename_top_cell_then_serialize_succeeds() {
         .expect("the project root cell is writable");
 
     assert_eq!(state.model.workspace.content.project.top_cell, "system");
-    crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+    rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("a renamed project root cell must still serialize and validate");
 }
 

@@ -3,8 +3,8 @@
 //! no fill band, and a review raised during a run offers Stop and no save verbs.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use egui::Context;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use rspice_app_workbench::workbench::app::dialogs::confirmation::*;
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 

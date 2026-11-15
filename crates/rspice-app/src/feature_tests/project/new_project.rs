@@ -2,8 +2,8 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::project_transactions::open_new_project_dialog;
-use crate::workbench::project::commands::ProjectRequest;
 use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
+use rspice_app_project::workbench::project::commands::ProjectRequest;
 
 use super::with_cx;
 

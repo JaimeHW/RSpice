@@ -31,7 +31,7 @@ fn controller_manual_run_receipt_survives_production_project_round_trip() {
         );
     controller.abort();
 
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+    let project = rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("production snapshot accepts controller manual run");
     let json = rspice_app_services::io::project_io::serialize_project_file(&project)
         .expect("controller manual run serializes");

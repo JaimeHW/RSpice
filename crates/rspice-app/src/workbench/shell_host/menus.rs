@@ -2,21 +2,20 @@
 //! renderer draws and a test can read. The source editor's right-click menu
 //! is the code feature's (`code::SOURCE_EDITOR_MENU`).
 
-use crate::workbench::ResultViewer;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design_system::WorkbenchIcon;
-use crate::workbench::models::commands::ModelsCommand;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::results::commands::ResultsCommand;
-use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
+use rspice_app_models::workbench::models::commands::ModelsCommand;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
+use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::ModelsPage;
 use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::VerificationPage;
@@ -24,6 +23,7 @@ use rspice_app_state::state::command_catalog::CommandKey;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::ApplicationMenu;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
+use rspice_ui_kit::panels::WorkbenchIcon;
 
 /// The command's row under the vocabulary's label.
 const fn command(command: Command) -> MenuEntry {
@@ -616,7 +616,10 @@ const SIMULATE_MENU: &[MenuEntry] = &[
     design(DesignCommand::AnnotateOperatingPoint).access('D'),
     design(DesignCommand::AnnotateTransientVoltages).access('T'),
     MenuEntry::command_as(
-        ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Op).key(),
+        ResultsCommand::ResultViewer(
+            rspice_app_results::workbench::documents::result_document::ResultViewer::Op,
+        )
+        .key(),
         "Operating-point table",
     )
     .access('O'),

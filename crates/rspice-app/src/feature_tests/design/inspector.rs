@@ -2,7 +2,6 @@
 //! lends, or through the whole frame: the component, net, sheet and selection
 //! cards and what their edits do.
 
-use crate::workbench::framework::feature::SimulatePort as _;
 use crate::workbench::state::{InlineEditField, InlineEditSession, Workspace};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_design::workbench::app::actions::workspace::inline_edit_authority;
@@ -23,6 +22,7 @@ use rspice_app_state::state::model_library::{DeviceModel, ModelLibrary, ModelTyp
 use rspice_app_state::state::{
     CellViewRef, Component, ComponentType, LibraryCellInstance, Point, SchematicProbe, ViewType,
 };
+use rspice_app_workbench::workbench::framework::feature::SimulatePort as _;
 use std::collections::HashMap;
 
 /// A whole application whose sheet holds one instance bound to a vendor model
@@ -673,7 +673,9 @@ fn begin_rename(app: &mut RSpiceApp, id: u64, buffer: &str, rename: Option<&str>
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_inspector_draws_on_the_inline_edit_the_selection_moved_off() {
-    use crate::workbench::framework::host::{Host as _, InspectorScope, Point as HostPoint};
+    use rspice_app_workbench::workbench::framework::host::{
+        Host as _, InspectorScope, Point as HostPoint,
+    };
 
     let (mut app, first, second) = two_resistors();
     app.state
@@ -716,7 +718,9 @@ fn the_inspector_draws_on_the_inline_edit_the_selection_moved_off() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_failed_inline_commit_keeps_its_instance_in_the_inspector() {
-    use crate::workbench::framework::host::{Host as _, InspectorScope, Point as HostPoint};
+    use rspice_app_workbench::workbench::framework::host::{
+        Host as _, InspectorScope, Point as HostPoint,
+    };
 
     let (mut app, first, second) = two_resistors();
     let name = instance_name(&app, first);
@@ -776,7 +780,9 @@ fn a_failed_inline_commit_keeps_its_instance_in_the_inspector() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn each_inspector_pass_says_afresh_whether_the_sheet_takes_its_place() {
-    use crate::workbench::framework::host::{Host as _, InspectorScope, Point as HostPoint};
+    use rspice_app_workbench::workbench::framework::host::{
+        Host as _, InspectorScope, Point as HostPoint,
+    };
 
     let (mut app, first, _) = two_resistors();
     let _ = painted_panel(|ui| show(ui, &mut app.design_cx()));

@@ -1,8 +1,8 @@
 //! The preferences file, in the case that carries a shortcut profile bound
 //! to the product's own commands.
 
-use crate::workbench::UserPreferences;
-use crate::workbench::framework::command_registry::ids;
+use rspice_app_state::workbench::preferences::UserPreferences;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 #[test]
 fn shortcut_profile_round_trips_inside_user_preferences() {

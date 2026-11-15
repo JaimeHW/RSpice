@@ -4,12 +4,11 @@ use egui::{Context, Popup};
 use std::path::Path;
 
 use crate::workbench::app_state::services_access::open_comparison;
-use crate::workbench::framework::command_registry::ids;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::project::workspace_state::ProjectLauncherPage;
 use crate::workbench::session::project_transactions::start_local_safe_mode;
 use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, features};
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_project::workbench::project::workspace_state::ProjectLauncherPage;
 use rspice_app_project::workbench::tools::project_launcher::{
     LAUNCHER_TOUCH_MAX_WIDTH, LauncherAction, LauncherControlHeightOverride, LauncherPass,
     launcher, restore_launcher_focus, show_discard_confirmation,
@@ -18,6 +17,7 @@ use rspice_app_services::workbench::lifecycle::recovery::{
     open_diagnostics_folder, refresh_catalog_if_requested,
 };
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
     let dropped = ctx.input(|input| input.raw.dropped_files.clone());
@@ -193,7 +193,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
 pub(crate) fn dismiss_launcher(app: &mut RSpiceApp) {
     app.state.project.project_launcher_open = false;
     if app.state.workbench.current_route().surface_id()
-        != crate::workbench::SurfaceId::ProjectLauncher
+        != rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ProjectLauncher
     {
         return;
     }
@@ -205,7 +205,9 @@ pub(crate) fn dismiss_launcher(app: &mut RSpiceApp) {
         && app
             .state
             .workbench
-            .navigate_back(crate::workbench::RouteTransitionSource::User)
+            .navigate_back(
+                rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource::User,
+            )
             .is_some()
     {
         return;
@@ -218,14 +220,15 @@ pub(crate) fn dismiss_launcher(app: &mut RSpiceApp) {
     } else {
         Workspace::Project
     };
-    let fallback = crate::workbench::SurfaceRoute::surface(
-        crate::workbench::SurfaceId::from_workspace(workspace),
+    let fallback = rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::from_workspace(
+            workspace,
+        ),
     );
-    if let Err(error) = app
-        .state
-        .workbench
-        .replace_route(fallback, crate::workbench::RouteTransitionSource::User)
-    {
+    if let Err(error) = app.state.workbench.replace_route(
+        fallback,
+        rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource::User,
+    ) {
         app.state.workbench.record_route_diagnostic(format!(
             "The Project Launcher closed, but its fallback workspace could not be restored: {error}"
         ));

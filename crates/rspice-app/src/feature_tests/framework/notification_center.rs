@@ -9,13 +9,15 @@ use egui::{Pos2, Rect, Vec2, ViewportId, pos2, vec2};
 
 use crate::workbench::state::{ConsolePage, NotificationFilter};
 use crate::workbench::{AppState, RSpiceApp};
-use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use rspice_app_services::workbench::browser::background_alerts::BackgroundAlerts;
 use rspice_app_workbench::ui::tokens;
 use rspice_app_workbench::ui::widgets::{
     MirroredEntry, NotificationAction, NotificationCategory, ToastKind, Toasts,
 };
 use rspice_app_workbench::workbench::chrome::title_bar;
+use rspice_app_workbench::workbench::routing::{
+    navigation::RouteTransitionSource, surface_catalog::SurfaceId, surface_route::SurfaceRoute,
+};
 use rspice_app_workbench::workbench::tools::notification_center::*;
 
 mod raster;
@@ -837,8 +839,11 @@ fn each_window_has_its_own_bell_to_hang_the_panel_from() {
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     let both = [ViewportId::ROOT, detached()];
-    let layout =
-        crate::workbench::layout::LayoutSpec::resolve(DESKTOP.0, DESKTOP.1, &app.state.workbench);
+    let layout = rspice_app_workbench::workbench::layout::LayoutSpec::resolve(
+        DESKTOP.0,
+        DESKTOP.1,
+        &app.state.workbench,
+    );
     let _ = ctx.run_ui(window_input(ViewportId::ROOT, &both, None), |_| {});
     let mut anchors = Vec::new();
     for _ in 0..2 {

@@ -7,16 +7,16 @@
 
 use super::*;
 use crate::workbench::app::HelpCenterPage;
-use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::menu_bar::DatasetExportPicker;
-use crate::workbench::project::workspace_state::LibraryDeletionTarget;
 use rspice_app_design::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState;
 use rspice_app_design::workbench::app::dialogs::replace_instance::ReplaceInstanceOpen;
 use rspice_app_design::workbench::app::dialogs::selection::commands::floating::{
     FloatingPaste, FloatingPasteOrigin,
 };
 use rspice_app_design::workbench::app::schematic::edit_authority::SchematicEditAuthority;
+use rspice_app_project::workbench::project::workspace_state::LibraryDeletionTarget;
 use rspice_app_results::workbench::docks::inspector::run_details::RunDetailsDialogState;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use rspice_app_simulate::workbench::app::dialogs::plan_removal::PlanRemovalTarget;
 use rspice_app_workbench::workbench::app::dialogs::window_session::WindowSessionPage;
 use rspice_schematic_editor::object_properties::ObjectPropertiesDraft;
@@ -59,7 +59,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
         dialogs
             .settings
             .workspace_layout_manager
-            .open(crate::workbench::WorkspacePreset::Engineering);
+            .open(rspice_app_state::workbench::preferences::WorkspacePreset::Engineering);
     });
     assert_blocks_shortcuts(|dialogs| dialogs.settings.shortcut_portability.open_import());
     assert_blocks_shortcuts(|dialogs| dialogs.settings.shortcut_portability.open_export());
@@ -285,7 +285,7 @@ const DIALOG_GATE: &[DialogRow] = &[
         dialogs
             .settings
             .workspace_layout_manager
-            .open(crate::workbench::WorkspacePreset::Engineering);
+            .open(rspice_app_state::workbench::preferences::WorkspacePreset::Engineering);
     }),
     ("shortcut_portability (import)", |dialogs| {
         dialogs.settings.shortcut_portability.open_import();
@@ -315,7 +315,7 @@ const DIALOG_GATE: &[DialogRow] = &[
         let run = rspice_app_state::state::SimulationRun::new(1);
         dialogs.results.run_details = Some(Box::new(RunDetailsDialogState {
             run_id: run.id,
-            manifest: crate::workbench::documents::result_document::manifest::manifest_for_run(
+            manifest: rspice_app_results::workbench::documents::result_document::manifest::manifest_for_run(
                 &run,
             ),
         }));

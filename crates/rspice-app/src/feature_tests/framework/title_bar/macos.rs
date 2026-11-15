@@ -5,9 +5,9 @@
 //! writes it. Read for the macOS platform value on any host.
 
 use super::*;
-use crate::workbench::framework::requests::WindowFrame;
 use egui::os::OperatingSystem;
 use rspice_app_state::state::command_catalog::CommandPlatform;
+use rspice_app_workbench::workbench::framework::requests::WindowFrame;
 
 /// `rows` without their key: `label | command id | state`.
 fn without_keys(rows: &[String]) -> Vec<String> {

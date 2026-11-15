@@ -3,7 +3,7 @@
 use rspice_results_ui::op_inspector::OpAction;
 
 use crate::workbench::AppState;
-use crate::workbench::documents::result_document::op_inspector::apply_action;
+use rspice_app_results::workbench::documents::result_document::op_inspector::apply_action;
 
 /// A locate that cannot be made is a refused gesture: the status bar
 /// says why, and nothing is toasted.

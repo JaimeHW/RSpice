@@ -3,11 +3,11 @@
 
 use crate::feature_tests::hardcopy::source_reads;
 use crate::feature_tests::results::histogram_publication::{distribution, setup};
-use crate::workbench::ResultViewer;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, PreparedRetainedHardcopyResolution, SemanticAxisKind,
     prepare_retained_hardcopy_resolution,
 };
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_hardcopy::render::{HardcopyPublicationTimestamp, HardcopyRenderer};
 use rspice_hardcopy_contract::{HardcopyPlan, HardcopyScope, OutputFormat};
 use rspice_results::histogram::HistogramDisplayMode;

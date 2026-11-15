@@ -202,7 +202,7 @@ fn open_in_results_opens_the_run_in_the_frame_it_is_released() {
     app.state.model.workspace.content.netlist_source = Some(DECK.to_owned());
     app.state.model.simulation.source.netlist_content = DECK.to_owned();
     app.state.code.netlist.active_document =
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
+        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     app.state.code.netlist.active_document_initialized = true;
     app.state.runs.manual_run.last_run_buffer = Some(DECK.to_owned());
     app.state.runs.manual_run.last_run_id = Some(run);

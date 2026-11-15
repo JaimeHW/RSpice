@@ -5,8 +5,8 @@
 
 use egui::{ScrollArea, Ui};
 
-use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::{RSpiceApp, features};
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::recovery::recovery;
 use rspice_app_project::workbench::surfaces::project::{configuration, dependencies, overview};
 

@@ -4,7 +4,6 @@ use crate::feature_tests::settings::shortcut_portability_dialogs::{
     detected, exported_artifact, open_with_artifact,
 };
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::ids;
 use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
 use rspice_app_settings::workbench::shortcuts::artifacts::ShortcutConflictPolicy;
 use rspice_app_state::state::command_catalog::CommandPlatform;
@@ -12,6 +11,7 @@ use rspice_app_state::state::shortcuts::ProtectedShortcutPolicy;
 use rspice_app_state::state::shortcuts::ShortcutBindingSlot;
 use rspice_app_state::state::shortcuts::ShortcutPreferences;
 use rspice_app_state::state::shortcuts::ShortcutProfileLibrary;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 #[test]
 fn protected_binding_requires_fresh_explicit_confirmation() {

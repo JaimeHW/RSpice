@@ -2,8 +2,8 @@
 //! feature's command, and owns no dialog of its own.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 
 /// The chip's whole purpose is the plan manager. Navigating to Simulation
 /// Studio instead left the manager reachable only from a button inside it.

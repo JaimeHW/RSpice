@@ -96,6 +96,6 @@ fn deleting_a_cell_removes_the_physical_layout_of_every_view_it_owned() {
             owner.display_path()
         );
     }
-    crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+    rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("a project whose deleted cell left no orphan layout still saves");
 }

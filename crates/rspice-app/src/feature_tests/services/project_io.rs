@@ -53,7 +53,7 @@ fn project_with_two_authoritative_layout_documents() -> (ProjectSnapshot, CellVi
         .model
         .initialize_physical_layout_document(child.clone())
         .expect("child layout initializes");
-    let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+    let project = rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("two-layout project snapshot validates");
     (project, top, child)
 }

@@ -20,10 +20,6 @@ use rspice_results_ui::report::session::ReportAuthoringState;
 use serde::{Deserialize, Serialize};
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::lifecycle::window_session::WindowSessionRegistry;
-use crate::workbench::models::workspace_state::ModelsWorkbenchViewState;
-use crate::workbench::preferences::UserPreferences;
-use crate::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
 use crate::workbench::slots::{
     CodeState, HardcopyState, ModelsState, PlatformState, ProjectState, ResultsState,
     SettingsState, SimulateState,
@@ -33,13 +29,18 @@ use crate::workbench::state::{
     WorkspaceDocumentRegistry, WorkspaceLayoutState, default_analysis_index,
     default_console_height, default_inspector_width, default_navigator_width,
 };
-use crate::workbench::{SurfaceNavigation, WorkspacePreset};
 use rspice_app_design::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
 use rspice_app_design::workbench::slots::design::{DesignPanel, DesignState};
 use rspice_app_models::workbench::documents::model_editor::ModelEditorRecoveryDraft;
+use rspice_app_models::workbench::models::workspace_state::ModelsWorkbenchViewState;
+use rspice_app_project::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
 use rspice_app_state::state::{GridStyle, SchematicVisibilityPolicy, SchematicWireRoutingStyle};
 use rspice_app_state::state::{SimulationPage, VerificationPage};
+use rspice_app_state::workbench::preferences::UserPreferences;
+use rspice_app_state::workbench::preferences::WorkspacePreset;
 use rspice_app_workbench::ui::Theme;
+use rspice_app_workbench::workbench::lifecycle::window_session::WindowSessionRegistry;
+use rspice_app_workbench::workbench::routing::navigation::SurfaceNavigation;
 
 /// What a session keeps of the document engines' session state, which the
 /// workbench and the design, results, platform and settings slots hold.
@@ -84,13 +85,13 @@ pub(in crate::workbench) struct UiSessionWire {
     #[serde(default = "default_autosave_minutes")]
     autosave_minutes: u8,
     #[serde(default)]
-    preferences: crate::workbench::preferences::UserPreferences,
+    preferences: rspice_app_state::workbench::preferences::UserPreferences,
     #[serde(default)]
     browser_spoken_feedback: bool,
     #[serde(default)]
-    text_locale: crate::workbench::UiTextLocale,
+    text_locale: rspice_app_workbench::workbench::localization::UiTextLocale,
     #[serde(default)]
-    result_viewer: crate::workbench::documents::result_document::ResultViewer,
+    result_viewer: rspice_app_results::workbench::documents::result_document::ResultViewer,
     /// Bit periods the reader pinned eyes to, for results that carry prepared
     /// provenance. Legacy keys name a run-local analysis id that a later
     /// session will never mint again, so they are dropped on save rather than
@@ -857,7 +858,8 @@ mod ui_session_tests {
     #[test]
     fn ui_text_locale_round_trips_and_legacy_sessions_default_to_english() {
         let mut session = AppState::default();
-        session.workbench.text_locale = crate::workbench::UiTextLocale::PseudoExpanded;
+        session.workbench.text_locale =
+            rspice_app_workbench::workbench::localization::UiTextLocale::PseudoExpanded;
         let serialized =
             serde_json::to_value(UiSessionWire::from(&session)).expect("serialize session");
         let restored = AppState::from(
@@ -865,7 +867,7 @@ mod ui_session_tests {
         );
         assert_eq!(
             restored.workbench.text_locale,
-            crate::workbench::UiTextLocale::PseudoExpanded
+            rspice_app_workbench::workbench::localization::UiTextLocale::PseudoExpanded
         );
 
         let legacy = AppState::from(
@@ -873,7 +875,7 @@ mod ui_session_tests {
         );
         assert_eq!(
             legacy.workbench.text_locale,
-            crate::workbench::UiTextLocale::EnglishUnitedStates
+            rspice_app_workbench::workbench::localization::UiTextLocale::EnglishUnitedStates
         );
     }
 
@@ -1125,7 +1127,11 @@ mod ui_session_tests {
 #[cfg(test)]
 mod workbench_session_tests {
     use super::*;
-    use crate::workbench::{BrowserHistoryEffect, RouteTransitionSource, SurfaceId, SurfaceRoute};
+    use rspice_app_workbench::workbench::routing::{
+        navigation::{BrowserHistoryEffect, RouteTransitionSource},
+        surface_catalog::SurfaceId,
+        surface_route::SurfaceRoute,
+    };
 
     fn restore(wire: WorkbenchWire) -> AppState {
         let mut state = AppState::default();

@@ -13,11 +13,11 @@ use crate::workbench::app::veriloga_design_tests::{
     themed_context,
 };
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::code_workspace::{
-    self, PendingVerilogACompile, VerilogACompileOutcome,
-};
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::documents::code_workspace::{
+    self, PendingVerilogACompile, VerilogACompileOutcome,
+};
 use rspice_app_state::state::{CellViewRef, ProjectSourceId, ProjectSourceLanguage};
 
 fn editor_id(bundle_id: ProjectSourceId, logical_path: &str) -> egui::Id {
@@ -27,9 +27,10 @@ fn editor_id(bundle_id: ProjectSourceId, logical_path: &str) -> egui::Id {
 /// Whether the frame put an editable Verilog-A source editor in front of the
 /// reader — what a screen reader announces, so what a reader is offered.
 fn shows_veriloga_editor(output: &egui::FullOutput) -> bool {
-    let label =
-        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
-            .text(crate::workbench::MessageId::EditorVerilogASourceEditor);
+    let label = rspice_app_workbench::workbench::localization::MessageCatalog::new(
+        rspice_app_workbench::workbench::localization::UiTextLocale::EnglishUnitedStates,
+    )
+    .text(rspice_app_workbench::workbench::localization::MessageId::EditorVerilogASourceEditor);
     output
         .platform_output
         .accesskit_update
@@ -613,7 +614,9 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     .expect("an edited source has something to say");
     assert_eq!(
         status,
-        messages.text(crate::workbench::MessageId::VerilogAStatusResultDiscarded)
+        messages.text(
+            rspice_app_workbench::workbench::localization::MessageId::VerilogAStatusResultDiscarded
+        )
     );
     // Edited-since-the-last-compile is where the source is, not something
     // wrong with it.
@@ -681,7 +684,7 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_source_edit_marks_its_tab_dirty_and_saving_clears_it() {
-    use crate::workbench::lifecycle::project_lifecycle::{
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         DestinationAuthority, SaveScope, save_native,
     };
 
@@ -771,8 +774,10 @@ fn session_restore_reopens_the_veriloga_tab_in_design() {
         reference
     );
     assert_eq!(
-        crate::workbench::lifecycle::project_lifecycle::active_document(&reopened.state),
-        crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId::CellView(
+        rspice_app_services::workbench::lifecycle::project_lifecycle::active_document(
+            &reopened.state
+        ),
+        rspice_app_services::workbench::lifecycle::project_lifecycle::ProjectDocumentId::CellView(
             reference.clone()
         )
     );

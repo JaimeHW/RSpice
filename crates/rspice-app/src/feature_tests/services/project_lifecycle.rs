@@ -12,8 +12,8 @@ use crate::workbench::app_state::{
         initialize_from_session, mark_project_closed, reset_for_new_project, revert_document,
     },
 };
-use crate::workbench::lifecycle::project_lifecycle::*;
 use rspice_app_services::io::ProjectSnapshot;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::*;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_state::simulation::plan::AnalysisKind;
 use rspice_app_state::state::{CellViewRef, ComponentType, Point, ViewType};
@@ -837,7 +837,7 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn design_checks_on_save_are_off_by_default_and_never_refuse_the_save() {
-    use crate::workbench::TogglePreference;
+    use rspice_app_state::workbench::preferences::TogglePreference;
 
     let path = unique_path("design-checks-on-save");
     let mut state = Box::new(AppState::default());

@@ -15,20 +15,11 @@ use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::LibraryRemoval;
 use crate::workbench::app_state::model::WorkspacePruned;
 use crate::workbench::app_state::services_access;
-use crate::workbench::documents::netlist_document::adopt_live_owned_source;
-use crate::workbench::framework::feature::ModelsPort;
-use crate::workbench::framework::requests::{self, AdoptLiveOwnedSource};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
-use crate::workbench::lifecycle::project_lifecycle::SaveScope;
-use crate::workbench::lifecycle::project_lifecycle::{
-    LifecycleParts, PersistenceBinding, ProjectCloseDestination, ProjectLifecycleError,
-    RevertReviewToken, has_unsaved_changes,
-};
 use crate::workbench::state::Workspace;
 use rspice_app_cloud::workbench::live_session::{
     CloudHandles, DiscardMirror, LiveHost, MirrorApply,
 };
+use rspice_app_code::workbench::documents::netlist_document::adopt_live_owned_source;
 #[cfg(target_arch = "wasm32")]
 use rspice_app_project::workbench::workflows::file_workflow::BrowserSchematic;
 use rspice_app_project::workbench::workflows::file_workflow::{self, SchematicLoadOrigin};
@@ -41,11 +32,20 @@ use rspice_app_project::workbench::workflows::project_workflow::{
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_services::io::SchematicIoError;
 use rspice_app_services::io::{FileWorkflowIo, ProjectSnapshot};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_services::workbench::lifecycle::project_lifecycle::DestinationAuthority;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::SaveScope;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+    LifecycleParts, PersistenceBinding, ProjectCloseDestination, ProjectLifecycleError,
+    RevertReviewToken, has_unsaved_changes,
+};
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::product::TransactionId;
 use rspice_app_state::state::write_policy::LocalSafeModeOptions;
 use rspice_app_state::state::{SchematicState, ViewType};
 use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
+use rspice_app_workbench::workbench::framework::feature::ModelsPort;
+use rspice_app_workbench::workbench::framework::requests::{self, AdoptLiveOwnedSource};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::ProjectIoError;
 #[cfg(target_arch = "wasm32")]
@@ -407,7 +407,7 @@ impl AppState {
         let keep_backup = self
             .model
             .preferences
-            .toggle(crate::workbench::TogglePreference::KeepSaveBackup);
+            .toggle(rspice_app_state::workbench::preferences::TogglePreference::KeepSaveBackup);
         match io.save_schematic(&self.model.schematic, path, keep_backup) {
             Ok(()) => {
                 let saved_path_is_reopenable = io.saved_paths_are_reopenable();
@@ -704,24 +704,25 @@ impl AppState {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn open_project(&mut self) -> bool {
         let transaction =
-            match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
+            match rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
                 Ok(transaction) => transaction,
                 Err(error) => {
                     lifecycle_error(self, error, "Project open blocked");
                     return false;
                 }
             };
-        let context = crate::workbench::lifecycle::project_lifecycle::browser_operation_context(
-            &self.model,
-            &self.platform,
-        );
+        let context =
+            rspice_app_services::workbench::lifecycle::project_lifecycle::browser_operation_context(
+                &self.model,
+                &self.platform,
+            );
         match project_workflow::start_browser_project_import(transaction, context) {
             Ok(()) => {
                 self.prompt("Choose an RSpice project file to open.");
                 true
             }
             Err(error) => {
-                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(
+                rspice_app_services::workbench::lifecycle::project_lifecycle::cancel_transaction(
                     &mut self.platform,
                 );
                 self.report_failure("Project open failed", error);
@@ -735,14 +736,16 @@ impl AppState {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn load_project_from_path(&mut self, path: &std::path::Path) -> bool {
         let transaction =
-            match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
+            match rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
                 Ok(transaction) => transaction,
                 Err(error) => {
                     lifecycle_error(self, error, "Project open blocked");
                     return false;
                 }
             };
-        match crate::workbench::lifecycle::project_lifecycle::read_native_binding(path) {
+        match rspice_app_services::workbench::lifecycle::project_lifecycle::read_native_binding(
+            path,
+        ) {
             Ok((project, binding)) => {
                 let canonical_path = binding.canonical_path.clone();
                 self.apply_loaded_project_authorized(
@@ -753,7 +756,7 @@ impl AppState {
                 )
             }
             Err(error) => {
-                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(
+                rspice_app_services::workbench::lifecycle::project_lifecycle::cancel_transaction(
                     &mut self.platform,
                 );
                 self.report_failure("Project open failed", error.to_string());
@@ -781,7 +784,7 @@ impl AppState {
             }
         };
         let transaction =
-            match crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
+            match rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement(self) {
                 Ok(transaction) => transaction,
                 Err(
                     ProjectLifecycleError::ActiveRun | ProjectLifecycleError::TransactionInProgress,
@@ -813,7 +816,7 @@ impl AppState {
     /// Ask the reader to review reverting the active document to what its
     /// project last saved. Returns whether the review opened.
     pub(crate) fn request_revert_active_document(&mut self) -> bool {
-        match crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(self) {
+        match rspice_app_services::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(self) {
             Ok(token) => {
                 self.workbench.project_review_dialog.show_revert(token);
                 true
@@ -881,7 +884,8 @@ impl AppState {
                 .project
                 .configuration
                 .is_dirty(&self.model.workspace.content.configuration_sets)
-            && crate::workbench::lifecycle::project_lifecycle::dirty_documents(self).is_empty()
+            && rspice_app_services::workbench::lifecycle::project_lifecycle::dirty_documents(self)
+                .is_empty()
     }
 }
 
@@ -1008,7 +1012,9 @@ impl AppState {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn save_project_as_to_path(&mut self, path: &std::path::Path) -> bool {
         if let Err(error) =
-            crate::workbench::lifecycle::project_lifecycle::save_project_copy_native(self, path)
+            rspice_app_services::workbench::lifecycle::project_lifecycle::save_project_copy_native(
+                self, path,
+            )
         {
             lifecycle_error(self, error, "Project Save As failed");
             return false;
@@ -1346,7 +1352,9 @@ pub(crate) fn go_on_leaving(
     } else {
         ModelsPort::model_editor_has_unsaved_changes(&*state.models)
     };
-    if !drafts && !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
+    if !drafts
+        && !rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
+    {
         let (path, kind) = recent.unzip();
         return Some((action, path, kind));
     }
@@ -1392,8 +1400,9 @@ pub(crate) fn open_confirmed(state: &mut AppState) {
 /// changes it has, as New project does.
 pub(crate) fn request_example(state: &mut AppState, example: Example) {
     let unsaved = state.platform.project_lifecycle.is_open()
-        && (crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
-            || ModelsPort::model_editor_has_unsaved_changes(&*state.models));
+        && (rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(
+            state,
+        ) || ModelsPort::model_editor_has_unsaved_changes(&*state.models));
     if unsaved {
         state
             .workbench
@@ -1421,7 +1430,7 @@ pub(crate) fn start_local_safe_mode(
 
     if options.isolate_prior_documents && state.platform.project_lifecycle.is_open() {
         if !state.close_project_discard(
-            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+            rspice_app_services::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
         ) {
             return Err("The current project could not be isolated safely".to_owned());
         }
@@ -1442,9 +1451,9 @@ pub(crate) fn start_local_safe_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::framework::requests::LiveMirrorEntry;
     use rspice_app_cloud::services::cloud_account::CloudAccountService;
     use rspice_app_cloud::workbench::live_session::LiveSessionEngine;
+    use rspice_app_workbench::workbench::framework::requests::LiveMirrorEntry;
 
     /// A close-to-mirror transaction that outlives its session leaves the
     /// reader where every project close does: on the no-project landing.

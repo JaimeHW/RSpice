@@ -492,7 +492,7 @@ fn full_screen_command_enters_in_the_same_frame_with_no_dialog() {
 }
 
 fn take_full_screen_request(app: &mut RSpiceApp) -> Option<bool> {
-    use crate::workbench::framework::requests::FullScreen;
+    use rspice_app_workbench::workbench::framework::requests::FullScreen;
     app.state
         .workbench
         .outbox

@@ -5,8 +5,8 @@
 //! through the saved session unchanged is tested with the session wire.
 
 use super::*;
-use crate::workbench::framework::requests::FullScreen;
 use rspice_app_state::state::VerificationPage;
+use rspice_app_workbench::workbench::framework::requests::FullScreen;
 
 #[test]
 fn canonical_workspace_order_is_stable() {
@@ -37,7 +37,7 @@ fn the_stimulus_library_is_named_once_across_its_registers() {
 
 #[test]
 fn ordinary_noise_uses_the_frequency_document_identity() {
-    use super::super::ResultViewer;
+    use rspice_app_results::workbench::documents::result_document::ResultViewer;
     assert_eq!(
         ResultViewer::NoiseContrib.viewer_document_id(),
         Some("viewer-bode")
@@ -54,7 +54,7 @@ fn ordinary_noise_uses_the_frequency_document_identity() {
 /// `noise` analysis outright.
 #[test]
 fn every_claimed_viewer_document_is_in_the_catalog() {
-    use super::super::ResultViewer;
+    use rspice_app_results::workbench::documents::result_document::ResultViewer;
     for viewer in ResultViewer::all() {
         let Some(id) = viewer.viewer_document_id() else {
             continue;

@@ -9,10 +9,10 @@
 //! obvious topic, else the workspace on screen.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::framework::dialogs::ModalGate;
-use crate::workbench::framework::requests::{OpenWebPage, Outbox};
 use crate::workbench::state::Workspace;
 use rspice_app_state::state::ViewType;
+use rspice_app_workbench::workbench::framework::dialogs::ModalGate;
+use rspice_app_workbench::workbench::framework::requests::{OpenWebPage, Outbox};
 
 /// This version's entry in the release notes.
 pub(in crate::workbench) const RELEASE_NOTES_URL: &str =

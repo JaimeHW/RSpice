@@ -5,10 +5,10 @@
 use egui::{Context, Rect, Vec2, vec2};
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::project::workspace_state::ProjectLauncherPage;
 use crate::workbench::shell_host::project::launcher::dismiss_launcher;
 use crate::workbench::shell_host::project::launcher::show;
 use crate::workbench::state::Workspace;
+use rspice_app_project::workbench::project::workspace_state::ProjectLauncherPage;
 use rspice_app_project::workbench::tools::project_launcher::{
     LAUNCHER_VERSION_LABEL, LauncherLayout,
 };
@@ -17,7 +17,7 @@ use rspice_app_project::workbench::tools::project_launcher::{
 fn launcher_dismissal_returns_through_canonical_history() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Results);
-    crate::workbench::project::open_project_launcher(
+    rspice_app_project::workbench::project::open_project_launcher(
         &mut app.state.project,
         &mut app.state.workbench,
         &mut app.state.platform,
@@ -25,7 +25,7 @@ fn launcher_dismissal_returns_through_canonical_history() {
 
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::ProjectLauncher
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ProjectLauncher
     );
     assert!(app.state.project.project_launcher_open);
 
@@ -33,7 +33,7 @@ fn launcher_dismissal_returns_through_canonical_history() {
 
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::Results
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::Results
     );
     assert!(!app.state.project.project_launcher_open);
 }
@@ -44,8 +44,8 @@ fn deep_linked_launcher_without_history_dismisses_to_owning_workspace() {
     app.state
         .workbench
         .replace_route(
-            crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::ProjectLauncher),
-            crate::workbench::RouteTransitionSource::BrowserPop,
+            rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ProjectLauncher),
+            rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource::BrowserPop,
         )
         .expect("Project Launcher has a canonical executor");
     app.state.project.project_launcher_open = true;
@@ -54,7 +54,7 @@ fn deep_linked_launcher_without_history_dismisses_to_owning_workspace() {
 
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::Design
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::Design
     );
     assert!(!app.state.project.project_launcher_open);
 }
@@ -66,27 +66,34 @@ fn dismissing_with_no_project_open_replaces_the_launcher_with_the_landing() {
     app.state.workbench.activate(Workspace::Results);
     assert!(matches!(
         app.state.workbench.take_browser_history_effect(),
-        Some(crate::workbench::BrowserHistoryEffect::Push(_))
+        Some(rspice_app_workbench::workbench::routing::navigation::BrowserHistoryEffect::Push(_))
     ));
-    crate::workbench::project::open_project_launcher(
+    rspice_app_project::workbench::project::open_project_launcher(
         &mut app.state.project,
         &mut app.state.workbench,
         &mut app.state.platform,
     );
     assert!(matches!(
         app.state.workbench.take_browser_history_effect(),
-        Some(crate::workbench::BrowserHistoryEffect::Push(_))
+        Some(rspice_app_workbench::workbench::routing::navigation::BrowserHistoryEffect::Push(_))
     ));
     app.state.close_project_session();
 
     dismiss_launcher(&mut app);
 
-    let destination = crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Project);
+    let destination =
+        rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute::surface(
+            rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::Project,
+        );
     assert_eq!(app.state.workbench.current_route(), destination);
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
     assert_eq!(
         app.state.workbench.take_browser_history_effect(),
-        Some(crate::workbench::BrowserHistoryEffect::Replace(destination))
+        Some(
+            rspice_app_workbench::workbench::routing::navigation::BrowserHistoryEffect::Replace(
+                destination
+            )
+        )
     );
     assert!(app.state.workbench.take_browser_history_effect().is_none());
     assert!(!app.state.project.project_launcher_open);
@@ -101,7 +108,7 @@ fn painted_launcher_page(
     let ctx = Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::project::open_project_launcher(
+    rspice_app_project::workbench::project::open_project_launcher(
         &mut app.state.project,
         &mut app.state.workbench,
         &mut app.state.platform,

@@ -637,7 +637,7 @@ fn reverting_in_place_brings_the_instance_and_its_wire_back() {
     assert_eq!(fixture.pin_a(), Some(Point::new(-40, 20)));
     assert_eq!(fixture.wire_end(), Point::new(60, 100));
 
-    let token = crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
+    let token = rspice_app_services::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(
         &fixture.replay.app.state,
     )
     .expect("the revert is reviewed");
@@ -667,8 +667,8 @@ fn reverting_in_place_brings_the_instance_and_its_wire_back() {
 /// with the edit in both and no half-open session.
 #[test]
 fn saving_in_place_writes_the_edit_and_reopens_without_the_session() {
-    use crate::workbench::lifecycle::project_lifecycle::dirty_documents;
-    use crate::workbench::project::commands::ProjectCommand;
+    use rspice_app_project::workbench::project::commands::ProjectCommand;
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::dirty_documents;
 
     let mut fixture = InPlace::new();
     fixture.wire_pin_a();
@@ -723,8 +723,8 @@ fn saving_in_place_writes_the_edit_and_reopens_without_the_session() {
 /// on an open sheet, writes that sheet with it.
 #[test]
 fn saving_the_symbol_view_writes_the_sheet_its_pin_move_rewired() {
-    use crate::workbench::lifecycle::project_lifecycle::dirty_documents;
-    use crate::workbench::project::commands::ProjectCommand;
+    use rspice_app_project::workbench::project::commands::ProjectCommand;
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::dirty_documents;
 
     let mut fixture = InPlace::new();
     fixture.wire_pin_a();
@@ -766,7 +766,7 @@ fn saving_the_symbol_view_writes_the_sheet_its_pin_move_rewired() {
 /// tab shows. A save that wrote the symbol alone says nothing of sheets.
 #[test]
 fn a_save_that_writes_the_rewired_sheet_names_both_in_the_status_line() {
-    use crate::workbench::project::commands::ProjectCommand;
+    use rspice_app_project::workbench::project::commands::ProjectCommand;
 
     let mut fixture = InPlace::new();
     fixture.wire_pin_a();
@@ -808,8 +808,8 @@ fn a_save_that_writes_the_rewired_sheet_names_both_in_the_status_line() {
 /// and choosing it puts the pin back, the project step still to undo.
 #[test]
 fn undo_names_the_symbol_step_over_an_older_project_step() {
-    use crate::workbench::framework::command_registry::ids;
-    use crate::workbench::framework::host::Host;
+    use rspice_app_workbench::workbench::framework::command_registry::ids;
+    use rspice_app_workbench::workbench::framework::host::Host;
 
     let mut fixture = InPlace::new();
     let state = &mut fixture.replay.app.state;
@@ -914,7 +914,7 @@ fn descend_with_options_edits_a_symbol_only_cell_in_place() {
 /// for the symbol is not part of it.
 #[test]
 fn the_layout_saved_in_place_is_the_sheets() {
-    use crate::workbench::project::commands::ProjectCommand;
+    use rspice_app_project::workbench::project::commands::ProjectCommand;
 
     let mut fixture = InPlace::new();
     let path = ProjectPath::new("layout");

@@ -5,11 +5,11 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
 use crate::workbench::app::project_transactions::{WholeStateValidation, run_design_checks_in};
 use crate::workbench::app_state::AppState;
-use crate::workbench::lifecycle::project_lifecycle::SaveScope;
 use rspice_app_project::workbench::app::dialogs::check_and_save::{
     NEWER_CHANGES, revision_note_error, rollback_exact_journal,
 };
 use rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::SaveScope;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::state::{
     AdvisoryDisposition, ValidatedRevisionJournal, ValidatedRevisionRequest,
@@ -80,7 +80,7 @@ impl RSpiceApp {
         let target_view_key = fresh_report.active_view().key();
         if original_journal.is_empty()
             && let Some(accepted) =
-                crate::workbench::lifecycle::project_lifecycle::accepted_active_schematic(
+                rspice_app_services::workbench::lifecycle::project_lifecycle::accepted_active_schematic(
                     &self.state.model,
                     &self.state.platform,
                 )
@@ -315,12 +315,16 @@ fn rollback_validated_save(
             })
     };
     let detail = match rollback_result {
-        Ok(()) => match crate::workbench::lifecycle::project_lifecycle::refresh_registry(state) {
-            Ok(()) => message.to_owned(),
-            Err(error) => format!(
-                "{message} The revision was taken back, but the project's unsaved-changes state could not be refreshed: {error}. Reopen the project before retrying."
-            ),
-        },
+        Ok(()) => {
+            match rspice_app_services::workbench::lifecycle::project_lifecycle::refresh_registry(
+                state,
+            ) {
+                Ok(()) => message.to_owned(),
+                Err(error) => format!(
+                    "{message} The revision was taken back, but the project's unsaved-changes state could not be refreshed: {error}. Reopen the project before retrying."
+                ),
+            }
+        }
         Err(error) => format!(
             "{message} The revision could not be taken back because {error}; close and reopen the project before retrying."
         ),

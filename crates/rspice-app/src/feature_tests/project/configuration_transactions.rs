@@ -3,10 +3,10 @@
 //! controller would start.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::project::configuration_state::ConfigurationSelection;
 use rspice_app_project::workbench::app::dialogs::project::configuration::{
     ConfigurationTransaction, commit_configuration, delete_refusal,
 };
+use rspice_app_project::workbench::project::configuration_state::ConfigurationSelection;
 use rspice_app_state::state::{ConfigurationSetDefinition, ConfigurationSetId};
 
 fn commit_configuration_transaction(
@@ -150,7 +150,7 @@ fn an_apply_that_unbinds_an_instance_names_its_cell_and_views() {
         .project
         .configuration
         .edit(&catalog, id, |definition| {
-            crate::workbench::project::configuration_state::set_instance_view(
+            rspice_app_project::workbench::project::configuration_state::set_instance_view(
                 definition,
                 "/X1",
                 Some("spice"),

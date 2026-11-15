@@ -7,10 +7,9 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticOwner;
 use crate::workbench::app_state::diagnostic_store::listing::listing;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::layout::LayoutSpec;
-use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::{ConsolePage, WorkbenchSession};
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::state::{
     AnalysisResult, AnalysisType, Point, SimulationRun, SimulationState,
@@ -20,6 +19,7 @@ use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::ui::widgets::Problem;
 use rspice_app_workbench::workbench::docks::console::problems::active_problem_count;
 use rspice_app_workbench::workbench::docks::console::*;
+use rspice_app_workbench::workbench::layout::LayoutSpec;
 use rspice_design::drc::DrcResult;
 
 /// Every producer the store holds evidence for puts a real finding on the
@@ -451,7 +451,7 @@ fn an_empty_page_starts_where_its_first_row_would() {
                     ..Default::default()
                 },
                 |ui| {
-                    let layout = crate::workbench::layout::LayoutSpec::resolve(
+                    let layout = rspice_app_workbench::workbench::layout::LayoutSpec::resolve(
                         1280.0,
                         760.0,
                         &app.state.workbench,
@@ -590,7 +590,7 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
     app.state.code.code_workspace.page =
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     app.state
         .model
         .log_buffer

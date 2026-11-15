@@ -1,17 +1,14 @@
 //! The source editor's menu through the whole application: the commands the
 //! code feature reads, and the rows a page's context reads once it has drawn.
 
-use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-use crate::workbench::documents::netlist_document::{
-    ActiveNetlistDocument, open_run_deck_snapshot_in,
-};
-use crate::workbench::framework::command_registry::CommandAvailability;
-use crate::workbench::framework::feature::Feature;
-use crate::workbench::framework::host::Host;
 use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, features};
 use egui::os::OperatingSystem;
 use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage;
+use rspice_app_code::workbench::documents::netlist_document::{
+    ActiveNetlistDocument, open_run_deck_snapshot_in,
+};
 use rspice_app_code::workbench::surfaces::netlist::fixtures::seal_manual_run;
 use rspice_app_code::workbench::surfaces::netlist::source_menu::SourceMenuLookup;
 use rspice_app_code::workbench::surfaces::netlist::{prepare_workspace, show_prepared};
@@ -19,6 +16,9 @@ use rspice_app_state::state::command_catalog::CommandPlatform;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{
     menu_keys, resolve_menu_rows,
 };
+use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
+use rspice_app_workbench::workbench::framework::feature::Feature;
+use rspice_app_workbench::workbench::framework::host::Host;
 
 /// The commands the code feature declares its menus read are the source
 /// editor menu's, in its order.

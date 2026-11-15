@@ -5,9 +5,9 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::DiagnosticInputs;
 use crate::workbench::app_state::diagnostic_store::listing;
 use crate::workbench::app_state::waivers::WaiverAction;
-use crate::workbench::preferences::TogglePreference;
 use rspice_app_state::state::{ComponentType, Point};
 use rspice_app_state::time_compat::Instant;
+use rspice_app_state::workbench::preferences::TogglePreference;
 
 fn open_state() -> AppState {
     let mut state = AppState::default();

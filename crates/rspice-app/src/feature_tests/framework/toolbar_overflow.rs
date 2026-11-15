@@ -2,13 +2,13 @@
 //! when the keyboard reached them.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::chrome::toolbar::overflow::*;
-use crate::workbench::layout::LayoutSpec;
 use egui::{Event, Key, Pos2, Stroke};
 use egui::{Rect, Vec2};
 use rspice_app_state::state::Tool;
 use rspice_app_workbench::ui::panels::WorkbenchIcon;
 use rspice_app_workbench::ui::tokens::Tokens;
+use rspice_app_workbench::workbench::chrome::toolbar::overflow::*;
+use rspice_app_workbench::workbench::layout::LayoutSpec;
 
 /// A row of More tools that arms a schematic tool.
 struct Arm(Tool);

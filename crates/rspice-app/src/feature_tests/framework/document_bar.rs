@@ -2,7 +2,6 @@
 //! what activating, cycling and closing a tab does to them, and how the tabs
 //! share the strip's width, elide their labels and scroll into view.
 
-use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
@@ -18,6 +17,7 @@ use rspice_app_workbench::ui::panels::{WorkbenchIcon, elide_text};
 use rspice_app_workbench::ui::theme::{self, FontWeight};
 use rspice_app_workbench::ui::tokens;
 use rspice_app_workbench::workbench::chrome::document_bar::*;
+use rspice_app_workbench::workbench::layout::LayoutSpec;
 
 fn multi_document_netlist_state() -> AppState {
     const ROOT: &str = "tabs\n.include \"models/resistor.inc\"\n.end\n";
@@ -49,7 +49,7 @@ fn multi_document_netlist_state() -> AppState {
     let mut state = AppState::default();
     state.workbench.workspace = Workspace::Netlist;
     state.code.code_workspace.page =
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     state.model.netlist_artifacts.generated_source = ROOT.to_owned();
     state.model.netlist_artifacts.generated_document = Some(generated);
     state.code.netlist.owned_document = Some(owned.clone());
@@ -113,25 +113,25 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
         2,
         "resolved closures are available in the navigator, not opened as thousands of tabs"
     );
-    crate::workbench::documents::netlist_document::open_netlist_dependency_from_root_in(
+    rspice_app_code::workbench::documents::netlist_document::open_netlist_dependency_from_root_in(
         &mut state.model,
         &mut state.code.netlist,
         &mut state.code.netlist_open_documents,
         &mut state.runs,
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated,
+        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::Generated,
         "models/resistor.inc",
     )
     .unwrap();
-    crate::workbench::documents::netlist_document::open_netlist_dependency_from_root_in(
+    rspice_app_code::workbench::documents::netlist_document::open_netlist_dependency_from_root_in(
         &mut state.model,
         &mut state.code.netlist,
         &mut state.code.netlist_open_documents,
         &mut state.runs,
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource,
+        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource,
         "models/resistor.inc",
     )
     .unwrap();
-    crate::workbench::documents::netlist_document::open_generated_primary_in(
+    rspice_app_code::workbench::documents::netlist_document::open_generated_primary_in(
         &mut state.model,
         &mut state.code.netlist,
     );
@@ -159,7 +159,7 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
     assert!(activate_document(&mut state, &owned_dependency));
     assert_eq!(
         state.code.netlist.active_document,
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
+        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
     );
     assert_eq!(
         state.code.netlist.active_dependency_identity.as_deref(),

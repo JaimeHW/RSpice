@@ -2,8 +2,8 @@
 //! design's clipboard.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::lifecycle::project_lifecycle::{ProjectDocumentId, snapshot};
 use rspice_app_design::workbench::app::actions::workspace::copy_active_schematic_selection;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{ProjectDocumentId, snapshot};
 use rspice_app_state::state::{ComponentType, Point};
 use rspice_project::registry::{DocumentRegistry, document_fingerprints};
 

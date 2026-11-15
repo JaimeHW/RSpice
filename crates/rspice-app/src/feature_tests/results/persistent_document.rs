@@ -3,14 +3,16 @@
 
 use crate::workbench::AppState;
 use crate::workbench::RSpiceApp;
-use crate::workbench::documents::result_document::ResultViewer;
-use crate::workbench::documents::result_document::create_document;
-use crate::workbench::documents::result_document::persistent_document::*;
-use crate::workbench::documents::result_document::persistent_document::{
+use egui::Ui;
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
+use rspice_app_results::workbench::documents::result_document::create_document;
+use rspice_app_results::workbench::documents::result_document::persistent_document::*;
+use rspice_app_results::workbench::documents::result_document::persistent_document::{
     LatestBinding, current_result_source_digest, refresh_latest_binding, show,
 };
-use crate::workbench::documents::result_document::test_fixtures::{completed_prepared_run, digest};
-use egui::Ui;
+use rspice_app_results::workbench::documents::result_document::test_fixtures::{
+    completed_prepared_run, digest,
+};
 use rspice_app_state::product::{
     AnalysisInstanceId, ContentDigest, ObjectRevision, ResultDocumentId, SimulationPlanId,
 };
@@ -376,10 +378,10 @@ fn projected_pane(state: &mut AppState, document_id: ResultDocumentId) -> PanePr
 fn active_analysis_anchor(
     state: &mut AppState,
 ) -> (
-    crate::workbench::documents::result_document::AnalysisPresentationKey,
-    crate::workbench::documents::result_document::WaveformPresentationKey,
+    rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey,
+    rspice_app_results::workbench::documents::result_document::WaveformPresentationKey,
 ) {
-    crate::workbench::documents::result_document::waves::source_waveform_anchor(
+    rspice_app_results::workbench::documents::result_document::waves::source_waveform_anchor(
         &mut state.results_parts(),
         "V(out)",
     )
@@ -387,12 +389,12 @@ fn active_analysis_anchor(
 }
 
 fn placement(
-    analysis: crate::workbench::documents::result_document::AnalysisPresentationKey,
-    anchor: &crate::workbench::documents::result_document::WaveformPresentationKey,
+    analysis: rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey,
+    anchor: &rspice_app_results::workbench::documents::result_document::WaveformPresentationKey,
     trace_name: &str,
     x: f64,
-) -> crate::workbench::documents::result_document::MarkerPlacement<'static> {
-    crate::workbench::documents::result_document::MarkerPlacement {
+) -> rspice_app_results::workbench::documents::result_document::MarkerPlacement<'static> {
+    rspice_app_results::workbench::documents::result_document::MarkerPlacement {
         analysis,
         anchor: anchor.clone(),
         trace_name: trace_name.to_owned(),
@@ -429,10 +431,11 @@ fn transient_fixture_with_layout(layout_id: &str) -> (RSpiceApp, ResultDocumentI
         layout_id: layout_id.to_owned(),
         validation_error: None,
     };
-    let document_id = crate::workbench::documents::result_document::create_document::commit(
-        &mut app.state.results_parts(),
-    )
-    .expect("persistent document commits");
+    let document_id =
+        rspice_app_results::workbench::documents::result_document::create_document::commit(
+            &mut app.state.results_parts(),
+        )
+        .expect("persistent document commits");
     (app, document_id)
 }
 
@@ -515,10 +518,11 @@ fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection()
             )
         })
     });
-    let analysis = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
-        app.state.model.simulation.retained.runs[0].dataset_id,
-        &app.state.model.simulation.retained.runs[0].analyses[0],
-    );
+    let analysis =
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
+            app.state.model.simulation.retained.runs[0].dataset_id,
+            &app.state.model.simulation.retained.runs[0].analyses[0],
+        );
     app.state.results.results.session.selected_trace =
         Some(rspice_results_ui::selection::SelectedResultTrace::from_identity(analysis, "V(out)"));
     app.state
@@ -637,7 +641,7 @@ fn placing_a_marker_on_a_persistent_pane_transacts_against_the_document() {
         .expect("retained document")
         .revision();
 
-    let selector = crate::workbench::documents::result_document::place_marker(
+    let selector = rspice_app_results::workbench::documents::result_document::place_marker(
         &mut app.state.results_parts(),
         placement(analysis, &anchor, "V(out)", 0.5),
     )
@@ -691,7 +695,7 @@ fn a_trace_the_document_does_not_retain_falls_back_to_a_quick_marker() {
     let _pane = projected_pane(&mut app.state, document_id);
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
 
-    let selector = crate::workbench::documents::result_document::place_marker(
+    let selector = rspice_app_results::workbench::documents::result_document::place_marker(
         &mut app.state.results_parts(),
         placement(analysis, &anchor, "V(a)+V(b)", 0.25),
     )
@@ -728,7 +732,7 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
         marker.note = "dataset note".to_owned();
     }
     let pane = projected_pane(&mut app.state, document_id);
-    crate::workbench::documents::result_document::place_marker(
+    rspice_app_results::workbench::documents::result_document::place_marker(
         &mut app.state.results_parts(),
         placement(analysis, &anchor, "V(out)", 0.5),
     )
@@ -768,7 +772,7 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
     // exactly what it was.
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
-            crate::workbench::documents::result_document::show_compact_split(
+            rspice_app_results::workbench::documents::result_document::show_compact_split(
                 ui,
                 state,
                 run_controller,
@@ -807,7 +811,7 @@ fn document_marker_serials_never_reach_the_project_save_or_the_quick_allocator()
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
     let _pane = projected_pane(&mut app.state, document_id);
-    let selector = crate::workbench::documents::result_document::place_marker(
+    let selector = rspice_app_results::workbench::documents::result_document::place_marker(
         &mut app.state.results_parts(),
         placement(analysis, &anchor, "V(out)", 0.5),
     )
@@ -847,7 +851,7 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
     let _pane = projected_pane(&mut app.state, document_id);
-    let selector = crate::workbench::documents::result_document::place_marker(
+    let selector = rspice_app_results::workbench::documents::result_document::place_marker(
         &mut app.state.results_parts(),
         placement(analysis, &anchor, "V(out)", 0.5),
     )
@@ -860,23 +864,25 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
     // by the store they name.
     let colliding = u32::try_from(marker_id.get()).expect("a small test serial");
     app.state.results.results.session.adopt_markers(
-        vec![crate::workbench::documents::result_document::ResultMarker {
-            id: colliding,
-            analysis,
-            anchor,
-            trace_name: "V(out)".to_owned(),
-            x: 0.9,
-            kind: crate::workbench::documents::result_document::MarkerKind::Note,
-            note: "quick".to_owned(),
-        }],
+        vec![
+            rspice_app_results::workbench::documents::result_document::ResultMarker {
+                id: colliding,
+                analysis,
+                anchor,
+                trace_name: "V(out)".to_owned(),
+                x: 0.9,
+                kind: rspice_app_results::workbench::documents::result_document::MarkerKind::Note,
+                note: "quick".to_owned(),
+            },
+        ],
         0,
     );
 
-    crate::workbench::documents::result_document::commit_marker_edit(
+    rspice_app_results::workbench::documents::result_document::commit_marker_edit(
         &mut app.state.results_parts(),
         selector,
         "retained",
-        crate::workbench::documents::result_document::MarkerKind::Peak,
+        rspice_app_results::workbench::documents::result_document::MarkerKind::Peak,
     )
     .expect("the document edit commits");
 
@@ -893,14 +899,14 @@ fn the_marker_dialog_applies_to_the_store_it_opened_on() {
     );
     assert_eq!(
         app.state.results.results.session.markers[0].kind,
-        crate::workbench::documents::result_document::MarkerKind::Note
+        rspice_app_results::workbench::documents::result_document::MarkerKind::Note
     );
 
-    crate::workbench::documents::result_document::commit_marker_edit(
+    rspice_app_results::workbench::documents::result_document::commit_marker_edit(
         &mut app.state.results_parts(),
         rspice_results_ui::session::MarkerSelector::Quick(colliding),
         "edited quick",
-        crate::workbench::documents::result_document::MarkerKind::Spec,
+        rspice_app_results::workbench::documents::result_document::MarkerKind::Spec,
     )
     .expect("the quick edit commits");
 
@@ -922,11 +928,12 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
     let _pane = projected_pane(&mut app.state, document_id);
-    let document_selector = crate::workbench::documents::result_document::place_marker(
-        &mut app.state.results_parts(),
-        placement(analysis, &anchor, "V(out)", 0.5),
-    )
-    .expect("the document retains its own marker");
+    let document_selector =
+        rspice_app_results::workbench::documents::result_document::place_marker(
+            &mut app.state.results_parts(),
+            placement(analysis, &anchor, "V(out)", 0.5),
+        )
+        .expect("the document retains its own marker");
     let quick = app
         .state
         .results
@@ -943,7 +950,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
         .expect("retained document")
         .revision();
 
-    crate::workbench::documents::result_document::remove_marker(
+    rspice_app_results::workbench::documents::result_document::remove_marker(
         &mut app.state.results_parts(),
         rspice_results_ui::session::MarkerSelector::Quick(quick),
     );
@@ -962,7 +969,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
         "removing a quick marker is not a change to the document"
     );
 
-    crate::workbench::documents::result_document::remove_marker(
+    rspice_app_results::workbench::documents::result_document::remove_marker(
         &mut app.state.results_parts(),
         document_selector,
     );
@@ -996,13 +1003,13 @@ fn a_saved_projection_of_a_retained_marker_is_dropped_on_load() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
     let _pane = projected_pane(&mut app.state, document_id);
-    crate::workbench::documents::result_document::place_marker(
+    rspice_app_results::workbench::documents::result_document::place_marker(
         &mut app.state.results_parts(),
         placement(analysis, &anchor, "V(out)", 0.5),
     )
     .expect("the document retains its own marker");
     let marker_id = retained_markers(&app, document_id)[0].id;
-    crate::workbench::documents::result_document::commit_marker_edit(
+    rspice_app_results::workbench::documents::result_document::commit_marker_edit(
         &mut app.state.results_parts(),
         rspice_results_ui::session::MarkerSelector::Document {
             document_id,
@@ -1010,30 +1017,30 @@ fn a_saved_projection_of_a_retained_marker_is_dropped_on_load() {
             marker_id,
         },
         "overshoot",
-        crate::workbench::documents::result_document::MarkerKind::Peak,
+        rspice_app_results::workbench::documents::result_document::MarkerKind::Peak,
     )
     .expect("the document edit commits");
 
-    let duplicate = crate::workbench::documents::result_document::ResultMarker {
+    let duplicate = rspice_app_results::workbench::documents::result_document::ResultMarker {
         id: 4,
         analysis,
         anchor: anchor.clone(),
         trace_name: "V(out)".to_owned(),
         x: 0.5,
-        kind: crate::workbench::documents::result_document::MarkerKind::Peak,
+        kind: rspice_app_results::workbench::documents::result_document::MarkerKind::Peak,
         note: "overshoot".to_owned(),
     };
-    let genuine = crate::workbench::documents::result_document::ResultMarker {
+    let genuine = rspice_app_results::workbench::documents::result_document::ResultMarker {
         id: 5,
         analysis,
         anchor,
         trace_name: "V(out)".to_owned(),
         x: 0.9,
-        kind: crate::workbench::documents::result_document::MarkerKind::Note,
+        kind: rspice_app_results::workbench::documents::result_document::MarkerKind::Note,
         note: "settling".to_owned(),
     };
 
-    crate::workbench::documents::result_document::restore_markers(
+    rspice_app_results::workbench::documents::result_document::restore_markers(
         &mut app.state.results_parts(),
         vec![duplicate.clone(), genuine.clone()],
         None,
@@ -1047,7 +1054,7 @@ fn a_saved_projection_of_a_retained_marker_is_dropped_on_load() {
 
     // Current files explicitly own quick markers. Identical annotation text
     // and coordinates no longer identify a legacy document projection.
-    crate::workbench::documents::result_document::restore_presentation(
+    rspice_app_results::workbench::documents::result_document::restore_presentation(
         &mut app.state.results_parts(),
         rspice_app_state::state::result_presentation::ResultPresentation {
             markers: vec![duplicate, genuine],
@@ -1067,7 +1074,7 @@ fn matching_marker_text_on_another_dataset_is_preserved_on_load() {
     let (mut app, document_id) = persistent_transient_fixture();
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
     projected_pane(&mut app.state, document_id);
-    crate::workbench::documents::result_document::place_marker(
+    rspice_app_results::workbench::documents::result_document::place_marker(
         &mut app.state.results_parts(),
         placement(analysis, &anchor, "V(out)", 0.5),
     )
@@ -1076,23 +1083,25 @@ fn matching_marker_text_on_another_dataset_is_preserved_on_load() {
     let mut another_run = SimulationRun::new(2);
     another_run.add_analysis(app.state.model.simulation.retained.runs[0].analyses[0].clone());
     let another_analysis =
-        crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
             another_run.dataset_id,
             &another_run.analyses[0],
         );
     app.state.model.simulation.retained.runs.push(another_run);
     let mut another_anchor = anchor;
     another_anchor.analysis = another_analysis;
-    let marker = crate::workbench::documents::result_document::ResultMarker {
+    let marker = rspice_app_results::workbench::documents::result_document::ResultMarker {
         id: 5,
         analysis: another_analysis,
         anchor: another_anchor,
         trace_name: "V(out)".to_owned(),
         x: 0.5,
-        kind: crate::workbench::documents::result_document::marker_kind_of_retained(retained.kind),
+        kind: rspice_app_results::workbench::documents::result_document::marker_kind_of_retained(
+            retained.kind,
+        ),
         note: retained.label,
     };
-    crate::workbench::documents::result_document::restore_markers(
+    rspice_app_results::workbench::documents::result_document::restore_markers(
         &mut app.state.results_parts(),
         vec![marker],
         None,
@@ -1139,7 +1148,7 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
     let retained_default =
         app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
 
-    crate::workbench::documents::result_document::waves::toggle_visibility(
+    rspice_app_results::workbench::documents::result_document::waves::toggle_visibility(
         &mut app.state.results_parts(),
         0,
         0,
@@ -1159,10 +1168,11 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
             .visible
     );
 
-    let analysis = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
-        app.state.model.simulation.retained.runs[0].dataset_id,
-        &app.state.model.simulation.retained.runs[0].analyses[0],
-    );
+    let analysis =
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
+            app.state.model.simulation.retained.runs[0].dataset_id,
+            &app.state.model.simulation.retained.runs[0].analyses[0],
+        );
     let view = app
         .state
         .results
@@ -1222,10 +1232,11 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
         layout_id: "two-linked-panes".to_owned(),
         validation_error: None,
     };
-    let second = crate::workbench::documents::result_document::create_document::commit(
-        &mut app.state.results_parts(),
-    )
-    .expect("a second document commits");
+    let second =
+        rspice_app_results::workbench::documents::result_document::create_document::commit(
+            &mut app.state.results_parts(),
+        )
+        .expect("a second document commits");
 
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
@@ -1344,10 +1355,11 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
         .session
         .persistent_document_page(document_id)
         .expect("the document selected a page");
-    let analysis = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
-        app.state.model.simulation.retained.runs[0].dataset_id,
-        &app.state.model.simulation.retained.runs[0].analyses[0],
-    );
+    let analysis =
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
+            app.state.model.simulation.retained.runs[0].dataset_id,
+            &app.state.model.simulation.retained.runs[0].analyses[0],
+        );
     app.state.results.results.session.selected_trace =
         Some(rspice_results_ui::selection::SelectedResultTrace::from_identity(analysis, "V(out)"));
     app.state
@@ -1361,7 +1373,7 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
     // the persistent projection behind.
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
-            crate::workbench::documents::result_document::show_compact_split(
+            rspice_app_results::workbench::documents::result_document::show_compact_split(
                 ui,
                 state,
                 run_controller,
@@ -1431,10 +1443,11 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
 fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
     let (mut app, document_id) = persistent_transient_fixture();
     let pane = projected_pane(&mut app.state, document_id);
-    let analysis = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
-        app.state.model.simulation.retained.runs[0].dataset_id,
-        &app.state.model.simulation.retained.runs[0].analyses[0],
-    );
+    let analysis =
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
+            app.state.model.simulation.retained.runs[0].dataset_id,
+            &app.state.model.simulation.retained.runs[0].analyses[0],
+        );
 
     // The volts pane — the one the document's vertical axis states.
     let volts = app
@@ -1521,10 +1534,11 @@ fn zooming_one_pane_of_a_saved_x_link_zooms_the_other() {
         .pages
         .remove(0);
     let (first, second) = (&page.panes[0], &page.panes[1]);
-    let analysis = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
-        app.state.model.simulation.retained.runs[0].dataset_id,
-        &app.state.model.simulation.retained.runs[0].analyses[0],
-    );
+    let analysis =
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
+            app.state.model.simulation.retained.runs[0].dataset_id,
+            &app.state.model.simulation.retained.runs[0].analyses[0],
+        );
 
     draw_pane(&mut app, first, |state| {
         state
@@ -1560,7 +1574,7 @@ fn document_frame(app: &mut RSpiceApp, document_id: ResultDocumentId, time: f64)
     };
     let _ = ctx.run_ui(input, |ui| {
         super::with_surface_parts(app, |state, run_controller, selected_specification| {
-            crate::workbench::documents::result_document::show_persistent_document(
+            rspice_app_results::workbench::documents::result_document::show_persistent_document(
                 ui,
                 state,
                 run_controller,
@@ -1577,7 +1591,7 @@ fn document_frame(app: &mut RSpiceApp, document_id: ResultDocumentId, time: f64)
 #[test]
 fn zoom_previous_steps_a_result_document_back_through_its_kept_windows() {
     use crate::workbench::commands::vocabulary::Command;
-    use crate::workbench::framework::host::Host;
+    use rspice_app_workbench::workbench::framework::host::Host;
     let (mut app, document_id) = persistent_transient_fixture();
     app.state
         .workbench
@@ -1590,12 +1604,13 @@ fn zoom_previous_steps_a_result_document_back_through_its_kept_windows() {
         .panes[0]
         .id;
     let run = &app.state.model.simulation.retained.runs[0];
-    let analysis = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
-        run.dataset_id,
-        &run.analyses[0],
-    );
+    let analysis =
+        rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey::new(
+            run.dataset_id,
+            &run.analyses[0],
+        );
     app.state.results.results.session.active_wave_pane = Some(
-        crate::workbench::documents::result_document::WavePanePresentationKey {
+        rspice_app_results::workbench::documents::result_document::WavePanePresentationKey {
             analysis,
             unit: "V".to_owned(),
         },
@@ -1651,7 +1666,7 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
     });
     let linked_before = app.state.results.results.session.linked_cursors;
 
-    crate::workbench::documents::result_document::toggle_linked_cursors(
+    rspice_app_results::workbench::documents::result_document::toggle_linked_cursors(
         &mut app.state.results_parts(),
     );
     assert_eq!(
@@ -1688,7 +1703,7 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
         "the linked cursor follows"
     );
 
-    crate::workbench::documents::result_document::toggle_linked_cursors(
+    rspice_app_results::workbench::documents::result_document::toggle_linked_cursors(
         &mut app.state.results_parts(),
     );
     let document = app

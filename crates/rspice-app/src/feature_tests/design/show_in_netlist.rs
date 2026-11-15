@@ -93,7 +93,7 @@ fn located_instance_state() -> (AppState, u64, u64, u64) {
     // The engineer is looking at their own deck, so the jump has a document
     // transition to make rather than a no-op reactivation to skip.
     state.code.netlist.active_document =
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
+        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     state.code.netlist.active_document_initialized = true;
     (state, source_id, load_id, unmapped_id)
 }
@@ -193,7 +193,7 @@ fn showing_an_instance_opens_the_generated_primary_at_its_card() {
     assert_eq!(state.workbench.workspace, Workspace::Netlist);
     assert_eq!(
         state.code.netlist.active_document,
-        crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
+        rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
     );
     assert!(state.code.netlist.active_dependency_identity.is_none());
     assert_eq!(state.model.simulation.source.netlist_content, DECK);

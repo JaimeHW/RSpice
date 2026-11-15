@@ -5,8 +5,8 @@
 //! only the mutating ones explain the refusal and decline.
 
 use super::*;
-use crate::workbench::project::commands::ProjectCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
 
 #[test]
 fn design_menu_commands_explain_wrong_context_and_read_only_states() {
@@ -88,7 +88,7 @@ fn the_check_commands_name_their_reach_and_keep_the_check_family_keys() {
         assert_eq!(spec.group, "Design");
         assert!(
             spec.flags.contains(
-                crate::workbench::framework::command_registry::CommandFlags::PALETTE_VISIBLE
+                rspice_app_workbench::workbench::framework::command_registry::CommandFlags::PALETTE_VISIBLE
             ),
             "{}",
             spec.label
@@ -163,7 +163,7 @@ fn configurations_opens_the_project_configuration_page() {
     );
     assert_eq!(
         app.state.project.project_page,
-        crate::workbench::project::workspace_state::ProjectPage::Configuration
+        rspice_app_project::workbench::project::workspace_state::ProjectPage::Configuration
     );
     assert!(!app.state.dialog_modal_open(), "the page is not a modal");
 
@@ -179,7 +179,7 @@ fn design_management_has_authority_and_an_owned_workflow() {
     app.execute_command_key(ProjectCommand::DesignManagement.key());
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::DesignManagement
+        rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::DesignManagement
     );
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert!(app.state.project.design_management.open);

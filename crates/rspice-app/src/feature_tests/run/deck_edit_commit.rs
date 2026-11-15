@@ -13,7 +13,7 @@ use egui::{Key, Modifiers};
 
 use super::engine_recovery_path::author_deck;
 use crate::feature_tests::replay::{PRIMARY, Replay};
-use crate::workbench::documents::netlist_document::{
+use rspice_app_code::workbench::documents::netlist_document::{
     OwnedNetlistReplacement, replace_owned_sources_atomically,
 };
 

@@ -3,14 +3,14 @@
 //! whole application holds.
 
 use crate::workbench::AppState;
-use crate::workbench::TogglePreference;
-use crate::workbench::framework::feature::CodePort as _;
 use rspice_app_state::product::ContentDigest;
 use rspice_app_state::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};
 use rspice_app_state::state::{
     AnalysisResult, AnalysisResultSourceDomain, AnalysisType, PreparedRunReceipt,
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, RetainedTrace, SimulationRun,
 };
+use rspice_app_state::workbench::preferences::TogglePreference;
+use rspice_app_workbench::workbench::framework::feature::CodePort as _;
 
 /// The end-frame step as the shell runs it: the projection, applied
 /// through the results' and the netlist's own fns.
@@ -336,7 +336,7 @@ fn a_run_that_named_nothing_offers_no_highlight() {
         );
 
     assert!(
-        !crate::workbench::documents::result_document::operational_state::active_failure_names_objects(
+        !rspice_app_results::workbench::documents::result_document::operational_state::active_failure_names_objects(
             &state.model
         ),
         "with no failed analysis on display there is nothing to offer"

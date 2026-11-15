@@ -2196,7 +2196,7 @@ fn closing_or_replacing_the_project_forgets_the_reading_position() {
     let mut state = AppState::default();
     read_narrowly(&mut state);
     assert!(state.close_project_discard(
-        crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+        rspice_app_services::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
     ));
     assert_eq!(state.workbench.problems_view, ProblemsView::default());
 

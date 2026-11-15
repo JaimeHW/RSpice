@@ -4,7 +4,6 @@
 
 use crate::workbench::AppState;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::documents::code_workspace::{CodeSourceFileAction, CodeWorkspacePage};
 use egui::Context;
 use rspice_app_code::workbench::app::dialogs::source_document::fixtures::facts_of;
 use rspice_app_code::workbench::app::dialogs::source_document::{
@@ -12,6 +11,9 @@ use rspice_app_code::workbench::app::dialogs::source_document::{
     open_source_document_dialog_in, source_document_dialog_is_available,
 };
 use rspice_app_code::workbench::code::commands::LifecycleAction;
+use rspice_app_code::workbench::documents::code_workspace::{
+    CodeSourceFileAction, CodeWorkspacePage,
+};
 use rspice_app_state::state::{ProjectSourceLanguage, ProjectSourceOwner};
 
 /// Bring the lifecycle dialog up for the page that is showing, as Manage
@@ -114,13 +116,13 @@ fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
     assert!(refusal.contains("read-only"), "{refusal}");
     assert!(!app.state.code.code_workspace.source_document_dialog);
 
-    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
+    rspice_app_code::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
         &app.state.model,
         &mut app.state.code.netlist,
         CodeSourceFileAction::New,
     )
     .unwrap();
-    crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
+    rspice_app_code::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
         &mut app.state.model,
         &mut app.state.code.netlist,
         &mut app.state.code.netlist_open_documents,
@@ -269,17 +271,17 @@ fn a_source_document_states_its_properties_without_identity_jargon() {
 fn owned_deck_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.model.preferences.set_toggle(
-        crate::workbench::preferences::TogglePreference::ReducedMotion,
+        rspice_app_state::workbench::preferences::TogglePreference::ReducedMotion,
         true,
     );
     app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
-    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
+    rspice_app_code::workbench::documents::netlist_document::begin_netlist_lifecycle_action_in(
         &app.state.model,
         &mut app.state.code.netlist,
         CodeSourceFileAction::New,
     )
     .unwrap();
-    crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
+    rspice_app_code::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
         &mut app.state.model,
         &mut app.state.code.netlist,
         &mut app.state.code.netlist_open_documents,

@@ -1,6 +1,5 @@
 //! The canvas context menu driven through a whole application.
 
-use crate::workbench::ResultViewer;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::answer_surface_requests;
 use crate::workbench::state::Workspace;
@@ -12,6 +11,7 @@ use rspice_app_design::workbench::app::dialogs::replace_instance::replace_instan
 use rspice_app_design::workbench::app::dialogs::selection::commands::duplicate_schematic_selection_at;
 use rspice_app_design::workbench::app_state::interaction_state::ContextTarget;
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_state::state::Point;
 use rspice_app_state::state::Tool;
 use rspice_app_state::state::{

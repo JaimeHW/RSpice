@@ -2,12 +2,12 @@
 
 use crate::workbench::app::sheets::*;
 use crate::workbench::app_state::{AppState, Model};
-use crate::workbench::framework::feature::CanvasGesturePort;
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_state::state::{
     Component, ComponentType, DrawingSheetTitleFieldId, Point, SheetDefinition,
     SheetDeleteBehavior, SheetId, SheetPortPolicy, SheetTemplate,
 };
+use rspice_app_workbench::workbench::framework::feature::CanvasGesturePort;
 
 /// [`Model::go_to_sheet`], stated on the status bar. Page navigation reaches
 /// it through [`next_sheet`] and [`previous_sheet`].

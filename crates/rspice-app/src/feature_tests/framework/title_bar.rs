@@ -8,18 +8,15 @@ use egui::{Context, Frame, Id, Key, Modifiers, Popup, Rect, Ui};
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::{Command, command_registry};
-use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags, ids};
-use crate::workbench::framework::host::Host;
-use crate::workbench::layout::LayoutSpec;
-use crate::workbench::models::commands::ModelsCommand;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::results::commands::ResultsCommand;
-use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_models::workbench::models::commands::ModelsCommand;
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::ModelsPage;
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::state::command_catalog::CommandKey;
@@ -32,6 +29,11 @@ use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
 };
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_rows};
 use rspice_app_workbench::workbench::chrome::title_bar::*;
+use rspice_app_workbench::workbench::framework::command_registry::{
+    CommandAvailability, CommandFlags, ids,
+};
+use rspice_app_workbench::workbench::framework::host::Host;
+use rspice_app_workbench::workbench::layout::LayoutSpec;
 
 mod access_keys;
 #[cfg(not(target_arch = "wasm32"))]
@@ -449,7 +451,12 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
         .flat_map(|menu| listed_commands(application_menu_entries(menu)))
         .collect::<Vec<_>>();
     assert!(
-        listed.contains(&ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves).key()),
+        listed.contains(
+            &ResultsCommand::ResultViewer(
+                rspice_app_results::workbench::documents::result_document::ResultViewer::Waves
+            )
+            .key()
+        ),
         "no menu lists the waveform viewer"
     );
     assert!(

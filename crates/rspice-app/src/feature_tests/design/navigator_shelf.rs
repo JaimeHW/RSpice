@@ -3,7 +3,6 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::framework::requests::FocusPlacementSearch;
 use rspice_app_design::schematic::view::SchematicShelfDragPayload;
 use rspice_app_design::schematic::{
     ComponentCategory, PaletteRow, component_palette, palette_rows, supply_palette,
@@ -18,6 +17,7 @@ use rspice_app_state::state::{
     ComponentType, Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports,
     engine_only_xspice_devices,
 };
+use rspice_app_workbench::workbench::framework::requests::FocusPlacementSearch;
 use std::collections::HashSet;
 
 /// The Component shelf under test: the application it paints from and the

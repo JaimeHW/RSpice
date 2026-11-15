@@ -2,13 +2,13 @@
 //! models slot's library, and its commit publishes into an open project session.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::framework::requests::OpenInDesign;
 use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::controller::open_create_subcircuit_bound_symbol_dialog;
 use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::state::*;
 use rspice_app_state::state::{
     CellViewRef, ComponentType, Library, Point, SymbolSourceContract, ViewType,
     model_library::{DeviceModel, ModelType},
 };
+use rspice_app_workbench::workbench::framework::requests::OpenInDesign;
 use std::path::PathBuf;
 
 /// Draw the dialog as the frame's step does, over the application's parts.

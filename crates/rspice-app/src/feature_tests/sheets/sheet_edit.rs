@@ -108,9 +108,9 @@ fn a_sheet_is_edited_only_on_a_writable_schematic() {
     ));
     assert_eq!(
         app.command_availability(
-            crate::workbench::framework::command_registry::ids::SHEET_PROPERTIES
+            rspice_app_workbench::workbench::framework::command_registry::ids::SHEET_PROPERTIES
         ),
-        crate::workbench::framework::command_registry::CommandAvailability::Disabled(
+        rspice_app_workbench::workbench::framework::command_registry::CommandAvailability::Disabled(
             "the active schematic is read-only"
         )
     );

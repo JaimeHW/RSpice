@@ -7,12 +7,12 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::diagnostic_routes::apply_remediation;
-use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::{ConsolePage, Workspace};
 use rspice_app_runs::workbench::preflight::{
     collect_report, poll, preparation_remediation, queue_retained_run, start,
     temperature_validity_advisories,
 };
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::{
     ModelsPage, PreflightIssue, PreflightRemediation, PreflightReport, PreparedPreflightContract,
 };
@@ -1682,13 +1682,13 @@ fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks()
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Verify);
     app.state.code.code_workspace.page =
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
     apply_remediation(&mut app, remediation);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
     assert_eq!(
         app.state.code.code_workspace.page,
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
     );
     assert_eq!(
         app.state.code.netlist.requested_line,

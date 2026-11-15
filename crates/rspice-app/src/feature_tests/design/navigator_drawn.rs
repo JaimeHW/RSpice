@@ -5,7 +5,6 @@ use super::navigator::{
     NavigatorPanel, interface_design, recursive_design, two_sheet_named_signals,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::framework::requests::FocusNavigatorSearch;
 use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState, Workspace};
 use rspice_app_design::schematic::view::sheet_visibility::SheetScope;
 use rspice_app_design::workbench::design::navigator::hierarchy_tree::{
@@ -16,6 +15,7 @@ use rspice_app_design::workbench::design::navigator::tests::{
 };
 use rspice_app_design::workbench::design::navigator::*;
 use rspice_app_state::state::{CellViewRef, ComponentType, InstancePath, SchematicState};
+use rspice_app_workbench::workbench::framework::requests::FocusNavigatorSearch;
 use rspice_design::connectivity::summary::DesignNet;
 use std::collections::HashSet;
 

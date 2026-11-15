@@ -4,7 +4,7 @@
 //! code feature's, in feature_tests/code/veriloga_interface.
 
 use super::*;
-use crate::workbench::documents::code_workspace;
+use rspice_app_code::workbench::documents::code_workspace;
 
 /// Replace the open view's root source with `source`.
 pub(crate) fn edit_source(app: &mut RSpiceApp, source: &str) {

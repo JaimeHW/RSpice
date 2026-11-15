@@ -7,7 +7,7 @@ use egui::Color32;
 use crate::workbench::RSpiceApp;
 use crate::workbench::examples::hierarchy_reference;
 use crate::workbench::features;
-use crate::workbench::project::configuration_state::ConfigurationSelection;
+use rspice_app_project::workbench::project::configuration_state::ConfigurationSelection;
 use rspice_app_project::workbench::surfaces::project::configuration::configuration;
 use rspice_app_workbench::ui::tokens::Tokens;
 
@@ -329,13 +329,13 @@ fn the_cells_tab_lists_each_cell_once_with_its_binding() {
         .project
         .configuration
         .edit(&catalog, id, |definition| {
-            crate::workbench::project::configuration_state::set_cell_view(
+            rspice_app_project::workbench::project::configuration_state::set_cell_view(
                 definition,
                 "vendor",
                 "filter",
                 Some("schematic"),
             );
-            crate::workbench::project::configuration_state::set_cell_view(
+            rspice_app_project::workbench::project::configuration_state::set_cell_view(
                 definition,
                 "user",
                 "retired_block",
@@ -343,7 +343,7 @@ fn the_cells_tab_lists_each_cell_once_with_its_binding() {
             );
         });
     app.state.project.configuration.tab =
-        crate::workbench::project::configuration_state::ConfigurationTab::Cells;
+        rspice_app_project::workbench::project::configuration_state::ConfigurationTab::Cells;
     let shown = frame(&mut app, 1440.0);
     assert!(shown.says(
         "Cell columns: Library, Cell, Instances, View found, View to use, Inherited view list"

@@ -11,8 +11,8 @@ use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, open_in_design, open_project_app, themed_context,
 };
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::code_workspace;
 use crate::workbench::state::Workspace;
+use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_services::io::ProjectSnapshot;
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
@@ -77,7 +77,7 @@ fn legacy_project_at(
         .map(ProjectSourceBundle::id)
         .expect("the legacy bundle");
     prepare(&mut state);
-    let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+    let snapshot = rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("the legacy project snapshots");
     (
         rspice_app_services::io::project_io::serialize_project_file(&snapshot)

@@ -2,12 +2,12 @@
 
 use super::veriloga_flow_tests::User;
 use super::*;
-use crate::workbench::ResultViewer;
-use crate::workbench::documents::result_document::AnalysisPresentationKey;
 use crate::workbench::session::project_transactions::create_example_project;
-use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::{ConsolePage, Workspace};
+use rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey;
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::waveform_plotted;
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::workbench::examples::EXAMPLES;
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 

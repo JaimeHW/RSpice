@@ -7,10 +7,12 @@ use std::path::PathBuf;
 
 use egui::Color32;
 
-use crate::workbench::models::ModelsFeature;
-use crate::workbench::models::tests::painted_text;
-use crate::workbench::models::workspace_state::{ModelsCatalogScope, ModelsOperationalState};
 use crate::workbench::{RSpiceApp, features};
+use rspice_app_models::workbench::models::ModelsFeature;
+use rspice_app_models::workbench::models::tests::painted_text;
+use rspice_app_models::workbench::models::workspace_state::{
+    ModelsCatalogScope, ModelsOperationalState,
+};
 use rspice_app_state::state::model_library::{
     DeviceModel, ModelLibrary, ModelQualificationState, ModelType,
 };
@@ -162,7 +164,7 @@ fn one_model_project() -> RSpiceApp {
         .model_qualification
         .insert("nch".to_owned(), ModelQualificationState::default());
     app.state.model.model_library_manager.add_library(library);
-    crate::workbench::models::workspace_state::select_library_or_prompt(
+    rspice_app_models::workbench::models::workspace_state::select_library_or_prompt(
         &mut app.state.model,
         &mut app.state.workbench,
         "alpha",
@@ -318,7 +320,7 @@ fn showing_the_project_models_always_opens_the_project_catalog_scope() {
     app.state
         .workbench
         .outbox
-        .push(crate::workbench::framework::requests::ShowProjectModels);
+        .push(rspice_app_workbench::workbench::framework::requests::ShowProjectModels);
     app.after_contribution();
 
     assert_eq!(
@@ -349,7 +351,7 @@ fn the_catalog_headings_stand_over_their_columns_while_the_rows_scroll() {
         library.add_model(model);
     }
     app.state.model.model_library_manager.add_library(library);
-    crate::workbench::models::workspace_state::select_library_or_prompt(
+    rspice_app_models::workbench::models::workspace_state::select_library_or_prompt(
         &mut app.state.model,
         &mut app.state.workbench,
         "alpha",

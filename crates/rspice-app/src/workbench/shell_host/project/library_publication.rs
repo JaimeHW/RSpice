@@ -3,7 +3,6 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::design_system::{property_card, property_row};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 use egui::Context;
@@ -24,6 +23,7 @@ use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::product::ContentDigest;
 use rspice_app_state::state::workspace::ProjectLibraryPublicationReceipt;
 use rspice_app_workbench::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
+use rspice_ui_kit::panels::{property_card, property_row};
 
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]
@@ -375,7 +375,7 @@ fn start_browser_publication(
     app: &RSpiceApp,
     draft: &PublicationDraft,
 ) -> Result<uuid::Uuid, String> {
-    use crate::workbench::lifecycle::project_lifecycle::{
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         BrowserBindingBackend, BrowserWriteTarget, start_browser_write,
     };
 
@@ -410,7 +410,7 @@ fn start_browser_publication(
 
 #[cfg(target_arch = "wasm32")]
 fn poll_browser_publication_completions(ctx: &Context, app: &mut RSpiceApp) {
-    use crate::workbench::lifecycle::project_lifecycle::{
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         BrowserWriteResult, release_browser_handle,
     };
 
@@ -538,7 +538,7 @@ fn pick_native_rollback_artifact(
 
 #[cfg(target_arch = "wasm32")]
 fn poll_browser_rollback_completions(ctx: &Context, app: &mut RSpiceApp) {
-    use crate::workbench::lifecycle::project_lifecycle::{
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         BrowserOpenResult, release_browser_handle,
     };
     use sha2::Digest as _;
@@ -687,7 +687,7 @@ pub(crate) fn prepare_project_library_publication(
             "project library publication is unavailable while a simulation is running".to_owned(),
         );
     }
-    let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
+    let snapshot = rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(state)
         .map_err(|error| format!("project library publication snapshot failed: {error}"))?;
     let serialized = rspice_app_services::io::project_io::serialize_project_file(&snapshot)
         .map_err(|error| format!("project library publication serialization failed: {error}"))?;
@@ -750,8 +750,9 @@ pub(crate) fn commit_project_library_publication(
                 .to_owned(),
         );
     }
-    let current_snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
-        .map_err(|error| format!("project library publication recheck failed: {error}"))?;
+    let current_snapshot =
+        rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(state)
+            .map_err(|error| format!("project library publication recheck failed: {error}"))?;
     let current_serialized =
         rspice_app_services::io::project_io::serialize_project_file(&current_snapshot).map_err(
             |error| format!("project library publication recheck serialization failed: {error}"),

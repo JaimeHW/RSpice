@@ -4,7 +4,6 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::framework::requests::FocusNavigatorSearch;
 use crate::workbench::state::{NavigatorTreeNode, Workspace};
 use rspice_app_design::schematic::view::sheet_visibility::{self, SheetScope};
 use rspice_app_design::workbench::design::navigator::tests::{
@@ -15,6 +14,7 @@ use rspice_app_design::workbench::design::navigator::*;
 use rspice_app_state::state::{
     CellViewRef, ComponentType, InstancePath, PortDirection, SchematicState,
 };
+use rspice_app_workbench::workbench::framework::requests::FocusNavigatorSearch;
 
 /// A design that recurses. The root places `XA` of `work/child`, and
 /// `work/child` places a leaf beside a second instance of the root cell — so

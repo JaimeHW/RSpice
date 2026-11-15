@@ -13,10 +13,10 @@ use crate::workbench::app::veriloga_design_tests::{
 };
 use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::code_workspace::{
+use rspice_app_code::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
+use rspice_app_code::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACellSymbol, VerilogACompileOutcome,
 };
-use rspice_app_code::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
 use rspice_app_state::state::VerilogAInterfaceOutcome;
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, LibraryCellInstance, Point, PortDirection, ProjectSourceBundle,

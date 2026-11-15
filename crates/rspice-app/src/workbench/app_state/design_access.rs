@@ -93,21 +93,21 @@ impl AppState {
         let Ok(location) = self.model.selected_instance_generated_line() else {
             return;
         };
-        crate::workbench::documents::netlist_document::open_generated_primary_in(
+        rspice_app_code::workbench::documents::netlist_document::open_generated_primary_in(
             &mut self.model,
             &mut self.code.netlist,
         );
         self.code.code_workspace.page =
-            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+            rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
         self.workbench
             .activate(crate::workbench::state::Workspace::Netlist);
         self.code.netlist.cursor_line = location.line.saturating_sub(1);
         self.code.netlist.requested_line = Some(location.line);
         let announced = self.workbench.messages().format(
             if location.stale {
-                crate::workbench::MessageId::NetlistShowInstanceStale
+                rspice_app_workbench::workbench::localization::MessageId::NetlistShowInstanceStale
             } else {
-                crate::workbench::MessageId::NetlistShowInstanceLocated
+                rspice_app_workbench::workbench::localization::MessageId::NetlistShowInstanceLocated
             },
             &[
                 ("instance", location.instance.as_str()),

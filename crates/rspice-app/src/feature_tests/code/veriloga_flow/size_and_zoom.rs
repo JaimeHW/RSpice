@@ -4,7 +4,7 @@ use egui::Key;
 
 use super::language_tools::{CTRL, EDITOR, op_amp, source};
 use super::*;
-use crate::workbench::ChoicePreference;
+use rspice_app_state::workbench::preferences::ChoicePreference;
 
 const SOURCE_LINE: &str = "module opamp_bhv";
 

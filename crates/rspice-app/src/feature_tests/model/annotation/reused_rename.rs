@@ -403,7 +403,9 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
-    use crate::workbench::lifecycle::project_lifecycle::{self, DestinationAuthority, SaveScope};
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+        self, DestinationAuthority, SaveScope,
+    };
 
     let (mut fixture, root, child, other) = reused_master_fixture(["X1", "X2"]);
     let configuration = fixture

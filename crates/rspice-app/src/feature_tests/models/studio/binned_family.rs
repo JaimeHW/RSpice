@@ -6,7 +6,7 @@
 //! counted against it, and Bind gives an instance `nch` with its library.
 
 use super::*;
-use crate::workbench::models::tests::kit_project;
+use rspice_app_models::workbench::models::tests::kit_project;
 
 /// The catalog opens a family on its first bin, shows another bin from the
 /// family's own detail, and in either case binds the selected instance to

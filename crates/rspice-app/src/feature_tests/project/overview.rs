@@ -5,12 +5,12 @@ use rspice_design::drc::DrcSeverity;
 use std::collections::BTreeSet;
 
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::project::commands::ProjectCommand;
-use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
 use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, features};
+use rspice_app_project::workbench::project::commands::ProjectCommand;
+use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::overview::{
     OverviewIntent, OverviewSnapshot, ProblemSnapshot, Tone, design_objects, problem_snapshot,
     run_plan_intent,

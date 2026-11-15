@@ -1,7 +1,9 @@
 //! Result-cache correctness through the real project snapshot and dirty paths.
 
 use super::*;
-use crate::workbench::documents::result_document::frame_work::{DatasetWalk, WorkCounts};
+use rspice_app_results::workbench::documents::result_document::frame_work::{
+    DatasetWalk, WorkCounts,
+};
 use rspice_app_state::state::{
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, SimulationState,
 };
@@ -81,7 +83,7 @@ fn the_frame_work_counters_count_in_the_build_these_tests_read() {
     let (state, _) = super::durable_content::retained_results();
     let work = WorkCounts::reset();
     assert_eq!(
-        crate::workbench::documents::result_document::active_incomplete_evidence_reason(
+        rspice_app_results::workbench::documents::result_document::active_incomplete_evidence_reason(
             state.results_reads()
         ),
         None
@@ -241,7 +243,7 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
 
 #[test]
 fn result_fingerprint_cache_preserves_signed_zero_in_annotation_edits() {
-    use crate::workbench::documents::result_document::marker_anchor_for;
+    use rspice_app_results::workbench::documents::result_document::marker_anchor_for;
     let (mut state, key) = super::durable_content::retained_results();
     state
         .results

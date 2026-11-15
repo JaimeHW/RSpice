@@ -6,14 +6,17 @@
 //! dialog in the same frame. Each step draws what it owns as the shell drew
 //! it before there was a list.
 
+use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::features;
-use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
-use crate::workbench::project::ProjectFeature;
-use crate::workbench::simulate::SimulateFeature;
-use crate::workbench::{RSpiceApp, SurfaceId};
+use rspice_app_project::workbench::project::ProjectFeature;
+use rspice_app_simulate::workbench::simulate::SimulateFeature;
 use rspice_app_workbench::workbench::app::command_palette;
 use rspice_app_workbench::workbench::app::dialogs;
+use rspice_app_workbench::workbench::framework::dialogs::{
+    DialogKey, DialogSpec, ModalGate, ModalSpec, Modality,
+};
+use rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId;
 
 pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] = &[
     DialogSpec {
@@ -561,7 +564,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| {
             SimulateFeature::render_jobs_manager(
                 &mut features::cx_with_foreign_answers(app, |app| {
-                    crate::workbench::simulate::jobs_manager_open(&app.state.workbench)
+                    rspice_app_simulate::workbench::simulate::jobs_manager_open(
+                        &app.state.workbench,
+                    )
                 }),
                 ctx,
             );
@@ -715,7 +720,7 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
     },
 ];
 
-const _: () = crate::workbench::framework::dialogs::check(DIALOG_ORDER, MODAL_ONLY);
+const _: () = rspice_app_workbench::workbench::framework::dialogs::check(DIALOG_ORDER, MODAL_ONLY);
 
 impl ModalGate for AppState {
     type Host = RSpiceApp;

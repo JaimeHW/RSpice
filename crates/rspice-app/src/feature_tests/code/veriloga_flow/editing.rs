@@ -5,8 +5,8 @@ use egui::Key;
 
 use super::language_tools::{CTRL, EDITOR, caret_after, op_amp, source, type_text};
 use super::*;
-use crate::workbench::documents::code_workspace;
-use crate::workbench::lifecycle::project_lifecycle::{
+use rspice_app_code::workbench::documents::code_workspace;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     DestinationAuthority, SaveScope, active_document_is_dirty, save_native,
 };
 use rspice_app_state::state::ProjectSourceRole;

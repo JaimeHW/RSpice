@@ -4,12 +4,11 @@
 
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
-use crate::workbench::framework::command_registry::ids;
-use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 use egui::Key;
 use egui::os::OperatingSystem;
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_state::state::command_catalog::CommandPlatform;
 use rspice_app_state::state::shortcuts::ProtectedShortcutPolicy;
 use rspice_app_state::state::shortcuts::ShortcutBindingSlot;
@@ -19,6 +18,7 @@ use rspice_app_state::state::shortcuts::ShortcutProfileIssueSeverity;
 use rspice_app_state::state::shortcuts::ShortcutSequence;
 use rspice_app_state::state::shortcuts::ShortcutStroke;
 use rspice_app_state::state::shortcuts::SingleKeyCanvasPolicy;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 fn sequence(key: Key, primary: bool) -> ShortcutSequence {
     ShortcutSequence::single(ShortcutStroke::new(key, primary, false, false))
@@ -51,7 +51,10 @@ fn immutable_workspace_ownership_projects_to_results_and_verify() {
         preferences
             .resolved_bindings(
                 &CommandRegistry,
-                ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves).key()
+                ResultsCommand::ResultViewer(
+                    rspice_app_results::workbench::documents::result_document::ResultViewer::Waves
+                )
+                .key()
             )
             .is_empty()
     );

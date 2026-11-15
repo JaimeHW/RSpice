@@ -23,10 +23,10 @@ fn record_browser_history_warning(state: &mut AppState, text: String) {
 }
 
 pub(super) fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &Context) {
-    use crate::workbench::RouteTransitionSource;
     use rspice_app_workbench::workbench::browser::navigation::{
         current_location, install_popstate_listener, restart_history_session,
     };
+    use rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource;
 
     match current_location() {
         Ok(location) => {
@@ -81,10 +81,12 @@ pub(super) fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &
 }
 
 pub(super) fn synchronize_browser_surface_navigation(state: &mut AppState) {
-    use crate::workbench::{BrowserHistoryEffect, RouteTransitionSource};
     use rspice_app_workbench::workbench::browser::navigation::{
         ensure_popstate_listener, history_session_ready, poll_popstate, push_route, replace_route,
         traversal_in_flight, traversal_watchdog_expired, traverse_history,
+    };
+    use rspice_app_workbench::workbench::routing::navigation::{
+        BrowserHistoryEffect, RouteTransitionSource,
     };
 
     while let Some(event) = poll_popstate() {
@@ -92,7 +94,9 @@ pub(super) fn synchronize_browser_surface_navigation(state: &mut AppState) {
             Ok(event) => {
                 let route = event.route();
                 let availability =
-                    crate::workbench::routing::availability::route_availability(route);
+                    rspice_app_workbench::workbench::routing::availability::route_availability(
+                        route,
+                    );
                 let pending_effects = state.workbench.has_pending_browser_history_effects();
                 let external_race = !event.initiated_by_app() && pending_effects;
                 let applied = if !availability.can_open() {
@@ -254,10 +258,10 @@ fn rollback_browser_navigation_after_sync_failure(
     state: &mut AppState,
     error: rspice_app_workbench::workbench::browser::navigation::BrowserNavigationError,
 ) {
-    use crate::workbench::RouteTransitionSource;
     use rspice_app_workbench::workbench::browser::navigation::{
         active_browser_route, restart_history_session,
     };
+    use rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource;
 
     match active_browser_route() {
         Ok(browser_route) => {
@@ -303,9 +307,9 @@ fn rollback_browser_navigation_after_sync_failure(
 fn apply_authenticated_browser_pop(
     state: &mut AppState,
     delta: i32,
-    route: crate::workbench::SurfaceRoute,
+    route: rspice_app_workbench::workbench::routing::surface_route::SurfaceRoute,
 ) -> Result<(), String> {
-    use crate::workbench::RouteTransitionSource;
+    use rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource;
 
     if delta < 0 {
         let outside = || "the page is older than this session's history".to_owned();

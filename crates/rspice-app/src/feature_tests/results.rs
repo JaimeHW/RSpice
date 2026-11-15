@@ -23,7 +23,7 @@ mod viewer_capabilities;
 mod waveform_export;
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::documents::result_document::ResultsParts;
+use rspice_app_results::workbench::documents::result_document::ResultsParts;
 use rspice_app_runs::simulation::controller::SimulationController;
 
 /// Lend `app`'s results parts, run controller and selected specification to

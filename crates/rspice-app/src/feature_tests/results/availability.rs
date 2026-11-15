@@ -5,15 +5,16 @@
 use rspice_results_ui::session::PaneAxis;
 use rspice_results_ui::soa::SoaRuleSelection;
 
-use crate::workbench::documents::result_document::test_fixtures::{
+use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
+use rspice_app_results::workbench::documents::result_document::test_fixtures::{
     events_analysis, network_matrix_analysis, optimization_analysis, soa_analysis,
 };
-use crate::workbench::documents::result_document::{
+use rspice_app_results::workbench::documents::result_document::{
     ActivePaneFacts, AnalysisPresentationKey, WavePanePresentationKey, active_axis_is_pinned,
     active_axis_range, active_incomplete_evidence_reason, right_panel, set_active_axis_range,
     sheet_purpose, show, show_persistent_pane_viewer, smith, viewer_availability, waves,
 };
-use crate::workbench::{AppState, RSpiceApp, ResultViewer};
 use rspice_app_state::state::{
     ActiveViewer, AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace,
     SensitivityResultMode, SensitivityResultRow, SimulationRun, SpecializedViewerCacheProvenance,

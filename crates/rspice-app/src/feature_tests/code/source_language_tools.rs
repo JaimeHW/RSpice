@@ -3,10 +3,10 @@
 //! the next frame.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::documents::code_workspace;
 use egui::Context;
 use rspice_app_code::workbench::app::dialogs::source_language_tools::RENAME_TITLE;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_code::workbench::documents::code_workspace;
 
 /// `resolve_veriloga_compile` was written to gate the compile command and
 /// never attached to it, so the button stayed enabled while a compile was
@@ -67,7 +67,7 @@ fn compiling_verilog_a_is_refused_while_a_compile_is_already_pending() {
 fn rename_form_over_two_files(locked: bool) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.code.code_workspace.page =
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
+        rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
     let language = rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation;
     let owner = rspice_app_state::state::ProjectSourceOwner::code_workspace(language);
     let content = &mut app.state.model.workspace.content;

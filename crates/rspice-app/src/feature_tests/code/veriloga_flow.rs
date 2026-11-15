@@ -99,7 +99,7 @@ fn a_device_bound_to_a_library_card_runs_with_the_cards_parameters() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_new_veriloga_device_runs_from_the_canvas_to_its_operating_point_and_back_from_disk() {
-    use crate::workbench::lifecycle::project_lifecycle::{
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::{
         DestinationAuthority, SaveScope, save_native,
     };
 
@@ -201,10 +201,11 @@ impl User {
     /// The one-based line and column of the caret the Verilog-A editor last
     /// reported.
     fn caret(&self) -> (usize, usize) {
-        let selected = crate::workbench::documents::code_workspace::selected_veriloga_source_in(
-            &self.app.state.model,
-        )
-        .expect("a Verilog-A view is open");
+        let selected =
+            rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
+                &self.app.state.model,
+            )
+            .expect("a Verilog-A view is open");
         let path = selected.document().logical_path().to_owned();
         let source = selected
             .bundle()
@@ -244,7 +245,7 @@ impl User {
 #[test]
 fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_was_written() {
     use crate::workbench::app_state::diagnostic_store::listing::listing;
-    use crate::workbench::documents::code_workspace::CodeEditorSeverity;
+    use rspice_app_code::workbench::documents::code_workspace::CodeEditorSeverity;
 
     let (mut user, _, _) = new_device("opamp_bhv", "inp:in inn:in out:out vdd vss");
     super::veriloga_interface_tests::edit_source(&mut user.app, OPAMP);
@@ -298,12 +299,13 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
         "Compiled opamp_bhv: 5 ports, 5 parameters, 1 advisory"
     );
     user.expect("Information at line 30, column 36: Denominator can reach zero");
-    let selected = crate::workbench::documents::code_workspace::selected_veriloga_source_in(
-        &user.app.state.model,
-    )
-    .expect("the module is open");
+    let selected =
+        rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
+            &user.app.state.model,
+        )
+        .expect("the module is open");
     assert_eq!(
-        crate::workbench::documents::code_workspace::veriloga_compile_status(
+        rspice_app_code::workbench::documents::code_workspace::veriloga_compile_status(
             &user.app.state.code.code_workspace.veriloga,
             user.app.state.model.workspace.content.project.id(),
             &selected,
@@ -373,7 +375,7 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
 
     // F8 steps on through the document's findings and wraps; Shift+F8 steps
     // back.
-    let path = crate::workbench::documents::code_workspace::selected_veriloga_source_in(
+    let path = rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
         &user.app.state.model,
     )
     .expect("a Verilog-A view is open")
@@ -416,7 +418,7 @@ fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted(
     super::veriloga_interface_tests::edit_source(&mut user.app, &broken);
     user.settle();
     compile(&mut user);
-    let path = crate::workbench::documents::code_workspace::selected_veriloga_source_in(
+    let path = rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
         &user.app.state.model,
     )
     .expect("a Verilog-A view is open")
@@ -593,7 +595,7 @@ const CMC_ROOTS: [(&str, &str, &str); 4] = [
 /// the library shelf on the top schematic, each model one cell of its own.
 #[test]
 fn compact_models_import_from_their_source_folders_compile_and_place() {
-    use crate::workbench::documents::code_workspace;
+    use rspice_app_code::workbench::documents::code_workspace;
     use rspice_app_state::state::workspace::ImportedInclude;
 
     let (mut user, top) = new_project();
@@ -693,7 +695,7 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
 /// carries the branch its generated code was built from.
 #[test]
 fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
-    use crate::workbench::project::workspace_state::ProjectPage;
+    use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 
     let (mut user, top) = new_project();
     let library = top.library.clone();
@@ -756,10 +758,11 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
         "the copy compiles: {:?}",
         veriloga.last_failure
     );
-    let selected = crate::workbench::documents::code_workspace::selected_veriloga_source_in(
-        &user.app.state.model,
-    )
-    .expect("the copy is selected");
+    let selected =
+        rspice_app_code::workbench::documents::code_workspace::selected_veriloga_source_in(
+            &user.app.state.model,
+        )
+        .expect("the copy is selected");
     let profile =
         rspice_simulation::project_veriloga::build_profile::resolve_veriloga_build_profile(
             selected.bundle(),

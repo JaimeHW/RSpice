@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn session_round_trip_preserves_exact_browser_binding_receipt() {
-        use crate::workbench::lifecycle::project_lifecycle::{
+        use rspice_app_services::workbench::lifecycle::project_lifecycle::{
             BrowserBindingBackend, BrowserBindingReceipt,
         };
         for backend in [
@@ -552,11 +552,12 @@ mod tests {
     #[test]
     fn session_round_trip_preserves_exact_native_binding_receipt() {
         let mut state = AppState::default();
-        let receipt = crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt {
-            canonical_path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
-            project_id: state.model.workspace.content.project.id().to_string(),
-            accepted_digest: rspice_app_state::product::ContentDigest::from_bytes([0x5a; 32]),
-        };
+        let receipt =
+            rspice_app_services::workbench::lifecycle::project_lifecycle::NativeBindingReceipt {
+                canonical_path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
+                project_id: state.model.workspace.content.project.id().to_string(),
+                accepted_digest: rspice_app_state::product::ContentDigest::from_bytes([0x5a; 32]),
+            };
         state.platform.native_project_binding_receipt = Some(receipt.clone());
 
         let restored = relaunch(saved_session(&mut state));
@@ -952,7 +953,10 @@ mod tests {
         state
             .model
             .preferences
-            .set_choice(crate::workbench::ChoicePreference::HanForm, 4)
+            .set_choice(
+                rspice_app_state::workbench::preferences::ChoicePreference::HanForm,
+                4,
+            )
             .expect("Japanese is one of the Han forms");
         let restored = relaunch(saved_session(&mut state));
         assert_eq!(
@@ -1159,11 +1163,13 @@ mod tests {
         let mut state = AppState::default();
         state.results.results.session.exprs.insert(
             0,
-            vec![crate::workbench::documents::result_document::ExprTrace {
-                text: "V(out)/V(in)".to_string(),
-                complex_policy: rspice_app_state::state::ComplexExpressionPolicy::Rectangular,
-                visible: true,
-            }],
+            vec![
+                rspice_app_results::workbench::documents::result_document::ExprTrace {
+                    text: "V(out)/V(in)".to_string(),
+                    complex_policy: rspice_app_state::state::ComplexExpressionPolicy::Rectangular,
+                    visible: true,
+                },
+            ],
         );
 
         let json = serde_json::to_string(&state).expect("session serializes");

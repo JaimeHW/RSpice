@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::project::commands::ProjectRequest;
 use rspice_app_project::workbench::app::dialogs::design_management::operations::variant_connectivity_difference_count;
 use rspice_app_project::workbench::app::dialogs::design_management::render_design_management_dialog;
 use rspice_app_project::workbench::app::dialogs::design_management::widgets;
@@ -15,6 +14,7 @@ use rspice_app_project::workbench::app::dialogs::design_management::{
     DesignManagementPage, DesignManagementParts, DesignManagementTab, MANAGER_PRIMARY,
     open_design_management_dialog, open_design_management_on,
 };
+use rspice_app_project::workbench::project::commands::ProjectRequest;
 use rspice_app_state::state::{
     AssemblyVariantDraft, ComponentType, Point, SchematicObjectKey, VariantInheritance,
     VariantQualificationPlan,
@@ -215,7 +215,7 @@ fn the_manager_tabs_stand_their_settings_on_one_grid_at_the_subflow_width() {
             .and_then(egui::accesskit::Node::bounds)
             .unwrap_or_else(|| panic!("{tab:?}: {heading} has bounds"));
         let surface_left = primary.x1 + 13.0 - width;
-        let text_left = header.x0 + f64::from(crate::workbench::design_system::PANEL_INSET);
+        let text_left = header.x0 + f64::from(rspice_ui_kit::panels::PANEL_INSET);
         assert!(
             (text_left - (surface_left + 13.0)).abs() < 0.5,
             "{tab:?}: the left pane's rows start at {text_left}, the title at {}",

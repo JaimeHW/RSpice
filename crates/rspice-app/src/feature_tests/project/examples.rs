@@ -11,8 +11,8 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::session::project_transactions::create_example_project;
 use crate::workbench::session::project_transactions::request_example;
-use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_project::workbench::tools::examples_browser::{open_refusal, show};
+use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::AnalysisType;
 
 /// Every example opens as a project whose default plan the engine

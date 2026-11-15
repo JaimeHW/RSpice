@@ -1,9 +1,9 @@
 //! A campaign member saved with the project it ran in.
 
 use super::session_of;
-use crate::workbench::lifecycle::project_lifecycle;
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_runs::simulation::controller::prepared_run::fixtures::two_plan_campaign_state;
+use rspice_app_services::workbench::lifecycle::project_lifecycle;
 
 #[test]
 fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {

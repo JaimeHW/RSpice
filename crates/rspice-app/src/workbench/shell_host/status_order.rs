@@ -11,12 +11,7 @@ use std::borrow::Cow;
 use crate::workbench::app_state::diagnostic_store::listing::listing_in_pass;
 use crate::workbench::chrome::status_bar::shell::platform_label;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::documents::result_document::{SharedXStatus, active_shared_x_status};
 use crate::workbench::features;
-use crate::workbench::framework::host::{
-    StatusCell, StatusControl, StatusKey, StatusMark, StatusText, StatusZone,
-};
-use crate::workbench::results::ResultsFeature;
 use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session;
@@ -26,6 +21,10 @@ use rspice_app_design::workbench::chrome::status_bar::design::{
 use rspice_app_results::workbench::chrome::status_bar::results::{
     format_plot_zoom, results_view_summary,
 };
+use rspice_app_results::workbench::documents::result_document::{
+    SharedXStatus, active_shared_x_status,
+};
+use rspice_app_results::workbench::results::ResultsFeature;
 use rspice_app_runs::simulation::status::{
     EngineAvailability, preflight_status, simulation_engine_status,
 };
@@ -33,6 +32,9 @@ use rspice_app_sheets::workbench::chrome::status_bar::sheets::sheet_position_sum
 use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::workbench::chrome::status_bar::{
     check_problem, check_summary, current_prompt, engine_status_mark,
+};
+use rspice_app_workbench::workbench::framework::host::{
+    StatusCell, StatusControl, StatusKey, StatusMark, StatusText, StatusZone,
 };
 
 /// What the cells read in common on a frame, worked out before any of them.

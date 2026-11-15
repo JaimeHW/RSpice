@@ -177,7 +177,7 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
     );
     assert_eq!(
         state.results.results.session.viewer,
-        crate::workbench::ResultViewer::Specs
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Specs
     );
     assert!(state.results.results.session.spec_drafts.is_some());
 

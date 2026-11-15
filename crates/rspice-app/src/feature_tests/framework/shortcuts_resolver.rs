@@ -8,11 +8,10 @@ use std::time::Duration;
 use egui::{Event, Key, Modifiers};
 
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
-use crate::workbench::framework::command_registry::ids;
-use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
+use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_state::state::ViewType;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
 use rspice_app_state::state::shortcuts::{
@@ -21,6 +20,7 @@ use rspice_app_state::state::shortcuts::{
 };
 use rspice_app_workbench::workbench::app_state::session::shortcuts::ShortcutInputSnapshot;
 use rspice_app_workbench::workbench::app_state::session::shortcuts::resolver::*;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 fn primary() -> Modifiers {
     Modifiers {

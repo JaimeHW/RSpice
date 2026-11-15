@@ -1,8 +1,8 @@
 //! The Netlist page's toolbar drawn through the application's context.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use egui::vec2;
+use rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument;
 use rspice_app_code::workbench::surfaces::netlist::fixtures::retain_generated;
 use rspice_app_code::workbench::surfaces::netlist::toolbar::{CodeToolbarLayout, code_toolbar};
 

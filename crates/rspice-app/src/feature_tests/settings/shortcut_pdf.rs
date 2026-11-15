@@ -2,7 +2,6 @@
 //! commands.
 
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::framework::command_registry::ids;
 use egui::os::OperatingSystem;
 use lopdf::Document as ParsedPdf;
 use rspice_app_settings::workbench::shortcuts::artifacts::pdf::*;
@@ -11,6 +10,7 @@ use rspice_app_settings::workbench::shortcuts::artifacts::projection::ShortcutEx
 use rspice_app_settings::workbench::shortcuts::artifacts::projection::build_shortcut_reference_model;
 use rspice_app_state::state::command_catalog::CommandPlatform;
 use rspice_app_state::state::shortcuts::ShortcutPreferences;
+use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 #[test]
 fn pdf_excludes_private_profile_state_and_filesystem_paths() {

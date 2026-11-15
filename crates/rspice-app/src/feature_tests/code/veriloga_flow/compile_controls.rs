@@ -9,7 +9,7 @@ use egui::Key;
 
 use super::language_tools::{CTRL_SHIFT, EDITOR, NONE, op_amp, source};
 use super::*;
-use crate::workbench::documents::code_workspace::{
+use rspice_app_code::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACompileOutcome,
 };
 use rspice_simulation::project_veriloga::compile_service::CompileCancellation;
