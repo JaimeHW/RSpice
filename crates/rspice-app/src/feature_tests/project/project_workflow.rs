@@ -2,6 +2,7 @@
 //! creating, opening, importing, saving and closing a project leave behind,
 //! and which transitions authorize a destructive action.
 
+use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 use rspice_results_ui::bode::BodeData;
 use rspice_results_ui::eye_diagram::{EyeData, EyeTrace};
 use rspice_results_ui::fft::{FftData, window::WindowFunction};
@@ -2089,7 +2090,7 @@ fn close_project_asks_about_configuration_edits_before_its_review() {
             .leaving
             .as_ref()
             .map(|leaving| leaving.action),
-        Some(crate::workbench::app::ConfirmationAction::CloseProject(
+        Some(ConfirmationAction::CloseProject(
             ProjectCloseDestination::EmptyWorkbench
         ))
     );

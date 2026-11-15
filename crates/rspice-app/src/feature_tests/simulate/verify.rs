@@ -30,7 +30,7 @@ use rspice_app_simulate::workbench::surfaces::verify::tuning::{
 /// again, and nothing runs.
 #[test]
 fn an_edit_after_a_tuning_commit_refuses_its_run() {
-    use crate::simulation::controller::prepared_run::thread_preparations;
+    use rspice_app_runs::simulation::controller::prepared_run::thread_preparations;
 
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();

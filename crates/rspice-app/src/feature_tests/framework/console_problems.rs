@@ -1232,10 +1232,10 @@ fn the_canvas_tour_and_the_grid_stand_on_one_finding() {
 /// suppressed whenever anything outside the canvas holds focus.
 #[test]
 fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
-    use crate::workbench::app_state::session::shortcuts::{
+    use crate::workbench::design::commands::DesignCommand;
+    use rspice_app_workbench::workbench::app_state::session::shortcuts::{
         ShortcutEnvironment, ShortcutInputSnapshot, runtime_command_platform,
     };
-    use crate::workbench::design::commands::DesignCommand;
 
     let mut state = state_with_design_findings();
     let harness = Harness::new();
@@ -1338,7 +1338,7 @@ fn app_frame(
 /// after a click on the canvas the reader was just taken to.
 #[test]
 fn following_a_finding_to_the_drawing_gives_the_canvas_the_keyboard() {
-    use crate::workbench::app_state::session::shortcuts::engineering_canvas_has_focus;
+    use rspice_app_workbench::workbench::app_state::session::shortcuts::engineering_canvas_has_focus;
 
     let mut app = design_app();
     let resistor = publish_design_findings(&mut app.state);

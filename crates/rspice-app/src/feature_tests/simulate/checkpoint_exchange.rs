@@ -13,7 +13,7 @@ use rspice_app_simulate::workbench::surfaces::simulate::checkpoint_exchange::{
 #[cfg(not(target_arch = "wasm32"))]
 fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
     let (_, bytes, _) =
-        crate::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture();
+        rspice_app_runs::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture();
     let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes).unwrap();
     let ctx = egui::Context::default();
     let mut app = RSpiceApp::test_instance();

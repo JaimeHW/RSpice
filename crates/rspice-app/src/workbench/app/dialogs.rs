@@ -7,7 +7,6 @@
 //! frame; the dialogs themselves never inspect each other.
 
 pub(crate) use rspice_app_project::workbench::app::dialogs::check_and_save_validation;
-pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::confirmation_state;
 pub(crate) mod connectivity_manager;
 pub(crate) mod create_model_bound_symbol;
 pub(crate) mod design_request;

@@ -23,8 +23,8 @@ mod results_post;
 mod transient_post;
 mod veriloga_project;
 
-use crate::simulation::controller::test_host::RunTestHost;
 use crate::workbench::app_state::AppState;
+use rspice_app_runs::simulation::controller::test_host::RunTestHost;
 
 /// A new session holding a run fixture's model and runs' slot, for a case
 /// that goes on from the run tier to a feature above it. The session's other

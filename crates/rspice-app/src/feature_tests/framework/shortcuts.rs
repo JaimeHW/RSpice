@@ -7,9 +7,9 @@ use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::{
     ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence, ShortcutStroke,
 };
-use crate::workbench::app_state::session::shortcuts::*;
 use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
 use crate::workbench::design::commands::DesignCommand;
+use rspice_app_workbench::workbench::app_state::session::shortcuts::*;
 
 #[test]
 fn accessibility_projection_uses_effective_custom_profile_and_host() {

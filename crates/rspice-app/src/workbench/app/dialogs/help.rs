@@ -10,11 +10,11 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, name_control, text_field};
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
-use crate::workbench::app_state::session::shortcuts::ShortcutCategory;
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 use rspice_app_workbench::workbench::app::dialogs::fact_grid;
+use rspice_app_workbench::workbench::app_state::session::shortcuts::ShortcutCategory;
 
 pub(in crate::workbench) mod report_problem;
 pub(in crate::workbench) mod site;

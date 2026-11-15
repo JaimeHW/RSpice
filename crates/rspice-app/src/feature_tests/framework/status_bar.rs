@@ -608,7 +608,7 @@ fn schematic_coordinates_use_the_permanent_sheet_origin_and_status_context() {
 /// engine builds them. A run of one point is not counted.
 #[test]
 fn a_preflight_pass_states_its_stage_and_how_far_it_has_got() {
-    use crate::simulation::controller::PreflightStage;
+    use rspice_app_runs::simulation::controller::PreflightStage;
     use rspice_simulation::execution::{DeckBuildProgress, PreparationProgress};
 
     let preparing = |prepared, total| {

@@ -1,13 +1,15 @@
 //! The run controller observed through a whole session.
 
 use super::session_of;
-use crate::simulation::controller::SimulationController;
-use crate::simulation::controller::test_execution::state_with_current_clean_drc;
-use crate::simulation::controller::test_execution::{MockExportWorkflowIo, bind_test_run_running};
 use crate::state::{
     AnalysisResult, AnalysisResultSourceDomain, AnalysisType, SimulationRunLifecycle,
 };
 use crate::workbench::app_state::AppState;
+use rspice_app_runs::simulation::controller::SimulationController;
+use rspice_app_runs::simulation::controller::test_execution::state_with_current_clean_drc;
+use rspice_app_runs::simulation::controller::test_execution::{
+    MockExportWorkflowIo, bind_test_run_running,
+};
 use rspice_app_runs::simulation::multi_run::AnalysisSpec;
 
 #[test]
@@ -81,10 +83,12 @@ fn design_context_reset_discards_pending_controller_result() {
     controller.current_spec = Some(AnalysisSpec::dc_op());
     controller.current_analysis_idx = 1;
     controller.total_analyses = 1;
-    controller.runner = crate::simulation::controller::test_execution::start_manual_deck(
+    controller.runner = rspice_app_runs::simulation::controller::test_execution::start_manual_deck(
         "Old design\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n",
     );
-    crate::simulation::controller::test_execution::wait_until_finished_unpolled(&controller.runner);
+    rspice_app_runs::simulation::controller::test_execution::wait_until_finished_unpolled(
+        &controller.runner,
+    );
 
     state.clear_design_execution_context();
     controller.update(&mut state, &export_io);

@@ -51,12 +51,12 @@ use rspice_project::ProjectIoError;
 #[cfg(target_arch = "wasm32")]
 use rspice_project::lifecycle::SaveContinuationEvent;
 
-use crate::workbench::app::ConfirmationAction;
 use crate::workbench::app::actions::workspace::symbol_document::run_active_symbol_pin_checks;
 use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::{
     Leaving, show_configuration_page_in,
 };
 use rspice_app_services::services::recent_files::RecentKind;
+use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
 pub(crate) mod check_and_save;
 
@@ -856,7 +856,7 @@ impl AppState {
         let destination = ProjectCloseDestination::EmptyWorkbench;
         if crate::workbench::app::project_transactions::hold_for_configuration_edits(
             self,
-            crate::workbench::app::ConfirmationAction::CloseProject(destination),
+            ConfirmationAction::CloseProject(destination),
             None,
         ) {
             return true;

@@ -2,9 +2,9 @@
 //! exports and application exit. Rendering lives in the workbench title bar.
 
 use crate::io::FileWorkflowIo;
-use crate::workbench::app::ConfirmationAction;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::feature::ModelsPort;
+use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
 /// Every action reachable from the File menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

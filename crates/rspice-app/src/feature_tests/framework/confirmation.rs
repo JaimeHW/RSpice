@@ -6,6 +6,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use egui::Context;
 use rspice_app_workbench::workbench::app::dialogs::confirmation::*;
+use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
 fn render_close_review(app: &mut RSpiceApp, size: egui::Vec2) -> egui::FullOutput {
     let ctx = Context::default();
@@ -145,8 +146,7 @@ fn save_prompt_asks_one_question_on_the_narrow_confirmation_surface() {
         .rename("lna-frontend")
         .expect("valid project name");
     app.state.workbench.confirmation_dialog.visible = true;
-    app.state.workbench.confirmation_dialog.pending_action =
-        Some(crate::workbench::app::ConfirmationAction::ProjectOpen);
+    app.state.workbench.confirmation_dialog.pending_action = Some(ConfirmationAction::ProjectOpen);
 
     let painted = painted_text(&render_close_review(&mut app, egui::vec2(1_280.0, 800.0)));
 

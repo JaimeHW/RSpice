@@ -109,7 +109,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         runs: Box::default(),
         workbench: Box::default(),
         shortcut_resolver:
-            crate::workbench::app_state::session::shortcuts::ShortcutResolverState::default(),
+            rspice_app_workbench::workbench::app_state::session::shortcuts::ShortcutResolverState::default(),
     };
     // The slots derive their `Default`; these are the values a new session
     // was always built with, set where they always were.

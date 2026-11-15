@@ -11,17 +11,17 @@ use rspice_results_ui::fft::{
 };
 
 use crate::product::{AnalysisInstanceId, DatasetId};
-use crate::simulation::controller::SimulationController;
-use crate::simulation::controller::test_execution::{clock, synthetic_result_provenance};
-use crate::simulation::controller::transient_post::{
-    DerivedViewAvailability, DerivedViewKind, DerivedViewResultPayload, DerivedViewTaskResult,
-    DerivedViewerLoadState, LoadedDerivedView, PendingDerivedViewTask, build_eye_from_waveform,
-    eye_matches_timebase,
-};
 use crate::state::{
     ActiveViewer, AnalysisResult, AnalysisType, SimulationRun, SpecializedViewerCacheProvenance,
 };
 use crate::workbench::app_state::AppState;
+use rspice_app_runs::simulation::controller::SimulationController;
+use rspice_app_runs::simulation::controller::test_execution::{clock, synthetic_result_provenance};
+use rspice_app_runs::simulation::controller::transient_post::{
+    DerivedViewAvailability, DerivedViewKind, DerivedViewResultPayload, DerivedViewTaskResult,
+    DerivedViewerLoadState, LoadedDerivedView, PendingDerivedViewTask, build_eye_from_waveform,
+    eye_matches_timebase,
+};
 
 fn owner() -> SpecializedViewerCacheProvenance {
     SpecializedViewerCacheProvenance::for_prepared_analysis(

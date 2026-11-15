@@ -18,10 +18,6 @@ use crate::state::shortcuts::{
     ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence, ShortcutStroke,
     shortcut_context_precedence_rank,
 };
-use crate::workbench::app_state::session::shortcuts::ShortcutContextMatch;
-use crate::workbench::app_state::session::shortcuts::{
-    ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
-};
 use crate::workbench::commands::vocabulary::{
     COMMAND_REGISTRY, CommandRegistry, command_registry, legacy_command,
 };
@@ -34,6 +30,10 @@ use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
+use rspice_app_workbench::workbench::app_state::session::shortcuts::ShortcutContextMatch;
+use rspice_app_workbench::workbench::app_state::session::shortcuts::{
+    ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
+};
 
 /// The retired ids `from_stable_id` still answers, each with the live id it
 /// resolves to. Shortcut profiles written by older builds name them.

@@ -1,9 +1,9 @@
 //! Completed runs observed through a whole session: a manual run saved with
 //! its project, and failures filed in an open project's Problems.
 
-use crate::simulation::controller::SimulationController;
 use crate::state::{AnalysisResult, AnalysisResultSourceDomain, AnalysisType};
 use crate::workbench::app_state::AppState;
+use rspice_app_runs::simulation::controller::SimulationController;
 
 #[test]
 fn controller_manual_run_receipt_survives_production_project_round_trip() {
@@ -147,10 +147,10 @@ fn a_real_operating_point_refusal_is_filed_with_the_conductor_the_engine_named()
     // Nothing here is injected: the deck is refused by the solver, the
     // attribution is the one `rspice-core` recorded (`engine/core.rs:1309`),
     // and the failure is written by the same call the run loop makes.
-    let mut runner = crate::simulation::controller::test_execution::start_manual_deck(
+    let mut runner = rspice_app_runs::simulation::controller::test_execution::start_manual_deck(
         "current-driven floating node\ni1 0 out dc 1m\nc1 out 0 1u\n.op\n.end\n",
     );
-    crate::simulation::controller::test_execution::wait_until_finished_unpolled(&runner);
+    rspice_app_runs::simulation::controller::test_execution::wait_until_finished_unpolled(&runner);
     let error = runner
         .poll_result()
         .unwrap()

@@ -272,7 +272,7 @@ fn a_completed_runs_engine_warnings_reach_the_page_as_canonical_records() {
     use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
 
     let mut state: AppState =
-        crate::simulation::controller::test_execution::run_manual_batch_session(
+        rspice_app_runs::simulation::controller::test_execution::run_manual_batch_session(
             "BSIM4 clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u\n\
          .model nch nmos level=54 version=4.8 pbs=0.05\n.op\n.end\n",
         );
@@ -345,7 +345,7 @@ fn a_clamp_opens_its_runs_log_on_the_line_the_engine_reported_it_on() {
 
     crate::diagnostics::engine_log::studio_logger_for_tests();
     let mut app = RSpiceApp::test_instance();
-    app.state = crate::simulation::controller::test_execution::run_manual_batch_session(
+    app.state = rspice_app_runs::simulation::controller::test_execution::run_manual_batch_session(
         "BSIM4 clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u\n\
          .model nch nmos level=54 version=4.8 pbs=0.05 pbsws=0.05\n.op\n.end\n",
     );

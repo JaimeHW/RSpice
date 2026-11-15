@@ -67,12 +67,12 @@ pub use interaction_state::{ContextTarget, DragType};
 pub(crate) use model::{Model, SlotFacts};
 // The platform services' own state, which they name beside the model.
 pub(in crate::workbench) use crate::workbench::slots::PlatformState;
-#[cfg(not(target_arch = "wasm32"))]
-pub use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
-pub(crate) use session::shortcuts::{
+pub(crate) use rspice_app_workbench::workbench::app_state::session::shortcuts::{
     accessibility_shortcut_summary, report_engineering_canvas_focus,
     request_engineering_canvas_focus, return_engineering_canvas_focus, runtime_command_platform,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 pub use sim_setup::SimSetupState;
 #[cfg(test)]
 pub use sim_setup::TranSetup;
@@ -113,7 +113,8 @@ pub struct AppState {
     pub(crate) workbench: Box<crate::workbench::WorkbenchSession>,
     /// Runtime-only chord/prefix authority. Partial sequences are never
     /// serialized or restored across application sessions.
-    pub(crate) shortcut_resolver: session::shortcuts::ShortcutResolverState,
+    pub(crate) shortcut_resolver:
+        rspice_app_workbench::workbench::app_state::session::shortcuts::ShortcutResolverState,
 }
 
 impl Default for AppState {
@@ -260,7 +261,7 @@ impl AppState {
             .active_source_editor
             .map(|editor| editor.id)
             .or_else(|| {
-                crate::workbench::app_state::session::shortcuts::engineering_canvas(
+                rspice_app_workbench::workbench::app_state::session::shortcuts::engineering_canvas(
                     ctx,
                     self.workbench.workspace,
                     self.model.workspace.content.active_view_type(),

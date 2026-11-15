@@ -599,7 +599,7 @@ fn an_imported_schematic_is_project_content_a_run_reads() {
         .run_active_design_checks()
         .expect("the imported schematic is checked");
     assert!(!checked.has_errors(), "{checked:#?}");
-    let prepared = crate::simulation::controller::SimulationController::new()
+    let prepared = rspice_app_runs::simulation::controller::SimulationController::new()
         .prepare_run_set_for_preflight(&app.state)
         .expect("the imported schematic prepares a run with no further step");
     assert_eq!((prepared.pvt_point_count, prepared.task_count), (2, 2));
@@ -625,7 +625,7 @@ fn a_part_runs_the_model_its_drawing_defines_and_a_repeat_adds_no_provider() {
     }
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    let mut controller = crate::simulation::controller::SimulationController::new();
+    let mut controller = rspice_app_runs::simulation::controller::SimulationController::new();
     let bound = |app: &RSpiceApp| {
         app.state
             .model

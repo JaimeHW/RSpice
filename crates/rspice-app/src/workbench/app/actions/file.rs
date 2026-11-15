@@ -4,8 +4,11 @@
 //! flow that runs first when the current document has unsaved changes.
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app::{ConfirmationAction, ConfirmationResponse, RSpiceApp};
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::framework::feature::ModelsPort;
+use rspice_app_workbench::workbench::app::dialogs::confirmation_state::{
+    ConfirmationAction, ConfirmationResponse,
+};
 
 impl RSpiceApp {
     /// Internal: Actually open a schematic (after confirmation)

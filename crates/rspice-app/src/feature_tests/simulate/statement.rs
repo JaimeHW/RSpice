@@ -13,9 +13,9 @@
 //! page's own accessor returns exactly that string, and that the string still
 //! parses when it arrives from the page's path rather than the ratchet's.
 
-use crate::simulation::controller::SimulationController;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::workbench::RSpiceApp;
+use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_simulate::workbench::surfaces::simulate::{
     engineering_statement, plan_statement_for,
 };

@@ -8,11 +8,13 @@ use rspice_simulation::netlist_preparation::reject_deferred_external_sources_wit
 use rspice_simulation::project_veriloga::preparation::project_veriloga_runtimes_referenced_by;
 
 use super::session_of;
-use crate::simulation::controller::SimulationController;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::simulation::controller::prepared_run::fixtures::{fixture_dir, manual_deck_state};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::model::compile_project_bundle_receipt;
+use rspice_app_runs::simulation::controller::SimulationController;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_runs::simulation::controller::prepared_run::fixtures::{
+    fixture_dir, manual_deck_state,
+};
 use rspice_simulation::execution::PreparationStage;
 
 #[test]

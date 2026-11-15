@@ -96,13 +96,12 @@ use browser_history::{
 };
 
 #[cfg(test)]
-pub(crate) use dialogs::confirmation_state::ProjectReviewRequest;
-pub use dialogs::confirmation_state::{ConfirmationAction, ConfirmationResponse};
+pub(crate) use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ProjectReviewRequest;
 
 /// Sheet navigation and sheet lifecycle, where the shell's feature tests
 /// reach them.
 #[cfg(test)]
-pub(crate) use actions::sheets;
+pub(crate) use rspice_app_sheets::workbench::app::actions::sheets;
 
 pub(crate) use dialogs::connectivity_manager::ConnectivityManagerDialogState;
 #[cfg(test)]

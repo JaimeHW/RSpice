@@ -522,7 +522,8 @@ fn a_manual_deck_design_over_a_deck_cell_validates_and_runs() {
         "the editor validates the design against the deck's cells"
     );
 
-    let result = crate::simulation::controller::test_execution::run_manual_deck_of(&app.state);
+    let result =
+        rspice_app_runs::simulation::controller::test_execution::run_manual_deck_of(&app.state);
     let vout = result.measurement("vout").expect("v(out) is measured");
     assert!(
         (vout - 0.5).abs() < 1e-9,

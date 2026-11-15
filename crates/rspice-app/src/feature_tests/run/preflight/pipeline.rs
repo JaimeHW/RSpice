@@ -4,7 +4,7 @@
 use super::engine::{add_operating_point, binned_library, enable_only, inverter_on_binned_pdk};
 use super::*;
 
-use crate::simulation::controller::PreflightStage;
+use rspice_app_runs::simulation::controller::PreflightStage;
 use rspice_simulation::execution::PreparationProgress;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
@@ -341,9 +341,9 @@ impl RSpiceApp {
         &mut self,
     ) -> (
         crate::product::ContentDigest,
-        crate::simulation::controller::PreparedRunSetInputs,
+        rspice_app_runs::simulation::controller::PreparedRunSetInputs,
     ) {
-        use crate::simulation::controller::prepared_run::thread_preparations;
+        use rspice_app_runs::simulation::controller::prepared_run::thread_preparations;
 
         self.invalidate_simulation_preflight();
         let (prepared, inputs) = self
@@ -362,12 +362,12 @@ impl RSpiceApp {
     /// Automation's evidence check, with the preparations it ran.
     fn evidence_check(
         &self,
-        inputs: &crate::simulation::controller::PreparedRunSetInputs,
+        inputs: &rspice_app_runs::simulation::controller::PreparedRunSetInputs,
     ) -> (
         Result<(), rspice_simulation::execution::PreparationError>,
         Vec<rspice_simulation::execution::SimulationRunIntent>,
     ) {
-        use crate::simulation::controller::prepared_run::thread_preparations;
+        use rspice_app_runs::simulation::controller::prepared_run::thread_preparations;
 
         let earlier = thread_preparations::take();
         assert!(earlier.is_empty(), "{earlier:?}");
@@ -392,7 +392,7 @@ impl RSpiceApp {
     pub(super) fn dispatch_frame(
         &mut self,
     ) -> Vec<rspice_simulation::execution::SimulationRunIntent> {
-        use crate::simulation::controller::prepared_run::thread_preparations;
+        use rspice_app_runs::simulation::controller::prepared_run::thread_preparations;
 
         let earlier = thread_preparations::take();
         assert!(
@@ -711,7 +711,7 @@ impl RSpiceApp {
     fn ran_capturing_checkpoints(
         &mut self,
     ) -> (
-        crate::simulation::controller::PreparedRunSetInputs,
+        rspice_app_runs::simulation::controller::PreparedRunSetInputs,
         crate::product::ContentDigest,
     ) {
         edit_the_transient(&mut self.state, |draft| {
@@ -754,7 +754,7 @@ impl RSpiceApp {
         &mut self,
     ) -> (
         crate::product::ContentDigest,
-        crate::simulation::controller::PreparedRunSetInputs,
+        rspice_app_runs::simulation::controller::PreparedRunSetInputs,
     ) {
         let (_, image) = self.ran_capturing_checkpoints();
         edit_the_transient(&mut self.state, |draft| {

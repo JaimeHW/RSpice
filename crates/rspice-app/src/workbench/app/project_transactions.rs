@@ -8,7 +8,6 @@
 #[cfg(test)]
 use crate::io::ProjectSnapshot;
 use crate::state::workspace::{DEFAULT_PROJECT_LIBRARY, DEFAULT_TOP_CELL};
-use crate::workbench::app::ConfirmationAction;
 use crate::workbench::app::dialogs::check_and_save_validation::{
     CheckAndSaveValidationReport, ValidationReads, run_design_checks,
 };
@@ -21,6 +20,7 @@ use rspice_app_project::workbench::workflows::project_workflow::ProjectLoadOrigi
 #[cfg(test)]
 use rspice_app_project::workbench::workflows::project_workflow::report_lifecycle_error;
 use rspice_app_services::services::recent_files::RecentKind;
+use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
 /// Open the transaction with the default library and top cell. The project
 /// name starts empty because it is the one field with no defensible default:

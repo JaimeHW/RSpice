@@ -72,7 +72,7 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
         ("shell", held(|state| &state.shell)),
         (
             "shortcut_resolver",
-            size_of::<a::session::shortcuts::ShortcutResolverState>(),
+            size_of::<rspice_app_workbench::workbench::app_state::session::shortcuts::ShortcutResolverState>(),
         ),
     ]
 }

@@ -511,15 +511,17 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
     }
 
     fn six_point_run_set() -> RunSetState {
-        crate::simulation::controller::test_execution::pvt::from_corner_config(&CornerConfig {
-            process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
-            voltages: vec![1.0],
-            supply_source_names: Vec::new(),
-            temperatures: vec![-40.0, 27.0, 125.0],
-            full_matrix: true,
-            points: Vec::new(),
-            base_analysis: CornerBaseAnalysis::Op,
-        })
+        rspice_app_runs::simulation::controller::test_execution::pvt::from_corner_config(
+            &CornerConfig {
+                process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
+                voltages: vec![1.0],
+                supply_source_names: Vec::new(),
+                temperatures: vec![-40.0, 27.0, 125.0],
+                full_matrix: true,
+                points: Vec::new(),
+                base_analysis: CornerBaseAnalysis::Op,
+            },
+        )
     }
 
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {

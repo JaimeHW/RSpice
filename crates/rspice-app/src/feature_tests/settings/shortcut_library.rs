@@ -3,13 +3,15 @@
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::session::shortcuts::{ShortcutEnvironment, ShortcutInputSnapshot};
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::requests::ResetShortcutResolver;
 use rspice_app_settings::workbench::app_state::session::shortcut_library::*;
 use rspice_app_settings::workbench::shortcuts::library_persistence::PersistedShortcutProfileLibrary;
+use rspice_app_workbench::workbench::app_state::session::shortcuts::{
+    ShortcutEnvironment, ShortcutInputSnapshot,
+};
 
 #[test]
 fn unacknowledged_completion_blocks_reentrant_publication() {

@@ -4,6 +4,7 @@
 
 use egui::{Context, vec2};
 use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
+use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 use std::time::{Duration, Instant};
 
 use crate::state::AnalysisType;
@@ -147,7 +148,7 @@ fn an_example_asks_to_save_unsaved_work_before_replacing_it() {
     assert!(confirmation.visible);
     assert_eq!(
         confirmation.pending_action,
-        Some(crate::workbench::app::ConfirmationAction::ProjectNew)
+        Some(ConfirmationAction::ProjectNew)
     );
     assert_eq!(
         confirmation.pending_example.as_deref(),

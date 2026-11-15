@@ -11,8 +11,6 @@ pub(in crate::workbench) mod file;
 pub(in crate::workbench) mod hierarchy_net_highlight;
 pub(in crate::workbench) mod property_edit;
 pub(in crate::workbench) mod reveal;
-#[cfg(test)]
-pub(crate) use rspice_app_sheets::workbench::app::actions::sheets;
 pub(crate) mod stimulus;
 pub(in crate::workbench) mod stimulus_placement;
 pub(crate) mod symbol;
@@ -29,7 +27,7 @@ use crate::workbench::commands::vocabulary::{Command as ShortcutCommand, Command
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::session::shortcuts::{
+use rspice_app_workbench::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
     engineering_canvas_has_focus, escape_owner_was_let_go, runtime_command_platform,
 };

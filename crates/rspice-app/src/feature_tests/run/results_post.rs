@@ -5,9 +5,9 @@ use std::collections::HashMap;
 
 use rspice_simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM;
 
-use crate::simulation::controller::SimulationController;
-use crate::simulation::controller::results_post::LOOP_GAIN_LOCUS_LABEL;
 use crate::workbench::app_state::AppState;
+use rspice_app_runs::simulation::controller::SimulationController;
+use rspice_app_runs::simulation::controller::results_post::LOOP_GAIN_LOCUS_LABEL;
 use rspice_app_runs::simulation::multi_run::AnalysisSpec;
 use rspice_simulation::results::SampledWaveform;
 

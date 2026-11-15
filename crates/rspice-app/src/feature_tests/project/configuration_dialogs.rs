@@ -4,8 +4,8 @@
 
 use crate::state::ConfigurationSetId;
 use crate::ui::widgets::DialogChoice;
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::project_transactions::hold_for_configuration_edits;
-use crate::workbench::app::{ConfirmationAction, RSpiceApp};
 use crate::workbench::examples::hierarchy_reference;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::workspace_state::ProjectPage;
@@ -16,6 +16,7 @@ use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs:
     LeavingAnswer, answer_leaving, open_configuration_dialog, render_configuration_dialog,
 };
 use rspice_app_services::services::recent_files::RecentKind;
+use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
 /// The configuration dialogs' parts over `app`, as the project feature's
 /// context lends them.

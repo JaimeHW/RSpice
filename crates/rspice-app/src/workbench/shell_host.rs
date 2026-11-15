@@ -24,7 +24,6 @@ use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::state::{CellViewRef, ViewType};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::NotificationAction;
-use crate::workbench::app::ConfirmationResponse;
 use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::commands::vocabulary::{
@@ -56,6 +55,7 @@ use rspice_app_code::workbench::code::{CodeFeature, SOURCE_EDITOR_MENU};
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
 use rspice_app_sheets::workbench::sheets::SheetsFeature;
 use rspice_app_workbench::workbench::app::dialogs::confirmation::ConfirmationHost;
+use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationResponse;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
     self, ApplicationMenu,
 };

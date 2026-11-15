@@ -47,17 +47,16 @@
 pub(crate) mod schematic;
 
 pub(crate) mod simulation {
-    //! The run and state tiers' simulation modules, at the paths the shell's
-    //! not-yet-moved readers still name. Every other reader names the owning
-    //! crate's module.
+    //! The state tier's simulation modules and the run tier's controller, at
+    //! the paths the shell's not-yet-moved readers still name. Every other
+    //! reader names the owning crate's module.
 
-    pub(crate) use rspice_app_runs::simulation::controller;
     pub(crate) use rspice_app_state::simulation::placed_sources;
     pub(crate) use rspice_app_state::simulation::plan;
     pub(crate) use rspice_app_state::simulation::stimulus_realize;
     pub(crate) use rspice_app_state::simulation::table_route;
 
-    pub use controller::SimulationController;
+    pub use rspice_app_runs::simulation::controller::SimulationController;
 }
 
 /// Project-bound property editing workflows.

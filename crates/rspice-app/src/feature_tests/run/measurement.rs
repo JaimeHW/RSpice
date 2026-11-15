@@ -3,11 +3,11 @@
 use std::collections::HashMap;
 
 use super::session_of;
-use crate::simulation::controller::SimulationController;
-use crate::simulation::controller::prepared_run::fixtures::{definition, runnable_state};
-use crate::simulation::controller::test_execution::run_resolved_task;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::{SimulationRunIntent, SpecificationDefinition};
+use rspice_app_runs::simulation::controller::SimulationController;
+use rspice_app_runs::simulation::controller::prepared_run::fixtures::{definition, runnable_state};
+use rspice_app_runs::simulation::controller::test_execution::run_resolved_task;
 use rspice_simulation_contract::config::AnalysisConfig;
 
 #[test]

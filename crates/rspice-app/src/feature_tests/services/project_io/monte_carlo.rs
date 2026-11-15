@@ -4,8 +4,8 @@ use super::*;
 
 #[test]
 fn monte_carlo_checkpoint_retention_project_round_trip_and_integrity() {
-    use crate::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture;
     use crate::state::MonteCarloCheckpointEvidence;
+    use rspice_app_runs::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture;
 
     let (_, bytes, _) = completed_checkpoint_fixture();
     let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes.clone()).unwrap();
@@ -151,7 +151,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_and_integrity() {
 
 #[test]
 fn monte_carlo_checkpoint_file_round_trip_rejects_corruption_and_bounds() {
-    use crate::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture;
+    use rspice_app_runs::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture;
     use rspice_formats::monte_carlo_checkpoint::{self as checkpoint_file, CheckpointFileError};
     use rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointEvidence;
     use rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary;

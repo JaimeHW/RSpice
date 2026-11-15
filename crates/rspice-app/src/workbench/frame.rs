@@ -710,10 +710,10 @@ fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNoti
 /// What a campaign outcome the controller reported announces. Both offer the
 /// Console line that says what happened.
 fn campaign_notice(
-    outcome: crate::simulation::controller::prepared_run::CampaignOutcome,
+    outcome: rspice_app_runs::simulation::controller::prepared_run::CampaignOutcome,
 ) -> RunNotice {
-    use crate::simulation::controller::prepared_run::CampaignOutcome;
     use crate::ui::widgets::{NotificationAction, ToastKind};
+    use rspice_app_runs::simulation::controller::prepared_run::CampaignOutcome;
 
     match outcome {
         CampaignOutcome::MemberRefused {
@@ -1722,9 +1722,9 @@ mod tests {
     #[test]
     fn a_two_member_campaign_announces_its_failed_member_and_its_end() {
         use crate::diagnostics::LogAnchor;
-        use crate::simulation::controller::prepared_run::CampaignOutcome;
         use crate::state::{SimulationCampaignMembership, SimulationRunLifecycle as Lifecycle};
         use crate::ui::widgets::{NotificationAction, ToastKind};
+        use rspice_app_runs::simulation::controller::prepared_run::CampaignOutcome;
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
