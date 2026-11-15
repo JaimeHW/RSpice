@@ -1285,7 +1285,9 @@ R3 R3_P R3_N 500k
     );
     let mut without_rbp = results.clone();
     for result in &mut without_rbp {
-        result.contributions.retain(|contribution| !is_rbp(contribution));
+        result
+            .contributions
+            .retain(|contribution| !is_rbp(contribution));
     }
     let integrated = IntegratedNoise::new(results);
     let without_rbp = IntegratedNoise::new(without_rbp);

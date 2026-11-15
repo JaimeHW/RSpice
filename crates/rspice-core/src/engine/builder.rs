@@ -13609,7 +13609,12 @@ mod tests {
         let double = build("W=10u L=10u M=2");
         let close = |got: Value, want: Value| (got - want).abs() <= want.abs() * 1e-12;
 
-        assert!(close(double.is, 2.0 * single.is), "{} vs {}", double.is, single.is);
+        assert!(
+            close(double.is, 2.0 * single.is),
+            "{} vs {}",
+            double.is,
+            single.is
+        );
         assert!(close(
             double.sidewall_perimeter,
             2.0 * single.sidewall_perimeter
