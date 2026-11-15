@@ -1252,6 +1252,22 @@ fn random_stream_is_deterministic_per_seed() {
 }
 
 #[test]
+fn a_cloned_stream_is_the_same_stream_and_an_equal_seed_is_not() {
+    let stream = RandomState::new(42);
+    let handle = stream.clone();
+    assert!(handle.shares_stream_with(&stream));
+    handle.next_uniform();
+    let fresh = RandomState::new(42);
+    assert_ne!(
+        stream.next_uniform(),
+        fresh.next_uniform(),
+        "a draw through the clone advances the shared stream"
+    );
+    assert!(!fresh.shares_stream_with(&stream));
+    assert!(!RandomState::new(43).shares_stream_with(&stream));
+}
+
+#[test]
 fn random_uniform_is_in_unit_interval_with_sane_moments() {
     let r = RandomState::new(7);
     let n = 20_000;

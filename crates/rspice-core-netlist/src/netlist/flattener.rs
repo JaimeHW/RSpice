@@ -4918,9 +4918,17 @@ fn resolve_numeric_parameter_binding(
             direction: None,
         }),
         ParametricValue::Expression(expr) => {
-            let mut context = scope.clone();
-            // All derived scopes consume the same netlist-wide sequence.
-            context.adopt_random(random);
+            // All derived scopes consume the same netlist-wide sequence. A
+            // scope that already draws from it is read as it stands.
+            let adopted;
+            let context = if scope.random().shares_stream_with(random) {
+                scope
+            } else {
+                let mut context = scope.clone();
+                context.adopt_random(random);
+                adopted = context;
+                &adopted
+            };
             context
                 .evaluate_parameter_binding_with_abort(expr, abort)
                 .map(|(value, direction)| NumericParameterBinding { value, direction })

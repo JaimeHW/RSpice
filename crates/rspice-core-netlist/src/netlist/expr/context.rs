@@ -76,6 +76,12 @@ impl RandomState {
         self.seed
     }
 
+    /// Whether both handles draw from one stream: the same seed and the same
+    /// shared counter, so a draw through either advances both.
+    pub(crate) fn shares_stream_with(&self, other: &Self) -> bool {
+        self.seed == other.seed && Arc::ptr_eq(&self.counter, &other.counter)
+    }
+
     /// Rewind the stream to `position`, keeping the seed.
     ///
     /// Elaborating a netlist consumes draws, so a second elaboration of the
