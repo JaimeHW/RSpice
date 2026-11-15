@@ -86,6 +86,127 @@ impl HbSolver {
         }
     }
 
+    /// Assemble, sparse, the matrix whose entries `visit` streams, or its
+    /// transpose: the matrix [`Self::solve_complex_linear_system`] solves
+    /// from dense rows, without the dense rows, so a system of any size can
+    /// be solved directly. Duplicate entries are summed in the order they
+    /// stream, as dense rows sum them, and the diagonal is kept structurally
+    /// as there.
+    pub(super) fn assemble_complex_entry_system(
+        size: usize,
+        transpose: bool,
+        visit: impl FnOnce(&mut dyn FnMut(usize, usize, Complex64)),
+    ) -> Result<ComplexMatrix, HbError> {
+        let mut entries: Vec<(usize, usize, Complex64)> = Vec::new();
+        let mut failure = None;
+        visit(&mut |row, column, value| {
+            if failure.is_some() {
+                return;
+            }
+            let (row, column) = if transpose {
+                (column, row)
+            } else {
+                (row, column)
+            };
+            if row >= size || column >= size {
+                failure = Some(HbError::InvalidCircuit(format!(
+                    "HB linear-system entry ({row}, {column}) is outside its {size}x{size} matrix"
+                )));
+            } else if entries.try_reserve(1).is_err() {
+                failure = Some(HbError::LinearSolveFailed(
+                    "HB linear-system entry allocation failed".to_string(),
+                ));
+            } else {
+                entries.push((row, column, value));
+            }
+        });
+        if let Some(failure) = failure {
+            return Err(failure);
+        }
+        // A stable sort keeps each coordinate's entries in the order they
+        // streamed, so each sum rounds as the dense row's does.
+        entries.sort_by_key(|&(row, column, _)| (row, column));
+        let mut cells: Vec<(usize, usize, Complex64)> = Vec::new();
+        cells.try_reserve_exact(entries.len()).map_err(|error| {
+            HbError::LinearSolveFailed(format!("HB linear-system allocation failed: {error}"))
+        })?;
+        for (row, column, value) in entries {
+            match cells.last_mut() {
+                Some(cell) if cell.0 == row && cell.1 == column => cell.2 += value,
+                _ => cells.push((row, column, Complex64::new(0.0, 0.0) + value)),
+            }
+        }
+        if let Some(&(row, column, _)) = cells
+            .iter()
+            .find(|(_, _, value)| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB linear-system coefficient ({row}, {column}) is non-finite"
+            )));
+        }
+        let mut structure = Vec::new();
+        structure
+            .try_reserve_exact(cells.len() + size)
+            .map_err(|error| {
+                HbError::LinearSolveFailed(format!("HB linear-system allocation failed: {error}"))
+            })?;
+        let mut next = cells.iter().peekable();
+        for row in 0..size {
+            let mut diagonal = false;
+            while let Some(&&(cell_row, column, value)) = next.peek() {
+                if cell_row != row {
+                    break;
+                }
+                next.next();
+                if column > row && !diagonal {
+                    structure.push((row, row, 0.0));
+                    diagonal = true;
+                }
+                if column == row || value != Complex64::new(0.0, 0.0) {
+                    diagonal |= column == row;
+                    structure.push((row, column, 0.0));
+                }
+            }
+            if !diagonal {
+                structure.push((row, row, 0.0));
+            }
+        }
+        let real_structure = StaticMatrix::from_triplets(size, size, &structure)
+            .map_err(Self::map_linear_solve_error)?;
+        let mut matrix = ComplexMatrix::from_real_structure(&real_structure);
+        for (row, column, value) in cells {
+            if value != Complex64::new(0.0, 0.0) {
+                matrix
+                    .try_add(row, column, value)
+                    .map_err(Self::map_linear_solve_error)?;
+            }
+        }
+        Ok(matrix)
+    }
+
+    /// Solve and certify a system [`Self::assemble_complex_entry_system`]
+    /// assembled, as [`Self::solve_complex_linear_system`] solves its own;
+    /// the matrix keeps its factorization for the next right-hand side.
+    pub(super) fn solve_complex_entry_system(
+        matrix: &mut ComplexMatrix,
+        b: &[Complex64],
+    ) -> Result<Vec<Complex64>, HbError> {
+        if b.iter()
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(HbError::InvalidCircuit(
+                "HB linear-system RHS contains a non-finite value".to_string(),
+            ));
+        }
+        match matrix.solve(b) {
+            Ok(solution) => Ok(solution),
+            Err(SolverError::InaccurateSolution(_)) if b.len() <= 64 => matrix
+                .solve_dense_extended(b)
+                .map_err(Self::map_linear_solve_error),
+            Err(error) => Err(Self::map_linear_solve_error(error)),
+        }
+    }
+
     pub(super) fn map_linear_solve_error(error: SolverError) -> HbError {
         Self::map_linear_solve_error_with_context(error, "HB linear solve")
     }

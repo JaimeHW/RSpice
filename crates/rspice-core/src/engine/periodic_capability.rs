@@ -1766,11 +1766,14 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
 /// balance's agree, and driven gently both give the model's own `.noise`.
 #[cfg(feature = "veriloga-builtins-base")]
 const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[&str] = &[
+    "angelov_gan",
     "asmesd",
     "asmesd_dio",
+    "bjt504tva",
     "bjt504va",
     "bjt505_va",
     "bjt505t_va",
+    "bjtd504tva",
     "bjtd504va",
     "bjtd505_va",
     "bjtd505t_va",
@@ -1794,32 +1797,15 @@ const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[&str] = &[
     "PSPNQS104VA",
 ];
 
-/// Why periodic noise refuses Mextram 504 with self-heating.
-#[cfg(feature = "veriloga-builtins-base")]
-const CARRIED_SITE_NOISE_504T: &str = "noise beside an operator harmonic balance carries as an unknown, unchecked for \
-     this model: in a pumped stage, at any drive and on either carrier, its periodic noise \
-     adjoint converges (normwise residual 1e-12) but fails its componentwise certificate \
-     (backward error 1)";
-
 /// The generated compact models with a carried operator site whose periodic
 /// noise could not be checked, each with what the check met.
 #[cfg(feature = "veriloga-builtins-base")]
-const PNOISE_UNCHECKED_CARRIED_SITE_MODELS: &[(&str, &str)] = &[
-    (
-        "angelov_gan",
-        "noise beside an operator harmonic balance carries as an unknown, unchecked for this \
-         model: driven gently, its periodic noise adjoint on shooting's carrier misses its \
-         componentwise certificate (backward error 4.9e-9)",
-    ),
-    (
-        "asmhemt",
-        "noise beside an operator harmonic balance carries as an unknown, unchecked for this \
-         model: in a pumped stage, at any drive and on either carrier, its periodic noise \
-         adjoint's iterative solve stalls at a normwise residual of 0.2",
-    ),
-    ("bjt504tva", CARRIED_SITE_NOISE_504T),
-    ("bjtd504tva", CARRIED_SITE_NOISE_504T),
-];
+const PNOISE_UNCHECKED_CARRIED_SITE_MODELS: &[(&str, &str)] = &[(
+    "asmhemt",
+    "noise beside an operator harmonic balance carries as an unknown, unchecked for this \
+     model: in a pumped stage its periodic noise on harmonic balance's carrier approaches \
+     shooting's only slowly with harmonics, 7.2e-3 apart at 8 and still 1.0e-3 at 24",
+)];
 
 /// Why periodic noise refuses a generated model with a carried operator
 /// site, or `None` for one [`PNOISE_CHECKED_CARRIED_SITE_MODELS`] names: one
@@ -1912,9 +1898,10 @@ mod tests {
         assert_eq!(carried_site_noise_refusal("PSPNQS102VA"), None);
         assert_eq!(carried_site_noise_refusal("pspnqs102va"), None);
         assert_eq!(carried_site_noise_refusal("HISIMHV_VA"), None);
+        assert_eq!(carried_site_noise_refusal("BJTD504TVA"), None);
         assert_eq!(
-            carried_site_noise_refusal("BJTD504TVA"),
-            Some(CARRIED_SITE_NOISE_504T)
+            carried_site_noise_refusal("ASMHEMT"),
+            Some(PNOISE_UNCHECKED_CARRIED_SITE_MODELS[0].1)
         );
         assert!(
             carried_site_noise_refusal("a_model_newly_given_a_carried_site")

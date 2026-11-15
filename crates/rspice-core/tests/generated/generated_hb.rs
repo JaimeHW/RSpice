@@ -919,40 +919,23 @@ const PNOISE_CHECK: PnoiseCheck = PnoiseCheck {
 /// [`PNOISE_CHECK`], each with its check. MVSG's harmonic-balance carrier
 /// takes 16 harmonics: at 8 its sideband-0 noise sat 2.2e-3 from shooting's,
 /// at 16 2.0e-4 and at 24 2.2e-4, shooting's unmoved from 512 to 1024
-/// points. EKV3 RF's gentle drive is 1e-2 of the fixture's: at 1e-3 and
-/// 1e-4 the noise adjoint stops short of its certificate (backward error
-/// 3.6e-11 after 8 iterations), while at 1e-2 both carriers give `.noise`
-/// within 2.9e-7.
-const PNOISE_CHECKS: &[(&str, PnoiseCheck)] = &[
-    (
-        "ekv3_rf",
-        PnoiseCheck {
-            harmonics: HARMONICS,
-            gentle: 1e-2,
-        },
-    ),
-    (
-        "mvsg_cmc",
-        PnoiseCheck {
-            harmonics: 16,
-            gentle: GENTLE_DRIVE,
-        },
-    ),
-];
+/// points.
+const PNOISE_CHECKS: &[(&str, PnoiseCheck)] = &[(
+    "mvsg_cmc",
+    PnoiseCheck {
+        harmonics: 16,
+        gentle: GENTLE_DRIVE,
+    },
+)];
 
 /// The shipped models whose periodic noise could not be checked, each with
 /// the words of the reason periodic noise refuses it by on either carrier
 /// (see [`check_pnoise_refusal`]). Every other model with a settled-transient
 /// fixture has its periodic noise checked (see [`check_pnoise`]).
-const PNOISE_REFUSED_MODELS: &[(&str, &str)] = &[
-    (
-        "angelov_gan",
-        "on shooting's carrier misses its componentwise certificate",
-    ),
-    ("asmhemt", "stalls at a normwise residual of 0.2"),
-    ("bjt504tva", "fails its componentwise certificate"),
-    ("bjtd504tva", "fails its componentwise certificate"),
-];
+const PNOISE_REFUSED_MODELS: &[(&str, &str)] = &[(
+    "asmhemt",
+    "approaches shooting's only slowly with harmonics",
+)];
 
 /// Periodic noise of a fixture's V(`node`) on both carriers, checked two
 /// ways:

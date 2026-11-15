@@ -1667,6 +1667,7 @@ impl HbSolver {
         };
         let reach = try_krylov
             .then(|| SidebandReach::new(size, s, false, |visitor| operator.visit_entries(visitor)));
+        let mut direct = None;
 
         for (excitation_index, excitation) in excitations.iter().enumerate() {
             let mut rhs = try_zeroed_complex_values(
@@ -1755,7 +1756,7 @@ impl HbSolver {
                     restart,
                     &crate::abort_signal::NoAbort,
                 )?;
-                self.qualify_periodic_ac_solution(&operator, &rhs, outcome)?
+                self.qualify_periodic_ac_solution(&operator, &rhs, outcome, &mut direct)?
             } else {
                 let matrix = dense.as_ref().ok_or_else(|| {
                     HbError::InvalidCircuit(
@@ -1998,12 +1999,16 @@ impl HbSolver {
     ///
     /// The matrix helper certifies a plain transpose. Visiting every PAC
     /// entry at its transposed coordinate therefore certifies the original
-    /// forward equation `Y*x=b` without allocating `Y` or `Y^T`.
+    /// forward equation `Y*x=b` without allocating `Y` or `Y^T`. A candidate
+    /// the check rejects is recovered by the certified direct solver on `Y`
+    /// assembled sparse from the same entries, which `direct` keeps,
+    /// factored, for the next excitation.
     fn qualify_periodic_ac_solution(
         &self,
         operator: &PeriodicConversionOperator<'_>,
         rhs: &[Complex64],
         outcome: super::krylov::GmresOutcome,
+        direct: &mut Option<crate::solver::ComplexMatrix>,
     ) -> Result<Vec<Complex64>, HbError> {
         let size = rhs.len();
         // The independent certificate, not GMRES's normwise flag, decides. A
@@ -2038,16 +2043,27 @@ impl HbSolver {
             Err(
                 error @ rspice_matrix::SolverError::ConvergenceFailed(_)
                 | error @ rspice_matrix::SolverError::InaccurateSolution(_),
-            ) if size < super::krylov::KRYLOV_AUTO_THRESHOLD => {
+            ) => {
                 log::debug!(
                     "PAC matrix-free solution was not certified after {} iterations \
-                     (reported relative residual {:.2e}: {}); using bounded dense recovery",
+                     (reported relative residual {:.2e}: {}); solving the system directly",
                     outcome.iterations,
                     outcome.relative_residual,
                     error
                 );
-                let matrix = operator.to_dense();
-                self.solve_complex_linear_system(&matrix, rhs)
+                let matrix = match direct {
+                    Some(matrix) => matrix,
+                    None => direct.insert(Self::assemble_complex_entry_system(
+                        size,
+                        false,
+                        |visitor| {
+                            operator.visit_entries(|row, column, value| {
+                                visitor(row, column, value);
+                            })
+                        },
+                    )?),
+                };
+                Self::solve_complex_entry_system(matrix, rhs)
             }
             Err(error) => Err(HbError::InvalidCircuit(format!(
                 "PAC forward {size}x{size} iterative linear solve is uncertified after {} \
@@ -2062,15 +2078,17 @@ impl HbSolver {
     ///
     /// GMRES reports a normwise residual.  That criterion can hide a failed
     /// low-scale equation beside a well-scaled row, so convergence alone is
-    /// not publication evidence.  Small systems may recover through the
-    /// independently certified dense solver; an automatic dense fallback is
-    /// forbidden at and above the Krylov threshold because its quadratic
-    /// allocation is precisely what the matrix-free route is meant to avoid.
+    /// not publication evidence.  A candidate the certificate rejects is
+    /// recovered by the independently certified direct solver, on the system
+    /// assembled sparse from the operator's entries, never densely: a dense
+    /// matrix's quadratic allocation is what the matrix-free route avoids.
+    /// `direct` keeps that system, factored, for the next channel.
     fn qualify_periodic_noise_adjoint(
         &self,
         operator: &dyn NoiseAdjointOperator,
         rhs: &[Complex64],
         outcome: super::krylov::GmresOutcome,
+        direct: &mut Option<crate::solver::ComplexMatrix>,
     ) -> Result<Vec<Complex64>, HbError> {
         let size = rhs.len();
         let qualification = if outcome.converged {
@@ -2106,16 +2124,23 @@ impl HbSolver {
             Err(
                 error @ rspice_matrix::SolverError::ConvergenceFailed(_)
                 | error @ rspice_matrix::SolverError::InaccurateSolution(_),
-            ) if size < super::krylov::KRYLOV_AUTO_THRESHOLD => {
+            ) => {
                 log::debug!(
                     "PNoise matrix-free adjoint was not certified after {} iterations \
-                     (reported relative residual {:.2e}: {}); using bounded dense recovery",
+                     (reported relative residual {:.2e}: {}); solving the adjoint directly",
                     outcome.iterations,
                     outcome.relative_residual,
                     error
                 );
-                let transpose = operator.noise_dense_transpose();
-                self.solve_complex_linear_system(&transpose, rhs)
+                let matrix = match direct {
+                    Some(matrix) => matrix,
+                    None => direct.insert(Self::assemble_complex_entry_system(
+                        size,
+                        true,
+                        |visitor| operator.visit_noise_entries(visitor),
+                    )?),
+                };
+                Self::solve_complex_entry_system(matrix, rhs)
             }
             Err(error) => Err(HbError::InvalidCircuit(format!(
                 "PNoise adjoint {size}x{size} iterative linear solve is uncertified after {} \
@@ -3359,8 +3384,8 @@ mod matrix_free_tests {
         );
 
         let recovered = solver
-            .qualify_periodic_noise_adjoint(&operator, &rhs, false_convergence)
-            .expect("a small uncertified Krylov solution uses bounded dense recovery");
+            .qualify_periodic_noise_adjoint(&operator, &rhs, false_convergence, &mut None)
+            .expect("a small uncertified Krylov solution is solved directly");
         assert_close(recovered[0], Complex64::new(1.0, 0.0));
         assert!(
             recovered[1].re < 0.0,
@@ -3418,8 +3443,8 @@ mod matrix_free_tests {
         );
 
         let recovered = solver
-            .qualify_periodic_ac_solution(&operator, &rhs, false_convergence)
-            .expect("a small uncertified PAC solution uses bounded dense recovery");
+            .qualify_periodic_ac_solution(&operator, &rhs, false_convergence, &mut None)
+            .expect("a small uncertified PAC solution is solved directly");
         assert_close(recovered[0], Complex64::new(1.0, 0.0));
         assert_eq!(recovered[1].im, 0.0);
         assert!(
@@ -3430,8 +3455,12 @@ mod matrix_free_tests {
         );
     }
 
+    /// A candidate the certificate rejects at the Krylov threshold, where
+    /// no dense matrix may be built, is recovered by the direct solver on
+    /// the system assembled sparse from the operator's entries, which it
+    /// keeps, factored, for the next right-hand side.
     #[test]
-    fn pac_forward_never_materializes_dense_fallback_at_krylov_threshold() {
+    fn pac_forward_recovers_an_uncertified_candidate_directly_at_krylov_threshold() {
         let dimension = super::super::krylov::KRYLOV_AUTO_THRESHOLD;
         let eps = 1.0e-12;
         let mut g = (0..dimension)
@@ -3466,15 +3495,18 @@ mod matrix_free_tests {
             converged: true,
         };
 
-        let error = solver
-            .qualify_periodic_ac_solution(&operator, &rhs, false_convergence)
-            .expect_err("large uncertified PAC solutions must fail without dense allocation");
-        let HbError::InvalidCircuit(message) = error else {
-            panic!("unexpected error: {error}");
-        };
-        assert!(message.contains("PAC forward 256x256"), "{message}");
-        assert!(message.contains("after 1 iterations"), "{message}");
-        assert!(message.contains("backward-error"), "{message}");
+        let mut direct = None;
+        let recovered = solver
+            .qualify_periodic_ac_solution(&operator, &rhs, false_convergence, &mut direct)
+            .expect("a large uncertified PAC solution is solved directly");
+        assert_close(recovered[0], Complex64::new(1.0, 0.0));
+        assert!(
+            (recovered[1].re + eps).abs() <= 8.0 * Value::EPSILON * eps,
+            "forward correction {} differs from {} at its own scale",
+            recovered[1].re,
+            -eps
+        );
+        assert!(direct.is_some(), "the assembled system is kept");
     }
 
     /// A Krylov candidate that GMRES stopped on its normwise flag is still
@@ -3511,7 +3543,7 @@ mod matrix_free_tests {
             converged: false,
         };
         let solution = solver
-            .qualify_periodic_ac_solution(&operator, &rhs, stalled)
+            .qualify_periodic_ac_solution(&operator, &rhs, stalled, &mut None)
             .expect("a certified candidate is published whatever GMRES's normwise flag says");
         assert!(
             solution
@@ -3597,7 +3629,7 @@ mod matrix_free_tests {
         assert_eq!(refined.solution, solution);
         let solver = HbSolver::new(HbConfig::new(1.0).with_harmonics(1), 5);
         solver
-            .qualify_periodic_ac_solution(&operator, &rhs, refined)
+            .qualify_periodic_ac_solution(&operator, &rhs, refined, &mut None)
             .expect("the projected candidate certifies");
     }
 
@@ -3916,8 +3948,10 @@ mod matrix_free_tests {
         assert!(error.to_string().contains("allocation failed"), "{error}");
     }
 
+    /// The adjoint's twin of
+    /// `pac_forward_recovers_an_uncertified_candidate_directly_at_krylov_threshold`.
     #[test]
-    fn pnoise_adjoint_never_materializes_dense_fallback_at_krylov_threshold() {
+    fn pnoise_adjoint_recovers_an_uncertified_candidate_directly_at_krylov_threshold() {
         let dimension = super::super::krylov::KRYLOV_AUTO_THRESHOLD;
         let eps = 1.0e-12;
         let mut g = (0..dimension)
@@ -3952,15 +3986,18 @@ mod matrix_free_tests {
             converged: true,
         };
 
-        let error = solver
-            .qualify_periodic_noise_adjoint(&operator, &rhs, false_convergence)
-            .expect_err("large uncertified Krylov solutions must fail without dense allocation");
-        let HbError::InvalidCircuit(message) = error else {
-            panic!("unexpected error: {error}");
-        };
-        assert!(message.contains("PNoise adjoint 256x256"), "{message}");
-        assert!(message.contains("after 1 iterations"), "{message}");
-        assert!(message.contains("backward-error"), "{message}");
+        let mut direct = None;
+        let recovered = solver
+            .qualify_periodic_noise_adjoint(&operator, &rhs, false_convergence, &mut direct)
+            .expect("a large uncertified adjoint is solved directly");
+        assert_close(recovered[0], Complex64::new(1.0, 0.0));
+        assert!(
+            (recovered[1].re + eps).abs() <= 8.0 * Value::EPSILON * eps,
+            "adjoint correction {} differs from {} at its own scale",
+            recovered[1].re,
+            -eps
+        );
+        assert!(direct.is_some(), "the assembled system is kept");
     }
 
     #[test]
@@ -4064,8 +4101,13 @@ mod matrix_free_tests {
         };
 
         let error = solver
-            .qualify_periodic_noise_adjoint(&operator, &[Complex64::new(1.0, 0.0)], outcome)
-            .expect_err("structural certificate failures must bypass dense recovery");
+            .qualify_periodic_noise_adjoint(
+                &operator,
+                &[Complex64::new(1.0, 0.0)],
+                outcome,
+                &mut None,
+            )
+            .expect_err("structural certificate failures must bypass direct recovery");
         let HbError::InvalidCircuit(message) = error else {
             panic!("unexpected error: {error}");
         };

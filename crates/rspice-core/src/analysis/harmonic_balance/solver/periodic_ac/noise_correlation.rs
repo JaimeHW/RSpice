@@ -399,6 +399,7 @@ impl HbSolver {
                 noise_operator.visit_noise_entries(visitor);
             })
         });
+        let mut direct = None;
         for (channel, output) in outputs.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
@@ -446,7 +447,7 @@ impl HbSolver {
                     restart,
                     abort,
                 )?;
-                self.qualify_periodic_noise_adjoint(noise_operator, &rhs, outcome)?
+                self.qualify_periodic_noise_adjoint(noise_operator, &rhs, outcome, &mut direct)?
             } else {
                 self.solve_complex_linear_system(
                     transpose.as_ref().ok_or_else(|| {
