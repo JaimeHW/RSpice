@@ -1415,7 +1415,7 @@ impl CircuitData {
             .zip(snapshot.xspice_instances)
         {
             if let Some(image) = image {
-                *instance = image;
+                instance.restore(image);
             }
         }
         self.scheduler.xspice_event_values = snapshot.xspice_event_values;

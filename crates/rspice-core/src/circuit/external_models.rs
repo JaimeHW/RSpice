@@ -2353,7 +2353,7 @@ impl CircuitData {
     pub(crate) fn restore_xspice_trial_state(&mut self, trial: XspiceTrialState) {
         for (instance, image) in self.xspice_instances.iter_mut().zip(trial.instances) {
             if let Some(image) = image {
-                *instance = image;
+                instance.restore(image);
             }
         }
         self.scheduler.xspice_event_values = trial.values;
@@ -2374,7 +2374,13 @@ impl CircuitData {
         &mut self,
         rollback: XspiceAcceptanceRollback,
     ) -> crate::xspice::CmResult<()> {
-        self.xspice_instances = rollback.instances;
+        if self.xspice_instances.len() == rollback.instances.len() {
+            for (instance, image) in self.xspice_instances.iter_mut().zip(rollback.instances) {
+                instance.restore(image);
+            }
+        } else {
+            self.xspice_instances = rollback.instances;
+        }
         self.scheduler.xspice_event_values = rollback.values;
         self.scheduler.xspice_event_queue = rollback.queue;
         self.xspice_evaluation_error = rollback.error;

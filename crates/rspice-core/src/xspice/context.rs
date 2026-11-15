@@ -2599,6 +2599,134 @@ impl CmContext {
         Ok(reading)
     }
 
+    /// Make this context a copy of `source`, reusing the buffers this one
+    /// already holds: a [`Clone::clone`] that allocates only where `source`
+    /// has outgrown them.
+    ///
+    /// Every field is named, so a field added to the context and not copied
+    /// here does not compile.
+    pub(crate) fn refill_from(&mut self, source: &Self) {
+        let Self {
+            time,
+            time_prev,
+            timestep,
+            coincidence,
+            xyce_one_step_order2,
+            transient_step_hint,
+            transient_stop_time,
+            temperature,
+            ramptime,
+            digital_delay_type,
+            analysis,
+            call_type,
+            evaluation_phase,
+            operating_point_load,
+            iteration,
+            event_loads_revision,
+            next_string_param_revision,
+            next_real_vector_param_revision,
+            transient_companion,
+            resource_limits,
+            inputs,
+            committed_digital_outputs,
+            other_digital_drivers,
+            input_event_times,
+            input_vector_event_times,
+            port_total_loads,
+            port_vector_total_loads,
+            outputs,
+            setup,
+            state,
+            state_prev,
+            int_state,
+            transient_histories,
+            input_analog_vector_transitions,
+            output_analog_transitions,
+            resources,
+            resource_transaction,
+            pending_events,
+            pending_real_events,
+            inertial_outputs,
+            requested_breakpoints,
+            requested_edge_completions,
+            requested_landings,
+            stamps,
+            rhs,
+            static_stamps,
+            static_rhs,
+            #[cfg(feature = "veriloga")]
+            hdl_drives,
+            #[cfg(feature = "veriloga")]
+            located_crossings,
+        } = source;
+        self.time = *time;
+        self.time_prev = *time_prev;
+        self.timestep = *timestep;
+        self.coincidence = *coincidence;
+        self.xyce_one_step_order2 = *xyce_one_step_order2;
+        self.transient_step_hint = *transient_step_hint;
+        self.transient_stop_time = *transient_stop_time;
+        self.temperature = *temperature;
+        self.ramptime = *ramptime;
+        self.digital_delay_type = *digital_delay_type;
+        self.analysis = *analysis;
+        self.call_type = *call_type;
+        self.evaluation_phase = *evaluation_phase;
+        self.operating_point_load = *operating_point_load;
+        self.iteration = *iteration;
+        self.event_loads_revision = *event_loads_revision;
+        self.next_string_param_revision = *next_string_param_revision;
+        self.next_real_vector_param_revision = *next_real_vector_param_revision;
+        self.transient_companion.clone_from(transient_companion);
+        self.resource_limits.clone_from(resource_limits);
+        self.inputs.clone_from(inputs);
+        self.committed_digital_outputs
+            .clone_from(committed_digital_outputs);
+        self.other_digital_drivers.clone_from(other_digital_drivers);
+        self.input_event_times.clone_from(input_event_times);
+        self.input_vector_event_times
+            .clone_from(input_vector_event_times);
+        self.port_total_loads.clone_from(port_total_loads);
+        self.port_vector_total_loads
+            .clone_from(port_vector_total_loads);
+        self.outputs.clone_from(outputs);
+        self.setup.clone_from(setup);
+        self.state.clone_from(state);
+        self.state_prev.clone_from(state_prev);
+        self.int_state.clone_from(int_state);
+        self.transient_histories.clone_from(transient_histories);
+        self.input_analog_vector_transitions
+            .clone_from(input_analog_vector_transitions);
+        self.output_analog_transitions
+            .clone_from(output_analog_transitions);
+        self.resources.clone_from(resources);
+        self.resource_transaction.clone_from(resource_transaction);
+        self.pending_events.clone_from(pending_events);
+        self.pending_real_events.clone_from(pending_real_events);
+        self.inertial_outputs.clone_from(inertial_outputs);
+        self.requested_breakpoints.clone_from(requested_breakpoints);
+        self.requested_edge_completions
+            .clone_from(requested_edge_completions);
+        self.requested_landings.clone_from(requested_landings);
+        self.stamps.clone_from(stamps);
+        self.rhs.clone_from(rhs);
+        self.static_stamps.clone_from(static_stamps);
+        self.static_rhs.clone_from(static_rhs);
+        #[cfg(feature = "veriloga")]
+        self.hdl_drives.clone_from(hdl_drives);
+        #[cfg(feature = "veriloga")]
+        self.located_crossings.clone_from(located_crossings);
+    }
+
+    /// Let go of the resources this context shares, before it is kept only
+    /// for its buffers ([`Self::refill_from`] replaces them anyway). A
+    /// resource a discarded trial opened is then dropped when the trial is,
+    /// as it was before the copy was kept.
+    pub(crate) fn release_resources(&mut self) {
+        self.resources = CopyOnWrite::default();
+        self.resource_transaction = None;
+    }
+
     /// Get parameter value
     pub fn param(&self, name: &str) -> Value {
         let key = Self::canonical_param_lookup_key(name);

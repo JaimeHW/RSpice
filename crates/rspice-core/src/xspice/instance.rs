@@ -991,15 +991,111 @@ pub enum EvaluationRecovery {
 /// because the only mutable view of the instance is [`Self::make_mut`].
 /// `DerefMut` is deliberately not implemented: shared reads go through
 /// [`Deref`] unchanged, and every mutation site is spelled out.
-#[derive(Clone)]
+///
+/// The copy a write takes is the one cost a rolled-back trial pays per
+/// instance it writes, and it used to be a fresh allocation, filled and then
+/// freed again when the trial was put back. [`Self::restore`] keeps that
+/// copy instead, as `spare`, and the next write refills it in place
+/// ([`XspiceInstance::refill_from`]): the same copy of the same instance,
+/// without allocating or freeing. A clone never carries the spare, so the
+/// spare stays this handle's alone.
 #[doc(hidden)]
-pub struct SharedXspiceInstance(Arc<XspiceInstance>);
+pub struct SharedXspiceInstance {
+    live: Arc<XspiceInstance>,
+    spare: Option<Arc<XspiceInstance>>,
+}
+
+impl Clone for SharedXspiceInstance {
+    fn clone(&self) -> Self {
+        Self {
+            live: Arc::clone(&self.live),
+            spare: None,
+        }
+    }
+}
+
+impl XspiceInstance {
+    /// Make this instance a copy of `source`, reusing the buffers it already
+    /// holds; see [`CmContext::refill_from`]. Every field is named, so a
+    /// field added and not copied here does not compile.
+    fn refill_from(&mut self, source: &Self) {
+        let Self {
+            solution_num_nodes,
+            port_context_solution_num_nodes,
+            event_inputs_dirty,
+            probe_writes_only_outputs,
+            analog_stamp_surface,
+            initialized,
+            mixed_input_thresholds_bound,
+            name,
+            model,
+            ports,
+            connections,
+            port_indices,
+            output_branches,
+            output_vector_branches,
+            last_event_input_signature,
+            event_input_signature_scratch,
+            context,
+            #[cfg(feature = "veriloga")]
+            driver_taps,
+            #[cfg(feature = "veriloga")]
+            hdl_drive_port,
+        } = source;
+        self.solution_num_nodes = *solution_num_nodes;
+        self.port_context_solution_num_nodes = *port_context_solution_num_nodes;
+        self.event_inputs_dirty = *event_inputs_dirty;
+        self.probe_writes_only_outputs = *probe_writes_only_outputs;
+        self.analog_stamp_surface = *analog_stamp_surface;
+        self.initialized = *initialized;
+        self.mixed_input_thresholds_bound = *mixed_input_thresholds_bound;
+        self.name.clone_from(name);
+        self.model.clone_from(model);
+        self.ports.clone_from(ports);
+        self.connections.clone_from(connections);
+        self.port_indices.clone_from(port_indices);
+        self.output_branches.clone_from(output_branches);
+        self.output_vector_branches
+            .clone_from(output_vector_branches);
+        self.last_event_input_signature
+            .clone_from(last_event_input_signature);
+        self.event_input_signature_scratch
+            .clone_from(event_input_signature_scratch);
+        self.context.refill_from(context);
+        #[cfg(feature = "veriloga")]
+        self.driver_taps.clone_from(driver_taps);
+        #[cfg(feature = "veriloga")]
+        self.hdl_drive_port.clone_from(hdl_drive_port);
+    }
+}
 
 impl SharedXspiceInstance {
     /// Register an instance the circuit has just built.
     #[doc(hidden)]
     pub fn new(instance: XspiceInstance) -> Self {
-        Self(Arc::new(instance))
+        Self {
+            live: Arc::new(instance),
+            spare: None,
+        }
+    }
+
+    /// Put `image`, a handle captured before a trial, back in place of this
+    /// one. A copy the trial wrote is kept as the spare the next write
+    /// refills; otherwise the spare this handle had is kept.
+    pub(crate) fn restore(&mut self, image: Self) {
+        let Self {
+            live: written,
+            spare,
+        } = std::mem::replace(self, image);
+        self.spare = spare;
+        if Arc::ptr_eq(&written, &self.live) {
+            return;
+        }
+        let mut written = written;
+        if let Some(copy) = Arc::get_mut(&mut written) {
+            copy.context.release_resources();
+            self.spare = Some(written);
+        }
     }
 
     /// Take a mutable view, copying the instance first if a snapshot still
@@ -1015,7 +1111,16 @@ impl SharedXspiceInstance {
     #[inline]
     #[doc(hidden)]
     pub fn make_mut(&mut self) -> &mut XspiceInstance {
-        let (instance, copied) = crate::xspice::settle_cost::make_mut_reporting_copy(&mut self.0);
+        if Arc::get_mut(&mut self.live).is_none()
+            && let Some(mut spare) = self.spare.take()
+            && let Some(copy) = Arc::get_mut(&mut spare)
+        {
+            copy.refill_from(&self.live);
+            self.live = spare;
+            crate::xspice::settle_cost::note_instance_deep_copy();
+        }
+        let (instance, copied) =
+            crate::xspice::settle_cost::make_mut_reporting_copy(&mut self.live);
         if copied {
             crate::xspice::settle_cost::note_instance_deep_copy();
         }
@@ -1028,13 +1133,13 @@ impl std::ops::Deref for SharedXspiceInstance {
 
     #[inline]
     fn deref(&self) -> &XspiceInstance {
-        &self.0
+        &self.live
     }
 }
 
 impl std::fmt::Debug for SharedXspiceInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&*self.0, f)
+        std::fmt::Debug::fmt(&*self.live, f)
     }
 }
 
@@ -4393,6 +4498,43 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    #[test]
+    fn a_trial_copy_is_kept_refilled_and_never_seen_by_the_image() {
+        let mut instance = instance_with(PanicModel::new());
+        instance.context.allocate_states(2);
+        instance.context.set_state(0, 1.0);
+        let mut shared = SharedXspiceInstance::new(instance);
+
+        // A trial writes through a copy and is put back.
+        let image = shared.clone();
+        shared.make_mut().context.set_state(0, 2.0);
+        assert_eq!(image.context.state(0), 1.0);
+        let copy = Arc::as_ptr(&shared.live);
+        shared.restore(image);
+        assert_eq!(shared.context.state(0), 1.0);
+        assert!(shared.spare.is_some(), "the written copy is kept");
+
+        // The next trial refills that copy from the image, so nothing the
+        // first trial wrote survives into it.
+        let image = shared.clone();
+        shared.make_mut().context.set_state(1, 3.0);
+        assert_eq!(Arc::as_ptr(&shared.live), copy, "the kept copy is reused");
+        assert_eq!(shared.context.state(0), 1.0);
+        assert_eq!(image.context.state(1), 0.0);
+        shared.restore(image);
+        assert_eq!(shared.context.state(1), 0.0);
+
+        // A trial that writes nothing keeps the spare, a clone never carries
+        // it, and an unshared handle writes in place.
+        let image = shared.clone();
+        assert!(image.spare.is_none());
+        shared.restore(image);
+        assert!(shared.spare.is_some());
+        let live = Arc::as_ptr(&shared.live);
+        shared.make_mut().context.set_state(0, 4.0);
+        assert_eq!(Arc::as_ptr(&shared.live), live);
     }
 
     fn instance_with(model: PanicModel) -> XspiceInstance {
