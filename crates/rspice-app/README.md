@@ -6,9 +6,9 @@ results, model library, hardcopy) to host services, document lifecycles,
 commands and the workbench shell, and owns no circuit, dataset or engine
 semantics of its own. One state tree and one command registry serve desktop,
 browser and tablet, and the same crate builds both the native binary and the
-wasm32 application image. Internal layering is checked by
-`tests/module_layering.rs`, package dependency boundaries by
-`tools/ci/check_app_crate_dependencies.py`.
+wasm32 application image. Internal layering and the application crates'
+conventions are checked by `tests/app_conventions.rs`, package dependency
+boundaries by `tools/ci/check_app_crate_dependencies.py`.
 
 ## What's in here
 
@@ -122,8 +122,8 @@ Production issuance belongs to the platform backend's cold-key flow.
 # Desktop application (binary name: rspice-app)
 cargo run -p rspice-app --release --features generated-veriloga-catalog
 
-# Inline #[cfg(test)] modules plus tests/: module_layering, hierarchy_guards,
-# browser_clock, simulation_configuration_contract. Self-contained.
+# Inline #[cfg(test)] modules plus tests/: app_conventions, hierarchy_guards,
+# simulation_configuration_contract. Self-contained.
 cargo test -p rspice-app
 ```
 

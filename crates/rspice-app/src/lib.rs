@@ -4,8 +4,9 @@
 //! presentation belong to the sibling crates. This crate binds those owners
 //! to host services, document lifecycles, commands, navigation and workbench UI.
 //!
-//! Internal layers are checked by `tests/module_layering.rs`; package dependency
-//! boundaries are checked by `tools/ci/check_app_crate_dependencies.py`.
+//! Internal layers and the application crates' conventions are checked by
+//! `tests/app_conventions.rs`; package dependency boundaries are checked by
+//! `tools/ci/check_app_crate_dependencies.py`.
 
 // Temporary allowance for existing external/SPICE naming conventions.
 #![allow(non_snake_case)]

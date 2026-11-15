@@ -805,7 +805,7 @@ mod tests {
     // for two reasons. It needs the private items above -- `KEY_TAG`, the
     // payload layout, `parse_and_verify_with_policy` -- and a separate target
     // could only reach them through `pub` re-exports from the crate root,
-    // which is the visibility hole `tests/module_layering.rs` exists to keep
+    // which is the visibility hole `tests/app_conventions.rs` exists to keep
     // shut. And `cfg(test)` is a stronger guarantee than a Cargo feature that
     // no signing code is linked into a shipped binary: a feature can be
     // enabled by accident.

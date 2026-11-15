@@ -1,27 +1,33 @@
-//! Architectural layering rule for the `rspice-app` application crate.
+//! The application crates' conventions, and the shell's own layering.
 //!
-//! The application still contains modules awaiting extraction: state, project
-//! I/O, orchestration, viewer mathematics, and chrome currently share this
-//! crate. The engine already lives in `rspice-core` and `rspice-veriloga`.
-//! Until the remaining owners have crate boundaries, the compiler cannot
-//! reject every import that inverts this internal architecture.
+//! # Conventions every application crate keeps
 //!
-//! This test is the substitute. It declares the intended layer order and
+//! Each of these reads every source of every application crate: the shell and
+//! each `rspice-app-*` crate, discovered under `crates/` and checked against
+//! [`KNOWN_APP_CRATES`]. Each fails if it read no source of one, so a crate a
+//! scan stops reaching fails instead of passing on nothing.
+//!
+//! - No source starts with a byte-order mark.
+//! - Every module opens with a `//!` header that says what it is.
+//! - A module's file sits beside its directory (`foo.rs` beside `foo/`), never
+//!   in a `mod.rs`.
+//! - Every production dialog states its purpose.
+//! - A row painted with words reaches the accessibility tree, or is listed as
+//!   debt in [`UNPUBLISHED_PAINTED_ROWS`].
+//! - A module is public only where [`PUBLIC_MODULES`] lists it: nowhere in the
+//!   shell, and exactly the listed ones in each crate below it.
+//!
+//! # The shell's layering
+//!
+//! The crate graph orders the application crates
+//! (`tools/ci/check_app_crate_dependencies.py`), and the compiler holds it.
+//! Nothing holds the order inside the shell, so this file declares it and
 //! fails when a module reaches sideways or upward through `crate::`.
+//! [`LAYERS`] orders the shell's top-level modules and [`WORKBENCH_LAYERS`]
+//! the modules inside its `workbench`; both orders are checked the same way.
 //!
-//! # Two levels
-//!
-//! [`LAYERS`] orders the crate's top-level modules. That alone is not enough:
-//! `workbench` is 283k lines across 254 files — about half the crate — so
-//! treating it as one unit left its entire interior unmeasured, and a cycle
-//! that an earlier refactor believed it had retired was in fact still there.
-//! [`WORKBENCH_LAYERS`] therefore orders `workbench`'s own submodules, and
-//! both orders are checked the same way.
-//!
-//! # Allowed edges
-//!
-//! Every edge that violates the layer order today is listed in
-//! [`ALLOWED_VIOLATIONS`]:
+//! Every edge that violates an order today is listed in [`ALLOWED_VIOLATIONS`]
+//! or [`ALLOWED_WORKBENCH_VIOLATIONS`]:
 //!
 //! - A **new** violating edge fails the build.
 //! - A listed edge that no longer exists fails the build until its entry is
@@ -51,19 +57,8 @@ use std::sync::OnceLock;
 /// The ordering encodes the target architecture, not today's reality —
 /// [`ALLOWED_VIOLATIONS`] carries the gap between the two.
 const LAYERS: &[(&str, u32)] = &[
-    // The persisted model, its contracts and its diagnostics live in
-    // `rspice-app-state`, and the platform services (project I/O, the
-    // lifecycle, recovery, the managed runtime and the build identity) in
-    // `rspice-app-services`, and the run tier (the controller, its prepared
-    // runs, the run preflight and the runs' slot) in `rspice-app-runs`, below
-    // every module here; each may reference them. The workbench framework
-    // compiles as `rspice-app-workbench`, and the sheets, settings, results,
-    // hardcopy, cloud, models, simulate, code, project and design features as
-    // `rspice-app-sheets`, `rspice-app-settings`, `rspice-app-results`,
-    // `rspice-app-hardcopy`, `rspice-app-cloud`, `rspice-app-models`,
-    // `rspice-app-simulate`, `rspice-app-code`, `rspice-app-project` and
-    // `rspice-app-design`, inside `workbench`, where the interior order below
-    // ranks them.
+    // Every other application crate sits below the shell, where the crate
+    // graph orders them, so each module here may reference any of them.
     //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, so the bottom layer clears every inbound edge
@@ -423,7 +418,7 @@ fn layer_of(module: &str) -> u32 {
         .unwrap_or_else(|| {
             panic!(
                 "module `{module}` has no declared layer.\n\
-                 Add it to LAYERS in tests/module_layering.rs, placing it \
+                 Add it to LAYERS in tests/app_conventions.rs, placing it \
                  strictly above everything it may reference."
             )
         })
@@ -472,7 +467,7 @@ fn every_top_level_module_declares_a_layer() {
     assert!(
         undeclared.is_empty(),
         "new top-level modules without a declared layer: {undeclared:?}\n\
-         Add them to LAYERS in tests/module_layering.rs. A module with no \
+         Add them to LAYERS in tests/app_conventions.rs. A module with no \
          declared position in the architecture is a module nobody decided \
          the position of."
     );
@@ -524,7 +519,7 @@ fn module_references_respect_the_layer_order() {
         failures.push_str(&format!(
             "\nAllowlist entries for edges that no longer exist:\n{}\n\
              Delete them from ALLOWED_VIOLATIONS in \
-             tests/module_layering.rs.\n",
+             tests/app_conventions.rs.\n",
             retired.join("\n")
         ));
     }
@@ -535,170 +530,44 @@ fn module_references_respect_the_layer_order() {
 // The interior of `workbench`
 // =============================================================================
 
-/// Intended order inside `workbench`, lowest first. Position is the rank.
+/// Intended order inside the shell's `workbench`, lowest first. Position is
+/// the rank.
 ///
-/// [`LAYERS`] treats `workbench` as one unit, which left 283k lines — roughly
-/// half the crate — with no layering enforcement at all. The `common` merge in
-/// `7401cdcf0` did not retire the cycle it describes; it moved the boundary so
-/// the top-level test could no longer see it. Sixteen module pairs still
-/// reference each other in both directions, and `app` is in twelve of them.
+/// Only the shell's own modules are ranked. The workbench framework and the
+/// features keep the paths they had here, but in crates of their own, and the
+/// crate graph orders those.
 ///
 /// Unlike [`LAYERS`], this order is total: a module may reference anything
 /// earlier in this list and nothing at or after it. Ties are what let a cycle
-/// hide inside a layer, and the whole point of this table is that one already
-/// did.
+/// hide inside a layer, and one has hidden in this interior before.
 const WORKBENCH_LAYERS: &[&str] = &[
-    // The requests the parts of the shell raise for one another and the
-    // frame points that take them. It names nothing of the shell's, so every
-    // part can raise or take one.
-    "framework",
-    // What the sheets feature's commands declare: keys, labels and bindings,
-    // values the command vocabulary lists in the shell's order.
-    "sheets/commands",
-    // What the settings feature's commands declare, the same way.
-    "settings/commands",
-    // What the hardcopy feature's commands declare, the same way.
-    "hardcopy/commands",
-    // What the cloud feature's commands declare, the same way.
-    "cloud/commands",
-    // What the models feature's commands declare, the same way.
-    "models/commands",
-    // What the simulate feature's commands declare, the same way.
-    "simulate/commands",
-    // What the code feature's commands declare, the same way.
-    "code/commands",
-    // What the design feature's commands declare, the same way.
-    "design/commands",
-    // The documents module's own vocabulary: which Code page is showing and
-    // what a source-file action is. Each document engine has its own entry;
-    // a document file without one is owned here, where its first reach into
-    // the shell fails the order.
-    "documents",
+    // Whether the system runs a contrast theme, and the colours it set. It
+    // names nothing of the shell.
     "system_contrast",
-    "routing/surface_route",
-    "routing/surface_catalog",
-    "routing/availability",
-    "routing/navigation",
-    // The workbench's session and the pages' persisted views. The session
-    // holds the route and its history, so it sits above routing; the routes
-    // name a workspace, which is the model's.
+    // The workbench session's tests. The session is the workbench
+    // framework's, and the tests name only lower crates.
     "state",
-    // What one feature shows that another reads, where every answer is a
-    // value of a lower crate or names the session, so the code that answers
-    // it sits anywhere above the session.
-    "framework/ports",
-    // What the Models & PDKs workspace keeps between frames. The models slot
-    // holds it and the session wire persists it, so it ranks below both; it
-    // names only the session's vocabulary and lower crates.
-    "models/workspace_state",
-    // What the Project workspace and the project launcher keep between
-    // frames. The project slot holds it and the session wire persists it, so
-    // it ranks below both; it names nothing of the workbench.
-    "project/workspace_state",
-    // What the Project > Configuration page keeps between frames. The project
-    // slot holds it, so it ranks below it; it names only lower crates.
-    "project/configuration_state",
-    // What the project feature's commands declare, the same way as the
-    // other features' declarations. They name the Project workspace's
-    // pages, so they rank above them.
-    "project/commands",
+    // The logging defaults the native entry points share.
     "logging",
-    "layout",
-    // The interface text catalog and its locales. It names nothing of the
-    // workbench; the command vocabulary reads the labels it owns, and the
-    // editors, docks and surfaces read it.
-    "localization",
-    // Reads the accessibility tree egui builds and writes to the page: it needs
-    // nothing of the shell but the words.
-    "browser/accessible_mirror",
-    // What the results feature's commands declare, the same way. Its labels
-    // read the interface text catalog, so it ranks above it.
-    "results/commands",
     // The command vocabulary: what commands exist, their portable identity,
     // and the label a menu shows. Shortcut profiles, preferences, and the
     // artifact writers name a command without reaching the dispatcher that
     // runs it, which is up at `commands`.
     "commands/vocabulary",
-    "shortcuts",
-    "design_system",
-    // The text model and editing commands the source editors share, and the
-    // virtualized editor drawn over them.
-    "documents/text_document_model",
-    "documents/text_editor_commands",
-    "documents/virtual_text_editor",
-    // Document engines.
-    "documents/netlist_document",
-    "documents/result_document",
-    "documents/code_workspace",
-    "documents/model_editor",
-    "documents/model_correlation",
-    // What the release gate concludes for each model, from the model library
-    // and the open candidate. The models slot answers another feature's
-    // question with it, so it ranks below the slot.
-    "models/qualification",
-    "lifecycle/window_session",
-    // The shortcut libraries' persistence and the artifacts they write.
-    "shortcuts/library_persistence",
-    "shortcuts/artifacts",
-    // Application hardcopy source resolution and host printing adapters.
-    "hardcopy_adapters/sources",
-    // Test fixtures that render resolved sources; the tests of the session
-    // and the dialogs above read them.
-    "hardcopy_adapters/tests",
-    "hardcopy_adapters/print",
     // The session aggregate: the design, the simulation, the document engines'
     // session state, and the dialogs' visibility. It sits directly below the
-    // frame loop because it aggregates the whole session — a module that only
-    // needs one part of it should take that part as a parameter, which is what
-    // retires the `-> app_state` entries below.
+    // frame loop because it aggregates the whole session; a module that only
+    // needs one part of it should take that part as a parameter.
     "app_state",
-    // The host the workbench's containers are drawn for, keyed by the
-    // workbench's own types. It hands them the session, so it sits above the
-    // session aggregate; every container that takes it sits above it.
-    "framework/workbench_host",
-    // A feature, the context its commands run in and the registry they are
-    // listed in. A context holds the model, so it sits above the session
-    // aggregate; every feature sits above it.
-    "framework/feature",
-    // The run tier's host over a feature command's context: it takes the
-    // context's parts, the peers and the registry, so it sits above the
-    // feature and below every feature that starts a run.
-    "framework/run_view",
-    // The live-session engine the application pumps each frame, and result
-    // import. Both take the session aggregate, not the application root.
-    "live_session",
-    "workflows/result_import_workflow",
-    "workflows/result_import_adapters",
-    // The publication snapshot builder: reads the session aggregate and the
-    // hardcopy adapters' resolved scenes to produce the sealed interchange
-    // snapshot. It mutates nothing, but it reads the whole session.
-    "hardcopy_adapters/publication_snapshot",
-    // Demonstration circuits and the shared hierarchy reference populate
+    // The shared hierarchy reference and the example circuits' tests populate
     // AppState through its APIs. They do not depend on the application root;
     // application validation tests can use the same authored projects.
     "examples",
-    // The one name the user is known by. It reads the cloud session and the
-    // license, never the application.
-    "user_identity",
-    // The models feature's browser PDK store: the application starts its
-    // first read at launch, and the feature takes what it settled each
-    // frame. It names the session's parts and lower crates, never the
-    // application, so the root starts it from above.
-    "models/pdk_persistence",
-    // The models feature's browser pack restore: the application starts it
-    // at launch, and the feature takes the packs it kept on the frame they
-    // land. It names the hub's handle, the model and the feature's view
-    // state, never the application, so the root starts it from above.
-    "models/pack_persistence",
     // The application root. Everything above operates on it; everything below
     // is operated on by it.
     "app",
     // Workflows that mutate application state.
-    "workflows/file_workflow",
-    "workflows/project_workflow",
-    "workflows/netlist_workflow",
     "workflows/foreign_schematic_workflow",
-    "shortcuts/profile_workflow",
     "workflows/file_actions",
     // The shell's transactions over the whole project, run where a feature's
     // work asks for one: they take the project workflows and the feature that
@@ -714,42 +583,13 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // and the document engines — so it sits above the commands and below
     // every surface that offers one, none of which it references.
     "diagnostic_routes",
-    // Chrome, docks, surfaces, and the rest of the presentation layer.
+    // The status bar's platform segment, and the actions behind the menus.
     "chrome",
-    "docks",
     "menu_bar",
     // The state each feature owns, one slot per feature. A slot names the
     // dialog and draft types its feature renders, so it ranks above them;
     // the session aggregate that holds the slots reaches up to it.
     "slots",
-    // The sheets feature: its commands' answers over its own slot, the model
-    // and the session.
-    "sheets",
-    // The settings feature: its commands' answers over its own slot, the
-    // model and the session, and the keys its shortcut tables name.
-    "settings",
-    // The hardcopy feature: its commands' answers over its own slot, the
-    // model, the session and what the results workspace shows.
-    "hardcopy",
-    // The results feature: its commands' answers over its own slot, the
-    // model, the session and the platform state.
-    "results",
-    // The account console, which the cloud feature registers and draws on
-    // the shell's route.
-    "account_organization",
-    // The cloud feature: its commands' answers over its own slot, the model,
-    // the session, and the account service and live-session engine it runs.
-    "cloud",
-    // The models feature's home.
-    "models",
-    // The project feature's home.
-    "project",
-    // The simulate feature's home.
-    "simulate",
-    // The design feature's home.
-    "design",
-    // The code feature's home.
-    "code",
     // The shell's list of registered features, which builds each one's
     // context from the application state.
     "features",
@@ -757,22 +597,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // feature that declares the command or the legacy table the commands
     // module keeps.
     "dispatch",
-    "surfaces",
-    // The tools' module file. It only re-exports what other crates compile
-    // (the launcher and the examples from project, the notification centre
-    // from the workbench), and with no tools directory left in the shell the
-    // directory rule does not cover it.
-    "tools",
-    "tools/notification_center",
-    "tools/project_launcher",
-    "tools/jobs_manager",
-    "preflight",
-    "cross_probe",
-    "browser/navigation",
-    // Opening an example replaces the session with a new project and saves
-    // it, through the project workflow; its test runs the plan through the
-    // preflight the frame runs.
-    "tools/examples_browser",
     // The project feature's compositions over the whole application: they
     // lend the feature its context and carry out what it returns, so they
     // rank above its surfaces, its launcher and the transactions they run.
@@ -789,179 +613,44 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "app/run_flow_tests",
 ];
 
-/// Order violations inside `workbench` today.
+/// Order violations inside the shell's `workbench` today.
 ///
 /// Same rules as [`ALLOWED_VIOLATIONS`]: a new edge fails, and an entry whose
 /// edge is gone fails until it is deleted. A new edge means the code is in the
 /// wrong module rather than that the table needs another row.
-///
-/// The concentration is the finding: `app` and `app_state` carry a third of
-/// the list between them. That is what splitting them apart exposed. Before
-/// the split, `AppState` and `RSpiceApp` shared a module, so "this module
-/// needs the session data" and "this module calls the application root" were
-/// the same measurement. They are now separate problems with separate fixes —
-/// the first retires by passing a slice of the session instead of the whole
-/// aggregate, the second by narrowing signatures that take `&mut RSpiceApp`.
 const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     // `app` is the frame loop, and it drives everything. These are the calls
     // out of `RSpiceApp` into the presentation and workflow layers it renders.
     // They retire as the frame loop stops calling and starts setting state
     // that the called module reads — the pattern `frame` already follows.
-    ("app", "workflows/project_workflow"),
     ("app", "commands"),
-    ("app", "chrome"),
     ("app", "workflows/file_actions"),
     ("app", "frame"),
-    // The source find and source document dialogs' tests that only seed and
-    // read code's state run over the code feature's harness, as code's own
-    // seeders do. The dialogs compile in rspice-app-code at their application
-    // path, so the row is their cases calling `code::tests::harness` there.
-    // It retires when those cases reach the harness from inside `code`:
-    // moved into the code feature's tests, or with the dialogs re-homed
-    // under it.
-    ("app", "code"),
-    // The design dialogs' cases that seed and read the design feature's
-    // state run over its test host, as design's own cases do. The dialogs
-    // compile in rspice-app-design at their application path, so the row is
-    // their cases calling `design::test_host` there. It retires when those
-    // cases reach the host from inside `design`: moved into the design
-    // feature's tests, or with the dialogs re-homed under it.
-    ("app", "design"),
-    // `AppState` is the session aggregate, so it inherits two problems from
-    // the root it was split out of.
-    //
-    // Downward: a module that needs one slice of the session takes the whole
-    // aggregate. Each of these retires by passing the slice — the schematic,
-    // the workspace, the netlist session — instead of `&AppState`.
-    ("documents/result_document", "app_state"),
-    // The results feature's test host holds the results slot whose parts its
-    // tests run against, as the session does.
-    ("documents/result_document", "slots"),
-    // Upward: fields whose types live in the feature that renders them, plus
-    // gating methods that query a module above; `-> app` also counts the
-    // session wire naming the bulk-edit filters it keeps, which live with the
-    // dialog that edits them. `-> slots` is the feature slots the state
-    // holds, the platform state it names for the services below it, and the
-    // session wire reading what it keeps of them; slots rank with the dialog
-    // types they name.
+    // `AppState` is the session aggregate, split out of the root, and it
+    // still reaches up: `-> app` is the preference runtime, which runs on the
+    // application root, and `-> slots` the shell's own slot, which ranks with
+    // the slots of the features.
     ("app_state", "app"),
     ("app_state", "slots"),
-    // The tests of code's documents, navigator panes and netlist workflow
-    // that only seed and read state run over the code feature on its own,
-    // and the feature builds that harness, as the models feature builds the
-    // model editor's below. Each module compiles in rspice-app-code at its
-    // application path, so each row is the module's cases calling
-    // `code::tests::harness` there. Each retires when those cases reach the
-    // harness from inside `code`: moved into the code feature's tests, or
-    // with the module re-homed under it.
-    //
-    // The automation, language services, source files, source search and
-    // Verilog-A cases.
-    ("documents/code_workspace", "code"),
-    // The netlist editor's, its library folder's, the language's and the
-    // document's cases.
-    ("documents/netlist_document", "code"),
-    // The code inspector's and the netlist and source bundle navigators' cases.
-    ("docks", "code"),
-    // The netlist workflow's cases.
-    ("workflows/netlist_workflow", "code"),
-    // The model editor document compiles in rspice-app-models at its
-    // application path, so the guard ranks it as before. The row is its
-    // qualification run calling the models feature's library selection, and
-    // its cases running over `models::tests::harness`. It retires when the
-    // document re-homes under `models`, or when both edges go.
-    ("documents/model_editor", "models"),
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
     ("commands", "menu_bar"),
-    ("surfaces", "preflight"),
-    // The shell's own persisted state reaching up into the window session.
-    // This is the same inversion the top-level `state -> *` entries describe,
-    // one layer down: `WorkbenchSession` stores what a surface is showing
-    // instead of the surface deriving it.
-    ("state", "lifecycle/window_session"),
-    // The framework dialogs the workbench holds: the window-session manager,
-    // the command palette, and the confirmation and project-review dialogs.
-    // Their types still live with the application root.
-    ("state", "app"),
-    // The text locale the workbench holds: its type lives with the message
-    // catalog.
-    ("state", "localization"),
-    // The design slot holds the schematic cross-probe runtime, whose type
-    // lives with the frame pass that synchronizes it.
-    ("slots", "cross_probe"),
-    // Artifacts reaching sideways into the workflows.
-    ("shortcuts/artifacts", "shortcuts/profile_workflow"),
-    // Result import opens the imported result's tab through the document
-    // bar, and the dispatcher that starts an import ranks below the bar.
-    ("workflows/result_import_workflow", "chrome"),
-    ("shortcuts/library_persistence", "shortcuts/artifacts"),
-    // Presentation reaching sideways into a peer surface.
-    ("documents/result_document", "chrome"),
-    // A route describing its own catalog and availability.
-    ("routing/surface_route", "routing/surface_catalog"),
 ];
 
 fn workbench_dir() -> PathBuf {
     src_dir().join("workbench")
 }
 
-/// The `src/workbench` of every application crate from the workbench framework
-/// up: the framework's own crate and each crate that depends on it, this
-/// crate among them.
-///
-/// The framework's modules and the features' keep the paths they had here and
-/// their rank in the same order, so each such crate's `src/workbench` is
-/// scanned beside this crate's. The roots come from [`app_src_dirs`] and the
-/// manifests, so a new feature crate's interior is ranked without an edit
-/// here. The tiers below the framework — the model, the services and the run
-/// tier — mirror some of these paths too, but the crate graph orders them
-/// (`tools/ci/check_app_crate_dependencies.py`), not this table.
-fn workbench_roots() -> &'static [PathBuf] {
-    static ROOTS: OnceLock<Vec<PathBuf>> = OnceLock::new();
-    ROOTS.get_or_init(|| {
-        let roots: Vec<PathBuf> = app_src_dirs()
-            .into_iter()
-            .filter(|src| crate_of(src) == "rspice-app-workbench" || depends_on_the_framework(src))
-            .map(|src| src.join("workbench"))
-            .collect();
-        // A floor, not a tally: this crate, the framework and the ten
-        // features that compile as crates of their own.
-        assert!(
-            roots.len() >= 12 && roots.contains(&workbench_dir()),
-            "the workbench scan found only {} roots: {roots:?}",
-            roots.len()
-        );
-        roots
-    })
-}
-
-/// Whether the crate whose `src` this is names the workbench framework among
-/// its dependencies.
-fn depends_on_the_framework(src: &Path) -> bool {
-    let manifest = src
-        .parent()
-        .expect("a source root sits in its crate's directory")
-        .join("Cargo.toml");
-    fs::read_to_string(&manifest)
-        .unwrap_or_else(|error| panic!("read {}: {error}", manifest.display()))
-        .lines()
-        .any(|line| line.trim_start().starts_with("rspice-app-workbench"))
-}
-
-/// A source's path under whichever workbench root holds it.
+/// A source's path under the shell's `src/workbench`.
 fn workbench_relative(file: &Path) -> Option<PathBuf> {
-    workbench_roots()
-        .iter()
-        .find_map(|root| file.strip_prefix(root).ok().map(Path::to_path_buf))
+    file.strip_prefix(workbench_dir())
+        .ok()
+        .map(Path::to_path_buf)
 }
 
-/// Every source under either workbench root.
+/// Every source under the shell's `src/workbench`.
 fn workbench_sources() -> Vec<PathBuf> {
-    workbench_roots()
-        .iter()
-        .flat_map(|root| rust_sources(root))
-        .collect()
+    rust_sources(&workbench_dir())
 }
 
 fn workbench_rank(module: &str) -> usize {
@@ -971,7 +660,7 @@ fn workbench_rank(module: &str) -> usize {
         .unwrap_or_else(|| {
             panic!(
                 "workbench module `{module}` has no declared rank.\n\
-                 Add it to WORKBENCH_LAYERS in tests/module_layering.rs, \
+                 Add it to WORKBENCH_LAYERS in tests/app_conventions.rs, \
                  placing it strictly after everything it may reference."
             )
         })
@@ -983,10 +672,10 @@ fn workbench_rank(module: &str) -> usize {
 /// to `app`. `src/workbench.rs` is the module root and is not scanned: like
 /// the crate root, it is allowed to see everything it declares.
 ///
-/// Declared names may be nested — `hardcopy/sources` — so that grouping files
-/// into a directory does not collapse their ranks into one. The longest
-/// declared prefix wins, which keeps `hardcopy/render` distinct from
-/// `hardcopy/print` while a bare `app` still owns everything beneath it.
+/// Declared names may be nested — `session/project_transactions` — so that
+/// grouping files into a directory does not collapse their ranks into one. The
+/// longest declared prefix wins, which keeps `app/run_flow_tests` distinct from
+/// the rest of `app` while a bare `app` still owns everything else beneath it.
 fn workbench_owning_module(file: &Path) -> Option<String> {
     let relative = workbench_relative(file)?;
     let path = relative
@@ -1014,12 +703,9 @@ fn longest_declared_prefix(path: &str) -> Option<String> {
 
 /// Map each name re-exported by `workbench.rs` back to the module that owns it.
 ///
-/// Two thirds of the shell's public names are re-exported from its root, so
-/// `crate::workbench::ResultViewer` and `crate::workbench::result_document::
-/// ResultViewer` are the same edge written two ways — 239 references, 17% of
-/// the interior total, took the short form. Resolving them here keeps this
-/// test measuring coupling rather than import style, and means the re-export
-/// cleanup can happen without the numbers moving underneath it.
+/// `crate::workbench::RSpiceApp` and `crate::workbench::app::RSpiceApp` are
+/// the same edge written two ways. Resolving the short form here keeps this
+/// test measuring coupling rather than import style.
 fn workbench_reexports() -> BTreeMap<String, String> {
     let source = fs::read_to_string(src_dir().join("workbench.rs")).expect("read workbench.rs");
     let declared: Vec<&str> = WORKBENCH_LAYERS.to_vec();
@@ -1279,23 +965,14 @@ fn declares_only_submodules(file: &Path) -> bool {
         .all(|line| line.starts_with("#[") || is_module_declaration(line))
 }
 
-/// `mod x;` behind any visibility: `pub`, `pub(crate)`, `pub(in path)`. A
-/// module a lower application crate compiles, re-exported here at the path it
-/// had (`pub(crate) use rspice_app_services::workbench::workflows::x;`), is
-/// the same declaration.
+/// `mod x;` behind any visibility: `pub`, `pub(crate)`, `pub(in path)`.
 fn is_module_declaration(line: &str) -> bool {
     let Some(declaration) = line.strip_suffix(';') else {
         return false;
     };
     let words = declaration.split_whitespace().collect::<Vec<_>>();
-    let visibility = match words.as_slice() {
-        [visibility @ .., "mod", _] => visibility,
-        [visibility @ .., "use", path]
-            if path.starts_with("rspice_app_") && !path.contains(['{', '*']) =>
-        {
-            visibility
-        }
-        _ => return false,
+    let [visibility @ .., "mod", _] = words.as_slice() else {
+        return false;
     };
     visibility
         .iter()
@@ -1322,9 +999,9 @@ fn every_workbench_module_declares_a_layer() {
     assert!(
         undeclared.is_empty(),
         "new workbench modules without a declared rank: {undeclared:?}\n\
-         Add them to WORKBENCH_LAYERS in tests/module_layering.rs. The shell \
-         is half this crate; a module with no position in it is a module \
-         nobody decided the position of."
+         Add them to WORKBENCH_LAYERS in tests/app_conventions.rs. A module \
+         with no position in the shell is a module nobody decided the \
+         position of."
     );
 }
 
@@ -1373,7 +1050,7 @@ fn workbench_references_respect_the_layer_order() {
         failures.push_str(&format!(
             "\nAllowlist entries for workbench edges that no longer exist:\n{}\n\
              Delete them from ALLOWED_WORKBENCH_VIOLATIONS in \
-             tests/module_layering.rs.\n",
+             tests/app_conventions.rs.\n",
             retired.join("\n")
         ));
     }
@@ -1397,6 +1074,9 @@ fn workbench_references_respect_the_layer_order() {
 ///
 /// To reach something from a test, add a re-export in `lib.rs`. Adding a
 /// `pub mod` re-opens the hole for that whole subtree.
+///
+/// The crates below the shell do make modules public, for the shell and the
+/// crates above to reach; [`PUBLIC_MODULES`] holds each to its exact list.
 #[test]
 fn no_module_is_public() {
     let root = src_dir();
@@ -1418,6 +1098,916 @@ fn no_module_is_public() {
          world. Use `pub(crate) mod`, and re-export from the crate root if an \
          integration test or example genuinely needs the item.",
         public.join("\n  ")
+    );
+}
+
+/// Every `pub mod` of each application crate below the shell, as (crate,
+/// [(file relative to the crate's `src/`, module name)]).
+///
+/// The shell and the crates above reach a lower crate's modules by their
+/// paths in its mirrored `workbench` tree, so a module reached that way has to
+/// be `pub mod`, and that is the only reason one is public. A name a file
+/// declares twice, under two `cfg`s or two parents, is one entry.
+const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
+    (
+        "rspice-app-cloud",
+        &[
+            ("lib.rs", "account_organization"),
+            ("lib.rs", "app"),
+            ("lib.rs", "app_state"),
+            ("lib.rs", "chrome"),
+            ("lib.rs", "cloud"),
+            ("lib.rs", "cloud_account"),
+            ("lib.rs", "dialogs"),
+            ("lib.rs", "dpapi"),
+            ("lib.rs", "license"),
+            ("lib.rs", "live_session"),
+            ("lib.rs", "presence"),
+            ("lib.rs", "publish_web"),
+            ("lib.rs", "services"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "unpublish_web"),
+            ("lib.rs", "update_check"),
+            ("lib.rs", "user_identity"),
+            ("lib.rs", "workbench"),
+            ("services/cloud_account.rs", "model_hub_transport"),
+            ("workbench/cloud.rs", "commands"),
+        ],
+    ),
+    (
+        "rspice-app-code",
+        &[
+            ("lib.rs", "actions"),
+            ("lib.rs", "app"),
+            ("lib.rs", "app_state"),
+            ("lib.rs", "automation"),
+            ("lib.rs", "automation_workflow"),
+            ("lib.rs", "bom_export"),
+            ("lib.rs", "browser"),
+            ("lib.rs", "chrome"),
+            ("lib.rs", "code"),
+            ("lib.rs", "code_context"),
+            ("lib.rs", "code_workspace"),
+            ("lib.rs", "commands"),
+            ("lib.rs", "dialogs"),
+            ("lib.rs", "docks"),
+            ("lib.rs", "document_bar"),
+            ("lib.rs", "documents"),
+            ("lib.rs", "editor_font"),
+            ("lib.rs", "inspector"),
+            ("lib.rs", "library"),
+            ("lib.rs", "menu_bar"),
+            ("lib.rs", "navigator"),
+            ("lib.rs", "netlist"),
+            ("lib.rs", "netlist_actions"),
+            ("lib.rs", "netlist_compat"),
+            ("lib.rs", "netlist_document"),
+            ("lib.rs", "netlist_export"),
+            ("lib.rs", "netlist_lifecycle"),
+            ("lib.rs", "netlist_workflow"),
+            ("lib.rs", "new_veriloga_device"),
+            ("lib.rs", "services"),
+            ("lib.rs", "simulation"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "source_bundle"),
+            ("lib.rs", "source_document"),
+            ("lib.rs", "source_find"),
+            ("lib.rs", "source_language_tools"),
+            ("lib.rs", "state"),
+            ("lib.rs", "surfaces"),
+            ("lib.rs", "text_document_model"),
+            ("lib.rs", "text_editor_commands"),
+            ("lib.rs", "title_bar"),
+            ("lib.rs", "veriloga"),
+            ("lib.rs", "veriloga_build_settings"),
+            ("lib.rs", "veriloga_import"),
+            ("lib.rs", "veriloga_placement"),
+            ("lib.rs", "veriloga_symbol"),
+            ("lib.rs", "virtual_text_editor"),
+            ("lib.rs", "workbench"),
+            ("lib.rs", "workflows"),
+            ("workbench/app/dialogs/source_document.rs", "fixtures"),
+            ("workbench/code.rs", "commands"),
+            ("workbench/code.rs", "netlist_first"),
+            ("workbench/code.rs", "netlist_validation"),
+            ("workbench/code.rs", "requests"),
+            ("workbench/code.rs", "toolbar"),
+            ("workbench/documents/netlist_document.rs", "fixtures"),
+            ("workbench/documents/netlist_document.rs", "language"),
+            ("workbench/surfaces/netlist.rs", "fixtures"),
+            ("workbench/surfaces/netlist.rs", "generation"),
+            ("workbench/surfaces/netlist.rs", "search"),
+            ("workbench/surfaces/netlist.rs", "source_menu"),
+            ("workbench/surfaces/netlist.rs", "toolbar"),
+            ("workbench/surfaces/netlist.rs", "transfer"),
+            ("workbench/workflows/netlist_workflow.rs", "bundle"),
+            ("workbench/workflows/netlist_workflow.rs", "fixtures"),
+            (
+                "workbench/workflows/netlist_workflow/fixtures.rs",
+                "vendor_profiles",
+            ),
+        ],
+    ),
+    (
+        "rspice-app-design",
+        &[
+            ("lib.rs", "actions"),
+            ("lib.rs", "app"),
+            ("lib.rs", "app_state"),
+            ("lib.rs", "chrome"),
+            ("lib.rs", "connectivity_manager"),
+            ("lib.rs", "create_model_bound_symbol"),
+            ("lib.rs", "cross_probe"),
+            ("lib.rs", "design"),
+            ("lib.rs", "design_request"),
+            ("lib.rs", "design_review_comments"),
+            ("lib.rs", "dialogs"),
+            ("lib.rs", "docks"),
+            ("lib.rs", "document_bar"),
+            ("lib.rs", "engineering_table"),
+            ("lib.rs", "find_replace"),
+            ("lib.rs", "grid_snap_routing"),
+            ("lib.rs", "hierarchy"),
+            ("lib.rs", "hierarchy_net_highlight"),
+            ("lib.rs", "interaction_state"),
+            ("lib.rs", "navigator"),
+            ("lib.rs", "object_properties"),
+            ("lib.rs", "placement"),
+            ("lib.rs", "properties"),
+            ("lib.rs", "property_dialog"),
+            ("lib.rs", "property_edit"),
+            ("lib.rs", "replace_instance"),
+            ("lib.rs", "rule_setup"),
+            ("lib.rs", "schematic"),
+            ("lib.rs", "selection"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "state"),
+            ("lib.rs", "status_bar"),
+            ("lib.rs", "stimulus"),
+            ("lib.rs", "stimulus_browser_state"),
+            ("lib.rs", "stimulus_editor"),
+            ("lib.rs", "stimulus_link"),
+            ("lib.rs", "stimulus_placement"),
+            ("lib.rs", "surfaces"),
+            ("lib.rs", "symbol"),
+            ("lib.rs", "symbol_definition"),
+            ("lib.rs", "title_bar"),
+            ("lib.rs", "visibility_options"),
+            ("lib.rs", "workbench"),
+            ("lib.rs", "workspace"),
+            ("properties.rs", "property_bridge"),
+            ("properties.rs", "source_preview"),
+            ("schematic.rs", "symbol_editor"),
+            ("schematic.rs", "view"),
+            ("schematic/symbol_editor.rs", "interaction"),
+            ("schematic/symbol_editor/interaction.rs", "tests"),
+            ("schematic/view.rs", "array_interaction"),
+            ("schematic/view.rs", "context_menu"),
+            ("schematic/view.rs", "frame_cost"),
+            ("schematic/view.rs", "gesture_commits"),
+            ("schematic/view.rs", "interaction"),
+            ("schematic/view.rs", "keyboard_navigation"),
+            ("schematic/view.rs", "mobile_controls"),
+            ("schematic/view.rs", "move_interaction"),
+            ("schematic/view.rs", "requests"),
+            ("schematic/view.rs", "scene"),
+            ("schematic/view.rs", "selection_drag"),
+            ("schematic/view.rs", "selection_transform"),
+            ("schematic/view.rs", "sheet_visibility"),
+            ("schematic/view.rs", "stretch_interaction"),
+            ("schematic/view.rs", "violations"),
+            ("schematic/view/keyboard_navigation.rs", "tests"),
+            ("schematic/view/scene.rs", "tests"),
+            ("schematic/view/stretch_interaction.rs", "tests"),
+            ("workbench/app/actions/workspace.rs", "design_checks"),
+            ("workbench/app/actions/workspace.rs", "history"),
+            ("workbench/app/actions/workspace.rs", "symbol_document"),
+            ("workbench/app/actions/workspace.rs", "symbol_in_place"),
+            ("workbench/app/actions/workspace.rs", "tests"),
+            ("workbench/app/actions/workspace.rs", "waivers"),
+            (
+                "workbench/app/dialogs/create_model_bound_symbol.rs",
+                "controller",
+            ),
+            (
+                "workbench/app/dialogs/create_model_bound_symbol.rs",
+                "state",
+            ),
+            (
+                "workbench/app/dialogs/create_model_bound_symbol.rs",
+                "tests",
+            ),
+            ("workbench/app/dialogs/design_review_comments.rs", "tests"),
+            ("workbench/app/dialogs/engineering_table.rs", "tests"),
+            ("workbench/app/dialogs/find_replace.rs", "tests"),
+            ("workbench/app/dialogs/hierarchy.rs", "create"),
+            ("workbench/app/dialogs/hierarchy.rs", "descend"),
+            ("workbench/app/dialogs/object_properties.rs", "tests"),
+            ("workbench/app/dialogs/placement.rs", "bus_tap"),
+            ("workbench/app/dialogs/placement.rs", "design_note"),
+            ("workbench/app/dialogs/placement.rs", "net_label"),
+            ("workbench/app/dialogs/placement.rs", "pin_port"),
+            ("workbench/app/dialogs/placement/bus_tap.rs", "tests"),
+            ("workbench/app/dialogs/placement/design_note.rs", "tests"),
+            ("workbench/app/dialogs/placement/net_label.rs", "tests"),
+            ("workbench/app/dialogs/placement/pin_port.rs", "tests"),
+            ("workbench/app/dialogs/selection.rs", "array"),
+            ("workbench/app/dialogs/selection.rs", "bulk_edit"),
+            ("workbench/app/dialogs/selection.rs", "bulk_filter"),
+            ("workbench/app/dialogs/selection.rs", "commands"),
+            ("workbench/app/dialogs/selection.rs", "move_selection"),
+            ("workbench/app/dialogs/selection.rs", "rename"),
+            ("workbench/app/dialogs/selection.rs", "shared_properties"),
+            ("workbench/app/dialogs/selection.rs", "stretch"),
+            ("workbench/app/dialogs/selection/bulk_edit.rs", "tests"),
+            ("workbench/app/dialogs/selection/commands.rs", "floating"),
+            ("workbench/app/dialogs/selection/rename.rs", "tests"),
+            (
+                "workbench/app/dialogs/selection/shared_properties.rs",
+                "tests",
+            ),
+            ("workbench/app/dialogs/stimulus_link.rs", "adopt"),
+            (
+                "workbench/app/dialogs/symbol_definition.rs",
+                "import_workflow",
+            ),
+            ("workbench/app/dialogs/symbol_definition.rs", "state"),
+            ("workbench/app/schematic.rs", "conductor_routes"),
+            ("workbench/app/schematic.rs", "named_net"),
+            ("workbench/app/schematic.rs", "placement"),
+            ("workbench/design.rs", "commands"),
+            ("workbench/design.rs", "inspector"),
+            ("workbench/design.rs", "navigator"),
+            ("workbench/design.rs", "surface"),
+            ("workbench/design.rs", "test_host"),
+            ("workbench/design.rs", "toolbar"),
+            ("workbench/design/inspector.rs", "component"),
+            ("workbench/design/inspector.rs", "inline_instance"),
+            ("workbench/design/inspector.rs", "model_evidence"),
+            ("workbench/design/inspector.rs", "stimulus"),
+            ("workbench/design/inspector.rs", "symbol"),
+            ("workbench/design/inspector.rs", "tests"),
+            ("workbench/design/navigator.rs", "hierarchy_tree"),
+            ("workbench/design/navigator.rs", "shelf"),
+            ("workbench/design/navigator.rs", "stimulus"),
+            ("workbench/design/navigator.rs", "symbol"),
+            ("workbench/design/navigator.rs", "tests"),
+            ("workbench/design/navigator/shelf.rs", "search"),
+            ("workbench/design/navigator/stimulus.rs", "tests"),
+            ("workbench/design/navigator/tests.rs", "shelf"),
+            ("workbench/design/surface.rs", "layout_editor"),
+            ("workbench/design/surface.rs", "tests"),
+            ("workbench/surfaces/stimulus.rs", "program"),
+            ("workbench/surfaces/stimulus.rs", "tests"),
+        ],
+    ),
+    (
+        "rspice-app-hardcopy",
+        &[
+            ("lib.rs", "app"),
+            ("lib.rs", "app_state"),
+            ("lib.rs", "dialogs"),
+            ("lib.rs", "hardcopy"),
+            ("lib.rs", "hardcopy_adapters"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "workbench"),
+            ("workbench/app/dialogs/hardcopy.rs", "execution"),
+            ("workbench/app/dialogs/hardcopy.rs", "publish"),
+            ("workbench/app/dialogs/hardcopy.rs", "render"),
+            (
+                "workbench/app/dialogs/hardcopy/render.rs",
+                "content_options",
+            ),
+            ("workbench/hardcopy.rs", "commands"),
+            ("workbench/hardcopy.rs", "report"),
+            ("workbench/hardcopy.rs", "report_authoring"),
+            ("workbench/hardcopy/report_authoring.rs", "result_insert"),
+            ("workbench/hardcopy_adapters.rs", "print"),
+            ("workbench/hardcopy_adapters.rs", "publication_snapshot"),
+            ("workbench/hardcopy_adapters.rs", "sources"),
+            ("workbench/hardcopy_adapters.rs", "tests"),
+            ("workbench/hardcopy_adapters/sources.rs", "report_inventory"),
+        ],
+    ),
+    (
+        "rspice-app-models",
+        &[
+            ("lib.rs", "app"),
+            ("lib.rs", "app_state"),
+            ("lib.rs", "chrome"),
+            ("lib.rs", "dialogs"),
+            ("lib.rs", "docks"),
+            ("lib.rs", "document_bar"),
+            ("lib.rs", "documents"),
+            ("lib.rs", "inspector"),
+            ("lib.rs", "model_correlation"),
+            ("lib.rs", "model_correlation_controller"),
+            ("lib.rs", "model_editor"),
+            ("lib.rs", "model_qualification"),
+            ("lib.rs", "models"),
+            ("lib.rs", "navigator"),
+            ("lib.rs", "pdk_settings"),
+            ("lib.rs", "services"),
+            ("lib.rs", "session"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "surfaces"),
+            ("lib.rs", "toolbar"),
+            ("lib.rs", "workbench"),
+            ("workbench/models.rs", "commands"),
+            ("workbench/models.rs", "model_editor_workflow"),
+            ("workbench/models.rs", "pack_persistence"),
+            ("workbench/models.rs", "pdk_persistence"),
+            ("workbench/models.rs", "pdk_workflow"),
+            ("workbench/models.rs", "tests"),
+            ("workbench/models.rs", "workspace_state"),
+            ("workbench/models/pdk_workflow.rs", "model_hub"),
+        ],
+    ),
+    (
+        "rspice-app-project",
+        &[
+            ("lib.rs", "app"),
+            ("lib.rs", "check_and_save"),
+            ("lib.rs", "check_and_save_validation"),
+            ("lib.rs", "chrome"),
+            ("lib.rs", "design_management"),
+            ("lib.rs", "dialogs"),
+            ("lib.rs", "docks"),
+            ("lib.rs", "document_bar"),
+            ("lib.rs", "examples_browser"),
+            ("lib.rs", "file_workflow"),
+            ("lib.rs", "inspector"),
+            ("lib.rs", "library"),
+            ("lib.rs", "library_cellview_manager"),
+            ("lib.rs", "navigator"),
+            ("lib.rs", "project"),
+            ("lib.rs", "project_launcher"),
+            ("lib.rs", "project_revision_history"),
+            ("lib.rs", "project_workflow"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "surfaces"),
+            ("lib.rs", "toolbar"),
+            ("lib.rs", "tools"),
+            ("lib.rs", "workbench"),
+            ("lib.rs", "workflows"),
+            ("workbench/app/dialogs/design_management.rs", "operations"),
+            ("workbench/app/dialogs/design_management.rs", "widgets"),
+            ("workbench/app/dialogs/project.rs", "configuration"),
+            ("workbench/app/dialogs/project.rs", "configuration_dialogs"),
+            ("workbench/app/dialogs/project.rs", "new_project"),
+            ("workbench/docks/inspector/project.rs", "configuration"),
+            ("workbench/project.rs", "commands"),
+            ("workbench/project.rs", "configuration_state"),
+            ("workbench/project.rs", "library_dialogs"),
+            ("workbench/project.rs", "workspace_state"),
+            ("workbench/project/library_dialogs.rs", "cell_ops"),
+            ("workbench/project/library_dialogs.rs", "deletion"),
+            ("workbench/project/library_dialogs.rs", "library_ops"),
+            ("workbench/project/library_dialogs.rs", "new_cell"),
+            ("workbench/project/library_dialogs.rs", "new_view"),
+            ("workbench/project/library_dialogs.rs", "rename_view"),
+            ("workbench/surfaces/project.rs", "configuration"),
+            ("workbench/surfaces/library_cellview_manager.rs", "tests"),
+            ("workbench/surfaces/project.rs", "dependencies"),
+            ("workbench/surfaces/project.rs", "landing"),
+            ("workbench/surfaces/project.rs", "library"),
+            ("workbench/surfaces/project.rs", "library_publication"),
+            ("workbench/surfaces/project.rs", "overview"),
+            ("workbench/surfaces/project.rs", "recovery"),
+            ("workbench/surfaces/project/library.rs", "builtin_models"),
+        ],
+    ),
+    (
+        "rspice-app-results",
+        &[
+            ("analysis.rs", "calculator"),
+            ("lib.rs", "activity_rail"),
+            ("lib.rs", "analysis"),
+            ("lib.rs", "app_state"),
+            ("lib.rs", "calculator"),
+            ("lib.rs", "chrome"),
+            ("lib.rs", "commands"),
+            ("lib.rs", "docks"),
+            ("lib.rs", "document_bar"),
+            ("lib.rs", "documents"),
+            ("lib.rs", "inspector"),
+            ("lib.rs", "menu_bar"),
+            ("lib.rs", "navigator"),
+            ("lib.rs", "plan_provenance"),
+            ("lib.rs", "result_authority"),
+            ("lib.rs", "result_document"),
+            ("lib.rs", "result_import_workflow"),
+            ("lib.rs", "result_navigation"),
+            ("lib.rs", "results"),
+            ("lib.rs", "results_actions"),
+            ("lib.rs", "results_rows"),
+            ("lib.rs", "run_details"),
+            ("lib.rs", "session"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "state"),
+            ("lib.rs", "status_bar"),
+            ("lib.rs", "toolbar"),
+            ("lib.rs", "viewer_capabilities"),
+            ("lib.rs", "waveform_export"),
+            ("lib.rs", "workbench"),
+            ("lib.rs", "workflows"),
+            ("workbench/documents/result_document.rs", "create_document"),
+            ("workbench/documents/result_document.rs", "document_edit"),
+            ("workbench/documents/result_document.rs", "frame_work"),
+            ("workbench/documents/result_document.rs", "import"),
+            ("workbench/documents/result_document.rs", "manifest"),
+            ("workbench/documents/result_document.rs", "op_inspector"),
+            (
+                "workbench/documents/result_document.rs",
+                "operational_state",
+            ),
+            (
+                "workbench/documents/result_document.rs",
+                "persistent_document",
+            ),
+            ("workbench/documents/result_document.rs", "smith"),
+            ("workbench/documents/result_document.rs", "specs"),
+            ("workbench/documents/result_document.rs", "test_fixtures"),
+            ("workbench/documents/result_document.rs", "view_context"),
+            ("workbench/documents/result_document.rs", "waves"),
+            (
+                "workbench/documents/result_document/document_edit.rs",
+                "compare",
+            ),
+            (
+                "workbench/documents/result_document/document_edit.rs",
+                "family",
+            ),
+            (
+                "workbench/documents/result_document/document_edit.rs",
+                "links",
+            ),
+            (
+                "workbench/documents/result_document/document_edit.rs",
+                "measurement",
+            ),
+            ("workbench/results.rs", "calculator"),
+            ("workbench/results.rs", "commands"),
+            ("workbench/results.rs", "surface"),
+        ],
+    ),
+    (
+        "rspice-app-runs",
+        &[
+            ("lib.rs", "app_state"),
+            ("lib.rs", "controller"),
+            ("lib.rs", "multi_run"),
+            ("lib.rs", "output_contract"),
+            ("lib.rs", "preflight"),
+            ("lib.rs", "results"),
+            ("lib.rs", "run_preflight"),
+            ("lib.rs", "runs"),
+            ("lib.rs", "simulation"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "status"),
+            ("lib.rs", "veriloga_tests"),
+            ("lib.rs", "workbench"),
+            ("simulation/controller.rs", "prepared_run"),
+            ("simulation/controller.rs", "results_post"),
+            ("simulation/controller.rs", "test_execution"),
+            ("simulation/controller.rs", "test_host"),
+            ("simulation/controller.rs", "transient_post"),
+            ("simulation/controller/prepared_run.rs", "fixtures"),
+            (
+                "simulation/controller/prepared_run.rs",
+                "thread_preparations",
+            ),
+            ("simulation/controller/test_execution.rs", "dc_history"),
+            ("simulation/controller/test_execution.rs", "monte_carlo"),
+            ("simulation/controller/test_execution.rs", "pvt"),
+            ("simulation/controller/test_execution.rs", "saved_outputs"),
+            ("simulation/output_contract.rs", "fixtures"),
+            ("simulation/veriloga_tests.rs", "test_support"),
+        ],
+    ),
+    (
+        "rspice-app-services",
+        &[
+            ("io.rs", "file_exchange"),
+            ("io.rs", "generated_bundle"),
+            ("io.rs", "netlist_export"),
+            ("io.rs", "project_io"),
+            ("io.rs", "schematic_io"),
+            ("io.rs", "waveform_io"),
+            ("io/project_io.rs", "fixtures"),
+            ("lib.rs", "accessibility"),
+            ("lib.rs", "app_state"),
+            ("lib.rs", "automation_runtime"),
+            ("lib.rs", "autosave"),
+            ("lib.rs", "background_alerts"),
+            ("lib.rs", "browser"),
+            ("lib.rs", "build_identity"),
+            ("lib.rs", "download"),
+            ("lib.rs", "export_workflow"),
+            ("lib.rs", "file_import"),
+            ("lib.rs", "io"),
+            ("lib.rs", "lifecycle"),
+            ("lib.rs", "live_protocol"),
+            ("lib.rs", "model_hub"),
+            ("lib.rs", "platform"),
+            ("lib.rs", "project_checkpoint"),
+            ("lib.rs", "project_lifecycle"),
+            ("lib.rs", "qualification"),
+            ("lib.rs", "recent_files"),
+            ("lib.rs", "recovery"),
+            ("lib.rs", "recovery_checkpoint"),
+            ("lib.rs", "services"),
+            ("lib.rs", "session"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "workbench"),
+            ("lib.rs", "workflows"),
+        ],
+    ),
+    (
+        "rspice-app-settings",
+        &[
+            ("lib.rs", "app"),
+            ("lib.rs", "app_state"),
+            ("lib.rs", "dialogs"),
+            ("lib.rs", "preferences"),
+            ("lib.rs", "preferences_file"),
+            ("lib.rs", "session"),
+            ("lib.rs", "settings"),
+            ("lib.rs", "shortcut_library"),
+            ("lib.rs", "shortcuts"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "workbench"),
+            ("workbench/app/dialogs/preferences.rs", "preference_pages"),
+            ("workbench/app/dialogs/preferences.rs", "preferences_shell"),
+            (
+                "workbench/app/dialogs/preferences.rs",
+                "shortcut_portability_dialogs",
+            ),
+            (
+                "workbench/app/dialogs/preferences.rs",
+                "shortcut_preferences",
+            ),
+            (
+                "workbench/app/dialogs/preferences/preference_pages.rs",
+                "libraries",
+            ),
+            (
+                "workbench/app/dialogs/preferences/shortcut_preferences.rs",
+                "capture",
+            ),
+            ("workbench/settings.rs", "commands"),
+            ("workbench/shortcuts.rs", "artifacts"),
+            ("workbench/shortcuts.rs", "library_persistence"),
+            ("workbench/shortcuts.rs", "profile_workflow"),
+            ("workbench/shortcuts/artifacts.rs", "import_io"),
+            ("workbench/shortcuts/artifacts.rs", "io"),
+            ("workbench/shortcuts/artifacts.rs", "markdown"),
+            ("workbench/shortcuts/artifacts.rs", "merge"),
+            ("workbench/shortcuts/artifacts.rs", "pdf"),
+            ("workbench/shortcuts/artifacts.rs", "projection"),
+            ("workbench/shortcuts/artifacts.rs", "schema"),
+            ("workbench/shortcuts/artifacts.rs", "vscode"),
+        ],
+    ),
+    (
+        "rspice-app-sheets",
+        &[
+            ("lib.rs", "actions"),
+            ("lib.rs", "app"),
+            ("lib.rs", "chrome"),
+            ("lib.rs", "delete_sheet"),
+            ("lib.rs", "design"),
+            ("lib.rs", "dialogs"),
+            ("lib.rs", "docks"),
+            ("lib.rs", "drawing_sheet_defaults"),
+            ("lib.rs", "drawing_sheet_edit"),
+            ("lib.rs", "drawing_sheet_overflow"),
+            ("lib.rs", "drawing_sheet_presets"),
+            ("lib.rs", "drawing_sheet_preview"),
+            ("lib.rs", "drawing_sheet_support"),
+            ("lib.rs", "inspector"),
+            ("lib.rs", "sheet"),
+            ("lib.rs", "sheet_strip"),
+            ("lib.rs", "sheets"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "status_bar"),
+            ("lib.rs", "workbench"),
+            ("workbench/app/dialogs/drawing_sheet_presets.rs", "model"),
+            ("workbench/app/dialogs/drawing_sheet_presets.rs", "render"),
+            ("workbench/app/drawing_sheet_edit.rs", "transaction"),
+            ("workbench/sheets.rs", "commands"),
+        ],
+    ),
+    (
+        "rspice-app-simulate",
+        &[
+            ("lib.rs", "actions"),
+            ("lib.rs", "app"),
+            ("lib.rs", "app_state"),
+            ("lib.rs", "chrome"),
+            ("lib.rs", "dialog"),
+            ("lib.rs", "dialogs"),
+            ("lib.rs", "docks"),
+            ("lib.rs", "document_bar"),
+            ("lib.rs", "documents"),
+            ("lib.rs", "inspector"),
+            ("lib.rs", "jobs_manager"),
+            ("lib.rs", "navigator"),
+            ("lib.rs", "plan_removal"),
+            ("lib.rs", "run_config_chip"),
+            ("lib.rs", "simulate"),
+            ("lib.rs", "simulate_session"),
+            ("lib.rs", "simulation"),
+            ("lib.rs", "slots"),
+            ("lib.rs", "state"),
+            ("lib.rs", "surfaces"),
+            ("lib.rs", "toolbar"),
+            ("lib.rs", "tools"),
+            ("lib.rs", "tuning_staging"),
+            ("lib.rs", "verification_footer"),
+            ("lib.rs", "verify"),
+            ("lib.rs", "workbench"),
+            ("lib.rs", "workflow_drafts"),
+            ("simulation/dialog.rs", "options"),
+            ("workbench/simulate.rs", "chrome"),
+            ("workbench/simulate.rs", "commands"),
+            ("workbench/simulate.rs", "run_host"),
+            ("workbench/surfaces/simulate.rs", "catalog"),
+            ("workbench/surfaces/simulate.rs", "checkpoint_exchange"),
+            ("workbench/surfaces/simulate.rs", "fixtures"),
+            ("workbench/surfaces/simulate.rs", "lifecycle"),
+            ("workbench/surfaces/simulate.rs", "page_kit"),
+            ("workbench/surfaces/simulate.rs", "page_models"),
+            ("workbench/surfaces/simulate.rs", "page_outputs"),
+            ("workbench/surfaces/simulate.rs", "page_raster"),
+            ("workbench/surfaces/simulate.rs", "page_runset"),
+            ("workbench/surfaces/simulate.rs", "page_save"),
+            ("workbench/surfaces/simulate.rs", "page_specs"),
+            ("workbench/surfaces/simulate.rs", "pages"),
+            ("workbench/surfaces/simulate.rs", "participation"),
+            ("workbench/surfaces/simulate.rs", "plan_manager"),
+            (
+                "workbench/surfaces/simulate.rs",
+                "transient_checkpoint_exchange",
+            ),
+            ("workbench/surfaces/simulate.rs", "variable_import"),
+            ("workbench/surfaces/simulate.rs", "workflows"),
+            ("workbench/surfaces/simulate.rs", "workload"),
+            ("workbench/surfaces/simulate/page_runset.rs", "toolbar"),
+            ("workbench/surfaces/simulate/plan_manager.rs", "exchange"),
+            ("workbench/surfaces/simulate/plan_manager.rs", "kit"),
+            ("workbench/surfaces/simulate/plan_manager.rs", "lifecycle"),
+            ("workbench/surfaces/simulate/plan_manager.rs", "raster"),
+            ("workbench/surfaces/simulate/plan_manager.rs", "records"),
+            ("workbench/surfaces/verify.rs", "raster"),
+            ("workbench/surfaces/verify.rs", "safety"),
+            ("workbench/surfaces/verify.rs", "table"),
+            ("workbench/surfaces/verify.rs", "toolbar"),
+            ("workbench/surfaces/verify.rs", "tuning"),
+        ],
+    ),
+    (
+        "rspice-app-state",
+        &[
+            ("diagnostics.rs", "engine_log"),
+            ("lib.rs", "app"),
+            ("lib.rs", "app_state"),
+            ("lib.rs", "browser_store"),
+            ("lib.rs", "cell_usage"),
+            ("lib.rs", "design_checks"),
+            ("lib.rs", "design_history"),
+            ("lib.rs", "diagnostic_store"),
+            ("lib.rs", "diagnostics"),
+            ("lib.rs", "edit_authority"),
+            ("lib.rs", "examples"),
+            ("lib.rs", "fixture_root"),
+            ("lib.rs", "model"),
+            ("lib.rs", "placed_sources"),
+            ("lib.rs", "placement"),
+            ("lib.rs", "plan"),
+            ("lib.rs", "preferences"),
+            ("lib.rs", "product"),
+            ("lib.rs", "quantity"),
+            ("lib.rs", "results"),
+            ("lib.rs", "rule_deck"),
+            ("lib.rs", "run_identity"),
+            ("lib.rs", "schematic"),
+            ("lib.rs", "schematic_preferences"),
+            ("lib.rs", "sim_setup"),
+            ("lib.rs", "simulation"),
+            ("lib.rs", "source_revision"),
+            ("lib.rs", "state"),
+            ("lib.rs", "stimulus_realize"),
+            ("lib.rs", "symbol_contract"),
+            ("lib.rs", "table_route"),
+            ("lib.rs", "time_compat"),
+            ("lib.rs", "veriloga_library"),
+            ("lib.rs", "waivers"),
+            ("lib.rs", "workbench"),
+            ("lib.rs", "workspace"),
+            ("results.rs", "safety"),
+            ("state.rs", "code_diagnostics"),
+            ("state.rs", "command_catalog"),
+            ("state.rs", "engineering_table"),
+            ("state.rs", "model_hub"),
+            ("state.rs", "model_library"),
+            ("state.rs", "netlist_diagnostics"),
+            ("state.rs", "notices"),
+            ("state.rs", "pdk_config"),
+            ("state.rs", "project_snapshot"),
+            ("state.rs", "shortcuts"),
+            ("state.rs", "stimulus_library"),
+            ("state.rs", "workspace"),
+            ("state.rs", "write_policy"),
+            ("state/model_hub.rs", "durable"),
+            ("state/model_hub.rs", "provider"),
+            ("state/model_hub.rs", "tests"),
+            ("state/model_hub.rs", "transport"),
+            ("state/pdk_config/technology_diff.rs", "tests"),
+            ("state/schematic.rs", "bulk_edit"),
+            ("state/schematic.rs", "named_net"),
+            ("state/schematic.rs", "overflow_memo"),
+            ("state/schematic.rs", "policy_labels"),
+            ("state/schematic.rs", "symbol_context_cache"),
+            ("state/schematic.rs", "transform_preview_memo"),
+            ("state/stimulus_library.rs", "fixtures"),
+            ("time_compat.rs", "tests"),
+            ("workbench/app_state/diagnostic_store.rs", "digest_memo"),
+            ("workbench/app_state/diagnostic_store.rs", "listing"),
+            ("workbench/app_state/diagnostic_store.rs", "producers"),
+            ("workbench/app_state/diagnostic_store.rs", "run_notices"),
+            ("workbench/app_state/sim_setup.rs", "plan_catalog"),
+        ],
+    ),
+    (
+        "rspice-app-workbench",
+        &[
+            ("lib.rs", "accessible_mirror"),
+            ("lib.rs", "app"),
+            ("lib.rs", "app_state"),
+            ("lib.rs", "browser"),
+            ("lib.rs", "chrome"),
+            ("lib.rs", "command_palette"),
+            ("lib.rs", "confirmation"),
+            ("lib.rs", "confirmation_state"),
+            ("lib.rs", "console_views"),
+            ("lib.rs", "dialogs"),
+            ("lib.rs", "docks"),
+            ("lib.rs", "documents"),
+            ("lib.rs", "fact_grid"),
+            ("lib.rs", "framework"),
+            ("lib.rs", "layout"),
+            ("lib.rs", "lifecycle"),
+            ("lib.rs", "localization"),
+            ("lib.rs", "model_browser"),
+            ("lib.rs", "navigation"),
+            ("lib.rs", "navigator_tree"),
+            ("lib.rs", "notification_center"),
+            ("lib.rs", "pane_focus"),
+            ("lib.rs", "problems_view"),
+            ("lib.rs", "retired_documents"),
+            ("lib.rs", "reveal"),
+            ("lib.rs", "review_primitives"),
+            ("lib.rs", "routing"),
+            ("lib.rs", "session"),
+            ("lib.rs", "shortcuts"),
+            ("lib.rs", "state"),
+            ("lib.rs", "surfaces"),
+            ("lib.rs", "tools"),
+            ("lib.rs", "ui"),
+            ("lib.rs", "window_session"),
+            ("lib.rs", "workbench"),
+            ("lib.rs", "workbench_session"),
+            ("workbench/app_state/session/shortcuts.rs", "category"),
+            ("workbench/app_state/session/shortcuts.rs", "resolver"),
+            ("workbench/chrome.rs", "activity_rail"),
+            ("workbench/chrome.rs", "document_bar"),
+            ("workbench/chrome.rs", "phone_navigation"),
+            ("workbench/chrome.rs", "status_bar"),
+            ("workbench/chrome.rs", "title_bar"),
+            ("workbench/chrome.rs", "toolbar"),
+            ("workbench/chrome/title_bar.rs", "application_menus"),
+            ("workbench/chrome/title_bar.rs", "menu_entries"),
+            ("workbench/chrome/toolbar.rs", "overflow"),
+            ("workbench/docks.rs", "console"),
+            ("workbench/docks.rs", "drawers"),
+            ("workbench/docks.rs", "inspector"),
+            ("workbench/docks.rs", "navigator"),
+            ("workbench/docks/console.rs", "log_anchor"),
+            ("workbench/docks/console.rs", "problems"),
+            ("workbench/docks/console.rs", "transcript"),
+            ("workbench/docks/console/problems.rs", "arrange"),
+            ("workbench/docks/console/problems.rs", "detail"),
+            ("workbench/docks/console/problems.rs", "grid"),
+            ("workbench/docks/console/transcript.rs", "lines"),
+            ("workbench/docks/inspector.rs", "shared"),
+            ("workbench/docks/inspector.rs", "soa"),
+            ("workbench/docks/navigator.rs", "rail"),
+            ("workbench/framework.rs", "command_registry"),
+            ("workbench/framework.rs", "dialogs"),
+            ("workbench/framework.rs", "feature"),
+            ("workbench/framework.rs", "host"),
+            ("workbench/framework.rs", "ports"),
+            ("workbench/framework.rs", "requests"),
+            ("workbench/framework.rs", "run_view"),
+            ("workbench/framework.rs", "workbench_host"),
+            ("workbench/framework/command_registry.rs", "ids"),
+            ("workbench/framework/feature.rs", "harness"),
+            ("workbench/routing.rs", "availability"),
+            ("workbench/routing.rs", "navigation"),
+            ("workbench/routing.rs", "surface_catalog"),
+            ("workbench/routing.rs", "surface_route"),
+        ],
+    ),
+];
+
+/// Each application crate below the shell makes public exactly the modules
+/// [`PUBLIC_MODULES`] lists for it.
+///
+/// The list is exact: a module that turns public for any other reason fails
+/// it, as does one that stops being reached and is left public, and so does a
+/// crate with no list.
+#[test]
+fn only_the_modules_a_crate_above_reaches_are_public() {
+    let mut listed: BTreeMap<&str, BTreeSet<(String, String)>> = BTreeMap::new();
+    for (krate, modules) in PUBLIC_MODULES {
+        let modules = modules
+            .iter()
+            .map(|(file, name)| ((*file).to_owned(), (*name).to_owned()))
+            .collect();
+        assert!(
+            listed.insert(*krate, modules).is_none(),
+            "PUBLIC_MODULES lists {krate} twice"
+        );
+    }
+
+    let mut measured: BTreeMap<String, BTreeSet<(String, String)>> = BTreeMap::new();
+    for source in app_sources() {
+        if source.krate == "rspice-app" {
+            continue;
+        }
+        let file = source
+            .shown
+            .strip_prefix(&format!("{}/src/", source.krate))
+            .expect("a source under its crate's src")
+            .to_owned();
+        let text = fs::read_to_string(&source.file)
+            .unwrap_or_else(|error| panic!("read {}: {error}", source.shown));
+        let public = measured.entry(source.krate).or_default();
+        for line in strip_line_comments(&text).lines() {
+            let Some(rest) = line.trim_start().strip_prefix("pub mod ") else {
+                continue;
+            };
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            public.insert((file.clone(), name));
+        }
+    }
+    let below: BTreeSet<String> = app_src_dirs()
+        .iter()
+        .map(|dir| crate_of(dir))
+        .filter(|krate| krate != "rspice-app")
+        .collect();
+    let read: BTreeSet<String> = measured.keys().cloned().collect();
+    assert_eq!(
+        read, below,
+        "the public-module scan did not read every application crate below the shell; \
+         a scan that reaches nothing there passes forever"
+    );
+
+    let mut failures = Vec::new();
+    for (krate, public) in &measured {
+        let Some(expected) = listed.get(krate.as_str()) else {
+            failures.push(format!(
+                "  {krate} has no list; add one naming its {} public modules",
+                public.len()
+            ));
+            continue;
+        };
+        let added: Vec<_> = public.difference(expected).collect();
+        let dropped: Vec<_> = expected.difference(public).collect();
+        if !added.is_empty() || !dropped.is_empty() {
+            failures.push(format!(
+                "  {krate}\n    newly public: {added:?}\n    no longer public: {dropped:?}"
+            ));
+        }
+    }
+    for krate in listed.keys() {
+        if !measured.contains_key(*krate) {
+            failures.push(format!(
+                "  {krate} is listed but is not an application crate"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "the public modules changed:\n{}\n\
+         A module below the shell is public only because the shell or a crate above \
+         reaches it by path. Update PUBLIC_MODULES in tests/app_conventions.rs to match \
+         exactly.",
+        failures.join("\n")
     );
 }
 
@@ -1845,6 +2435,7 @@ fn a_painted_row_reaches_the_accessibility_tree() {
     }
 
     let mut scanned = 0_usize;
+    let mut read = BTreeSet::new();
     let mut found: BTreeMap<String, String> = BTreeMap::new();
     for path in sources {
         let relative = path
@@ -1856,6 +2447,7 @@ fn a_painted_row_reaches_the_accessibility_tree() {
             continue;
         }
         scanned += 1;
+        read.insert(relative.split('/').next().unwrap_or_default().to_owned());
         let source = fs::read_to_string(&path).expect("read Rust source");
         let shipped = without_test_items(&source);
         let lines = shipped.lines().collect::<Vec<_>>();
@@ -1917,6 +2509,7 @@ fn a_painted_row_reaches_the_accessibility_tree() {
     }
 
     assert!(scanned > 100, "the accessibility scan read {scanned} files");
+    assert_reads_every_app_crate("the accessibility scan", read.iter().map(String::as_str));
 
     let listed: std::collections::BTreeSet<&str> =
         UNPUBLISHED_PAINTED_ROWS.iter().copied().collect();

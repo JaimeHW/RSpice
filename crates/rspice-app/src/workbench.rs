@@ -30,7 +30,7 @@
 //!   dismissed, which is what separates them from a `tools` float.
 //!
 //! Its interior layering is ordered and ratcheted by
-//! `tests/module_layering.rs`, not by this file.
+//! `tests/app_conventions.rs`, not by this file.
 pub(crate) mod app;
 pub(crate) mod app_state;
 pub(crate) mod chrome {

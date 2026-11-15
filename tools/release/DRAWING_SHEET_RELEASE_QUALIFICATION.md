@@ -58,7 +58,7 @@ complete clean-commit product CI gates below.
 ```text
 cargo test --locked -p rspice-core --test engine save_directives::
 cargo test --locked -p rspice-app --lib
-cargo test --locked -p rspice-app --test module_layering
+cargo test --locked -p rspice-app --test app_conventions
 cargo check --locked -p rspice-app --target wasm32-unknown-unknown
 cargo check --locked -p rspice-app --target x86_64-pc-windows-msvc
 cargo check --locked -p rspice-app --target x86_64-unknown-linux-gnu

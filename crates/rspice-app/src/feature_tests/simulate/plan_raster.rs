@@ -28,10 +28,9 @@ fn raster(mode: SimulationPlanManagerMode, screen: Vec2) -> Canvas {
     // `simulation_workflow`; each pass hands it a fresh one so the rasterizer's
     // three passes render the same state rather than accumulating it.
     //
-    // The application is captured rather than taken as a parameter on purpose.
-    // `tests/module_layering.rs` counts every whole-application mutable
-    // parameter in the crate, test-only files included, and a render harness is
-    // not a reason for that ceiling to move.
+    // The application is captured rather than taken as a parameter on purpose:
+    // a helper taking `&mut RSpiceApp` hands its caller the whole application,
+    // and a render harness is not a reason to.
     rspice_app_workbench::ui::raster::render(screen, |ui, _| {
         plan_manager_dialog(
             ui,

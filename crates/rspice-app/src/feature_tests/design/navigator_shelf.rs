@@ -24,8 +24,7 @@ use std::collections::HashSet;
 /// context it paints into, held together so that one frame is one call.
 ///
 /// The pair is owned rather than passed because a helper taking `&mut
-/// RSpiceApp` hands a test the whole application, and `tests/module_layering`
-/// counts every signature that does.
+/// RSpiceApp` hands a test the whole application.
 #[cfg(not(target_arch = "wasm32"))]
 struct ShelfHarness {
     ctx: egui::Context,
