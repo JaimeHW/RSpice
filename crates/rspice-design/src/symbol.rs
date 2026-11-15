@@ -959,11 +959,16 @@ impl PinSummary {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PinFindingKind {
     UnplacedPin,
     OrphanedPin,
     PinOffGrid,
+    /// The pin's terminal is where an earlier pin's is: a wire drawn to the
+    /// point joins both. `under` names the first pin at that point.
+    OverlappingPin {
+        under: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1557,9 +1562,12 @@ impl SymbolDocument {
     }
 
     /// Every pin finding against `interface`. A symbol that defines the
-    /// interface itself is checked only for terminals off the grid; one whose
-    /// interface declares no pins has every pin it carries reported as not in
-    /// that interface.
+    /// interface itself is checked only for where its terminals sit: off the
+    /// grid, or on another pin's terminal. One whose interface declares no
+    /// pins has every pin it carries reported as not in that interface.
+    ///
+    /// Of pins whose terminals coincide, each after the first in list order
+    /// is the finding, naming the first: taking it off answers it.
     pub fn pin_findings(&self, interface: &SymbolInterface) -> Vec<PinFinding> {
         let ports = interface.ports();
         let declared = matches!(interface, SymbolInterface::Declared(_));
@@ -1586,6 +1594,22 @@ impl SymbolDocument {
             if pin.position.is_some() && !pin.terminal_on_grid() {
                 findings.push(PinFinding {
                     kind: PinFindingKind::PinOffGrid,
+                    pin_name: pin.name.clone(),
+                });
+            }
+        }
+        for (index, pin) in self.pins.iter().enumerate() {
+            let Some(terminal) = pin.position else {
+                continue;
+            };
+            if let Some(under) = self.pins[..index]
+                .iter()
+                .find(|earlier| earlier.position == Some(terminal))
+            {
+                findings.push(PinFinding {
+                    kind: PinFindingKind::OverlappingPin {
+                        under: under.name.clone(),
+                    },
                     pin_name: pin.name.clone(),
                 });
             }

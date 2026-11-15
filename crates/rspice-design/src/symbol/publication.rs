@@ -92,10 +92,14 @@ pub fn check_symbol_pins(
             PinFindingKind::UnplacedPin => DrcViolationType::SymbolUnplacedPin,
             PinFindingKind::OrphanedPin => DrcViolationType::SymbolOrphanedPin,
             PinFindingKind::PinOffGrid => DrcViolationType::SymbolPinOffGrid,
+            PinFindingKind::OverlappingPin { .. } => DrcViolationType::SymbolOverlappingPin,
         };
-        let message = match finding.kind {
+        let message = match &finding.kind {
             PinFindingKind::OrphanedPin => {
                 format!("Symbol pin is not in the {source}: {}", finding.pin_name)
+            }
+            PinFindingKind::OverlappingPin { under } => {
+                format!("Pin {} sits on pin {under}", finding.pin_name)
             }
             PinFindingKind::UnplacedPin | PinFindingKind::PinOffGrid => {
                 format!("{}: {}", violation_type.description(), finding.pin_name)

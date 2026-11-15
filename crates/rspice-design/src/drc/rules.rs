@@ -542,6 +542,18 @@ impl DrcViolationType {
                 max_severity: DrcSeverity::Critical,
                 waivable: true,
             },
+            Self::SymbolOverlappingPin => &DrcRule {
+                code: "SYMBOL-OVERLAPPING-PIN",
+                title: "Overlapping symbol pins",
+                explanation: "Two of the symbol's pins have their terminals at one point, so a \
+                    wire drawn to it joins both, and every instance placed from the symbol ties \
+                    their two nets together. Click the finding to select the pin and press \
+                    Delete, or drag it off the other pin.",
+                default_severity: DrcSeverity::Warning,
+                floor: ANY,
+                max_severity: DrcSeverity::Critical,
+                waivable: false,
+            },
             Self::SymbolPinOrder => &DrcRule {
                 code: "SYMBOL-PIN-ORDER",
                 title: "Symbol pin order",
@@ -643,6 +655,7 @@ mod tests {
             DrcViolationType::SymbolUnplacedPin => "SYMBOL-UNPLACED-PIN",
             DrcViolationType::SymbolOrphanedPin => "SYMBOL-ORPHANED-PIN",
             DrcViolationType::SymbolPinOffGrid => "SYMBOL-PIN-OFF-GRID",
+            DrcViolationType::SymbolOverlappingPin => "SYMBOL-OVERLAPPING-PIN",
             DrcViolationType::SymbolPinOrder => "SYMBOL-PIN-ORDER",
             DrcViolationType::SymbolPinDirection => "SYMBOL-PIN-DIRECTION",
             DrcViolationType::SymbolModelFamily => "SYMBOL-MODEL-FAMILY",

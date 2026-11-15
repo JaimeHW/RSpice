@@ -153,6 +153,59 @@ fn an_off_grid_terminal_is_found_against_any_interface() {
     }
 }
 
+/// Two pins whose terminals coincide are one wire's end on the sheet. Each
+/// pin after the first at the point is a warning anchored to it, naming the
+/// pin it sits on, whatever the interface; pins with no terminal sit nowhere.
+#[test]
+fn a_pin_on_another_pins_terminal_is_a_finding_on_that_pin() {
+    let mut unplaced = pin("EN", PortDirection::In, (0, 0));
+    unplaced.position = None;
+    let mut also_unplaced = pin("CLK", PortDirection::In, (0, 0));
+    also_unplaced.position = None;
+    let document = symbol(vec![
+        pin("A", PortDirection::In, (-40, 0)),
+        pin("B", PortDirection::In, (-40, 0)),
+        pin("Y", PortDirection::Out, (40, 0)),
+        pin("C", PortDirection::In, (-40, 0)),
+        unplaced,
+        also_unplaced,
+    ]);
+    let reference = CellViewRef::new("work", "amp", "symbol");
+
+    for interface in [
+        SymbolInterface::SymbolDefined,
+        SymbolInterface::Declared(
+            ["A", "B", "Y", "C", "EN", "CLK"]
+                .map(|name| port(name, PortDirection::In))
+                .to_vec(),
+        ),
+    ] {
+        let result = check_symbol_pins(&document, &interface, None, &reference, "schematic");
+        let overlaps = result
+            .violations()
+            .iter()
+            .filter(|finding| finding.violation_type == DrcViolationType::SymbolOverlappingPin)
+            .map(|finding| (finding.message.as_str(), finding.location.clone()))
+            .collect::<Vec<_>>();
+        let on = |name: &str| DrcLocation::SymbolPin {
+            reference: reference.clone(),
+            pin_name: name.to_owned(),
+            point: Some(Point::new(-40, 0)),
+        };
+        assert_eq!(
+            overlaps,
+            [
+                ("Pin B sits on pin A", on("B")),
+                ("Pin C sits on pin A", on("C")),
+            ],
+            "{interface:?}"
+        );
+    }
+    let rule = DrcViolationType::SymbolOverlappingPin.rule();
+    assert_eq!(rule.default_severity, crate::drc::DrcSeverity::Warning);
+    assert!(!rule.waivable, "two pins sharing a terminal is never meant");
+}
+
 /// A module declares its rails `inout`, and the generated symbol draws them
 /// as the rails they are. That is no finding.
 #[test]

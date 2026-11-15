@@ -1463,3 +1463,97 @@ fn a_symbol_finding_followed_in_place_selects_and_shows_its_pin() {
         Some(off_grid)
     );
 }
+
+/// A pin moved onto another pin's terminal is found by Check cellview, in
+/// the symbol's own view and while the symbol is edited in place. The
+/// finding names both pins; a click on its row on the Problems page selects
+/// the pin that sits on the other, Delete takes that pin off as one step,
+/// and one Undo puts it back where it was.
+#[test]
+fn a_pin_on_another_pins_terminal_is_found_and_goes_from_its_finding() {
+    for in_place in [false, true] {
+        let mut fixture = InPlace::new();
+        if in_place {
+            fixture.enter();
+        } else {
+            let symbol = fixture.symbol.clone();
+            fixture.replay.app.state.open_workspace_view(symbol);
+            fixture.replay.frames(vec![]);
+        }
+        let state = &mut fixture.replay.app.state;
+        let mut document = state.model.load_active_symbol_document().unwrap();
+        let terminal = document.pin("A").and_then(|pin| pin.position);
+        document.pins[1].position = terminal;
+        state.store_active_symbol_document(&document).unwrap();
+        fixture
+            .replay
+            .app
+            .execute_command_key(DesignCommand::CheckCellview.key());
+        fixture
+            .replay
+            .app
+            .execute_command_key(Command::OpenProblems.key());
+        let controls = fixture.replay.frames(vec![]);
+        let row = controls
+            .iter()
+            .find(|control| {
+                control.role == Role::ListBoxOption && control.label.contains("Pin B sits on pin A")
+            })
+            .unwrap_or_else(|| panic!("in place {in_place}: the finding is listed"))
+            .center;
+
+        click_at(&mut fixture.replay, row);
+        fixture.replay.frames(vec![]);
+        let state = &fixture.replay.app.state;
+        assert_eq!(
+            state.model.workspace.content.active_view, fixture.symbol,
+            "in place {in_place}: the symbol stays in front"
+        );
+        assert_eq!(
+            crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
+                .is_some(),
+            in_place,
+            "following the finding neither enters nor leaves an in-place edit"
+        );
+        assert_eq!(
+            state.design.symbol.editor.selection.pins,
+            ["B".to_owned()].into_iter().collect(),
+            "in place {in_place}: the pin sitting on the other is selected"
+        );
+
+        fixture.replay.key(egui::Key::Delete, egui::Modifiers::NONE);
+        let pins = |fixture: &InPlace| {
+            fixture
+                .replay
+                .app
+                .state
+                .model
+                .load_active_symbol_document()
+                .unwrap()
+                .pins
+                .iter()
+                .map(|pin| (pin.name.clone(), pin.position))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            pins(&fixture)
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>(),
+            ["A", "C"],
+            "in place {in_place}: Delete took B off"
+        );
+        fixture
+            .replay
+            .key(egui::Key::Z, crate::feature_tests::replay::PRIMARY);
+        assert_eq!(
+            pins(&fixture),
+            document
+                .pins
+                .iter()
+                .map(|pin| (pin.name.clone(), pin.position))
+                .collect::<Vec<_>>(),
+            "in place {in_place}: one Undo put B back on A"
+        );
+    }
+}

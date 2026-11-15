@@ -191,6 +191,8 @@ pub enum DrcViolationType {
     SymbolOrphanedPin,
     /// Symbol pin terminal is not on the required terminal grid.
     SymbolPinOffGrid,
+    /// Symbol pin terminal is where another pin's is.
+    SymbolOverlappingPin,
     /// Symbol pins carry the interface's names in another order.
     SymbolPinOrder,
     /// Symbol pin states a direction or electrical type its interface does
@@ -208,7 +210,7 @@ impl DrcViolationType {
     /// The array's fixed length does not make it exhaustive — a variant added
     /// to the enum and not here still compiles — so a test in `rules` holds it
     /// to the variants serde's derive declares.
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 40] = [
         Self::FloatingNode,
         Self::UnconnectedPin,
         Self::UndrivenInput,
@@ -245,6 +247,7 @@ impl DrcViolationType {
         Self::SymbolUnplacedPin,
         Self::SymbolOrphanedPin,
         Self::SymbolPinOffGrid,
+        Self::SymbolOverlappingPin,
         Self::SymbolPinOrder,
         Self::SymbolPinDirection,
         Self::SymbolModelFamily,
@@ -288,6 +291,7 @@ impl DrcViolationType {
             Self::SymbolUnplacedPin
             | Self::SymbolOrphanedPin
             | Self::SymbolPinOffGrid
+            | Self::SymbolOverlappingPin
             | Self::SymbolPinOrder
             | Self::SymbolPinDirection
             | Self::SymbolModelFamily => DrcRuleCategory::SymbolContract,
@@ -378,6 +382,7 @@ impl DrcViolationType {
             Self::SymbolUnplacedPin => "Symbol pin is not placed",
             Self::SymbolOrphanedPin => "Symbol pin is not in the cell's interface",
             Self::SymbolPinOffGrid => "Symbol pin is off the terminal grid",
+            Self::SymbolOverlappingPin => "Symbol pin sits on another pin",
             Self::SymbolPinOrder => "Symbol pin order differs from the interface",
             Self::SymbolPinDirection => "Symbol pin direction differs from the interface",
             Self::SymbolModelFamily => "Symbol is bound to another cell's model",
@@ -451,6 +456,9 @@ impl DrcViolationType {
                  the interface is read from"
             }
             Self::SymbolPinOffGrid => "Move the symbol pin onto the terminal grid",
+            Self::SymbolOverlappingPin => {
+                "Click the finding to select the pin and press Delete, or drag it off the other pin"
+            }
             Self::SymbolPinOrder => "Reorder the symbol pins to the interface's order",
             Self::SymbolPinDirection => "Set the pin's direction to the one the interface declares",
             Self::SymbolModelFamily => "Bind the symbol to this cell's model",

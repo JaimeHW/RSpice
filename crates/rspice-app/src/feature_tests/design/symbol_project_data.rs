@@ -413,6 +413,55 @@ fn check_and_save_checks_the_symbol_and_never_refuses_the_save() {
     assert!(!has_unsaved_changes(&fixture.app.state));
 }
 
+/// Check and save finds a pin moved onto another pin's terminal, as a
+/// warning naming both and routed to the pin that moved, and saves the
+/// symbol as drawn.
+#[test]
+fn check_and_save_finds_a_pin_sitting_on_another() {
+    use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticLevel};
+
+    let mut fixture = Fixture::new("overlap", Some(&["IN", "OUT"]), &["IN", "OUT"]);
+    let terminal = |fixture: &Fixture, name: &str| {
+        fixture
+            .document()
+            .pin(name)
+            .and_then(|pin| pin.position)
+            .expect("the pin is placed")
+    };
+    let onto = terminal(&fixture, "IN") - terminal(&fixture, "OUT");
+    fixture.move_pin("OUT", onto);
+
+    fixture
+        .app
+        .execute_command_key(ProjectCommand::CheckAndSave.key());
+
+    let subject = fixture.symbol.clone();
+    let overlap = fixture
+        .app
+        .state
+        .model
+        .diagnostics
+        .batches()
+        .filter(|batch| {
+            batch.inputs
+                == DiagnosticInputs::SymbolPins {
+                    subject: subject.clone(),
+                }
+        })
+        .flat_map(|batch| batch.records.iter())
+        .find(|record| record.canonical.code.as_ref() == "SYMBOL-OVERLAPPING-PIN")
+        .expect("the pin on the other's terminal is a finding")
+        .clone();
+    assert_eq!(overlap.message, "Pin OUT sits on pin IN");
+    assert_eq!(overlap.level, DiagnosticLevel::Warning);
+    assert!(overlap.route.is_some(), "the finding is routed to its pin");
+    assert_eq!(
+        fixture.saved().0.pin("OUT").and_then(|pin| pin.position),
+        Some(terminal(&fixture, "IN")),
+        "the finding did not stop the save"
+    );
+}
+
 /// A cell with no schematic is drawn symbol first: its symbol defines the
 /// interface, and nothing is said about pins it has no schematic for.
 #[test]
