@@ -218,6 +218,9 @@ pub struct VectorNet {
     /// Bus vertices and vector terminals that resolve to this net. A point is
     /// listed once, and every point of one net carries the same declaration.
     pub attachments: Vec<Point>,
+    /// The vector terminals among them: the points where a placed or
+    /// interface terminal meets a bus of its own declaration.
+    pub terminals: Vec<Point>,
 }
 
 /// A vector connection whose two ends declare different conductors.
@@ -306,6 +309,7 @@ pub fn vector_connectivity(
                 nets.push(VectorNet {
                     declaration: declaration.clone(),
                     attachments: Vec::new(),
+                    terminals: Vec::new(),
                 });
                 net_of_root[root] = Some(nets.len() - 1);
                 nets.len() - 1
@@ -334,6 +338,9 @@ pub fn vector_connectivity(
                     let root = find(&mut parents, index);
                     if let Some(net_index) = net_of_root[root] {
                         attach(&mut nets[net_index], point);
+                        if !nets[net_index].terminals.contains(&point) {
+                            nets[net_index].terminals.push(point);
+                        }
                     }
                 }
                 None => {

@@ -103,6 +103,8 @@ pub use rspice_core_base::diagnostics;
 pub mod engine;
 /// The names an event-only net is refused and published under.
 use rspice_core_base::event_net;
+/// What a module port carries across the analog and event boundary.
+pub use rspice_core_base::event_net::PortCarrier;
 pub mod execution;
 pub use rspice_core_base::expr;
 #[doc(hidden)]
@@ -152,6 +154,17 @@ pub use abort_signal::{
 pub use analysis::{DcAnalysis, MeasureEngine, MeasureResult};
 pub use circuit::CircuitData;
 pub use device::{engine_capabilities, engine_supports_capability};
+#[cfg(feature = "veriloga")]
+pub use engine::{
+    BoundaryPortLayout, HeldVerilogASources, InstalledProjectVerilogARuntime,
+    ProjectVerilogAConnectionLibraryRegistration, ProjectVerilogARuntimeRegistration,
+    ProjectVerilogASourceRegistration, SealedVerilogAArtifact, VerilogACacheTelemetry,
+    boundary_port_layout, hold_installed_project_veriloga_runtimes,
+    hold_project_veriloga_sources_for_session, open_sealed_veriloga_artifact,
+    register_precompiled_veriloga_model, register_precompiled_veriloga_model_with_dependencies,
+    register_precompiled_veriloga_runtime_with_dependencies, seal_veriloga_artifact,
+    veriloga_cache_telemetry,
+};
 pub use engine::{
     ContinuationAid, ContinuationFailure, ContinuationStage, ConvergenceConfig, ConvergencePreset,
     DampingStrategy, ElaborationError, ElaborationErrorKind, Engine, EngineHealthReport,
@@ -160,17 +173,6 @@ pub use engine::{
     ResultSchemaMismatchError, SimulationConfig, SimulationConfigError, SimulationConfigOverrides,
     SimulationError, SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
     SpiceDialect, UnsupportedCapabilityError, XyceTraInterpolation, resolve_simulation_config,
-};
-#[cfg(feature = "veriloga")]
-pub use engine::{
-    HeldVerilogASources, InstalledProjectVerilogARuntime,
-    ProjectVerilogAConnectionLibraryRegistration, ProjectVerilogARuntimeRegistration,
-    ProjectVerilogASourceRegistration, SealedVerilogAArtifact, VerilogACacheTelemetry,
-    hold_installed_project_veriloga_runtimes, hold_project_veriloga_sources_for_session,
-    open_sealed_veriloga_artifact, register_precompiled_veriloga_model,
-    register_precompiled_veriloga_model_with_dependencies,
-    register_precompiled_veriloga_runtime_with_dependencies, seal_veriloga_artifact,
-    veriloga_cache_telemetry,
 };
 pub use netlist::Netlist;
 pub use resource::{ResourceKind, ResourceLimitError, ResourceLimits};

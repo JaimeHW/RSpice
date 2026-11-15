@@ -8,11 +8,16 @@
 //! here. How far it has drifted from the module is measured instead, for the
 //! editor and the inspector to offer "Update symbol".
 //!
-//! A continuous vector port is one bus pin, `d[3:0]`. Its conductors expand
-//! most significant first as declared, which is the order the compiled module
-//! binds its terminals in; [`compiled_interface`] checks that lane by lane
-//! rather than assuming it. A discrete vector is one pin under its bare name:
-//! its bits travel as one digital signal.
+//! What a port carries is the engine's reading of the compiled module,
+//! [`rspice_core::boundary_port_layout`]: a port its discrete plan names is
+//! logic or real, whatever discipline its declaration spells, and any other
+//! is electrical. A vector port is one bus pin, `d[3:0]`, whose conductors
+//! expand most significant first as declared. A continuous vector binds one
+//! terminal per conductor, and [`compiled_interface`] checks that lane by lane
+//! rather than assuming it. A logic vector binds one terminal carrying the
+//! whole signal, and the engine's boundary lays that signal out as one net per
+//! bit in the same order, so its pin is a bus pin as well: the conductors a
+//! placement draws are the nets the run binds.
 //!
 //! The same write states the module's parameters as the view's
 //! `veriloga.parameter_contract`: types, defaults, ranges, units and
@@ -23,6 +28,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use rspice_core::PortCarrier;
 use rspice_design::library::metadata::{
     CellParameter, ParameterDeclaration, ParameterRange, ParameterScope, ParameterValueType,
     PortDomain, RangeBound, RangeValue, SourceViewPort, VERILOGA_PARAMETER_CONTRACT_KEY,
@@ -37,9 +43,9 @@ use rspice_design::symbol_generation::InterfacePin;
 use rspice_design_model::bus::{BusDeclaration, BusNotation};
 use rspice_veriloga::ast::PortDirection as ModulePortDirection;
 use rspice_veriloga::canonical_ir::CanonicalValueType;
-use rspice_veriloga::disciplines::Domain;
 use rspice_veriloga::{
     RuntimeAbiParameterValue, RuntimeAbiRangeBound, RuntimeAbiRangeValue, RuntimeAbiSummary,
+    RuntimeCompileReport,
 };
 use rspice_vocabulary::diagnostics::{
     DiagnosticSeverity as CodeEditorSeverity, SourceDiagnostic as CodeEditorDiagnostic,
@@ -72,9 +78,12 @@ pub struct AppliedInterface {
 /// Every port is checked against the terminals it binds. A scalar is named
 /// as its terminal is; a continuous vector's members, expanded as the design
 /// model expands a bus pin, are its terminals in order; a discrete vector
-/// binds exactly one. The ports between them bind every terminal once, so the
-/// generated symbol's conductors are the module's, one for one.
-fn compiled_interface(abi: &RuntimeAbiSummary) -> Result<Vec<SourceViewPort>, String> {
+/// binds exactly one, and its pin carries one conductor per declared bit. The
+/// ports between them bind every terminal once, so the generated symbol's
+/// conductors are the nets the engine's boundary binds, one for one.
+fn compiled_interface(report: &RuntimeCompileReport) -> Result<Vec<SourceViewPort>, String> {
+    let abi = &report.abi;
+    let layout = rspice_core::boundary_port_layout(&report.canonical_ir);
     let mut formal = abi.formal_ports.iter().collect::<Vec<_>>();
     formal.sort_by_key(|port| port.lanes.first().copied().unwrap_or(usize::MAX));
     let lane_name = |lane: usize| {
@@ -108,23 +117,32 @@ fn compiled_interface(abi: &RuntimeAbiSummary) -> Result<Vec<SourceViewPort>, St
             .iter()
             .map(|lane| lane_name(*lane))
             .collect::<Result<Vec<_>, _>>()?;
-        let name = match (port.domain, port.range, terminals.as_slice()) {
-            (Domain::Continuous, Some(range), _) if terminals.len() > 1 => {
-                let declaration = u32::try_from(range.msb)
-                    .ok()
-                    .zip(u32::try_from(range.lsb).ok())
-                    .and_then(|(msb, lsb)| {
-                        BusDeclaration::new(port.name.as_str(), msb, lsb, BusNotation::Square).ok()
-                    })
-                    .ok_or_else(|| {
-                        format!(
-                            "port `{}[{}:{}]` cannot be a bus pin: a pin's range runs from 0 to {}",
-                            port.name,
-                            range.msb,
-                            range.lsb,
-                            rspice_design_model::bus::MAX_BUS_MEMBER_INDEX
-                        )
-                    })?;
+        // A pin's declared range, when the port is a vector a bus pin can
+        // name.
+        let bus_pin = |range: rspice_veriloga::canonical_ir::VectorBounds| {
+            u32::try_from(range.msb)
+                .ok()
+                .zip(u32::try_from(range.lsb).ok())
+                .and_then(|(msb, lsb)| {
+                    BusDeclaration::new(port.name.as_str(), msb, lsb, BusNotation::Square).ok()
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "port `{}[{}:{}]` cannot be a bus pin: a pin's range runs from 0 to {}",
+                        port.name,
+                        range.msb,
+                        range.lsb,
+                        rspice_design_model::bus::MAX_BUS_MEMBER_INDEX
+                    )
+                })
+        };
+        // The boundary's reading of the port's first terminal: a vector's
+        // lanes all carry what its first does.
+        let boundary = port.lanes.first().and_then(|lane| layout.get(*lane));
+        let carrier = boundary.map_or(PortCarrier::Electrical, |boundary| boundary.carrier);
+        let name = match (carrier, port.range, terminals.as_slice()) {
+            (PortCarrier::Electrical, Some(range), _) if terminals.len() > 1 => {
+                let declaration = bus_pin(range)?;
                 let members = declaration
                     .members()
                     .iter()
@@ -149,8 +167,28 @@ fn compiled_interface(abi: &RuntimeAbiSummary) -> Result<Vec<SourceViewPort>, St
                 format!("{}[{}:{}]", port.name, range.msb, range.lsb)
             }
             // A one-lane vector binds the one terminal it names, `d[0]`.
-            (Domain::Continuous, _, [terminal]) => (*terminal).to_owned(),
-            (Domain::Discrete, _, [_]) => port.name.to_string(),
+            (PortCarrier::Electrical, _, [terminal]) => (*terminal).to_owned(),
+            // A logic vector's one terminal is a net per bit at the engine's
+            // boundary, most significant first as declared.
+            (PortCarrier::Logic, Some(range), [_])
+                if boundary.is_some_and(|boundary| boundary.conductors > 1) =>
+            {
+                let declaration = bus_pin(range)?;
+                let conductors = boundary.map_or(1, |boundary| boundary.conductors);
+                if declaration.members().len() != conductors {
+                    return Err(format!(
+                        "bus pin `{}[{}:{}]` would draw {} conductors where module `{}` \
+                         binds {conductors} nets",
+                        port.name,
+                        range.msb,
+                        range.lsb,
+                        declaration.members().len(),
+                        abi.module_name,
+                    ));
+                }
+                format!("{}[{}:{}]", port.name, range.msb, range.lsb)
+            }
+            (PortCarrier::Logic | PortCarrier::Real, _, [_]) => port.name.to_string(),
             _ => {
                 return Err(format!(
                     "port `{}` of module `{}` binds {} terminals, which no pin can carry",
@@ -168,9 +206,9 @@ fn compiled_interface(abi: &RuntimeAbiSummary) -> Result<Vec<SourceViewPort>, St
                 ModulePortDirection::Inout => PortDirection::InOut,
             },
             discipline: port.discipline.to_string(),
-            domain: match port.domain {
-                Domain::Continuous => PortDomain::Continuous,
-                Domain::Discrete => PortDomain::Discrete,
+            domain: match carrier {
+                PortCarrier::Electrical => PortDomain::Continuous,
+                PortCarrier::Logic | PortCarrier::Real => PortDomain::Discrete,
             },
         });
     }
@@ -219,17 +257,17 @@ pub fn apply_compiled_interface(
     libraries: &mut LibraryManager,
     schematic_buffers: &HashMap<String, Schematic>,
     reference: &CellViewRef,
-    abi: &RuntimeAbiSummary,
+    report: &RuntimeCompileReport,
 ) -> AppliedInterface {
     let refused = |reason: String| AppliedInterface {
         outcome: VerilogAInterfaceOutcome::Refused(reason),
         wrote: false,
     };
-    let ports = match compiled_interface(abi) {
+    let ports = match compiled_interface(report) {
         Ok(ports) => ports,
         Err(reason) => return refused(reason),
     };
-    let contract = match encode_veriloga_parameter_contract(&compiled_parameters(abi)) {
+    let contract = match encode_veriloga_parameter_contract(&compiled_parameters(&report.abi)) {
         Ok(contract) => contract,
         Err(reason) => return refused(reason),
     };
@@ -420,7 +458,7 @@ fn apply_receipt_interface(
         libraries,
         schematic_buffers,
         reference,
-        &receipt.compilation.report().abi,
+        receipt.compilation.report(),
     );
     if let VerilogAInterfaceOutcome::Refused(reason) = applied.outcome {
         return Err(reason);

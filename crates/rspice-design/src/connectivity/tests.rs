@@ -228,3 +228,49 @@ fn a_global_ground_label_is_node_zero() {
         Some("0")
     );
 }
+
+/// A vector terminal on a bus of its own declaration is met by that bus as a
+/// scalar terminal is by a wire, so the design check does not call it open;
+/// one no bus reaches still is.
+#[test]
+fn a_vector_terminal_on_its_bus_is_attached() {
+    use crate::schematic::component::LibraryCellInstance;
+
+    let place = |id: u64, at: Point| {
+        let mut binding = LibraryCellInstance::new("work", "cell", "verilog");
+        binding.terminal_order = vec!["mode[1:0]".to_owned()];
+        binding.interface_bound = true;
+        Component::new(id, ComponentType::CellInstance, at).with_library_cell(binding)
+    };
+    let (driver, load, open) = (
+        place(1, Point::new(0, 0)),
+        place(2, Point::new(0, 200)),
+        place(3, Point::new(400, 0)),
+    );
+    let pin = |component: &Component| component.terminal_positions()[0].1;
+    let (from, to) = (pin(&driver), pin(&load));
+    let document = SchematicDocument {
+        buses: vec![
+            Bus::new(
+                4,
+                vec![
+                    from,
+                    Point::new(from.x - 60, from.y),
+                    Point::new(from.x - 60, to.y),
+                    to,
+                ],
+                Some(BusDeclaration::parse("mode[1:0]").expect("declaration")),
+            )
+            .expect("bus"),
+        ],
+        components: vec![driver, load, open],
+        ..SchematicDocument::default()
+    };
+
+    let attached = extracted(&document)
+        .terminals
+        .iter()
+        .map(|terminal| (terminal.component_id, terminal.attached))
+        .collect::<Vec<_>>();
+    assert_eq!(attached, [(1, true), (2, true), (3, false)]);
+}

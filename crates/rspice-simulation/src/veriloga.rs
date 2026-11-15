@@ -454,6 +454,27 @@ impl PreparedVerilogARuntime {
             .map(ToString::to_string)
             .collect())
     }
+
+    /// The nodes an instance card binds, one name per node, in card order.
+    ///
+    /// Each terminal is one node, except a logic vector's: that one terminal
+    /// carries the whole signal, and the engine's boundary lays it out as one
+    /// net per bit, most significant first as declared, so it reads
+    /// `mode[1]`, `mode[0]` here as a bus pin's members do. The layout is the
+    /// engine's own, [`rspice_core::boundary_port_layout`].
+    pub fn card_terminal_names(&self) -> Result<Vec<String>, String> {
+        let (_, canonical_ir) = self.parsed()?;
+        Ok(rspice_core::boundary_port_layout(&canonical_ir)
+            .into_iter()
+            .flat_map(|port| match port.range {
+                Some(range) if port.conductors > 1 => range
+                    .indices_msb_first()
+                    .map(|bit| format!("{}[{bit}]", port.name))
+                    .collect(),
+                _ => vec![port.name],
+            })
+            .collect())
+    }
 }
 
 /// Common binding inventory for executable models and connection libraries.

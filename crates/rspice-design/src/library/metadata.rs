@@ -337,10 +337,10 @@ pub enum PortDomain {
 
 /// One port of a source view's interface, as `veriloga.ports` states it.
 ///
-/// A continuous vector is one bus port named with its range, `d[7:0]`, whose
-/// conductors expand in declaration order. A discrete vector is one port
-/// under its bare name: its bits travel as one digital signal, so it is one
-/// terminal.
+/// A vector is one bus port named with its range, `d[7:0]`, whose conductors
+/// expand most significant first as declared: a continuous vector's
+/// terminals, or a discrete vector's nets, one per bit, as the engine's
+/// boundary binds them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceViewPort {
     pub name: String,

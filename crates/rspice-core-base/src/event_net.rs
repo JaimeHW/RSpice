@@ -120,3 +120,32 @@ pub fn event_only_voltage_refusal(
          output-card operand."
     )
 }
+
+/// What one module port carries across the boundary between the analog solver
+/// and the event kernel.
+///
+/// A port its module's discrete plan names is an event endpoint: four-state
+/// logic, one net per bit, or a real value on one net. Any other port is an
+/// electrical terminal. The engine lays out an instance card by this, and a
+/// design states its pins by the same answer, so the two cannot disagree about
+/// which conductors a port has or what they carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PortCarrier {
+    /// A continuous terminal: one electrical node.
+    Electrical,
+    /// Four-state logic with drive strength: one event net per bit.
+    Logic,
+    /// A real value: one event net.
+    Real,
+}
+
+impl PortCarrier {
+    /// The word a pin or a net is described by.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Electrical => "electrical",
+            Self::Logic => "logic",
+            Self::Real => "real",
+        }
+    }
+}

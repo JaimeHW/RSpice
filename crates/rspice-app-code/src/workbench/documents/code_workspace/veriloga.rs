@@ -651,7 +651,7 @@ pub fn poll_veriloga_compile(
                                 &mut model.library_manager,
                                 &model.workspace.content.schematic_buffers,
                                 reference,
-                                &report.abi,
+                                &report,
                             );
                             if applied.wrote {
                                 model.workspace.content.project_metadata_dirty = true;

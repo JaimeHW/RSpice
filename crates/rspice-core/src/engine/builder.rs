@@ -116,6 +116,8 @@ mod mixed_boundaries;
 #[cfg(feature = "veriloga")]
 mod mixed_modules;
 #[cfg(feature = "veriloga")]
+pub use mixed_modules::{BoundaryPortLayout, boundary_port_layout};
+#[cfg(feature = "veriloga")]
 mod real_converters;
 #[cfg(feature = "veriloga")]
 mod veriloga_instances;

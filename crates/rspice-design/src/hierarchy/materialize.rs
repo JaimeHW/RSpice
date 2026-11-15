@@ -117,10 +117,20 @@ pub fn materialize_authoritative_source_binding(
     if !placed.terminal_order.is_empty()
         && !same_terminal_contract(&placed.terminal_order, &terminal_order)
     {
+        // A module's symbol follows it only through Update symbol, so an
+        // HDL view's refusal names that step before the instance's own.
+        let symbol_step = if view.view_type.is_hdl_source() {
+            "if the cell's symbol is out of date, run Update symbol on it first; then "
+        } else {
+            ""
+        };
         return Err(format!(
-            "placed interface for {}/{} is incompatible with authoritative source view '{}'; \
-             select the instance and run \"Update instance interface\"",
-            placed.library, placed.cell, view.name
+            "placed interface for {}/{} does not match authoritative source view '{}': {}; \
+             {symbol_step}select the instance and run \"Update instance interface\"",
+            placed.library,
+            placed.cell,
+            view.name,
+            interface_difference(&placed.terminal_order, &terminal_order)
         ));
     }
     let mut materialized = LibraryCellInstance::new(&library.name, &cell.name, &view.name);
@@ -165,6 +175,43 @@ pub fn materialize_authoritative_source_binding(
     materialized.declare_parameters(current_parameter_order(library, cell, view)?);
     materialized.bind_interface(&ports);
     Ok(materialized)
+}
+
+/// Which ports a placement and its source view disagree on, by name: never
+/// a pin dropped or added in silence.
+fn interface_difference(placed: &[String], declared: &[&str]) -> String {
+    let unplaced = declared
+        .iter()
+        .copied()
+        .filter(|port| !placed.iter().any(|pin| pin.eq_ignore_ascii_case(port)))
+        .collect::<Vec<_>>();
+    let undeclared = placed
+        .iter()
+        .map(String::as_str)
+        .filter(|pin| !declared.iter().any(|port| port.eq_ignore_ascii_case(pin)))
+        .collect::<Vec<_>>();
+    let mut parts = Vec::with_capacity(2);
+    if !unplaced.is_empty() {
+        parts.push(format!(
+            "ports the instance does not place: {}",
+            unplaced.join(", ")
+        ));
+    }
+    if !undeclared.is_empty() {
+        parts.push(format!(
+            "pins the view does not declare: {}",
+            undeclared.join(", ")
+        ));
+    }
+    if parts.is_empty() {
+        format!(
+            "the instance places {} where the view declares {}",
+            placed.join(", "),
+            declared.join(", ")
+        )
+    } else {
+        parts.join("; ")
+    }
 }
 
 /// The allowlist an instance of `view` binds now, by the rule placement used:
@@ -462,5 +509,25 @@ mod tests {
         let wildcard = selected_configuration_override(&overrides, "/Xother")
             .expect("wildcard override matches");
         assert_eq!(wildcard.instance_path, "/*");
+    }
+
+    /// A placement that disagrees with its view is told which ports: a
+    /// discrete vector placed as the one pin it used to be is a missing bus
+    /// pin and an undeclared scalar, and the same ports reordered say so.
+    #[test]
+    fn an_interface_difference_names_the_ports() {
+        let placed = ["p", "n", "mode"].map(str::to_owned);
+        assert_eq!(
+            interface_difference(&placed, &["p", "n", "mode[1:0]"]),
+            "ports the instance does not place: mode[1:0]; pins the view does not declare: mode"
+        );
+        assert_eq!(
+            interface_difference(&placed, &["P", "N"]),
+            "pins the view does not declare: mode"
+        );
+        assert_eq!(
+            interface_difference(&placed, &["n", "p", "mode"]),
+            "the instance places p, n, mode where the view declares n, p, mode"
+        );
     }
 }

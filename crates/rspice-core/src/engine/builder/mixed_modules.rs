@@ -372,15 +372,89 @@ fn declared_node_count(artifact: &rspice_veriloga::canonical_ir::CanonicalIrArti
 pub(super) fn port_node_widths(
     artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
 ) -> impl Iterator<Item = usize> + '_ {
-    artifact.hir.ports.iter().map(|port| {
-        artifact
-            .digital
-            .signals
-            .iter()
-            .find(|signal| signal.name == port.name)
-            .filter(|signal| !signal.kind.is_real())
-            .map_or(1, |signal| signal.width.max(1) as usize)
-    })
+    artifact
+        .hir
+        .ports
+        .iter()
+        .map(|port| port_conductors(port_signal(artifact, &port.name)))
+}
+
+/// The discrete plan's signal for the port named `name`, which is what makes
+/// the port a boundary: a port the plan does not name is an electrical
+/// terminal.
+fn port_signal<'a>(
+    artifact: &'a rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+    name: &str,
+) -> Option<&'a rspice_veriloga::canonical_ir::DigitalSignal> {
+    artifact
+        .digital
+        .signals
+        .iter()
+        .find(|signal| signal.name == name)
+}
+
+/// What a port whose plan signal is `signal` carries.
+fn port_carrier(
+    signal: Option<&rspice_veriloga::canonical_ir::DigitalSignal>,
+) -> crate::event_net::PortCarrier {
+    use crate::event_net::PortCarrier;
+    match signal {
+        None => PortCarrier::Electrical,
+        Some(signal) if signal.kind.is_real() => PortCarrier::Real,
+        Some(_) => PortCarrier::Logic,
+    }
+}
+
+/// How many consecutive X-card nodes a port whose plan signal is `signal`
+/// takes: one per bit of a logic port, one for anything else.
+fn port_conductors(signal: Option<&rspice_veriloga::canonical_ir::DigitalSignal>) -> usize {
+    match signal {
+        Some(signal) if !signal.kind.is_real() => signal.width.max(1) as usize,
+        _ => 1,
+    }
+}
+
+/// One port of a compiled module as the engine's boundary lays it out on an
+/// instance card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundaryPortLayout {
+    /// The port's name as its module declares it: `mode`, not `mode[1]`.
+    pub name: String,
+    pub carrier: crate::event_net::PortCarrier,
+    /// The consecutive card nodes it takes.
+    pub conductors: usize,
+    /// A logic vector's declared range: its conductors are its bits from the
+    /// left bound to the right, whatever their values. `None` for a scalar.
+    pub range: Option<rspice_veriloga::canonical_ir::VectorBounds>,
+}
+
+/// Every port of `artifact` in card order, as an X-card naming it binds it.
+///
+/// This is the boundary's own reading, the one elaboration lays out nodes
+/// by: a port is a logic or real endpoint exactly when the discrete plan names
+/// it, whatever discipline its declaration spells, and a logic vector takes
+/// one node per bit, most significant first.
+pub fn boundary_port_layout(
+    artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+) -> Vec<BoundaryPortLayout> {
+    artifact
+        .hir
+        .ports
+        .iter()
+        .map(|port| {
+            let signal = port_signal(artifact, &port.name);
+            let carrier = port_carrier(signal);
+            BoundaryPortLayout {
+                name: port.name.to_string(),
+                carrier,
+                conductors: port_conductors(signal),
+                range: signal
+                    .and_then(|signal| signal.bounds)
+                    .filter(|_| carrier == crate::event_net::PortCarrier::Logic)
+                    .map(|(msb, lsb)| rspice_veriloga::canonical_ir::VectorBounds { msb, lsb }),
+            }
+        })
+        .collect()
 }
 
 /// Split the module's ports into the analog terminals the continuous half
@@ -423,15 +497,8 @@ fn classify_boundary_ports(
     };
     let mut cursor = 0usize;
     for port in &artifact.hir.ports {
-        let signal = artifact
-            .digital
-            .signals
-            .iter()
-            .find(|signal| signal.name == port.name);
-        let width = match signal {
-            Some(signal) if !signal.kind.is_real() => signal.width.max(1) as usize,
-            _ => 1,
-        };
+        let signal = port_signal(artifact, &port.name);
+        let width = port_conductors(signal);
         let first = cursor;
         cursor += width;
         layout.analog_terminals.push(terminal_nodes[first]);

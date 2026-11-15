@@ -130,9 +130,10 @@ pub use crate::config::{
 pub use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 #[cfg(feature = "veriloga")]
 pub use builder::{
-    HeldVerilogASources, InstalledProjectVerilogARuntime,
+    BoundaryPortLayout, HeldVerilogASources, InstalledProjectVerilogARuntime,
     ProjectVerilogAConnectionLibraryRegistration, ProjectVerilogARuntimeRegistration,
     ProjectVerilogASourceRegistration, SealedVerilogAArtifact, VerilogACacheTelemetry,
+    boundary_port_layout,
     hdl_spice_leaves::{hdl_delay_select, hdl_external_cells, hdl_wreal_resolution},
     hold_installed_project_veriloga_runtimes, hold_project_veriloga_sources_for_session,
     open_sealed_veriloga_artifact, register_precompiled_veriloga_model,

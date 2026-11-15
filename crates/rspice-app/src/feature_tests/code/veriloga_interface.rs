@@ -557,10 +557,12 @@ fn same_named_cells_in_two_libraries_each_bind_their_own_module() {
     }
 }
 
-/// A discrete vector's bits travel as one digital signal: one pin, `Logic`,
-/// one terminal, so the symbol's conductor count is the module's.
+/// A discrete vector is one `Logic` bus pin, `mode[1:0]`, on one ABI lane:
+/// the module binds its whole signal through one terminal, and the engine's
+/// boundary lays that signal out as one net per bit, so the symbol's
+/// conductors are the nets a run binds, two for the vector.
 #[test]
-fn a_discrete_vector_is_one_logic_pin_on_one_terminal() {
+fn a_discrete_vector_is_one_logic_bus_pin_with_a_conductor_per_bit() {
     let mut app = open_project_app();
     let reference = add_module_cell(
         &mut app.state,
@@ -577,22 +579,26 @@ fn a_discrete_vector_is_one_logic_pin_on_one_terminal() {
         [
             ("p", PortDirection::InOut),
             ("n", PortDirection::InOut),
-            ("mode", PortDirection::In),
+            ("mode[1:0]", PortDirection::In),
         ]
     );
     assert_eq!(ports[2].domain, PortDomain::Discrete);
     assert_eq!(ports[2].discipline, "logic");
     let symbol = symbol(&app, &reference);
     assert_eq!(
-        symbol.pin("mode").and_then(|pin| pin.electrical_type),
+        symbol.pin("mode[1:0]").and_then(|pin| pin.electrical_type),
         Some(SymbolElectricalType::Logic)
     );
-    let terminals = symbol
+    assert!(
+        symbol.pin("mode").is_none(),
+        "one pin, not a scalar beside it"
+    );
+    let conductors = symbol
         .pins
         .iter()
         .map(|pin| rspice_design::schematic::bus::declared_width(&pin.name))
         .sum::<usize>();
-    let lanes = app
+    let report = app
         .state
         .code
         .code_workspace
@@ -602,11 +608,18 @@ fn a_discrete_vector_is_one_logic_pin_on_one_terminal() {
         .expect("the receipt")
         .compilation
         .report()
-        .abi
-        .analog_ports
-        .len();
-    assert_eq!(terminals, lanes);
-    assert_eq!(lanes, 3);
+        .clone();
+    assert_eq!(report.abi.analog_ports.len(), 3, "one lane for the vector");
+    let mode_bits = report
+        .canonical_ir
+        .digital
+        .signals
+        .iter()
+        .find(|signal| signal.name == "mode")
+        .expect("the discrete plan carries mode")
+        .width;
+    assert_eq!(conductors, 2 + mode_bits as usize);
+    assert_eq!(conductors, 4);
 }
 
 /// A cell's schematic defines its ports. A module that compiles to different

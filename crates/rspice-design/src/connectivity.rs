@@ -1113,7 +1113,8 @@ where
 
     /// Bind every placed terminal to its net, in drawing order, and judge
     /// whether anything else meets it: another point of its net, another
-    /// terminal on it, or a name written onto its point.
+    /// terminal on it, a name written onto its point, or a bus of its own
+    /// declaration under a vector terminal.
     fn bind_terminals(&mut self) -> Vec<BoundTerminal> {
         let schematic = self.schematic;
 
@@ -1124,6 +1125,16 @@ where
             .iter()
             .map(|label| label.pos)
             .chain(self.buses.scalar_taps.iter().map(|binding| binding.point))
+            .collect();
+
+        // A vector terminal joins the vector net of the bus beneath it, which
+        // no scalar net records: that bus meets it as a wire meets a scalar
+        // terminal.
+        let on_buses: FastSet<Point> = self
+            .vector_nets
+            .nets
+            .iter()
+            .flat_map(|net| net.terminals.iter().copied())
             .collect();
 
         let mut bound: Vec<(u64, String, Point, usize)> = Vec::new();
@@ -1155,7 +1166,8 @@ where
                 net,
                 attached: spans.get(&net).copied().unwrap_or_default() > 1
                     || terminal_counts.get(&net).copied().unwrap_or_default() > 1
-                    || annotations.contains(&point),
+                    || annotations.contains(&point)
+                    || on_buses.contains(&point),
             })
             .collect()
     }

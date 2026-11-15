@@ -107,10 +107,11 @@ pub fn prepared_configuration_veriloga_runtimes(
             )
         })?;
         let compiled_terminals = runtime
-            .terminal_names()
+            .card_terminal_names()
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        // A bus pin `d[3:0]` is the module's terminals `d[3]` to `d[0]`, in
-        // the order the deck emits its conductors.
+        // A bus pin `d[3:0]` is the nodes `d[3]` to `d[0]` the module binds,
+        // in the order the deck emits its conductors: a continuous vector's
+        // terminals, or a discrete vector's nets at the engine's boundary.
         let declared_terminals = materialized
             .terminal_order
             .iter()
