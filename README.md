@@ -152,9 +152,9 @@ analysis and by the families of instances the circuit holds:
 | PAC analysis | if (12) | if (12) | no (a) | if (13) | if (14) | no (a) | no (a) |
 | Pnoise analysis | if (15) | if (15) | no (a) | if (16) | if (17) | no (a) | no (a) |
 | PXF analysis | if (12) | if (12) | no (a) | if (13) | if (14) | no (a) | no (a) |
-| PSTB analysis | if (9) | if (9) | no (a) | no (b) | no (c) | no (a) | no (a) |
-| Envelope analysis | if (18) | if (18) | no (a) | no (d) | no (c) | no (a) | no (a) |
-| Quasi-periodic analysis | if (18) | if (18) | no (a) | no (e) | no (f) | no (a) | no (a) |
+| PSTB analysis | if (18) | if (18) | no (a) | if (19) | if (20) | no (a) | no (a) |
+| Envelope analysis | if (21) | if (21) | no (a) | no (b) | no (c) | no (a) | no (a) |
+| Quasi-periodic analysis | if (21) | if (21) | no (a) | no (d) | no (e) | no (a) | no (a) |
 
 A restricted cell runs the instances its condition admits and refuses the others by name:
 
@@ -175,16 +175,18 @@ A restricted cell runs the instances its condition admits and refuses the others
 - (15) every instance whose declared periodic contracts admit it, and on an event shooting orbit voltage- and current-controlled switches whose controls carry no noise where they change, for driven noise from white sources, output-referred or sampled at a phase
 - (16) every Verilog-A module periodic AC admits on the same carrier, its white_noise and flicker_noise processes sampled over the orbit
 - (17) every generated compact model periodic AC admits on the same carrier, its white_noise and flicker_noise processes sampled over the orbit
-- (18) every instance whose declared envelope and periodic contracts admit it
+- (18) every instance whose declared periodic contracts admit it, and on a driven orbit voltage- and current-controlled switches, read through the monodromy event shooting certifies over the coordinates the period remembers
+- (19) every Verilog-A module PSS admits, read through the monodromy of the orbit it solves: by native shooting, a module whose state is the charges it contributes, autonomous orbits included; on a driven orbit, by event shooting, every other module without laplace_*, absdelay, idtmod or zi_* whose events and the values they write come back every period, its ddt and idt states and real retained variables coordinates of the period map
+- (20) every generated compact model PSS admits, read through the monodromy of the orbit shooting solves: its charges are coordinates of the period map from the state the period starts at
+- (21) every instance whose declared envelope and periodic contracts admit it
 
 A refused cell refuses on the family's first instance:
 
 - (a) `analysis.mixed_signal.discrete_state`: a periodic steady state with a running discrete state has no formulation yet: the digital half's event queue, process resumptions and drivers are not part of a period map; a transient runs the circuit with its digital half live, and transient noise (.TRAN with NOISEFMAX) gives its noise
-- (b) `analysis.periodic.veriloga`: Verilog-A integration state is not part of a period map
+- (b) `analysis.periodic.veriloga`: Verilog-A integration state is not part of an envelope
 - (c) `analysis.periodic.veriloga`: generated Verilog-A integration state
-- (d) `analysis.periodic.veriloga`: Verilog-A integration state is not part of an envelope
-- (e) `analysis.periodic.veriloga`: runtime Verilog-A devices without exact HB charge/noise capability metadata
-- (f) `analysis.periodic.veriloga`: generated Verilog-A compact-model equations
+- (d) `analysis.periodic.veriloga`: runtime Verilog-A devices without exact HB charge/noise capability metadata
+- (e) `analysis.periodic.veriloga`: generated Verilog-A compact-model equations
 
 <!-- end of support table -->
 
