@@ -300,7 +300,7 @@ fn replace_all_in_the_cell_view_is_one_undo_step() {
 /// The Sheet scope leaves another sheet of the same cell view alone.
 #[test]
 fn the_sheet_scope_leaves_the_other_sheets_alone() {
-    let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[2]);
+    let mut state = super::two_sheet_state(&[1], &[2]);
     let document = state.model.schematic.document_mut_for_test();
     document.components = vec![part(1, "R1", "1k"), part(2, "R2", "1k")];
     document.wires.clear();

@@ -8,8 +8,6 @@ use std::sync::Arc;
 use egui::Ui;
 
 use crate::workbench::app::{symbol_context_revision, sync_active_schematic};
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::{Model, model_design_view};
 use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::{slots::DesignState, state::WorkbenchSession};

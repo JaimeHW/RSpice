@@ -52,7 +52,7 @@ fn open_pin_marks(ctx: &egui::Context, state: &mut AppState) -> Vec<Point> {
 /// changes no topology, and the marks still follow the sheet.
 #[test]
 fn an_open_pin_on_sheet_two_is_marked_at_its_own_point() {
-    let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[6], &[7]);
+    let mut state = super::two_sheet_state(&[6], &[7]);
     state.design.grid = crate::state::GridStyle::Off;
     let first = Component::new(6, ComponentType::Resistor, Point::new(100, 100));
     let second = Component::new(7, ComponentType::Capacitor, Point::new(300, 200));

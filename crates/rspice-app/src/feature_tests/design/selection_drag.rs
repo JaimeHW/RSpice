@@ -373,7 +373,7 @@ fn an_angled_routing_style_stretches_the_dragged_wire_straight() {
 #[test]
 fn a_drag_leaves_another_sheets_wire_end_in_place() {
     let ctx = egui::Context::default();
-    let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1, 9], &[20]);
+    let mut state = super::two_sheet_state(&[1, 9], &[20]);
     state
         .model
         .schematic

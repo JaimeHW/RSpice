@@ -163,6 +163,19 @@ pub(crate) fn state_with_populated_user_library() -> AppState {
     )
 }
 
+/// A cell view with two sheets
+/// ([`seed_two_sheets`](crate::schematic::view::sheet_visibility::seed_two_sheets))
+/// in a new whole application.
+fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
+    let mut state = AppState::default();
+    crate::schematic::view::sheet_visibility::seed_two_sheets(
+        &mut state.model,
+        active_ids,
+        hidden_ids,
+    );
+    state
+}
+
 /// The application made of a new host is a new application, on the four
 /// fields the host lends. A map's `Debug` order is its own per instance, so
 /// the state is compared by its sorted lines; the model, which has no

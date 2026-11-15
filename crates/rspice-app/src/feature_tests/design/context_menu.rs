@@ -871,8 +871,7 @@ fn context_requests_recheck_the_opening_selection_source_and_authority() {
 /// short the source sheet does not have (audit U-5).
 #[test]
 fn copy_takes_no_wire_or_junction_from_another_sheet() {
-    let mut state =
-        crate::schematic::view::sheet_visibility::two_sheet_state(&[1, 3, 5, 7], &[2, 6]);
+    let mut state = super::two_sheet_state(&[1, 3, 5, 7], &[2, 6]);
     let r3 = Component::new(1, ComponentType::Resistor, Point::origin());
     let r4 = Component::new(3, ComponentType::Resistor, Point::new(100, 0));
     let r3_right = r3.terminal_positions()[1].1;

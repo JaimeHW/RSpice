@@ -19,8 +19,6 @@ use crate::state::{
 };
 use crate::workbench::app_state::Model;
 
-#[cfg(test)]
-use super::AppState;
 use super::{SchematicSymbolContext, SelectionWindow, parts::CanvasParts};
 
 /// How much of a cell view a dock lists.
@@ -490,15 +488,6 @@ pub(super) fn active_sheet_has_objects(model: &Model) -> bool {
             .probes
             .iter()
             .any(|object| object_is_on_active_sheet(model, object.id))
-}
-
-/// A cell view with two sheets ([`seed_two_sheets`]) in a new whole
-/// application. Shared by the canvas modules' tests.
-#[cfg(test)]
-pub(crate) fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppState {
-    let mut state = AppState::default();
-    seed_two_sheets(&mut state.model, active_ids, hidden_ids);
-    state
 }
 
 /// A cell view with two sheets ([`seed_two_sheets`]) on a new design test
