@@ -59,6 +59,11 @@ pub(super) struct CallTables {
     /// The module instance each hierarchical scope argument names, by the
     /// referring module scope and the parser's symbol.
     pub scope_references: Arc<HashMap<(DigitalScopeId, SmolStr), DigitalScopeId>>,
+    /// The source's other top-level modules, which a scope argument may name
+    /// by their names alone (`$printtimescale(othertop)`).
+    pub top_levels: Arc<HashMap<SmolStr, crate::time_scale::ModuleTimeScale>>,
+    /// The other top-level modules' scopes this process named first, by path.
+    pub external_scopes: Vec<(SmolStr, DigitalScopeId)>,
     /// `disable` lowering: the names some `disable` targets, the disabled
     /// named blocks around the statement being lowered, and the routine
     /// being lowered.
@@ -76,6 +81,10 @@ pub(super) struct PlanCalls {
     pub overrides: Vec<super::super::digital::DigitalOverride>,
     pub module_scopes: Arc<HashMap<SmolStr, DigitalScopeId>>,
     pub scope_references: Arc<HashMap<(DigitalScopeId, SmolStr), DigitalScopeId>>,
+    pub top_levels: Arc<HashMap<SmolStr, crate::time_scale::ModuleTimeScale>>,
+    /// The scopes that stand for other top-level modules' instances, which
+    /// this plan names but does not hold.
+    pub external_scopes: Vec<DigitalScopeId>,
     /// Every name a `disable` of the design targets.
     pub disabled: Arc<std::collections::HashSet<SmolStr>>,
     /// The `disable`s that name a block outside their own, resolved once
@@ -114,6 +123,26 @@ impl PlanCalls {
         }
     }
 
+    /// The scope standing for an instance of another top-level module: the
+    /// module itself when `path` is its name. Linking keeps its path.
+    pub fn external_scope(
+        &mut self,
+        path: SmolStr,
+        module: SmolStr,
+        time_scale: crate::time_scale::ModuleTimeScale,
+    ) -> DigitalScopeId {
+        if let Some(&id) = self.module_scopes.get(&path) {
+            return id;
+        }
+        let name: SmolStr = path
+            .rsplit_once('.')
+            .map_or(path.as_str(), |(_, name)| name)
+            .into();
+        let scope = self.add_module_scope(None, path, module.clone(), module, name, time_scale);
+        self.external_scopes.push(scope.id);
+        scope.id
+    }
+
     /// Tables for one process lowered in `scope`.
     pub fn tables_for(&self, scope: Option<&ScopeFrame>) -> CallTables {
         CallTables {
@@ -124,6 +153,7 @@ impl PlanCalls {
             stack: scope.cloned().into_iter().collect(),
             module_scopes: Arc::clone(&self.module_scopes),
             scope_references: Arc::clone(&self.scope_references),
+            top_levels: Arc::clone(&self.top_levels),
             threads: super::disable::ThreadTables::new(Arc::clone(&self.disabled)),
             ..Default::default()
         }
@@ -137,6 +167,10 @@ impl PlanCalls {
         debug_assert_eq!(tables.observer_base as usize, self.observers.len());
         debug_assert_eq!(tables.override_base as usize, self.overrides.len());
         self.scopes.extend(tables.scopes);
+        for (path, id) in tables.external_scopes {
+            Arc::make_mut(&mut self.module_scopes).insert(path, id);
+            self.external_scopes.push(id);
+        }
         self.sites.extend(tables.sites);
         self.observers.extend(tables.observers);
         self.overrides.extend(tables.overrides);
@@ -422,6 +456,17 @@ impl ProcessLowerer<'_> {
             // `$dumpvars(0, top.u1)`: resolved during elaboration.
             return DigitalSystemArgument::Scope(id);
         }
+        if DigitalSystemCallKind::from_name(&call.name)
+            == Some(DigitalSystemCallKind::PrintTimeScale)
+            && crate::ast::is_reference_symbol(&identifier.name)
+        {
+            self.invalid(
+                "the argument of `$printtimescale` names a module (IEEE 1364-2005 section \
+                 17.4.2), and this hierarchical name is not a module instance",
+                identifier.span,
+            );
+            return DigitalSystemArgument::Empty;
+        }
         if crate::ast::is_reference_symbol(&identifier.name) {
             // IEEE 1364-2005 section 18.1.2 dumps such a signal under the
             // scopes of its own path, which the dump writer does not lay out.
@@ -451,6 +496,7 @@ impl ProcessLowerer<'_> {
             [name.to_string(), format!("{}.{name}", module.path)]
                 .iter()
                 .find_map(|path| self.calls.module_scopes.get(path.as_str()).copied())
+                .or_else(|| self.top_level_scope(name))
         };
         match found {
             Some(id) => DigitalSystemArgument::Scope(id),
@@ -466,6 +512,31 @@ impl ProcessLowerer<'_> {
                 DigitalSystemArgument::Empty
             }
         }
+    }
+
+    /// Another top-level module named alone (`$printtimescale(othertop)`):
+    /// a scope that stands for it, made once per plan.
+    fn top_level_scope(&mut self, name: &str) -> Option<DigitalScopeId> {
+        if let Some((_, id)) = self
+            .calls
+            .external_scopes
+            .iter()
+            .find(|(path, _)| path == name)
+        {
+            return Some(*id);
+        }
+        let time_scale = *self.calls.top_levels.get(name)?;
+        let id = DigitalScopeId(self.calls.scope_base + self.calls.scopes.len() as u32);
+        self.calls.scopes.push(DigitalScope {
+            id,
+            parent: None,
+            path: name.into(),
+            module: name.into(),
+            kind: DigitalScopeKind::Module,
+            time_scale,
+        });
+        self.calls.external_scopes.push((name.into(), id));
+        Some(id)
     }
 
     /// The value class an output target is written with.

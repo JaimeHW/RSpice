@@ -147,14 +147,20 @@ impl Resolver {
                         init: None,
                         span: item.span,
                     };
+                    let integer = kind == DigitalVariableKind::Integer;
                     borrowed = Some(Borrowed::Variable(DigitalVariableDecl {
                         kind,
-                        signedness: if kind == DigitalVariableKind::Integer {
+                        signedness: if integer {
                             Signedness::Signed
                         } else {
                             Signedness::Unsigned
                         },
-                        range: None,
+                        // An `integer` is [31:0] (IEEE 1364-2005 section 3.9).
+                        range: if integer {
+                            super::local::integer_range(span)
+                        } else {
+                            None
+                        },
                         items: vec![close_item(&item)?],
                         span,
                     }));

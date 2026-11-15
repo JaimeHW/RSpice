@@ -73,7 +73,7 @@ fn mark_calls(
 }
 
 /// Every expression a routine's declarations and body hold.
-fn routine_expressions<'a>(routine: &'a SourceRoutine, out: &mut Vec<&'a Expression>) {
+pub(super) fn routine_expressions<'a>(routine: &'a SourceRoutine, out: &mut Vec<&'a Expression>) {
     declaration_expressions(routine, out);
     statement_expressions(&routine.body, out);
 }

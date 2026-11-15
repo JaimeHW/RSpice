@@ -342,6 +342,16 @@ pub struct SemanticError {
     pub span: Span,
 }
 
+/// The only hierarchical names left without a declaration name a named block
+/// whole, which only a scope argument may (IEEE 1364-2005 section 12.5).
+fn undeclared_symbol(name: &str) -> String {
+    if crate::ast::is_reference_symbol(name) {
+        "a hierarchical name here names a named block, not a net, variable or function".into()
+    } else {
+        format!("Undeclared symbol: '{name}'")
+    }
+}
+
 impl SemanticError {
     pub fn new(kind: SemanticErrorKind, span: Span) -> Self {
         Self { kind, span }
@@ -351,7 +361,7 @@ impl SemanticError {
 /// Types of semantic errors
 #[derive(Debug, Error)]
 pub enum SemanticErrorKind {
-    #[error("Undeclared symbol: '{name}'")]
+    #[error("{}", undeclared_symbol(name))]
     UndeclaredSymbol { name: smol_str::SmolStr },
 
     /// A SystemVerilog package, import or scoped name that the visibility

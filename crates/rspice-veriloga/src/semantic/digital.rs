@@ -65,6 +65,9 @@ pub struct AnalyzedDigital {
     /// of a system task (IEEE 1364-2005 sections 12.5, 17.4.2 and 18.1.2), by
     /// the parser's symbol.
     pub scope_references: std::collections::BTreeMap<SmolStr, DigitalScopeReference>,
+    /// Hierarchical names that start at another top-level module, by the
+    /// parser's symbol (IEEE 1364-2005 section 12.5).
+    pub top_level_references: std::collections::BTreeMap<SmolStr, DigitalTopLevelReference>,
     /// Continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
     /// Module path delays (IEEE 1364-2005 section 14), one per source and
@@ -141,6 +144,23 @@ pub struct DigitalScopeReference {
     pub absolute: bool,
     /// The reference as written, for diagnostics: `top.u1`.
     pub written: SmolStr,
+    pub span: Span,
+}
+
+/// What a hierarchical name that starts at another top-level module names.
+///
+/// That module is a root of its own; linking the roots into one design
+/// joins this module's copy of a signal to the signal itself.
+#[derive(Debug, Clone)]
+pub struct DigitalTopLevelReference {
+    /// The other top-level module.
+    pub root: SmolStr,
+    /// Below `root`: the signal's elaborated name there (`u.flag`), or the
+    /// path of the module instance a scope argument names, empty for `root`
+    /// itself.
+    pub path: SmolStr,
+    /// For a scope argument, the named instance's module and time scale.
+    pub scope: Option<(SmolStr, crate::time_scale::ModuleTimeScale)>,
     pub span: Span,
 }
 
@@ -679,6 +699,8 @@ pub struct ElaboratedDigitalInstance {
     /// The instance's hierarchical scope arguments, every path below the
     /// compiled root.
     pub scope_references: std::collections::BTreeMap<SmolStr, DigitalScopeReference>,
+    /// The instance's hierarchical names into other top-level modules.
+    pub top_level_references: std::collections::BTreeMap<SmolStr, DigitalTopLevelReference>,
     /// The instance's continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
     /// The implicit continuous assignments of this instance's variable output
@@ -1001,6 +1023,7 @@ impl SemanticAnalyzer {
                     )
                 })
                 .collect(),
+            top_level_references: module.foreign_top_levels.clone(),
             continuous_assigns,
             paths,
             timing_checks,
@@ -3911,6 +3934,14 @@ impl SemanticAnalyzer {
                 }
                 DigitalArgumentUse::Reference => match argument {
                     Expression::Identifier(_) | Expression::NullArgument(_) => {}
+                    other if kind == DigitalSystemCallKind::PrintTimeScale => self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(
+                            "the argument of `$printtimescale` names a module (IEEE \
+                                 1364-2005 section 17.4.2), not an expression"
+                                .into(),
+                        ),
+                        other.span(),
+                    ),
                     other => self.record_error_at(
                         SemanticErrorKind::InvalidExpression(format!(
                             "argument {} of `{name}` names a module instance, block or signal, \

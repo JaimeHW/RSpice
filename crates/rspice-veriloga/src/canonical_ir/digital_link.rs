@@ -378,14 +378,59 @@ pub fn link_digital_plans(
             }
         }
     }
+    // A hierarchical name into another top-level module (IEEE 1364-2005
+    // section 12.5) is storage of the referring root that stands for the
+    // named root's own signal: the two are one signal of the design.
+    let mut stand_ins = BTreeSet::new();
+    for layout in &layouts {
+        for external in &layout.instance.plan.external_signals {
+            let target = instance_names
+                .get(external.root.as_str())
+                .map(|&owner| &layouts[owner])
+                .ok_or_else(|| {
+                    error(format!(
+                        "digital instance '{}' names top-level module '{}', which is not part \
+                         of this design",
+                        layout.instance.name, external.root
+                    ))
+                })?;
+            let held = target
+                .instance
+                .plan
+                .signals
+                .iter()
+                .position(|signal| signal.name == external.name)
+                .ok_or_else(|| {
+                    error(format!(
+                        "digital instance '{}' names '{}.{}', which that module does not declare",
+                        layout.instance.name, external.root, external.name
+                    ))
+                })?;
+            let stand_in = layout.first_signal + usize::from(external.signal);
+            let held = target.first_signal + held;
+            if slots[stand_in].kind != slots[held].kind
+                || slots[stand_in].width != slots[held].width
+            {
+                return Err(error(format!(
+                    "digital instance '{}' declares '{}.{}' with another type than that module",
+                    layout.instance.name, external.root, external.name
+                )));
+            }
+            join(&mut parents, stand_in, held);
+            stand_ins.insert(stand_in);
+        }
+    }
     let roots: Vec<_> = (0..slots.len())
         .map(|slot| root(&mut parents, slot))
         .collect();
     let mut representatives = BTreeMap::new();
     for (slot, &root) in roots.iter().enumerate() {
         let chosen = representatives.entry(root).or_insert(slot);
-        // Prefer the first explicitly named net to an internal port name.
-        if *chosen < original_signals && slot >= original_signals {
+        // Prefer the first explicitly named net to an internal port name,
+        // and a signal to the storage that stands for it.
+        if (*chosen < original_signals && slot >= original_signals)
+            || (stand_ins.contains(chosen) && !stand_ins.contains(&slot) && slot < original_signals)
+        {
             *chosen = slot;
         }
     }
@@ -615,11 +660,17 @@ pub fn link_digital_plans(
         // the table it names.
         for scope in &source.scopes {
             let mut scope = scope.clone();
+            // A scope standing for another top-level module keeps its path.
+            let external = source.external_scopes.contains(&scope.id);
             scope.id = DigitalScopeId(scope.id.0 + layout.tables.scopes);
             scope.parent = scope
                 .parent
                 .map(|parent| DigitalScopeId(parent.0 + layout.tables.scopes));
-            scope.path = instance_scope_path(layout.instance.name, &scope.path);
+            if external {
+                plan.external_scopes.push(scope.id);
+            } else {
+                scope.path = instance_scope_path(layout.instance.name, &scope.path);
+            }
             plan.scopes.push(scope);
         }
         for site in &source.system_calls {

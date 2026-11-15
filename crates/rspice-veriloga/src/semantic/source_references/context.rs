@@ -34,6 +34,7 @@ impl Resolver {
             active_imports: HashSet::new(),
             next_import: 0,
             builtins: crate::types::FunctionRegistry::new(),
+            top_levels: HashMap::new(),
         })
     }
 
@@ -50,7 +51,7 @@ impl Resolver {
 
     /// Local scopes shadow outer scopes, even when the remaining path is invalid.
     pub(super) fn start_scope(
-        &self,
+        &mut self,
         owner: usize,
         reference: &ScopedHierarchicalReference,
     ) -> CompileResult<(usize, Vec<HierarchicalScopeKey>, usize)> {
@@ -107,6 +108,14 @@ impl Resolver {
             };
             origin = &current.parent_scope;
             frame = parent;
+        }
+        // A name that starts at another top-level module (IEEE 1364-2005
+        // section 12.5), once no scope here or above declares it.
+        if self.selected
+            && first.index.is_none()
+            && let Some(top_level) = self.top_level(&first.name)
+        {
+            return Ok((top_level, Vec::new(), 1));
         }
         Err(self.unresolved_scope(owner, reference))
     }
@@ -514,6 +523,11 @@ pub(super) fn prepare(
     // Overrides may discover later siblings on demand. Every discovered occurrence
     // joins this same graph and is visited exactly once here.
     while cursor < resolver.frames.len() {
+        if resolver.frames[cursor].top_level.is_some() {
+            // Another top-level module's frames only answer references.
+            cursor += 1;
+            continue;
+        }
         let count = resolver.frames[cursor].source.instances.len();
         for ordinal in 0..count {
             let span = resolver.frames[cursor].source.instances[ordinal].span;
@@ -533,6 +547,9 @@ pub(super) fn prepare(
     let mut representatives = HashMap::new();
     let mut occurrences = HashMap::new();
     for frame in resolver.frames {
+        if frame.top_level.is_some() {
+            continue;
+        }
         representatives
             .entry(frame.source.name.clone())
             .or_insert_with(|| frame.path.clone());
@@ -706,7 +723,7 @@ pub(crate) fn insert(
     };
     let mut cursor = first;
     while cursor < resolver.frames.len() {
-        if within(&resolver.frames[cursor].path) {
+        if resolver.frames[cursor].top_level.is_none() && within(&resolver.frames[cursor].path) {
             for ordinal in 0..resolver.frames[cursor].source.instances.len() {
                 let span = resolver.frames[cursor].source.instances[ordinal].span;
                 resolver.child(cursor, ordinal, span)?;
@@ -727,7 +744,7 @@ pub(crate) fn insert(
     let design = catalog.design.as_mut().unwrap();
     let mut paths = Vec::new();
     for frame in resolver.frames {
-        if within(&frame.path) {
+        if frame.top_level.is_none() && within(&frame.path) {
             paths.push(frame.path.clone());
             design.occurrences.insert(frame.path, frame.source);
         }

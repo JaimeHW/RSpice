@@ -967,10 +967,16 @@ pub fn run_digital_testbench(
         plans.push((module, digital));
     }
     // A module some other module instantiates is not a root.
+    // A scope that stands for another top-level module does not instantiate it.
     instantiated.extend(
         plans
             .iter()
-            .flat_map(|(_, plan)| plan.scopes.iter().skip(1))
+            .flat_map(|(_, plan)| {
+                plan.scopes
+                    .iter()
+                    .skip(1)
+                    .filter(|scope| !plan.external_scopes.contains(&scope.id))
+            })
             .filter(|scope| {
                 scope.kind == rspice_veriloga::canonical_ir::digital::DigitalScopeKind::Module
             })
@@ -988,7 +994,9 @@ pub fn run_digital_testbench(
                 .unwrap_or_default(),
         });
     }
-    let plan = if roots.len() == 1 {
+    // A name into another top-level module is joined to it by linking, which
+    // refuses one whose module is not a root here.
+    let plan = if roots.len() == 1 && roots[0].1.external_signals.is_empty() {
         roots.into_iter().next().expect("one root").1
     } else {
         use rspice_veriloga::canonical_ir::digital_link::{

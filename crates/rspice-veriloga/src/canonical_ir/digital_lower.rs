@@ -167,6 +167,23 @@ pub(crate) fn parameter_override_literal(
 
 pub(crate) use constants::ElaborationDependencies;
 
+/// Each function of `functions` that the constant expressions `roots` call,
+/// directly or through another function (IEEE 1364-2005 section 10.4.5), with
+/// every expression its declarations and body hold.
+pub(crate) fn constant_function_expressions<'f>(
+    functions: &'f [crate::ast::DigitalRoutine],
+    roots: &[&Expression],
+) -> Vec<(&'f crate::ast::DigitalRoutine, Vec<&'f Expression>)> {
+    constant_functions::reachable(functions, roots)
+        .into_iter()
+        .map(|function| {
+            let mut expressions = Vec::new();
+            constant_functions::routine_expressions(function, &mut expressions);
+            (function, expressions)
+        })
+        .collect()
+}
+
 pub(crate) fn digital_dependencies<'a>(
     digital: &AnalyzedDigital,
     shapes: impl IntoIterator<Item = &'a Expression>,
@@ -232,6 +249,8 @@ pub(crate) enum DigitalRefusalKind {
     NotLowered,
     /// A driver the standard does not admit on the net it drives.
     InvalidContribution,
+    /// An expression or argument the standard rules out where it stands.
+    InvalidExpression,
 }
 
 /// One diagnostic from the discrete-domain lowering, with the class that
@@ -287,12 +306,14 @@ impl DigitalLoweringDiagnostic {
 /// diagnostics, and the compiler's own path ([`lower_module`]) keeps it so the
 /// author's constructs and the compiler's invariants are rendered apart.
 pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDiagnostic>> {
-    lower_with_analog_variables(digital, &HashMap::new(), "top").map_err(|diagnostics| {
-        diagnostics
-            .into_iter()
-            .map(|entry| entry.diagnostic)
-            .collect()
-    })
+    lower_with_analog_variables(digital, &HashMap::new(), "top", HashMap::new()).map_err(
+        |diagnostics| {
+            diagnostics
+                .into_iter()
+                .map(|entry| entry.diagnostic)
+                .collect()
+        },
+    )
 }
 
 #[derive(Clone)]
@@ -324,10 +345,18 @@ impl AnalogVariable {
     }
 }
 
+/// `top_levels` are the source's other top-level modules, with their time
+/// scales, which a scope argument may name.
 pub(crate) fn lower_module(
     module: &crate::semantic::AnalyzedModule,
+    top_levels: HashMap<SmolStr, crate::time_scale::ModuleTimeScale>,
 ) -> Result<CanonicalDigitalPlan, Vec<DigitalLoweringDiagnostic>> {
-    lower_with_analog_variables(&module.digital, &analog_variables(module), &module.name)
+    lower_with_analog_variables(
+        &module.digital,
+        &analog_variables(module),
+        &module.name,
+        top_levels,
+    )
 }
 
 fn analog_variables(module: &crate::semantic::AnalyzedModule) -> HashMap<SmolStr, AnalogVariable> {
@@ -427,6 +456,7 @@ fn lower_with_analog_variables(
     digital: &AnalyzedDigital,
     analog_variables: &HashMap<SmolStr, AnalogVariable>,
     root_name: &str,
+    top_levels: HashMap<SmolStr, crate::time_scale::ModuleTimeScale>,
 ) -> Result<CanonicalDigitalPlan, Vec<DigitalLoweringDiagnostic>> {
     if digital.is_empty() {
         return Ok(CanonicalDigitalPlan::default());
@@ -773,6 +803,7 @@ fn lower_with_analog_variables(
                 .collect()
         })
         .collect();
+    let external_signals = external_signals(digital, &module_scope, &frame_scopes);
     // The scope an implicit port driver resolves in. It names both sides of a
     // connection, which live in two different instances, so it is the only one
     // keyed by elaborated name.
@@ -905,6 +936,7 @@ fn lower_with_analog_variables(
                         .chain(routines.iter().map(|routine| &routine.routine.body))
                 }),
         )),
+        top_levels: std::sync::Arc::new(top_levels),
         ..PlanCalls::default()
     };
     // A library binding's root is known by its `library.cell` (`%l`).
@@ -947,7 +979,7 @@ fn lower_with_analog_variables(
         root_name,
         &root_scope,
         &frame_scope_frames,
-        &calls.module_scopes,
+        &mut calls,
     ));
     // Tasks and functions, numbered per scope before any body is lowered so
     // that a body may call any routine of its scope, itself included.
@@ -1450,6 +1482,8 @@ fn lower_with_analog_variables(
     CanonicalDigitalPlan {
         timing,
         content_identity: [0; 32],
+        external_signals,
+        external_scopes: calls.external_scopes,
         elaboration_parameters: std::iter::once(("", &digital.elaboration_parameters))
             .chain(
                 digital
@@ -2680,6 +2714,16 @@ impl ProcessLowerer<'_> {
             message,
             SourceSpanRef::from(span),
         ));
+    }
+
+    /// Refuse what the standard rules out, as a source error at `span`.
+    fn invalid(&mut self, message: impl Into<String>, span: Span) {
+        self.diagnostics
+            .push(DigitalLoweringDiagnostic::refusal_with_kind(
+                DigitalRefusalKind::InvalidExpression,
+                message,
+                SourceSpanRef::from(span),
+            ));
     }
 
     /// Report a violation of something this pass established itself. Nothing
@@ -6548,26 +6592,76 @@ fn scope_references(
     root_name: &str,
     root_scope: &ScopeFrame,
     frames: &[ScopeFrame],
-    module_scopes: &HashMap<SmolStr, DigitalScopeId>,
+    calls: &mut PlanCalls,
 ) -> HashMap<(DigitalScopeId, SmolStr), DigitalScopeId> {
-    let full = |path: &SmolStr| -> SmolStr {
+    let full = |root: &str, path: &str| -> SmolStr {
         if path.is_empty() {
-            root_name.into()
+            root.into()
         } else {
-            format!("{root_name}.{path}").into()
+            format!("{root}.{path}").into()
         }
     };
-    std::iter::once((root_scope, &digital.scope_references))
+    let mut found = HashMap::new();
+    let frames = std::iter::once((
+        root_scope,
+        &digital.scope_references,
+        &digital.top_level_references,
+    ))
+    .chain(
+        frames
+            .iter()
+            .zip(&digital.instances)
+            .map(|(frame, instance)| {
+                (
+                    frame,
+                    &instance.scope_references,
+                    &instance.top_level_references,
+                )
+            }),
+    );
+    for (frame, references, top_levels) in frames {
+        for (symbol, reference) in references {
+            if let Some(&target) = calls.module_scopes.get(&full(root_name, &reference.path)) {
+                found.insert((frame.id, symbol.clone()), target);
+            }
+        }
+        for (symbol, reference) in top_levels {
+            if let Some((module, time_scale)) = &reference.scope {
+                let path = full(&reference.root, &reference.path);
+                let target = calls.external_scope(path, module.clone(), *time_scale);
+                found.insert((frame.id, symbol.clone()), target);
+            }
+        }
+    }
+    found
+}
+
+/// The storage each hierarchical name into another top-level module was
+/// given, and the signal it stands for there.
+fn external_signals(
+    digital: &AnalyzedDigital,
+    module_scope: &HashMap<&str, DigitalSignalId>,
+    frame_scopes: &[HashMap<&str, DigitalSignalId>],
+) -> Vec<super::digital::DigitalExternalSignal> {
+    std::iter::once((&digital.top_level_references, module_scope))
         .chain(
-            frames
+            digital
+                .instances
                 .iter()
-                .zip(&digital.instances)
-                .map(|(frame, instance)| (frame, &instance.scope_references)),
+                .zip(frame_scopes)
+                .map(|(instance, scope)| (&instance.top_level_references, scope)),
         )
-        .flat_map(|(frame, references)| {
+        .flat_map(|(references, scope)| {
             references.iter().filter_map(|(symbol, reference)| {
-                let target = module_scopes.get(&full(&reference.path)).copied()?;
-                Some(((frame.id, symbol.clone()), target))
+                let signal = *scope.get(symbol.as_str())?;
+                reference
+                    .scope
+                    .is_none()
+                    .then(|| super::digital::DigitalExternalSignal {
+                        signal,
+                        root: reference.root.clone(),
+                        name: reference.path.clone(),
+                    })
             })
         })
         .collect()

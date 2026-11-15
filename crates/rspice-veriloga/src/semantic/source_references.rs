@@ -7,6 +7,7 @@ mod digital;
 mod functions;
 mod local;
 mod physical;
+mod top_level;
 mod unnamed;
 use super::*;
 use std::borrow::Cow;
@@ -40,6 +41,20 @@ fn has_references(module: &Module) -> bool {
 }
 
 fn validate_parameter_references(source: &Module) -> CompileResult<()> {
+    if source.pending_hierarchical_references.is_empty() {
+        return Ok(());
+    }
+    let names = |expression: &Expression, symbol: &SmolStr| {
+        let mut named = false;
+        crate::ast::visit_expression(expression, &mut |value| {
+            named |= matches!(value, Expression::Identifier(id) if id.name == *symbol)
+                || matches!(value, Expression::ArrayAccess(access) if access.array == *symbol)
+                || matches!(value, Expression::Digital(expr) if expr.base_name() == Some(symbol))
+                || matches!(value, Expression::Call(call) if call.name == *symbol);
+        });
+        named
+    };
+    let mut constant_roots = Vec::new();
     for (symbol, reference) in &source.pending_hierarchical_references {
         let declarations = source.parameters.iter().chain(&source.localparams);
         for declaration in declarations {
@@ -64,12 +79,8 @@ fn validate_parameter_references(source: &Module) -> CompileResult<()> {
                     .filter_map(|attribute| attribute.value.as_ref()),
             );
             for expression in expressions {
-                crate::ast::visit_expression(expression, &mut |value| {
-                    forbidden |= matches!(value, Expression::Identifier(id) if id.name == *symbol)
-                        || matches!(value, Expression::ArrayAccess(access) if access.array == *symbol)
-                        || matches!(value, Expression::Digital(expr) if expr.base_name() == Some(symbol))
-                        || matches!(value, Expression::Call(call) if call.name == *symbol);
-                });
+                forbidden |= names(expression, symbol);
+                constant_roots.push(expression);
             }
             if forbidden {
                 // A parameter's value is a constant expression, which names
@@ -77,6 +88,29 @@ fn validate_parameter_references(source: &Module) -> CompileResult<()> {
                 return Err(invalid(
                     "a parameter declaration cannot reference outside its module (IEEE \
                      1364-2005 section 5.2, VAMS-2023 6.7.1)",
+                    reference.source.span,
+                ));
+            }
+        }
+    }
+    // A function a parameter calls is a constant function, which names
+    // nothing outside itself (IEEE 1364-2005 section 10.4.5).
+    let functions = crate::canonical_ir::digital_lower::constant_function_expressions(
+        &source.digital_routines,
+        &constant_roots,
+    );
+    for (function, expressions) in functions {
+        for (symbol, reference) in &source.pending_hierarchical_references {
+            if expressions
+                .iter()
+                .any(|expression| names(expression, symbol))
+            {
+                return Err(invalid(
+                    format!(
+                        "constant function `{}` contains a hierarchical reference (IEEE \
+                         1364-2005 section 10.4.5)",
+                        function.name
+                    ),
                     reference.source.span,
                 ));
             }
@@ -209,6 +243,9 @@ struct Frame {
     instances: HashMap<SmolStr, usize>,
     root_members: HashSet<SmolStr>,
     physical: Option<(Module, super::node_vectors::PhysicalNodes)>,
+    /// The other top-level module this frame is under, when it is not part
+    /// of the design being resolved.
+    top_level: Option<SmolStr>,
 }
 impl Frame {
     fn new(source: Module, path: SmolStr, depth: usize) -> Self {
@@ -231,6 +268,7 @@ impl Frame {
             instances,
             root_members,
             physical: None,
+            top_level: None,
         }
     }
     fn member(&self, scope: &[HierarchicalScopeKey], name: &str) -> Option<SmolStr> {
@@ -263,6 +301,8 @@ struct Resolver {
     active_imports: HashSet<(usize, usize, SmolStr)>,
     next_import: usize,
     builtins: crate::types::FunctionRegistry,
+    /// The frame of each other top-level module a reference starts at.
+    top_levels: HashMap<SmolStr, usize>,
 }
 
 impl Resolver {
@@ -286,7 +326,7 @@ impl Resolver {
         }
         if let Some(branch) = &reference.source.branch {
             let (target, scope, local) = self.target_scope(owner, &reference)?;
-            if !scope.is_empty() || local.is_some() {
+            if !scope.is_empty() || local.is_some() || self.frames[target].top_level.is_some() {
                 return Err(error(
                     "branch() must select a module instance",
                     reference.source.span,
@@ -295,11 +335,34 @@ impl Resolver {
             self.import_unnamed(owner, target, branch, symbol, reference.source.span)?;
         } else {
             let (target, scope, local) = self.target_scope(owner, &reference)?;
-            if let Some(local) = local {
+            if self.frames[target].top_level.is_some() {
+                self.import_top_level(owner, target, &scope, local.is_some(), &reference, symbol)?;
+            } else if let Some(local) = local {
                 self.import_local(owner, target, &scope, &local, &reference, symbol)?;
             } else {
-                let name = self.terminal(target, &scope, &reference)?;
                 let terminal = reference.source.segments.last().expect("parsed terminal");
+                let block = HierarchicalScopeKey {
+                    name: terminal.name.clone(),
+                    index: None,
+                };
+                let name = match self.terminal(target, &scope, &reference) {
+                    Ok(name) => name,
+                    Err(_)
+                        if terminal.index.is_none()
+                            && matches!(
+                                self.local_scope(target, &scope, &block),
+                                Some(local::LocalScope::Block { .. })
+                            ) =>
+                    {
+                        // A named block named whole, as a scope argument names
+                        // one (`$dumpvars(1, top.b)`): no module instance, so
+                        // the call that takes it decides what it may be.
+                        self.active.remove(&key);
+                        self.resolved.insert(key);
+                        return Ok(());
+                    }
+                    Err(error) => return Err(error),
+                };
                 if let Some(&ordinal) = self.frames[target].instances.get(&name)
                     && terminal.index.is_none()
                 {
@@ -762,6 +825,7 @@ impl Resolver {
         }
         let mut frame = Frame::new(child, path, self.frames[parent].depth + 1);
         frame.parent = Some(parent);
+        frame.top_level = self.frames[parent].top_level.clone();
         frame.specialization = specialization;
         frame.instance_name = instance.name.clone();
         if let Some((scope, name)) = self.frames[parent]

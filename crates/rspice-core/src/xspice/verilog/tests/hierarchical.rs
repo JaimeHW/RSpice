@@ -194,3 +194,121 @@ endmodule
          Time scale of (top.u) is 1ns / 1ns\n"
     );
 }
+
+/// Names that start at another top-level module read, write and wait on its
+/// signals, a continuous assignment's net and an instance's variable among
+/// them, and name an instance in it as a scope argument.
+#[test]
+fn names_into_another_top_level_module_reach_its_signals_and_scopes() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module a;
+  integer n;
+  wire [7:0] w;
+  reg [7:0] r;
+  assign w = r + 1;
+  initial begin n = 5; r = 8'd3; #2 $display("a: n=%0d r=%0d", n, r); end
+  sub u();
+endmodule
+module sub;
+  reg [3:0] deep;
+  initial deep = 4'd9;
+endmodule
+module b;
+  initial begin
+    #1 $display("b: a.n=%0d a.w=%0d a.u.deep=%0d", a.n, a.w, a.u.deep);
+    a.n = a.n + 10; a.r = 8'd40; a.u.deep = 4'd2;
+    $printtimescale(a.u);
+    #2 $display("b: %0d %0d %0d", a.n, a.w, a.u.deep);
+  end
+  always @(a.r) $display("%0t b sees a.r=%0d", $time, a.r);
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "0 b sees a.r=3\n\
+         b: a.n=5 a.w=4 a.u.deep=9\n\
+         Time scale of (a.u) is 1ns / 1ns\n\
+         1 b sees a.r=40\n\
+         a: n=15 r=40\n\
+         b: 15 41 2\n"
+    );
+}
+
+/// An instance that declares nothing is still a scope, and another top-level
+/// module is named by its name alone.
+#[test]
+fn scope_arguments_name_empty_instances_and_other_top_level_modules() {
+    let report = bench(
+        "`timescale 1us/1ns
+module top;
+  initial begin
+    $printtimescale(mid);
+    $printtimescale(mid.leaf);
+    $printtimescale(spare);
+    $printtimescale(spare.inner);
+    $display(\"%m done\");
+  end
+  shell mid();
+endmodule
+`timescale 10ns/1ns
+module shell;
+  hollow leaf();
+endmodule
+`timescale 1ns/1ps
+module hollow;
+endmodule
+`timescale 1ms/1us
+module spare;
+  hollow inner();
+endmodule
+",
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "Time scale of (top.mid) is 10ns / 1ns\n\
+         Time scale of (top.mid.leaf) is 1ns / 1ps\n\
+         Time scale of (spare) is 1ms / 1us\n\
+         Time scale of (spare.inner) is 1ns / 1ps\n\
+         top done\n"
+    );
+}
+
+/// What the standard rules out is a source error naming its clause. Icarus
+/// rejects the constant function too; it prints a time scale for a variable,
+/// which IEEE 1364-2005 section 17.4.2 does not give one.
+#[test]
+fn a_constant_function_or_a_time_scale_of_a_variable_is_a_source_error() {
+    let run = |source: &str| {
+        super::run_digital_testbench(
+            &[("tb.v".into(), source.into())],
+            &super::HdlTestbenchOptions::default(),
+        )
+        .expect_err("the source is in error")
+        .to_string()
+    };
+    let constant = run("module m1;
+  function integer f1(input integer i); f1 = i + 1; endfunction
+endmodule
+module test;
+  function integer f2(input integer i); f2 = m1.f1(i); endfunction
+  localparam p = f2(1);
+  initial $display(p);
+endmodule
+");
+    assert!(
+        constant.contains("constant function `f2` contains a hierarchical reference")
+            && constant.contains("section 10.4.5"),
+        "{constant}"
+    );
+    let variable = run("module top;
+  reg r;
+  initial $printtimescale(top.r);
+endmodule
+");
+    assert!(variable.contains("section 17.4.2"), "{variable}");
+    assert!(!variable.contains("Unsupported"), "{variable}");
+}

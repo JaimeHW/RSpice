@@ -426,6 +426,10 @@ pub struct Module {
     /// is root-relative in a selected context and otherwise relative to the
     /// caller.
     pub(crate) foreign_scopes: std::collections::BTreeMap<SmolStr, SmolStr>,
+    /// Hierarchical names that start at another top-level module of the
+    /// source (`othertop.flag`), by the parser's symbol.
+    pub(crate) foreign_top_levels:
+        std::collections::BTreeMap<SmolStr, crate::semantic::DigitalTopLevelReference>,
     pub(crate) hierarchical_parameter_values: std::collections::HashSet<SmolStr>,
     pub(crate) hierarchical_parameter_given: std::collections::HashSet<SmolStr>,
     /// The library the source declaring this module was read into, when a
@@ -509,6 +513,51 @@ impl Module {
             .collect()
     }
 
+    /// Whether this module instantiates `name` anywhere, a generate block of
+    /// it included.
+    pub(crate) fn instantiates(&self, name: &str) -> bool {
+        let mut found = std::collections::HashSet::new();
+        self.instantiated_modules(&mut found);
+        found.contains(name)
+    }
+
+    /// Add every module this module instantiates, in a generate block of it
+    /// too, to `found`.
+    pub(crate) fn instantiated_modules(&self, found: &mut std::collections::HashSet<SmolStr>) {
+        let mut modules = vec![self];
+        while let Some(module) = modules.pop() {
+            found.extend(
+                module
+                    .instances
+                    .iter()
+                    .map(|instance| instance.module.clone()),
+            );
+            if let Some(template) = &module.generate_template {
+                modules.push(&template.module);
+            }
+            let mut constructs: Vec<_> = module.generates.iter().collect();
+            while let Some(construct) = constructs.pop() {
+                let blocks: Vec<_> = match construct {
+                    GenerateConstruct::Loop(value) => vec![&value.body],
+                    GenerateConstruct::Conditional(value) => std::iter::once(&value.then_block)
+                        .chain(value.else_block.iter())
+                        .collect(),
+                    GenerateConstruct::Case(value) => value
+                        .items
+                        .iter()
+                        .map(|item| &item.block)
+                        .chain(value.default.iter())
+                        .collect(),
+                    GenerateConstruct::Block(block) => vec![block],
+                };
+                for block in blocks {
+                    modules.push(&block.items);
+                    constructs.extend(&block.nested);
+                }
+            }
+        }
+    }
+
     /// Whether the module declares anything from the discrete half of
     /// Verilog-AMS, a timing check among it.
     pub fn has_digital_content(&self) -> bool {
@@ -572,6 +621,7 @@ impl Module {
             foreign_physical: Default::default(),
             foreign_digital: Default::default(),
             foreign_scopes: Default::default(),
+            foreign_top_levels: Default::default(),
             hierarchical_parameter_values: Default::default(),
             hierarchical_parameter_given: Default::default(),
             library: None,

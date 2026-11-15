@@ -628,7 +628,7 @@ endmodule
     .expect_err("a cross-module task name is not supported yet");
     let text = error.to_string();
     assert!(
-        text.contains("`other.passed` names module `other`, which is not instantiated here"),
+        text.contains("`other.passed` calls a task or function of another top-level module"),
         "{text}"
     );
     assert!(!text.contains("rspice_reference"), "{text}");

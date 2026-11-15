@@ -160,7 +160,10 @@ pub(crate) fn elaborate_digital_hierarchy(
     elaborator.append_instances(root_source, Scope::for_root(root, root_source)?)?;
     // Domain resolution may turn an entire structural subtree into physical
     // connectivity. Empty frames must not force a digital runtime for that tree.
-    elaborator.instances.retain(|frame| {
+    // Once the design runs digitally, an empty frame stays as a scope: `%m`
+    // names its children through it, and `$printtimescale` or `$dumpvars`
+    // may name it (IEEE 1364-2005 sections 17.4.2 and 18.1.2).
+    let occupied = |frame: &ElaboratedDigitalInstance| {
         !frame.signals.is_empty()
             || !frame.processes.is_empty()
             || !frame.continuous_assigns.is_empty()
@@ -169,7 +172,16 @@ pub(crate) fn elaborate_digital_hierarchy(
             || !frame.analog_events.is_empty()
             || !frame.event_assigned_variables.is_empty()
             || !frame.immutable_analog_variables.is_empty()
-    });
+    };
+    let digital = &root.digital;
+    let runs = !digital.signals.is_empty()
+        || !digital.processes.is_empty()
+        || !digital.continuous_assigns.is_empty()
+        || !digital.bit_aliases.is_empty()
+        || elaborator.instances.iter().any(occupied);
+    if !runs {
+        elaborator.instances.clear();
+    }
     Ok(ElaboratedHierarchy {
         warnings: elaborator.connections.warnings,
         root: prepared_root,
@@ -270,7 +282,31 @@ pub(super) fn digital_subtrees(
             }
         }
     }
+    // A module that declares nothing of either domain is a scope a digital
+    // parent may name; it never makes its parent digital.
+    required.extend(
+        sources
+            .iter()
+            .filter(|(_, module)| declares_nothing(module))
+            .map(|(name, _)| name.clone()),
+    );
     required
+}
+
+/// No ports, declarations or behaviour: only parameters and instances.
+fn declares_nothing(module: &Module) -> bool {
+    module.ports.is_empty()
+        && module.nets.is_empty()
+        && module.variables.is_empty()
+        && module.branches.is_empty()
+        && module.analog_block.is_none()
+        && module.analog_initial.is_none()
+        && module.analog_final.is_none()
+        && module.external_leaves.is_empty()
+        && module.gate_arrays.is_empty()
+        && module.generates.is_empty()
+        && module.generate_template.is_none()
+        && !module.has_digital_content()
 }
 
 /// How the elaborated scope sees one name.
@@ -761,6 +797,7 @@ impl DigitalElaborator<'_> {
                     (symbol.clone(), reference)
                 })
                 .collect(),
+            top_level_references: child.digital.top_level_references.clone(),
             continuous_assigns: child.digital.continuous_assigns.clone(),
             port_drivers,
             bit_aliases,

@@ -1379,6 +1379,16 @@ pub struct CanonicalDigitalPlan {
     /// Hierarchical scopes a system call can name (`%m`), root first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scopes: Vec<DigitalScope>,
+    /// The scopes in `scopes` that stand for another top-level module or an
+    /// instance in it (`$printtimescale(othertop)`): named here, held there.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_scopes: Vec<DigitalScopeId>,
+    /// Storage this plan gave a hierarchical name that starts at another
+    /// top-level module (IEEE 1364-2005 section 12.5). Linking the roots
+    /// joins each to the signal it names; a plan that keeps one unjoined is
+    /// not a whole design.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_signals: Vec<DigitalExternalSignal>,
     /// One entry per system task or function call site (IEEE 1364-2005
     /// section 17), in lowering order. A call node names its entry here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1510,6 +1520,16 @@ pub enum DigitalScopeKind {
     Task,
     /// A function's body (section 10.4).
     Function,
+}
+
+/// A signal of this plan that stands for one of another top-level module.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalExternalSignal {
+    pub signal: DigitalSignalId,
+    /// The top-level module that holds the signal.
+    pub root: SmolStr,
+    /// The signal's name in that module's plan (`flag`, `u.flag`).
+    pub name: SmolStr,
 }
 
 /// One hierarchical scope, named the way `%m` prints it (IEEE 1364-2005

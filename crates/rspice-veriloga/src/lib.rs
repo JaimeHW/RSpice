@@ -1612,7 +1612,33 @@ impl VerilogACompiler {
         // artifact that silently omitted a driver would describe a different
         // circuit, which is the failure the old blanket refusal existed to
         // prevent.
-        let digital = canonical_ir::digital_lower::lower_module(module)
+        // The source's other top-level modules, which a scope argument may
+        // name (IEEE 1364-2005 section 12.5).
+        let mut top_levels = std::collections::HashMap::new();
+        if !module.digital.is_empty() {
+            let declared: Vec<&ast::Module> = analyzed
+                .source
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    ast::Item::Module(declared) => Some(declared),
+                    _ => None,
+                })
+                .collect();
+            let mut instantiated = std::collections::HashSet::new();
+            for declared in &declared {
+                declared.instantiated_modules(&mut instantiated);
+            }
+            top_levels.extend(
+                declared
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.name != module.name && !instantiated.contains(&candidate.name)
+                    })
+                    .map(|candidate| (candidate.name.clone(), candidate.time_scale)),
+            );
+        }
+        let digital = canonical_ir::digital_lower::lower_module(module, top_levels)
             .map_err(Self::digital_lowering_error)?;
         // A signal reports the file and line it was declared on, and a
         // process, a system call and an analog read of a discrete value the
@@ -1903,6 +1929,9 @@ impl VerilogACompiler {
                 let kind = match entry.class {
                     DigitalLoweringClass::Refusal(DigitalRefusalKind::InvalidContribution) => {
                         error::SemanticErrorKind::InvalidContribution(entry.diagnostic.message)
+                    }
+                    DigitalLoweringClass::Refusal(DigitalRefusalKind::InvalidExpression) => {
+                        error::SemanticErrorKind::InvalidExpression(entry.diagnostic.message)
                     }
                     // Every other refusal is a construct this lowering does not
                     // build. An invariant cannot arrive here — the check above

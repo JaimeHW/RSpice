@@ -265,7 +265,11 @@ use smol_str::SmolStr;
 /// Version 190 records the switch branches a card's potential-mode short
 /// merges at setup (`HirModel::switch_shorts`). An earlier artifact carries no
 /// shorts and would keep every such branch as an unknown, so it must be rebuilt.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 190;
+/// Version 191 records the signals and scopes a digital plan names in another
+/// top-level module (`CanonicalDigitalPlan::external_signals` and
+/// `external_scopes`), which linking the roots joins. An earlier artifact
+/// refused such a name.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 191;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {
