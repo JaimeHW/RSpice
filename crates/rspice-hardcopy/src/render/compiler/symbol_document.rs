@@ -286,14 +286,6 @@ impl SemanticSceneCompiler<'_> {
                     to: convert(self, to)?,
                     stroke: body_stroke,
                 });
-                // An input's or an output's arrow on its lead, as the canvas
-                // draws it.
-                let fill = self.mapped_fill(
-                    PrintObjectKind::Layer,
-                    body_stable_id,
-                    Some(SceneFill::solid(body_stroke.color)),
-                );
-                self.pin_direction_mark(world(from), world(to), pin.direction, body_stroke, fill)?;
             }
             if let Some((centre, radius)) = drawing.bubble {
                 self.primitives.push(ScenePrimitive::Circle {

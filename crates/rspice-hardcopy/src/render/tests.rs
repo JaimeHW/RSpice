@@ -1348,8 +1348,8 @@ fn a_symbol_whose_origin_moved_prints_the_same_drawing() {
 }
 
 /// A symbol printed alone marks each pin as its editor does: the hollow
-/// square on every terminal, since nothing meets any of them, an input's
-/// arrow on its lead, and no ring on any terminal.
+/// square on every terminal, since nothing meets any of them, no
+/// signal-flow arrow on an input's lead, and no ring on any terminal.
 #[test]
 fn a_printed_symbol_marks_its_pins_as_its_editor_does() {
     use rspice_design_model::{port::PortDirection, symbol_pin::SymbolPinSide};
@@ -1420,7 +1420,7 @@ fn a_printed_symbol_marks_its_pins_as_its_editor_does() {
             _ => {}
         }
     }
-    assert_eq!((squares, arrows), (2, 1));
+    assert_eq!((squares, arrows), (2, 0));
 }
 
 /// A shape's style reaches the page: its weight scales the body's stroke, a

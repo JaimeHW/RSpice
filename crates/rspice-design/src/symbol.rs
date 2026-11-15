@@ -464,54 +464,6 @@ pub fn pin_drawing(
     }
 }
 
-/// How far a pin's signal-flow arrow runs along its lead, in symbol units.
-pub const PIN_DIRECTION_MARK_LENGTH: f32 = 5.0;
-/// Half the width of a pin's signal-flow arrow across its lead.
-pub const PIN_DIRECTION_MARK_HALF_WIDTH: f32 = 2.0;
-
-/// The signal-flow arrow on the lead from `terminal` to `inner`, its tip
-/// first, `unit` drawn lengths to the symbol unit: an input points into the
-/// body it drives, an output out toward the net it drives, and any other
-/// direction draws none. The arrow stands in the middle of the lead and never
-/// runs past half of it. The canvas and print both draw the mark from these
-/// corners, so it stands in the same place on a sheet and on paper.
-pub fn pin_direction_mark(
-    terminal: [f32; 2],
-    inner: [f32; 2],
-    direction: PortDirection,
-    unit: f32,
-) -> Option<[[f32; 2]; 3]> {
-    if !matches!(direction, PortDirection::In | PortDirection::Out) {
-        return None;
-    }
-    let lead = [inner[0] - terminal[0], inner[1] - terminal[1]];
-    let reach = lead[0].hypot(lead[1]);
-    if !(reach.is_finite() && reach > 0.0) {
-        return None;
-    }
-    let inward = [lead[0] / reach, lead[1] / reach];
-    let length = (PIN_DIRECTION_MARK_LENGTH * unit).min(reach * 0.5);
-    let base_offset = (reach - length) * 0.5;
-    let along = |distance: f32| {
-        [
-            terminal[0] + inward[0] * distance,
-            terminal[1] + inward[1] * distance,
-        ]
-    };
-    let (tip, base) = if direction == PortDirection::In {
-        (along(base_offset + length), along(base_offset))
-    } else {
-        (along(base_offset), along(base_offset + length))
-    };
-    let half = PIN_DIRECTION_MARK_HALF_WIDTH * unit;
-    let across = [-inward[1] * half, inward[0] * half];
-    Some([
-        tip,
-        [base[0] + across[0], base[1] + across[1]],
-        [base[0] - across[0], base[1] - across[1]],
-    ])
-}
-
 /// Where a pin's name starts by default: a gutter past the body end of its
 /// lead, and past the wedge of a clock.
 pub fn pin_name_anchor(
@@ -2083,39 +2035,6 @@ mod validation_tests {
             .validate()
             .expect_err("a lead cannot run away from the body");
         assert!(error.contains("negative lead length"), "{error}");
-    }
-
-    /// An input's arrow points along its lead into the body, an output's out
-    /// of it, in the middle of the lead and never longer than half of it;
-    /// any other direction draws none.
-    #[test]
-    fn a_pins_arrow_points_the_way_its_signal_flows() {
-        let (terminal, inner) = ([-40.0, 0.0], [-20.0, 0.0]);
-        assert_eq!(
-            pin_direction_mark(terminal, inner, PortDirection::In, 1.0),
-            Some([[-27.5, 0.0], [-32.5, 2.0], [-32.5, -2.0]])
-        );
-        assert_eq!(
-            pin_direction_mark(terminal, inner, PortDirection::Out, 1.0),
-            Some([[-32.5, 0.0], [-27.5, 2.0], [-27.5, -2.0]])
-        );
-        // Drawn at twice the size, the arrow is twice as large.
-        assert_eq!(
-            pin_direction_mark([-80.0, 0.0], [-40.0, 0.0], PortDirection::In, 2.0),
-            Some([[-55.0, 0.0], [-65.0, 4.0], [-65.0, -4.0]])
-        );
-        // A short lead holds the arrow to half of itself.
-        assert_eq!(
-            pin_direction_mark([0.0, 0.0], [0.0, 4.0], PortDirection::In, 1.0),
-            Some([[0.0, 3.0], [-2.0, 1.0], [2.0, 1.0]])
-        );
-        for direction in [PortDirection::InOut, PortDirection::Supply] {
-            assert_eq!(pin_direction_mark(terminal, inner, direction, 1.0), None);
-        }
-        assert_eq!(
-            pin_direction_mark(terminal, terminal, PortDirection::In, 1.0),
-            None
-        );
     }
 
     /// Each style marks the body end of the lead: a bubble the lead stops

@@ -24,13 +24,12 @@ use rspice_design::{
     },
     symbol::{
         SymbolCurve, SymbolDash, SymbolDocument, SymbolFill, SymbolShape, SymbolStyle,
-        SymbolTextAlign, SymbolTextPlacement, SymbolTextRotation, arrow_corners,
-        pin_direction_mark, rectangle_corners, symbol_label_text, symbol_text_bounds,
-        symbol_text_hang,
+        SymbolTextAlign, SymbolTextPlacement, SymbolTextRotation, arrow_corners, rectangle_corners,
+        symbol_label_text, symbol_text_bounds, symbol_text_hang,
     },
     symbol_generation::fit_pin_name,
 };
-use rspice_design_model::{Point, port::PortDirection};
+use rspice_design_model::Point;
 use rspice_ui_kit::{palette::Palette, tokens::Tokens};
 
 pub fn draw_resolved_symbol(
@@ -374,7 +373,6 @@ fn draw_symbol_pins(
             if leads.paint_leads(painter, &[terminal, inner], stroke).len() == 2 {
                 painter.line_segment([terminal, inner], stroke);
             }
-            draw_direction_mark(painter, terminal, inner, pin.direction, scale, color);
         }
         if let Some((centre, radius)) = drawing.bubble {
             painter.circle_stroke(screen(centre), radius as f32 * scale, stroke);
@@ -578,32 +576,6 @@ fn to_screen_symbol(
     point: Point,
 ) -> Pos2 {
     to_screen(origin, scale, component, symbol.effective_point(point))
-}
-
-/// Signal-flow arrow on a pin's lead, from the corners print draws it by.
-/// The mark is drawn in symbol units so it holds its proportion at every
-/// zoom.
-pub(crate) fn draw_direction_mark(
-    painter: &Painter,
-    terminal: Pos2,
-    inner: Pos2,
-    direction: PortDirection,
-    scale: f32,
-    color: Color32,
-) {
-    let Some(corners) = pin_direction_mark(
-        [terminal.x, terminal.y],
-        [inner.x, inner.y],
-        direction,
-        scale,
-    ) else {
-        return;
-    };
-    painter.add(Shape::convex_polygon(
-        corners.map(|[x, y]| Pos2::new(x, y)).to_vec(),
-        color,
-        Stroke::NONE,
-    ));
 }
 
 /// `curve` as it stands on the sheet relative to `component`: the instance's
@@ -842,7 +814,7 @@ mod tests {
         schematic::{component_type::ComponentType, rotation::Rotation},
         symbol::{SymbolDocument, SymbolPin, SymbolStroke, SymbolTextSize},
     };
-    use rspice_design_model::port::PortSpec;
+    use rspice_design_model::port::{PortDirection, PortSpec};
     use rspice_design_model::symbol_pin::{SymbolPinSide, SymbolPinStyle};
     use rspice_ui_kit::raster::Canvas;
 
@@ -931,6 +903,55 @@ mod tests {
             })
             .count();
         (columns, rows)
+    }
+
+    /// A lead carries no signal-flow glyph, as a Virtuoso symbol pin carries
+    /// its direction as a property rather than a drawing: an input's, an
+    /// output's and an inout's lead paint the same pixels at every zoom, so
+    /// nothing on a lead can meet the open-pin square the scene puts on its
+    /// end.
+    #[test]
+    fn a_pins_lead_draws_the_same_whatever_its_direction() {
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        let symbol = |direction: PortDirection| {
+            ResolvedCellSymbol::from_authored_document(
+                SymbolDocument {
+                    pins: vec![
+                        SymbolPin::new("P", direction, Some(Point::new(-30, 0)))
+                            .with_side(SymbolPinSide::Left),
+                    ],
+                    ..SymbolDocument::default()
+                },
+                &[port("P", direction)],
+            )
+        };
+        for scale in [0.5, 1.0, 2.0, 5.0] {
+            let drawn = |direction: PortDirection| {
+                let canvas = rspice_ui_kit::raster::render(egui::vec2(320.0, 320.0), |ui, _| {
+                    draw_symbol_pins(
+                        &ui.painter().clone(),
+                        pos2(240.0, 160.0),
+                        scale,
+                        &component,
+                        &symbol(direction),
+                        Stroke::new(1.2, Color32::from_rgb(255, 64, 64)),
+                        false,
+                        &PinLeads::NONE,
+                    );
+                });
+                let painted = painted_pixels(
+                    &canvas,
+                    egui::Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(320.0, 320.0)),
+                )
+                .1;
+                (canvas.regression_fingerprint(320), painted)
+            };
+            let (inout, painted) = drawn(PortDirection::InOut);
+            assert!(painted > 0, "the lead drew nothing at {scale}");
+            for direction in [PortDirection::In, PortDirection::Out] {
+                assert_eq!(drawn(direction).0, inout, "{direction:?} at {scale}");
+            }
+        }
     }
 
     /// A rectangle draws on an instance exactly as the closed outline of

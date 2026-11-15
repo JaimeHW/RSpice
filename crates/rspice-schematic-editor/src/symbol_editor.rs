@@ -38,7 +38,7 @@ use rspice_design::{
 use rspice_design_model::{
     Point,
     cell_view::CellViewRef,
-    port::{PortDirection, PortSpec},
+    port::PortSpec,
     symbol_pin::{SymbolPinSide, SymbolPinStyle},
 };
 use rspice_ui_kit::{
@@ -982,7 +982,6 @@ fn draw_pins(
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.symbol,
         );
-        draw_direction_mark(painter, viewport, pin.direction, drawing.lead, color);
     }
 }
 
@@ -1623,31 +1622,6 @@ fn pin_label_pos(position: Point, side: SymbolPinSide, viewport: SymbolViewport)
     } else {
         base + vec2(26.0, pad * 0.4 * outward.y.signum())
     }
-}
-
-/// Signal-flow arrow on a pin's drawn lead: an input points into the body
-/// it drives, an output points out toward the net it drives.
-fn draw_direction_mark(
-    painter: &egui::Painter,
-    viewport: SymbolViewport,
-    direction: PortDirection,
-    lead: Option<(Point, Point)>,
-    color: Color32,
-) {
-    if !matches!(direction, PortDirection::In | PortDirection::Out) {
-        return;
-    }
-    let Some((tip, end)) = lead else {
-        return;
-    };
-    crate::view::resolved_symbol_render::draw_direction_mark(
-        painter,
-        viewport.world_to_screen(tip),
-        viewport.world_to_screen(end),
-        direction,
-        viewport.zoom,
-        color,
-    );
 }
 
 /// An arrowhead in symbol units, so it keeps its size against the body at

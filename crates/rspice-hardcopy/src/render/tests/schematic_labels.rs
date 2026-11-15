@@ -750,10 +750,9 @@ fn a_placed_symbol_prints_each_pins_lead_and_the_mark_of_its_style() {
     );
 }
 
-/// A placed part's pins print the marks the canvas draws on them: an input's
-/// and an output's arrow on its lead, where the canvas puts it, the hollow
-/// square on a pin nothing meets and on no other, and no ring on every
-/// terminal.
+/// A placed part's pins print the marks the canvas draws on them: the hollow
+/// square on a pin nothing meets and on no other, no signal-flow arrow on
+/// any lead whatever its direction, and no ring on every terminal.
 #[test]
 fn a_placed_part_prints_the_pin_marks_the_canvas_draws() {
     let mut symbol = cell_symbol();
@@ -793,25 +792,10 @@ fn a_placed_part_prints_the_pin_marks_the_canvas_draws() {
             })
             .collect::<Vec<_>>()
     };
-    let canvas_mark = |terminal: (f32, f32), inner: (f32, f32), direction| {
-        rspice_design::symbol::pin_direction_mark(
-            [terminal.0, terminal.1],
-            [inner.0, inner.1],
-            direction,
-            1.0,
-        )
-        .unwrap()
-        .map(|[x, y]| compiled.at(f64::from(x), f64::from(y)))
-        .to_vec()
-    };
-    let arrows = closed(true);
     assert_eq!(
-        arrows,
-        [
-            canvas_mark((-10.0, 40.0), (10.0, 40.0), PortDirection::In),
-            canvas_mark((90.0, 40.0), (70.0, 40.0), PortDirection::Out),
-        ],
-        "an inout pin carries no arrow"
+        closed(true),
+        Vec::<Vec<(i64, i64)>>::new(),
+        "no lead carries an arrow"
     );
     let squares = closed(false)
         .into_iter()
