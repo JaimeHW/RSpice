@@ -6418,11 +6418,16 @@ fn evaluate_statements_with_equation_traces(
     // Xyce updates every measurement sequentially at each accepted point. A
     // later consumer sees the producer's current-point value; a forward
     // consumer sees its previous-point value (or DEFAULT_VAL at row zero).
-    let mut signal_maps = statements
+    //
+    // A statement that reads no equation trace and derives no signal of its
+    // own evaluates against `signals` itself; only the others own a copy, so
+    // a deck of many measures over a large circuit does not copy and
+    // re-index every waveform once per statement.
+    let mut own_maps = statements
         .iter()
         .enumerate()
         .map(|(statement_index, _)| {
-            let mut map = signals.clone();
+            let mut map: Option<HashMap<String, &[Value]>> = None;
             for (trace_index, trace) in traces.iter().enumerate() {
                 if !statement_dependencies
                     .get(statement_index)
@@ -6442,31 +6447,53 @@ fn evaluate_statements_with_equation_traces(
                 } else {
                     continue;
                 };
-                insert_case_variants(&mut map, &trace.name, values);
+                insert_case_variants(
+                    map.get_or_insert_with(|| signals.clone()),
+                    &trace.name,
+                    values,
+                );
             }
             map
         })
         .collect::<Vec<_>>();
 
+    let shared_index = measure_expression_signal_index(signals, params, abort)?;
     let expression_signals = statements
         .iter()
-        .zip(&signal_maps)
-        .map(|(statement, map)| {
-            materialize_measure_expression_signals_with_limits_and_abort(
+        .zip(&own_maps)
+        .map(|(statement, map)| match map {
+            Some(map) => materialize_measure_expression_signals_with_limits_and_abort(
                 &[*statement],
                 axis,
                 map,
                 params,
                 &ResourceLimits::unlimited(),
                 abort,
-            )
+            ),
+            None => materialize_measure_expression_signals_from_index(
+                &[*statement],
+                axis,
+                &shared_index,
+                params,
+                &ResourceLimits::unlimited(),
+                abort,
+            ),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    for (map, derived) in signal_maps.iter_mut().zip(&expression_signals) {
+    drop(shared_index);
+    for (map, derived) in own_maps.iter_mut().zip(&expression_signals) {
+        if derived.is_empty() {
+            continue;
+        }
+        let map = map.get_or_insert_with(|| signals.clone());
         for (name, waveform) in derived {
             map.insert(name.clone(), waveform.as_slice());
         }
     }
+    let signal_maps = own_maps
+        .iter()
+        .map(|map| map.as_ref().unwrap_or(signals))
+        .collect::<Vec<_>>();
 
     let mut engine = MeasureEngine::new();
     engine.set_use_legacy_tran_trig_targ(use_legacy_tran_trig_targ);
@@ -6632,9 +6659,36 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<(String, Vec<Value>)>, SimulationError> {
-    let signal_index = CanonicalMeasureSignalIndex::new_with_abort(signals, abort)?
+    let signal_index = measure_expression_signal_index(signals, params, abort)?;
+    materialize_measure_expression_signals_from_index(
+        statements,
+        axis,
+        &signal_index,
+        params,
+        limits,
+        abort,
+    )
+}
+
+/// The lookup an authored measurement expression evaluates against.
+fn measure_expression_signal_index<'a>(
+    signals: &HashMap<String, &'a [Value]>,
+    params: MeasureParameters<'a>,
+    abort: &dyn AbortSignal,
+) -> Result<CanonicalMeasureSignalIndex<'a>, SimulationError> {
+    Ok(CanonicalMeasureSignalIndex::new_with_abort(signals, abort)?
         .with_parameters(params.rows)
-        .with_phase_unit(params.phase_unit);
+        .with_phase_unit(params.phase_unit))
+}
+
+fn materialize_measure_expression_signals_from_index(
+    statements: &[&MeasureStatement],
+    axis: &[Value],
+    signal_index: &CanonicalMeasureSignalIndex<'_>,
+    params: MeasureParameters<'_>,
+    limits: &ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<(String, Vec<Value>)>, SimulationError> {
     let mut names = Vec::new();
     let mut add = |name: &str| {
         let expression = name.starts_with('{') && name.ends_with('}');
@@ -6714,7 +6768,7 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
                 &name,
                 &OutputOperandKind::Probe(probe),
                 axis,
-                &signal_index,
+                signal_index,
                 params.base,
                 abort,
             ) {
@@ -6750,7 +6804,7 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
             })?;
         for row in 0..axis.len() {
             super::measure::continuous::poll(abort, row)?;
-            match expression.value_with(row, &signal_index, params.base, abort, &mut |_| Ok(None)) {
+            match expression.value_with(row, signal_index, params.base, abort, &mut |_| Ok(None)) {
                 // Authored measurement expressions normalize non-finite root
                 // components before the scalar measurement engine consumes them.
                 Ok(value) => waveform.push(

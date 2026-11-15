@@ -980,17 +980,17 @@ impl MeasureEngine {
     /// Evaluate each statement against its own signal view. Continuous Xyce
     /// equation measures update in netlist order, so a point-event statement
     /// can legitimately observe a different equation trace depending on its
-    /// position relative to the equation statement.
+    /// position relative to the equation statement. Statements may share one
+    /// view.
     pub(crate) fn evaluate_with_segment_starts_and_signal_maps_and_context(
         &self,
         time: &[Value],
-        signal_maps: &[HashMap<String, &[Value]>],
+        signal_maps: &[&HashMap<String, &[Value]>],
         segment_starts: &[usize],
         params: MeasureParameters<'_>,
         abort: &dyn crate::abort_signal::AbortSignal,
     ) -> Result<Vec<MeasureResult>, crate::SimulationError> {
-        let signal_map_refs = signal_maps.iter().collect::<Vec<_>>();
-        self.evaluate_with_signal_maps(time, &signal_map_refs, segment_starts, params, abort)
+        self.evaluate_with_signal_maps(time, signal_maps, segment_starts, params, abort)
     }
 
     fn evaluate_with_signal_maps(
@@ -1016,7 +1016,20 @@ impl MeasureEngine {
                 "measurement axis contains non-finite sample at index {index}"
             )));
         }
-        if let Some((name, signal)) = signal_maps
+        // Statements that share one view are checked and indexed once.
+        let mut distinct_maps: Vec<&HashMap<String, &[Value]>> = Vec::new();
+        let mut view_of_statement = Vec::with_capacity(signal_maps.len());
+        let mut view_of_map = HashMap::<*const HashMap<String, &[Value]>, usize>::new();
+        for &signals in signal_maps {
+            let view = *view_of_map
+                .entry(std::ptr::from_ref(signals))
+                .or_insert_with(|| {
+                    distinct_maps.push(signals);
+                    distinct_maps.len() - 1
+                });
+            view_of_statement.push(view);
+        }
+        if let Some((name, signal)) = distinct_maps
             .iter()
             .flat_map(|signals| signals.iter())
             .find(|(_, signal)| signal.len() != time.len())
@@ -1032,11 +1045,14 @@ impl MeasureEngine {
         }) {
             return Ok(self.fail_all("measurement segment starts are invalid or unordered"));
         }
-        let indexed_signal_maps = signal_maps
+        let indexed_signal_maps = distinct_maps
             .iter()
             .map(|signals| index_measure_signals_with_abort(signals, abort))
             .collect::<Result<Vec<_>, _>>()?;
-        let signal_maps = indexed_signal_maps.iter().collect::<Vec<_>>();
+        let signal_maps = view_of_statement
+            .iter()
+            .map(|&view| &indexed_signal_maps[view])
+            .collect::<Vec<_>>();
 
         // Expression measures (PARAM='...') read other results by name, so
         // they evaluate in a second pass over the directly computed set —
