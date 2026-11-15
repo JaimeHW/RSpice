@@ -57,6 +57,7 @@ pub(super) fn frame(
     let Some(placement) = state.symbol_in_place_placement() else {
         // The parent or the instance is gone: nothing is placed to edit.
         state.design.symbol.in_place = None;
+        crate::workbench::app::sync_in_place_layout(&state.design.symbol.in_place, state.model);
         return None;
     };
     let navigation = state.model.preferences.canvas_navigation();

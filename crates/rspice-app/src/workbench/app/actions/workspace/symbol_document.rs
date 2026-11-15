@@ -271,9 +271,11 @@ pub(crate) fn project_active_symbol_session(
     if let Some(session) = symbol
         .in_place
         .take_if(|session| session.symbol != model.workspace.content.active_view)
-        && !session.symbol_was_open
     {
-        model.workspace.content.close_view(&session.symbol);
+        if !session.symbol_was_open {
+            model.workspace.content.close_view(&session.symbol);
+        }
+        super::symbol_in_place::sync_in_place_layout(&symbol.in_place, model);
     }
     let source = symbol_editor_request_source(model, wb);
     let is_symbol =

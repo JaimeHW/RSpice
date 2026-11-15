@@ -15,6 +15,7 @@ mod drawing_sheet_overflow;
 mod drawing_sheet_presets;
 mod export_name;
 mod generated_instance;
+mod in_place_layout;
 mod library_catalog;
 mod owned_source;
 mod physical_layout;
@@ -35,6 +36,7 @@ mod veriloga_parameters;
 
 pub use definition_index::DefinitionRow;
 pub use generated_instance::GeneratedInstanceLocation;
+pub use in_place_layout::InPlaceLayout;
 pub use library_catalog::{LibraryRemoval, WorkspacePruned};
 pub use owned_source::{
     LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,
@@ -141,6 +143,9 @@ pub struct Model {
     /// symbol, or another project replacing this one, forgets them.
     pub symbol_rewired_sheets:
         std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    /// The symbol edited in place and the sheet it is edited on, while the
+    /// edit lasts: what a saved layout holds in its place. Runtime only.
+    pub symbol_in_place_layout: Option<InPlaceLayout>,
     /// The ports each generated symbol was last drawn for, by cellview key,
     /// each by the object that declares it: a port the next drawing finds
     /// under another name was renamed, and its placed terminals follow it.

@@ -212,6 +212,19 @@ pub(crate) fn in_place_session<'a>(
         .filter(|session| session.symbol == model.workspace.content.active_view)
 }
 
+/// Note on `model` the edit `in_place` holds, or that none is held: a
+/// layout saved during the edit reads it.
+pub(crate) fn sync_in_place_layout(in_place: &Option<Box<SymbolInPlace>>, model: &mut Model) {
+    model.symbol_in_place_layout =
+        in_place.as_deref().map(
+            |session| crate::workbench::app_state::model::InPlaceLayout {
+                symbol: session.symbol.clone(),
+                parent: session.parent.clone(),
+                symbol_was_open: session.symbol_was_open,
+            },
+        );
+}
+
 /// [`in_place_session`], to write to.
 pub(crate) fn in_place_session_mut<'a>(
     in_place: &'a mut Option<Box<SymbolInPlace>>,
@@ -357,6 +370,7 @@ impl NavigationParts<'_> {
             symbol_was_open,
             parent_editor: Default::default(),
         }));
+        sync_in_place_layout(&self.restore.symbol.in_place, self.model);
         self.wb.prompt(format!(
             "Editing the {} symbol in place on {instance_name}. Esc or Return goes back to {}.",
             symbol.cell, parent.cell
@@ -395,6 +409,7 @@ impl NavigationParts<'_> {
             self.restore.symbol.in_place = Some(session);
             return;
         }
+        sync_in_place_layout(&self.restore.symbol.in_place, self.model);
         if !session.symbol_was_open {
             self.model.workspace.content.close_view(&session.symbol);
         }

@@ -744,6 +744,64 @@ fn saving_the_symbol_view_writes_the_sheet_its_pin_move_rewired() {
     assert_eq!(fixture.saved_wire_end(&reopened), Point::new(60, 100));
 }
 
+/// The layout saved while a symbol is edited in place is the sheet's: the
+/// project reopens on the parent sheet, which opens as it does saved without
+/// the edit rather than at the edit's view, and the tab the session opened
+/// for the symbol is not part of it.
+#[test]
+fn the_layout_saved_in_place_is_the_sheets() {
+    use crate::workbench::project::commands::ProjectCommand;
+
+    let mut fixture = InPlace::new();
+    let path = ProjectPath::new("layout");
+    assert!(fixture.replay.app.state.save_project_to_path(&path.0));
+    let opened_view = |reopened: &Replay| {
+        let editor = &reopened.app.state.model.schematic.session.editor;
+        (editor.zoom, editor.pan)
+    };
+    let sheet_view = opened_view(&fixture.reopen(&path));
+    // A camera that leaves the instance out, which entering frames on it.
+    fixture.replay.app.state.model.schematic.session.editor.pan = (-4000.0, -4000.0);
+    fixture.replay.frames(vec![]);
+    fixture.enter();
+    let in_place_view = {
+        let session = crate::workbench::app::in_place_session(
+            &fixture.replay.app.state.design.symbol.in_place,
+            &fixture.replay.app.state.model,
+        )
+        .expect("the symbol is edited in place");
+        (session.zoom, session.pan)
+    };
+    fixture.drag(Point::new(60, 70), Point::new(60, 100));
+    fixture
+        .replay
+        .app
+        .execute_command_key(ProjectCommand::SaveAll.key());
+    fixture.replay.frames(vec![]);
+
+    let reopened = fixture.reopen(&path);
+    let content = &reopened.app.state.model.workspace.content;
+    assert_eq!(content.active_view, fixture.parent, "it lands on the sheet");
+    assert!(
+        !content
+            .open_views
+            .iter()
+            .any(|open| open.reference == fixture.symbol),
+        "the in-place tab is not saved: {:?}",
+        content.open_views
+    );
+    assert_eq!(
+        opened_view(&reopened),
+        sheet_view,
+        "the sheet opens as it does saved without the edit"
+    );
+    assert_ne!(
+        opened_view(&reopened),
+        in_place_view,
+        "not at the edit's view"
+    );
+}
+
 impl InPlace {
     /// The project saved at `path`, opened in a new application.
     fn reopen(&self, path: &ProjectPath) -> Replay {

@@ -220,6 +220,12 @@ pub fn capture_snapshot(
                 .project_presentation(&state.model.simulation)
         },
     )?;
+    let mut file = file;
+    // A symbol edited in place leaves the sheet it is edited on in front of
+    // the layout a save writes.
+    if let Some(layout) = &state.model.symbol_in_place_layout {
+        layout.apply(&mut file.workspace);
+    }
     Ok(ProjectSnapshot {
         file,
         workspace_session: sessions.workspace,

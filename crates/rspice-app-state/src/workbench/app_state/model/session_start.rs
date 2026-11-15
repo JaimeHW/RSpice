@@ -70,6 +70,7 @@ impl Model {
             recorded_sync_failures: Default::default(),
             unsaved_pin_renames: Default::default(),
             symbol_rewired_sheets: Default::default(),
+            symbol_in_place_layout: None,
             generated_symbol_ports: Default::default(),
             source_drift: Default::default(),
         };

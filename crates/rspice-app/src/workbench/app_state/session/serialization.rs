@@ -115,18 +115,25 @@ impl AppState {
         };
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         let mut committed_workspace;
-        let workspace = if self
-            .model
-            .workspace
-            .content
-            .schematic_buffers
-            .values()
-            .any(|schematic| schematic.pending_operation_id().is_some())
+        let in_place = self.model.symbol_in_place_layout.as_ref();
+        let workspace = if in_place.is_some()
+            || self
+                .model
+                .workspace
+                .content
+                .schematic_buffers
+                .values()
+                .any(|schematic| schematic.pending_operation_id().is_some())
         {
             committed_workspace = self.model.workspace.clone();
             committed_workspace.for_each_schematic_editor_mut(|_, schematic| {
                 schematic.cancel_operation();
             });
+            // A symbol edited in place leaves the sheet it is edited on in
+            // front of the layout a restart restores.
+            if let Some(layout) = in_place {
+                layout.apply(&mut committed_workspace.content);
+            }
             &committed_workspace
         } else {
             &self.model.workspace
