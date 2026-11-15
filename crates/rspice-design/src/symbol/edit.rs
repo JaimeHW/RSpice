@@ -8,7 +8,7 @@ use super::{
 use crate::library::View;
 use crate::schematic::component::Component;
 use crate::schematic::document::SchematicDocument;
-use crate::schematic::history::SchematicSnapshot;
+use crate::schematic::history::{SchematicSnapshot, UndoSequence, next_undo_sequence};
 use rspice_design_model::{Point, cell_view::CellViewRef};
 
 /// What an author meant by a symbol edit, beyond the geometry it produced.
@@ -94,12 +94,34 @@ pub struct SymbolParentEdit {
 ///
 /// Whether a symbol has unsaved edits is the project's question, answered by
 /// comparing it with the last project save; the history only steps edits.
+///
+/// Each record carries the global undo sequence drawn when it last crossed
+/// onto its stack, as every other history's records do, so Undo can tell a
+/// symbol edit made after a project step from one made before it.
 #[derive(Debug, Clone, Default)]
 pub struct SymbolHistory {
-    undo_stacks: HashMap<String, Vec<SymbolDocumentSnapshot>>,
-    redo_stacks: HashMap<String, Vec<SymbolDocumentSnapshot>>,
+    undo_stacks: HashMap<String, Vec<SymbolHistoryRecord>>,
+    redo_stacks: HashMap<String, Vec<SymbolHistoryRecord>>,
     /// The edit whose parent wiring is held open, by the cellview it edits.
     parent_edit: Option<(String, SymbolParentEdit)>,
+}
+
+/// One step of a symbol's history, stamped where it stands in the global
+/// undo order.
+#[derive(Debug, Clone)]
+struct SymbolHistoryRecord {
+    sequence: UndoSequence,
+    snapshot: SymbolDocumentSnapshot,
+}
+
+impl SymbolHistoryRecord {
+    /// `snapshot`, stamped as it crosses onto a stack now.
+    fn stamped(snapshot: SymbolDocumentSnapshot) -> Self {
+        Self {
+            sequence: next_undo_sequence(),
+            snapshot,
+        }
+    }
 }
 
 impl SymbolHistory {
@@ -124,7 +146,7 @@ impl SymbolHistory {
 
     pub fn record_edit(&mut self, key: String, snapshot: SymbolDocumentSnapshot, max_len: usize) {
         let undo_stack = self.undo_stacks.entry(key.clone()).or_default();
-        undo_stack.push(snapshot);
+        undo_stack.push(SymbolHistoryRecord::stamped(snapshot));
         if undo_stack.len() > max_len {
             undo_stack.remove(0);
         }
@@ -137,7 +159,7 @@ impl SymbolHistory {
             .get_mut(key)
             .and_then(|stack| stack.last_mut())
         {
-            entry.renames = renames
+            entry.snapshot.renames = renames
                 .iter()
                 .map(|(from, to)| (to.clone(), from.clone()))
                 .collect();
@@ -166,27 +188,53 @@ impl SymbolHistory {
         Self::named_step(self.redo_stacks.get(key))
     }
 
-    fn named_step(stack: Option<&Vec<SymbolDocumentSnapshot>>) -> Option<&str> {
+    fn named_step(stack: Option<&Vec<SymbolHistoryRecord>>) -> Option<&str> {
         stack
             .and_then(|stack| stack.last())
-            .map(|snapshot| snapshot.step.as_str())
+            .map(|record| record.snapshot.step.as_str())
             .filter(|step| !step.is_empty())
     }
 
+    /// Where the step Undo would take back stands in the global undo order.
+    pub fn undo_sequence(&self, key: &str) -> Option<UndoSequence> {
+        Self::newest_sequence(self.undo_stacks.get(key))
+    }
+
+    /// Where the step Redo would take again stands in the global undo order.
+    pub fn redo_sequence(&self, key: &str) -> Option<UndoSequence> {
+        Self::newest_sequence(self.redo_stacks.get(key))
+    }
+
+    fn newest_sequence(stack: Option<&Vec<SymbolHistoryRecord>>) -> Option<UndoSequence> {
+        stack.and_then(|stack| stack.last()).map(|record| record.sequence)
+    }
+
     pub fn pop_undo(&mut self, key: &str) -> Option<SymbolDocumentSnapshot> {
-        self.undo_stacks.get_mut(key).and_then(Vec::pop)
+        self.undo_stacks
+            .get_mut(key)
+            .and_then(Vec::pop)
+            .map(|record| record.snapshot)
     }
 
     pub fn pop_redo(&mut self, key: &str) -> Option<SymbolDocumentSnapshot> {
-        self.redo_stacks.get_mut(key).and_then(Vec::pop)
+        self.redo_stacks
+            .get_mut(key)
+            .and_then(Vec::pop)
+            .map(|record| record.snapshot)
     }
 
     pub fn finish_undo(&mut self, key: String, current: SymbolDocumentSnapshot) {
-        self.redo_stacks.entry(key).or_default().push(current);
+        self.redo_stacks
+            .entry(key)
+            .or_default()
+            .push(SymbolHistoryRecord::stamped(current));
     }
 
     pub fn finish_redo(&mut self, key: String, current: SymbolDocumentSnapshot) {
-        self.undo_stacks.entry(key).or_default().push(current);
+        self.undo_stacks
+            .entry(key)
+            .or_default()
+            .push(SymbolHistoryRecord::stamped(current));
     }
 
     /// Forget the edits waiting to be redone, for edits the author threw
@@ -616,5 +664,31 @@ mod tests {
         assert_eq!(restored.revision, 1);
         assert_eq!(restored.revisions.len(), 1);
         assert_eq!(restored.attributes, metadata.attributes);
+    }
+
+    /// A symbol step stands in the one undo order every history draws from:
+    /// after a step any other history took before it, and afresh each time
+    /// it crosses between the undo and redo stacks.
+    #[test]
+    fn a_symbol_step_stands_in_the_global_undo_order() {
+        let key = "work/amp/symbol".to_owned();
+        let mut history = SymbolHistory::default();
+        assert_eq!(history.undo_sequence(&key), None);
+
+        let earlier = crate::schematic::history::next_undo_sequence();
+        let snapshot = SymbolDocumentSnapshot::from_document(&SymbolDocument::default());
+        history.record_edit(key.clone(), snapshot, 8);
+        let recorded = history.undo_sequence(&key).expect("the edit is stamped");
+        assert!(recorded > earlier, "the edit came after the earlier step");
+
+        let undone = history.pop_undo(&key).expect("the edit");
+        history.finish_undo(key.clone(), undone);
+        assert_eq!(history.undo_sequence(&key), None);
+        let redoable = history.redo_sequence(&key).expect("the undo is stamped");
+        assert!(redoable > recorded, "undoing moved the step");
+
+        let redone = history.pop_redo(&key).expect("the step");
+        history.finish_redo(key.clone(), redone);
+        assert!(history.undo_sequence(&key).expect("the redo is stamped") > redoable);
     }
 }

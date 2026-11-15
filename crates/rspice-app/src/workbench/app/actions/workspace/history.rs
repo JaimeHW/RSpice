@@ -232,7 +232,7 @@ fn take_step<H>(
     }
     let project_first = project_step_is_newer(
         project_sequence(parts.model, direction),
-        document_sequence(parts.model, direction),
+        document_sequence(parts.model, parts.design.restore.symbol, direction),
     );
     if project_first && take_project_history_step(&mut parts, direction) {
         return;
@@ -252,15 +252,19 @@ fn project_sequence(model: &Model, direction: HistoryDirection) -> Option<UndoSe
 }
 
 /// Where the active document's next step `direction` sits in the global
-/// order.
-///
-/// Symbol documents keep their history as plain snapshot stacks that no
-/// commit boundary stamps, so they carry no position in that order and
-/// answer `None` rather than a position that would sort as the oldest
-/// record in the session.
-fn document_sequence(model: &Model, direction: HistoryDirection) -> Option<UndoSequence> {
+/// order: the symbol editor's own history for a symbol, the schematic's for
+/// a schematic.
+fn document_sequence(
+    model: &Model,
+    symbol: &SymbolUiState,
+    direction: HistoryDirection,
+) -> Option<UndoSequence> {
     if model.workspace.content.active_view_type() == Some(ViewType::Symbol) {
-        return None;
+        let key = model.workspace.content.active_key();
+        return match direction {
+            HistoryDirection::Undo => symbol.history.undo_sequence(&key),
+            HistoryDirection::Redo => symbol.history.redo_sequence(&key),
+        };
     }
     match direction {
         HistoryDirection::Undo => model.schematic.history().undo_sequence(),
@@ -353,9 +357,8 @@ fn take_document_history_step(
 /// The project history and the active document's history are one timeline as
 /// far as the operator is concerned, so the step that moved most recently
 /// wins — that is what the global sequence records. A document history with
-/// no position in that order cannot be compared, so a stamped project step
-/// takes precedence over it and nothing takes precedence over a document
-/// history when the project has no step at all.
+/// no step that way gives way to a project step, and nothing takes
+/// precedence over a document history when the project has no step at all.
 fn project_step_is_newer(project: Option<UndoSequence>, document: Option<UndoSequence>) -> bool {
     match (project, document) {
         (Some(project), Some(document)) => project > document,
