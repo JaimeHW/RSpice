@@ -1047,6 +1047,191 @@ fn the_instance_menu_edits_its_symbol_in_place() {
     assert_eq!((session.zoom, session.pan), (2.0, (60.0, 40.0)));
 }
 
+/// Every drawing tool draws in place as in the symbol's own view, in the
+/// symbol's coordinates, each point clicked on the sheet around the
+/// instance: a circle, an arc, a closed polygon, typed text and a pin.
+#[test]
+fn every_drawing_tool_draws_in_place_in_the_symbols_coordinates() {
+    use crate::state::SymbolShape;
+
+    let mut fixture = InPlace::new();
+    let entered = fixture.enter();
+    click_at(&mut fixture.replay, canvas_centre(&entered));
+    // The unturned instance stands at (100, 80): a symbol point is that much
+    // further on the sheet. Every point here is clear of the body and pins.
+    let on_sheet = |x: i32, y: i32| Point::new(x + 100, y + 80);
+    let place = |fixture: &mut InPlace, tool: DesignCommand, points: &[Point]| {
+        fixture.replay.app.execute_command_key(tool.key());
+        fixture.replay.frames(vec![]);
+        for point in points {
+            let at = fixture.screen(*point);
+            click_at(&mut fixture.replay, at);
+        }
+    };
+    let document = |fixture: &InPlace| {
+        fixture
+            .replay
+            .app
+            .state
+            .model
+            .load_symbol_document(&fixture.symbol)
+            .unwrap()
+    };
+
+    place(
+        &mut fixture,
+        DesignCommand::SymbolCircleTool,
+        &[on_sheet(80, 50), on_sheet(90, 50)],
+    );
+    assert_eq!(
+        document(&fixture).body.last(),
+        Some(&SymbolShape::Circle {
+            center: Point::new(80, 50),
+            radius: 10,
+            style: Default::default(),
+        })
+    );
+
+    place(
+        &mut fixture,
+        DesignCommand::SymbolArcTool,
+        &[on_sheet(80, -50), on_sheet(90, -50), on_sheet(80, -40)],
+    );
+    assert!(
+        matches!(document(&fixture).body.last(),
+            Some(SymbolShape::Arc { center, radius: 10, .. }) if *center == Point::new(80, -50)),
+        "{:?}",
+        document(&fixture).body.last()
+    );
+
+    place(
+        &mut fixture,
+        DesignCommand::SymbolPolygonTool,
+        &[on_sheet(60, 80), on_sheet(100, 80), on_sheet(80, 100)],
+    );
+    fixture.replay.key(egui::Key::Enter, egui::Modifiers::NONE);
+    assert!(
+        matches!(document(&fixture).body.last(),
+            Some(SymbolShape::Polyline { points, closed: true, .. })
+                if points.starts_with(&[Point::new(60, 80), Point::new(100, 80), Point::new(80, 100)])),
+        "{:?}",
+        document(&fixture).body.last()
+    );
+
+    place(
+        &mut fixture,
+        DesignCommand::SymbolTextTool,
+        &[on_sheet(60, -80)],
+    );
+    fixture
+        .replay
+        .frames(vec![egui::Event::Text("GAIN".to_owned())]);
+    fixture.replay.key(egui::Key::Enter, egui::Modifiers::NONE);
+    assert!(
+        matches!(document(&fixture).body.last(),
+            Some(SymbolShape::Text { anchor, text, .. })
+                if *anchor == Point::new(60, -80) && text == "GAIN"),
+        "{:?}",
+        document(&fixture).body.last()
+    );
+
+    let pins = document(&fixture).pins.len();
+    place(
+        &mut fixture,
+        DesignCommand::SymbolPinTool,
+        &[on_sheet(-60, 60)],
+    );
+    fixture
+        .replay
+        .frames(vec![egui::Event::Text("EN".to_owned())]);
+    fixture.replay.key(egui::Key::Enter, egui::Modifiers::NONE);
+    let drawn = document(&fixture);
+    assert_eq!(drawn.pins.len(), pins + 1, "the pin tool placed a pin");
+    assert!(
+        drawn
+            .pins
+            .iter()
+            .any(|pin| pin.position == Some(Point::new(-60, 60))),
+        "its tip is where it was clicked: {:?}",
+        drawn.pins
+    );
+}
+
+/// A drawn shape is reshaped and restyled in place as in the symbol's own
+/// view: the selected rectangle's corner handle, dragged on the sheet,
+/// resizes it in the symbol's coordinates, and the inspector beside the
+/// edit sets its stroke.
+#[test]
+fn a_shape_is_reshaped_and_restyled_in_place() {
+    use crate::state::SymbolShape;
+    use rspice_design::symbol::SymbolStroke;
+    use rspice_schematic_editor::symbol_editor::session::SymbolTool;
+
+    let mut fixture = InPlace::new();
+    fixture.replay.app.state.workbench.inspector_visible = true;
+    let entered = fixture.enter();
+    click_at(&mut fixture.replay, canvas_centre(&entered));
+    fixture.replay.key(egui::Key::R, egui::Modifiers::NONE);
+    // Symbol (60, 40) to (100, 60), clear of the body and the pins.
+    fixture.drag(Point::new(160, 120), Point::new(200, 140));
+    let body = |fixture: &InPlace| {
+        fixture
+            .replay
+            .app
+            .state
+            .model
+            .load_symbol_document(&fixture.symbol)
+            .unwrap()
+            .body
+    };
+    let index = body(&fixture).len() - 1;
+    let editor = &mut fixture.replay.app.state.design.symbol.editor;
+    editor.tool = SymbolTool::Select;
+    editor.select_shape(index);
+    fixture.replay.frames(vec![]);
+
+    // The corner at symbol (100, 60) is sheet (200, 140).
+    fixture.drag(Point::new(200, 140), Point::new(210, 150));
+    assert_eq!(
+        body(&fixture)[index],
+        SymbolShape::Rectangle {
+            min: Point::new(60, 40),
+            max: Point::new(110, 70),
+            style: Default::default(),
+        },
+        "the corner handle resized it"
+    );
+
+    let press = |fixture: &mut InPlace, label: &str| {
+        let controls = fixture.replay.frames(vec![]);
+        let at = controls
+            .iter()
+            .find(|control| control.label == label)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{label:?} is offered in place: {:?}",
+                    controls
+                        .iter()
+                        .map(|control| &control.label)
+                        .collect::<Vec<_>>()
+                )
+            })
+            .center;
+        click_at(&mut fixture.replay, at);
+    };
+    press(&mut fixture, "Stroke");
+    press(&mut fixture, "heavy");
+    assert_eq!(
+        body(&fixture)[index].style().map(|style| style.stroke),
+        Some(SymbolStroke::Heavy),
+        "the inspector restyled it"
+    );
+    assert_eq!(
+        fixture.replay.app.state.model.workspace.content.active_view, fixture.symbol,
+        "still in place"
+    );
+}
+
 /// Escape lets go of a handle before it leaves the edit in place: a handle
 /// Stretch armed, and one being dragged, are each the canvas's to cancel
 /// first. With nothing held, Escape leaves.
