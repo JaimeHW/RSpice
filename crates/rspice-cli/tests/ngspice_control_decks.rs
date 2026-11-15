@@ -1,6 +1,7 @@
 //! Upstream decks whose checks live in their `.control` script, run the way
 //! a user runs them: `rspice run` in the deck's own directory, in the ngspice
-//! dialect the decks were written for and check themselves against.
+//! dialect the decks were written for and check themselves against, and in
+//! the default dialect users run them in.
 //!
 //! The conformance runners judge a deck's declarative analyses; only this
 //! test executes its script through the command users run, so a script that
@@ -20,6 +21,22 @@ use std::sync::Mutex;
 const SCRIPT_MARKER: &str = "!script";
 /// Marks a deck too expensive for a routine run.
 const EXTENDED_MARKER: &str = "!extended";
+
+/// The dialects every deck runs in: ngspice's, and the default one, which
+/// `rspice run` uses without `--spice-dialect`.
+const DIALECTS: [Option<&str>; 2] = [Some("ngspice"), None];
+
+/// What the default dialect runs a deck with beyond its own arguments, and
+/// the documented difference of that dialect the deck's check does not
+/// allow for. The default dialect's TMAX is TSTOP/1024
+/// (`resolve_dialect_transient_maximum_step`), ngspice's TSTEP.
+const DEFAULT_DIALECT_ARGUMENTS: &[(&str, &[&str], &str)] = &[(
+    "regression/misc/resume-1.cir",
+    &["--max-step", "0.2u"],
+    "the deck's 2e-6 limit holds at ngspice's TMAX, its TSTEP of 0.2 us; at the default \
+     dialect's 1.95 us, trapezoidal integration of the 0.5 ms time constant after the stop \
+     errs 2.98e-6 against the closed form, as ngspice-46 itself does at that TMAX (2.80e-6)",
+)];
 
 fn corpus(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -50,9 +67,10 @@ fn rows(
         .collect()
 }
 
-/// Run `deck` in a copy of its directory, so a file its script writes stays
-/// out of the corpus, and report how it failed, if it did.
-fn run_script(deck: &Path) -> Result<(), String> {
+/// Run `deck` in `dialect` (the default one for `None`) in a copy of its
+/// directory, so a file its script writes stays out of the corpus, and
+/// report how it failed, if it did.
+fn run_script(deck: &Path, dialect: Option<&str>) -> Result<(), String> {
     let name = deck.file_name().unwrap().to_string_lossy().into_owned();
     let dir = test_dir(&name.replace('.', "_"));
     for entry in std::fs::read_dir(deck.parent().unwrap()).unwrap() {
@@ -61,40 +79,63 @@ fn run_script(deck: &Path) -> Result<(), String> {
             std::fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
         }
     }
-    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+    command
         .current_dir(&*dir)
         .args(["--quiet", "run", &name, "-o", "result.csv", "-f", "csv"])
-        .args(["--spice-dialect", "ngspice"])
         .env(
             "RSPICE_MODELS_DIR",
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/spice"),
-        )
-        .output()
-        .expect("execute public CLI");
+        );
+    let mut reason = None;
+    match dialect {
+        Some(dialect) => {
+            command.args(["--spice-dialect", dialect]);
+        }
+        None => {
+            if let Some((_, arguments, why)) = DEFAULT_DIALECT_ARGUMENTS
+                .iter()
+                .find(|(path, _, _)| deck.ends_with(path))
+            {
+                command.args(*arguments);
+                reason = Some(format!("with {} because {why}", arguments.join(" ")));
+            }
+        }
+    }
+    let output = command.output().expect("execute public CLI");
     if output.status.success() {
         return Ok(());
     }
     Err(format!(
-        "{} exited with {}\nstdout:\n{}\nstderr:\n{}",
+        "{} in the {} dialect{} exited with {}\nstdout:\n{}\nstderr:\n{}",
         deck.display(),
+        dialect.unwrap_or("default"),
+        reason.map_or_else(String::new, |reason| format!(" ({reason})")),
         output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     ))
 }
 
-/// Run every selected deck, several at a time, and fail with every failure.
+/// Run every selected deck in every dialect, several at a time, and fail
+/// with every failure.
 fn run_all(decks: Vec<(PathBuf, bool)>) {
     assert!(
         !decks.is_empty(),
         "no deck selected: the manifest moved or lost its rows"
     );
+    for (path, _, _) in DEFAULT_DIALECT_ARGUMENTS {
+        assert!(
+            corpus("ngspice").join(path).is_file(),
+            "{path}: no such deck for its default-dialect arguments"
+        );
+    }
     let extended = std::env::var("RSPICE_EXECUTION_EXTENDED").as_deref() == Ok("1");
     let pending = Mutex::new(
         decks
             .into_iter()
             .filter(|(_, costly)| extended || !costly)
-            .map(|(deck, _)| deck)
+            .flat_map(|(deck, _)| DIALECTS.map(|dialect| (deck.clone(), dialect)))
             .collect::<Vec<_>>(),
     );
     let failures = Mutex::new(Vec::new());
@@ -102,8 +143,8 @@ fn run_all(decks: Vec<(PathBuf, bool)>) {
     std::thread::scope(|scope| {
         for _ in 0..workers {
             scope.spawn(|| {
-                while let Some(deck) = pending.lock().unwrap().pop() {
-                    if let Err(failure) = run_script(&deck) {
+                while let Some((deck, dialect)) = pending.lock().unwrap().pop() {
+                    if let Err(failure) = run_script(&deck, dialect) {
                         failures.lock().unwrap().push(failure);
                     }
                 }
