@@ -455,7 +455,8 @@ impl Engine {
         let size = circuit.matrix_size();
         let xyce_zero_start = self.config.spice_dialect == crate::engine::SpiceDialect::Xyce;
         let entry_state = xyce_zero_start.then(|| circuit.nonlinear_state_snapshot());
-        // Xyce's DCOP Newton solve starts from the zero global solution and
+        // Xyce's DCOP Newton solve starts from the zero global solution,
+        // takes its full limited step (`NoGainProjection::Unprojected`) and
         // lets each device apply its init-junction policy locally. In
         // particular, its GP BJT writes tVCrit only into the device's VBE
         // state; a resistor-only presolve followed by a generic 0.7 V BJT
@@ -474,6 +475,11 @@ impl Engine {
             matrix,
             initial_guess,
             hints,
+            if xyce_zero_start {
+                NoGainProjection::Unprojected
+            } else {
+                NoGainProjection::Projected
+            },
             abort,
         );
         match primary {
@@ -494,7 +500,12 @@ impl Engine {
                     "Xyce-compatible zero-start DC solve failed ({primary_error}); retrying from the robust linear operating-point seed."
                 );
                 self.solve_nonlinear_from_seed_with_node_hints(
-                    circuit, matrix, recovery, hints, abort,
+                    circuit,
+                    matrix,
+                    recovery,
+                    hints,
+                    NoGainProjection::Projected,
+                    abort,
                 )
             }
             Err(error) => Err(error),
@@ -544,6 +555,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         mut initial_guess: Vec<Value>,
         hints: &StartupVoltageHints,
+        projection: NoGainProjection,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let node_hints = &hints.constraints;
@@ -569,7 +581,7 @@ impl Engine {
             }
         }
 
-        self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&initial_guess), abort)
+        self.solve_operating_point_newton(circuit, matrix, Some(&initial_guess), projection, abort)
     }
 
     /// An operating point that holds each `.IC` node at its value. The
@@ -1089,8 +1101,30 @@ impl Engine {
         initial_guess: Option<&[Value]>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
-        let solution =
-            self.solve_nonlinear_with_guess_unchecked(circuit, matrix, initial_guess, abort)?;
+        self.solve_operating_point_newton(
+            circuit,
+            matrix,
+            initial_guess,
+            NoGainProjection::Projected,
+            abort,
+        )
+    }
+
+    fn solve_operating_point_newton(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: Option<&[Value]>,
+        projection: NoGainProjection,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let solution = self.solve_nonlinear_with_guess_unchecked(
+            circuit,
+            matrix,
+            initial_guess,
+            projection,
+            abort,
+        )?;
         self.check_settled_compact_model_private_nodes(circuit, &solution)?;
         Ok(solution)
     }
@@ -1189,10 +1223,17 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         initial_guess: Option<&[Value]>,
+        projection: NoGainProjection,
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
         self.attempt_at_zero_dc_nodal_floor(circuit, matrix, abort, &mut |circuit, matrix| {
-            self.solve_nonlinear_with_guess_unchecked(circuit, matrix, initial_guess, abort)
+            self.solve_nonlinear_with_guess_unchecked(
+                circuit,
+                matrix,
+                initial_guess,
+                projection,
+                abort,
+            )
         })
     }
 
@@ -1458,11 +1499,17 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         initial_guess: Option<&[Value]>,
+        projection: NoGainProjection,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         if self.tries_zero_dc_nodal_floor(circuit)
-            && let Some(solution) =
-                self.solve_at_zero_dc_nodal_floor(circuit, matrix, initial_guess, abort)?
+            && let Some(solution) = self.solve_at_zero_dc_nodal_floor(
+                circuit,
+                matrix,
+                initial_guess,
+                projection,
+                abort,
+            )?
         {
             return Ok(solution);
         }
@@ -1533,7 +1580,10 @@ impl Engine {
         let mut limit_cycle_hits = 0usize;
         let mut limit_cycle_detected = false;
         let mut direct_solver_error = None;
-        let voltage_box = damping::NoGainVoltageBox::of(circuit);
+        let voltage_box = match projection {
+            NoGainProjection::Projected => damping::NoGainVoltageBox::of(circuit),
+            NoGainProjection::Unprojected => None,
+        };
         let thermal_step_bound = damping::ThermalStepBound::of(circuit);
         for iteration in 0..dc_max_iterations {
             direct_iterations = iteration + 1;
@@ -2870,6 +2920,7 @@ impl Engine {
                 time,
                 guess: vec![0.0; size],
                 current_seeded_inductors,
+                projection: NoGainProjection::Unprojected,
             };
             match self.solve_nonlinear_transient_op_from_start(
                 circuit,
@@ -2895,6 +2946,7 @@ impl Engine {
                 time,
                 guess: linear_guess,
                 current_seeded_inductors,
+                projection: NoGainProjection::Projected,
             },
             hints,
             node_constraints,
@@ -2915,6 +2967,7 @@ impl Engine {
             time,
             guess: mut solution,
             current_seeded_inductors: mut use_transient_current_seed,
+            projection,
         } = start;
         let node_hints = &hints.constraints;
         let size = circuit.matrix_size();
@@ -2970,14 +3023,16 @@ impl Engine {
             || self.b3soi_limiter_owns_global_damping(circuit);
         // ngspice finds the DC and the transient operating point with the one
         // CKTop, so this Newton projects its iterates onto the same no-gain
-        // box the DC one does, spanning the sources at `time`. An initial
-        // condition is a source the box does not span: a constrained start
-        // keeps the unprojected step, as the DC constrained startup does.
-        let voltage_box = if node_constraints.is_empty() {
-            damping::NoGainVoltageBox::of_transient_operating_point(circuit, time)
-        } else {
-            None
-        };
+        // box the DC one does, spanning the sources at `time`, unless the
+        // start follows Xyce's unprojected Newton. An initial condition is a
+        // source the box does not span: a constrained start keeps the
+        // unprojected step, as the DC constrained startup does.
+        let voltage_box =
+            if node_constraints.is_empty() && projection == NoGainProjection::Projected {
+                damping::NoGainVoltageBox::of_transient_operating_point(circuit, time)
+            } else {
+                None
+            };
         // ngspice floors every NIiter call to 100 iterations (ITL1); the
         // per-iterate junction walk of pnjlim devices legitimately needs
         // tens of iterations on deep TTL chains before the residual settles.
@@ -3231,6 +3286,21 @@ struct TransientOpStart {
     time: Value,
     guess: Vec<Value>,
     current_seeded_inductors: bool,
+    projection: NoGainProjection,
+}
+
+/// Whether an operating-point Newton projects its iterates onto the no-gain
+/// box ([`damping::NoGainVoltageBox`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoGainProjection {
+    /// RSpice's own Newton: every iterate is projected into the box.
+    Projected,
+    /// Xyce's DCOP Newton takes the full limited step, and the Xyce dialect's
+    /// zero start follows it. Projection keeps every solution, but it moves
+    /// the path, and a multistable circuit can then settle in another of its
+    /// operating points: CircuitSim90's SEU latch settles in the state
+    /// opposite Xyce's.
+    Unprojected,
 }
 
 #[cfg(test)]
