@@ -257,13 +257,13 @@ impl CommandSet for DesignCommand {
         let schematic = schematic_editor(reads);
         let selected = reads.state.selected_stimulus_definition.is_some();
         let refusal = match self {
-            Self::GridSnapRouting
-            | Self::VisibilityOptions
-            | Self::EngineeringTableView
-            | Self::FitSchematicContent => {
+            Self::GridSnapRouting | Self::VisibilityOptions | Self::FitSchematicContent => {
                 (!schematic).then_some("command is unavailable in this context")
             }
-            Self::SelectTool | Self::CycleGrid | Self::CheckCellview => {
+            Self::SelectTool
+            | Self::CycleGrid
+            | Self::CheckCellview
+            | Self::EngineeringTableView => {
                 let symbol = routed::symbol_editor(reads.wb.workspace, reads.model);
                 (!schematic && !symbol).then_some("command is unavailable in this context")
             }
@@ -1480,6 +1480,7 @@ impl DesignFeature {
             dialog: &mut cx.state.engineering_table,
             views: &mut cx.state.engineering_table_views,
             model: cx.model,
+            symbol: &mut cx.state.symbol,
             platform: cx.platform,
             workbench: cx.wb,
         }

@@ -4,6 +4,9 @@ use std::collections::HashMap;
 
 pub use rspice_results::engineering_table::*;
 
+use rspice_design::symbol::SymbolDocument;
+use rspice_schematic_editor::symbol_editor::pin_table::{PIN_TABLE_GRID_ID, PinTableColumn};
+
 use crate::state::{ComponentType, SchematicState};
 
 pub const ACTIVE_SCHEMATIC_GRID_ID: &str = "active-schematic-objects";
@@ -168,6 +171,60 @@ pub fn active_schematic_dataset(schematic: &SchematicState) -> EngineeringDatase
         columns,
         rows,
     }
+}
+
+/// The symbol's pins as rows, in netlist order: a column for each field the
+/// inspector edits on one pin. A row's id is its netlist place, padded so
+/// that rows no sort orders stay in netlist order.
+pub fn symbol_pin_dataset(document: &SymbolDocument, source_revision: u64) -> EngineeringDataset {
+    let columns = PinTableColumn::ALL
+        .into_iter()
+        .map(|column| EngineeringColumn {
+            id: column.id().to_owned(),
+            label: column.label().to_owned(),
+            unit: column.unit().map(str::to_owned),
+            identifier: column == PinTableColumn::Name,
+            numeric: column.numeric(),
+        })
+        .collect();
+    let rows = (0..document.pins.len())
+        .map(|index| EngineeringRow {
+            stable_id: symbol_pin_row_id(document.pins.len(), index),
+            cells: PinTableColumn::ALL
+                .into_iter()
+                .map(|column| {
+                    let cell = EngineeringCell {
+                        display: column.value(document, index),
+                        numeric: column.number(document, index),
+                    };
+                    (column.id().to_owned(), cell)
+                })
+                .collect(),
+        })
+        .collect();
+    EngineeringDataset {
+        id: PIN_TABLE_GRID_ID.to_owned(),
+        title: "Symbol pins".to_owned(),
+        source_revision,
+        columns,
+        rows,
+    }
+}
+
+/// The row id of the pin at netlist place `index` among `count` pins.
+pub fn symbol_pin_row_id(count: usize, index: usize) -> String {
+    let width = count.max(1).to_string().len();
+    format!("pin-{:0width$}", index + 1)
+}
+
+/// The netlist place of the pin a row id names, among `count` pins.
+pub fn symbol_pin_row_index(count: usize, id: &str) -> Option<usize> {
+    let index = id
+        .strip_prefix("pin-")?
+        .parse::<usize>()
+        .ok()?
+        .checked_sub(1)?;
+    (index < count && symbol_pin_row_id(count, index) == id).then_some(index)
 }
 
 fn object_row(
@@ -421,6 +478,44 @@ mod tests {
                 .with_name_value("C2", "2p"),
         );
         active_schematic_dataset(&schematic)
+    }
+
+    #[test]
+    fn symbol_pin_rows_stand_in_netlist_order_until_a_sort_reorders_them() {
+        use rspice_design::symbol::SymbolPin;
+        use rspice_design_model::port::PortDirection;
+
+        let names = ["Z", "A", "M", "B", "Q", "C", "D", "E", "F", "G", "H"];
+        let document = SymbolDocument {
+            pins: names
+                .iter()
+                .map(|name| SymbolPin::new(*name, PortDirection::In, None))
+                .collect(),
+            ..SymbolDocument::default()
+        };
+        let dataset = symbol_pin_dataset(&document, 4);
+        assert_eq!(dataset.id, PIN_TABLE_GRID_ID);
+        assert_eq!(dataset.source_revision, 4);
+        let view = EngineeringTableView::for_dataset(&dataset);
+        let shown = |projection: EngineeringProjection| {
+            projection
+                .rows
+                .iter()
+                .map(|row| row.cells["name"].display.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shown(dataset.project(&view)), names, "ten and more pins");
+        let mut sorted = view.clone();
+        sorted.sort.push(EngineeringSortRule {
+            column_id: "name".to_owned(),
+            direction: SortDirection::Ascending,
+        });
+        assert_eq!(shown(dataset.project(&sorted))[..3], ["A", "B", "C"]);
+
+        assert_eq!(symbol_pin_row_id(11, 0), "pin-01");
+        assert_eq!(symbol_pin_row_index(11, "pin-11"), Some(10));
+        assert_eq!(symbol_pin_row_index(11, "pin-12"), None);
+        assert_eq!(symbol_pin_row_index(11, "pin-1"), None);
     }
 
     #[test]

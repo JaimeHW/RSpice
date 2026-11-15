@@ -714,7 +714,7 @@ const PINNED_SYMBOL_MENUS: [(ApplicationMenu, &[&str]); 1] = [(
         "Connectivity and buses… | design-connectivity-tools |  | off: open a schematic or testbench",
         "Highlight net | highlight-net |  | off: open a schematic or testbench",
         "Review comments… | review-comments |  | off: open a schematic project",
-        "Object table… | engineering-table-manager | Ctrl+Shift+T | off: command is unavailable in this context",
+        "Object table… | engineering-table-manager | Ctrl+Shift+T | on",
         "---",
         "Check cellview | check-cellview | Ctrl+E | on",
         "Check design | check-design |  | on",

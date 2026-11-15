@@ -3,7 +3,6 @@
 use egui::{Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::engineering_table::active_schematic_dataset;
 use crate::state::{
     EngineeringDataset, EngineeringFilterGrammar, EngineeringSortRule, EngineeringTableView,
     EngineeringViewScope, SortDirection,
@@ -18,10 +17,13 @@ use crate::ui::widgets::{
 use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
 };
+use symbol_pins::{active_dataset, is_pin_table};
 
 use crate::state::engineering_table::EngineeringTableViewStore;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::WorkbenchSession;
+
+mod symbol_pins;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub(crate) enum EngineeringTableDialogPage {
@@ -100,6 +102,10 @@ pub(crate) struct EngineeringTableDialogState {
     pub(crate) active_cell: Option<(usize, usize)>,
     pub(crate) focus_cell: Option<(usize, usize)>,
     pub(crate) row_details_id: Option<String>,
+    /// The pin table's cell being edited, if any.
+    pub(crate) pin_edit: Option<symbol_pins::PinCellEdit>,
+    /// The pin table's row a Shift+click selects the run from.
+    pub(crate) pin_anchor: Option<usize>,
     pub(crate) saved_edit_id: Option<String>,
     pub(crate) saved_edit_name: String,
     #[cfg(target_arch = "wasm32")]
@@ -150,6 +156,16 @@ enum BodyAction {
     BeginRename(String, String),
     CommitRename(String, EngineeringViewScope),
     DuplicateSaved(String, EngineeringViewScope, String),
+    /// Set one column of the pins these rows stand for.
+    EditPins {
+        rows: Vec<String>,
+        column: rspice_schematic_editor::symbol_editor::pin_table::PinTableColumn,
+        text: String,
+    },
+    /// Move the selected pins one netlist place.
+    MovePins {
+        later: bool,
+    },
 }
 
 /// The file the browser picker returned for one import, keyed to the token
@@ -174,7 +190,7 @@ pub(crate) fn open_engineering_table_dialog(
     if dialog.open {
         return false;
     }
-    let dataset = active_schematic_dataset(&model.schematic);
+    let dataset = active_dataset(model);
     let mut view = views
         .working
         .get(&dataset.id)
@@ -361,12 +377,14 @@ fn row_details_form(
 }
 
 /// What the engineering table draws over and changes: its draft, the views
-/// saved on this device, the model, the platform's project lifecycle and the
-/// session.
+/// saved on this device, the model, the symbol editor whose pins it edits,
+/// the platform's project lifecycle and the session.
 pub(crate) struct EngineeringTable<'a> {
     pub(in crate::workbench) dialog: &'a mut EngineeringTableDialogState,
     pub(in crate::workbench) views: &'a mut EngineeringTableViewStore,
     pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) symbol:
+        &'a mut crate::workbench::app::actions::workspace::symbol_document::SymbolUiState,
     pub(in crate::workbench) platform: &'a mut PlatformState,
     pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
 }
@@ -379,13 +397,24 @@ impl EngineeringTable<'_> {
             return;
         }
 
-        let dataset = active_schematic_dataset(&self.model.schematic);
-        if self.dialog.source_revision != dataset.source_revision {
+        let dataset = active_dataset(self.model);
+        if self.dialog.source_revision != dataset.source_revision
+            || self
+                .dialog
+                .draft
+                .as_ref()
+                .is_some_and(|draft| draft.grid_id != dataset.id)
+        {
             if let Some(draft) = self.dialog.draft.as_mut() {
                 draft.normalize_for(&dataset);
             }
             self.dialog.source_revision = dataset.source_revision;
         }
+        let pin_table = is_pin_table(&dataset);
+        if pin_table {
+            self.take_canvas_pin_selection(&dataset);
+        }
+        let selected_before = self.dialog.selected_row_ids.clone();
 
         let page = self.dialog.page;
         // What a page asks before it acts is a command form of its own;
@@ -413,19 +442,30 @@ impl EngineeringTable<'_> {
             }
             return;
         }
-        let (title, primary) = if page == EngineeringTableDialogPage::Manager {
-            ("Engineering table view", "Apply table view")
+        let manager = page == EngineeringTableDialogPage::Manager;
+        let (title, primary) = match (manager, pin_table) {
+            (true, false) => ("Engineering table view", "Apply table view"),
+            // A pin edit is kept as it is made, one undo step each, so the
+            // table has nothing to apply or cancel but its view.
+            (true, true) => ("Pin table", "Done"),
+            (false, _) => ("Saved engineering table views", "Done"),
+        };
+        let description = if pin_table {
+            "Edit the symbol's pins: select rows, then edit a cell to set it on every selected \
+             pin. Choose the columns and their order, and sort and filter the rows."
         } else {
-            ("Saved engineering table views", "Done")
+            "Choose the table's columns and their order, sort and filter its rows, and copy or export them."
         };
         let mut action = None;
         let mut dialog = Dialog::new(title, primary)
-            .description("Choose the table's columns and their order, sort and filter its rows, and copy or export them.")
+            .description(description)
             .size(DialogSize::WideWorkflow)
             .overlay_scrollbar()
-            .initial_focus(DialogInitialFocus::BodyControl);
+            .initial_focus(DialogInitialFocus::BodyControl)
+            // Enter in the pin table edits a cell or keeps the value typed in it.
+            .primary_on_enter(!pin_table);
         // Saved views has one way back to the table, its primary.
-        if page == EngineeringTableDialogPage::Manager {
+        if manager && !pin_table {
             dialog = dialog.ghost("Cancel");
         }
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
@@ -451,11 +491,19 @@ impl EngineeringTable<'_> {
             Some(ui.make_persistent_id(("engineering-table-first", page)))
         });
 
+        if pin_table {
+            self.give_canvas_pin_selection(&dataset, &selected_before);
+        }
         if let Some(action) = action {
             self.handle_engineering_table_body_action(action, &dataset);
         }
 
         match choice {
+            // Escape while a cell is edited drops the edit, not the table.
+            DialogChoice::Cancelled if self.dialog.pin_edit.is_some() => {
+                self.dialog.pin_edit = None;
+                self.dialog.focus_cell = self.dialog.active_cell;
+            }
             DialogChoice::Primary if page == EngineeringTableDialogPage::Manager => {
                 self.apply_engineering_table_view(&dataset);
             }
@@ -558,6 +606,10 @@ impl EngineeringTable<'_> {
                 self.dialog.row_details_id = Some(id);
                 self.dialog.page = EngineeringTableDialogPage::RowDetails;
             }
+            BodyAction::EditPins { rows, column, text } => {
+                self.edit_symbol_pins(&rows, column, &text);
+            }
+            BodyAction::MovePins { later } => self.move_symbol_pins(later),
             BodyAction::ImportSaved => self.import_engineering_saved_view(),
             BodyAction::ExportSaved(id, scope) => self.export_engineering_saved_view(&id, scope),
             BodyAction::BeginRename(id, name) => {
@@ -628,8 +680,12 @@ impl EngineeringTable<'_> {
         view.normalize_for(dataset);
         self.views.set_working(view, dataset);
         self.dialog.close();
-        self.workbench
-            .prompt("Engineering table view applied on this device; the project is unchanged.");
+        // The pin table's edits were each kept as they were made; Done only
+        // keeps its view, and says nothing a pin edit would contradict.
+        if !is_pin_table(dataset) {
+            self.workbench
+                .prompt("Engineering table view applied on this device; the project is unchanged.");
+        }
     }
 
     fn copy_engineering_table(&mut self, dataset: &EngineeringDataset) {
@@ -1085,7 +1141,7 @@ impl EngineeringTable<'_> {
     }
 
     fn publish_imported_engineering_view(&mut self, source: &str) {
-        let dataset = active_schematic_dataset(&self.model.schematic);
+        let dataset = active_dataset(self.model);
         let scope = self.dialog.save_scope;
         let result = match scope {
             EngineeringViewScope::Personal => self.views.import_view(source, scope, &dataset),
@@ -1436,27 +1492,38 @@ fn manager_body(
         1 => "1 row".to_owned(),
         count => format!("{count} rows"),
     };
+    let pin_table = is_pin_table(dataset);
+    let selected = !state.selected_row_ids.is_empty();
     let verbs = heading_row(ui, &rows, |ui| {
         let export = Button::new("Export\u{2026}").show(ui).clicked();
         let copy = Button::new("Copy")
             .show(ui)
             .on_hover_text("Copy the selected rows, or every row, with headings and units")
             .clicked();
-        (export, copy)
+        let reorder = pin_table
+            .then(|| symbol_pins::reorder_verbs(ui, selected))
+            .flatten();
+        (export, copy, reorder)
     });
     match verbs {
-        (true, _) => action = Some(BodyAction::Export),
-        (_, true) => action = Some(BodyAction::Copy),
+        (true, _, _) => action = Some(BodyAction::Export),
+        (_, true, _) => action = Some(BodyAction::Copy),
+        (_, _, Some(reorder)) => action = Some(reorder),
         _ => {}
     }
-    if let Some(preview_action) = engineering_grid_preview(
-        ui,
-        &projection,
-        &mut state.selected_row_ids,
-        &mut state.active_cell,
-        &mut state.focus_cell,
-    ) {
-        return Some(preview_action);
+    let grid_action = if pin_table {
+        symbol_pins::pin_grid(ui, &projection, state)
+    } else {
+        engineering_grid_preview(
+            ui,
+            &projection,
+            &mut state.selected_row_ids,
+            &mut state.active_cell,
+            &mut state.focus_cell,
+        )
+    };
+    if let Some(grid_action) = grid_action {
+        return Some(grid_action);
     }
     if let Some(error) = &state.error {
         ui.colored_label(tokens.color.err, error);
@@ -1998,6 +2065,7 @@ pub(crate) mod tests {
             dialog: &mut state.design.engineering_table,
             views: &mut state.design.engineering_table_views,
             model: &mut state.model,
+            symbol: &mut state.design.symbol,
             platform: &mut state.platform,
             workbench: &mut state.workbench,
         }
