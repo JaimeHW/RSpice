@@ -9,7 +9,7 @@
 use egui::epaint::TextShape;
 use egui::{Align2, Pos2, Rect, Sense, Shape, Stroke as EguiStroke, Vec2};
 use rspice_publication_contract::{
-    PathSegment, Point, Primitive, Scene, StrokePattern, TextAnchor,
+    PathSegment, Point, Primitive, Scene, Stroke, StrokePattern, TextAnchor,
 };
 
 use crate::theme::Palette;
@@ -23,6 +23,26 @@ pub fn dash_pattern(pattern: StrokePattern) -> &'static [f32] {
         StrokePattern::Dashed => &[4.0, 2.0],
         StrokePattern::Dotted => &[1.0, 3.0],
         StrokePattern::DashDot => &[4.0, 2.0, 1.0, 2.0],
+    }
+}
+
+/// The on and off lengths `stroke` is drawn in on screen, `scale` pixels to
+/// the micrometre: the exact pattern its author drew where it carries one,
+/// else the pattern's own. Exact lengths are for round caps; these runs end
+/// square, so each dash takes the caps' reach of one width and each gap
+/// gives it up. Empty for a whole line.
+#[must_use]
+pub fn dash_array(stroke: &Stroke, scale: f32) -> Vec<f32> {
+    let width = stroke.width_um as f32 * scale;
+    match stroke.dash_um {
+        Some([on, off]) => vec![
+            (on as f32 * scale + width).max(0.5),
+            (off as f32 * scale - width).max(0.5),
+        ],
+        None => dash_pattern(stroke.pattern)
+            .iter()
+            .map(|multiple| (multiple * width).max(0.5))
+            .collect(),
     }
 }
 
@@ -202,8 +222,7 @@ pub fn paint_scene(
                                 (stroke.width_um as f32 * scale).max(0.75),
                                 palette.resolve(stroke.paint),
                             ),
-                            stroke.pattern,
-                            stroke.width_um as f32 * scale,
+                            dash_array(stroke, scale),
                         )
                     });
                     let mut subpath: Vec<Pos2> = Vec::new();
@@ -216,16 +235,11 @@ pub fn paint_scene(
                                     EguiStroke::NONE,
                                 ));
                             }
-                            if let Some((stroke, pattern, width)) = &stroke {
-                                let array = dash_pattern(*pattern);
+                            if let Some((stroke, array)) = &stroke {
                                 if array.is_empty() {
                                     painter.add(Shape::line(points.clone(), *stroke));
                                 } else {
-                                    let scaled: Vec<f32> = array
-                                        .iter()
-                                        .map(|multiple| (multiple * width).max(0.5))
-                                        .collect();
-                                    for run in dash_polyline(points, &scaled) {
+                                    for run in dash_polyline(points, array) {
                                         if run.len() >= 2 {
                                             painter.add(Shape::line(run, *stroke));
                                         }
@@ -338,6 +352,29 @@ mod tests {
         assert_eq!(dash_pattern(StrokePattern::Dashed), &[4.0, 2.0]);
         assert_eq!(dash_pattern(StrokePattern::Dotted), &[1.0, 3.0]);
         assert_eq!(dash_pattern(StrokePattern::DashDot), &[4.0, 2.0, 1.0, 2.0]);
+    }
+
+    /// An outline carrying the pattern its author drew is drawn in exactly
+    /// that pattern, its round-capped lengths read for square ends: a dot of
+    /// next to nothing stands one width across. One without draws the
+    /// pattern's own.
+    #[test]
+    fn an_outline_draws_the_exact_pattern_it_was_drawn_in() {
+        let stroke = |dash_um| rspice_publication_contract::Stroke {
+            width_um: 250,
+            paint: rspice_publication_contract::Paint::Rgba([0, 0, 0, 255]),
+            pattern: StrokePattern::Dotted,
+            dash_um,
+        };
+        let near = |drawn: Vec<f32>, expected: [f32; 2]| {
+            drawn.len() == 2
+                && drawn
+                    .iter()
+                    .zip(expected)
+                    .all(|(drawn, expected)| (drawn - expected).abs() < 1e-4)
+        };
+        assert!(near(dash_array(&stroke(Some([1, 1249])), 0.01), [2.51, 9.99]));
+        assert!(near(dash_array(&stroke(None), 0.01), [2.5, 7.5]));
     }
 
     #[test]

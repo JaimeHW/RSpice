@@ -379,6 +379,18 @@ impl StrokeStyle {
             exact_dot_spacing: None,
         })
     }
+
+    /// The exact on and off lengths this stroke's pattern prints in, in
+    /// micrometres, for round caps; `None` where the pattern alone decides.
+    /// A dotted run prints a dot one width long every spacing.
+    #[must_use]
+    pub fn exact_dash_um(&self) -> Option<[u64; 2]> {
+        match (self.exact_dash, self.exact_dot_spacing) {
+            (Some((on, off)), _) => Some([on.micrometres(), off.micrometres()]),
+            (None, Some(spacing)) => Some([self.width.micrometres(), spacing.micrometres()]),
+            (None, None) => None,
+        }
+    }
 }
 
 impl Default for StrokeStyle {

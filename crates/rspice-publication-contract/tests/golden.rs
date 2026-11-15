@@ -36,6 +36,7 @@ fn stroke(width_um: u64, role: PaintRole) -> Option<Stroke> {
         width_um,
         paint: Paint::Role(role),
         pattern: StrokePattern::Solid,
+        dash_um: None,
     })
 }
 
@@ -208,6 +209,7 @@ fn rc_lowpass_sheet() -> Scene {
                             width_um: 254,
                             paint: Paint::Rgba([214, 138, 42, 255]),
                             pattern: StrokePattern::Dashed,
+                            dash_um: None,
                         }),
                         fill: Some(Paint::Rgba([214, 138, 42, 24])),
                     }),
@@ -255,6 +257,7 @@ fn plot_scene(x_caption: &str, y_caption: &str, series: u8) -> Scene {
                             width_um: 127,
                             paint: Paint::Role(PaintRole::Grid),
                             pattern: StrokePattern::Dotted,
+                            dash_um: None,
                         }),
                         fill: None,
                     }),
@@ -298,6 +301,7 @@ fn plot_scene(x_caption: &str, y_caption: &str, series: u8) -> Scene {
                         width_um: 381,
                         paint: Paint::Role(PaintRole::TraceSeries(series)),
                         pattern: StrokePattern::Solid,
+                        dash_um: None,
                     }),
                     fill: None,
                 })],

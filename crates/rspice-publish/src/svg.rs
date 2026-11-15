@@ -97,6 +97,17 @@ impl Presentation {
             " stroke-width=\"{}\"",
             fmt_um(stroke.width_um as i64)
         );
+        // The exact pattern the author drew, which the page's round caps end
+        // as the print does.
+        if let Some([on, off]) = stroke.dash_um {
+            let _ = write!(
+                self.attributes,
+                " stroke-dasharray=\"{} {}\"",
+                fmt_um(on as i64),
+                fmt_um(off as i64)
+            );
+            return;
+        }
         match stroke.pattern {
             StrokePattern::Solid => {}
             StrokePattern::Dashed => {
@@ -371,6 +382,7 @@ mod tests {
             width_um: 254,
             paint: Paint::Rgba([214, 138, 42, 255]),
             pattern: StrokePattern::Solid,
+            dash_um: None,
         });
         translucent.fill(Some(&Paint::Rgba([214, 138, 42, 24])));
         assert_eq!(
@@ -383,5 +395,30 @@ mod tests {
         let mut text = Presentation::default();
         text.text_paint(Paint::Rgba([0, 9, 255, 0]));
         assert_eq!(text.markup(), " fill=\"#0009ff\" fill-opacity=\"0\"");
+    }
+
+    /// An outline that carries the pattern its author drew is written in
+    /// exactly that pattern; one that does not takes the page's own.
+    #[test]
+    fn an_outline_keeps_the_exact_pattern_it_was_drawn_in() {
+        let outline = |pattern, dash_um| {
+            let mut presentation = Presentation::default();
+            presentation.stroke(&Stroke {
+                width_um: 250,
+                paint: Paint::Rgba([0, 0, 0, 255]),
+                pattern,
+                dash_um,
+            });
+            presentation.markup()
+        };
+        assert_eq!(
+            outline(StrokePattern::Dotted, Some([1, 1249])),
+            " stroke=\"#000000\" stroke-width=\"250\" stroke-dasharray=\"1 1249\""
+        );
+        assert!(
+            outline(StrokePattern::Dashed, None).contains("stroke-dasharray=\"1000 500\""),
+            "{}",
+            outline(StrokePattern::Dashed, None)
+        );
     }
 }

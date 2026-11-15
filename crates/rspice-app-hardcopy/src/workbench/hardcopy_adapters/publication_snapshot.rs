@@ -839,6 +839,9 @@ fn stroke(style: &StrokeStyle) -> Stroke {
             SceneStrokePattern::Dotted => StrokePattern::Dotted,
             SceneStrokePattern::DashDot => StrokePattern::DashDot,
         },
+        // The exact pattern a drawn outline prints in, so a published sheet
+        // shows the dash and dot the author drew.
+        dash_um: style.exact_dash_um(),
     }
 }
 
@@ -1487,6 +1490,74 @@ mod tests {
             x: Length::from_micrometres(x_um),
             y: Length::from_micrometres(y_um),
         }
+    }
+
+    /// A published outline carries the exact dash and dot its print draws,
+    /// not only whether it is broken, so the published sheet shows the
+    /// pattern the author drew.
+    #[test]
+    fn a_published_outline_keeps_the_pattern_its_print_draws() {
+        use rspice_design::symbol::{SymbolDash, SymbolShape, SymbolStyle};
+        let line = |y: i32, dash| SymbolShape::Polyline {
+            points: vec![
+                crate::state::Point::new(-20, y),
+                crate::state::Point::new(20, y),
+            ],
+            closed: false,
+            style: SymbolStyle {
+                dash,
+                ..SymbolStyle::default()
+            },
+        };
+        let document = crate::state::SymbolDocument {
+            body: vec![
+                line(-10, SymbolDash::Solid),
+                line(0, SymbolDash::Dashed),
+                line(10, SymbolDash::Dotted),
+            ],
+            ..crate::state::SymbolDocument::default()
+        };
+        let resolved = rspice_hardcopy::sources::resolve_symbol_document(
+            rspice_hardcopy_contract::sources::HardcopySourceIdentity::try_new(
+                "symbol",
+                rspice_hardcopy_contract::HardcopyDocumentId::new(),
+                crate::product::ObjectRevision::INITIAL,
+                "Symbol",
+            )
+            .unwrap(),
+            document,
+            rspice_hardcopy_contract::HardcopyScope::ActiveDocument,
+        )
+        .unwrap();
+        let scene = scene_from_resolved(
+            &resolved,
+            resolved.default_print_mapping(),
+            rspice_hardcopy_contract::SchematicHardcopySetup::default(),
+            rspice_hardcopy::render::HardcopySceneMetadata::try_new("Symbol", "RSpice test")
+                .unwrap(),
+        )
+        .unwrap();
+        let published = scene
+            .primitives()
+            .iter()
+            .filter_map(|primitive| match primitive {
+                ScenePrimitive::Polyline { stroke: printed, .. } => {
+                    Some((printed.exact_dash_um(), stroke(printed)))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(published.len(), 3, "{published:?}");
+        assert!(
+            published
+                .iter()
+                .all(|(printed, published)| published.dash_um == *printed)
+        );
+        assert_eq!(published[0].1.dash_um, None, "a whole line has no pattern");
+        let [dash, gap] = published[1].1.dash_um.expect("a dashed line keeps its dash");
+        assert!(dash > 1 && gap > 1, "{dash} {gap}");
+        let [dot, _] = published[2].1.dash_um.expect("a dotted line keeps its dot");
+        assert_eq!(dot, 1, "a dot is a round-capped dash of next to nothing");
     }
 
     #[test]

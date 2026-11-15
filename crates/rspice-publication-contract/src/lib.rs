@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Exact schema version a conforming publication snapshot must declare.
-pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 5;
+pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 6;
 /// Exact schema version a conforming figure manifest must declare.
 pub const FIGURE_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// Hard upper bound on canonical snapshot bytes, matching the hardcopy
@@ -552,7 +552,8 @@ pub enum Paint {
 }
 
 /// Stroke pattern vocabulary. Dash geometry is a renderer decision keyed off
-/// the pattern, keeping sealed scenes independent of output styling.
+/// the pattern, keeping sealed scenes independent of output styling, unless
+/// the stroke carries the exact lengths its author drew ([`Stroke::dash_um`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum StrokePattern {
@@ -568,6 +569,13 @@ pub struct Stroke {
     pub width_um: u64,
     pub paint: Paint,
     pub pattern: StrokePattern,
+    /// The exact on and off lengths of the pattern an outline was drawn in,
+    /// in micrometres, for round caps: each dash's caps reach half the width
+    /// past its ends, so a dot is a dash of next to nothing. A renderer that
+    /// ends dashes square lengthens each dash by the width and shortens each
+    /// gap by it. Absent, the pattern's dash geometry is the renderer's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dash_um: Option<[u64; 2]>,
 }
 
 /// One path step. Arc angles are integral millidegrees, counter-clockwise
@@ -1975,6 +1983,7 @@ mod tests {
                         width_um: 254,
                         paint: Paint::Role(PaintRole::Foreground),
                         pattern: StrokePattern::Solid,
+                        dash_um: None,
                     }),
                     fill: None,
                 })],
@@ -2514,6 +2523,7 @@ mod tests {
                 width_um: 254,
                 paint: Paint::Role(PaintRole::Foreground),
                 pattern: StrokePattern::Solid,
+                dash_um: None,
             }),
             fill: None,
         })];
