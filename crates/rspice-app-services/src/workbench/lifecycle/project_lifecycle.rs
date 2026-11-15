@@ -299,6 +299,25 @@ fn active_save_documents(state: &dyn LifecycleSource) -> Vec<ProjectDocumentId> 
     std::iter::once(active).chain(sheets).collect()
 }
 
+/// The documents a save of `scope` writes when it writes more than the
+/// document in front: the symbol in front, then each sheet its edits carried
+/// a wire end on. Empty when the save writes the document alone, or the
+/// whole project.
+pub fn documents_saved_with_their_sheets(
+    state: &dyn LifecycleSource,
+    scope: SaveScope,
+) -> Vec<ProjectDocumentId> {
+    if effective_save_scope(state.lifecycle_view().platform, scope) != SaveScope::ActiveDocument {
+        return Vec::new();
+    }
+    let documents = active_save_documents(state);
+    if documents.len() > 1 {
+        documents
+    } else {
+        Vec::new()
+    }
+}
+
 pub fn active_document_is_dirty(state: &dyn LifecycleSource) -> bool {
     let state = &state.lifecycle_view();
     state

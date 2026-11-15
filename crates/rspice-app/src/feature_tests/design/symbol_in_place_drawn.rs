@@ -748,6 +748,48 @@ fn saving_the_symbol_view_writes_the_sheet_its_pin_move_rewired() {
     assert_eq!(fixture.saved_wire_end(&reopened), Point::new(60, 100));
 }
 
+/// A save that wrote the sheet a symbol's pin move rewired says so in the
+/// status line, the symbol first and then the sheet, each by the name its
+/// tab shows. A save that wrote the symbol alone says nothing of sheets.
+#[test]
+fn a_save_that_writes_the_rewired_sheet_names_both_in_the_status_line() {
+    use crate::workbench::project::commands::ProjectCommand;
+
+    let mut fixture = InPlace::new();
+    fixture.wire_pin_a();
+    let path = ProjectPath::new("save-status");
+    assert!(fixture.replay.app.state.save_project_to_path(&path.0));
+    fixture.enter();
+
+    // A pin with no wire on it moves nothing on the sheet.
+    let state = &mut fixture.replay.app.state;
+    let mut document = state.model.load_active_symbol_document().unwrap();
+    document.pins[1].position = Some(Point::new(40, 30));
+    state.store_active_symbol_document(&document).unwrap();
+    fixture
+        .replay
+        .app
+        .execute_command_key(ProjectCommand::Save.key());
+    let alone = fixture.replay.frames(vec![]);
+    assert!(
+        !prompt(&alone).starts_with("Saved"),
+        "the symbol alone was saved: {:?}",
+        prompt(&alone)
+    );
+
+    fixture.drag(Point::new(60, 70), Point::new(60, 100));
+    assert_eq!(fixture.wire_end(), Point::new(60, 100));
+    fixture
+        .replay
+        .app
+        .execute_command_key(ProjectCommand::Save.key());
+    let together = fixture.replay.frames(vec![]);
+    assert_eq!(
+        prompt(&together),
+        format!("Saved amp and {}", fixture.parent.cell)
+    );
+}
+
 /// Undo names the symbol's step whenever it is the one Undo takes back, a
 /// project step older than it notwithstanding: the row reads "Undo move pin A",
 /// and choosing it puts the pin back, the project step still to undo.

@@ -467,10 +467,18 @@ pub fn save_native_scope(
     path: &Path,
     authority: DestinationAuthority,
 ) -> Result<(), String> {
+    // Read before the save, which forgets the sheets it writes with a symbol.
+    let written_together =
+        crate::workbench::lifecycle::project_lifecycle::documents_saved_with_their_sheets(
+            &parts, scope,
+        );
     match crate::workbench::lifecycle::project_lifecycle::save_native(
         &mut parts, scope, path, authority,
     ) {
         Ok(()) => {
+            if let Some(saved) = documents_saved_together(&written_together) {
+                parts.workbench.prompt(saved);
+            }
             let LifecycleParts {
                 model, platform, ..
             } = parts.lifecycle;
@@ -501,6 +509,28 @@ pub fn save_native_scope(
             );
             Err(message)
         }
+    }
+}
+
+/// What the status line says of a save that wrote a symbol and the sheets
+/// its edits rewired with it: "Saved amp, top and filter", the symbol first,
+/// each by the cell name its tab shows. `None` for a save of anything else.
+#[cfg(not(target_arch = "wasm32"))]
+fn documents_saved_together(
+    documents: &[crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId],
+) -> Option<String> {
+    use crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId;
+
+    let names: Vec<&str> = documents
+        .iter()
+        .filter_map(|document| match document {
+            ProjectDocumentId::CellView(reference) => Some(reference.cell.as_str()),
+            _ => None,
+        })
+        .collect();
+    match names.as_slice() {
+        [] | [_] => None,
+        [first @ .., last] => Some(format!("Saved {} and {last}", first.join(", "))),
     }
 }
 
