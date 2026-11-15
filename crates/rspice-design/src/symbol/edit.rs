@@ -206,7 +206,9 @@ impl SymbolHistory {
     }
 
     fn newest_sequence(stack: Option<&Vec<SymbolHistoryRecord>>) -> Option<UndoSequence> {
-        stack.and_then(|stack| stack.last()).map(|record| record.sequence)
+        stack
+            .and_then(|stack| stack.last())
+            .map(|record| record.sequence)
     }
 
     pub fn pop_undo(&mut self, key: &str) -> Option<SymbolDocumentSnapshot> {

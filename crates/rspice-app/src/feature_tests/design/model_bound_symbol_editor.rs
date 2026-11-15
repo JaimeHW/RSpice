@@ -15,9 +15,9 @@ use crate::state::{
     SymbolEditorMetadata, SymbolElectricalType, SymbolPin, SymbolPinSide,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::AppState;
 use crate::workbench::app::dialogs::create_model_bound_symbol::state::PRIMARY;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame_with, themed_context};
+use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRoute};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::commands::DesignCommand;
@@ -127,7 +127,11 @@ impl Fixture {
         app.state.workbench.activate(Workspace::Design);
         let path = unique_path(label);
         app.state
-            .save_project_scope_to(SaveScope::AllDocuments, &path, DestinationAuthority::UserSelected)
+            .save_project_scope_to(
+                SaveScope::AllDocuments,
+                &path,
+                DestinationAuthority::UserSelected,
+            )
             .expect("the project saves");
         open_create_model_bound_symbol_dialog(&mut app.state);
         app.state
@@ -137,13 +141,16 @@ impl Fixture {
         press(&ctx, &mut app, PRIMARY);
         let symbol = CellViewRef::new("analog_blocks", "nmos_core", "symbol");
         assert_eq!(
-            app.state.model.workspace.content.active_view,
-            symbol,
+            app.state.model.workspace.content.active_view, symbol,
             "creating the symbol opens it in the symbol editor: {:?}",
             app.state.design.create_model_bound_symbol.validation_error
         );
         app.state
-            .save_project_scope_to(SaveScope::AllDocuments, &path, DestinationAuthority::UserSelected)
+            .save_project_scope_to(
+                SaveScope::AllDocuments,
+                &path,
+                DestinationAuthority::UserSelected,
+            )
             .expect("the project saves");
         Self {
             ctx,

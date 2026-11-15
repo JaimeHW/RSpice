@@ -498,7 +498,10 @@ fn a_compiled_symbol_undoes_saves_and_reverts_as_a_drawn_one() {
     let generated = |app: &RSpiceApp| {
         is_generated_symbol(view(app, &reference, GENERATED_SYMBOL_VIEW).expect("the symbol"))
     };
-    assert!(generated(&app), "saving left the compile's symbol the compile's");
+    assert!(
+        generated(&app),
+        "saving left the compile's symbol the compile's"
+    );
 
     move_rail(&mut app, Point::new(20, 0));
     assert!(!generated(&app), "the edit made the symbol its author's");
