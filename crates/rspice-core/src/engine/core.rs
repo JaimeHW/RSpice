@@ -1541,7 +1541,18 @@ impl Engine {
         Vec<crate::netlist::InitialCondition>,
         Vec<crate::netlist::NodeSet>,
     ) {
-        if netlist.subcircuits.is_empty() {
+        // Only a subcircuit's own `.IC` and `.NODESET` cards are scoped, so a
+        // deck whose definitions hold none has nothing to expand for.
+        let mut definitions: Vec<_> = netlist.subcircuits.iter().collect();
+        let mut scoped = false;
+        while let Some(definition) = definitions.pop() {
+            if !definition.initial_conditions.is_empty() || !definition.node_sets.is_empty() {
+                scoped = true;
+                break;
+            }
+            definitions.extend(&definition.nested_subcircuits);
+        }
+        if !scoped {
             return (Vec::new(), Vec::new());
         }
 

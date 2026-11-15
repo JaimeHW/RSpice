@@ -81,6 +81,7 @@ impl Engine {
 
         // Avoid hierarchy work for decks with no data-consuming element kinds.
         let other_kinds = other_inputs.is_some();
+        let substituted_lookups = lookups_may_arrive_by_substitution(netlist);
         let mut definitions: Vec<_> = netlist.subcircuits.iter().collect();
         let mut elements = netlist.elements.as_slice();
         loop {
@@ -90,7 +91,9 @@ impl Engine {
                 if matches!(element.kind, ElementKind::Xspice { .. })
                     || other_kinds
                         && (matches!(element.kind, ElementKind::XyceMemristor { .. })
-                            || behavioral_data_expression(&element.kind).is_some())
+                            || behavioral_data_expression(&element.kind).is_some_and(
+                                |expression| substituted_lookups || names_lookup(expression),
+                            ))
                 {
                     found = true;
                     break;
@@ -244,6 +247,76 @@ fn collect_pem_data_inputs(
         paths.extend(crate::xspice::data_file_input_candidates(&path));
     }
     Ok(())
+}
+
+/// Whether flattening may put a lookup function into an element expression
+/// whose own text names none: through a `.FUNC` body, a parameter kept as an
+/// expression, or a subcircuit or instance parameter expression that names
+/// one.
+fn lookups_may_arrive_by_substitution(netlist: &Netlist) -> bool {
+    fn value_names_lookup(value: &crate::netlist::ParametricValue) -> bool {
+        use crate::netlist::ParametricValue;
+        match value {
+            ParametricValue::Expression(text) => names_lookup(text),
+            ParametricValue::Array(values) => values.iter().any(value_names_lookup),
+            ParametricValue::Resolved(_)
+            | ParametricValue::String(_)
+            | ParametricValue::StringExpression(_) => false,
+        }
+    }
+    let instances_name_lookups = |elements: &[crate::netlist::Element]| {
+        elements.iter().any(|element| {
+            matches!(&element.kind, ElementKind::Subcircuit { params, .. }
+                if params.iter().any(|(_, value)| value_names_lookup(value)))
+        })
+    };
+    if netlist.params.function_count() > 0
+        || netlist.params.has_retained_parameter_expressions()
+        || instances_name_lookups(&netlist.elements)
+    {
+        return true;
+    }
+    let mut definitions: Vec<_> = netlist.subcircuits.iter().collect();
+    while let Some(definition) = definitions.pop() {
+        if !definition.body_functions.is_empty()
+            || definition
+                .expr_params
+                .iter()
+                .chain(&definition.body_expr_params)
+                .any(|(_, text)| names_lookup(text))
+            || instances_name_lookups(&definition.elements)
+        {
+            return true;
+        }
+        definitions.extend(&definition.nested_subcircuits);
+    }
+    false
+}
+
+/// Whether `expression` names a lookup function, the only thing that reads a
+/// data file. Text that does not parse is not ruled out.
+fn names_lookup(expression: &str) -> bool {
+    use crate::netlist::expr::Expr;
+    let Ok(parsed) = crate::netlist::expr::parse_expression(expression) else {
+        return true;
+    };
+    let mut pending = vec![&parsed];
+    while let Some(node) = pending.pop() {
+        match node {
+            Expr::FnCall { name, args } => {
+                if crate::expr::Function::from_name(name)
+                    .is_some_and(crate::expr::is_file_lookup_function)
+                {
+                    return true;
+                }
+                pending.extend(args);
+            }
+            Expr::BinOp { left, right, .. } => pending.extend([left.as_ref(), right.as_ref()]),
+            Expr::UnaryOp { operand, .. } => pending.push(operand),
+            Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) | Expr::Param(_) => {}
+        }
+    }
+    false
 }
 
 fn behavioral_data_expression(kind: &ElementKind) -> Option<&str> {

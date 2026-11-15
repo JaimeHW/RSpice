@@ -31,6 +31,38 @@ fn behavioral_dependencies_expand_functions_and_use_the_readers_path_rules() {
     );
 }
 
+/// A lookup reaches an element through a subcircuit or instance parameter
+/// expression that names it, though the element's own text names none.
+#[test]
+fn a_lookup_substituted_through_a_parameter_names_its_file() {
+    let root = std::env::temp_dir().join("rspice-substituted-lookup-paths");
+    let deck = |instance: &str| {
+        format!(
+            "substituted lookups\n\
+             .subckt src out wave=1\n\
+             B1 out 0 V={{wave}}\n\
+             .ends\n\
+             .subckt shaped out\n\
+             .param shape={{fasttablefile(\"shape.dat\")}}\n\
+             R1 out 0 R={{1k*shape}}\n\
+             .ends\n\
+             {instance}\nX3 c shaped\n.end\n"
+        )
+    };
+    let netlist = Netlist::parse_with_path(
+        &deck("X1 a src wave={tablefile(\"instance.dat\")}"),
+        &root.join("deck.cir"),
+    )
+    .unwrap();
+    assert_eq!(
+        candidates(&netlist),
+        vec![root.join("instance.dat"), root.join("shape.dat")]
+    );
+    // Without the instance's lookup, the subcircuit body's own still counts.
+    let netlist = Netlist::parse_with_path(&deck("X1 a src"), &root.join("deck.cir")).unwrap();
+    assert_eq!(candidates(&netlist), vec![root.join("shape.dat")]);
+}
+
 #[test]
 fn pem_inputs_include_deck_relative_defaults_and_only_the_active_family() {
     let root = std::env::temp_dir().join("rspice-pem-dependency-paths");

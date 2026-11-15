@@ -107,6 +107,12 @@ fn lookup_function_mode(func: Function) -> Option<(bool, InterpolationKind)> {
     }
 }
 
+/// Whether `func` reads a data file when its first argument is a path.
+#[doc(hidden)]
+pub fn is_file_lookup_function(func: Function) -> bool {
+    lookup_function_mode(func).is_some()
+}
+
 /// The native file consumed by this AST node, using the reader's own function
 /// classification and path resolver. Child expressions are visited by callers.
 #[doc(hidden)]
