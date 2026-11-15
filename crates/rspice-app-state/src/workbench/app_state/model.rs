@@ -134,6 +134,13 @@ pub struct Model {
     /// Runtime only: a save of the symbol, or another project replacing this
     /// one, forgets them.
     pub unsaved_pin_renames: rspice_design::symbol::edit::UnsavedPinRenames,
+    /// The sheets each symbol's edits carried a wire end on since the symbol
+    /// was last saved, by symbol cellview key, each by its cellview key.
+    /// Saving the symbol writes them with it, so no file holds a wire off a
+    /// pin the saved symbol put elsewhere. Runtime only: a save of the
+    /// symbol, or another project replacing this one, forgets them.
+    pub symbol_rewired_sheets:
+        std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     /// The ports each generated symbol was last drawn for, by cellview key,
     /// each by the object that declares it: a port the next drawing finds
     /// under another name was renamed, and its placed terminals follow it.

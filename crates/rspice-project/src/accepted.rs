@@ -26,13 +26,16 @@ impl AcceptedProject {
         self.fingerprints.as_ref().map_err(Clone::clone)
     }
 
+    /// The accepted content with `ids` taken from `working`.
     pub fn document_candidate(
         &self,
         working: &ProjectFile,
-        id: &ProjectDocumentId,
+        ids: &[ProjectDocumentId],
     ) -> Result<ProjectFile, String> {
         let mut candidate = self.baseline.clone();
-        candidate.overlay_document(working, id)?;
+        for id in ids {
+            candidate.overlay_document(working, id)?;
+        }
         Ok(candidate)
     }
 

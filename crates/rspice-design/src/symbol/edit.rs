@@ -200,8 +200,9 @@ impl SymbolHistory {
             .map(|(_, edit)| edit)
     }
 
-    pub fn take_parent_edit(&mut self) -> Option<SymbolParentEdit> {
-        self.parent_edit.take().map(|(_, edit)| edit)
+    /// The held edit, with the key of the symbol it belongs to.
+    pub fn take_parent_edit(&mut self) -> Option<(String, SymbolParentEdit)> {
+        self.parent_edit.take()
     }
 
     pub fn undo_depth(&self, key: &str) -> usize {

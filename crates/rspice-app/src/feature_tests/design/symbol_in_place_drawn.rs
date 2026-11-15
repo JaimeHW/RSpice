@@ -645,12 +645,12 @@ fn reverting_in_place_brings_the_instance_and_its_wire_back() {
 }
 
 /// Saving while editing in place saves the symbol, the document in front, as
-/// Save does in its own view; the sheet whose wire followed the moved pin
-/// stays unsaved work the close review lists, and Save All writes it too.
-/// The project reopens with the edit in both and no half-open session.
+/// Save does in its own view, and with it the sheet whose wire followed the
+/// moved pin, so no file holds a wire off the saved pin. The project reopens
+/// with the edit in both and no half-open session.
 #[test]
 fn saving_in_place_writes_the_edit_and_reopens_without_the_session() {
-    use crate::workbench::lifecycle::project_lifecycle::{ProjectDocumentId, dirty_documents};
+    use crate::workbench::lifecycle::project_lifecycle::dirty_documents;
     use crate::workbench::project::commands::ProjectCommand;
 
     let mut fixture = InPlace::new();
@@ -673,22 +673,13 @@ fn saving_in_place_writes_the_edit_and_reopens_without_the_session() {
         .is_some(),
         "saving keeps the session"
     );
-    let unsaved = dirty_documents(&fixture.replay.app.state);
-    assert!(
-        unsaved.contains(&ProjectDocumentId::CellView(fixture.parent.clone()))
-            && !unsaved.contains(&ProjectDocumentId::CellView(fixture.symbol.clone())),
-        "the symbol is saved and the sheet is still unsaved work: {unsaved:?}"
+    assert_eq!(
+        dirty_documents(&fixture.replay.app.state),
+        Vec::new(),
+        "the symbol and the sheet it rewired are both saved"
     );
-    fixture
-        .replay
-        .app
-        .execute_command_key(ProjectCommand::SaveAll.key());
-    fixture.replay.frames(vec![]);
-    assert_eq!(dirty_documents(&fixture.replay.app.state), Vec::new());
 
-    let mut reopened = Replay::new();
-    assert!(reopened.app.state.load_project_from_path(&path.0));
-    reopened.frames(vec![]);
+    let reopened = fixture.reopen(&path);
     let state = &reopened.app.state;
     assert_eq!(
         state
@@ -700,19 +691,8 @@ fn saving_in_place_writes_the_edit_and_reopens_without_the_session() {
         Some(Point::new(-40, 20)),
         "the symbol holds the edit"
     );
-    let sheet = state
-        .model
-        .workspace
-        .content
-        .schematic_buffers
-        .get(&fixture.parent.key())
-        .filter(|_| state.model.workspace.content.active_view != fixture.parent)
-        .map_or_else(
-            || state.model.schematic.document().clone(),
-            |buffer| buffer.document().clone(),
-        );
     assert_eq!(
-        sheet.wires[0].points[0],
+        fixture.saved_wire_end(&reopened),
         Point::new(60, 100),
         "the sheet holds the wire where the pin put it"
     );
@@ -720,6 +700,72 @@ fn saving_in_place_writes_the_edit_and_reopens_without_the_session() {
         state.design.symbol.in_place.is_none(),
         "no session survives the reopen"
     );
+}
+
+/// Saving the symbol in its own view, after a pin move there carried a wire
+/// on an open sheet, writes that sheet with it.
+#[test]
+fn saving_the_symbol_view_writes_the_sheet_its_pin_move_rewired() {
+    use crate::workbench::lifecycle::project_lifecycle::dirty_documents;
+    use crate::workbench::project::commands::ProjectCommand;
+
+    let mut fixture = InPlace::new();
+    fixture.wire_pin_a();
+    let path = ProjectPath::new("save-view");
+    assert!(fixture.replay.app.state.save_project_to_path(&path.0));
+    fixture
+        .replay
+        .app
+        .state
+        .open_workspace_view(fixture.symbol.clone());
+    fixture.replay.frames(vec![]);
+    let state = &mut fixture.replay.app.state;
+    let mut document = state.model.load_active_symbol_document().unwrap();
+    document
+        .pins
+        .iter_mut()
+        .find(|pin| pin.name == "A")
+        .expect("the symbol has pin A")
+        .position = Some(Point::new(-40, 20));
+    state.store_active_symbol_document(&document).unwrap();
+    fixture.replay.frames(vec![]);
+    assert_eq!(fixture.wire_end(), Point::new(60, 100));
+    fixture
+        .replay
+        .app
+        .execute_command_key(ProjectCommand::Save.key());
+    fixture.replay.frames(vec![]);
+    assert_eq!(
+        dirty_documents(&fixture.replay.app.state),
+        Vec::new(),
+        "the symbol and the sheet it rewired are both saved"
+    );
+    let reopened = fixture.reopen(&path);
+    assert_eq!(fixture.saved_wire_end(&reopened), Point::new(60, 100));
+}
+
+impl InPlace {
+    /// The project saved at `path`, opened in a new application.
+    fn reopen(&self, path: &ProjectPath) -> Replay {
+        let mut reopened = Replay::new();
+        assert!(reopened.app.state.load_project_from_path(&path.0));
+        reopened.frames(vec![]);
+        reopened
+    }
+
+    /// The first point of the parent's first wire, as `reopened` holds it.
+    fn saved_wire_end(&self, reopened: &Replay) -> Point {
+        let content = &reopened.app.state.model.workspace.content;
+        let sheet = content
+            .schematic_buffers
+            .get(&self.parent.key())
+            .filter(|_| content.active_view != self.parent)
+            .map_or_else(
+                || reopened.app.state.model.schematic.document().clone(),
+                |buffer| buffer.document().clone(),
+            );
+        sheet.wires[0].points[0]
+    }
 }
 
 /// Drawing in place draws in the symbol's own coordinates, read back through

@@ -263,6 +263,36 @@ pub fn active_document(state: &dyn LifecycleSource) -> ProjectDocumentId {
     registry::active_document(state.workspace, &state.model.workspace.content.active_view)
 }
 
+/// What Save writes: the document in front and, when that is a symbol, every
+/// sheet its edits since its last save carried a wire end on, so the files
+/// never hold a wire off a pin the saved symbol put elsewhere.
+fn active_save_documents(state: &dyn LifecycleSource) -> Vec<ProjectDocumentId> {
+    let active = active_document(state);
+    let view = state.lifecycle_view();
+    let sheets = match &active {
+        ProjectDocumentId::CellView(symbol) => view
+            .model
+            .symbol_rewired_sheets
+            .get(&symbol.key())
+            .into_iter()
+            .flatten()
+            .filter_map(|key| CellViewRef::from_key(key))
+            .filter(|sheet| {
+                // A sheet deleted since has nothing left to write.
+                view.model
+                    .library_manager
+                    .get_library(&sheet.library)
+                    .and_then(|library| library.get_cell(&sheet.cell))
+                    .and_then(|cell| cell.get_view(&sheet.view))
+                    .is_some()
+            })
+            .map(ProjectDocumentId::CellView)
+            .collect(),
+        _ => Vec::new(),
+    };
+    std::iter::once(active).chain(sheets).collect()
+}
+
 pub fn active_document_is_dirty(state: &dyn LifecycleSource) -> bool {
     let state = &state.lifecycle_view();
     state
@@ -847,7 +877,7 @@ pub fn save_native(
                 .lifecycle_view()
                 .platform
                 .project_lifecycle
-                .accepted_document_candidate(&working, &active_document(state))?,
+                .accepted_document_candidate(&working, &active_save_documents(state))?,
         };
         let ProjectSnapshot {
             file,
@@ -1009,7 +1039,7 @@ pub fn prepare_browser_save(
             state
                 .platform
                 .project_lifecycle
-                .accepted_document_candidate(&working, &saved_document)?
+                .accepted_document_candidate(&working, &active_save_documents(state))?
         };
         let ProjectSnapshot {
             file,
@@ -1341,11 +1371,16 @@ fn adopt_successful_save(
     rebase_pending_operation_dirty_state(state, &candidate, scope);
     // The save wrote each symbol it covers with its pins named as they are
     // now, so those names are the ones Revert to saved returns to.
+    // The sheets it rewired went with it.
     match scope {
-        SaveScope::AllDocuments => state.model.unsaved_pin_renames.clear(),
+        SaveScope::AllDocuments => {
+            state.model.unsaved_pin_renames.clear();
+            state.model.symbol_rewired_sheets.clear();
+        }
         SaveScope::ActiveDocument => {
             if let ProjectDocumentId::CellView(reference) = active_document(state) {
                 state.model.unsaved_pin_renames.forget(&reference.key());
+                state.model.symbol_rewired_sheets.remove(&reference.key());
             }
         }
     }

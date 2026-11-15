@@ -49,31 +49,35 @@ impl ProjectLifecycleState {
             .clone_schematic_editor(&accepted.baseline().workspace, key)
     }
 
+    /// The accepted project with `ids` taken from `working`: what saving
+    /// those documents, and no others, publishes.
     pub fn accepted_document_candidate(
         &self,
         working: &ProjectSnapshot,
-        id: &ProjectDocumentId,
+        ids: &[ProjectDocumentId],
     ) -> Result<ProjectSnapshot, ProjectLifecycleError> {
         let accepted = self
             .authority
             .accepted()
             .ok_or(ProjectLifecycleError::NoAcceptedBaseline)?;
         let file = accepted
-            .document_candidate(&working.file, id)
+            .document_candidate(&working.file, ids)
             .map_err(ProjectLifecycleError::InvalidState)?;
         let mut workspace_session = (*self.accepted_session).clone();
-        if let ProjectDocumentId::CellView(reference) = id {
-            let key = reference.key();
-            if working.file.workspace.schematic_buffers.contains_key(&key) {
-                let session = working
-                    .workspace_session
-                    .schematic_sessions
-                    .get(&key)
-                    .cloned()
-                    .unwrap_or_default();
-                workspace_session.schematic_sessions.insert(key, session);
-            } else {
-                workspace_session.schematic_sessions.remove(&key);
+        for id in ids {
+            if let ProjectDocumentId::CellView(reference) = id {
+                let key = reference.key();
+                if working.file.workspace.schematic_buffers.contains_key(&key) {
+                    let session = working
+                        .workspace_session
+                        .schematic_sessions
+                        .get(&key)
+                        .cloned()
+                        .unwrap_or_default();
+                    workspace_session.schematic_sessions.insert(key, session);
+                } else {
+                    workspace_session.schematic_sessions.remove(&key);
+                }
             }
         }
         Ok(ProjectSnapshot {

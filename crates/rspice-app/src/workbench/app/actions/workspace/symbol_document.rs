@@ -702,9 +702,10 @@ fn wire_ends_left_by_removed_pins(
 /// spanning the whole edit.
 pub(crate) fn finish_symbol_parent_edit(symbol: &mut SymbolUiState, model: &mut Model) {
     const DESCRIPTION: &str = "move wires with symbol pins";
-    let Some(edit) = symbol.history.take_parent_edit() else {
+    let Some((symbol_key, edit)) = symbol.history.take_parent_edit() else {
         return;
     };
+    let mut rewired = Vec::new();
     for parent in edit.parents {
         match parent.buffer {
             Some(buffer) => {
@@ -714,15 +715,26 @@ pub(crate) fn finish_symbol_parent_edit(symbol: &mut SymbolUiState, model: &mut 
                     .for_each_schematic_editor_mut(|key, schematic| {
                         if key == buffer
                             && let Some(before) = before.take()
+                            && schematic.commit_undo_from(before, DESCRIPTION)
                         {
-                            schematic.commit_undo_from(before, DESCRIPTION);
+                            rewired.push(buffer.clone());
                         }
                     });
             }
             None => {
-                model.schematic.commit_undo_from(parent.before, DESCRIPTION);
+                if model.schematic.commit_undo_from(parent.before, DESCRIPTION) {
+                    rewired.push(model.workspace.content.active_schematic_reference().key());
+                }
             }
         }
+    }
+    // Saving the symbol writes these sheets with it.
+    if !rewired.is_empty() {
+        model
+            .symbol_rewired_sheets
+            .entry(symbol_key)
+            .or_default()
+            .extend(rewired);
     }
 }
 
