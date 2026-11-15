@@ -97,7 +97,7 @@ fn timeout_interrupts_work_inside_one_measurement_expression() {
             "* bounded expression cancellation\nV1 out 0 DC 1 AC 1\nR1 out 0 1k\n.FUNC work(x) {{IF(x<=0,1,work(x-1)+work(x-1))}}\n{analysis}\n{statement}\n.END\n"
         )).unwrap();
             let mut child = Command::new(env!("CARGO_BIN_EXE_rspice"))
-                .args(["--quiet", "run"])
+                .args(["--quiet", "--error-format", "json", "run"])
                 .arg(&deck)
                 .args(["--timeout", "0.05", "--summary", "-"])
                 .args(["--format", "json", "--output"])
@@ -125,8 +125,20 @@ fn timeout_interrupts_work_inside_one_measurement_expression() {
                 "{statement}: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
-            assert_eq!(summary["status"], "timed_out", "{statement}: {summary}");
+            let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+            assert_eq!(
+                error["error"]["category"], "timeout",
+                "{statement}: {error}"
+            );
+            // An empty stdout means the deadline came while the deck was still
+            // being read, before any run existed to summarize; the process-level
+            // JSON error is then the whole machine-readable verdict. A loaded
+            // runner can reach 50 ms that early, so the phase is read from the
+            // output rather than predicted.
+            if !output.stdout.is_empty() {
+                let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(summary["status"], "timed_out", "{statement}: {summary}");
+            }
             assert!(
                 !std::fs::read_dir(&dir).unwrap().any(|entry| {
                     entry
