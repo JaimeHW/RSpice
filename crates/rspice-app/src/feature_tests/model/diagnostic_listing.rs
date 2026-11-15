@@ -1,15 +1,15 @@
 //! `workbench/app_state/diagnostic_store/listing` observed through a whole session.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::diagnostic_store::BatchStanding;
-use crate::workbench::app_state::diagnostic_store::DiagnosticBatch;
-use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
-use crate::workbench::app_state::diagnostic_store::listing::*;
-use crate::workbench::app_state::diagnostic_store::{
-    DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticSubject,
-};
 use rspice_app_state::state::code_diagnostics::CodeDiagnosticCollection;
 use rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection;
+use rspice_app_state::workbench::app_state::diagnostic_store::BatchStanding;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticBatch;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
+use rspice_app_state::workbench::app_state::diagnostic_store::listing::*;
+use rspice_app_state::workbench::app_state::diagnostic_store::{
+    DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticSubject,
+};
 use rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata;
 use std::sync::Arc;
 

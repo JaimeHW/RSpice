@@ -7,10 +7,10 @@ use rspice_app_state::state::{Point, SchematicState, Tool};
 
 #[test]
 fn symbol_draft_survives_passive_window_projection() {
-    use crate::workbench::state::WorkspaceDocumentId;
     use rspice_app_state::state::{
         Cell, CellViewRef, SymbolDocument, SymbolEditorMetadata, SymbolShape, View, ViewType,
     };
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
     use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
     let mut failures = Vec::new();
@@ -155,7 +155,7 @@ fn symbol_draft_survives_passive_window_projection() {
         // Enter on the canvas finishes the line the projections kept. The
         // canvas answers the request for the keyboard a pass later, after it
         // has read that pass's input.
-        crate::workbench::app_state::request_engineering_canvas_focus(&fixture.ctx);
+        rspice_app_workbench::workbench::app_state::session::shortcuts::request_engineering_canvas_focus(&fixture.ctx);
         fixture.frame(vec![], true);
         fixture.frame(vec![], true);
         fixture.frame(
@@ -214,7 +214,7 @@ fn symbol_draft_survives_passive_window_projection() {
 
 #[test]
 fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
-    use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
     let mut fixture = Fixture::new(false);
     let original = fixture
         .app
@@ -307,7 +307,7 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
 
 #[test]
 fn conductor_routes_validate_source_before_finishing() {
-    use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
     for tool in [Tool::Wire, Tool::Bus] {
         for change in [
@@ -490,7 +490,7 @@ fn conductor_routes_validate_source_before_finishing() {
 
 #[test]
 fn gesture_new_window_owner_and_owner_window_close_restore_the_old_buffer() {
-    use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
     for close_owner in [false, true] {
         let mut fixture = Fixture::new(false);
         let original = fixture

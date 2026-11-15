@@ -12,7 +12,7 @@ use rspice_app_code::workbench::surfaces::netlist::toolbar::{CodeToolbarLayout, 
 fn netlist_first_app() -> RSpiceApp {
     const DECK: &str = "toolbar fixture\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+    app.state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
     app.state.model.workspace.content.netlist_source = Some(DECK.to_owned());
     app.state.model.simulation.source.netlist_content = DECK.to_owned();
     app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
@@ -23,7 +23,7 @@ fn netlist_first_app() -> RSpiceApp {
 /// A schematic-first project: a generated primary is retained and active.
 fn schematic_first_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+    app.state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
     retain_generated(
         &mut app.state.model,
         &mut app.state.code.netlist,

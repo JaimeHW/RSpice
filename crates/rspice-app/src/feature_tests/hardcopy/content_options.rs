@@ -23,10 +23,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// past the plan".
 struct RefusedDestination(Arc<AtomicUsize>);
 
-impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for RefusedDestination {
+impl rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo
+    for RefusedDestination
+{
     fn show_save_dialog(
         &self,
-        _config: crate::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
+        _config: rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
     ) -> Result<Option<PathBuf>, String> {
         self.0.fetch_add(1, Ordering::SeqCst);
         Ok(None)
@@ -65,7 +67,7 @@ impl Studio {
         app.export_workflow_io = Box::new(RefusedDestination(exports.clone()));
         let reference = app.state.model.workspace.content.active_view.clone();
         app.state.workbench.documents.activate(
-            crate::workbench::state::WorkspaceDocumentId::CellView(reference),
+            rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::CellView(reference),
         );
         publish::open_hardcopy_workflow(&mut hardcopy_parts(&mut app), HardcopyWorkflow::Export);
         let mut studio = Self {

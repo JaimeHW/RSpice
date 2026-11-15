@@ -6,7 +6,6 @@
 
 use crate::feature_tests::hardcopy::{hardcopy_parts, resolve_retained_hardcopy_source};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::publish::{
     active_retained_source_selection, apply_open_resolved, current_metadata, current_plan,
@@ -17,6 +16,7 @@ use rspice_app_hardcopy::workbench::hardcopy_adapters::print::{
 };
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
 use rspice_app_state::product::ContentDigest;
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 use rspice_hardcopy::render::{
     HardcopyRenderError, HardcopyRenderer, HardcopySceneMetadata, RenderedPrinterPages,
 };

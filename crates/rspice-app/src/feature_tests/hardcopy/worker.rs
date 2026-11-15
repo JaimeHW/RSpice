@@ -3,11 +3,11 @@
 
 use crate::feature_tests::hardcopy::{resolve_retained_hardcopy_source, source_reads};
 use crate::workbench::AppState;
-use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::{
     PreparedRetainedHardcopyResolution, prepare_retained_hardcopy_resolution,
 };
 use rspice_app_state::state::{Point, Wire};
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 use rspice_formats::zip::deterministic_stored_zip;
 use rspice_hardcopy::render::{HardcopyPreviewPage, RenderedHardcopyPublication};
 use rspice_hardcopy::render::{HardcopyRenderer, HardcopySceneMetadata};

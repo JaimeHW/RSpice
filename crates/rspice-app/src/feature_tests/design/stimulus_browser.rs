@@ -2,7 +2,6 @@
 //! whole application lends: the rows, the scope strip, the footer and the
 //! adopter cards.
 
-use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_design::workbench::design::inspector::stimulus as inspector_dock;
 use rspice_app_design::workbench::design::navigator::stimulus::tests::NAVIGATOR;
@@ -12,6 +11,7 @@ use rspice_app_state::state::stimulus_library::definition::StimulusFamily;
 use rspice_app_state::state::stimulus_library::draft::DefinitionDraft;
 use rspice_app_state::state::stimulus_library::fixtures;
 use rspice_app_state::state::{Component, Point};
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// The mockup's fourteen definitions, with nothing adopted, in the workspace
 /// whose navigator lists them.

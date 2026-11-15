@@ -2,8 +2,6 @@
 //! what activating, cycling and closing a tab does to them, and how the tabs
 //! share the strip's width, elide their labels and scroll into view.
 
-use crate::workbench::state::workbench_session::WorkspaceDocument;
-use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents;
 use rspice_app_design::workbench::chrome::document_bar::design::icon_for_view;
@@ -13,11 +11,14 @@ use rspice_app_state::state::{
     DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput, NetlistDocument,
     NetlistDocumentId, SimulationRun, SourceLocator,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::panels::{WorkbenchIcon, elide_text};
 use rspice_app_workbench::ui::theme::{self, FontWeight};
 use rspice_app_workbench::ui::tokens;
 use rspice_app_workbench::workbench::chrome::document_bar::*;
 use rspice_app_workbench::workbench::layout::LayoutSpec;
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocument;
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
 fn multi_document_netlist_state() -> AppState {
     const ROOT: &str = "tabs\n.include \"models/resistor.inc\"\n.end\n";
@@ -187,7 +188,7 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
 
 #[test]
 fn registry_scopes_active_documents_by_workspace() {
-    let mut registry = crate::workbench::state::WorkspaceDocumentRegistry::default();
+    let mut registry = rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentRegistry::default();
     let dataset = rspice_app_state::product::DatasetId::new();
 
     registry.activate(WorkspaceDocumentId::SimulationPlan);
@@ -797,7 +798,7 @@ fn a_session_naming_the_retired_setup_document_opens_on_the_plan() {
         closed: [AnalysisSetup("9f1b6f6c-0f1a-4f2e-9c6d-2a1b3c4d5e6f")],
     )"#;
 
-    let registry: crate::workbench::state::WorkspaceDocumentRegistry =
+    let registry: rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentRegistry =
         ron::from_str(SESSION).expect("a retired identity costs the reader nothing");
     assert!(
         registry.active(Workspace::Simulate).is_none(),

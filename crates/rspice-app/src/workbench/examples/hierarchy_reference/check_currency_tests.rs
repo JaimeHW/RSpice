@@ -6,13 +6,13 @@
 //! while nothing it read has moved, so a frame with no edit digests nothing.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::design_checks::DesignCheckStatus;
-use crate::workbench::app_state::diagnostic_store::digest_memo::{
-    computed_digests, reset_computed_digests,
-};
-use crate::workbench::app_state::diagnostic_store::listing;
 use crate::workbench::examples::hierarchy_reference::{self, AMP_INSTANCES, HierarchyReference};
 use rspice_app_state::state::{CellViewRef, Library, Point, ViewType};
+use rspice_app_state::workbench::app_state::design_checks::DesignCheckStatus;
+use rspice_app_state::workbench::app_state::diagnostic_store::digest_memo::{
+    computed_digests, reset_computed_digests,
+};
+use rspice_app_state::workbench::app_state::diagnostic_store::listing;
 use rspice_design::connectivity_contract::GlobalAliasComparisonPolicy;
 use rspice_design::projection::{document_digest_counts, reset_document_digest_counts};
 

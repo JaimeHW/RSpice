@@ -1,14 +1,14 @@
 //! `workbench/app_state/design_checks` observed through a whole session.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::design_checks::*;
-use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
-use crate::workbench::app_state::diagnostic_store::DiagnosticRecord;
-use crate::workbench::app_state::diagnostic_store::DiagnosticSubject;
-use crate::workbench::app_state::diagnostic_store::FindingKey;
-use crate::workbench::app_state::diagnostic_store::mint_canonical;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::state::ViewType;
+use rspice_app_state::workbench::app_state::design_checks::*;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRecord;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticSubject;
+use rspice_app_state::workbench::app_state::diagnostic_store::FindingKey;
+use rspice_app_state::workbench::app_state::diagnostic_store::mint_canonical;
 use rspice_design::drc::DrcLocation;
 use rspice_design::drc::DrcResult;
 use rspice_design::drc::DrcViolationType;
@@ -251,7 +251,7 @@ fn a_refused_publication_stores_no_receipt() {
     );
     let squatter = DiagnosticRecord::new(
         mint_canonical(&[key], 0, "elsewhere").remove(0),
-        crate::workbench::app_state::diagnostic_store::DiagnosticLevel::Error,
+        rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel::Error,
         DiagnosticSubject::new(state.model.workspace.content.project.id(), "elsewhere"),
         "elsewhere",
     );

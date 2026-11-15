@@ -43,10 +43,12 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
         bytes: Rc<RefCell<Vec<u8>>>,
     }
 
-    impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for CaptureIo {
+    impl rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo for CaptureIo {
         fn show_save_dialog(
             &self,
-            _config: crate::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
+            _config: rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig<
+                '_,
+            >,
         ) -> Result<Option<PathBuf>, String> {
             Ok(Some(PathBuf::from("converted.cir")))
         }
@@ -58,7 +60,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
 
         fn write_bytes_file_observed(
             &self,
-            _destination: &crate::workbench::workflows::export_workflow::ObservedExportDestination,
+            _destination: &rspice_app_services::workbench::workflows::export_workflow::ObservedExportDestination,
             contents: &[u8],
             _mime_type: &str,
         ) -> Result<(), String> {
@@ -925,7 +927,7 @@ fn imported_netlist_becomes_dirty_manual_source_without_deleting_retained_runs()
     assert!(imported);
     assert_eq!(
         state.workbench.workspace,
-        crate::workbench::state::Workspace::Netlist
+        rspice_app_state::workbench::workspace::Workspace::Netlist
     );
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
@@ -992,7 +994,7 @@ fn opening_a_netlist_commits_an_independent_netlist_first_project() {
     );
     assert_eq!(
         state.workbench.workspace,
-        crate::workbench::state::Workspace::Netlist
+        rspice_app_state::workbench::workspace::Workspace::Netlist
     );
 }
 

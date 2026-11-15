@@ -99,7 +99,7 @@ fn conductance(module: &str, header: &str, declarations: &str) -> String {
 pub(crate) fn compile_and_publish(app: &mut RSpiceApp) {
     let selected = code_workspace::selected_veriloga_source_in(&app.state.model)
         .expect("a Verilog-A view is open");
-    let receipt = crate::workbench::app_state::model::compile_project_bundle_receipt(
+    let receipt = rspice_app_state::workbench::app_state::model::compile_project_bundle_receipt(
         app.state.model.workspace.content.project.id(),
         selected.bundle(),
         selected.selected_module(),
@@ -698,7 +698,7 @@ fn a_module_that_differs_from_its_cells_schematic_is_refused_and_writes_nothing(
     );
     assert!(view(&app, &reference, GENERATED_SYMBOL_VIEW).is_none());
 
-    let report = super::dialogs::check_and_save_validation::CheckAndSaveValidationReport::validate(
+    let report = rspice_app_project::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport::validate(
         &app.state,
     )
     .expect("the design check runs");

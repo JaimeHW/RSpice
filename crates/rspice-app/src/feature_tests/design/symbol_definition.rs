@@ -35,9 +35,9 @@ fn import_action_opens_an_isolated_draft_in_the_writable_project_library() {
 #[test]
 fn importing_a_symbol_opens_it_in_the_symbol_editor() {
     use crate::feature_tests::replay::Replay;
-    use crate::workbench::state::Workspace;
     use egui::accesskit::Role;
     use rspice_app_design::workbench::app::dialogs::symbol_definition::state::SymbolImportBindingChoice;
+    use rspice_app_state::workbench::workspace::Workspace;
 
     let mut replay = Replay::new();
     let state = &mut replay.app.state;

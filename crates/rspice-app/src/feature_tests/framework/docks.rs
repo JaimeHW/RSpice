@@ -2,11 +2,11 @@
 //! and only a matching explicit resize keeps it, every dock keeps the size it
 //! was dragged to, and the splitter keys step the dock the width class shows.
 
-use crate::workbench::state::WorkbenchSession;
 use rspice_app_workbench::workbench::docks::{
     SplitterKeyboardAction, apply_splitter_step, panel_cache_is_stale,
 };
 use rspice_app_workbench::workbench::layout::LayoutSpec;
+use rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession;
 
 #[test]
 fn responsive_and_reset_layouts_discard_egui_panel_memory() {
@@ -51,11 +51,11 @@ fn splitter_keyboard_steps_match_the_mockup_contract() {
 #[test]
 fn every_dock_keeps_the_size_it_was_dragged_to() {
     use crate::workbench::RSpiceApp;
-    use crate::workbench::state::ConsolePage;
     use rspice_app_workbench::workbench::docks::{
         CONSOLE_PANEL_ID, INSPECTOR_PANEL_ID, NAVIGATOR_PANEL_ID, show_console, show_inspector,
         show_navigator, synchronize_panel_memory,
     };
+    use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 
     // Wide, so both side docks are docked and resizable.
     const SCREEN: egui::Vec2 = egui::vec2(1_600.0, 1_000.0);

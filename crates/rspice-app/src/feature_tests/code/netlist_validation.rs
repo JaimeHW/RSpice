@@ -295,7 +295,7 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
         &mut app.state.model,
         &mut app.state.code.netlist,
         &mut app.state.workbench,
-        &crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
+        &rspice_app_services::workbench::workflows::export_workflow::NativeExportWorkflowIo,
         false,
         rspice_app_state::state::NetlistTextEncoding::Utf8,
         "Attempt conflicting save",
@@ -458,8 +458,8 @@ fn vendor_admitted_decks_have_explicit_preparation_outcomes() {
 /// nothing validated.
 #[test]
 fn the_validate_command_validates_the_deck_the_netlist_page_shows() {
-    use crate::workbench::state::Workspace;
     use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_state::workbench::workspace::Workspace;
 
     let mut app = crate::workbench::RSpiceApp::test_instance();
     app.state

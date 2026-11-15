@@ -40,7 +40,7 @@ fn apply(state: &mut AppState, request: SymbolCanvasRequest) {
 
 #[test]
 fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
-    use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
     for change in ["navigation", "revision", "replacement", "close", "window"] {
         let mut state = open_symbol();

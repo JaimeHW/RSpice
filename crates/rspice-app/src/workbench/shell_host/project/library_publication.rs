@@ -3,8 +3,6 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 use egui::Context;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_project::workbench::surfaces::project::library_publication::PublicationAction;
@@ -19,6 +17,8 @@ use rspice_app_project::workbench::surfaces::project::library_publication::{
     publication_fields, rollback_fields, rollback_receipt_selector, safe_file_stem,
     selected_receipt, transaction_status,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::product::ContentDigest;
 use rspice_app_state::state::workspace::ProjectLibraryPublicationReceipt;
@@ -885,7 +885,7 @@ pub(crate) fn rollback_project_library_publication(
                 format!("project library rollback execution context is invalid: {error}")
             })?,
             None => (
-                crate::workbench::app_state::SimSetupState::new_with_user_preferences(
+                rspice_app_state::workbench::app_state::sim_setup::SimSetupState::new_with_user_preferences(
                     &state.model.preferences,
                 ),
                 rspice_app_state::workbench::workspace::default_model_library_manager(),

@@ -4,7 +4,7 @@
 use egui::Ui;
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// The Simulate workspace as the shell draws it on the stage.
 pub(super) fn show_on_stage(ui: &mut Ui, app: &mut RSpiceApp) {

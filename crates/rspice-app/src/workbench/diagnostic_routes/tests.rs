@@ -8,10 +8,10 @@
 
 use super::*;
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use rspice_app_state::state::{
     Cell, CellViewRef, ComponentType, Library, NetLabel, Point, View, ViewType,
 };
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use rspice_design::drc::DrcViolationType;
 
 fn context() -> Context {
@@ -28,7 +28,7 @@ fn a_requested_route_is_applied_once() {
     app.state.open_project_session();
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     app.state
         .model
         .diagnostics
@@ -39,16 +39,16 @@ fn a_requested_route_is_applied_once() {
     apply_pending(&context(), &mut app);
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Simulate
+        rspice_app_state::workbench::workspace::Workspace::Simulate
     );
 
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     apply_pending(&context(), &mut app);
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Results,
+        rspice_app_state::workbench::workspace::Workspace::Results,
         "a served request must not be served again",
     );
 }
@@ -343,7 +343,7 @@ pub(crate) fn draw_source_loop(
 
 /// The identity the published loop finding carries.
 pub(crate) fn loop_finding(state: &AppState, subject: &CellViewRef) -> uuid::Uuid {
-    let crate::workbench::app_state::DesignCheckStatus::Current(receipt) =
+    let rspice_app_state::workbench::app_state::design_checks::DesignCheckStatus::Current(receipt) =
         state.design_check_status(subject)
     else {
         panic!("the check of the subject is current");
@@ -543,7 +543,7 @@ fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
         apply_pending(&context(), &mut app);
 
         assert_eq!(
-            crate::workbench::app::sheets::active_sheet_id(&app.state),
+            rspice_app_sheets::workbench::app::actions::sheets::active_sheet_id(&app.state),
             Some(sheet_of(id)),
             "the sheet that draws #{id} is brought forward"
         );

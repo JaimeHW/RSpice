@@ -5,10 +5,10 @@
 //! page rows.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_simulate::workbench::docks::navigator::simulate::{
     NAV_PROPERTY_COLUMN_GAP, NAV_PROPERTY_PADDING_X,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::docks::navigator;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 

@@ -12,7 +12,7 @@ fn cleared_run_sequence_is_dirty_and_survives_scoped_and_all_saves() {
         let mut state = AppState::default();
         state
             .workbench
-            .activate(crate::workbench::state::Workspace::Results);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Results);
         let path = unique_path("cleared-run-sequence");
         save_native(
             &mut state,
@@ -79,7 +79,7 @@ pub(super) fn retained_results() -> (AppState, AnalysisPresentationKey) {
     assert!(state.model.simulation.select_run(0));
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     (state, key)
 }
 

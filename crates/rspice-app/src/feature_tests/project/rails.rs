@@ -2,8 +2,8 @@
 //! the reader selects from, and nothing a panel beside it already owns.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::docks::navigator::show;
 
 /// A project with two libraries, an active configuration and a recovery

@@ -5,10 +5,10 @@
 //! one that would change nothing, must not be offered as if it would.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::SimulationWorkflowDialog;
 use egui::Rect;
 use egui::vec2;
 use rspice_app_simulate::workbench::simulate::SimulateFeature;
+use rspice_app_simulate::workbench::state::workflow_drafts::SimulationWorkflowDialog;
 use rspice_app_simulate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
 
 /// The simulation plan workflows as the frame's dialog walk draws them, with
@@ -56,7 +56,7 @@ fn the_rename_dialog_refuses_a_rename_that_renames_nothing() {
             .display_name()
             .to_owned();
         let mut draft =
-            crate::workbench::state::RenameAnalysisDraft::for_instance(instance, "", &shown_as);
+            rspice_app_simulate::workbench::state::workflow_drafts::RenameAnalysisDraft::for_instance(instance, "", &shown_as);
         draft.name = name.to_owned();
         app.state.simulate.simulation_workflow =
             Some(SimulationWorkflowDialog::RenameAnalysis(draft));

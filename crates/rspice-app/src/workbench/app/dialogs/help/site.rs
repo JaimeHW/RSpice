@@ -9,8 +9,8 @@
 //! obvious topic, else the workspace on screen.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::Workspace;
 use rspice_app_state::state::ViewType;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::dialogs::ModalGate;
 use rspice_app_workbench::workbench::framework::requests::{OpenWebPage, Outbox};
 

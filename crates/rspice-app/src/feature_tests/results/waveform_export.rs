@@ -5,9 +5,11 @@
 use rspice_formats::vcd::encode_result_vcd;
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::menu_bar::{DatasetExportChoice, action_export_dataset_with_io};
 use rspice_app_results::workbench::documents::result_document::test_fixtures::{
     MockExportWorkflowIo, waveform,
+};
+use rspice_app_results::workbench::menu_bar::waveform_export::{
+    DatasetExportChoice, action_export_dataset_with_io,
 };
 use rspice_app_state::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, DigitalEventPointEvidence,
@@ -60,7 +62,7 @@ fn activate_result_document(
         .expect("test retains an active result run")
         .dataset_id;
     state.workbench.documents.activate(
-        crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
+        rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::ResultDataset(dataset_id),
     );
     state.results.results.session.viewer = viewer;
 }

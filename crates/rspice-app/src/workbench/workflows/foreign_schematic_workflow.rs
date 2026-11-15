@@ -645,7 +645,7 @@ fn add_model_libraries(
     includes: &[(PathBuf, Option<String>)],
     notices: &mut Vec<(ForeignNoticeSeverity, String)>,
 ) -> Vec<SimulationPlanModelBinding> {
-    use crate::workbench::app_state::design_history::publish_model_library_candidate;
+    use rspice_app_state::workbench::app_state::design_history::publish_model_library_candidate;
 
     let mut libraries = Vec::new();
     let mut text = String::new();
@@ -843,7 +843,8 @@ fn commit_plan(
         }
     }
     let mut options = plan.options.clone();
-    let mut reference_pvt = crate::workbench::app_state::ReferencePvtPoint::default();
+    let mut reference_pvt =
+        rspice_app_state::workbench::app_state::sim_setup::ReferencePvtPoint::default();
     if let Some(temperature) = plan.temperature {
         reference_pvt.temperature_celsius = temperature;
         options.temp = temperature;
@@ -964,13 +965,14 @@ fn commit_plan_document(
     app: &mut RSpiceApp,
     cell: &str,
     analysis_plan: rspice_simulation_contract::plan_model::SimulationPlan,
-    reference_pvt: crate::workbench::app_state::ReferencePvtPoint,
+    reference_pvt: rspice_app_state::workbench::app_state::sim_setup::ReferencePvtPoint,
     options: rspice_simulation_contract::options::SimulationOptions,
     run_set: RunSetState,
     model_bindings: Vec<SimulationPlanModelBinding>,
     payload: &rspice_app_state::state::SimulationPlanPayload,
 ) -> Result<String, String> {
-    use crate::workbench::app_state::{SimulationPlanImportDocument, SimulationPlanName};
+    use rspice_app_state::workbench::app_state::sim_setup::plan_catalog::SimulationPlanName;
+    use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 
     let taken = |name: &str| {
         let setup = &app.state.model.sim_setup;
@@ -992,7 +994,8 @@ fn commit_plan_document(
         reference_pvt,
         run_set,
         model_bindings,
-        save_policy: crate::workbench::app_state::SimulationSavePolicy::default(),
+        save_policy:
+            rspice_app_state::workbench::app_state::sim_setup::SimulationSavePolicy::default(),
         options,
     };
     let mut setup = app.state.model.sim_setup.clone();

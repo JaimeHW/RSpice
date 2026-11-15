@@ -9,12 +9,12 @@ use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 
 use crate::feature_tests::replay::{Control, Replay, only};
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, Point, PortDirection, SymbolDocument, SymbolPin, SymbolPinSide,
     SymbolShape, View, ViewType,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// An amplifier symbol of its own, four pins in netlist order.
 fn amplifier() -> RSpiceApp {

@@ -2,7 +2,6 @@
 //! run's details, observed through a whole application.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use egui::Color32;
 use egui::Pos2;
 use egui::Rect;
@@ -10,6 +9,7 @@ use egui::Vec2;
 use rspice_app_results::workbench::docks::inspector::results::*;
 use rspice_app_results::workbench::docks::inspector::run_details;
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::workbench::docks::inspector::show;
 use rspice_results_ui::session::PaneAxis;

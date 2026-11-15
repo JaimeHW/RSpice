@@ -804,7 +804,7 @@ fn the_specification_filter_narrows_the_table_over_the_cells_it_paints() {
 /// would mean the page held two disagreeing opinions about the same evidence.
 #[test]
 fn the_evidence_class_keeps_exactly_the_rows_the_head_counted() {
-    use crate::workbench::state::SpecificationEvidenceFilter;
+    use rspice_app_simulate::workbench::state::simulate_session::SpecificationEvidenceFilter;
 
     let unfiltered = render_with(SimulationPage::Specifications, 1200.0, |app| {
         seed_two_specifications(&mut app.state);

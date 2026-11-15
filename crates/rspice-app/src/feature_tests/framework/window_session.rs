@@ -1,9 +1,10 @@
 //! The window session dialog: its Windows page and its window workflows.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::{Workspace, WorkspaceLayoutState};
 use egui::Context;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::app::dialogs::window_session::*;
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceLayoutState;
 
 /// The Windows page lists the windows and the actions on them. Two
 /// paragraphs restating, on every opening, what detaching does and how

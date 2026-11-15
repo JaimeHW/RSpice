@@ -5,9 +5,9 @@
 use egui::{Event, Key, Modifiers};
 
 use super::*;
-use crate::workbench::state::ConsolePage;
 use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index;
+use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 
 pub(super) const EDITOR: &str = "Verilog-A/AMS source editor";
 /// As the keyboard of a Windows or Linux desktop reports the key.

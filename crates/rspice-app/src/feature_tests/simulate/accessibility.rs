@@ -425,7 +425,7 @@ fn first_enabled_instance(app: &RSpiceApp) -> rspice_app_state::product::Analysi
 /// each of them silently disabled every keyboard shortcut in the application
 /// with no painted dialog to press Escape on.
 fn analysis_catalogue_fixtures() -> Vec<(String, RSpiceApp)> {
-    use crate::workbench::state::Workspace;
+    use rspice_app_state::workbench::workspace::Workspace;
 
     let mut fixtures = SimulationPage::NAVIGATION
         .into_iter()
@@ -495,7 +495,7 @@ fn the_analysis_catalogue_is_hosted_by_the_frame_on_every_route() {
 /// [`every_studio_workflow_draft_has_an_overlay_fixture`] counts the list
 /// against the enum rather than trusting the sentence.
 pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
-    use crate::workbench::state::{
+    use rspice_app_simulate::workbench::state::workflow_drafts::{
         CaptureGroupDraft, ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft,
         SavedOutputDraft, SimulationPlanManagerDraft, SimulationWorkflowDialog,
     };
@@ -634,7 +634,7 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
 /// way: a new variant fails to compile here until it has a fixture.
 #[test]
 fn every_studio_workflow_draft_has_an_overlay_fixture() {
-    use crate::workbench::state::SimulationWorkflowDialog;
+    use rspice_app_simulate::workbench::state::workflow_drafts::SimulationWorkflowDialog;
 
     let opened: Vec<&'static str> = studio_overlays()
         .into_iter()

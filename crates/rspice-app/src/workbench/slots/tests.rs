@@ -7,7 +7,6 @@
 
 use super::*;
 use crate::workbench::app::HelpCenterPage;
-use crate::workbench::menu_bar::DatasetExportPicker;
 use rspice_app_design::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState;
 use rspice_app_design::workbench::app::dialogs::replace_instance::ReplaceInstanceOpen;
 use rspice_app_design::workbench::app::dialogs::selection::commands::floating::{
@@ -16,6 +15,7 @@ use rspice_app_design::workbench::app::dialogs::selection::commands::floating::{
 use rspice_app_design::workbench::app::schematic::edit_authority::SchematicEditAuthority;
 use rspice_app_project::workbench::project::workspace_state::LibraryDeletionTarget;
 use rspice_app_results::workbench::docks::inspector::run_details::RunDetailsDialogState;
+use rspice_app_results::workbench::menu_bar::waveform_export::DatasetExportPicker;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use rspice_app_simulate::workbench::app::dialogs::plan_removal::PlanRemovalTarget;
 use rspice_app_workbench::workbench::app::dialogs::window_session::WindowSessionPage;

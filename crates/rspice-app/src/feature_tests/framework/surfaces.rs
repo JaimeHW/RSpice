@@ -132,7 +132,7 @@ fn source_editor_page(
         ProjectSourceLanguage::RSpiceAutomation => {
             app.state
                 .workbench
-                .activate(crate::workbench::state::Workspace::Netlist);
+                .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
             app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
             rspice_app_state::state::ProjectSourceOwner::code_workspace(language)
         }
@@ -170,7 +170,7 @@ fn source_editor_page(
             app.state.open_workspace_view(reference);
             app.state
                 .workbench
-                .activate(crate::workbench::state::Workspace::Design);
+                .activate(rspice_app_state::workbench::workspace::Workspace::Design);
             owner
         }
     };

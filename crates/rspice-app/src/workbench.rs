@@ -70,8 +70,6 @@ pub(crate) mod slots;
 pub(crate) mod state;
 pub(crate) mod workflows;
 
-pub use state::WorkbenchSession;
-
 pub use app::RSpiceApp;
 pub use app_state::AppState;
 pub(crate) use frame::{show, show_embedded_secondary, show_secondary};

@@ -13,9 +13,9 @@ use crate::workbench::app::veriloga_flow_tests::{
     CELL, MODULE, PORTS, User, assert_five_volts, compile, new_device, new_project, run_plan,
     run_plan_of_instance, wired_device,
 };
-use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_state::state::CellViewRef;
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// A device bound to a card of the project's model library runs with the
 /// card's parameters: the output follows the card's gain of 2, not the
@@ -244,8 +244,8 @@ impl User {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_was_written() {
-    use crate::workbench::app_state::diagnostic_store::listing::listing;
     use rspice_app_code::workbench::documents::code_workspace::CodeEditorSeverity;
+    use rspice_app_state::workbench::app_state::diagnostic_store::listing::listing;
 
     let (mut user, _, _) = new_device("opamp_bhv", "inp:in inn:in out:out vdd vss");
     super::veriloga_interface_tests::edit_source(&mut user.app, OPAMP);

@@ -7,7 +7,6 @@
 
 use egui::{Pos2, Rect, Vec2, ViewportId, pos2, vec2};
 
-use crate::workbench::state::{ConsolePage, NotificationFilter};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_services::workbench::browser::background_alerts::BackgroundAlerts;
 use rspice_app_workbench::ui::tokens;
@@ -17,6 +16,9 @@ use rspice_app_workbench::ui::widgets::{
 use rspice_app_workbench::workbench::chrome::title_bar;
 use rspice_app_workbench::workbench::routing::{
     navigation::RouteTransitionSource, surface_catalog::SurfaceId, surface_route::SurfaceRoute,
+};
+use rspice_app_workbench::workbench::state::{
+    console_views::NotificationFilter, workbench_session::ConsolePage,
 };
 use rspice_app_workbench::workbench::tools::notification_center::*;
 

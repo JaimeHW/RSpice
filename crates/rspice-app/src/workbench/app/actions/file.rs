@@ -410,7 +410,7 @@ impl RSpiceApp {
         if opened {
             self.state
                 .workbench
-                .activate(crate::workbench::state::Workspace::Design);
+                .activate(rspice_app_state::workbench::workspace::Workspace::Design);
         }
     }
 
@@ -439,8 +439,10 @@ impl RSpiceApp {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
     use rspice_app_services::io::{FileWorkflowIo, SchematicIoError, WaveformDataset};
+    use rspice_app_services::workbench::workflows::export_workflow::{
+        ExportWorkflowIo, SaveDialogConfig,
+    };
     use rspice_app_state::simulation::plan::AnalysisKind;
     use rspice_app_state::state::{Component, ComponentType, Point, SchematicState};
     use std::cell::RefCell;
@@ -591,10 +593,10 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn project_save_never_falls_through_to_legacy_schematic_io_in_any_workspace() {
-        use crate::workbench::state::Workspace;
         use rspice_app_services::workbench::lifecycle::project_lifecycle::{
             DestinationAuthority, SaveScope,
         };
+        use rspice_app_state::workbench::workspace::Workspace;
 
         for workspace in [
             Workspace::Project,
@@ -719,7 +721,7 @@ mod tests {
         let mut project_source = crate::workbench::app_state::AppState::default();
         project_source
             .workbench
-            .activate(crate::workbench::state::Workspace::Design);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
         rspice_app_services::workbench::lifecycle::project_lifecycle::save_native(
             &mut project_source,
             SaveScope::AllDocuments,
@@ -801,7 +803,7 @@ mod tests {
         let mut schematic_source = crate::workbench::app_state::AppState::default();
         schematic_source
             .workbench
-            .activate(crate::workbench::state::Workspace::Design);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
         rspice_app_services::workbench::lifecycle::project_lifecycle::save_native(
             &mut schematic_source,
             SaveScope::AllDocuments,
@@ -923,7 +925,7 @@ mod tests {
         assert!(state.request_close_project());
         assert!(matches!(
             state.workbench.project_review_dialog.request.as_ref(),
-            Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
+            Some(rspice_app_workbench::workbench::app::dialogs::confirmation_state::ProjectReviewRequest::CloseProject(_))
         ));
 
         let project_id = state.model.workspace.content.project.id();
@@ -935,7 +937,7 @@ mod tests {
         assert_eq!(state.model.workspace.content.project.id(), project_id);
         assert!(matches!(
             state.workbench.project_review_dialog.request.as_ref(),
-            Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
+            Some(rspice_app_workbench::workbench::app::dialogs::confirmation_state::ProjectReviewRequest::CloseProject(_))
         ));
 
         // Cancel closes only the review; every project-owned draft remains.
@@ -971,7 +973,7 @@ mod tests {
         .expect("seed canonical project");
         state
             .workbench
-            .activate(crate::workbench::state::Workspace::Design);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
 
         assert!(state.request_close_project());
 
@@ -980,7 +982,7 @@ mod tests {
         assert!(!state.project.project_launcher_open);
         assert_eq!(
             state.workbench.workspace,
-            crate::workbench::state::Workspace::Project
+            rspice_app_state::workbench::workspace::Workspace::Project
         );
         remove_project_artifacts(&path);
     }
@@ -1026,7 +1028,7 @@ mod tests {
         assert!(!app.state.project.project_launcher_open);
         assert_eq!(
             app.state.workbench.workspace,
-            crate::workbench::state::Workspace::Project
+            rspice_app_state::workbench::workspace::Workspace::Project
         );
         assert!(app.state.workbench.project_review_dialog.request.is_none());
         assert!(saved_paths.borrow().is_empty());
@@ -1099,7 +1101,7 @@ mod tests {
         assert_eq!(app.state.model.schematic.document().components.len(), 1);
         assert!(matches!(
             app.state.workbench.project_review_dialog.request.as_ref(),
-            Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
+            Some(rspice_app_workbench::workbench::app::dialogs::confirmation_state::ProjectReviewRequest::CloseProject(_))
         ));
         assert!(
             rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(

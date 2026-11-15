@@ -3,7 +3,6 @@
 //! are on desktop and touch.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_results::workbench::docks::navigator::results_actions::{
     select_result_analysis, select_result_dataset, select_result_signal,
 };
@@ -16,6 +15,7 @@ use rspice_app_results::workbench::documents::result_document::AnalysisPresentat
 use rspice_app_state::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace, SimulationRun,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::docks::navigator;
 use rspice_results::result_presentation::{
     ResultArtifactPresentationKey, SourceWaveformPresentationKey,
@@ -258,7 +258,7 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
     assert_eq!(app.state.model.simulation.view.active_analysis_idx, Some(0));
     assert_eq!(
         app.state.workbench.documents.active(Workspace::Results),
-        Some(&crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id))
+        Some(&rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::ResultDataset(dataset_id))
     );
 
     let was_visible = app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
@@ -880,8 +880,10 @@ fn periodic_payload_artifacts_report_their_counts_and_verdicts() {
 /// is not offered once the session no longer holds that run.
 #[test]
 fn a_quantitys_run_log_is_the_log_of_the_run_that_produced_it() {
-    use crate::workbench::commands::result_navigation::{open_run_log, producing_run};
-    use crate::workbench::state::{ConsoleChannel, ConsolePage};
+    use rspice_app_results::workbench::commands::result_navigation::{open_run_log, producing_run};
+    use rspice_app_workbench::workbench::state::{
+        console_views::ConsoleChannel, workbench_session::ConsolePage,
+    };
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.console_visible = false;

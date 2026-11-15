@@ -1,13 +1,14 @@
 //! What the sheet actions promise the strip, the chords and the menus.
 
-use crate::workbench::app::sheets::*;
-use crate::workbench::app_state::{AppState, Model};
-use crate::workbench::state::WorkbenchSession;
+use crate::workbench::app_state::AppState;
+use rspice_app_sheets::workbench::app::actions::sheets::*;
 use rspice_app_state::state::{
     Component, ComponentType, DrawingSheetTitleFieldId, Point, SheetDefinition,
     SheetDeleteBehavior, SheetId, SheetPortPolicy, SheetTemplate,
 };
+use rspice_app_state::workbench::app_state::model::Model;
 use rspice_app_workbench::workbench::framework::feature::CanvasGesturePort;
+use rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession;
 
 /// [`Model::go_to_sheet`], stated on the status bar. Page navigation reaches
 /// it through [`next_sheet`] and [`previous_sheet`].

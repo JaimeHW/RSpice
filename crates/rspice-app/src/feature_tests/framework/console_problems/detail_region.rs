@@ -112,7 +112,7 @@ fn the_detail_region_states_where_the_batch_stands_only_when_it_is_not_current()
         .policy
         .width_mismatch = rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
     let reason = {
-        use crate::workbench::app_state::diagnostic_store::listing::RowStanding;
+        use rspice_app_state::workbench::app_state::diagnostic_store::listing::RowStanding;
         let listed = listing(&state);
         match listed.row(0).expect("the finding keeps its row").standing {
             RowStanding::Stale(reason) => reason,
@@ -186,7 +186,7 @@ fn a_related_place_is_stated_even_where_it_cannot_be_followed() {
 /// line at all, rather than a jump with nowhere to land.
 #[test]
 fn a_finding_a_runs_log_states_offers_that_line_and_one_no_line_states_offers_none() {
-    use crate::workbench::app_state::diagnostic_store::RunLogPlace;
+    use rspice_app_state::workbench::app_state::diagnostic_store::RunLogPlace;
 
     let mut state = open_state();
     let place = RunLogPlace {

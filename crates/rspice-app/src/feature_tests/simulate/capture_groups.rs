@@ -88,12 +88,12 @@ fn the_group_editor_edits_every_rule_of_a_disjunction() {
         .position(|kind| *kind == SavedOutputKind::DerivedExpression)
         .expect("DerivedExpression occupies a kind slot");
     draft.rules[1].kind = Some(expression);
-    draft
-        .rules
-        .push(crate::workbench::state::CaptureGroupRuleDraft {
+    draft.rules.push(
+        rspice_app_simulate::workbench::state::workflow_drafts::CaptureGroupRuleDraft {
             scope: "/x2".to_owned(),
             kind: None,
-        });
+        },
+    );
     commit_capture_group(&mut crate::workbench::features::cx(&mut app), &draft)
         .expect("the edited group commits");
 

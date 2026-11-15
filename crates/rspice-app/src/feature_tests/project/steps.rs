@@ -53,7 +53,7 @@ fn checking(file: Option<&std::path::Path>) -> RSpiceApp {
     app.state.open_project_session();
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     rspice_app_state::workbench::examples::load_example(
         "RC Lowpass Filter",
         &mut app.state.model.schematic,
@@ -86,7 +86,7 @@ fn check_and_save_opens_in_the_project_context_on_the_report_the_application_giv
         .report
         .clone()
         .expect("the dialog opens on a report");
-    let whole = crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport::collect_in(&app.state)
+    let whole = rspice_app_project::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport::collect_in(&app.state)
         .expect("the whole state gives a report");
     assert_eq!(opened, whole);
 }

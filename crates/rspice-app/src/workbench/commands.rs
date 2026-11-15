@@ -15,11 +15,13 @@ use rspice_app_workbench::workbench::app::dialogs::window_session::{
 use rspice_app_workbench::workbench::framework::command_registry::{CommandOwner, ids};
 use rspice_app_workbench::workbench::state::pane_focus::PaneStep;
 
-use super::state::{ConsoleChannel, ConsolePage, Workspace};
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::state::{
+    console_views::ConsoleChannel, workbench_session::ConsolePage,
+};
 
 mod enablement;
 mod registry;
-pub(crate) use rspice_app_results::workbench::commands::result_navigation;
 mod veriloga_commits;
 pub(crate) mod vocabulary;
 
@@ -279,7 +281,7 @@ impl Command {
                 app.state.workbench.focus_mode = false;
                 app.state.workbench.console_visible = true;
                 app.state.workbench.console_maximized = false;
-                app.state.workbench.console_page = super::state::ConsolePage::Problems;
+                app.state.workbench.console_page = rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Problems;
             }
             Self::OpenConsole => app.state.workbench.open_console(),
             Self::OpenNotifications => app.state.workbench.notification_center_open = true,

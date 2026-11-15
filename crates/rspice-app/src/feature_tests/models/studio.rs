@@ -325,7 +325,7 @@ fn showing_the_project_models_always_opens_the_project_catalog_scope() {
 
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Models
+        rspice_app_state::workbench::workspace::Workspace::Models
     );
     assert_eq!(
         app.state.models.models_view.catalog_scope,

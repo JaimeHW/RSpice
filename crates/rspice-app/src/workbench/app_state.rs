@@ -13,10 +13,6 @@
 //! `workflows::project_workflow`). Only accessors over this struct's own
 //! fields are defined here.
 
-pub(crate) use rspice_app_state::workbench::app_state::design_checks;
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) use rspice_app_state::workbench::app_state::design_history;
-pub(crate) use rspice_app_state::workbench::app_state::diagnostic_store;
 mod design_access;
 #[cfg(test)]
 mod design_test_support;
@@ -24,56 +20,43 @@ mod execution_context;
 mod full_screen;
 #[cfg(test)]
 mod modal_gate_tests;
-pub(crate) use rspice_app_state::workbench::app_state::model;
 mod model_access;
 mod run_access;
 use rspice_app_runs::workbench::app_state::run_preflight;
 mod schematic_drag;
 pub(crate) mod services_access;
 pub(crate) mod session;
-use rspice_app_state::workbench::app_state::sim_setup;
 #[cfg(test)]
 mod stack_budget;
 #[cfg(test)]
 mod technology_demand_tests;
 mod transaction;
-pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
-use crate::workbench::slots::{
-    CloudState, CodeState, HardcopyState, ModelsState, ProjectState, ResultsState, RunsState,
-    SettingsState, SheetsState, ShellState, SimulateState,
-};
+use crate::workbench::slots::ShellState;
+use rspice_app_cloud::workbench::slots::cloud::CloudState;
+use rspice_app_code::workbench::slots::code::CodeState;
 use rspice_app_design::workbench::slots::design::DesignState;
+use rspice_app_hardcopy::workbench::slots::hardcopy::HardcopyState;
+use rspice_app_models::workbench::slots::models::ModelsState;
+use rspice_app_project::workbench::slots::project::ProjectState;
 use rspice_app_results::workbench::documents::result_document::{ResultsParts, ResultsReads};
+use rspice_app_results::workbench::slots::results::ResultsState;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_app_services::services::recent_files::RecentKind;
 use rspice_app_services::workbench::slots::platform::remember_recent_file;
 #[cfg(test)]
 use rspice_app_services::workbench::slots::platform::trim_recent_files;
 use rspice_app_settings::workbench::app_state::session::preferences_file::PreferencesFileParts;
 use rspice_app_settings::workbench::app_state::session::shortcut_library::ShortcutLibraryParts;
+use rspice_app_settings::workbench::slots::settings::SettingsState;
+use rspice_app_sheets::workbench::slots::sheets::SheetsState;
+use rspice_app_simulate::workbench::slots::simulate::SimulateState;
 use rspice_app_state::state::notices::NoticeKind;
 use rspice_app_state::state::{RunEvent, RunEventSink};
 
-#[cfg(test)]
-pub(crate) use design_checks::DesignCheckStatus;
-pub(crate) use design_checks::model_location_anchor;
-#[cfg(test)]
-pub(crate) use design_history::DesignManagementHistoryEntry;
-pub(crate) use model::{Model, SlotFacts};
+use rspice_app_state::workbench::app_state::model::Model;
 // The platform services' own state, which they name beside the model.
-pub(in crate::workbench) use crate::workbench::slots::PlatformState;
-#[cfg(test)]
-pub(crate) use rspice_app_workbench::workbench::app_state::session::shortcuts::request_engineering_canvas_focus;
-pub(crate) use rspice_app_workbench::workbench::app_state::session::shortcuts::runtime_command_platform;
-#[cfg(not(target_arch = "wasm32"))]
-pub use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
-pub use sim_setup::SimSetupState;
-#[cfg(test)]
-pub use sim_setup::plan_catalog::SimulationPlanCloneOptions;
-#[cfg(not(target_arch = "wasm32"))]
-pub use sim_setup::plan_catalog::SimulationPlanName;
-#[cfg(not(target_arch = "wasm32"))]
-pub use sim_setup::{ReferencePvtPoint, SimulationSavePolicy};
+use rspice_app_services::workbench::slots::platform::PlatformState;
 
 /// Main application state container
 #[derive(Clone)]
@@ -102,7 +85,8 @@ pub struct AppState {
     /// What watching the simulations in flight keeps between frames.
     pub(crate) runs: Box<RunsState>,
     /// Canonical workbench navigation and responsive layout state.
-    pub(crate) workbench: Box<crate::workbench::WorkbenchSession>,
+    pub(crate) workbench:
+        Box<rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession>,
     /// Runtime-only chord/prefix authority. Partial sequences are never
     /// serialized or restored across application sessions.
     pub(crate) shortcut_resolver:
@@ -343,7 +327,7 @@ impl AppState {
 
     /// [`WorkbenchSession::show_problem_findings`] for the session.
     ///
-    /// [`WorkbenchSession::show_problem_findings`]: crate::workbench::state::WorkbenchSession::show_problem_findings
+    /// [`WorkbenchSession::show_problem_findings`]: rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession::show_problem_findings
     // A workbench write the checks ask for; it becomes a request.
     pub(crate) fn show_problem_findings(&mut self) {
         self.workbench.show_problem_findings();
@@ -418,7 +402,9 @@ impl AppState {
 
 /// The prompt on `workbench`'s status bar, if one is showing.
 #[cfg(test)]
-pub(crate) fn prompt_text(workbench: &crate::workbench::WorkbenchSession) -> Option<&str> {
+pub(crate) fn prompt_text(
+    workbench: &rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession,
+) -> Option<&str> {
     workbench.prompt.as_ref().map(|prompt| prompt.text.as_str())
 }
 

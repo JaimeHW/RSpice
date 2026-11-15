@@ -129,7 +129,7 @@ fn install_definition(
 
 #[test]
 fn validated_save_uses_each_masters_schema_without_borrowing_the_open_dialog() {
-    use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
+    use rspice_app_project::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
 
     let mut state = AppState::default();
     let first = model_bound_definition();

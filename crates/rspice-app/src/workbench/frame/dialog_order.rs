@@ -714,7 +714,7 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
         key: DialogKey("code.netlist"),
         modality: Modality::Application,
         is_open: |state| {
-            state.workbench.workspace == crate::workbench::state::Workspace::Netlist
+            state.workbench.workspace == rspice_app_state::workbench::workspace::Workspace::Netlist
                 && state.code.netlist.application_modal_open()
         },
     },

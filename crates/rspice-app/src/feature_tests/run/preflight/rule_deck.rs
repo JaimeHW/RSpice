@@ -2,8 +2,8 @@
 //! and the run gate judge the configured root under it alike.
 
 use super::*;
-use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticLevel};
 use rspice_app_state::state::Point;
+use rspice_app_state::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticLevel};
 use rspice_design::drc::{DrcSeverity, DrcViolationType};
 use rspice_simulation::execution::PreparationStage;
 
@@ -286,9 +286,9 @@ fn run_again_with_the_rules_edited_in_flight(edit: impl FnOnce(&mut AppState)) -
 fn page_waiver_target(
     state: &mut AppState,
     rule: DrcViolationType,
-) -> crate::workbench::app_state::waivers::WaiverTarget {
-    use crate::workbench::app_state::diagnostic_store::listing;
-    use crate::workbench::app_state::waivers::WaiverAction;
+) -> rspice_app_state::workbench::app_state::waivers::WaiverTarget {
+    use rspice_app_state::workbench::app_state::diagnostic_store::listing;
+    use rspice_app_state::workbench::app_state::waivers::WaiverAction;
 
     state
         .run_active_design_checks()

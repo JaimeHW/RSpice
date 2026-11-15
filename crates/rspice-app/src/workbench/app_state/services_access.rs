@@ -76,7 +76,7 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
     if !state.platform.project_lifecycle.is_open() {
         state
             .workbench
-            .activate(crate::workbench::state::Workspace::Project);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Project);
         return;
     }
     project_lifecycle::bind_restored_project(state);
@@ -242,7 +242,7 @@ pub(crate) fn open_comparison(
     recovery::reset_comparison_execution(&mut state.model);
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     if let Some(notice) = baseline_notice {
         state.record(LogSeverity::Warning, LogSource::Studio, notice);
     }

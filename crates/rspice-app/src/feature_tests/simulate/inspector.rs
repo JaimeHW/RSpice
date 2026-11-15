@@ -6,13 +6,13 @@
 use egui::Vec2;
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_state::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun, SimulationRunLifecycle,
     SpecEntry, SpecPointScope,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_results::yield_analysis::{
     DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
 };

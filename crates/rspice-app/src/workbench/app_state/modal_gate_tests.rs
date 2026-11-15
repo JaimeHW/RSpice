@@ -8,7 +8,7 @@
 //! operation a browser is running, so no native test can open it.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::Workspace;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::routing::{
     navigation::RouteTransitionSource, surface_catalog::SurfaceId, surface_route::SurfaceRoute,
 };
@@ -67,8 +67,8 @@ const APPLICATION_GATE: &[GateRow] = &[
     }),
     ("workbench.simulation_workflow", |state| {
         state.simulate.simulation_workflow = Some(
-            crate::workbench::state::SimulationWorkflowDialog::DesignVariable(
-                crate::workbench::state::DesignVariableDraft::default(),
+            rspice_app_simulate::workbench::state::workflow_drafts::SimulationWorkflowDialog::DesignVariable(
+                rspice_app_simulate::workbench::state::workflow_drafts::DesignVariableDraft::default(),
             ),
         );
     }),

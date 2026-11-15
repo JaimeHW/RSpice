@@ -18,14 +18,10 @@ mod status_order;
 use egui::Ui;
 use egui::os::OperatingSystem;
 
-use crate::workbench::app_state::waivers::WaiverTarget;
-use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::commands::vocabulary::{
     Command, CommandRegistry, command_registry, legacy_command,
 };
 use crate::workbench::features;
-use crate::workbench::state::workbench_session::WorkspaceDocument;
-use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use menus::{APPLICATION_MENU, COMPACT_MENU, application_menu_entries};
 use rspice_app_cloud::workbench::cloud::CloudFeature;
@@ -38,12 +34,16 @@ use rspice_app_results::workbench::results::ResultsFeature;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     ProjectCloseDestination, RevertReviewToken,
 };
+use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_sheets::workbench::sheets::SheetsFeature;
 use rspice_app_simulate::workbench::simulate::SimulateFeature;
 use rspice_app_state::diagnostics::LogAnchor;
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
 use rspice_app_state::state::{CellViewRef, ViewType};
+use rspice_app_state::workbench::app_state::model::Model;
+use rspice_app_state::workbench::app_state::waivers::WaiverTarget;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::icons::Icon;
 use rspice_app_workbench::ui::widgets::NotificationAction;
 use rspice_app_workbench::workbench::app::dialogs::confirmation::ConfirmationHost;
@@ -62,6 +62,10 @@ use rspice_app_workbench::workbench::framework::host::{
 use rspice_app_workbench::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
 use rspice_app_workbench::workbench::layout::LayoutSpec;
 use rspice_app_workbench::workbench::localization::MessageId;
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocument;
+use rspice_app_workbench::workbench::state::workbench_session::{
+    WorkbenchSession, WorkspaceDocumentId,
+};
 use rspice_ui_kit::panels::WorkbenchIcon;
 
 /// A route whose surface brings its own toolbar, in place of its
@@ -899,7 +903,7 @@ impl Host for RSpiceApp {
     }
 
     fn open_run_log(&mut self, run_sequence: u64) {
-        crate::workbench::commands::result_navigation::open_run_log(
+        rspice_app_results::workbench::commands::result_navigation::open_run_log(
             &self.state.model,
             &mut self.state.workbench,
             run_sequence,
@@ -1033,7 +1037,7 @@ impl WorkbenchHost for RSpiceApp {
         state.models.models_page = rspice_app_state::state::ModelsPage::Models;
         state
             .workbench
-            .activate(crate::workbench::state::Workspace::Models);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Models);
     }
 
     fn show_signal(&mut self, run_index: usize, analysis_index: usize, waveform_index: usize) {
@@ -1063,7 +1067,7 @@ impl WorkbenchHost for RSpiceApp {
         state.results.results.session.maximized_strip = None;
         state
             .workbench
-            .activate(crate::workbench::state::Workspace::Results);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     }
 }
 

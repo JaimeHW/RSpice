@@ -1,18 +1,18 @@
 //! `workbench/app_state/diagnostic_store/run_notices` observed through a whole session.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
-use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
-use crate::workbench::app_state::diagnostic_store::DiagnosticRecord;
-use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
-use crate::workbench::app_state::diagnostic_store::run_notices::*;
-use crate::workbench::app_state::diagnostic_store::{BatchStanding, listing};
 use rspice_app_state::diagnostics::LogAnchor;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::state::{
     Cell, Component, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
     ViewType,
 };
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRecord;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
+use rspice_app_state::workbench::app_state::diagnostic_store::run_notices::*;
+use rspice_app_state::workbench::app_state::diagnostic_store::{BatchStanding, listing};
 use rspice_core::ContinuationAid;
 use rspice_core::notice::BoundarySupplyKind;
 use rspice_core::notice::EngineNotice;
@@ -398,10 +398,12 @@ fn points_accepted_past_the_truncation_tolerance_are_one_warning_for_the_run() {
     assert_eq!(record.details, "Raised 3 times in Transient, Transient 2");
     assert_eq!(
         record.log_place,
-        Some(crate::workbench::app_state::diagnostic_store::RunLogPlace {
-            run_sequence: 1,
-            line: 4
-        }),
+        Some(
+            rspice_app_state::workbench::app_state::diagnostic_store::RunLogPlace {
+                run_sequence: 1,
+                line: 4
+            }
+        ),
         "the first line of the run's log that says so"
     );
 }

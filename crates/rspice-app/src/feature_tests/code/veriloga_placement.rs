@@ -12,7 +12,6 @@ use crate::workbench::app::veriloga_design_tests::{
 use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::app_state::prompt_text;
 use crate::workbench::features;
-use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::app::actions::veriloga_placement::{
     offered_veriloga_placement, veriloga_placement_target,
 };
@@ -20,6 +19,7 @@ use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open
 use rspice_app_code::workbench::surfaces::veriloga;
 use rspice_app_state::state::VerilogAPlacementHandoff;
 use rspice_app_state::state::{Cell, CellViewRef, ComponentType, Library, Tool, View, ViewType};
+use rspice_app_state::workbench::workspace::Workspace;
 
 const LIBRARY: &str = "behavioral";
 

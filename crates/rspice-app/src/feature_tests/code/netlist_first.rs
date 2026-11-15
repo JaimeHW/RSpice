@@ -3,11 +3,11 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::features::{self, Registered};
-use crate::workbench::state::Workspace;
 use egui::{Rect, Ui, Vec2, pos2, vec2};
 use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_code::workbench::code::netlist_first::*;
 use rspice_app_code::workbench::documents::netlist_document::root_deck_source_index;
+use rspice_app_state::workbench::workspace::Workspace;
 
 const DECK: &str = "Precision front-end bench\n\
     * differential input stage\n\

@@ -1,10 +1,10 @@
 //! The canvas's touch controls driven through a whole application.
 
-use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, features};
 use egui::Context;
 use rspice_app_design::schematic::view::mobile_controls::*;
 use rspice_app_design::workbench::design::DesignFeature;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::feature::Cx;
 use rspice_schematic_editor::view::mobile_controls::{MobileCanvasAction, MobileCanvasRequest};
 use rspice_schematic_editor::view::navigation::ZoomRequest;

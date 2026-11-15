@@ -66,9 +66,9 @@ fn held<T>(_field: fn(&crate::workbench::app_state::AppState) -> &T) -> usize {
 /// and can never explain inline growth, so listing them would only add the
 /// upward module references this layer is retiring.
 fn field_sizes() -> Vec<(&'static str, usize)> {
-    use crate::workbench::app_state as a;
+    use rspice_app_state::workbench::app_state as a;
     vec![
-        ("model", size_of::<a::Model>()),
+        ("model", size_of::<a::model::Model>()),
         ("shell", held(|state| &state.shell)),
         (
             "shortcut_resolver",
@@ -80,7 +80,7 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
 /// The model's inline fields, listed the same way: its boxed fields
 /// (`netlist_artifacts`, `preferences`) are pointer size by construction.
 fn model_field_sizes() -> Vec<(&'static str, usize)> {
-    use crate::workbench::app_state as a;
+    use rspice_app_state::workbench::app_state as a;
     vec![
         (
             "schematic",
@@ -98,7 +98,7 @@ fn model_field_sizes() -> Vec<(&'static str, usize)> {
             "design_checks",
             size_of::<a::design_checks::DesignCheckRuntime>(),
         ),
-        ("sim_setup", size_of::<a::SimSetupState>()),
+        ("sim_setup", size_of::<a::sim_setup::SimSetupState>()),
         (
             "log_buffer",
             size_of::<rspice_app_state::diagnostics::LogBuffer>(),
@@ -162,7 +162,7 @@ fn app_state_stays_inside_its_inline_stack_budget() {
 /// held to its own share of the state's budget.
 #[test]
 fn the_model_stays_inside_its_inline_stack_budget() {
-    let model = size_of::<crate::workbench::app_state::Model>();
+    let model = size_of::<rspice_app_state::workbench::app_state::model::Model>();
     assert!(
         model <= MODEL_INLINE_BUDGET,
         "Model is {model} bytes inline (budget {MODEL_INLINE_BUDGET}); it moves inline with \

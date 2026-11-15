@@ -8,7 +8,7 @@ fn accepted_snapshot_clones_share_content_and_edits_cannot_change_their_fingerpr
     let mut state = AppState::default();
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     let baseline = snapshot(&state).unwrap();
     state
         .platform

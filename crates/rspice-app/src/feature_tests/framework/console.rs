@@ -4,22 +4,22 @@ use egui::Vec2;
 
 use crate::workbench::AppState;
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::diagnostic_store::DiagnosticOwner;
-use crate::workbench::app_state::diagnostic_store::listing::listing;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::{ConsolePage, WorkbenchSession};
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::state::{
     AnalysisResult, AnalysisType, Point, SimulationRun, SimulationState,
 };
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticOwner;
+use rspice_app_state::workbench::app_state::diagnostic_store::listing::listing;
 use rspice_app_workbench::ui::theme::FontWeight;
 use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::ui::widgets::Problem;
 use rspice_app_workbench::workbench::docks::console::problems::active_problem_count;
 use rspice_app_workbench::workbench::docks::console::*;
 use rspice_app_workbench::workbench::layout::LayoutSpec;
+use rspice_app_workbench::workbench::state::workbench_session::{ConsolePage, WorkbenchSession};
 use rspice_design::drc::DrcResult;
 
 /// Every producer the store holds evidence for puts a real finding on the
@@ -63,11 +63,11 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                     .expect("the checks publish against the live design");
             }
             DiagnosticOwner::SymbolPins => {
-                use crate::workbench::state::Workspace;
                 use rspice_app_state::state::{
                     Cell, CellViewRef, ComponentType, Library, PortDirection, SchematicState,
                     SymbolDocument, SymbolPin, View, ViewType,
                 };
+                use rspice_app_state::workbench::workspace::Workspace;
 
                 // A symbol whose pin contract genuinely fails: its cell's
                 // schematic declares a port that the symbol never places.
@@ -269,7 +269,7 @@ fn settled_missing(character: char) -> char {
 /// the Console as one line and the page said nothing.
 #[test]
 fn a_completed_runs_engine_warnings_reach_the_page_as_canonical_records() {
-    use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel;
 
     let mut state: AppState =
         rspice_app_runs::simulation::controller::test_execution::run_manual_batch_session(
@@ -341,7 +341,9 @@ fn a_completed_runs_engine_warnings_reach_the_page_as_canonical_records() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_clamp_opens_its_runs_log_on_the_line_the_engine_reported_it_on() {
-    use crate::workbench::state::{ConsoleChannel, ConsoleReveal, ConsoleSelection};
+    use rspice_app_workbench::workbench::state::console_views::{
+        ConsoleChannel, ConsoleReveal, ConsoleSelection,
+    };
 
     rspice_app_state::diagnostics::engine_log::studio_logger_for_tests();
     let mut app = RSpiceApp::test_instance();
@@ -588,7 +590,7 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
     app.state.open_project_session();
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Netlist);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
     app.state.code.code_workspace.page =
         rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     app.state
@@ -610,7 +612,7 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
     // The same count wherever the reader is standing.
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     assert_eq!(active_problem_count(&app.state, 1).total(), 1);
 }
 
@@ -693,7 +695,7 @@ fn a_run_channel_has_no_clear_and_the_command_leaves_the_session_alone() {
     app.state
         .workbench
         .console_view
-        .open(crate::workbench::state::ConsoleChannel::Run(3));
+        .open(rspice_app_workbench::workbench::state::console_views::ConsoleChannel::Run(3));
 
     let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchSession::default());
     assert!(!clear_is_offered(
@@ -1244,7 +1246,7 @@ fn painted_console_body(mut render: impl FnMut(&mut egui::Ui)) -> String {
 /// nothing. None of them promises lines that will never come.
 #[test]
 fn each_channel_says_why_it_shows_no_rows() {
-    use crate::workbench::state::ConsoleChannel;
+    use rspice_app_workbench::workbench::state::console_views::ConsoleChannel;
 
     let mut state = AppState::default();
     state.model.log_buffer.clear();

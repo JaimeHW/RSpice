@@ -137,7 +137,10 @@ fn publish(
         publish_model_hub_output(&ctx, cx, request, output)
     });
     if let Some(ArmPartPlacement(placement)) = state.workbench.outbox.take() {
-        crate::workbench::app::arm_pack_part(&mut state.model, placement);
+        rspice_app_state::workbench::app::schematic::placement::arm_pack_part(
+            &mut state.model,
+            placement,
+        );
     }
 }
 
@@ -857,7 +860,7 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
     // The placement half of the shelf gesture, driven from the same arming
     // entry point the operation machine uses.
     let mut state = open_project();
-    let armed = crate::workbench::app::arm_pack_part(
+    let armed = rspice_app_state::workbench::app::schematic::placement::arm_pack_part(
         &mut state.model,
         PartPlacement::NativeDevice {
             component_type: ComponentType::Diode,

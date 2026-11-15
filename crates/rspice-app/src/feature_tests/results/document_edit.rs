@@ -1,8 +1,6 @@
 //! Pins for the edits the result viewer makes to a project result document.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
-use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::document_edit::*;
 use rspice_app_state::product::DatasetBinding;
@@ -15,6 +13,8 @@ use rspice_app_state::results::visualization_document::VisualizationDocument;
 use rspice_app_state::results::visualization_document::{LinkKind, Pane};
 use rspice_app_state::state::AnalysisResult;
 use rspice_app_state::state::{AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle};
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 use rspice_results_ui::document_dialogs::ResultDocumentDialog;
 

@@ -14,7 +14,7 @@ use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 
 use crate::feature_tests::replay::{PRIMARY, Replay, only};
-use crate::workbench::state::Workspace;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
 
 /// The deck the script types into its new source document.

@@ -16,7 +16,7 @@
 //! out of the registry for the one container that holds its key; no menu,
 //! shortcut profile or Repeat reaches one of those.
 
-use crate::workbench::app_state::PlatformState;
+use crate::workbench::RSpiceApp;
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
@@ -27,8 +27,6 @@ use crate::workbench::commands::{
 };
 use crate::workbench::features;
 use crate::workbench::menu_bar::FileMenuAction;
-use crate::workbench::state::Workspace;
-use crate::workbench::{RSpiceApp, WorkbenchSession};
 use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_code::workbench::code::commands::{
     CodeRequest, NetlistEditorRequest, VerilogAStripRequest,
@@ -41,7 +39,9 @@ use rspice_app_design::workbench::design::inspector::CommitSheetSection;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use rspice_app_hardcopy::workbench::hardcopy;
 use rspice_app_project::workbench::project::commands::ProjectRequest;
+use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::state::command_catalog::CommandKey;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::{
     CommandAvailability, CommandFlags, CommandSpec, ids,
 };
@@ -56,6 +56,7 @@ use rspice_app_workbench::workbench::framework::requests::{
     ShowWaveforms, SourceEditorRequest, StageComponentTuning, SubcircuitSymbolSource,
     VoidVerilogAEvidence,
 };
+use rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession;
 
 /// The dispatcher by key: where a key becomes the command it names, a
 /// feature's first and the shell's legacy table's otherwise.
@@ -426,7 +427,10 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, ArmPartPlacement(placement)| {
-                crate::workbench::app::arm_pack_part(&mut app.state.model, placement);
+                rspice_app_state::workbench::app::schematic::placement::arm_pack_part(
+                    &mut app.state.model,
+                    placement,
+                );
             },
         );
         requests::drain(
@@ -529,7 +533,7 @@ impl RSpiceApp {
                 app.state.open_workspace_view(reference);
                 app.state
                     .workbench
-                    .activate(crate::workbench::state::Workspace::Design);
+                    .activate(rspice_app_state::workbench::workspace::Workspace::Design);
             },
         );
         requests::drain(
@@ -823,9 +827,9 @@ mod tests {
     fn run_on_the_netlist_workspace_runs_the_deck_and_not_the_plan() {
         use crate::workbench::RSpiceApp;
         use crate::workbench::features::cx;
-        use crate::workbench::state::Workspace;
         use rspice_app_code::workbench::code::netlist_validation::validate_visible_netlist_source;
         use rspice_app_state::state::SimulationRunIntent;
+        use rspice_app_state::workbench::workspace::Workspace;
         use rspice_app_workbench::workbench::framework::command_registry::{
             CommandAvailability, ids,
         };

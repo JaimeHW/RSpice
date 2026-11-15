@@ -16,7 +16,7 @@ fn opening_a_history_row_lands_on_that_run_and_refuses_a_pruned_one() {
     app.state.open_project_session();
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Simulate);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Simulate);
     let first = app.state.model.simulation.start_run().run_id;
     app.state.model.simulation.retained.runs[0]
         .analyses
@@ -36,7 +36,7 @@ fn opening_a_history_row_lands_on_that_run_and_refuses_a_pruned_one() {
     app.after_contribution();
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Results
+        rspice_app_state::workbench::workspace::Workspace::Results
     );
     assert_eq!(
         app.state.model.simulation.active_run().map(|run| run.id),
@@ -46,7 +46,7 @@ fn opening_a_history_row_lands_on_that_run_and_refuses_a_pruned_one() {
 
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Simulate);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Simulate);
     app.state
         .model
         .simulation
@@ -58,7 +58,7 @@ fn opening_a_history_row_lands_on_that_run_and_refuses_a_pruned_one() {
     app.after_contribution();
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Simulate,
+        rspice_app_state::workbench::workspace::Workspace::Simulate,
         "a pruned run must not move the reader"
     );
     assert!(

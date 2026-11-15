@@ -7,9 +7,9 @@ use egui::accesskit::Role;
 use super::app_state_of;
 use crate::feature_tests::replay::Replay;
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::app::actions::workspace::tests::state_with_amp_symbol_pin;
 use rspice_app_state::state::{CellViewRef, ComponentType, Point, PortDirection, SymbolPin};
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 /// The amp whose schematic declares IN, and whose symbol has OUT and VDD

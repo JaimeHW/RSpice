@@ -1,8 +1,8 @@
 //! `workbench/app_state/diagnostic_store` observed through a whole session.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::diagnostic_store::*;
 use rspice_app_state::state::CampaignMemberRefusal;
+use rspice_app_state::workbench::app_state::diagnostic_store::*;
 use rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata;
 
 /// A symbol view whose pins the checks can read: `work/amp/symbol`, with

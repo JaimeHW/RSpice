@@ -10,7 +10,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::Workspace;
 use rspice_app_design::schematic::view::gesture_commits;
 use rspice_app_design::schematic::view::schematic_symbol_context;
 use rspice_app_design::schematic::view::selection_transform::{
@@ -26,6 +25,7 @@ use rspice_app_state::state::{
     MoveSelectionMode, Point, Rotation, Selection, SheetDefinition, SheetId, SheetPortPolicy,
     SheetTemplate, View, ViewType,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_design::projection::ProjectionSource;
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_schematic_editor::view::pointer_target::PointerTarget;
@@ -404,7 +404,7 @@ impl Bench {
     /// Make sheet `index` the one being edited, as its tab does.
     pub(super) fn activate_sheet(&mut self, index: usize) {
         let state = &mut self.app.state;
-        let _ = crate::workbench::app::sheets::activate_sheet(
+        let _ = rspice_app_sheets::workbench::app::actions::sheets::activate_sheet(
             &mut state.model,
             &mut state.workbench,
             &mut *state.design,
@@ -414,7 +414,8 @@ impl Bench {
     }
 
     pub(super) fn active_sheet(&self) -> usize {
-        let active = crate::workbench::app::sheets::active_sheet_id(&self.app.state);
+        let active =
+            rspice_app_sheets::workbench::app::actions::sheets::active_sheet_id(&self.app.state);
         self.sheets
             .iter()
             .position(|sheet| Some(*sheet) == active)

@@ -7,8 +7,6 @@
 use rspice_design::drc::DrcResult;
 
 use super::AppState;
-use super::waivers::StoredWaivers;
-use crate::workbench::state::InlineEditAuthority;
 use rspice_app_design::workbench::app::actions::hierarchy_net_highlight::light_net_named;
 use rspice_app_design::workbench::app::actions::workspace::design_checks::check_active_cellview;
 use rspice_app_design::workbench::app::actions::workspace::history::{
@@ -21,6 +19,8 @@ use rspice_app_design::workbench::app::actions::workspace::symbol_document::{
 };
 use rspice_app_design::workbench::app::actions::workspace::waivers::restate_waived_findings;
 use rspice_app_state::state::{CellViewRef, SymbolDocument, SymbolEditorMetadata};
+use rspice_app_state::workbench::app_state::waivers::StoredWaivers;
+use rspice_app_workbench::workbench::state::console_views::InlineEditAuthority;
 
 impl AppState {
     /// [`check_active_cellview`] for the session.
@@ -103,11 +103,12 @@ impl AppState {
     /// checks have run.
     pub(crate) fn active_symbol_pin_finding_levels(
         &self,
-    ) -> Option<Vec<super::diagnostic_store::DiagnosticLevel>> {
+    ) -> Option<Vec<rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel>>
+    {
         let subject = self.model.workspace.content.active_view.clone();
         self.model
             .diagnostics
-            .batch(&super::diagnostic_store::DiagnosticInputs::SymbolPins { subject })
+            .batch(&rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs::SymbolPins { subject })
             .map(|batch| batch.records.iter().map(|record| record.level).collect())
     }
 

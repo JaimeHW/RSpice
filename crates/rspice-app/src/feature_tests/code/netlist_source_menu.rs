@@ -1,7 +1,6 @@
 //! The source editor's menu through the whole application: the commands the
 //! code feature reads, and the rows a page's context reads once it has drawn.
 
-use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, features};
 use egui::os::OperatingSystem;
 use rspice_app_code::workbench::code::CodeFeature;
@@ -13,6 +12,7 @@ use rspice_app_code::workbench::surfaces::netlist::fixtures::seal_manual_run;
 use rspice_app_code::workbench::surfaces::netlist::source_menu::SourceMenuLookup;
 use rspice_app_code::workbench::surfaces::netlist::{prepare_workspace, show_prepared};
 use rspice_app_state::state::command_catalog::CommandPlatform;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{
     menu_keys, resolve_menu_rows,
 };

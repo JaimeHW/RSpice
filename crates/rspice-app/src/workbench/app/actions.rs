@@ -243,7 +243,7 @@ mod shortcut_ownership_tests {
     fn publish_sheet_assignment(
         state: &mut crate::workbench::app_state::AppState,
     ) -> rspice_app_state::state::CellViewRef {
-        use crate::workbench::app_state::DesignManagementHistoryEntry;
+        use rspice_app_state::workbench::app_state::design_history::DesignManagementHistoryEntry;
 
         state.open_project_session();
         let owner = state.model.workspace.content.active_schematic_reference();
@@ -404,7 +404,7 @@ mod shortcut_ownership_tests {
             .open_workspace_view(CellViewRef::new("dispatch", "amp", "symbol"));
         app.state
             .workbench
-            .activate(crate::workbench::state::Workspace::Design);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
         app
     }
 
@@ -421,7 +421,7 @@ mod shortcut_ownership_tests {
         schematic
             .state
             .workbench
-            .activate(crate::workbench::state::Workspace::Design);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
         let mut symbol = app_on_a_symbol_view();
         for app in [&mut schematic, &mut symbol] {
             let view = app.state.model.workspace.content.active_view_type();
@@ -454,7 +454,8 @@ mod shortcut_ownership_tests {
     fn open_responsive_drawer_blocks_background_shortcut_dispatch() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
+        state.workbench.drawer =
+            Some(rspice_app_workbench::workbench::state::workbench_session::Drawer::Navigator);
 
         assert!(shortcut_dispatch_blocked(&state, &ctx));
     }
@@ -495,7 +496,7 @@ mod shortcut_ownership_tests {
         assert!(app.state.model.simulation.select_run(0));
         app.state
             .workbench
-            .activate(crate::workbench::state::Workspace::Results);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Results);
         app.state.results.results.session.cursors.a = Some(0.5);
         app.state.results.results.session.cursor_strip = Some(0);
 
@@ -589,7 +590,7 @@ mod shortcut_ownership_tests {
         app.state.refresh_active_design_check_projection();
         app.state
             .workbench
-            .activate(crate::workbench::state::Workspace::Verify);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Verify);
 
         // The tour's position is the shared current finding, named by the
         // canonical identity its published record carries, so the Problems
@@ -608,7 +609,7 @@ mod shortcut_ownership_tests {
         app.execute_command_key(next);
         assert_eq!(
             app.state.workbench.workspace,
-            crate::workbench::state::Workspace::Design
+            rspice_app_state::workbench::workspace::Workspace::Design
         );
         assert_eq!(
             app.state.model.diagnostics.current_finding(),
@@ -652,7 +653,7 @@ mod shortcut_ownership_tests {
         );
         assert_eq!(
             app.state.workbench.workspace,
-            crate::workbench::state::Workspace::Design
+            rspice_app_state::workbench::workspace::Workspace::Design
         );
     }
 }
@@ -687,7 +688,7 @@ mod symbol_action_tests {
         app.state.open_workspace_view(reference);
         app.state
             .workbench
-            .activate(crate::workbench::state::Workspace::Design);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
 
         let select =
             rspice_app_design::workbench::design::commands::DesignCommand::SelectTool.key();

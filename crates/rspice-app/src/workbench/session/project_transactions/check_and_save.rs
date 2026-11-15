@@ -2,12 +2,12 @@
 //! validates and commits, its rollbacks, and the report it reads.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
 use crate::workbench::app::project_transactions::{WholeStateValidation, run_design_checks_in};
 use crate::workbench::app_state::AppState;
 use rspice_app_project::workbench::app::dialogs::check_and_save::{
     NEWER_CHANGES, revision_note_error, rollback_exact_journal,
 };
+use rspice_app_project::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
 use rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::SaveScope;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};

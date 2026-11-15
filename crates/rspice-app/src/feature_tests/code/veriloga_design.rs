@@ -13,12 +13,12 @@ use crate::workbench::app::veriloga_design_tests::{
     themed_context,
 };
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACompileOutcome,
 };
 use rspice_app_state::state::{CellViewRef, ProjectSourceId, ProjectSourceLanguage};
+use rspice_app_state::workbench::workspace::Workspace;
 
 fn editor_id(bundle_id: ProjectSourceId, logical_path: &str) -> egui::Id {
     code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, logical_path)
@@ -257,7 +257,7 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
     assert!(app.state.workbench.console_visible);
     assert_eq!(
         app.state.workbench.console_page,
-        crate::workbench::state::ConsolePage::References
+        rspice_app_workbench::workbench::state::workbench_session::ConsolePage::References
     );
     assert_eq!(
         app.state.prompt_text(),
@@ -408,7 +408,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
 
     // The worker answers while Design is still the workspace on screen.
     let selected = code_workspace::selected_veriloga_source_in(&app.state.model).unwrap();
-    let receipt = crate::workbench::app_state::model::compile_project_bundle_receipt(
+    let receipt = rspice_app_state::workbench::app_state::model::compile_project_bundle_receipt(
         app.state.model.workspace.content.project.id(),
         selected.bundle(),
         selected.selected_module(),

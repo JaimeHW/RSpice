@@ -3,7 +3,6 @@
 //! is the code feature's (`code::SOURCE_EDITOR_MENU`).
 
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::Workspace;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
@@ -20,6 +19,7 @@ use rspice_app_state::state::ModelsPage;
 use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::state::command_catalog::CommandKey;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::ApplicationMenu;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};

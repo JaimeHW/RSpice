@@ -508,14 +508,14 @@ fn imported_dataset_is_unattributed_stable_immutable_and_saveable() {
     assert_ne!(run.run_id.to_string(), run.dataset_id.to_string());
     assert_eq!(
         state.workbench.workspace,
-        crate::workbench::state::Workspace::Results
+        rspice_app_state::workbench::workspace::Workspace::Results
     );
     assert_eq!(
         state
             .workbench
             .documents
-            .active(crate::workbench::state::Workspace::Results),
-        Some(&crate::workbench::state::WorkspaceDocumentId::ResultDataset(run.dataset_id))
+            .active(rspice_app_state::workbench::workspace::Workspace::Results),
+        Some(&rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::ResultDataset(run.dataset_id))
     );
     assert!(
         rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),

@@ -94,17 +94,7 @@ use rspice_app_models::workbench::models::pack_persistence;
 #[cfg(target_arch = "wasm32")]
 use rspice_app_models::workbench::models::pdk_persistence;
 
-#[cfg(test)]
-pub(crate) use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ProjectReviewRequest;
-
-/// Sheet navigation and sheet lifecycle, where the shell's feature tests
-/// reach them.
-#[cfg(test)]
-pub(crate) use rspice_app_sheets::workbench::app::actions::sheets;
-
 pub(crate) use dialogs::state::HelpCenterPage;
-
-pub(crate) use rspice_app_state::workbench::app::schematic::placement::arm_pack_part;
 
 use rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session;
 
@@ -149,7 +139,7 @@ pub struct RSpiceApp {
     pub(crate) read_system_contrast:
         fn() -> Option<rspice_app_workbench::ui::palette::ContrastInks>,
     pub(crate) export_workflow_io:
-        Box<dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo>,
+        Box<dyn rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo>,
 }
 
 fn configure_platform_input_contract(ctx: &Context) {
@@ -294,7 +284,7 @@ impl RSpiceApp {
             file_workflow_io: Box::new(rspice_app_services::io::NativeFileWorkflowIo),
             read_system_contrast: crate::workbench::system_contrast::read,
             export_workflow_io: Box::new(
-                crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
+                rspice_app_services::workbench::workflows::export_workflow::NativeExportWorkflowIo,
             ),
         }
     }
@@ -475,7 +465,7 @@ impl RSpiceApp {
             ),
             read_system_contrast: crate::workbench::system_contrast::read,
             export_workflow_io: Box::new(
-                crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
+                rspice_app_services::workbench::workflows::export_workflow::NativeExportWorkflowIo,
             ),
         }
     }
@@ -722,7 +712,7 @@ impl RSpiceApp {
     pub(crate) fn project_application_window(
         &mut self,
         window: rspice_app_workbench::workbench::lifecycle::window_session::ApplicationWindowId,
-        fallback_layout: crate::workbench::state::WorkspaceLayoutState,
+        fallback_layout: rspice_app_workbench::workbench::state::workbench_session::WorkspaceLayoutState,
     ) -> bool {
         let Some(window_state) = self.state.workbench.window_session.state(window).cloned() else {
             return false;
@@ -1106,8 +1096,8 @@ mod tests {
 
     #[test]
     fn window_rendering_preserves_primary_drawers_and_console_expansion() {
-        use crate::workbench::state::Drawer;
         use rspice_app_design::workbench::design::commands::DesignCommand;
+        use rspice_app_workbench::workbench::state::workbench_session::Drawer;
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
@@ -1124,7 +1114,8 @@ mod tests {
 
     #[test]
     fn window_projection_retains_independent_transient_panels_without_persisting_them() {
-        use crate::workbench::state::{Drawer, Workspace};
+        use rspice_app_state::workbench::workspace::Workspace;
+        use rspice_app_workbench::workbench::state::workbench_session::Drawer;
 
         let mut app = RSpiceApp::test_instance();
         let primary = app.state.workbench.window_session.primary();
@@ -1173,8 +1164,9 @@ mod tests {
 
     #[test]
     fn portrait_toolbar_shelf_search_and_canvas_placement_work_across_frames() {
-        use crate::workbench::{commands::vocabulary::Command, state::Drawer};
+        use crate::workbench::commands::vocabulary::Command;
         use rspice_app_state::state::Tool;
+        use rspice_app_workbench::workbench::state::workbench_session::Drawer;
 
         struct Fixture {
             ctx: Context,
@@ -1814,7 +1806,7 @@ mod tests {
         assert!(state.application_modal_open());
         state.models.model_browser_state.open = false;
 
-        state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
         state.code.netlist.find.open = true;
         assert!(state.application_modal_open());
         state.code.netlist.find.open = false;

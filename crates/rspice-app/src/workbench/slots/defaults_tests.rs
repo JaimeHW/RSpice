@@ -9,10 +9,13 @@
 
 use super::*;
 use rspice_app_design::workbench::slots::design::{DesignPanel, DesignState};
+use rspice_app_models::workbench::slots::models::ModelsState;
 use rspice_app_project::workbench::project::workspace_state::{
     LibraryCellviewPage, ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
     ProjectPage,
 };
+use rspice_app_project::workbench::slots::project::ProjectState;
+use rspice_app_simulate::workbench::slots::simulate::SimulateState;
 use rspice_app_state::state::{SimulationPage, VerificationPage};
 
 #[test]

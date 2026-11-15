@@ -11,7 +11,7 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
         let mut state = AppState::default();
         state
             .workbench
-            .activate(crate::workbench::state::Workspace::Models);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Models);
         let path = unique_path("model-validation-evidence");
         save_native(
             &mut state,
@@ -120,7 +120,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
         let mut state = AppState::default();
         state
             .workbench
-            .activate(crate::workbench::state::Workspace::Models);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Models);
         let first = state
             .model
             .model_library_manager

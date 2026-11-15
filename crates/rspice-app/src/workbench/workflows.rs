@@ -7,7 +7,6 @@
 //! injectable IO backend so the tests can run them without touching a disk or
 //! a file picker.
 
-pub(crate) use rspice_app_services::workbench::workflows::export_workflow;
 pub(crate) mod file_actions;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod foreign_schematic_workflow;

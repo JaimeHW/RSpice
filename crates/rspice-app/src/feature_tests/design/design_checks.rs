@@ -47,7 +47,7 @@ fn a_check_that_finds_errors_warns_and_opens_problems() {
     assert!(state.workbench.console_visible);
     assert_eq!(
         state.workbench.console_page,
-        crate::workbench::state::ConsolePage::Problems
+        rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Problems
     );
     assert!(state.workbench.toasts.activity().is_empty());
 

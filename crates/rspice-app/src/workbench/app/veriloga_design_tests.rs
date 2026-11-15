@@ -5,11 +5,11 @@
 //! feature_tests/code/veriloga_design.
 
 use super::*;
-use crate::workbench::state::Workspace;
 use rspice_app_state::state::{
     Cell, CellViewRef, Library, ProjectSourceBundle, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, View, ViewType,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 
 const LIBRARY: &str = "behavioral";
 

@@ -8,31 +8,9 @@
 //! field, by the session wire. Each is `Default + Clone`, because a project
 //! transaction builds its result in a clone of the whole state.
 
-use rspice_app_cloud::workbench::slots::cloud;
-use rspice_app_code::workbench::slots::code;
-use rspice_app_hardcopy::workbench::slots::hardcopy;
-use rspice_app_models::workbench::slots::models;
-use rspice_app_project::workbench::slots::project;
-use rspice_app_results::workbench::slots::results;
-use rspice_app_runs::workbench::slots::runs;
-use rspice_app_services::workbench::slots::platform;
-use rspice_app_settings::workbench::slots::settings;
-use rspice_app_sheets::workbench::slots::sheets;
 mod shell;
-use rspice_app_simulate::workbench::slots::simulate;
 
-pub(crate) use cloud::CloudState;
-pub(crate) use code::CodeState;
-pub(crate) use hardcopy::HardcopyState;
-pub(crate) use models::ModelsState;
-pub(crate) use platform::PlatformState;
-pub(crate) use project::ProjectState;
-pub(crate) use results::ResultsState;
-pub(crate) use runs::RunsState;
-pub(crate) use settings::SettingsState;
-pub(crate) use sheets::SheetsState;
 pub(crate) use shell::ShellState;
-pub(crate) use simulate::SimulateState;
 
 use crate::workbench::app_state::AppState;
 

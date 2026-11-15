@@ -3,9 +3,9 @@
 //! again.
 
 use super::*;
-use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
-use crate::workbench::app_state::waivers::{WaiverAction, WaiverTarget};
 use rspice_app_state::state::Point;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
+use rspice_app_state::workbench::app_state::waivers::{WaiverAction, WaiverTarget};
 use rspice_simulation::execution::PreparationStage;
 
 const REASON: &str = "sense is tied to SENSE on purpose";

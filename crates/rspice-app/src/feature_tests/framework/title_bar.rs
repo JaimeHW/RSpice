@@ -8,7 +8,6 @@ use egui::{Context, Frame, Id, Key, Modifiers, Popup, Rect, Ui};
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::{Command, command_registry};
-use crate::workbench::state::Workspace;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
@@ -20,6 +19,7 @@ use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::ModelsPage;
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::state::command_catalog::CommandKey;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::panels::WorkbenchIcon;
 use rspice_app_workbench::ui::theme::{self, FontWeight};
 use rspice_app_workbench::ui::tokens;

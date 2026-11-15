@@ -114,7 +114,11 @@ fn published(
 /// Verilog-A receipt is kept, and the documents a creation seeded.
 fn in_front(
     app: &crate::workbench::RSpiceApp,
-) -> (crate::workbench::state::Workspace, bool, Vec<String>) {
+) -> (
+    rspice_app_state::workbench::workspace::Workspace,
+    bool,
+    Vec<String>,
+) {
     let mut buffers = app
         .state
         .model

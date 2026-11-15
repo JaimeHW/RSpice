@@ -5,11 +5,11 @@
 use crate::workbench::app::project_transactions::WholeStateValidation;
 use rspice_design::drc::{DrcLocation, DrcSeverity};
 
-use crate::workbench::app::dialogs::check_and_save_validation::{
-    CheckAndSaveFindingLevel, CheckAndSaveValidationReport,
-};
 use crate::workbench::app::project_transactions::run_design_checks_in;
 use crate::workbench::app_state::AppState;
+use rspice_app_project::workbench::app::dialogs::check_and_save_validation::{
+    CheckAndSaveFindingLevel, CheckAndSaveValidationReport,
+};
 use rspice_app_services::workbench::lifecycle::project_lifecycle::SaveScope;
 use rspice_app_state::state::{ComponentType, Point};
 
@@ -91,8 +91,8 @@ fn validation_is_deterministic_and_stales_after_design_change() {
 /// states them under: a waived error is listed and blocks nothing.
 #[test]
 fn a_save_decides_from_the_checks_the_page_lists_and_waivers_count() {
-    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
-    use crate::workbench::app_state::waivers::WaiverAction;
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
+    use rspice_app_state::workbench::app_state::waivers::WaiverAction;
 
     let mut state = AppState::default();
     state.open_project_session();

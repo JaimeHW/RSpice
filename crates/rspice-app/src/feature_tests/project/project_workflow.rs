@@ -120,7 +120,7 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
     let mut state = AppState::default();
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     // An untouched project closes without asking; an edited one is reviewed.
     state
         .model
@@ -133,7 +133,7 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
     assert!(state.request_close_project());
     assert!(matches!(
         state.workbench.project_review_dialog.request,
-        Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
+        Some(rspice_app_workbench::workbench::app::dialogs::confirmation_state::ProjectReviewRequest::CloseProject(_))
     ));
 
     state.workbench.project_review_dialog.close();
@@ -143,7 +143,7 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
     assert!(!state.project.project_launcher_open);
     assert_eq!(
         state.workbench.workspace,
-        crate::workbench::state::Workspace::Project
+        rspice_app_state::workbench::workspace::Workspace::Project
     );
     assert_eq!(
         state.workbench.current_route().surface_id(),
@@ -199,7 +199,7 @@ fn startup_closes_a_saved_project_only_when_asked_and_nothing_is_lost() {
     assert!(!closed.platform.project_lifecycle.is_open());
     assert_eq!(
         closed.workbench.workspace,
-        crate::workbench::state::Workspace::Project
+        rspice_app_state::workbench::workspace::Workspace::Project
     );
 
     let mut edited = reopened("edited.rspiceproj", 1);
@@ -245,7 +245,7 @@ fn a_session_saved_after_close_project_restarts_with_no_project() {
         assert!(!restored.project.project_launcher_open);
         assert_eq!(
             restored.workbench.workspace,
-            crate::workbench::state::Workspace::Project
+            rspice_app_state::workbench::workspace::Workspace::Project
         );
     }
 }
@@ -335,9 +335,9 @@ fn a_saved_project_comes_back_through_its_session() {
 /// check failed.
 #[test]
 fn closing_a_project_as_an_edit_settles_checks_nothing() {
-    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
     use crate::workbench::examples::hierarchy_reference;
     use rspice_app_state::state::{ComponentType, Point};
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
 
     let reference = hierarchy_reference::build();
     let mut state = reference.state;
@@ -384,7 +384,7 @@ fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
     assert!(!state.project.project_launcher_open);
     assert_eq!(
         state.workbench.workspace,
-        crate::workbench::state::Workspace::Project
+        rspice_app_state::workbench::workspace::Workspace::Project
     );
     use rspice_app_workbench::workbench::framework::requests::LiveMirrorEntry;
     assert!(state.workbench.outbox.take::<LiveMirrorEntry>().is_some());
@@ -1169,7 +1169,7 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
 fn invalid_execution_context_does_not_partially_replace_open_project() {
     let mut project = project_named("invalid-context.rspiceproj");
     let context = rspice_app_services::io::capture_execution_context(
-        &crate::workbench::app_state::SimSetupState::new(),
+        &rspice_app_state::workbench::app_state::sim_setup::SimSetupState::new(),
         &rspice_app_state::state::model_library::ModelLibraryManager::new(),
     )
     .expect("baseline context validates");

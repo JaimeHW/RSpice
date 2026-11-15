@@ -2,7 +2,6 @@
 //! named, an anchor that no longer resolves renders inert and says why, and a
 //! run line refuses once its run is gone.
 
-use crate::workbench::state::{ConsoleChannel, ConsoleView};
 use crate::workbench::{AppState, RSpiceApp};
 use egui::Vec2;
 use rspice_app_state::diagnostics::LogAnchor;
@@ -10,6 +9,7 @@ use rspice_app_state::diagnostics::LogSource;
 use rspice_app_state::state::SimulationRun;
 use rspice_app_workbench::workbench::docks::console::log_anchor::*;
 use rspice_app_workbench::workbench::docks::console::transcript::console;
+use rspice_app_workbench::workbench::state::console_views::{ConsoleChannel, ConsoleView};
 
 /// Where the console painted the row whose message contains `needle`.
 ///
@@ -122,7 +122,7 @@ fn double_clicking_an_anchored_console_row_marks_what_the_run_named() {
     let mut state = state_with_probed_conductor();
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     state.model.log_buffer.log_anchored(
         rspice_app_state::diagnostics::LogSeverity::Error,
         LogSource::Run,
@@ -148,7 +148,7 @@ fn double_clicking_an_anchored_console_row_marks_what_the_run_named() {
     );
     assert_eq!(
         state.workbench.workspace,
-        crate::workbench::state::Workspace::Design,
+        rspice_app_state::workbench::workspace::Workspace::Design,
         "and take the reader to the drawing it marked it on"
     );
 }
@@ -160,7 +160,7 @@ fn an_unresolvable_anchor_renders_inert_and_says_why() {
     let mut state = state_with_probed_conductor();
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     let anchor = LogAnchor::Simulation {
         nets: vec!["DELETED".to_owned()],
         devices: Vec::new(),
@@ -197,7 +197,7 @@ fn an_unresolvable_anchor_renders_inert_and_says_why() {
     );
     assert_eq!(
         state.workbench.workspace,
-        crate::workbench::state::Workspace::Results,
+        rspice_app_state::workbench::workspace::Workspace::Results,
         "and must not navigate away from what the reader was looking at"
     );
     assert!(

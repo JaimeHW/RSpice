@@ -10,11 +10,11 @@ use egui::{Key, Modifiers};
 
 use crate::feature_tests::replay::{Replay, controls};
 use crate::workbench::features;
-use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_code::workbench::documents::code_workspace::{self, CodeWorkspacePage};
 use rspice_app_code::workbench::documents::virtual_text_editor::context_menu_may_show;
 use rspice_app_state::state::{ProjectSourceLanguage, ProjectSourceOwner};
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::feature::{Cx, Feature};
 
 /// The id of the editor the Automation page shows the workspace's entry

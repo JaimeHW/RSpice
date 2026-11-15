@@ -10,17 +10,22 @@ use std::time::Duration;
 
 use rspice_design::drc::DrcResult;
 
-use super::design_checks::CheckScope;
-#[cfg(test)]
-use super::design_checks::DesignCheckStatus;
-use super::diagnostic_store::listing::{ListingInputs, ListingSource};
-#[cfg(test)]
-use super::diagnostic_store::{BatchStanding, DiagnosticBatch};
-#[cfg(test)]
-use super::diagnostic_store::{DiagnosticInputs, DiagnosticRecord};
-use super::{AppState, Model, SlotFacts};
+use super::AppState;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::time_compat::Instant;
+use rspice_app_state::workbench::app_state::design_checks::CheckScope;
+#[cfg(test)]
+use rspice_app_state::workbench::app_state::design_checks::DesignCheckStatus;
+use rspice_app_state::workbench::app_state::diagnostic_store::listing::{
+    ListingInputs, ListingSource,
+};
+#[cfg(test)]
+use rspice_app_state::workbench::app_state::diagnostic_store::{BatchStanding, DiagnosticBatch};
+#[cfg(test)]
+use rspice_app_state::workbench::app_state::diagnostic_store::{
+    DiagnosticInputs, DiagnosticRecord,
+};
+use rspice_app_state::workbench::app_state::model::{Model, SlotFacts};
 
 /// The model a session holds, for the operations that read nothing else and
 /// take any holder of it.
@@ -156,7 +161,7 @@ impl AppState {
     pub(in crate::workbench) fn current_design_check(
         &self,
         subject: &CellViewRef,
-        scope: super::design_checks::CheckScope,
+        scope: rspice_app_state::workbench::app_state::design_checks::CheckScope,
     ) -> Option<&DrcResult> {
         self.model
             .current_design_check(subject, scope, self.slot_facts())
@@ -193,7 +198,7 @@ impl AppState {
     /// [`Model::ensure_design_check`] with the slots' facts, stating what its
     /// drawing sync had to say.
     ///
-    /// [`Model::ensure_design_check`]: crate::workbench::app_state::Model::ensure_design_check
+    /// [`Model::ensure_design_check`]: rspice_app_state::workbench::app_state::model::Model::ensure_design_check
     pub(in crate::workbench) fn ensure_design_check(
         &mut self,
         subject: CellViewRef,
@@ -210,7 +215,7 @@ impl AppState {
     /// [`Model::run_active_design_checks`] with the slots' facts, stating
     /// what its drawing sync had to say.
     ///
-    /// [`Model::run_active_design_checks`]: crate::workbench::app_state::Model::run_active_design_checks
+    /// [`Model::run_active_design_checks`]: rspice_app_state::workbench::app_state::model::Model::run_active_design_checks
     pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
         let facts = self.slot_facts();
         let (outcome, prompt) = self.model.run_active_design_checks(facts);
@@ -251,7 +256,7 @@ impl AppState {
     pub(crate) fn current_live_receipt(
         &self,
         subject: &CellViewRef,
-    ) -> Option<&super::design_checks::CellViewCheckReceipt> {
+    ) -> Option<&rspice_app_state::workbench::app_state::design_checks::CellViewCheckReceipt> {
         self.model.current_live_receipt(subject, self.slot_facts())
     }
 }

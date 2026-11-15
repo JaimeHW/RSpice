@@ -139,8 +139,8 @@ fn empty_projects_report_nothing_to_publish() {
 
 #[test]
 fn a_multi_sheet_cell_view_publishes_each_sheet_once() {
-    use crate::workbench::state::WorkspaceDocumentId;
     use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate, Wire};
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
     let mut state = AppState::default();
     // Both sheets draw their only wire at the same coordinates, so a page

@@ -511,7 +511,8 @@ fn a_code_model_with_open_port_widths_asks_before_it_arms() {
         "and asks nothing"
     );
 
-    app.state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
+    app.state.workbench.drawer =
+        Some(rspice_app_workbench::workbench::state::workbench_session::Drawer::Navigator);
     assert!(
         place_builtin_xspice(
             &mut app.state.design,
@@ -541,7 +542,7 @@ fn a_code_model_with_open_port_widths_asks_before_it_arms() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn shelf_selection_returns_to_canvas_without_hiding_desktop_dock() {
-    use crate::workbench::state::Drawer;
+    use rspice_app_workbench::workbench::state::workbench_session::Drawer;
 
     let builtin = engine_only_xspice_devices()
         .iter()

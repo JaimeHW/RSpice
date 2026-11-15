@@ -7,7 +7,6 @@ use std::collections::BTreeSet;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
-use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
@@ -16,6 +15,7 @@ use rspice_app_project::workbench::surfaces::project::overview::{
     run_plan_intent,
 };
 use rspice_app_state::state::CellViewRef;
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// The Overview's snapshot, as the page takes it in the context the shell
 /// lends it, with the dispatcher's answers for the commands its rows offer.

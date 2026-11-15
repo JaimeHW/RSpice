@@ -21,12 +21,13 @@ use rspice_hardcopy_contract::PrinterMediaSource;
 
 #[test]
 fn results_export_selects_the_active_project_document_pane_authority() {
-    use crate::workbench::state::{Workspace, WorkspaceDocumentId};
     use rspice_app_state::product::{AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId};
     use rspice_app_state::results::visualization_document::{
         ColumnRole, DocumentEdit, PaneDataBinding, SourceColumn, SourceDataset, SourceRow,
         TypedValue, ValueType, VisualizationDocument,
     };
+    use rspice_app_state::workbench::workspace::Workspace;
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
     let binding = DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([0x6e; 32]));
     let source = SourceDataset::new(
@@ -99,12 +100,11 @@ fn resolve_active_source(app: &mut RSpiceApp) -> Result<ResolvedHardcopyDocument
 fn governed_design_print_selects_the_active_sheet_identity() {
     let mut app = RSpiceApp::test_instance();
     let reference = app.state.model.workspace.content.active_view.clone();
-    app.state
-        .workbench
-        .documents
-        .activate(crate::workbench::state::WorkspaceDocumentId::CellView(
+    app.state.workbench.documents.activate(
+        rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::CellView(
             reference,
-        ));
+        ),
+    );
     let key = app.state.model.workspace.content.active_key();
     let sheet_id = app
         .state
@@ -124,8 +124,8 @@ fn governed_design_print_selects_the_active_sheet_identity() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn publication_reuses_only_the_exact_sealed_preview_plan() {
-    use crate::workbench::state::WorkspaceDocumentId;
     use rspice_app_state::state::{Point, Wire};
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
     let mut app = RSpiceApp::test_instance();
     app.state
@@ -168,8 +168,8 @@ fn publication_reuses_only_the_exact_sealed_preview_plan() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
-    use crate::workbench::state::WorkspaceDocumentId;
     use rspice_app_state::state::{Point, Wire};
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
     use rspice_hardcopy_contract::{HardcopyOutcome, PrinterRasterGeometry};
 
     let mut app = RSpiceApp::test_instance();
@@ -336,12 +336,13 @@ const EDITED_DECK: &str = "* owned deck\nV1 out 0 2\nR1 out 0 1k\n.op\n.end\n";
 /// with a sealed preview plan and no publication started.
 #[cfg(not(target_arch = "wasm32"))]
 fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
-    use crate::workbench::state::{Workspace, WorkspaceDocumentId};
     use rspice_app_code::workbench::documents::netlist_document::{
         begin_netlist_lifecycle_action_in, commit_netlist_lifecycle_action,
     };
     use rspice_app_state::state::{Point, Wire};
+    use rspice_app_state::workbench::workspace::Workspace;
     use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
     let mut app = RSpiceApp::test_instance();
     begin_netlist_lifecycle_action_in(
@@ -399,8 +400,8 @@ fn assert_export_survived(app: &RSpiceApp, plan: &std::sync::Arc<HardcopyPlan>, 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn netlist_transactions_keep_an_export_in_flight() {
-    use crate::workbench::app_state::model::LiveOwnedSource;
     use rspice_app_code::workbench::documents::netlist_document::replace_owned_source;
+    use rspice_app_state::workbench::app_state::model::LiveOwnedSource;
     use rspice_app_workbench::workbench::framework::feature::CodePort;
 
     let mut app = export_open_on_a_netlist_owned_project();
@@ -543,7 +544,7 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
         app.state
             .model
             .apply_live_owned_source(PEER_DECK.to_owned(), shows_owned_root),
-        crate::workbench::app_state::model::LiveOwnedSource::Applied(_)
+        rspice_app_state::workbench::app_state::model::LiveOwnedSource::Applied(_)
     ));
 
     let ctx = egui::Context::default();

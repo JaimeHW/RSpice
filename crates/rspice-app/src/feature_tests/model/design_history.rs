@@ -7,7 +7,6 @@
 //! see on screen.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::design_history::*;
 use rspice_app_state::product::ObjectRevision;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::state::DesignManagementCatalog;
@@ -24,6 +23,7 @@ use rspice_app_state::state::model_library::ProjectModelDefinition;
 use rspice_app_state::state::model_library::ProjectModelRevisionDefinition;
 use rspice_app_state::state::write_policy::LocalSafeModeOptions;
 use rspice_app_state::state::{Cell, ComponentType, LibraryCellInstance, Point, View, ViewType};
+use rspice_app_state::workbench::app_state::design_history::*;
 use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 use std::collections::BTreeMap;
 

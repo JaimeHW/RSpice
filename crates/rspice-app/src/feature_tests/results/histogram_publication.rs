@@ -2,7 +2,6 @@
 
 use crate::feature_tests::hardcopy::source_reads;
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, prepare_retained_hardcopy_resolution,
 };
@@ -11,6 +10,7 @@ use rspice_app_state::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata,
     SimulationRunLifecycle, SimulationRunProvenance,
 };
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 use rspice_hardcopy_contract::{
     BackgroundMode, ColorMapping, FontPolicy, HardcopyScope, HardcopySetup, OutputFormat,
     RenderSetup, RenderTarget,

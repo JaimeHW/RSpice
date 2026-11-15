@@ -14,7 +14,7 @@ fn initial_focus_accepts_source_search_typing() {
         rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+        app.state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
         app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
         if read_only {
             app.state.model.safe_mode.activate(

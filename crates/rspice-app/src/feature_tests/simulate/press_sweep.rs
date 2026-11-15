@@ -1207,10 +1207,10 @@ fn the_sweep_press_that_starts_a_picker_answers_without_a_dialog() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn spec_sheet_import_answers_without_a_dialog() {
-    use crate::workbench::state::SimulationWorkflowDialog;
     use rspice_app_services::io::file_exchange::{
         ScriptedChoice, script_next_choice, scripted_choices_remaining, take_pickers_opened,
     };
+    use rspice_app_simulate::workbench::state::workflow_drafts::SimulationWorkflowDialog;
 
     let index = (0..surface_count())
         .find(|&index| sweep_surface(index).0 == "Variables")

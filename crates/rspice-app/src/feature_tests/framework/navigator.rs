@@ -2,7 +2,7 @@
 //! mockup and the names they give assistive technology.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::docks::navigator::{
     header, panel_search, panel_search_field_width,
 };

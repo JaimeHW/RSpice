@@ -1,11 +1,11 @@
 //! `workbench/app_state/rule_deck` observed through a whole session.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
-use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
-use crate::workbench::app_state::diagnostic_store::DiagnosticRecord;
-use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use rspice_app_state::state::PreflightRemediation;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRecord;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
 
 fn deck_records(state: &AppState) -> Vec<DiagnosticRecord> {
     state

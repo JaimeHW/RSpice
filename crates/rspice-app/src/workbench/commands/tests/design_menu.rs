@@ -159,7 +159,7 @@ fn configurations_opens_the_project_configuration_page() {
     Command::ConfigurationSets.execute(&mut app);
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Project
+        rspice_app_state::workbench::workspace::Workspace::Project
     );
     assert_eq!(
         app.state.project.project_page,

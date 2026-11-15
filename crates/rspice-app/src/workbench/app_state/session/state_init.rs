@@ -80,7 +80,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         rspice_app_state::state::pdk_config::PdkConfig::default(),
         None::<String>,
     );
-    let model = crate::workbench::app_state::Model::session_start(
+    let model = rspice_app_state::workbench::app_state::model::Model::session_start(
         pdk_config,
         pdk_load_error,
         restore_session_model_library_manager,

@@ -4,7 +4,6 @@
 
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
-use crate::workbench::state::Workspace;
 use egui::Key;
 use egui::os::OperatingSystem;
 use rspice_app_design::workbench::design::commands::DesignCommand;
@@ -18,6 +17,7 @@ use rspice_app_state::state::shortcuts::ShortcutProfileIssueSeverity;
 use rspice_app_state::state::shortcuts::ShortcutSequence;
 use rspice_app_state::state::shortcuts::ShortcutStroke;
 use rspice_app_state::state::shortcuts::SingleKeyCanvasPolicy;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 fn sequence(key: Key, primary: bool) -> ShortcutSequence {

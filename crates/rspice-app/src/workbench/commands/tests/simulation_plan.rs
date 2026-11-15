@@ -96,7 +96,7 @@ fn managing_simulation_plans_opens_the_plan_manager_on_the_active_plan() {
     );
     app.execute_command_key(manage);
 
-    let Some(crate::workbench::state::SimulationWorkflowDialog::PlanManager(draft)) =
+    let Some(rspice_app_simulate::workbench::state::workflow_drafts::SimulationWorkflowDialog::PlanManager(draft)) =
         app.state.simulate.simulation_workflow.as_ref()
     else {
         panic!("the plan manager did not open");
@@ -105,7 +105,7 @@ fn managing_simulation_plans_opens_the_plan_manager_on_the_active_plan() {
     assert_eq!(draft.name, "Regression envelope");
     assert_eq!(
         draft.mode,
-        crate::workbench::state::SimulationPlanManagerMode::Browse
+        rspice_app_simulate::workbench::state::workflow_drafts::SimulationPlanManagerMode::Browse
     );
 }
 

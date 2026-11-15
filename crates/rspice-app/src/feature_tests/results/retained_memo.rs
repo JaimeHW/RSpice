@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use crate::workbench::state::WorkspaceDocumentId;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::test_fixtures::analysis;
 use rspice_app_results::workbench::documents::result_document::{create_document, view_context};
 use rspice_app_state::state::{AnalysisType, SimulationRunLifecycle, SimulationRunProvenance};
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
 fn retained_state(kind: AnalysisType, samples: usize) -> AppState {
     let mut state = AppState::default();

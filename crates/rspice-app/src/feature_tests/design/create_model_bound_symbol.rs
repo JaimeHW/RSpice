@@ -57,7 +57,7 @@ fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(), String> 
     state.open_workspace_view(reference);
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     Ok(())
 }
 

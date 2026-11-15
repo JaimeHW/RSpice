@@ -3,7 +3,7 @@
 //! recording or removing one does to a run already checked.
 
 use super::*;
-use crate::workbench::app_state::waivers::WaiverAction;
+use rspice_app_state::workbench::app_state::waivers::WaiverAction;
 
 const REASON: &str = "the stub is a probe point";
 
@@ -205,7 +205,7 @@ fn the_row_menu_waives_the_row_it_was_opened_on() {
 /// reason that could not be recorded.
 #[test]
 fn a_waiver_that_cannot_be_recorded_here_is_not_offered() {
-    use crate::workbench::app_state::waivers::WaiverTarget;
+    use rspice_app_state::workbench::app_state::waivers::WaiverTarget;
 
     let mut state = open_state();
     let symbol = rspice_app_state::state::CellViewRef::new("work", "amp", "symbol");
@@ -300,7 +300,8 @@ fn runnable_colliding_app() -> crate::workbench::RSpiceApp {
         .run_active_design_checks()
         .expect("the checks run");
     app.state.workbench.console_visible = true;
-    app.state.workbench.console_page = crate::workbench::state::ConsolePage::Problems;
+    app.state.workbench.console_page =
+        rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Problems;
     app
 }
 

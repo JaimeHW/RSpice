@@ -12,9 +12,7 @@ use crate::feature_tests::design::create_model_bound_symbol::{
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame_with, themed_context};
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRoute};
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::app::dialogs::create_model_bound_symbol::state::PRIMARY;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
@@ -26,6 +24,8 @@ use rspice_app_state::state::{
     CellViewRef, ModelBoundSymbolDefinition, Point, PortDirection, SymbolDocument,
     SymbolEditorMetadata, SymbolElectricalType, SymbolPin, SymbolPinSide,
 };
+use rspice_app_state::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRoute};
+use rspice_app_state::workbench::workspace::Workspace;
 
 fn unique_path(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(

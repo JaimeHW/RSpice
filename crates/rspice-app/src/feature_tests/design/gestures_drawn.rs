@@ -3,10 +3,10 @@
 
 use crate::workbench::app::*;
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::Workspace;
 use egui::Context;
 use rspice_app_design::workbench::app_state::interaction_state::DragType;
 use rspice_app_state::state::{ComponentType, Point, SchematicState, Tool, Wire};
+use rspice_app_state::workbench::workspace::Workspace;
 
 #[test]
 fn gesture_release_commits_selection_and_wire_vertex_moves_once() {
@@ -512,7 +512,7 @@ fn switching_sheets_mid_drag_leaves_the_first_sheets_buffer_as_before_the_drag()
     fixture.drag(DragType::MoveSelection);
 
     let state = &mut fixture.app.state;
-    crate::workbench::app::sheets::activate_sheet(
+    rspice_app_sheets::workbench::app::actions::sheets::activate_sheet(
         &mut state.model,
         &mut state.workbench,
         &mut *state.design,

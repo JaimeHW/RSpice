@@ -42,6 +42,6 @@ fn pending_specs_route_survives_viewer_and_draft_reconciliation() {
     assert!(!app.state.results.specification_editor_route_pending);
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Results
+        rspice_app_state::workbench::workspace::Workspace::Results
     );
 }

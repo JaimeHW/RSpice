@@ -7,9 +7,9 @@
 //! netlist returns the instance it started from.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::Workspace;
 use rspice_app_state::state::ComponentType;
 use rspice_app_state::state::Point;
+use rspice_app_state::workbench::workspace::Workspace;
 
 const DECK: &str = "show-in-netlist fixture\nV1 in 0 1\nR1 in out 1k\n+ tc1=0\n.op\n.end\n";
 

@@ -207,7 +207,7 @@ fn open_in_results_opens_the_run_in_the_frame_it_is_released() {
     app.state.runs.manual_run.last_run_buffer = Some(DECK.to_owned());
     app.state.runs.manual_run.last_run_id = Some(run);
     app.state.model.simulation.view.active_run_idx = None;
-    app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+    app.state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
     let mut replay = Replay::of(app);
     let open = only(&replay.frames(Vec::new()), "Open in Results", Role::Button).center;
     press_and_release(&mut replay, open);
@@ -218,7 +218,7 @@ fn open_in_results_opens_the_run_in_the_frame_it_is_released() {
     );
     assert_eq!(
         replay.app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Results,
+        rspice_app_state::workbench::workspace::Workspace::Results,
         "the frame of the release ends on Results"
     );
 }
@@ -237,7 +237,8 @@ fn import_deck_is_answered_in_the_frame_it_is_released() {
         String::new(),
     );
     assert!(replay.app.state.model.safe_mode.project_read_only());
-    replay.app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+    replay.app.state.workbench.workspace =
+        rspice_app_state::workbench::workspace::Workspace::Netlist;
     // The empty page measures its actions in an invisible pass before it
     // draws them, and the measured copies are in the tree too: the drawn
     // button is the last.

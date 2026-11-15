@@ -10,12 +10,12 @@ use crate::workbench::features;
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::rollback_project_library_publication;
-use crate::workbench::state::Workspace;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::library::{
     AUDIT_REPORT_ID, LibraryIntent, apply_library_intent, icon_for_view, library_context,
 };
 use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_ui_kit::panels::WorkbenchIcon;
 
 /// Carry `intent` out as the page does, then answer what it raised, as

@@ -87,7 +87,8 @@ mod tests {
             "the frame that published the findings asks for the next"
         );
         assert_ne!(
-            crate::workbench::app_state::diagnostic_store::listing::listing(&app.state).len(),
+            rspice_app_state::workbench::app_state::diagnostic_store::listing::listing(&app.state)
+                .len(),
             0,
             "the live pass was published"
         );

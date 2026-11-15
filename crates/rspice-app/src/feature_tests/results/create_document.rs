@@ -2,8 +2,6 @@
 //! family, name and viewer choices, and a commit that the project owns.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
-use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_results::workbench::documents::result_document::create_document::*;
 use rspice_app_state::results::visualization_document::ResultDocumentTracking;
 use rspice_app_state::state::AnalysisResult;
@@ -20,6 +18,8 @@ use rspice_app_state::state::SoaParameterEvidence;
 use rspice_app_state::state::SoaRuleVerdictEvidence;
 use rspice_app_state::state::SoaViolationEvidence;
 use rspice_app_state::state::SoaViolationSeverityEvidence;
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 use rspice_results::document_creation::ResultDocumentFamily;
 use rspice_results::document_creation::ResultDocumentLayout;
 use rspice_results_ui::create_document::{CreateDocumentHost, CreateResultDocumentDialogState};

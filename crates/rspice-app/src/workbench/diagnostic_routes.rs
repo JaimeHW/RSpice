@@ -22,9 +22,7 @@
 use egui::Context;
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
@@ -32,6 +30,8 @@ use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::{DrawnObject, PreflightRemediation};
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// Apply the route a consumer asked for, if one is outstanding.
 ///
@@ -70,7 +70,7 @@ pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
         } => open_code_document(ctx, app, bundle, &logical_path, line, column),
         DiagnosticRoute::Repair(remediation) => apply_remediation(app, remediation),
         DiagnosticRoute::RunLogLine { run_sequence, line } => {
-            crate::workbench::commands::result_navigation::show_run_line(
+            rspice_app_results::workbench::commands::result_navigation::show_run_line(
                 &app.state.model,
                 &mut app.state.workbench,
                 run_sequence,
@@ -307,7 +307,7 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                 },
             };
             app.state.open_workspace_view(cell_view.clone());
-            match crate::workbench::app_state::model_location_anchor(
+            match rspice_app_state::workbench::app_state::design_checks::model_location_anchor(
                 &app.state.model,
                 app.state.design.schematic_visibility.review_markers,
                 &cell_view,

@@ -16,7 +16,7 @@ use rspice_design_model::{Point, SchematicPageOrientation};
 use rspice_schematic_editor::view::drawing_sheet::{DrawingSheetGeometry, WorldRect};
 use rspice_schematic_editor::view::symbol_context::SchematicSymbolContext;
 
-use crate::workbench::app_state::Model;
+use rspice_app_state::workbench::app_state::model::Model;
 
 /// The clearance between the drawing and the edge of the area it is placed
 /// in, in world units: 10 mm.

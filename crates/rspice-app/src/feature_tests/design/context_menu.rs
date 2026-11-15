@@ -2,7 +2,6 @@
 
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::answer_surface_requests;
-use crate::workbench::state::Workspace;
 use egui::{Context, Key, Modifiers, Rect, Ui, pos2, vec2};
 use rspice_app_design::schematic::view::SchematicSymbolContext;
 use rspice_app_design::schematic::view::context_menu::{ARRANGE_ENTRIES, ContextEntry};
@@ -18,6 +17,7 @@ use rspice_app_state::state::{
     Component, ComponentType, DesignNote, DesignNoteKind, DocumentationShape,
     DocumentationShapeGeometry, Junction, LibraryCellInstance, NetLabel, Wire,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_schematic_editor::view::context_menu::ContextMenuBinding;
 use rspice_schematic_editor::view::context_menu::ContextMenuRequest;
 use rspice_schematic_editor::view::context_menu::ContextMenuView;

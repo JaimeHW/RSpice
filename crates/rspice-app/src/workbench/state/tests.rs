@@ -4,9 +4,20 @@
 //! the live layout owner rather than a copy. That every layout round-trips
 //! through the saved session unchanged is tested with the session wire.
 
-use super::*;
+use rspice_app_simulate::workbench::state::simulate_session::VerificationSessionState;
 use rspice_app_state::state::VerificationPage;
+use rspice_app_state::workbench::preferences::WorkspacePreset;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::requests::FullScreen;
+use rspice_app_workbench::workbench::routing::{
+    navigation::{BrowserHistoryEffect, RouteTransitionSource},
+    surface_catalog::SurfaceId,
+    surface_route::SurfaceRoute,
+};
+use rspice_app_workbench::workbench::state::workbench_session::{
+    ConsolePage, Drawer, LAYOUT_SCHEMA_VERSION, WidthClass, WorkbenchSession, WorkspaceLayoutState,
+    default_inspector_width, default_navigator_width,
+};
 
 #[test]
 fn canonical_workspace_order_is_stable() {

@@ -2,7 +2,6 @@
 //! lends, or through the whole frame: the component, net, sheet and selection
 //! cards and what their edits do.
 
-use crate::workbench::state::{InlineEditField, InlineEditSession, Workspace};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_design::workbench::app::actions::workspace::inline_edit_authority;
 use rspice_app_design::workbench::design::inspector::component::{
@@ -22,7 +21,9 @@ use rspice_app_state::state::model_library::{DeviceModel, ModelLibrary, ModelTyp
 use rspice_app_state::state::{
     CellViewRef, Component, ComponentType, LibraryCellInstance, Point, SchematicProbe, ViewType,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::feature::SimulatePort as _;
+use rspice_app_workbench::workbench::state::console_views::{InlineEditField, InlineEditSession};
 use std::collections::HashMap;
 
 /// A whole application whose sheet holds one instance bound to a vendor model

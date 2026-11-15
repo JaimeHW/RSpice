@@ -2,7 +2,6 @@
 //! and glyphs, and the responsive widths every breakpoint reserves.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::{WorkbenchSession, Workspace};
 use egui::Vec2;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_design::workbench::design::toolbar::{
@@ -21,9 +20,11 @@ use rspice_app_state::state::{
     PreparedSourceCheckReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
     Tool,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::panels::WorkbenchIcon;
 use rspice_app_workbench::workbench::chrome::toolbar::*;
 use rspice_app_workbench::workbench::layout::LayoutSpec;
+use rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession;
 
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
@@ -119,7 +120,7 @@ fn running_dataset_is_never_presented_as_current() {
     let dataset_id = run.dataset_id;
     app.state.model.simulation.retained.runs = vec![run].into();
     app.state.workbench.documents.activate(
-        crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
+        rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::ResultDataset(dataset_id),
     );
 
     assert!(!results_document_is_historical(app.state.results_reads()));
@@ -136,7 +137,7 @@ fn missing_current_generated_source_never_authenticates_a_retained_dataset() {
     let dataset_id = run.dataset_id;
     app.state.model.simulation.retained.runs = vec![run].into();
     app.state.workbench.documents.activate(
-        crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
+        rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::ResultDataset(dataset_id),
     );
 
     assert!(results_document_is_historical(app.state.results_reads()));

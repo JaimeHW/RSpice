@@ -2,8 +2,8 @@
 //! feature's command, and owns no dialog of its own.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// The chip's whole purpose is the plan manager. Navigating to Simulation
 /// Studio instead left the manager reachable only from a button inside it.
@@ -17,7 +17,7 @@ fn the_plan_chip_owns_no_dialog_construction_of_its_own() {
 
     assert!(matches!(
         app.state.simulate.simulation_workflow,
-        Some(crate::workbench::state::SimulationWorkflowDialog::PlanManager(_))
+        Some(rspice_app_simulate::workbench::state::workflow_drafts::SimulationWorkflowDialog::PlanManager(_))
     ));
     assert_ne!(app.state.workbench.workspace, Workspace::Simulate);
 }

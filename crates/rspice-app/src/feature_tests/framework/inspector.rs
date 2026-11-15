@@ -5,9 +5,9 @@
 //! bounded, so two schematic subjects cannot inherit each other's offset.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::design::inspector::bind_component_model_from_catalog;
 use rspice_app_state::state::{Component, ComponentType};
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::docks::inspector::*;
 
 fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
@@ -110,7 +110,9 @@ fn catalog_binding_preserves_raw_parameters_and_refuses_malformed_text_atomicall
 
 #[test]
 fn catalog_binding_resolves_the_pending_inspector_draft_before_model_publication() {
-    use crate::workbench::state::{InlineEditField, InlineEditSession};
+    use rspice_app_workbench::workbench::state::console_views::{
+        InlineEditField, InlineEditSession,
+    };
     let (mut app, id) = catalog_test_diode(r#"note="a  b""#);
     let expected = app.state.model.schematic.document().components[0].clone();
     let mut candidate = expected.clone();

@@ -11,7 +11,6 @@ use crate::workbench::app::veriloga_design_tests::{
 };
 use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::features;
-use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::documents::code_workspace::{
@@ -21,6 +20,7 @@ use rspice_app_code::workbench::surfaces::veriloga;
 use rspice_app_state::state::{
     CellViewRef, Point, PortDirection, SymbolDocument, SymbolElectricalType,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_design::symbol::SymbolShape;
 use rspice_design::symbol::generated::{GENERATED_SYMBOL_VIEW, is_generated_symbol};
 use rspice_design_model::symbol_pin::SymbolPinSide;
@@ -376,7 +376,7 @@ fn the_symbol_editor_answers_a_compiled_symbol_to_its_module() {
 /// pin list, on the canvas and in the finding the pin check publishes.
 #[test]
 fn a_pin_the_module_dropped_is_named_against_the_module() {
-    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
 
     let mut app = open_project_app();
     let reference = add_module_cell(&mut app.state, "ota", "ota", &amplifier(", en"));

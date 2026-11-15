@@ -118,7 +118,7 @@ fn a_press_returns_before_its_run_is_prepared_or_checked() {
 /// is left behind: no run retained, no report, no findings, nothing queued.
 #[test]
 fn stop_during_preparation_queues_nothing_and_leaves_nothing_behind() {
-    use crate::workbench::app_state::diagnostic_store::DiagnosticOwner;
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticOwner;
 
     let mut app = inverter_over_a_run_set();
     let release = app.simulation_controller.hold_next_preflight_worker();
@@ -166,8 +166,10 @@ fn stop_during_preparation_queues_nothing_and_leaves_nothing_behind() {
 /// as it stood at the press, so it reads stale. Nothing is retained or queued.
 #[test]
 fn an_edit_during_preparation_queues_nothing_and_stales_what_the_pass_found() {
-    use crate::workbench::app_state::diagnostic_store::{BatchStanding, DiagnosticOwner};
     use rspice_app_state::state::{ComponentType, Point};
+    use rspice_app_state::workbench::app_state::diagnostic_store::{
+        BatchStanding, DiagnosticOwner,
+    };
 
     let (mut app, _) = app_with_a_forced_capacitor_island(true);
     let release = app.simulation_controller.hold_next_preflight_worker();

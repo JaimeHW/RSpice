@@ -14,13 +14,13 @@ use egui::accesskit::Role;
 use egui::{Key, Modifiers, Pos2};
 
 use crate::feature_tests::replay::{Control, Replay, controls, only};
-use crate::workbench::state::Workspace;
 use rspice_app_code::automation_workflow::{ArtifactKind, RenderedArtifact};
 use rspice_app_code::workbench::documents::code_workspace::{
     self, AutomationArtifactStore, AutomationExecutionState, AutomationRuntimeLaunchMode,
     CodeWorkspacePage, PendingAutomationRuntimeExecution, SourceOperationToken,
 };
 use rspice_app_state::state::{ProjectSourceLanguage, ProjectSourceOwner};
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// A session with a project open, on the Automation page.
 fn automation_page() -> Replay {
@@ -273,10 +273,10 @@ fn a_breakpoint_toggle_is_carried_out_in_the_frame_of_its_key() {
 /// cancelled.
 struct CountedSave(Arc<AtomicUsize>);
 
-impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for CountedSave {
+impl rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo for CountedSave {
     fn show_save_dialog(
         &self,
-        _config: crate::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
+        _config: rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
     ) -> Result<Option<PathBuf>, String> {
         self.0.fetch_add(1, Ordering::SeqCst);
         Ok(None)

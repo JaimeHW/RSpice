@@ -319,7 +319,9 @@ mod tests {
 
     #[test]
     fn file_actions_resolve_the_draft_before_saving_or_asking_about_unsaved_changes() {
-        use crate::workbench::state::{InlineEditField, InlineEditSession};
+        use rspice_app_workbench::workbench::state::console_views::{
+            InlineEditField, InlineEditSession,
+        };
         let mut state = AppState::default();
         state
             .model

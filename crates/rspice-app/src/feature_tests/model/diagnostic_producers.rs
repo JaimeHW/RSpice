@@ -1,15 +1,15 @@
 //! `workbench/app_state/diagnostic_store/producers` observed through a whole session.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
-use crate::workbench::app_state::diagnostic_store::listing;
-use crate::workbench::app_state::diagnostic_store::producers::*;
 use rspice_app_state::diagnostics::LogAnchor;
 use rspice_app_state::state::ConvergenceAttribution;
 use rspice_app_state::state::PreflightAdvisory;
 use rspice_app_state::state::PreflightIssue;
 use rspice_app_state::state::PreflightRemediation;
 use rspice_app_state::state::PreflightReport;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
+use rspice_app_state::workbench::app_state::diagnostic_store::listing;
+use rspice_app_state::workbench::app_state::diagnostic_store::producers::*;
 
 fn open_state() -> AppState {
     let mut state = AppState::default();

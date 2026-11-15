@@ -3,7 +3,6 @@
 
 use super::navigator::{NavigatorPanel, interface_design, two_sheet_named_signals};
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_design::schematic::view::sheet_visibility::SheetScope;
 use rspice_app_design::workbench::design::navigator::hierarchy_tree;
 use rspice_app_design::workbench::design::navigator::tests::*;
@@ -13,6 +12,7 @@ use rspice_app_state::state::ComponentType;
 use rspice_app_state::state::InstancePath;
 use rspice_app_state::state::PortDirection;
 use rspice_app_state::state::SchematicState;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::tokens::Tokens;
 
 /// The ports rail lists the interface in the order the deck has it, and numbers

@@ -5,7 +5,6 @@ use std::path::Path;
 
 use crate::workbench::app_state::services_access::open_comparison;
 use crate::workbench::session::project_transactions::start_local_safe_mode;
-use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_project::workbench::project::workspace_state::ProjectLauncherPage;
@@ -17,6 +16,7 @@ use rspice_app_services::workbench::lifecycle::recovery::{
     open_diagnostics_folder, refresh_catalog_if_requested,
 };
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {

@@ -3,9 +3,9 @@
 //! at the cellview it is drawn in.
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::diagnostic_store::listing;
 use crate::workbench::examples::hierarchy_reference::{self, USER_LIBRARY};
 use rspice_app_state::state::{Cell, CellViewRef, ComponentType, Library, Point, View, ViewType};
+use rspice_app_state::workbench::app_state::diagnostic_store::listing;
 
 const UNUSED: &str = "DRC-UNUSED-CELLVIEW";
 
@@ -284,7 +284,7 @@ fn a_cellview_check_leaves_standing_what_only_the_design_check_computes() {
         .state
         .current_design_check(
             &fixture.top,
-            crate::workbench::app_state::design_checks::CheckScope::Design,
+            rspice_app_state::workbench::app_state::design_checks::CheckScope::Design,
         )
         .expect("Check Design still describes the design");
     assert!(gate.has_errors(), "the run gate refuses on the loop");
@@ -331,9 +331,9 @@ fn a_cell_states_its_own_lost_ground_label_and_keeps_its_waiver() {
             .filter_map(|index| listed.row(index))
             .find(|row| row.code == GROUND_NOT_ZERO)
             .and_then(|row| match row.waiver_action {
-                Some(crate::workbench::app_state::waivers::WaiverAction::Waive(target)) => {
-                    Some(target.clone())
-                }
+                Some(rspice_app_state::workbench::app_state::waivers::WaiverAction::Waive(
+                    target,
+                )) => Some(target.clone()),
                 _ => None,
             })
             .expect("Check Design finds the lost label inside amp, and it may be waived")
@@ -377,8 +377,8 @@ fn a_cell_states_its_own_lost_ground_label_and_keeps_its_waiver() {
 /// the three agree.
 #[test]
 fn a_deck_cannot_make_an_unused_cellview_block_a_run() {
-    use crate::workbench::app_state::design_checks::CheckScope;
-    use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
+    use rspice_app_state::workbench::app_state::design_checks::CheckScope;
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel;
 
     let errors = |fixture: &mut Fixture| {
         fixture.state.check_design().expect("the design checks");
@@ -422,7 +422,7 @@ fn a_deck_cannot_make_an_unused_cellview_block_a_run() {
 /// open the cellview first, or its library is borrowed read-only.
 #[test]
 fn a_waiver_is_changed_only_where_its_document_is_edited() {
-    use crate::workbench::app_state::waivers::WaiverTarget;
+    use rspice_app_state::workbench::app_state::waivers::WaiverTarget;
 
     let mut fixture = fixture();
     let symbol = CellViewRef::new(USER_LIBRARY, "amp", "symbol");
@@ -482,7 +482,7 @@ fn rows_in(state: &AppState, cell_view: &CellViewRef) -> Vec<String> {
 /// configured design: the check runs, and nothing says it failed.
 #[test]
 fn an_edit_settling_as_its_view_is_left_is_checked_without_a_warning() {
-    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
 
     let reference = hierarchy_reference::build();
     let mut state = reference.state;

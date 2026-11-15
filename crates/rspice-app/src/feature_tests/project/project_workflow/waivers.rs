@@ -2,12 +2,14 @@
 //! saved with that document and read back with it.
 
 use super::*;
-use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRecord};
-use crate::workbench::app_state::waivers::WaiverAction;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     DestinationAuthority, SaveScope, save_native,
 };
 use rspice_app_state::state::Point;
+use rspice_app_state::workbench::app_state::diagnostic_store::{
+    DiagnosticInputs, DiagnosticRecord,
+};
+use rspice_app_state::workbench::app_state::waivers::WaiverAction;
 
 const COLLISION: &str = "DRC-CASE-COLLIDING-NET-NAMES";
 

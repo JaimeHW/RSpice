@@ -5,8 +5,8 @@ use egui::{Context, RichText};
 
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
-use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 use rspice_app_cloud::services::license::LicenseInfo;
+use rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
 use rspice_app_state::state::shortcuts::ShortcutPreferences;
 use rspice_app_workbench::ui::theme::{self, FontWeight};
@@ -246,7 +246,7 @@ impl RSpiceApp {
         // Count against the filter as entered last frame — immediate mode
         // corrects the hint one frame after each keystroke.
         let shortcuts = self.state.model.preferences.shortcuts().clone();
-        let platform = crate::workbench::app_state::runtime_command_platform(ctx);
+        let platform = rspice_app_workbench::workbench::app_state::session::shortcuts::runtime_command_platform(ctx);
         let operating_system = ctx.os();
         let filter = self.state.shell.shortcuts_filter.trim().to_lowercase();
         let total: usize = ShortcutCategory::ALL
@@ -597,7 +597,7 @@ fn export_support_bundle(app: &mut RSpiceApp, include_session_log: bool) {
         });
     match result {
         Ok(()) => {
-            let message = crate::workbench::workflows::export_workflow::export_completion_message(
+            let message = rspice_app_services::workbench::workflows::export_workflow::export_completion_message(
                 "support bundle",
                 &path,
                 None,
@@ -994,7 +994,7 @@ mod tests {
         write_error: Option<&'static str>,
     }
 
-    impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for BundleIo {
+    impl rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo for BundleIo {
         fn show_save_dialog(
             &self,
             _config: SaveDialogConfig<'_>,

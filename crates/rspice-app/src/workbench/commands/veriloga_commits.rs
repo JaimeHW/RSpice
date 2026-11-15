@@ -10,10 +10,10 @@
 //! way the shell's arms do.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::app::dialogs::library::{new_veriloga_device, veriloga_import};
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::state::CellViewRef;
+use rspice_app_state::workbench::workspace::Workspace;
 
 impl RSpiceApp {
     /// Create the import form's cells and open the first in Design.

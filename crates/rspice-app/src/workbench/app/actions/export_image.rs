@@ -53,7 +53,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let reference = app.state.model.workspace.content.active_view.clone();
         app.state.workbench.documents.activate(
-            crate::workbench::state::WorkspaceDocumentId::CellView(reference),
+            rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::CellView(reference),
         );
         app
     }

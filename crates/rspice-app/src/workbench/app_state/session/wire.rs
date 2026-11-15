@@ -20,27 +20,34 @@ use rspice_results_ui::report::session::ReportAuthoringState;
 use serde::{Deserialize, Serialize};
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::slots::{
-    CodeState, HardcopyState, ModelsState, PlatformState, ProjectState, ResultsState,
-    SettingsState, SimulateState,
-};
-use crate::workbench::state::{
-    ConsolePage, VerificationSessionState, WorkbenchSession, Workspace, WorkspaceDocumentId,
-    WorkspaceDocumentRegistry, WorkspaceLayoutState, default_analysis_index,
-    default_console_height, default_inspector_width, default_navigator_width,
-};
+use rspice_app_code::workbench::slots::code::CodeState;
 use rspice_app_design::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
 use rspice_app_design::workbench::slots::design::{DesignPanel, DesignState};
+use rspice_app_hardcopy::workbench::slots::hardcopy::HardcopyState;
 use rspice_app_models::workbench::documents::model_editor::ModelEditorRecoveryDraft;
 use rspice_app_models::workbench::models::workspace_state::ModelsWorkbenchViewState;
+use rspice_app_models::workbench::slots::models::ModelsState;
 use rspice_app_project::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
+use rspice_app_project::workbench::slots::project::ProjectState;
+use rspice_app_results::workbench::slots::results::ResultsState;
+use rspice_app_services::workbench::slots::platform::PlatformState;
+use rspice_app_settings::workbench::slots::settings::SettingsState;
+use rspice_app_simulate::workbench::slots::simulate::SimulateState;
+use rspice_app_simulate::workbench::state::simulate_session::{
+    VerificationSessionState, default_analysis_index,
+};
 use rspice_app_state::state::{GridStyle, SchematicVisibilityPolicy, SchematicWireRoutingStyle};
 use rspice_app_state::state::{SimulationPage, VerificationPage};
 use rspice_app_state::workbench::preferences::UserPreferences;
 use rspice_app_state::workbench::preferences::WorkspacePreset;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::Theme;
 use rspice_app_workbench::workbench::lifecycle::window_session::WindowSessionRegistry;
 use rspice_app_workbench::workbench::routing::navigation::SurfaceNavigation;
+use rspice_app_workbench::workbench::state::workbench_session::{
+    ConsolePage, WorkbenchSession, WorkspaceDocumentId, WorkspaceDocumentRegistry,
+    WorkspaceLayoutState, default_console_height, default_inspector_width, default_navigator_width,
+};
 
 /// What a session keeps of the document engines' session state, which the
 /// workbench and the design, results, platform and settings slots hold.

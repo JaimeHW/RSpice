@@ -3,8 +3,9 @@
 
 use crate::feature_tests::design::inline_instance_drawn::{Editor, key};
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::{InlineEditField, Workspace};
 use rspice_app_state::state::CellViewRef;
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::state::console_views::InlineEditField;
 
 #[test]
 fn switching_fields_in_either_render_order_commits_each_edit_once() {

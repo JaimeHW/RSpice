@@ -770,7 +770,8 @@ mod tests {
 
         let workbench = &mut state.workbench;
         workbench.console_visible = true;
-        workbench.console_page = crate::workbench::state::ConsolePage::Problems;
+        workbench.console_page =
+            rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Problems;
         workbench.console_height = 244.0;
         workbench.navigator_visible = false;
         workbench.navigator_width = 311.0;

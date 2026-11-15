@@ -85,7 +85,7 @@ fn type_stroke(
             &CommandRegistry,
             CommandPlatform::Desktop,
             ShortcutEnvironment {
-                workspace: crate::workbench::state::Workspace::Design,
+                workspace: rspice_app_state::workbench::workspace::Workspace::Design,
                 active_view: Some(rspice_app_state::state::ViewType::Schematic),
                 canvas_focus: false,
                 source_editor_focus: false,

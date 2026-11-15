@@ -8,10 +8,10 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::tests::{RunOrigin, app_with_prepared_run, plan_binding};
-use crate::workbench::state::Workspace;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::{AnalysisResult, AnalysisType};
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::widgets::NotificationAction;
 use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
 use rspice_app_workbench::workbench::framework::host::Host;
@@ -423,11 +423,11 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
     app.execute_command_key(ResultsCommand::RevealProducerLog.key());
     assert_eq!(
         app.state.workbench.console_page,
-        crate::workbench::state::ConsolePage::Console
+        rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Console
     );
     assert_eq!(
         app.state.workbench.console_view.channel,
-        crate::workbench::state::ConsoleChannel::Run(producer),
+        rspice_app_workbench::workbench::state::console_views::ConsoleChannel::Run(producer),
         "the hop opens the log of the run that produced the quantity"
     );
 }

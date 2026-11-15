@@ -579,7 +579,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         "14",
         &[
             "|app, ArmPartPlacement(placement)|",
-            "crate::workbench::app::arm_pack_part(&mut app.state.model, placement);",
+            "rspice_app_state::workbench::app::schematic::placement::arm_pack_part(&mut app.state.model, placement,);",
         ],
     ),
     (
@@ -635,7 +635,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         &[
             "|app, OpenInDesign(reference)|",
             "app.state.open_workspace_view(reference);",
-            ".activate(crate::workbench::state::Workspace::Design);",
+            ".activate(rspice_app_state::workbench::workspace::Workspace::Design);",
         ],
     ),
     (

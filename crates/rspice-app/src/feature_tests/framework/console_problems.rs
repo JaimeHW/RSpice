@@ -11,14 +11,16 @@ use std::sync::Arc;
 use egui::accesskit::Role;
 
 use crate::workbench::AppState;
-use crate::workbench::app_state::diagnostic_store::listing::{DiagnosticRow, RowStanding, listing};
-use crate::workbench::app_state::diagnostic_store::{
-    DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
-};
 use rspice_app_state::state::netlist_diagnostics::{
     Diagnostic, DiagnosticFix, NetlistDiagnosticCollection,
 };
 use rspice_app_state::state::{ComponentType, Point};
+use rspice_app_state::workbench::app_state::diagnostic_store::listing::{
+    DiagnosticRow, RowStanding, listing,
+};
+use rspice_app_state::workbench::app_state::diagnostic_store::{
+    DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
+};
 use rspice_app_workbench::ui::widgets::PROBLEM_MARK_ADVANCE as CONSOLE_MARK_GUTTER;
 use rspice_app_workbench::workbench::docks::console::problems::arrange::{Arrangement, Line};
 use rspice_app_workbench::workbench::docks::console::problems::*;
@@ -1269,7 +1271,7 @@ fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
                     &crate::workbench::commands::vocabulary::CommandRegistry,
                     runtime_command_platform(&ctx),
                     ShortcutEnvironment {
-                        workspace: crate::workbench::state::Workspace::Design,
+                        workspace: rspice_app_state::workbench::workspace::Workspace::Design,
                         active_view: Some(rspice_app_state::state::ViewType::Schematic),
                         canvas_focus: false,
                         source_editor_focus: false,
@@ -1302,7 +1304,7 @@ fn design_app() -> crate::workbench::RSpiceApp {
     app.state.open_project_session();
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     app.state.model.schematic = rspice_app_state::state::SchematicState::default();
     app.state.model.schematic.session.editor.needs_fit = false;
     app.state
@@ -1371,7 +1373,7 @@ fn following_a_finding_to_the_drawing_gives_the_canvas_the_keyboard() {
     assert!(
         engineering_canvas_has_focus(
             &harness.ctx,
-            crate::workbench::state::Workspace::Design,
+            rspice_app_state::workbench::workspace::Workspace::Design,
             Some(rspice_app_state::state::ViewType::Schematic),
         ),
         "the canvas the finding led to holds the keyboard",
@@ -2448,7 +2450,7 @@ fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
 /// on the frame after it.
 #[test]
 fn a_frame_with_no_edit_digests_nothing_and_an_edit_is_seen_next_frame() {
-    use crate::workbench::app_state::diagnostic_store::digest_memo::{
+    use rspice_app_state::workbench::app_state::diagnostic_store::digest_memo::{
         computed_digests, reset_computed_digests,
     };
     use rspice_design::projection::{document_digest_counts, reset_document_digest_counts};

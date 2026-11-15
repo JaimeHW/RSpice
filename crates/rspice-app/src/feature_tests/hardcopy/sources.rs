@@ -6,8 +6,6 @@ mod quick_view;
 
 use crate::feature_tests::hardcopy::{resolve_retained_hardcopy_source, source_reads};
 use crate::workbench::AppState;
-use crate::workbench::state::Workspace;
-use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::RetainedHardcopySourceAvailability;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::active_visualization_document_pane;
@@ -64,6 +62,8 @@ use rspice_app_state::state::SheetTemplate;
 use rspice_app_state::state::SimulationRun;
 use rspice_app_state::state::SimulationRunLifecycle;
 use rspice_app_state::state::Wire;
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 use rspice_hardcopy::sources::HardcopySemanticDocument;
 use rspice_hardcopy::sources::PLOT_INSET_UM;
 use rspice_hardcopy::sources::PLOT_WIDTH_UM;

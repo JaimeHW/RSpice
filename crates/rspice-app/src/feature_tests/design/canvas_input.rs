@@ -173,7 +173,7 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
     crate::workbench::commands::answer_surface_requests(&mut state);
     assert_eq!(
         state.workbench.workspace,
-        crate::workbench::state::Workspace::Results
+        rspice_app_state::workbench::workspace::Workspace::Results
     );
     assert_eq!(
         state.results.results.session.viewer,

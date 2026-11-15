@@ -183,7 +183,7 @@ fn a_command_is_found_under_the_menu_that_holds_it() {
         ),
         (Command::SelectAll.key(), PaletteScope::Edit, "Edit"),
         (
-            Command::OpenWorkspace(crate::workbench::state::Workspace::Design).key(),
+            Command::OpenWorkspace(rspice_app_state::workbench::workspace::Workspace::Design).key(),
             PaletteScope::Window,
             "Window \u{203a} Workspace",
         ),
@@ -358,7 +358,7 @@ fn test_app() -> RSpiceApp {
         file_workflow_io: Box::new(rspice_app_services::io::NativeFileWorkflowIo),
         read_system_contrast: crate::workbench::system_contrast::read,
         export_workflow_io: Box::new(
-            crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
+            rspice_app_services::workbench::workflows::export_workflow::NativeExportWorkflowIo,
         ),
     }
 }
@@ -737,7 +737,7 @@ fn real_cellview_records_are_searchable_and_open_the_workspace_document() {
     );
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Design
+        rspice_app_state::workbench::workspace::Workspace::Design
     );
 }
 
@@ -900,7 +900,7 @@ fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
     );
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Models
+        rspice_app_state::workbench::workspace::Workspace::Models
     );
 }
 
@@ -1064,7 +1064,7 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
     assert_eq!(app.state.results.results.session.maximized_strip, None);
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Results
+        rspice_app_state::workbench::workspace::Workspace::Results
     );
     assert!(app.state.workbench.command_palette.recent.is_empty());
 }

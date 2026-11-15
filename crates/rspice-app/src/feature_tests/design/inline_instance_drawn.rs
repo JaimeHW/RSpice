@@ -2,9 +2,10 @@
 //! rejected fields, stale authority, and the functional and gate presets.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::{InlineEditField, Workspace};
 use rspice_app_design::workbench::design::inspector::inline_instance::*;
 use rspice_app_state::state::ComponentType;
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::state::console_views::InlineEditField;
 use rspice_ui_kit::panels::PropertyRowCaption;
 use std::collections::HashMap;
 

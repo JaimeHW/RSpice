@@ -9,10 +9,10 @@ use egui::Key;
 
 use super::vocabulary::Command;
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_state::state::command_catalog::{
     CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::CommandAvailability;
 
 const ALL: &[CommandPlatform] = &CommandPlatform::ALL;

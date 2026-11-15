@@ -5,7 +5,7 @@
 use super::verify_fixtures::monte_carlo_app;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::{YieldLimitBound, YieldLimitDraft};
+use rspice_app_simulate::workbench::state::simulate_session::{YieldLimitBound, YieldLimitDraft};
 use rspice_app_simulate::workbench::surfaces::verify::raster::fixture_yield_results;
 use rspice_app_simulate::workbench::surfaces::verify::raster::{page_input, page_pass};
 use rspice_app_simulate::workbench::surfaces::verify::show;

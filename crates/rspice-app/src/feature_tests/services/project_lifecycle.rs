@@ -62,7 +62,7 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
     let mut state = AppState::default();
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Project);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Project);
     let baseline = snapshot(&state).expect("baseline");
     state.open_project_session();
     state
@@ -274,7 +274,7 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
     // A Verilog-A view is edited as a Design document.
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     let baseline = snapshot(&state).expect("baseline");
     state.open_project_session();
     state
@@ -561,7 +561,7 @@ fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
         .platform
         .project_lifecycle
         .accept_project(baseline.clone(), None);
-    state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+    state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
     edit_automation_source(&mut state, "print('edited')\n");
     assert!(state.model.workspace.content.project_sources_dirty);
 
@@ -927,7 +927,7 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
     let mut state = AppState::default();
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Project);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Project);
     save_native(
         &mut state,
         SaveScope::AllDocuments,
@@ -1077,7 +1077,7 @@ fn revert_is_document_scoped_and_rejects_active_document_and_baseline_races() {
     let active_race = prepare_revert_active_document(&state).expect("prepare active race");
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Project);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Project);
     let active_race_error = confirm_revert_active_document(&mut state, &active_race)
         .expect_err("changed active document invalidates review");
     assert!(matches!(
@@ -1088,7 +1088,7 @@ fn revert_is_document_scoped_and_rejects_active_document_and_baseline_races() {
 
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     let baseline_race = prepare_revert_active_document(&state).expect("prepare baseline race");
     save_native(
         &mut state,
@@ -1137,7 +1137,7 @@ fn close_active_document_is_presentation_only() {
         .add_component(ComponentType::Inductor, Point::new(3, 5));
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
 
     close_active_document(&mut state).expect("close presentation");
 

@@ -2,7 +2,6 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::Workspace;
 use egui::{Color32, Context, Pos2, Rect, Vec2, vec2};
 use rspice_app_design::schematic::view::schematic_symbol_context;
 use rspice_app_design::workbench::design::commands::DesignCommand;
@@ -11,6 +10,7 @@ use rspice_app_state::state::{
     SchematicState, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolShape, View, ViewType,
     Wire,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 use rspice_schematic_editor::view::coordinates::viewport_from_camera;
 

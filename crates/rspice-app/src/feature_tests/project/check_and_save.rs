@@ -40,7 +40,7 @@ fn check_and_save_is_a_command_form_without_the_wizard() {
     app.state.open_project_session();
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     rspice_app_state::workbench::examples::load_example(
         "RC Lowpass Filter",
         &mut app.state.model.schematic,

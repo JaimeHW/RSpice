@@ -1595,7 +1595,7 @@ fn zoom_previous_steps_a_result_document_back_through_its_kept_windows() {
     let (mut app, document_id) = persistent_transient_fixture();
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     let key = Command::ZoomPrevious.key();
     document_frame(&mut app, document_id, 0.0);
     let pane_id = projection(app.state.results_reads(), document_id)

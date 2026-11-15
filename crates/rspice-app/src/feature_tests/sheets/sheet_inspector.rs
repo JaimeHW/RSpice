@@ -1181,7 +1181,7 @@ fn a_value_the_block_cuts_short_says_so_under_its_row() {
 fn the_panel_brings_its_sheet_section_into_view_once_when_asked() {
     let mut app = RSpiceApp::test_instance();
     let state = &mut app.state;
-    crate::workbench::app::sheets::reveal_sheet_properties_on(
+    rspice_app_sheets::workbench::app::actions::sheets::reveal_sheet_properties_on(
         &mut state.model,
         &mut state.workbench,
         &mut state.sheets.reveal_sheet_section,

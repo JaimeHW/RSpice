@@ -5,8 +5,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use super::plan_manager::{app_with_every_lifecycle_state, route_draft};
-use crate::workbench::state::SimulationPlanManagerMode;
 use egui::Vec2;
+use rspice_app_simulate::workbench::state::workflow_drafts::SimulationPlanManagerMode;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::plan_manager_dialog;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::raster::{
     PLAN_MANAGER_FINGERPRINTS, baseline_cases, file_stem,

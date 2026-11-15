@@ -4,12 +4,12 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::project_transactions::open_new_project_dialog;
-use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_state::state::{
     CellViewRef, Component, ComponentType, PinFindingKind, Point, PortDirection, SymbolDocument,
     SymbolInterface, SymbolPin, SymbolPinSide, ViewType,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
 use super::super::replay::Replay;
@@ -518,7 +518,7 @@ fn the_pin_check_names_each_port_change_and_update_pins_answers_it() {
 /// finding.
 #[test]
 fn an_orphaned_pin_goes_in_one_step_from_its_finding() {
-    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
 
     let orphan = |replay: &Replay, symbol: &CellViewRef| {
         replay
@@ -580,7 +580,7 @@ fn an_orphaned_pin_goes_in_one_step_from_its_finding() {
     // the canvas it lands on the keyboard.
     let route = finding.route.clone().expect("the finding is routed");
     replay.app.state.model.diagnostics.request_route(route);
-    crate::workbench::app_state::request_engineering_canvas_focus(replay.ctx());
+    rspice_app_workbench::workbench::app_state::session::shortcuts::request_engineering_canvas_focus(replay.ctx());
     replay.frames(Vec::new());
     assert_eq!(replay.app.state.model.workspace.content.active_view, symbol);
     assert_eq!(
@@ -913,7 +913,7 @@ fn an_instance_keeps_its_wires_as_the_schematic_redraws_its_symbol() {
 /// was, open: no other pin takes it, and checking the sheet reports it.
 #[test]
 fn a_wire_a_deleted_port_let_go_is_reported_on_its_sheet() {
-    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
 
     let mut replay = new_project();
     let schematic = replay.app.state.model.workspace.content.active_view.clone();

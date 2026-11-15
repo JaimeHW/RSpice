@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::ConsolePage;
 use rspice_app_workbench::workbench::layout::LayoutSpec;
+use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 
 /// The three findings of a drawing with one stray label and no ground: a
 /// label on no wire, an off-sheet connector with no partner, and the missing
@@ -119,7 +119,9 @@ fn nothing_in_the_dock_is_cut_at_any_height() {
         .diagnostics
         .set_current_finding(Some(missing));
     let width = 1280.0;
-    let default = crate::workbench::state::WorkbenchSession::default().console_height;
+    let default =
+        rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession::default()
+            .console_height;
     let pages = [
         ConsolePage::Problems,
         ConsolePage::Console,

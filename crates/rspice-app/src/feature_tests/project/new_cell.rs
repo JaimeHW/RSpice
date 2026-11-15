@@ -261,7 +261,7 @@ fn new_cell_verilog_a_switch_creates_the_module_view_and_its_generated_symbol() 
     assert_eq!(app.state.model.workspace.content.active_view, reference);
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Design
+        rspice_app_state::workbench::workspace::Workspace::Design
     );
     assert!(app.state.code.code_workspace.veriloga.receipt.is_some());
 }
@@ -435,7 +435,7 @@ fn carry_out_in_place(app: &mut RSpiceApp, seeded: rspice_app_state::state::Sche
     {
         state
             .workbench
-            .activate(crate::workbench::state::Workspace::Design);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Design);
         state.code.code_workspace.veriloga.receipt = Some(receipt);
     }
 }

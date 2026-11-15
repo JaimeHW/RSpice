@@ -5,9 +5,9 @@
 use super::stage::show_on_stage;
 use super::workflow_dialogs::show_workflow_dialogs_on_stage;
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::ClonePlanDraft;
 use egui::Rect;
 use egui::vec2;
+use rspice_app_simulate::workbench::state::workflow_drafts::ClonePlanDraft;
 use rspice_app_simulate::workbench::surfaces::simulate::workflows::commit_clone_plan;
 use rspice_app_simulate::workbench::surfaces::simulate::workflows::finish_workflow_choice;
 use rspice_app_workbench::ui::widgets::DialogChoice;
@@ -74,8 +74,8 @@ fn simulate_frame(app: &mut RSpiceApp, page: Option<rspice_app_state::state::Sim
 #[test]
 fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
     use crate::workbench::AppState;
-    use crate::workbench::app_state::model::AnalysisLifecycleOutcome;
     use crate::workbench::app_state::session::wire::{WorkbenchWire, WorkbenchWireRef};
+    use rspice_app_state::workbench::app_state::model::AnalysisLifecycleOutcome;
 
     assert!(!AnalysisLifecycleOutcome::default().message().is_empty());
 

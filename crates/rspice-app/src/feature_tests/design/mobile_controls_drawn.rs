@@ -2,11 +2,11 @@
 
 use super::mobile_controls::strip_cx;
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use egui::{Context, Event, Pos2, RawInput, Rect, TouchPhase, Vec2};
 use rspice_app_design::schematic::view::mobile_controls::{operation_live, show};
 use rspice_app_design::workbench::app::dialogs::selection::commands::duplicate_schematic_selection_at;
 use rspice_app_state::state::{ComponentType, Point, SchematicState};
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// A Design workspace under a finger: the canvas and the strip, drawn as the
 /// design surface draws them.

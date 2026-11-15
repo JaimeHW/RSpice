@@ -3,12 +3,13 @@
 use super::veriloga_flow_tests::User;
 use super::*;
 use crate::workbench::session::project_transactions::create_example_project;
-use crate::workbench::state::{ConsolePage, Workspace};
 use rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey;
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::waveform_plotted;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::workbench::examples::EXAMPLES;
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 
 /// An example project with a short transient, the session settled on it.

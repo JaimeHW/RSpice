@@ -8,9 +8,9 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::{self, command_registry};
-use crate::workbench::state::Workspace;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::{
     CommandAvailability, CommandFlags,
 };
@@ -293,8 +293,8 @@ fn result_dataset_import_waits_for_an_idle_open_project() {
 /// a console warning instead of a file.
 #[test]
 fn exporting_the_dataset_requires_an_open_result_document() {
-    use crate::workbench::state::WorkspaceDocumentId;
     use rspice_app_state::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();

@@ -43,7 +43,7 @@ pub(crate) fn open_symbol() -> RSpiceApp {
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     app
 }
 

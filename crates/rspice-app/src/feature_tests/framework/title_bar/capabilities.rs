@@ -341,12 +341,11 @@ fn copy_as_image_draws_the_selection_or_else_the_view() {
         .expect("a wire is added");
     app.state.workbench.activate(Workspace::Design);
     let reference = app.state.model.workspace.content.active_view.clone();
-    app.state
-        .workbench
-        .documents
-        .activate(crate::workbench::state::WorkspaceDocumentId::CellView(
+    app.state.workbench.documents.activate(
+        rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::CellView(
             reference,
-        ));
+        ),
+    );
     let key = HardcopyCommand::CopyAsImage.key();
     assert_eq!(app.availability(key), CommandAvailability::Available);
     let copy = |app: &mut RSpiceApp| {

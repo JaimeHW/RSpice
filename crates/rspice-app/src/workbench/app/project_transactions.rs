@@ -5,10 +5,10 @@
 //! root's layer, below the workflows; the rest sit in
 //! `session::project_transactions`, above them.
 
-use crate::workbench::app::dialogs::check_and_save_validation::{
+use crate::workbench::app_state::AppState;
+use rspice_app_project::workbench::app::dialogs::check_and_save_validation::{
     CheckAndSaveValidationReport, ValidationReads, run_design_checks,
 };
-use crate::workbench::app_state::AppState;
 use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::Leaving;
 use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 #[cfg(test)]

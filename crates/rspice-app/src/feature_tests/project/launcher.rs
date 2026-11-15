@@ -7,11 +7,11 @@ use egui::{Context, Rect, Vec2, vec2};
 use crate::workbench::RSpiceApp;
 use crate::workbench::shell_host::project::launcher::dismiss_launcher;
 use crate::workbench::shell_host::project::launcher::show;
-use crate::workbench::state::Workspace;
 use rspice_app_project::workbench::project::workspace_state::ProjectLauncherPage;
 use rspice_app_project::workbench::tools::project_launcher::{
     LAUNCHER_VERSION_LABEL, LauncherLayout,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 
 #[test]
 fn launcher_dismissal_returns_through_canonical_history() {

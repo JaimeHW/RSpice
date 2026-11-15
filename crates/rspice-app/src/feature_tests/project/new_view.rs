@@ -384,7 +384,7 @@ fn creating_layout_view_atomically_retains_exact_pdk_document_and_opens_it() {
     assert_eq!(app.state.model.workspace.content.active_view, reference);
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Design
+        rspice_app_state::workbench::workspace::Workspace::Design
     );
     rspice_app_services::workbench::lifecycle::project_lifecycle::snapshot(&app.state)
         .expect("created Layout view and document validate as one project transaction");
@@ -550,7 +550,7 @@ fn creating_veriloga_view_atomically_retains_contract_and_opens_exact_editor() {
     assert_eq!(app.state.model.workspace.content.active_view, reference);
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Design,
+        rspice_app_state::workbench::workspace::Workspace::Design,
         "a new Verilog-A view opens as a Design document"
     );
     assert_eq!(
@@ -797,7 +797,7 @@ fn carry_out_in_place(app: &mut RSpiceApp, seeded: SchematicState) {
             if let Some(receipt) = veriloga {
                 state
                     .workbench
-                    .activate(crate::workbench::state::Workspace::Design);
+                    .activate(rspice_app_state::workbench::workspace::Workspace::Design);
                 state.code.code_workspace.veriloga.receipt = Some(*receipt);
             }
             state.record(

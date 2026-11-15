@@ -4,7 +4,6 @@ use crate::feature_tests::design::inspector_veriloga_modules_drawn::{
     app_with_compiled_veriloga_instance, app_with_owned_veriloga_instance, module_parameter,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::InlineEditField;
 use rspice_app_design::workbench::design::inspector::component::{
     MODEL_CARD_PARAMETER_NOTE, REMOVE_UNDECLARED_PARAMETER, UNDECLARED_PARAMETER_NOTE,
     identity_section, inline_parameter_contract, model_cards_of_module, parameters_section,
@@ -15,6 +14,7 @@ use rspice_app_design::workbench::design::inspector::inline_instance::{
 use rspice_app_design::workbench::design::inspector::model_evidence::component_model_evidence;
 use rspice_app_design::workbench::design::inspector::tests::*;
 use rspice_app_state::state::{CellViewRef, Component, ComponentType, Point};
+use rspice_app_workbench::workbench::state::console_views::InlineEditField;
 use rspice_ui_kit::panels::Problem;
 use std::collections::HashMap;
 

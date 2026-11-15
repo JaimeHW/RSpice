@@ -22,7 +22,9 @@ fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppStat
 /// one list of every standing condition and had nothing of theirs on it.
 #[test]
 fn symbol_pin_checks_publish_records_routed_to_the_failing_pin() {
-    use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticRoute};
+    use rspice_app_state::workbench::app_state::diagnostic_store::{
+        DiagnosticInputs, DiagnosticRoute,
+    };
 
     let mut state = state_with_amp_symbol_pin("IN", None);
     state.open_project_session();
@@ -60,7 +62,7 @@ fn symbol_pin_checks_publish_records_routed_to_the_failing_pin() {
     ));
 
     // A pin the symbol has not placed is a warning: it never stops a save.
-    let listed = crate::workbench::app_state::diagnostic_store::listing::listing(&state);
+    let listed = rspice_app_state::workbench::app_state::diagnostic_store::listing::listing(&state);
     assert_eq!(listed.counts().warnings, batch.records.len());
     let row = (0..listed.len())
         .filter_map(|index| listed.row(index))

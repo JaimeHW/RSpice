@@ -7,7 +7,6 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::diagnostic_routes::apply_remediation;
-use crate::workbench::state::{ConsolePage, Workspace};
 use rspice_app_runs::workbench::preflight::{
     collect_report, poll, preparation_remediation, queue_retained_run, start,
     temperature_validity_advisories,
@@ -16,6 +15,8 @@ use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::state::{
     ModelsPage, PreflightIssue, PreflightRemediation, PreflightReport, PreparedPreflightContract,
 };
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 
 mod engine;
 mod pipeline;
@@ -138,7 +139,8 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
         .iter()
         .map(|issue| issue.observed.clone())
         .collect();
-    let listed = crate::workbench::app_state::diagnostic_store::listing::listing(&app.state);
+    let listed =
+        rspice_app_state::workbench::app_state::diagnostic_store::listing::listing(&app.state);
     let listed_messages: Vec<String> = (0..listed.len())
         .filter_map(|index| listed.row(index))
         .map(|row| row.message.to_owned())
@@ -1010,7 +1012,7 @@ fn app_with_a_source_across_a_winding() -> (RSpiceApp, rspice_app_state::state::
 /// of fixed DC voltages.
 fn winding_loop_warning(
     app: &RSpiceApp,
-) -> &crate::workbench::app_state::diagnostic_store::DiagnosticRecord {
+) -> &rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRecord {
     let warnings: Vec<_> = app
         .state
         .model
@@ -1024,7 +1026,7 @@ fn winding_loop_warning(
     };
     assert_eq!(
         warning.level,
-        crate::workbench::app_state::diagnostic_store::DiagnosticLevel::Warning,
+        rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel::Warning,
         "{warning:#?}"
     );
     warning
@@ -1032,13 +1034,13 @@ fn winding_loop_warning(
 
 /// Whether `route` leads to component `id` drawn in `cell_view`.
 fn routes_to_component(
-    route: Option<&crate::workbench::app_state::diagnostic_store::DiagnosticRoute>,
+    route: Option<&rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute>,
     cell_view: &rspice_app_state::state::CellViewRef,
     id: u64,
 ) -> bool {
     matches!(
         route,
-        Some(crate::workbench::app_state::diagnostic_store::DiagnosticRoute::Anchor(
+        Some(rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute::Anchor(
             rspice_app_state::diagnostics::LogAnchor::Schematic {
                 cell_view: drawn,
                 component: Some(component),
@@ -1165,7 +1167,8 @@ fn a_voltage_source_loop_is_stated_once_by_the_rule_that_owns_it() {
         "{:?}",
         report.blockers
     );
-    let loop_rows = crate::workbench::app_state::diagnostic_store::listing::listing(&app.state);
+    let loop_rows =
+        rspice_app_state::workbench::app_state::diagnostic_store::listing::listing(&app.state);
     let loop_rows: Vec<String> = (0..loop_rows.len())
         .filter_map(|index| loop_rows.row(index))
         .map(|row| row.message.to_owned())
@@ -1229,7 +1232,8 @@ fn a_source_loop_the_design_rule_does_not_see_is_the_engines_refusal() {
         panic!("the finding is located on the drawing: {:?}", loops[0]);
     };
     assert_eq!(cell_view, &root);
-    let rows = crate::workbench::app_state::diagnostic_store::listing::listing(&app.state);
+    let rows =
+        rspice_app_state::workbench::app_state::diagnostic_store::listing::listing(&app.state);
     let loop_rows: Vec<String> = (0..rows.len())
         .filter_map(|index| rows.row(index))
         .map(|row| row.message.to_owned())
@@ -1858,7 +1862,7 @@ fn app_with_a_failing_root_and_an_unrelated_open_view()
 /// run does not execute — is not checked as a side effect.
 #[test]
 fn preflight_lists_each_design_rule_finding_once_under_the_configured_root() {
-    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+    use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticInputs;
 
     let (mut app, root) = app_with_a_failing_root_and_an_unrelated_open_view();
     let open_view = app.state.model.workspace.content.active_view.clone();
@@ -1934,7 +1938,8 @@ fn preflight_lists_each_design_rule_finding_once_under_the_configured_root() {
         );
     }
 
-    let listed = crate::workbench::app_state::diagnostic_store::listing::listing(&app.state);
+    let listed =
+        rspice_app_state::workbench::app_state::diagnostic_store::listing::listing(&app.state);
     let rows: Vec<_> = (0..listed.len())
         .filter_map(|index| listed.row(index))
         .collect();
@@ -1963,7 +1968,9 @@ fn preflight_lists_each_design_rule_finding_once_under_the_configured_root() {
 /// act on any more.
 #[test]
 fn invalidating_the_report_stales_the_findings_it_published() {
-    use crate::workbench::app_state::diagnostic_store::{BatchStanding, DiagnosticOwner};
+    use rspice_app_state::workbench::app_state::diagnostic_store::{
+        BatchStanding, DiagnosticOwner,
+    };
 
     let (mut app, _) = app_with_a_failing_root_and_an_unrelated_open_view();
     start(&mut app.state, &mut app.simulation_controller, false);

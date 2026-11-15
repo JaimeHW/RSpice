@@ -6,12 +6,12 @@ use egui::{Color32, Modifiers, Rect, Ui, pos2};
 
 use crate::workbench::shell_host::project::library_publication::commit_project_library_publication;
 use crate::workbench::shell_host::project::library_publication::prepare_project_library_publication;
-use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::project::ProjectFeature;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::surfaces::project::recovery;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::begin_project_replacement;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_app_workbench::workbench::framework::host::{Host, Point};

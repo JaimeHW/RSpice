@@ -2,8 +2,8 @@
 //! File ▸ Export ▸ Netlist on the application.
 
 use crate::workbench::app::veriloga_flow_tests::{CELL, MODULE, wired_device};
-use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use rspice_app_code::workbench::menu_bar::netlist_actions::action_export_netlist_with_io;
+use rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo;
 
 /// A save dialog that answers with `self.0` and writes that reach the disk.
 struct SavesTo(std::path::PathBuf);
@@ -11,7 +11,7 @@ struct SavesTo(std::path::PathBuf);
 impl ExportWorkflowIo for SavesTo {
     fn show_save_dialog(
         &self,
-        _config: crate::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
+        _config: rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig<'_>,
     ) -> Result<Option<std::path::PathBuf>, String> {
         Ok(Some(self.0.clone()))
     }

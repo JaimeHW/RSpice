@@ -6,9 +6,9 @@
 //! the sheet exists.
 
 use crate::workbench::app::*;
-use crate::workbench::state::Workspace;
 use egui::{Event, Pos2, Rect, TouchPhase, Vec2};
 use rspice_app_state::state::{ComponentType, Point, SchematicState, Tool};
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// Someone at the application with nothing but a finger.
 struct Finger {

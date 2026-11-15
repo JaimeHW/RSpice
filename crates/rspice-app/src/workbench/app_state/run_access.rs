@@ -8,10 +8,11 @@ use rspice_results_ui::eye_diagram::EyeTimebase;
 use rspice_results_ui::fft::FftInputOptions;
 use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
-use super::design_checks::CheckScope;
-use super::{AppState, Model, RunsState, SlotFacts};
+use super::{AppState, RunsState};
 use rspice_app_runs::simulation::{NetlistShown, RunHost, ViewerHost, ViewerReading};
 use rspice_app_state::state::{CellViewRef, SpecializedViewerCacheProvenance};
+use rspice_app_state::workbench::app_state::design_checks::CheckScope;
+use rspice_app_state::workbench::app_state::model::{Model, SlotFacts};
 
 impl ViewerHost for AppState {
     fn model(&self) -> &Model {

@@ -7,7 +7,6 @@
 //! same slots in the same order as before.
 
 use super::AppState;
-use super::waivers::{StoredWaiverEdit, WaiverTarget};
 use rspice_app_design::workbench::app::actions::property_edit::open_property_editor_in;
 use rspice_app_design::workbench::app::actions::workspace::symbol_document::{
     record_symbol_edit, run_active_symbol_pin_checks, store_active_symbol_document,
@@ -19,6 +18,7 @@ use rspice_app_design::workbench::app::actions::workspace::{
 };
 use rspice_app_state::diagnostics::LogAnchor;
 use rspice_app_state::state::{CellViewRef, SchematicState, SymbolDocument};
+use rspice_app_state::workbench::app_state::waivers::{StoredWaiverEdit, WaiverTarget};
 
 impl AppState {
     /// [`new_schematic_document`] for the session.
@@ -49,7 +49,7 @@ impl AppState {
     /// [`Model::sync_active_schematic_to_workspace`], stating what it has to
     /// say on the status bar.
     ///
-    /// [`Model::sync_active_schematic_to_workspace`]: crate::workbench::app_state::Model::sync_active_schematic_to_workspace
+    /// [`Model::sync_active_schematic_to_workspace`]: rspice_app_state::workbench::app_state::model::Model::sync_active_schematic_to_workspace
     pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
         sync_active_schematic(&mut self.model, &mut self.workbench);
     }
@@ -100,7 +100,7 @@ impl AppState {
         self.code.code_workspace.page =
             rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
         self.workbench
-            .activate(crate::workbench::state::Workspace::Netlist);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
         self.code.netlist.cursor_line = location.line.saturating_sub(1);
         self.code.netlist.requested_line = Some(location.line);
         let announced = self.workbench.messages().format(

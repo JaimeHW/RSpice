@@ -6,10 +6,10 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::command_registry;
-use crate::workbench::state::Workspace;
 use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_models::workbench::models::model_editor_workflow::selected_project_model_for_editor;
 use rspice_app_state::state::ModelsPage;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::{
     CommandAvailability, CommandFlags, ids,
 };

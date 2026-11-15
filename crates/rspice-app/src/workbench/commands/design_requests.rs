@@ -136,9 +136,10 @@ impl RSpiceApp {
 /// with the manager closed.
 fn open_connectivity_source_map(state: &mut AppState) {
     state.design.connectivity_manager.close();
-    state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+    state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
     state.workbench.navigator_visible = true;
-    state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
+    state.workbench.drawer =
+        Some(rspice_app_workbench::workbench::state::workbench_session::Drawer::Navigator);
     state.code.netlist.active_document =
         rspice_app_code::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
     state.workbench.set_navigator_filter("source mapping");

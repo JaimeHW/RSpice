@@ -12,10 +12,11 @@
 use super::tests::{MemoryStorage, relaunch};
 use super::*;
 
-use crate::workbench::state::{ConsolePage, Workspace, WorkspaceDocumentId};
 use rspice_app_project::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
 use rspice_app_state::state::ModelsPage;
 use rspice_app_state::state::{SimulationPage, VerificationPage};
+use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::state::workbench_session::{ConsolePage, WorkspaceDocumentId};
 
 /// A session in mid-work with every persisted field moved off its default:
 /// a closed project that left its documents, a run and an unsaved model edit

@@ -5,12 +5,12 @@ use egui::accesskit::Role;
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::project_transactions::open_new_project_dialog;
-use crate::workbench::state::Workspace;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_project::workbench::project::library_dialogs::new_view::{
     CREATABLE_VIEW_TYPES, CREATE_SYMBOL_TITLE, view_type_label,
 };
 use rspice_app_state::state::{CellViewRef, ViewType};
+use rspice_app_state::workbench::workspace::Workspace;
 
 use super::super::replay::{Control, Replay};
 

@@ -42,7 +42,7 @@ fn install_retained_results(state: &mut AppState) -> AnalysisPresentationKey {
     assert!(state.model.simulation.select_run(0));
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     key
 }
 
@@ -200,7 +200,7 @@ fn saving_another_document_does_not_publish_results_allocation_history() {
     state.results.results.session.remove_marker(pending);
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     state
         .model
         .schematic
@@ -223,7 +223,7 @@ fn saving_another_document_does_not_publish_results_allocation_history() {
     );
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Results);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     assert!(active_document_is_dirty(&state));
     save_native(
         &mut state,

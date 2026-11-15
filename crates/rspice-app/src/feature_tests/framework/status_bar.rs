@@ -3,8 +3,6 @@
 //! the engine's lifecycle mark, and what gives way on a narrow bar.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::diagnostic_store::listing::DiagnosticCounts;
-use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::chrome::status_bar::design::{
     design_engineering_context, schematic_cursor_summary, selection_summary,
 };
@@ -16,6 +14,8 @@ use rspice_app_runs::simulation::status::{
     preflight_status, simulation_engine_status, simulation_progress_percent,
 };
 use rspice_app_sheets::workbench::chrome::status_bar::sheets::sheet_position_summary;
+use rspice_app_state::workbench::app_state::diagnostic_store::listing::DiagnosticCounts;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::theme::{self, FontWeight};
 use rspice_app_workbench::ui::tokens::{self, Tokens};
 use rspice_app_workbench::ui::widgets::Problem;
@@ -25,7 +25,7 @@ use rspice_app_workbench::workbench::layout::LayoutSpec;
 
 /// The counts the bar states, read as the page reads them.
 fn counts(app: &RSpiceApp) -> DiagnosticCounts {
-    crate::workbench::app_state::diagnostic_store::listing::listing(&app.state).counts()
+    rspice_app_state::workbench::app_state::diagnostic_store::listing::listing(&app.state).counts()
 }
 
 /// A rule separates two items. The last item on the left used to draw
@@ -93,7 +93,7 @@ fn the_bar_draws_the_prompt_and_drops_it_once_it_expires() {
                 .as_mut()
                 .expect("the prompt is still held")
                 .issued = rspice_app_state::time_compat::Instant::now()
-                .checked_sub(crate::workbench::state::StatusPrompt::LIFETIME)
+                .checked_sub(rspice_app_workbench::workbench::state::workbench_session::StatusPrompt::LIFETIME)
                 .expect("the session clock reaches back one prompt lifetime");
         }
         let ctx = egui::Context::default();
@@ -576,7 +576,7 @@ fn the_page_segment_appears_only_above_one_sheet_and_follows_activation() {
         Some("p1/4".to_owned())
     );
 
-    crate::workbench::app::sheets::activate_sheet(
+    rspice_app_sheets::workbench::app::actions::sheets::activate_sheet(
         &mut app.state.model,
         &mut app.state.workbench,
         &mut *app.state.design,

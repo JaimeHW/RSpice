@@ -11,7 +11,6 @@ use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, open_in_design, open_project_app, themed_context,
 };
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::documents::code_workspace;
 use rspice_app_services::io::ProjectSnapshot;
 use rspice_app_state::state::{
@@ -19,6 +18,7 @@ use rspice_app_state::state::{
     ProjectSourceDocument, ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
     SymbolDocument, View, ViewType,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// The demonstration module every project used to be created with, exactly.
 const RETIRED_DEMO: &str = "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule";

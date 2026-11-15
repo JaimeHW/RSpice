@@ -3,9 +3,6 @@
 
 use egui::{Key, Modifiers, Rect, pos2};
 
-use crate::workbench::state::{
-    ConsoleChannel, ConsolePage, ConsoleReveal, ConsoleSelection, ConsoleView,
-};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_state::diagnostics::{LogAnchor, LogBuffer, LogSeverity, LogSource};
 use rspice_app_state::state::SimulationRun;
@@ -14,6 +11,10 @@ use rspice_app_workbench::ui::widgets::PROBLEM_MARK_ADVANCE as CONSOLE_MARK_GUTT
 use rspice_app_workbench::workbench::docks::console::transcript::lines::{Rows, Source};
 use rspice_app_workbench::workbench::docks::console::transcript::*;
 use rspice_app_workbench::workbench::docks::console::{CONSOLE_COLUMN_GAP, CONSOLE_ROW_MIN_HEIGHT};
+use rspice_app_workbench::workbench::state::{
+    console_views::{ConsoleChannel, ConsoleReveal, ConsoleSelection, ConsoleView},
+    workbench_session::ConsolePage,
+};
 use rspice_vocabulary::run_log::{RunLog, RunLogLine};
 
 const SIZE: egui::Vec2 = egui::vec2(900.0, 600.0);
@@ -448,7 +449,7 @@ fn show_in_console_selects_the_line_the_notice_came_from() {
     app.state
         .workbench
         .console_view
-        .toggle(crate::workbench::state::ConsoleSeverity::Errors);
+        .toggle(rspice_app_workbench::workbench::state::console_views::ConsoleSeverity::Errors);
 
     rspice_app_workbench::workbench::framework::host::Host::perform_notification_action(
         &mut app,
@@ -464,7 +465,9 @@ fn show_in_console_selects_the_line_the_notice_came_from() {
         view.find.is_empty(),
         "nothing the reader set hides the line"
     );
-    assert!(view.shows(crate::workbench::state::ConsoleSeverity::Errors));
+    assert!(
+        view.shows(rspice_app_workbench::workbench::state::console_views::ConsoleSeverity::Errors)
+    );
 
     rspice_app_workbench::workbench::framework::host::Host::perform_notification_action(
         &mut app,

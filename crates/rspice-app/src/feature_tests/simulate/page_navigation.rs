@@ -346,7 +346,7 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
     app.after_contribution();
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Results,
+        rspice_app_state::workbench::workspace::Workspace::Results,
         "the hop lands where the family view is drawn"
     );
     let Some(rspice_results_ui::document_dialogs::ResultDocumentDialog::Family(draft)) =
@@ -455,7 +455,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     app.after_contribution();
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Results
+        rspice_app_state::workbench::workspace::Workspace::Results
     );
     assert_eq!(
         app.state
@@ -576,7 +576,7 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
     assert!(retained.waveforms.iter().all(|waveform| !waveform.visible));
     assert_eq!(
         app.state.workbench.workspace,
-        crate::workbench::state::Workspace::Results
+        rspice_app_state::workbench::workspace::Workspace::Results
     );
 }
 

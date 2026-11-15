@@ -4,13 +4,14 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::WorkbenchSession;
-use crate::workbench::state::{Drawer, Workspace};
 use egui::{Area, Context, Id, Order, Sense, UiKind};
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::tokens::{Mode, Tokens};
 use rspice_app_workbench::workbench::docks::drawers::*;
 use rspice_app_workbench::workbench::layout::LayoutSpec;
+use rspice_app_workbench::workbench::state::workbench_session::Drawer;
+use rspice_app_workbench::workbench::state::workbench_session::WorkbenchSession;
 
 #[derive(Clone, Copy)]
 struct ModalFocusFixtureIds {

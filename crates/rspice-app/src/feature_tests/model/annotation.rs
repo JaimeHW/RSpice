@@ -1,12 +1,12 @@
 //! Annotation publication, dependent references and shared project history.
 
-use crate::workbench::app_state::design_history::DesignManagementHistoryEntry;
-use crate::workbench::app_state::design_history::schematic_for_reference;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::state::ComponentType;
 use rspice_app_state::state::DesignManagementCatalog;
 use rspice_app_state::state::SchematicSnapshot;
 use rspice_app_state::state::SchematicState;
+use rspice_app_state::workbench::app_state::design_history::DesignManagementHistoryEntry;
+use rspice_app_state::workbench::app_state::design_history::schematic_for_reference;
 
 mod live_references;
 mod manual_edit;

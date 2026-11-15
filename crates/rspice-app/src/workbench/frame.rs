@@ -343,7 +343,7 @@ impl RSpiceApp {
 /// with Export dataset… drawn where its request is answered.
 fn answer_result_requests(ctx: &Context, app: &mut RSpiceApp) {
     requests::drain(app, outbox, |app, ExportResultQuantities(keys)| {
-        crate::workbench::menu_bar::action_export_result_selection_with_io(
+        rspice_app_results::workbench::menu_bar::waveform_export::action_export_result_selection_with_io(
             &mut app.state.results_parts(),
             app.export_workflow_io.as_ref(),
             &keys,
@@ -1136,7 +1136,8 @@ fn apply_browser_full_screen(app: &mut RSpiceApp, enabled: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::state::{Drawer, Workspace};
+    use rspice_app_state::workbench::workspace::Workspace;
+    use rspice_app_workbench::workbench::state::workbench_session::{Drawer, WorkbenchSession};
 
     #[test]
     fn every_canonical_workspace_has_a_surface_owner() {

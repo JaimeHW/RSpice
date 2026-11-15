@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::Workspace;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     ProjectDocumentId, dirty_documents, has_unsaved_changes,
@@ -18,6 +17,7 @@ use rspice_app_state::state::{
     CellViewRef, ComponentType, Point, PortSpec, SchematicState, SymbolDocument,
     SymbolEditorMetadata, SymbolInterface, View, ViewType,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_schematic_editor::symbol_editor::surface::canvas_check_lines;
 
 fn unique_path(label: &str) -> PathBuf {
@@ -368,7 +368,7 @@ fn symbol_edits_are_unsaved_project_work_until_the_project_is_saved() {
     assert!(
         matches!(
             fixture.app.state.workbench.project_review_dialog.request,
-            Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
+            Some(rspice_app_workbench::workbench::app::dialogs::confirmation_state::ProjectReviewRequest::CloseProject(_))
         ),
         "closing the project asks about the unsaved symbol"
     );
@@ -503,7 +503,7 @@ fn a_schematic_declaring_no_pins_is_a_note_never_a_refusal() {
     assert!(!levels.is_empty(), "the undeclared pins are found");
     assert!(
         levels.iter().all(|level| *level
-            == crate::workbench::app_state::diagnostic_store::DiagnosticLevel::Warning),
+            == rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel::Warning),
         "a pin the schematic does not declare is a warning: {levels:?}"
     );
 }

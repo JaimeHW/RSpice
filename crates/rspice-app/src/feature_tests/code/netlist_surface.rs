@@ -113,7 +113,7 @@ fn run_strip_band(
     const EDITED: &str = "run strip fixture\nV1 out 0 1\nR1 out 0 2k\n.op\n.end\n";
 
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+    app.state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
     app.state.model.workspace.content.netlist_source = Some(DECK.to_owned());
     app.state.model.simulation.source.netlist_content = DECK.to_owned();
     app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;

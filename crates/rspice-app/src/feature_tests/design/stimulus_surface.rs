@@ -12,7 +12,7 @@ use rspice_app_state::state::stimulus_library::fixtures;
 pub(super) fn seeded(selection: &str) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.model.workspace.content.stimulus_library = fixtures::library();
-    app.state.workbench.workspace = crate::workbench::state::Workspace::Stimulus;
+    app.state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Stimulus;
     app.state.design.selected_stimulus_definition = Some(selection.to_owned());
     app
 }

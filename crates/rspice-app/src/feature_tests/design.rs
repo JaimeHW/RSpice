@@ -108,7 +108,6 @@ use egui::{Context, Rect, pos2, vec2};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::features::{self, Registered};
-use crate::workbench::state::Workspace;
 use rspice_app_design::workbench::design::DesignFeature;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_design::workbench::design::test_host::DesignTestHost;
@@ -116,6 +115,7 @@ use rspice_app_state::state::{
     Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance,
     ModelBoundSymbolDefinition, Point, SymbolDefinitionImport, View, ViewType,
 };
+use rspice_app_state::workbench::workspace::Workspace;
 
 use super::replay::Replay;
 

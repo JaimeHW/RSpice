@@ -6,10 +6,10 @@
 use egui::{Modifiers, Rect, vec2};
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_app_project::workbench::project::workspace_state::LibraryCellviewPage;
 use rspice_app_project::workbench::surfaces::library_cellview_manager::tests::typed_symbol;
 use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::requests::OpenSymbolAuthoring;
 use rspice_app_workbench::workbench::routing::{
     navigation::RouteTransitionSource, surface_catalog::SurfaceId, surface_route::SurfaceRoute,

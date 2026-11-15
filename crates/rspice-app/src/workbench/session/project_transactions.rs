@@ -9,13 +9,7 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-#[cfg(doc)]
-use crate::workbench::app_state::Model;
-#[cfg(test)]
-use crate::workbench::app_state::model::LibraryRemoval;
-use crate::workbench::app_state::model::WorkspacePruned;
 use crate::workbench::app_state::services_access;
-use crate::workbench::state::Workspace;
 use rspice_app_cloud::workbench::live_session::{
     CloudHandles, DiscardMirror, LiveHost, MirrorApply,
 };
@@ -43,7 +37,13 @@ use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::product::TransactionId;
 use rspice_app_state::state::write_policy::LocalSafeModeOptions;
 use rspice_app_state::state::{SchematicState, ViewType};
+#[cfg(test)]
+use rspice_app_state::workbench::app_state::model::LibraryRemoval;
+#[cfg(doc)]
+use rspice_app_state::workbench::app_state::model::Model;
+use rspice_app_state::workbench::app_state::model::WorkspacePruned;
 use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::feature::ModelsPort;
 use rspice_app_workbench::workbench::framework::requests::{self, AdoptLiveOwnedSource};
 #[cfg(not(target_arch = "wasm32"))]
@@ -1443,7 +1443,7 @@ pub(crate) fn start_local_safe_mode(
     services::activate_safe_mode(&mut state.model, options, preserved_session);
     state
         .workbench
-        .activate(crate::workbench::state::Workspace::Project);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Project);
     services::record_safe_mode_started(&mut state.model, options);
     Ok(())
 }
@@ -1476,7 +1476,7 @@ mod tests {
         assert!(!state.project.project_launcher_open);
         assert_eq!(
             state.workbench.workspace,
-            crate::workbench::state::Workspace::Project
+            rspice_app_state::workbench::workspace::Workspace::Project
         );
         assert!(
             state.workbench.outbox.peek::<LiveMirrorEntry>().is_none(),

@@ -20,7 +20,7 @@ use std::collections::HashMap;
 
 #[test]
 fn symbol_field_typing_survives_passive_window_projection() {
-    use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 
     let mut editor = Editor::new();
     let before = editor

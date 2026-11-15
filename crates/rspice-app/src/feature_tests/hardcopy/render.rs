@@ -70,12 +70,11 @@ fn studio_surface(viewport: Vec2) -> Rect {
 fn studio_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     let reference = app.state.model.workspace.content.active_view.clone();
-    app.state
-        .workbench
-        .documents
-        .activate(crate::workbench::state::WorkspaceDocumentId::CellView(
+    app.state.workbench.documents.activate(
+        rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId::CellView(
             reference,
-        ));
+        ),
+    );
     publish::open_hardcopy_workflow(&mut hardcopy_parts(&mut app), HardcopyWorkflow::Export);
     app
 }

@@ -5,12 +5,12 @@
 //! below holds every authored fact the port refused over every route.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::SimulationPlanManagerDraft;
-use crate::workbench::state::SimulationPlanManagerMode;
-use crate::workbench::state::SimulationPlanScope;
 use egui::Rect;
 use egui::Vec2;
 use egui::vec2;
+use rspice_app_simulate::workbench::state::workflow_drafts::SimulationPlanManagerDraft;
+use rspice_app_simulate::workbench::state::workflow_drafts::SimulationPlanManagerMode;
+use rspice_app_simulate::workbench::state::workflow_drafts::SimulationPlanScope;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::NO_MODELLED_COST;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::PLAN_COLUMNS;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::PLAN_DIALOG_DESCRIPTION;
@@ -1457,7 +1457,7 @@ fn a_clone_names_its_source_and_the_source_keeps_its_own_reference_corner() {
     let outcome = setup
         .clone_active_plan(
             "Cloned characterization",
-            crate::workbench::app_state::SimulationPlanCloneOptions::ALL_PLAN_CONTENTS,
+            rspice_app_state::workbench::app_state::sim_setup::plan_catalog::SimulationPlanCloneOptions::ALL_PLAN_CONTENTS,
         )
         .expect("the active plan clones");
     setup

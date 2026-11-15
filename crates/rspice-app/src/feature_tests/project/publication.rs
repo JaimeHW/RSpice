@@ -17,13 +17,15 @@ use crate::workbench::shell_host::project::library_publication::publication_file
 use crate::workbench::shell_host::project::library_publication::publish_native;
 use crate::workbench::shell_host::project::library_publication::show;
 use crate::workbench::shell_host::project::library_publication::validate_rollback_artifact;
-use crate::workbench::workflows::export_workflow::SaveDialogConfig;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, ObservedExportDestination};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_project::workbench::surfaces::project::library_publication::PublicationAction;
 use rspice_app_project::workbench::surfaces::project::library_publication::{
     PublicationDraft, audit_text_valid, open_publication, open_rollback, safe_file_stem,
+};
+use rspice_app_services::workbench::workflows::export_workflow::SaveDialogConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_services::workbench::workflows::export_workflow::{
+    ExportWorkflowIo, ObservedExportDestination,
 };
 
 /// Every `(path, bytes)` the test double was asked to publish, shared so

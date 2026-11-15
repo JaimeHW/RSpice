@@ -45,7 +45,7 @@ fn compiling_verilog_a_is_refused_while_a_compile_is_already_pending() {
     app.state.open_workspace_view(reference);
     app.state
         .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+        .activate(rspice_app_state::workbench::workspace::Workspace::Design);
     let enabled_before = app.command_key_enabled(CodeCommand::CompileVerilogA.key());
     assert!(
         enabled_before,

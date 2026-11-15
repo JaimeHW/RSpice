@@ -124,7 +124,7 @@ impl AppState {
         )?;
         candidate
             .workbench
-            .activate(crate::workbench::state::Workspace::Netlist);
+            .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
         self.commit_candidate(candidate);
         Ok(())
     }

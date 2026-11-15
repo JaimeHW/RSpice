@@ -95,7 +95,7 @@ impl Studio {
             // a studio shown beside it has to actually be the active one.
             app.state
                 .workbench
-                .activate(crate::workbench::state::Workspace::Simulate);
+                .activate(rspice_app_state::workbench::workspace::Workspace::Simulate);
         }
         app.state.simulate.simulation_page = page;
         let mut studio = Self {
@@ -393,7 +393,7 @@ fn the_run_set_toolbar_undoes_redoes_and_previews_the_declaration() {
 /// workspace method works and says nothing about the button above it.
 #[test]
 fn every_capture_group_command_is_reachable_from_the_card() {
-    use crate::workbench::state::SimulationWorkflowDialog;
+    use rspice_app_simulate::workbench::state::workflow_drafts::SimulationWorkflowDialog;
     use rspice_app_state::state::{
         CaptureGroup, CaptureGroupRule, InstancePath, SavedOutput, SavedOutputCompatibility,
         SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,

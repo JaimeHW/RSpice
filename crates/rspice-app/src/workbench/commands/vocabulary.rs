@@ -13,7 +13,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::workbench::state::Workspace;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_design::schematic::view::sheet_visibility::SchematicObjectKind;
@@ -32,6 +31,7 @@ use rspice_app_state::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
 };
 use rspice_app_state::state::{SimulationPage, VerificationPage};
+use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::{self, CommandFlags, Registry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
