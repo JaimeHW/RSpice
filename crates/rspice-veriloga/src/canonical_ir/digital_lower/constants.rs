@@ -326,20 +326,87 @@ pub(super) fn resolve<'a>(
     initializers: impl IntoIterator<Item = &'a Expression>,
 ) -> Result<ResolvedConstants, Vec<DigitalLoweringDiagnostic>> {
     let required = required_parameters(processes, assignments, routines, initializers);
-    let definitions: HashMap<_, _> = source
+    let definitions = definitions(source);
+    let mut resolved = seeded(source);
+    resolve_names(
+        source,
+        &definitions,
+        time_scale,
+        required,
+        &mut resolved,
+        &mut HashSet::new(),
+    )?;
+    Ok(resolved)
+}
+
+/// Every parameter `source` declares with its value, for a design that dumps
+/// them (IEEE 1364-2005 section 18.2.3.8), resolved as [`resolve`] resolves
+/// the ones a process reads. A declaration with no digital constant value is
+/// left out.
+pub(super) fn dumped(
+    source: &DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+) -> Vec<(SmolStr, super::super::digital::DigitalParameterValue)> {
+    use super::super::digital::DigitalParameterValue;
+    let definitions = definitions(source);
+    let mut resolved = seeded(source);
+    let mut finished = HashSet::new();
+    let mut dumped = Vec::new();
+    for declaration in &source.definitions {
+        let name = declaration.name.as_str();
+        if resolve_names(
+            source,
+            &definitions,
+            time_scale,
+            BTreeSet::from([name.to_owned()]),
+            &mut resolved,
+            &mut finished,
+        )
+        .is_err()
+        {
+            continue;
+        }
+        let value = if let Some(&real) = resolved.reals.get(name) {
+            DigitalParameterValue::Real(real)
+        } else if let Some((bits, _)) = resolved.bits.get(name) {
+            DigitalParameterValue::FourState(bits.clone())
+        } else {
+            continue;
+        };
+        dumped.push((declaration.name.clone(), value));
+    }
+    dumped
+}
+
+fn definitions(source: &DigitalConstants) -> HashMap<&str, &ParameterDecl> {
+    source
         .definitions
         .iter()
         .map(|value| (value.name.as_str(), value))
-        .collect();
-    let mut resolved = ResolvedConstants {
+        .collect()
+}
+
+fn seeded(source: &DigitalConstants) -> ResolvedConstants {
+    ResolvedConstants {
         bits: HashMap::new(),
         bounds: HashMap::new(),
         integers: source.integers.clone(),
         reals: source.reals.clone(),
         non_finite_reals: source.non_finite_reals.clone(),
         functions: source.functions.clone(),
-    };
-    let mut finished = HashSet::new();
+    }
+}
+
+/// Resolve `required` and what each depends on into `resolved`, skipping the
+/// names in `finished`, which gains every name resolved.
+fn resolve_names(
+    source: &DigitalConstants,
+    definitions: &HashMap<&str, &ParameterDecl>,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    required: BTreeSet<String>,
+    resolved: &mut ResolvedConstants,
+    finished: &mut HashSet<String>,
+) -> Result<(), Vec<DigitalLoweringDiagnostic>> {
     let mut active = HashSet::new();
     let mut pending: Vec<_> = required
         .into_iter()
@@ -360,7 +427,7 @@ pub(super) fn resolve<'a>(
             )]
         })?;
         if ready {
-            resolve_one(&name, &declaration, &mut resolved, time_scale)?;
+            resolve_one(&name, &declaration, resolved, time_scale)?;
             active.remove(&name);
             finished.insert(name);
             continue;
@@ -382,7 +449,7 @@ pub(super) fn resolve<'a>(
         }
         pending.extend(dependencies.into_iter().rev().map(|name| (name, false)));
     }
-    Ok(resolved)
+    Ok(())
 }
 
 /// Typed assignment evidence; numeric defaults still retain executable expressions.

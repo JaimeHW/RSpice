@@ -132,6 +132,18 @@ struct Spec {
     upper: bool,
 }
 
+/// `value` as C's `%.16g` prints it, the form a value change dump writes a
+/// real in (IEEE 1364-2005 section 18.2.1).
+pub(super) fn dump_real(value: f64) -> String {
+    format_real(
+        value,
+        &Spec {
+            precision: Some(16),
+            ..Spec::natural('g')
+        },
+    )
+}
+
 impl Spec {
     fn natural(conversion: char) -> Self {
         Self {

@@ -277,7 +277,11 @@ use smol_str::SmolStr;
 /// a port connection joined to another scope's net
 /// (`CanonicalDigitalPlan::signal_aliases`), and a reference argument naming
 /// such a port. An earlier artifact named neither.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 193;
+/// Version 194 records a dumping design's parameters, local parameters and
+/// generate loop indices with their values, by scope
+/// (`CanonicalDigitalPlan::dump_parameters`). An earlier artifact's dump
+/// listed none.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 194;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

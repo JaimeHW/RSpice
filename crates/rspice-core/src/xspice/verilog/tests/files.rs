@@ -671,6 +671,194 @@ $enddefinitions $end
     assert!(skipped[0].contains("`tb.dut.d`"), "{skipped:?}");
 }
 
+const PARAMETER_DESIGN: &str = r##"`timescale 1ns/1ps
+module leaf #(parameter W = 4, parameter [7:0] K = 8'hA5);
+  localparam real G = 1.5;
+  localparam S = "hi";
+  localparam B = 1'b1;
+  localparam signed [5:0] N = -3;
+  reg [W-1:0] q;
+  initial q = K[W-1:0];
+endmodule
+module tb;
+  parameter P = 5;
+  parameter real R = 2.25;
+  localparam [3:0] L = 4'b10x1;
+  reg [3:0] d;
+  leaf u1();
+  leaf #(.W(2), .K(3)) u2();
+  genvar g;
+  generate
+    for (g = 0; g < 2; g = g + 1) begin : gl
+      localparam M = g * 3;
+      reg r;
+      initial r = g;
+    end
+    if (P == 5) begin : gi
+      localparam Q = 7;
+    end
+  endgenerate
+  initial begin
+    $dumpfile("work/DUMP.vcd");
+    CALLS
+    d = 4'b0011;
+    #1 d = 4'b1100;
+    #1 $finish;
+  end
+endmodule
+"##;
+
+/// Section 18.2's grammar declares a parameter as a `$var parameter`. Icarus
+/// Verilog lists every parameter, localparam and genvar a dumped scope
+/// holds, after the scope's nets and before its variables, a string as its
+/// bytes, and gives their values once, in a `$dumpall` block ahead of time
+/// zero, in the reverse of the order it declared them. A generate loop's
+/// genvar is a parameter of each iteration's scope, holding that
+/// iteration's value. Expected text from Icarus 13.0 running the same
+/// source, but for two widths: a real is 64 bits, where Icarus writes 1, and
+/// a genvar is the 32-bit integer localparam section 12.4.1 makes it, where
+/// Icarus writes its value's smallest signed width.
+#[test]
+fn a_dump_lists_parameters_and_genvars_as_icarus_does() {
+    const WHOLE: &str = r##"$scope module tb $end
+$var parameter 4 ! L $end
+$var parameter 32 " P $end
+$var real 64 # R $end
+$var reg 4 $ d [3:0] $end
+$scope begin gi $end
+$var parameter 32 % Q $end
+$upscope $end
+$scope begin gl[0] $end
+$var parameter 32 & M $end
+$var parameter 32 ' g $end
+$var reg 1 ( r $end
+$upscope $end
+$scope begin gl[1] $end
+$var parameter 32 ) M $end
+$var parameter 32 * g $end
+$var reg 1 + r $end
+$upscope $end
+$scope module u1 $end
+$var parameter 1 , B $end
+$var real 64 - G $end
+$var parameter 8 . K $end
+$var parameter 6 / N $end
+$var parameter 16 0 S $end
+$var parameter 32 1 W $end
+$var reg 4 2 q [3:0] $end
+$upscope $end
+$scope module u2 $end
+$var parameter 1 3 B $end
+$var real 64 4 G $end
+$var parameter 8 5 K $end
+$var parameter 6 6 N $end
+$var parameter 16 7 S $end
+$var parameter 32 8 W $end
+$var reg 2 9 q [1:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+$comment Show the parameter values. $end
+$dumpall
+b10 8
+b110100001101001 7
+b111101 6
+b11 5
+r1.5 4
+13
+b100 1
+b110100001101001 0
+b111101 /
+b10100101 .
+r1.5 -
+1,
+b1 *
+b11 )
+b0 '
+b0 &
+b111 %
+r2.25 #
+b101 "
+b10x1 !
+$end
+#0
+$dumpvars
+b11 9
+b101 2
+1+
+0(
+b11 $
+$end
+#1000
+b1100 $
+#2000
+"##;
+    const SCOPED: &str = r##"$scope module tb $end
+$scope module u2 $end
+$var parameter 1 ! B $end
+$var real 64 " G $end
+$var parameter 8 # K $end
+$var parameter 6 $ N $end
+$var parameter 16 % S $end
+$var parameter 32 & W $end
+$var reg 2 ' q [1:0] $end
+$upscope $end
+$upscope $end
+$scope module tb $end
+$scope begin gi $end
+$var parameter 32 ( Q $end
+$upscope $end
+$upscope $end
+$scope module tb $end
+$var parameter 4 ) L $end
+$var parameter 32 * P $end
+$var real 64 + R $end
+$var reg 4 , d [3:0] $end
+$upscope $end
+$enddefinitions $end
+$comment Show the parameter values. $end
+$dumpall
+r2.25 +
+b101 *
+b10x1 )
+b111 (
+b10 &
+b110100001101001 %
+b111101 $
+b11 #
+r1.5 "
+1!
+$end
+#0
+$dumpvars
+b11 ,
+b11 '
+$end
+#1000
+b1100 ,
+#2000
+"##;
+    for (name, calls, expected) in [
+        ("whole", "$dumpvars(0, tb);", WHOLE),
+        (
+            "scoped",
+            "$dumpvars(1, tb.u2); $dumpvars(0, tb.gi); $dumpvars(1, tb);",
+            SCOPED,
+        ),
+    ] {
+        let directory = run_directory(&format!("dump-parameters-{name}"));
+        let source = PARAMETER_DESIGN
+            .replace("DUMP", name)
+            .replace("CALLS", calls);
+        let report = bench_in(&directory, &source, false);
+        let text = written(&report, &format!("work/{name}.vcd"));
+        let start = text
+            .find("$scope")
+            .unwrap_or_else(|| panic!("no scope in\n{text}"));
+        assert_eq!(&text[start..], expected, "{name}");
+    }
+}
+
 /// A write that would leave the run directory fails as
 /// section 17.2.1 prescribes, with a located warning; the run may lift the
 /// confinement.

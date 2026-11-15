@@ -1741,7 +1741,7 @@ varlsfht2	vlg	passed	L3	pass	PASSED
 varrshft	vlg	passed	L1	pass	PASSED
 varrshft1	vlg	passed	L1	pass	PASSED
 varrshft2	vlg	passed	L3	pass	PASSED
-vcd-dup	vlg	gold	L5	deviation	IEEE 1364-2005 §18.2: the dump has the gold's scopes, variables, shared identifier codes and every value change, laid out where the clause leaves the order to the tool: Icarus lists `c2` before `c1` in each scope in its link order, so the codes after them follow, orders the lines of a value block and a time step by its callbacks, and adds an empty parameter block
+vcd-dup	vlg	gold	L5	deviation	IEEE 1364-2005 §18.2: the dump has the gold's scopes, variables, shared identifier codes and every value change, laid out where the clause leaves the order to the tool: Icarus lists `c2` before `c1` in each scope in its link order, so the codes after them and the lines of each value block, written by code, follow; it orders a time step by its callbacks; and the design, with no `timescale`, has Icarus's 1 s unit where RSpice's is 1 ns
 vector	vlg	gold	L1	pass	matches the gold file
 verify_two_var_delays	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
 vvp_scalar_value	vlg	passed	L7	pass	PASSED

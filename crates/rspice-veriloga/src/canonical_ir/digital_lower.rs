@@ -1570,9 +1570,48 @@ fn lower_with_analog_variables(
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
+    // A dump lists every parameter, local parameter and generate loop index
+    // with its value, each in the scope declaring it (IEEE 1364-2005 section
+    // 18.2.3.8). A generate block's are named under it (`gl[0].M`).
+    let mut dump_parameters = Vec::new();
+    if calls.dumps {
+        let scope_ids: HashMap<&str, DigitalScopeId> = calls
+            .scopes
+            .iter()
+            .map(|scope| (scope.path.as_str(), scope.id))
+            .collect();
+        let frames = std::iter::once((
+            SmolStr::from(root_name),
+            &digital.constants,
+            digital.time_scale,
+        ))
+        .chain(digital.instances.iter().map(|instance| {
+            (
+                format!("{root_name}.{}", instance.path).into(),
+                &instance.constants,
+                instance.time_scale,
+            )
+        }));
+        for (frame, constants, time_scale) in frames {
+            for (name, value) in constants::dumped(constants, time_scale) {
+                let (scope, leaf) = match name.rsplit_once('.') {
+                    Some((qualifier, leaf)) => (format!("{frame}.{qualifier}"), leaf),
+                    None => (frame.to_string(), name.as_str()),
+                };
+                if let Some(&scope) = scope_ids.get(scope.as_str()) {
+                    dump_parameters.push(super::digital::DigitalDumpParameter {
+                        scope,
+                        name: leaf.into(),
+                        value,
+                    });
+                }
+            }
+        }
+    }
     CanonicalDigitalPlan {
         timing,
         content_identity: [0; 32],
+        dump_parameters,
         external_signals,
         external_routines,
         external_scopes: calls.external_scopes,

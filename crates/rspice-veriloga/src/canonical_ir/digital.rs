@@ -1398,6 +1398,11 @@ pub struct CanonicalDigitalPlan {
     /// instance in it (`$printtimescale(othertop)`): named here, held there.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub external_scopes: Vec<DigitalScopeId>,
+    /// Every parameter, local parameter and generate loop index of the
+    /// design with its value, by the scope declaring it, when the design
+    /// calls `$dumpvars`, which lists them; empty otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dump_parameters: Vec<DigitalDumpParameter>,
     /// Storage this plan gave a hierarchical name that starts at another
     /// top-level module (IEEE 1364-2005 section 12.5). Linking the roots
     /// joins each to the signal it names; a plan that keeps one unjoined is
@@ -1583,6 +1588,23 @@ pub struct DigitalScope {
     pub kind: DigitalScopeKind,
     /// That module's `timescale` (`$printtimescale`, `%t`).
     pub time_scale: crate::time_scale::ModuleTimeScale,
+}
+
+/// One parameter, local parameter or generate loop index in the scope that
+/// declares it, with its elaborated value: what `$dumpvars` lists as a
+/// `parameter` variable (IEEE 1364-2005 section 18.2.3.8).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DigitalDumpParameter {
+    pub scope: DigitalScopeId,
+    pub name: SmolStr,
+    pub value: DigitalParameterValue,
+}
+
+/// A parameter's elaborated value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum DigitalParameterValue {
+    FourState(super::digital_value::FourStateValue),
+    Real(f64),
 }
 
 /// The radix a display-family task formats an unformatted argument in.

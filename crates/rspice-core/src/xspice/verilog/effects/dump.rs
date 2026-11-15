@@ -14,7 +14,8 @@
 //!
 //! `$dumpvars` calls made in one time step select the variables; at the end
 //! of that step the header is written and the selection's values are dumped
-//! in a `$dumpvars` block (section 18.1.2). From then on, the end of every
+//! in a `$dumpvars` block (section 18.1.2), after a block of every dumped
+//! parameter's value, which never changes. From then on, the end of every
 //! step writes the variables whose value changed, after a `#time` line. A
 //! later `$dumpvars` is ignored with a warning. `$dumpoff` writes every
 //! variable as `x` and stops recording, `$dumpon` writes every current value
@@ -31,14 +32,16 @@
 //! variable an earlier argument named is skipped, each with a warning. A
 //! port that its connection joined to another scope's net is listed in its
 //! own scope with that net's identifier code, as one value under two names.
+//! A value block lists the newest variable first, and a time step the
+//! variable that first changed last first, as Icarus Verilog writes them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use rspice_veriloga::canonical_ir::digital::{
-    CanonicalDigitalPlan, DigitalScopeKind, DigitalSystemArgument, DigitalSystemCall,
-    DigitalSystemCallKind as Kind,
+    CanonicalDigitalPlan, DigitalParameterValue, DigitalScopeKind, DigitalSystemArgument,
+    DigitalSystemCall, DigitalSystemCallKind as Kind,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalClock, DigitalEnvironment, DigitalEvalError, DigitalScalar,
@@ -80,6 +83,10 @@ pub(crate) struct DumpVar {
     /// `[msb:lsb]`, for a vector.
     pub range: Option<(i64, i64)>,
     pub real: bool,
+    /// The plan's dumped parameter this variable is, whose value the header's
+    /// parameter block writes once; `signal` is then unused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameter: Option<u32>,
 }
 
 /// One line of the header, laid out as the `$dumpvars` calls ask.
@@ -118,9 +125,12 @@ pub(crate) struct Dump {
     /// Signal to the variable dumping it, for the change hook.
     #[serde(skip)]
     by_signal: Arc<BTreeMap<u32, usize>>,
-    /// Variables changed in this step.
+    /// Variables changed in this step, in the order each first changed.
     #[serde(skip)]
-    dirty: BTreeSet<usize>,
+    dirty: Vec<usize>,
+    /// Which variables are in `dirty`.
+    #[serde(skip)]
+    scheduled: Vec<bool>,
     pub last: Vec<Option<Dumped>>,
     /// `$dumpoff` stops recording, `$dumpon` resumes it.
     pub recording: bool,
@@ -151,7 +161,8 @@ impl Default for Dump {
             phase: DumpPhase::Idle,
             vars: Vec::new(),
             by_signal: Arc::default(),
-            dirty: BTreeSet::new(),
+            dirty: Vec::new(),
+            scheduled: Vec::new(),
             last: Vec::new(),
             recording: true,
             limit: None,
@@ -172,9 +183,12 @@ impl Dump {
             self.vars
                 .iter()
                 .enumerate()
+                .filter(|(_, var)| var.parameter.is_none())
                 .map(|(index, var)| (var.signal, index))
                 .collect(),
         );
+        self.dirty.clear();
+        self.scheduled = vec![false; self.vars.len()];
     }
 
     /// Whether the change hook has anything to do.
@@ -184,9 +198,22 @@ impl Dump {
 
     /// A signal changed value.
     pub(crate) fn note_change(&mut self, signal: DigitalSignalId) {
-        if let Some(index) = self.by_signal.get(&signal.index()) {
-            self.dirty.insert(*index);
+        if let Some(&index) = self.by_signal.get(&signal.index())
+            && let Some(scheduled) = self.scheduled.get_mut(index)
+            && !std::mem::replace(scheduled, true)
+        {
+            self.dirty.push(index);
         }
+    }
+
+    /// The variables changed in this step, in the order each first changed,
+    /// leaving none.
+    fn take_dirty(&mut self) -> Vec<usize> {
+        let dirty = std::mem::take(&mut self.dirty);
+        for &index in &dirty {
+            self.scheduled[index] = false;
+        }
+        dirty
     }
 }
 
@@ -259,9 +286,9 @@ fn hierarchy(plan: &CanonicalDigitalPlan, name: &str, linked: bool) -> (String, 
 
 /// The design's scopes and variables as a dump lays them out (IEEE 1364-2005
 /// section 18.2.3.4). Each scope lists its variables and then its scopes,
-/// each group in the order Icarus Verilog lists it: nets, variables, then
-/// integers and reals; functions, generate blocks, module instances, named
-/// blocks, then tasks; by name within each.
+/// each group in the order Icarus Verilog lists it: nets, parameters,
+/// variables, then integers and reals; functions, generate blocks, module
+/// instances, named blocks, then tasks; by name within each.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct DumpTree {
     nodes: Vec<DumpScope>,
@@ -286,7 +313,15 @@ struct DumpMember {
     rank: u8,
     name: String,
     kind: &'static str,
-    signal: u32,
+    item: DumpItem,
+}
+
+/// What a dumped variable follows: a signal, or a parameter of
+/// [`CanonicalDigitalPlan::dump_parameters`], whose value never changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DumpItem {
+    Signal(u32),
+    Parameter(u32),
 }
 
 impl DumpTree {
@@ -338,11 +373,11 @@ impl DumpTree {
                 continue;
             }
             let (rank, kind) = if real {
-                (2, "real")
+                (3, "real")
             } else if signal.integer {
-                (2, "integer")
+                (3, "integer")
             } else if signal.procedurally_assignable {
-                (1, "reg")
+                (2, "reg")
             } else {
                 (0, "wire")
             };
@@ -350,6 +385,27 @@ impl DumpTree {
         }
         for alias in &plan.signal_aliases {
             tree.member(plan, &alias.name, 0, "wire", alias.signal.index());
+        }
+        // Parameters follow the nets, as Icarus Verilog lists them; a real
+        // one is a `real`, the VCD having no real parameter type.
+        for (index, parameter) in plan.dump_parameters.iter().enumerate() {
+            let Some(scope) = plan.scopes.get(parameter.scope.index()) else {
+                continue;
+            };
+            let node = tree.scope(&scope.path, None);
+            let kind = match parameter.value {
+                DigitalParameterValue::Real(_) => "real",
+                DigitalParameterValue::FourState(_) => "parameter",
+            };
+            let scope = &mut tree.nodes[node];
+            if !scope.vars.iter().any(|var| var.name == parameter.name) {
+                scope.vars.push(DumpMember {
+                    rank: 1,
+                    name: parameter.name.to_string(),
+                    kind,
+                    item: DumpItem::Parameter(index as u32),
+                });
+            }
         }
         let keys: Vec<(u8, String)> = tree
             .nodes
@@ -423,7 +479,7 @@ impl DumpTree {
             rank,
             name,
             kind,
-            signal,
+            item: DumpItem::Signal(signal),
         });
     }
 
@@ -434,7 +490,7 @@ impl DumpTree {
         let member = self.nodes[node]
             .vars
             .iter()
-            .position(|var| var.name == name && var.signal == signal)?;
+            .position(|var| var.name == name && var.item == DumpItem::Signal(signal))?;
         Some((node, member))
     }
 }
@@ -492,7 +548,10 @@ fn change_line(value: &Dumped, identifier: &str) -> String {
     match value {
         Dumped::Bits(bits) if bits.starts_with('b') => format!("{bits} {identifier}\n"),
         Dumped::Bits(bit) => format!("{bit}{identifier}\n"),
-        Dumped::Real(bits) => format!("r{:?} {identifier}\n", f64::from_bits(*bits)),
+        Dumped::Real(bits) => format!(
+            "r{} {identifier}\n",
+            super::format::dump_real(f64::from_bits(*bits))
+        ),
     }
 }
 
@@ -796,6 +855,7 @@ impl HdlEffects {
             .vars
             .iter()
             .enumerate()
+            .filter(|(_, var)| var.parameter.is_none())
             .map(|(index, var)| (var.signal, index))
             .collect();
         for (node, member) in items {
@@ -898,31 +958,69 @@ impl HdlEffects {
     }
 
     /// A `$var` line for `member`, whose signal is a new variable unless a
-    /// line already names it.
+    /// line already names it; a parameter is a new variable each time.
     fn dump_member(
         &mut self,
         plan: &CanonicalDigitalPlan,
         member: &DumpMember,
         vars: &mut BTreeMap<u32, usize>,
     ) {
-        let Some(declared) = plan.signals.get(member.signal as usize) else {
-            return;
+        let var = match member.item {
+            DumpItem::Signal(signal) => {
+                let Some(declared) = plan.signals.get(signal as usize) else {
+                    return;
+                };
+                *vars.entry(signal).or_insert_with(|| {
+                    let real = declared.kind.is_real();
+                    self.dump.vars.push(DumpVar {
+                        signal,
+                        width: if real { 64 } else { declared.width },
+                        range: declared.bounds.filter(|_| !real),
+                        real,
+                        parameter: None,
+                    });
+                    self.dump.vars.len() - 1
+                })
+            }
+            DumpItem::Parameter(index) => {
+                let Some(parameter) = plan.dump_parameters.get(index as usize) else {
+                    return;
+                };
+                let (width, real) = match &parameter.value {
+                    DigitalParameterValue::FourState(value) => (value.width(), false),
+                    DigitalParameterValue::Real(_) => (64, true),
+                };
+                self.dump.vars.push(DumpVar {
+                    signal: u32::MAX,
+                    width,
+                    range: None,
+                    real,
+                    parameter: Some(index),
+                });
+                self.dump.vars.len() - 1
+            }
         };
-        let var = *vars.entry(member.signal).or_insert_with(|| {
-            let real = declared.kind.is_real();
-            self.dump.vars.push(DumpVar {
-                signal: member.signal,
-                width: if real { 64 } else { declared.width },
-                range: declared.bounds.filter(|_| !real),
-                real,
-            });
-            self.dump.vars.len() - 1
-        });
         self.dump.header.push(HeaderLine::Var {
             var,
             kind: member.kind,
             name: member.name.clone(),
         });
+    }
+
+    /// The run ends at `clock`'s time: a dump still recording ends with that
+    /// time, as Icarus Verilog closes its dump, unless it is already the last.
+    pub(super) fn dump_end(
+        &mut self,
+        plan: &CanonicalDigitalPlan,
+        site: &DigitalSystemCall,
+        clock: Option<DigitalClock>,
+    ) {
+        if !self.dump.watching() {
+            return;
+        }
+        if let Some(text) = self.timestamp(clock.map_or(0, |clock| clock.tick)) {
+            self.dump_write(plan, Some(site), clock, text);
+        }
     }
 
     /// Append dump text to the dump file.
@@ -992,12 +1090,14 @@ impl HdlEffects {
         if self.dump.dirty.is_empty() {
             return;
         }
-        let dirty = std::mem::take(&mut self.dump.dirty);
+        let dirty = self.dump.take_dirty();
         if !self.dump.watching() {
             return;
         }
+        // The last variable to change first comes first, as Icarus Verilog
+        // writes a time step.
         let mut text = String::new();
-        for index in dirty {
+        for &index in dirty.iter().rev() {
             let var = &self.dump.vars[index];
             let Some(value) = current(store, var) else {
                 continue;
@@ -1031,7 +1131,12 @@ impl HdlEffects {
     ) {
         let mut text = self.timestamp(tick).unwrap_or_default();
         text.push_str(&format!("${block}\n"));
-        for (index, var) in self.dump.vars.iter().enumerate() {
+        // The newest variable first, as Icarus Verilog writes a block; a
+        // parameter's value is in the header's parameter block.
+        for (index, var) in self.dump.vars.iter().enumerate().rev() {
+            if var.parameter.is_some() {
+                continue;
+            }
             let identifier = crate::io::vcd::canonical_identifier(index);
             if block == "dumpoff" {
                 // Section 18.1.3: every variable is dumped as `x`; a real has
@@ -1057,7 +1162,7 @@ impl HdlEffects {
             "dumpon" => self.dump.recording = true,
             _ => {}
         }
-        self.dump.dirty.clear();
+        self.dump.take_dirty();
         self.dump_write(plan, site, clock, text);
     }
 
@@ -1138,6 +1243,27 @@ impl HdlEffects {
             }
         }
         header.push_str("$enddefinitions $end\n");
+        // Each parameter's value, the newest first, once: a parameter never
+        // changes, so no later block lists it. Icarus Verilog writes the
+        // block, empty or not, before the first time.
+        header.push_str("$comment Show the parameter values. $end\n$dumpall\n");
+        for (index, var) in self.dump.vars.iter().enumerate().rev() {
+            let Some(value) = var
+                .parameter
+                .and_then(|parameter| plan.dump_parameters.get(parameter as usize))
+            else {
+                continue;
+            };
+            let value = match &value.value {
+                DigitalParameterValue::FourState(bits) => Dumped::Bits(spell(bits, var.width > 1)),
+                DigitalParameterValue::Real(real) => Dumped::Real(real.to_bits()),
+            };
+            header.push_str(&change_line(
+                &value,
+                &crate::io::vcd::canonical_identifier(index),
+            ));
+        }
+        header.push_str("$end\n");
         self.dump.tree = None;
         self.dump.scanned.clear();
         self.dump.named.clear();

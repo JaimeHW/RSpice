@@ -693,6 +693,11 @@ pub fn link_digital_plans(
             }
             plan.scopes.push(scope);
         }
+        for parameter in &source.dump_parameters {
+            let mut parameter = parameter.clone();
+            parameter.scope = DigitalScopeId(parameter.scope.0 + layout.tables.scopes);
+            plan.dump_parameters.push(parameter);
+        }
         for site in &source.system_calls {
             let mut site = site.clone();
             site.id = DigitalSystemCallId(site.id.0 + layout.tables.sites);

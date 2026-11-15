@@ -1668,6 +1668,13 @@ impl CanonicalDigitalPlan {
                 ));
             }
         }
+        if self.dump_parameters.iter().any(|parameter| {
+            parameter.scope.index() >= self.scopes.len() || parameter.name.is_empty()
+        }) {
+            return Err(error(
+                "a dumped parameter must be named and belong to one of the plan's scopes",
+            ));
+        }
         let mut observed = vec![false; self.observers.len()];
         for (index, site) in self.system_calls.iter().enumerate() {
             site.time_scale.validate().map_err(error)?;
