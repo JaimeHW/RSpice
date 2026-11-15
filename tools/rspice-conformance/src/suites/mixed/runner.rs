@@ -67,17 +67,18 @@ impl RunOptions {
     }
 }
 
-/// The default `--jobs`: a quarter of the hardware threads, between 2 and 8.
+/// The default `--jobs`: one cell per hardware thread.
 ///
-/// Measured on the 28-thread, 31.7 GB development box (2026-10-12): a Monte
-/// Carlo cell runs its trials in parallel, about one core per trial (C4 ports
-/// mc-tran 9.8 cores and 0.50 GB, C2 xs mc-tran 8.0 cores and 0.64 GB); every
-/// other cell is one core and at most 72 MB. Slowest first starts the two long
-/// MC cells together, so N children want about 2 × 9 + (N − 2) cores: 23 of
-/// 28 at N = 7, leaving room for the other work on the box, in under 2 GB.
+/// Every cell is compute-bound, and every cell but a family is one core: a
+/// Monte Carlo cell runs its trials side by side, about one core per trial
+/// (C4 ports mc-tran 9.8 cores and 0.50 GB, C2 xs mc-tran 8.0 cores and
+/// 0.64 GB on the 28-thread box); every other cell is at most 72 MB. One cell
+/// per thread keeps every core busy for the whole run, so the run takes its
+/// total work over the cores, or its slowest cell, whichever is longer. While
+/// a family runs, its trials share the cores with the other cells; the work
+/// is the same either way, and slowest first starts the families early.
 pub fn default_jobs() -> usize {
-    let threads = std::thread::available_parallelism().map_or(1, usize::from);
-    (threads / 4).clamp(2, 8)
+    std::thread::available_parallelism().map_or(1, usize::from)
 }
 
 /// One classified cell.
