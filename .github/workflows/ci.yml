@@ -782,19 +782,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
-      - name: Fingerprint the dependency build
-        id: deps
-        shell: bash
-        run: >-
-          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
-          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
-          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
-          >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-        with:
-          shared-key: wasm-${{ steps.deps.outputs.digest }}
-          add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check rspice-app
         env:
           RUSTFLAGS: -D warnings
@@ -1071,19 +1058,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target ${{ matrix.target }}
-      - name: Fingerprint the dependency build
-        id: deps
-        shell: bash
-        run: >-
-          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
-          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
-          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
-          >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-        with:
-          shared-key: veriloga-mobile-${{ steps.deps.outputs.digest }}
-          add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Configure Android NDK C toolchain
         if: matrix.target == 'aarch64-linux-android'
         shell: bash
@@ -1124,19 +1098,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component clippy
-      - name: Fingerprint the dependency build
-        id: deps
-        shell: bash
-        run: >-
-          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
-          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
-          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
-          >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-        with:
-          shared-key: native-feature-lint-${{ steps.deps.outputs.digest }}
-          add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run warnings-denied Clippy
         run: cargo clippy --locked -p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices --all-targets --all-features -- -D warnings
 
@@ -1151,19 +1112,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component clippy
-      - name: Fingerprint the dependency build
-        id: deps
-        shell: bash
-        run: >-
-          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
-          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
-          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
-          >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-        with:
-          shared-key: surface-gates-${{ steps.deps.outputs.digest }}
-          add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Clippy rspice-engine-adapter (warnings denied)
         run: >-
           cargo clippy --locked -p rspice-engine-adapter --all-targets --all-features
@@ -1226,19 +1174,6 @@ jobs:
         run: >-
           rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component clippy
           ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
-      - name: Fingerprint the dependency build
-        id: deps
-        shell: bash
-        run: >-
-          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
-          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
-          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
-          >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-        with:
-          shared-key: feature-shard-${{ matrix.package }}-${{ matrix.target }}-${{ steps.deps.outputs.digest }}
-          add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Clippy shard
         run: >-
           cargo clippy --locked -p ${{ matrix.package }} ${{ matrix.features }}

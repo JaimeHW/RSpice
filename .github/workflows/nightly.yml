@@ -761,19 +761,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
-      - name: Fingerprint the dependency build
-        id: deps
-        shell: bash
-        run: >-
-          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
-          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
-          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
-          >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-        with:
-          shared-key: release-build-${{ steps.deps.outputs.digest }}
-          add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build shipped binaries
         run: cargo build --locked --release -p rspice-app -p rspice-cli --features rspice-app/generated-veriloga-catalog
       - name: Stage release artifacts
