@@ -36,9 +36,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      # Each Rust cache is keyed on what decides its dependency build: the
+      # external crates Cargo.lock pins, the build profiles, the target
+      # rustflags and the toolchain. Workspace manifests stay out of the key,
+      # since rust-cache never stores workspace crates, so the key changes only
+      # when the stored dependencies would. Caches are saved from main alone;
+      # other refs restore main's.
+      - name: Fingerprint the dependency build
+        id: deps
+        shell: bash
+        run: >-
+          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
+          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
+          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
+          >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          key: nightly
+          shared-key: conformance-${{ steps.deps.outputs.digest }}
+          add-rust-environment-hash-key: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           # Saved when the job fails too; otherwise a job that stays red
           # starts every night from an empty cache.
           cache-on-failure: true
@@ -190,9 +206,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - name: Fingerprint the dependency build
+        id: deps
+        shell: bash
+        run: >-
+          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
+          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
+          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
+          >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          key: veriloga-corpus
+          shared-key: veriloga-corpus-${{ steps.deps.outputs.digest }}
+          add-rust-environment-hash-key: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
       - name: Corpus golden gates on every generated model
         # The four correctness gates: finite evaluation at every probe point,
@@ -337,9 +363,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - name: Fingerprint the dependency build
+        id: deps
+        shell: bash
+        run: >-
+          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
+          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
+          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
+          >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          key: generated-hb-models
+          shared-key: generated-hb-models-${{ steps.deps.outputs.digest }}
+          add-rust-environment-hash-key: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
       - name: Build the walk over every shipped model
         id: build
@@ -369,9 +405,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
+      - name: Fingerprint the dependency build
+        id: deps
+        shell: bash
+        run: >-
+          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
+          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
+          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
+          >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          key: browser-jit-shipped-sources
+          shared-key: browser-jit-shipped-sources-${{ steps.deps.outputs.digest }}
+          add-rust-environment-hash-key: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
       - name: Install pinned wasm-bindgen CLI
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
@@ -401,9 +447,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - name: Fingerprint the dependency build
+        id: deps
+        shell: bash
+        run: >-
+          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
+          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
+          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
+          >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          key: mixed-determinism
+          shared-key: mixed-determinism-${{ steps.deps.outputs.digest }}
+          add-rust-environment-hash-key: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Serial test threads and --nocapture for both runs: the comparison is
       # over printed lines, and a key printed by two threads at once is a
       # difference in the log rather than in the engine. The `tri_family`
@@ -501,9 +557,19 @@ jobs:
         run: >-
           rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
           ${{ matrix.route == 'worker' && '--target wasm32-unknown-unknown' || '' }}
+      - name: Fingerprint the dependency build
+        id: deps
+        shell: bash
+        run: >-
+          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
+          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
+          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
+          >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          key: mixed-corpus-${{ matrix.route }}${{ matrix.os == 'ubuntu-24.04-arm' && '-arm64' || '' }}
+          shared-key: mixed-corpus-${{ matrix.route }}-${{ steps.deps.outputs.digest }}
+          add-rust-environment-hash-key: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           # A cell that drifted still built everything; keep the build.
           cache-on-failure: true
       # The shipped browser worker image and its bindings, where the
@@ -624,9 +690,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - name: Fingerprint the dependency build
+        id: deps
+        shell: bash
+        run: >-
+          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
+          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
+          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
+          >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          key: ivtest
+          shared-key: ivtest-${{ steps.deps.outputs.digest }}
+          add-rust-environment-hash-key: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
       # Icarus Verilog and its ivtest suite are GPL. The job builds the v13_0
       # source tag outside the repository for this run only; nothing of it is
@@ -678,9 +754,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - name: Fingerprint the dependency build
+        id: deps
+        shell: bash
+        run: >-
+          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
+          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
+          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
+          >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          key: nightly-release-${{ matrix.os }}
+          shared-key: release-build-${{ steps.deps.outputs.digest }}
+          add-rust-environment-hash-key: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build shipped binaries
         run: cargo build --locked --release -p rspice-app -p rspice-cli --features rspice-app/generated-veriloga-catalog
       - name: Stage release artifacts

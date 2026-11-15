@@ -46,9 +46,25 @@ jobs:
         run: >-
           rustup toolchain install ${{ env.RUST_TOOLCHAIN }}
           --profile minimal --target ${{ matrix.target }}
+      # Each Rust cache is keyed on what decides its dependency build: the
+      # external crates Cargo.lock pins, the build profiles, the target
+      # rustflags and the toolchain. Workspace manifests stay out of the key,
+      # since rust-cache never stores workspace crates, so the key changes only
+      # when the stored dependencies would. Caches are saved from main alone;
+      # other refs restore main's.
+      - name: Fingerprint the dependency build
+        id: deps
+        shell: bash
+        run: >-
+          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
+          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
+          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
+          >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
-          key: drawing-sheet-qualification-${{ matrix.target }}
+          shared-key: drawing-sheet-qualification-${{ matrix.target }}-${{ steps.deps.outputs.digest }}
+          add-rust-environment-hash-key: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test qualification evidence runner
         run: python tools/ci/test_qualify_drawing_sheet.py -v
       - name: Run locked drawing-sheet qualification
