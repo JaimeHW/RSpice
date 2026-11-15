@@ -231,6 +231,26 @@ impl Finger {
         self.frame(Vec::new());
     }
 
+    /// Two fingers land at `a` and `b`, move to `a2` and `b2` in four steps,
+    /// and lift. The platform drives the pointer from the first finger only.
+    fn pinch(&mut self, (a, b): (Pos2, Pos2), (a2, b2): (Pos2, Pos2)) {
+        self.settle();
+        self.down(a);
+        self.frame(vec![Self::touch_id(2, TouchPhase::Start, b)]);
+        for step in 1..=4 {
+            let t = step as f32 / 4.0;
+            let (at, bt) = (a + (a2 - a) * t, b + (b2 - b) * t);
+            self.frame(vec![
+                Self::touch(TouchPhase::Move, at),
+                Self::touch_id(2, TouchPhase::Move, bt),
+                Event::PointerMoved(at),
+            ]);
+        }
+        self.frame(vec![Self::touch_id(2, TouchPhase::End, b2)]);
+        self.up(a2);
+        self.frame(Vec::new());
+    }
+
     /// A touch that lands and lifts with no tap: the shell and the canvas
     /// are in touch mode and nothing is clicked.
     fn wake(&mut self) {
@@ -492,4 +512,36 @@ fn a_long_press_on_the_symbol_canvas_only_opens_its_menu() {
             style: Default::default(),
         })
     );
+}
+
+/// Two fingers zoom and nothing else: a shape the first finger's drag would
+/// have drawn is not drawn, and a selection it would have moved stays.
+#[test]
+fn a_pinch_on_the_symbol_canvas_draws_and_moves_nothing() {
+    let mut finger = Finger::with_body(vec![square()]);
+    finger.arm(SymbolTool::Line);
+    let centre = finger.screen(Point::new(0, 60));
+    let zoom = finger.app.state.design.symbol.editor.zoom;
+    finger.pinch(
+        (
+            centre - egui::vec2(40.0, 0.0),
+            centre + egui::vec2(40.0, 0.0),
+        ),
+        (
+            centre - egui::vec2(80.0, 0.0),
+            centre + egui::vec2(80.0, 0.0),
+        ),
+    );
+    assert_eq!(finger.document().body, vec![square()], "no line was drawn");
+    assert!(!finger.app.state.design.symbol.editor.has_draft());
+    assert!(finger.app.state.design.symbol.editor.zoom > zoom * 1.5);
+
+    finger.arm(SymbolTool::Select);
+    finger.tap(finger.screen(Point::new(20, 0)));
+    let edge = finger.screen(Point::new(20, 10));
+    finger.pinch(
+        (edge, edge + egui::vec2(120.0, 0.0)),
+        (edge - egui::vec2(30.0, 0.0), edge + egui::vec2(150.0, 0.0)),
+    );
+    assert_eq!(finger.document().body, vec![square()], "the square stayed");
 }

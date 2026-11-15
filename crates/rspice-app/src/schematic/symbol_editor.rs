@@ -15,6 +15,7 @@ use crate::workbench::app::{
     load_active_symbol_editor_metadata, symbol_editor_copy_available, symbol_editor_lock_message,
     symbol_editor_request_source,
 };
+use rspice_schematic_editor::symbol_editor::interaction::pinch_holds_canvas;
 use rspice_schematic_editor::symbol_editor::surface::{
     self, SymbolSurfaceAction, SymbolSurfaceRequest,
 };
@@ -127,9 +128,11 @@ pub fn show(
                     .0
             });
             let navigation = canvas.model.preferences.canvas_navigation();
-            // A Space or Alt pan, or the armed zoom box, holds the primary
-            // drag; the tools act on none of it.
-            let navigating = canvas.design.symbol.editor.zoom_box.armed
+            // A Space or Alt pan, the armed zoom box, or a two-finger pinch
+            // holds the primary drag; the tools act on none of it.
+            let pinching = pinch_holds_canvas(ui.ctx(), &mut canvas.design.symbol.editor);
+            let navigating = pinching
+                || canvas.design.symbol.editor.zoom_box.armed
                 || rspice_schematic_editor::view::navigation::primary_pan_gesture_active(
                     ui, &response,
                 );

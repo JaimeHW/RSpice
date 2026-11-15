@@ -155,6 +155,43 @@ pub fn canvas_request(
     })
 }
 
+/// Whether a second finger holds the canvas for a pinch this frame. The
+/// pinch owns the gesture from the frame the second finger lands until the
+/// first lifts: whatever the first finger had begun is let go, and none of
+/// the gesture reaches the tools, its lift included.
+pub fn pinch_holds_canvas(ctx: &egui::Context, session: &mut SymbolEditorSession) -> bool {
+    let id = egui::Id::new("rspice.symbol-canvas.pinch");
+    let (pinching, pressed) = ctx.input(|input| {
+        (
+            input.multi_touch().is_some(),
+            input.pointer.primary_down() || input.pointer.primary_released(),
+        )
+    });
+    let held = ctx.data(|data| data.get_temp::<bool>(id)) == Some(true);
+    if pinching && !held {
+        release_for_pinch(session);
+        ctx.data_mut(|data| data.insert_temp(id, true));
+        return true;
+    }
+    if held && !pinching && !pressed {
+        ctx.data_mut(|data| data.remove::<bool>(id));
+        return false;
+    }
+    held || pinching
+}
+
+/// A second finger landed: what the first finger's drag had picked up is
+/// put down where it is, its selection box goes, and a shape its drag began
+/// is not drawn.
+fn release_for_pinch(session: &mut SymbolEditorSession) {
+    session.clear_drag_state();
+    session.marquee_start = None;
+    session.marquee_current = None;
+    if session.drawing_drag {
+        session.clear_draft();
+    }
+}
+
 /// Whether the press on `response` is a long press, which belongs to the
 /// context menu from the frame it is recognised until the finger lifts.
 fn held_for_menu(response: &egui::Response) -> bool {
