@@ -1374,3 +1374,92 @@ fn escape_lets_go_of_a_held_handle_before_it_leaves_in_place() {
         "with nothing held it leaves"
     );
 }
+
+/// A symbol finding followed from the Problems page while the symbol is
+/// edited in place selects its pin there without leaving the edit, and
+/// brings the instance back into view when the camera has moved off it.
+/// Delete then takes the pin off as one step, which Undo puts back.
+#[test]
+fn a_symbol_finding_followed_in_place_selects_and_shows_its_pin() {
+    let mut fixture = InPlace::new();
+    fixture.enter();
+    let off_grid = Point::new(41, 20);
+    let state = &mut fixture.replay.app.state;
+    let mut document = state.model.load_active_symbol_document().unwrap();
+    document.pins[1].position = Some(off_grid);
+    state.store_active_symbol_document(&document).unwrap();
+    state.run_active_symbol_pin_checks();
+    fixture
+        .replay
+        .app
+        .execute_command_key(Command::OpenProblems.key());
+    let controls = fixture.replay.frames(vec![]);
+    let row = controls
+        .iter()
+        .find(|control| {
+            control.role == Role::ListBoxOption
+                && control.label.contains("off the terminal grid: B")
+        })
+        .expect("the finding is listed")
+        .center;
+
+    // A camera moved well off the instance.
+    let state = &mut fixture.replay.app.state;
+    crate::workbench::app::in_place_session_mut(&mut state.design.symbol.in_place, &state.model)
+        .expect("the symbol is edited in place")
+        .pan = (-4000.0, -4000.0);
+    click_at(&mut fixture.replay, row);
+    let output = fixture.replay.frame(vec![]);
+    let canvas = canvas_rect(&output);
+    let state = &fixture.replay.app.state;
+    let session =
+        crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
+            .expect("following the finding keeps the in-place edit");
+    assert_eq!(
+        state.design.symbol.editor.selection.pins,
+        ["B".to_owned()].into_iter().collect(),
+        "the finding's pin is selected"
+    );
+    let placement = crate::workbench::app::in_place_placement(session, &state.model).unwrap();
+    let on_sheet = placement.place(off_grid);
+    let on_screen = egui::pos2(
+        canvas.min.x + (session.pan.0 + f64::from(on_sheet.x) * session.zoom) as f32,
+        canvas.min.y + (session.pan.1 + f64::from(on_sheet.y) * session.zoom) as f32,
+    );
+    assert!(
+        canvas.contains(on_screen),
+        "pin B at {on_screen:?} is in view on the canvas {canvas:?}"
+    );
+
+    fixture.replay.key(egui::Key::Delete, egui::Modifiers::NONE);
+    let names = |fixture: &InPlace| {
+        fixture
+            .replay
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap()
+            .pins
+            .iter()
+            .map(|pin| pin.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(&fixture), ["A", "C"], "Delete took the pin off");
+    fixture
+        .replay
+        .key(egui::Key::Z, crate::feature_tests::replay::PRIMARY);
+    assert_eq!(names(&fixture), ["A", "B", "C"], "one Undo put it back");
+    assert_eq!(
+        fixture
+            .replay
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap()
+            .pin("B")
+            .and_then(|pin| pin.position),
+        Some(off_grid)
+    );
+}

@@ -326,6 +326,17 @@ impl NavigationParts<'_> {
                 self.open_workspace_view(reference);
                 self.wb.activate(Workspace::Design);
                 self.restore.symbol.editor.select_pin(pin_name);
+                // Edited in place, the canvas looks at the parent sheet
+                // through the session's own camera, which brings the whole
+                // instance, every pin of it, into view when it leaves any
+                // of it out.
+                if let Some(session) = super::symbol_in_place::in_place_session_mut(
+                    &mut self.restore.symbol.in_place,
+                    self.model,
+                ) {
+                    session.entering = true;
+                    return;
+                }
                 if let Some(point) = point {
                     let zoom = self.restore.symbol.editor.zoom.max(1.0);
                     self.restore.symbol.editor.pan =
