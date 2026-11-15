@@ -136,12 +136,29 @@ pub(crate) fn open_descend_hierarchy_dialog(
 }
 
 /// The name of the selected instance when its cell has no schematic master
-/// to descend into but has a symbol that can be edited in place.
+/// to descend into but has a symbol that can be edited in place. A cell
+/// that draws a schematic is not such a cell, whichever view the instance
+/// is bound to.
 pub(crate) fn selected_symbol_only_instance(model: &Model) -> Option<String> {
     if selected_hierarchy_master(model).is_some() {
         return None;
     }
-    let (id, _) = selected_symbol_in_place_target(model).ok()?;
+    let (id, symbol) = selected_symbol_in_place_target(model).ok()?;
+    let draws_schematic = model
+        .library_manager
+        .get_library(&symbol.library)
+        .and_then(|library| library.get_cell(&symbol.cell))
+        .is_some_and(|cell| {
+            cell.views_sorted().into_iter().any(|view| {
+                matches!(
+                    view.view_type,
+                    crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+                )
+            })
+        });
+    if draws_schematic {
+        return None;
+    }
     model
         .schematic
         .document()
