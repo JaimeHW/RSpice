@@ -8,6 +8,7 @@
 
 use rspice_design::schematic::{
     bus::{Bus, BusTap},
+    component::instance_model_name,
     component_display::SchematicParameterLabelVisibility,
     component_type::ComponentType,
     label_layout::{self, LayoutPoint, LayoutRect, PlacedText, TextEdge, ValueClass},
@@ -116,6 +117,19 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
             placed: name,
             text: component.name.clone(),
             size_percent: component.name_label_pos.size_percent(),
+        });
+    }
+    // The model the part is bound to, where its symbol letters it.
+    if let Some(document) = &semantic.resolved_symbol
+        && component.display_mode.show_value(visibility)
+        && let Some(placed) = label_layout::symbol_model_placement(component, document)
+        && let Some(model) = instance_model_name(component)
+    {
+        texts.push(SchematicText {
+            class: SchematicTextClass::Value,
+            placed,
+            text: model,
+            size_percent: 100,
         });
     }
     let pieces = value_pieces(component)

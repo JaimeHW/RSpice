@@ -1207,11 +1207,7 @@ fn sync_legacy_attribute_anchor(
     kind: SymbolAttributeKind,
     position: Point,
 ) {
-    match kind {
-        SymbolAttributeKind::Reference => document.name_anchor = position,
-        SymbolAttributeKind::Value => document.value_anchor = position,
-        SymbolAttributeKind::Model => {}
-    }
+    document.place_attribute(kind, position);
 }
 
 /// The pin the Pin tool puts down next.

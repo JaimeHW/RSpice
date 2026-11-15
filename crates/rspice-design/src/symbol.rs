@@ -700,14 +700,10 @@ impl SymbolEditorMetadata {
                 SymbolAttribute {
                     kind: SymbolAttributeKind::Model,
                     default_value: String::new(),
-                    shown: false,
-                    position: Point::new(
-                        document.value_anchor.x,
-                        document
-                            .value_anchor
-                            .y
-                            .saturating_add(SYMBOL_TERMINAL_GRID * 2),
-                    ),
+                    shown: document.model_anchor.is_some(),
+                    position: document
+                        .model_anchor
+                        .unwrap_or_else(|| document.under_the_value()),
                 },
             ],
             ..Self::default()
@@ -914,6 +910,11 @@ pub struct SymbolDocument {
     /// its instances. Not written while it is.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub value_hidden: bool,
+    /// Where a placed part letters the model it is bound to; `None` while
+    /// the symbol keeps its model off its instances. Not written while it
+    /// does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_anchor: Option<Point>,
 }
 
 /// What a symbol's pins answer to.
@@ -983,28 +984,58 @@ impl Default for SymbolDocument {
             waivers: crate::drc::DrcWaivers::default(),
             name_hidden: false,
             value_hidden: false,
+            model_anchor: None,
         }
     }
 }
 
 impl SymbolDocument {
     /// Shows or hides the attribute `kind` names on every placed part: the
-    /// reference as the part's name, the value as its value. A placed part
-    /// letters no model, so the model's flag changes nothing here.
+    /// reference as the part's name, the value as its value, the model as
+    /// the model the part is bound to. A model newly shown stands where it
+    /// stood, else two grid steps under the value, until it is placed.
     pub fn show_on_instances(&mut self, kind: SymbolAttributeKind, shown: bool) {
         match kind {
             SymbolAttributeKind::Reference => self.name_hidden = !shown,
             SymbolAttributeKind::Value => self.value_hidden = !shown,
-            SymbolAttributeKind::Model => {}
+            SymbolAttributeKind::Model => {
+                self.model_anchor =
+                    shown.then(|| self.model_anchor.unwrap_or_else(|| self.under_the_value()));
+            }
         }
     }
 
+    /// Stands the attribute `kind` names at `position` on every placed
+    /// part: the reference at the name's anchor, the value at the value's,
+    /// the model at its own while it is shown.
+    pub fn place_attribute(&mut self, kind: SymbolAttributeKind, position: Point) {
+        match kind {
+            SymbolAttributeKind::Reference => self.name_anchor = position,
+            SymbolAttributeKind::Value => self.value_anchor = position,
+            SymbolAttributeKind::Model => {
+                if self.model_anchor.is_some() {
+                    self.model_anchor = Some(position);
+                }
+            }
+        }
+    }
+
+    /// Two grid steps under the value: where a model stands until it is
+    /// placed.
+    fn under_the_value(&self) -> Point {
+        Point::new(
+            self.value_anchor.x,
+            self.value_anchor.y.saturating_add(SYMBOL_TERMINAL_GRID * 2),
+        )
+    }
+
     /// Takes what `before` letters on its placed parts: whether they show
-    /// its name and its value. Drawing a symbol again redraws its artwork,
-    /// never that choice.
+    /// its name, its value and its model, and where the model stands.
+    /// Drawing a symbol again redraws its artwork, never that choice.
     pub fn keep_instance_lettering(&mut self, before: &SymbolDocument) {
         self.name_hidden = before.name_hidden;
         self.value_hidden = before.value_hidden;
+        self.model_anchor = before.model_anchor;
     }
 
     /// The type size of this symbol's pin names, in world units.
@@ -1079,6 +1110,7 @@ impl SymbolDocument {
             waivers: crate::drc::DrcWaivers::default(),
             name_hidden: false,
             value_hidden: false,
+            model_anchor: None,
         }
     }
 
@@ -2182,6 +2214,44 @@ mod validation_tests {
         assert_eq!(
             document.pin("vss").map(|pin| pin.side),
             Some(SymbolPinSide::Bottom)
+        );
+    }
+
+    /// Showing the model on instances stands it under the value until it is
+    /// placed; placing it moves it while shown; hiding it takes it off the
+    /// parts, and the attributes and a redrawn symbol read the same.
+    #[test]
+    fn a_symbol_letters_its_model_where_it_shows_it() {
+        let mut document = SymbolDocument {
+            value_anchor: Point::new(-20, 30),
+            ..SymbolDocument::default()
+        };
+        document.place_attribute(SymbolAttributeKind::Model, Point::new(40, 0));
+        assert_eq!(document.model_anchor, None, "a hidden model stands nowhere");
+        document.show_on_instances(SymbolAttributeKind::Model, true);
+        assert_eq!(
+            document.model_anchor,
+            Some(Point::new(-20, 30 + SYMBOL_TERMINAL_GRID * 2))
+        );
+        document.place_attribute(SymbolAttributeKind::Model, Point::new(40, 0));
+        assert_eq!(document.model_anchor, Some(Point::new(40, 0)));
+        let attribute = SymbolEditorMetadata::for_document(&document)
+            .attribute(SymbolAttributeKind::Model)
+            .cloned()
+            .expect("every symbol has a model attribute");
+        assert!(attribute.shown);
+        assert_eq!(attribute.position, Point::new(40, 0));
+        let mut redrawn = SymbolDocument::generated_from_ports(&[]);
+        redrawn.keep_instance_lettering(&document);
+        assert_eq!(redrawn.model_anchor, Some(Point::new(40, 0)));
+
+        document.show_on_instances(SymbolAttributeKind::Model, false);
+        assert_eq!(document.model_anchor, None);
+        assert!(
+            !serde_json::to_string(&document)
+                .expect("document serializes")
+                .contains("model_anchor"),
+            "a hidden model is not written"
         );
     }
 

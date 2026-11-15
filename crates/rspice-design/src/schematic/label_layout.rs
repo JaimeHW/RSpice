@@ -379,6 +379,17 @@ pub fn symbol_value_placement(component: &Component, document: &SymbolDocument) 
         .unwrap_or_else(|| symbol_label_placement(component, document, document.value_anchor))
 }
 
+/// Where an instance of an authored symbol letters its model, in world
+/// units: at the symbol's model anchor, while the symbol shows its model.
+pub fn symbol_model_placement(
+    component: &Component,
+    document: &SymbolDocument,
+) -> Option<PlacedText> {
+    document
+        .model_anchor
+        .map(|anchor| symbol_label_placement(component, document, anchor))
+}
+
 fn instance_origin(component: &Component) -> LayoutPoint {
     LayoutPoint::new(component.pos.x as f32, component.pos.y as f32)
 }

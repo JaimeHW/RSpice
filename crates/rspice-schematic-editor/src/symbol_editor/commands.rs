@@ -13,8 +13,8 @@ use super::session::{
 };
 use crate::view::selection_layout::SelectionLayoutCommand;
 use rspice_design::symbol::{
-    MAX_SYMBOL_PIN_NAME_BYTES, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
-    SymbolShape, SymbolTextAlign, SymbolTextSize,
+    MAX_SYMBOL_PIN_NAME_BYTES, SymbolDocument, SymbolEditorMetadata, SymbolShape, SymbolTextAlign,
+    SymbolTextSize,
 };
 use rspice_design_model::{Point, port::PortSpec, symbol_pin::SymbolPinSide};
 
@@ -504,15 +504,7 @@ fn transform_selection(
     for kind in &selection.attributes {
         if let Some(attribute) = metadata.attribute_mut(*kind) {
             attribute.position = (motion.point)(attribute.position, pivot);
-            match kind {
-                SymbolAttributeKind::Reference => {
-                    document.name_anchor = attribute.position;
-                }
-                SymbolAttributeKind::Value => {
-                    document.value_anchor = attribute.position;
-                }
-                SymbolAttributeKind::Model => {}
-            }
+            document.place_attribute(*kind, attribute.position);
         }
     }
     let changed = *document != before || metadata.attributes != labels_before;

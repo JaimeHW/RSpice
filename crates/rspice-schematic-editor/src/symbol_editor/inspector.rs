@@ -1119,6 +1119,7 @@ fn attribute_section(
         record_once(edit, &before);
         metadata.attributes[index].shown = shown;
         document.show_on_instances(kind, shown);
+        document.place_attribute(kind, metadata.attributes[index].position);
         changed = true;
     }
 
@@ -1127,11 +1128,7 @@ fn attribute_section(
         | coordinate_row(ui, edit, &before, "Position Y", &mut position.y);
     if moved {
         metadata.attributes[index].position = position;
-        match kind {
-            SymbolAttributeKind::Reference => document.name_anchor = position,
-            SymbolAttributeKind::Value => document.value_anchor = position,
-            SymbolAttributeKind::Model => {}
-        }
+        document.place_attribute(kind, position);
         changed = true;
     }
     changed

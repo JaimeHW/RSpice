@@ -1567,6 +1567,19 @@ pub fn explicit_component_model(component: &Component) -> Option<String> {
     }
 }
 
+/// The model a placed part letters where its symbol shows its model: the
+/// card or model it is bound to, else the module its instance line names.
+pub fn instance_model_name(component: &Component) -> Option<String> {
+    explicit_component_model(component)
+        .or_else(|| {
+            component
+                .library_cell
+                .as_ref()
+                .and_then(|binding| binding.module_name.clone())
+        })
+        .filter(|model| !model.trim().is_empty())
+}
+
 // =============================================================================
 // Tests
 // =============================================================================

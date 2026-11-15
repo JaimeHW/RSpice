@@ -64,6 +64,7 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
             waivers: crate::drc::DrcWaivers::default(),
             name_hidden: false,
             value_hidden: false,
+            model_anchor: None,
         };
         document.settle_drawn_pins();
         return document;
@@ -103,6 +104,7 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
         waivers: crate::drc::DrcWaivers::default(),
         name_hidden: false,
         value_hidden: false,
+        model_anchor: None,
     }
 }
 

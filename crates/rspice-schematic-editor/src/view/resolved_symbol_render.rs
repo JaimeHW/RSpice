@@ -475,6 +475,22 @@ fn draw_symbol_labels(
             painter.text(position, align, &component.name, font, palette.text);
         }
     }
+    // The model the part is bound to, where the symbol letters it, in the
+    // value's type and ink.
+    if let Some(anchor) = symbol.document().model_anchor
+        && component.display_mode.show_value(visibility)
+        && let Some(model) = rspice_design::schematic::component::instance_model_name(component)
+        && let Some(size) = lod::annotation_size(INSTANCE_VALUE_WORLD, scale, ppp)
+    {
+        rspice_ui_kit::text::paint_text(
+            painter,
+            to_screen_symbol(origin, scale, component, symbol, anchor),
+            instance_label_align(component, symbol, anchor),
+            &model,
+            sans(size, FontWeight::Regular),
+            palette.text_dim,
+        );
+    }
     if component.display_mode.show_value(visibility) {
         draw_parameter_labels(painter, origin, scale, component, symbol, palette.text_dim);
     }
@@ -1272,6 +1288,45 @@ mod tests {
 
     /// A symbol that keeps its name or its value off its instances draws a
     /// placed part without it.
+    #[test]
+    fn a_placed_part_letters_its_model_where_its_symbol_shows_it() {
+        // The model stands 40 units right of the origin; the name and value
+        // are kept off, so only the model can paint there.
+        let right = egui::Rect::from_min_max(pos2(235.0, 140.0), pos2(320.0, 180.0));
+        let drawn = |model_anchor| {
+            let symbol = ResolvedCellSymbol::from_authored_document(
+                SymbolDocument {
+                    name_hidden: true,
+                    value_hidden: true,
+                    model_anchor,
+                    ..SymbolDocument::default()
+                },
+                &[],
+            );
+            let mut binding = rspice_design::schematic::component::LibraryCellInstance::new(
+                "work", "amp", "symbol",
+            );
+            binding.model_card = Some("nch_lvt".to_owned());
+            let component = Component::new(1, ComponentType::CellInstance, Point::origin())
+                .with_name_value("X1", "amp")
+                .with_library_cell(binding);
+            let canvas = rspice_ui_kit::raster::render(egui::vec2(320.0, 320.0), |ui, _| {
+                draw_symbol_labels(
+                    &ui.painter().clone(),
+                    pos2(160.0, 160.0),
+                    2.0,
+                    &component,
+                    &symbol,
+                    SchematicParameterLabelVisibility::NamesAndValues,
+                    &Tokens::get(ui.ctx()).color,
+                );
+            });
+            painted_span(&canvas, right).0
+        };
+        assert!(drawn(Some(Point::new(40, 0))) > 20, "the model is lettered");
+        assert_eq!(drawn(None), 0, "a symbol that hides its model letters none");
+    }
+
     #[test]
     fn a_symbol_keeps_the_name_or_value_it_hides_off_its_parts() {
         // The name stands 40 units above the origin and the value 40 below.

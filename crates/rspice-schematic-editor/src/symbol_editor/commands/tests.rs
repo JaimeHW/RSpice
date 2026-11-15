@@ -1,7 +1,7 @@
 //! Symbol command geometry and clipboard behavior independent of the app.
 
 use super::*;
-use rspice_design::symbol::SymbolPin;
+use rspice_design::symbol::{SymbolAttributeKind, SymbolPin};
 use rspice_design_model::port::PortDirection;
 
 #[test]

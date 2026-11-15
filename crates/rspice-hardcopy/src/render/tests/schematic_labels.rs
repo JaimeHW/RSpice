@@ -53,6 +53,37 @@ fn cell_symbol() -> SymbolDocument {
     }
 }
 
+/// A placed part letters the model it is bound to where its symbol shows
+/// its model, as the canvas does, and none where the symbol hides it.
+#[test]
+fn a_placed_part_prints_its_model_where_its_symbol_shows_it() {
+    use rspice_design::schematic::component::LibraryCellInstance;
+
+    let printed = |model_anchor| {
+        let mut symbol = cell_symbol();
+        symbol.model_anchor = model_anchor;
+        let mut binding = LibraryCellInstance::new("work", "amp", "symbol");
+        binding.model_card = Some("nch_lvt".to_owned());
+        let component =
+            part(1, ComponentType::CellInstance, (0, 0), "X1", "amp").with_library_cell(binding);
+        let mut printed = sheet(Vec::new());
+        printed.components.push(SemanticComponent {
+            symbol_source: Some(SemanticSymbolSource::Authored),
+            component,
+            resolved_symbol: Some(symbol),
+        });
+        compile(&printed)
+            .texts()
+            .into_iter()
+            .map(|(text, ..)| text.to_owned())
+            .collect::<Vec<_>>()
+    };
+    let shown = printed(Some(SchematicPoint::new(40, 0)));
+    assert!(shown.iter().any(|text| text == "nch_lvt"), "{shown:?}");
+    let hidden = printed(None);
+    assert!(!hidden.iter().any(|text| text == "nch_lvt"), "{hidden:?}");
+}
+
 /// A label on a placed part prints its parameter with the part's own value,
 /// or the default where the part sets none; a hidden one prints nothing.
 #[test]

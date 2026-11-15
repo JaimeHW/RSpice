@@ -227,15 +227,7 @@ fn move_objects(
             SymbolArrangeObject::Label(kind) => {
                 if let Some(attribute) = metadata.attribute_mut(kind) {
                     attribute.position = attribute.position + *delta;
-                    match kind {
-                        SymbolAttributeKind::Reference => {
-                            document.name_anchor = attribute.position;
-                        }
-                        SymbolAttributeKind::Value => {
-                            document.value_anchor = attribute.position;
-                        }
-                        SymbolAttributeKind::Model => {}
-                    }
+                    document.place_attribute(kind, attribute.position);
                 }
             }
         }
