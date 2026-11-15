@@ -1046,3 +1046,189 @@ s1 a 0 a 0 swm
     assert_eq!(changes.len(), 2, "{:?}", traversal.events);
     assert_ne!(changes[0], changes[1]);
 }
+
+/// The self-controlled switch's orbit in closed form. Open, `C·v' = (vin −
+/// v)/R1 − v/ROFF`; closed, `ROFF` is `RON`. Each state is linear, so from
+/// `(t0, v0)` the node is the sine's particular response plus the decay of
+/// its difference; the switch closes where `v` rises through 1.2 V and opens
+/// where it falls through 0.8 V.
+mod self_controlled_closed_form {
+    use crate::Value;
+    const R1: Value = 1.0e3;
+    const C: Value = 100.0e-12;
+    const OMEGA: Value = std::f64::consts::TAU * 1.0e6;
+    const PERIOD: Value = 1.0e-6;
+
+    fn decay_and_drive(closed: bool) -> (Value, Value) {
+        let conductance = 1.0 / R1 + 1.0 / if closed { 1.0e3 } else { 1.0e9 };
+        (conductance / C, 2.0 / (R1 * C))
+    }
+
+    fn particular(t: Value, closed: bool) -> Value {
+        let (a, b) = decay_and_drive(closed);
+        b / (a * a + OMEGA * OMEGA) * (a * (OMEGA * t).sin() - OMEGA * (OMEGA * t).cos())
+    }
+
+    fn at(t: Value, (t0, v0, closed): (Value, Value, bool)) -> Value {
+        let (a, _) = decay_and_drive(closed);
+        particular(t, closed) + (v0 - particular(t0, closed)) * (-a * (t - t0)).exp()
+    }
+
+    fn changes(v: Value, closed: bool) -> bool {
+        if closed { v < 0.8 } else { v > 1.2 }
+    }
+
+    /// The segment `start` is in, carried to its first change before `until`.
+    fn change_before(start: (Value, Value, bool), until: Value) -> Option<Value> {
+        let step = PERIOD / 2000.0;
+        let mut t = start.0;
+        while t < until {
+            let next = (t + step).min(until);
+            if changes(at(next, start), start.2) {
+                let (mut lo, mut hi) = (t, next);
+                while lo < hi && (lo + hi) / 2.0 > lo && (lo + hi) / 2.0 < hi {
+                    let mid = (lo + hi) / 2.0;
+                    if changes(at(mid, start), start.2) {
+                        hi = mid;
+                    } else {
+                        lo = mid;
+                    }
+                }
+                return Some(hi);
+            }
+            t = next;
+        }
+        None
+    }
+
+    /// The settled orbit: its segments' starts over one period from `from`.
+    pub(super) struct Orbit {
+        segments: Vec<(Value, Value, bool)>,
+    }
+
+    impl Orbit {
+        pub(super) fn settled(from: Value) -> Self {
+            let mut segment = (0.0, 0.0, false);
+            let mut segments = Vec::new();
+            let end = from + PERIOD;
+            loop {
+                match change_before(segment, end) {
+                    Some(t) => {
+                        segment = (t, if segment.2 { 0.8 } else { 1.2 }, !segment.2);
+                        if t >= from - PERIOD {
+                            segments.push(segment);
+                        }
+                    }
+                    None => return Self { segments },
+                }
+            }
+        }
+
+        pub(super) fn voltage(&self, t: Value) -> Value {
+            let segment = self
+                .segments
+                .iter()
+                .rev()
+                .find(|segment| segment.0 <= t)
+                .expect("a segment starts before every time of the period");
+            at(t, *segment)
+        }
+
+        /// The period map's multiplier: each state's decay over its stay,
+        /// times each change's saltation, the ratio of the slopes after and
+        /// before it.
+        pub(super) fn multiplier(&self) -> Value {
+            let (closes, opens) = self.change_phases();
+            let closed_for = (opens - closes).rem_euclid(PERIOD);
+            let (open_decay, _) = decay_and_drive(false);
+            let (closed_decay, _) = decay_and_drive(true);
+            let slope = |t: Value, v: Value, closed: bool| {
+                let (a, b) = decay_and_drive(closed);
+                -a * v + b * (OMEGA * t).sin()
+            };
+            let saltation = |t: Value, v: Value, from_closed: bool| {
+                slope(t, v, !from_closed) / slope(t, v, from_closed)
+            };
+            (-closed_decay * closed_for - open_decay * (PERIOD - closed_for)).exp()
+                * saltation(closes, 1.2, false)
+                * saltation(opens, 0.8, true)
+        }
+
+        /// The changes' phases in the period, closing first.
+        pub(super) fn change_phases(&self) -> (Value, Value) {
+            let phase = |closed: bool| {
+                self.segments
+                    .iter()
+                    .rev()
+                    .find(|segment| segment.2 == closed)
+                    .map(|segment| segment.0.rem_euclid(PERIOD))
+                    .expect("both changes")
+            };
+            (phase(true), phase(false))
+        }
+    }
+}
+
+/// A switch across its own control node certifies its orbit. The node falls
+/// through 0 V at 577.6 ns of the period, where the mesh certificate once
+/// held it to VNTOL alone: the bisections' differences fell 4x each (5.2e-5,
+/// 1.3e-5, 3.3e-6 V, the trapezoid's own error) and missed by 1.085x after
+/// three. Each node is now held to RELTOL of its swing, as native shooting's
+/// certificate holds it; the orbit meets the closed form at every point by
+/// 1.7e-5 V against that 1.70e-3 V, its changes fall within 0.11 ns of the
+/// closed form's 214.6497 and 393.3229 ns, and its multiplier is 5.6240e-6
+/// against the closed form's 5.6274e-6 (the decays, and saltations -0.59815
+/// and -1.23712).
+#[test]
+fn a_switch_that_drives_its_own_control_certifies_its_orbit() {
+    let deck = "switch across its own control
+vin in 0 sin(0 2 1meg)
+r1 in a 1k
+c1 a 0 100p
+s1 a 0 a 0 swm
+.model swm sw vt=1 vh=0.2 ron=1k roff=1e9
+.end
+";
+    let config = PssConfig::new(1.0e6).with_tstab(5.0e-6);
+    let netlist = Netlist::parse(deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let event = engine
+        .run_event_pss(&netlist, &config, None, &NoAbort)
+        .expect("the orbit certifies");
+    let result = &event.analysis.result;
+    // The published orbit's time is absolute time modulo the period.
+    let exact = self_controlled_closed_form::Orbit::settled(20.0e-6);
+    let swing = waveform(result, "a")
+        .iter()
+        .fold(0.0, |peak: Value, value| peak.max(value.abs()));
+    let tolerance = 1.0e-3 * swing + 1.0e-6;
+    let worst = result
+        .time
+        .iter()
+        .zip(waveform(result, "a"))
+        .map(|(&t, &v)| (v - exact.voltage(20.0e-6 + t)).abs())
+        .fold(0.0, Value::max);
+    assert!(worst <= tolerance, "|V(a) - closed form| = {worst:e} V");
+    let (closes, opens) = exact.change_phases();
+    for phase in [closes, opens] {
+        assert!(
+            event
+                .certification
+                .events
+                .iter()
+                .any(|(_, published)| (published - phase).abs() <= 1.0e-9),
+            "a change at {phase:e} s in {:?}",
+            event.certification.events
+        );
+    }
+    let multiplier = exact.multiplier();
+    let dominant = result
+        .floquet_multipliers
+        .iter()
+        .map(|value| value.norm())
+        .fold(0.0, Value::max);
+    assert!(
+        (dominant / multiplier - 1.0).abs() < 1.0e-2,
+        "multiplier {dominant:e} against {multiplier:e}"
+    );
+}

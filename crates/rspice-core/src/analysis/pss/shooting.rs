@@ -113,6 +113,16 @@ impl RefinementTolerance {
         }
     }
 
+    /// The tolerance of the waveform `coarse` takes on one mesh and `fine`
+    /// on its refinement.
+    pub(crate) fn of(coarse: &[Value], fine: &[Value], reltol: Value, abstol: Value) -> Self {
+        let peak = coarse
+            .iter()
+            .chain(fine)
+            .fold(0.0, |peak: Value, value| peak.max(value.abs()));
+        Self::from_peak(peak, reltol, abstol)
+    }
+
     /// How far apart `a` and `b` are, in tolerances.
     pub(crate) fn deviation(&self, a: Value, b: Value) -> Value {
         (a / self.scale - b / self.scale).abs() / self.tolerance

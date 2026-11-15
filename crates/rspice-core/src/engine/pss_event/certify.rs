@@ -4,7 +4,9 @@
 //!   its relative or absolute tolerance, and the discrete state comes back.
 //! - **Mesh**: the orbit on the bisected mesh agrees with the orbit on the
 //!   nominal one at every nominal point and every event, within the engine's
-//!   transient tolerances; otherwise the mesh is refined and compared again.
+//!   transient tolerances, each node's relative one taken of the node's peak
+//!   over the period as native shooting takes it; otherwise the mesh is
+//!   refined and compared again.
 //! - **Linearization**: `Φ`, assembled from coordinate columns, predicts the
 //!   map's response along three seeded directions to 1e-4.
 //! - **Event margins**: no two state-dependent events of different sources
@@ -19,6 +21,7 @@ use super::Refusal;
 use super::boundary::ObservedEvent;
 use super::newton::{FD_STEP, Orbit, Traversal, signature};
 use crate::Value;
+use crate::analysis::pss::RefinementTolerance;
 use crate::engine::SimulationError;
 use crate::engine::transient::state_capture::CapturedTransientState;
 
@@ -54,7 +57,15 @@ impl Orbit<'_> {
         // The node voltages carry the orbit's state. A branch current is the
         // derivative of a charge or the drive of a source, and at a switch's
         // change it is a spike each mesh resolves on its own points, which a
-        // pointwise comparison would charge to the mesh.
+        // pointwise comparison would charge to the mesh. Each node is held
+        // to its swing, as native shooting holds its waveforms.
+        let tolerances: Vec<RefinementTolerance> = coarse
+            .result
+            .voltages
+            .iter()
+            .zip(&fine.result.voltages)
+            .map(|(a, b)| RefinementTolerance::of(a, b, reltol, vntol))
+            .collect();
         for (coarse_index, &time) in coarse.result.time.iter().enumerate() {
             let Ok(fine_index) = fine
                 .result
@@ -63,18 +74,18 @@ impl Orbit<'_> {
             else {
                 continue;
             };
-            for (node, (a, b)) in coarse
+            for (node, ((a, b), tolerance)) in coarse
                 .result
                 .voltages
                 .iter()
                 .zip(&fine.result.voltages)
+                .zip(&tolerances)
                 .enumerate()
             {
                 let (Some(&a), Some(&b)) = (a.get(coarse_index), b.get(fine_index)) else {
                     continue;
                 };
-                let tolerance = reltol * a.abs().max(b.abs()) + vntol;
-                note((a - b).abs() / tolerance, &|| {
+                note(tolerance.deviation(a, b), &|| {
                     format!(
                         "V({}) at t={time:.6e} s",
                         coarse
