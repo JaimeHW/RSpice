@@ -343,7 +343,8 @@ impl Orbit<'_> {
             };
             let h = step.step;
             let coefficients = step.coefficients;
-            if !(h > 0.0)
+            if h.is_nan()
+                || h <= 0.0
                 || (after.time - before.time - h).abs()
                     > 1.0e-9 * h.max(after.time.abs() * Value::EPSILON)
             {
