@@ -16,7 +16,8 @@ use super::*;
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine::pss) struct PssGeneratedIntegrals {
     /// Each generated device that carries integrals, with how many, in device
-    /// order.
+    /// order. A build without generated models has none.
+    #[cfg_attr(not(feature = "veriloga-builtins-base"), allow(dead_code))]
     devices: Vec<(usize, usize)>,
     dimension: usize,
 }
@@ -48,6 +49,7 @@ impl PssGeneratedIntegrals {
 
     /// Each carried integral's device and its place among that device's
     /// integrals, in coordinate order.
+    #[cfg_attr(not(feature = "veriloga-builtins-base"), allow(dead_code))]
     pub(in crate::engine::pss) fn sites(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.devices
             .iter()
@@ -56,6 +58,7 @@ impl PssGeneratedIntegrals {
 
     /// Each device that carries integrals, with its first coordinate's place
     /// among the integrals and how many it carries.
+    #[cfg_attr(not(feature = "veriloga-builtins-base"), allow(dead_code))]
     pub(in crate::engine::pss) fn devices(
         &self,
     ) -> impl Iterator<Item = (usize, usize, usize)> + '_ {
@@ -200,6 +203,7 @@ impl PssGeneratedIntegrals {
         circuit: &CircuitData,
         points: impl Iterator<Item = (&'a [Value], &'a [Value])> + Clone,
     ) -> Result<Option<Vec<PssIntegralCoupling>>, SimulationError> {
+        #[cfg_attr(not(feature = "veriloga-builtins-base"), allow(unused_mut))]
         let mut couplings: Vec<PssIntegralCoupling> = Vec::new();
         #[cfg(feature = "veriloga-builtins-base")]
         {
