@@ -281,16 +281,36 @@ fn coordinate_row(
     label: &str,
     value: &mut i32,
 ) -> bool {
+    integer_row(ui, edit, before, label, value, |_| true)
+}
+
+/// An editable integer that `accepts` decides is legal. Illegal text is
+/// marked and not applied; the row keeps showing the value the document
+/// holds.
+fn integer_row(
+    ui: &mut Ui,
+    edit: &mut InspectorEdit,
+    before: &SymbolDocument,
+    label: &str,
+    value: &mut i32,
+    accepts: impl Fn(i32) -> bool,
+) -> bool {
     let id = ui.id().with(("symbol-coordinate", label));
     let mut buffer = ui
         .data_mut(|data| data.get_temp::<String>(id))
         .unwrap_or_else(|| value.to_string());
-    let parsed = buffer.trim().parse::<i32>();
-    let response = property_row_input(ui, label, &mut buffer, parsed.is_err());
+    let parse = |text: &str| {
+        text.trim()
+            .parse::<i32>()
+            .ok()
+            .filter(|number| accepts(*number))
+    };
+    let invalid = parse(&buffer).is_none();
+    let response = property_row_input(ui, label, &mut buffer, invalid);
     let mut changed = false;
     if response.changed() {
         ui.data_mut(|data| data.insert_temp(id, buffer.clone()));
-        if let Ok(parsed) = buffer.trim().parse::<i32>()
+        if let Some(parsed) = parse(&buffer)
             && parsed != *value
         {
             record_once(edit, before);
@@ -497,6 +517,16 @@ fn pin_section(
         changed = true;
     }
 
+    // How far the lead runs from the tip toward the body; 0 leaves a bare
+    // connection point whose lead, if any, is artwork.
+    let mut length = document.pins[order].length;
+    if integer_row(ui, edit, &before, "Lead length", &mut length, |length| {
+        length >= 0
+    }) {
+        document.pins[order].length = length;
+        changed = true;
+    }
+
     let style = document.pins[order].style;
     let mut style_value = style.label().to_owned();
     let style_options = SymbolPinStyle::ALL
@@ -517,6 +547,13 @@ fn pin_section(
     {
         record_once(edit, &before);
         document.pins[order].style = new_style;
+        changed = true;
+    }
+
+    let mut shown = !document.pins[order].name_hidden;
+    if rspice_ui_kit::widgets::switch_row(ui, "Show name", &mut shown) {
+        record_once(edit, &before);
+        document.pins[order].name_hidden = !shown;
         changed = true;
     }
 

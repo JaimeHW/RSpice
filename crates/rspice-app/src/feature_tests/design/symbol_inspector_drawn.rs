@@ -289,6 +289,77 @@ fn unfinished_symbol_field_does_not_follow_a_different_selection_or_view() {
     );
 }
 
+/// Each row of a selected pin changes that one field and nothing else: its
+/// lead length (never below zero), whether its name shows, its style and its
+/// side.
+#[test]
+fn each_pin_row_changes_only_its_own_field() {
+    use crate::state::{PortDirection, SymbolPin, SymbolPinSide};
+    use rspice_design_model::symbol_pin::SymbolPinStyle;
+    let mut editor = Editor::new();
+    let mut document = editor
+        .app
+        .state
+        .model
+        .load_active_symbol_document()
+        .unwrap();
+    document.pins.push(
+        SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 0)))
+            .with_side(SymbolPinSide::Left),
+    );
+    editor
+        .app
+        .state
+        .store_active_symbol_editor_bundle(
+            &document,
+            &SymbolEditorMetadata::for_document(&document),
+        )
+        .unwrap();
+    editor.app.state.design.symbol.editor.select_pin("IN");
+    editor.pass(Vec::new());
+    let pin = |editor: &Editor| {
+        editor
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap()
+            .pin("IN")
+            .cloned()
+            .unwrap()
+    };
+    let mut expected = pin(&editor);
+
+    editor.click("Lead length");
+    editor.replace("0");
+    expected.length = 0;
+    assert_eq!(pin(&editor), expected);
+    editor.replace("-5");
+    assert_eq!(
+        pin(&editor),
+        expected,
+        "a lead cannot run away from the body"
+    );
+
+    editor.click("Show name");
+    expected.name_hidden = true;
+    assert_eq!(pin(&editor), expected);
+
+    // A menu lays itself out unseen the frame it opens; its choices take
+    // clicks from the next.
+    editor.click("Style");
+    editor.pass(Vec::new());
+    editor.click("inverted clock");
+    expected.style = SymbolPinStyle::InvertedClock;
+    assert_eq!(pin(&editor), expected);
+
+    editor.click("Side");
+    editor.pass(Vec::new());
+    editor.click("top");
+    expected.side = SymbolPinSide::Top;
+    assert_eq!(pin(&editor), expected);
+}
+
 pub(crate) struct Editor {
     ctx: egui::Context,
     pub(crate) app: RSpiceApp,
