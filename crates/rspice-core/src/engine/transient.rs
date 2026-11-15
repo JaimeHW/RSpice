@@ -7028,6 +7028,15 @@ impl Engine {
         // ladder the audit measured after every digital edge. Restarting from
         // this instead is the policy a native source breakpoint already gets.
         let mut veriloga_refinement_approach_step: Option<Value> = None;
+        // The earliest candidate end a chase has seen hold its Verilog-A
+        // root. A landing that fires nothing stopped short of that root, which
+        // still lies before this, so the step after such a landing resumes the
+        // chase inside its bracket; restarting from the approach step instead
+        // re-chases the whole interrupted interval after every landing. A
+        // root with no zero -- `cross(ph - 0.5)` across an `idtmod` wrap --
+        // never meets its expression tolerance, is chased to the resolution of
+        // time, and made that re-chase quadratic in the landings it takes.
+        let mut veriloga_chase_root_bound: Option<Value> = None;
         // Consecutive re-chases of a landed root that fell back onto its
         // landing; see `VERILOGA_ROOT_STAGNATION_FRACTION`.
         let mut stagnant_root_landings = 0_usize;
@@ -8818,6 +8827,17 @@ impl Engine {
                                 return Err(SimulationError::Circuit(format!(
                                     "Verilog-A event refinement target {target} is not strictly inside transient interval ({accepted_time}, {candidate_time})"
                                 )));
+                            }
+                            // The root lies before this candidate's end: the
+                            // bracket the step after an unresolved landing
+                            // resumes in.
+                            if model_candidate.analog_event_root {
+                                veriloga_chase_root_bound = Some(match veriloga_chase_root_bound {
+                                    Some(bound) if bound > accepted_time => {
+                                        bound.min(candidate_time)
+                                    }
+                                    _ => candidate_time,
+                                });
                             }
                             // A chase that has already landed (its approach
                             // step is recorded) and whose next chord root keeps
@@ -13067,7 +13087,20 @@ impl Engine {
                     .chain(edge_completion_resume)
                     .reduce(Value::max)
                     .map_or(landing_dt, |step| step.max(landing_dt));
-                timestep.force_step(restart_dt.min(controller_dt).min(restarted_max_step));
+                let restart = restart_dt.min(controller_dt).min(restarted_max_step);
+                // A landing that resolved its root restarts as above. One that
+                // fired nothing resumes inside the bracket its chase measured.
+                let unresolved_bracket = veriloga_chase_root_bound
+                    .filter(|bound| *bound - t >= timestep.hard_min_dt())
+                    .filter(|_| {
+                        landed_device_event
+                            && circuit.veriloga_landing_left_root_unresolved(accepted_from)
+                    });
+                if unresolved_bracket.is_none() {
+                    veriloga_chase_root_bound = None;
+                }
+                timestep
+                    .force_step(unresolved_bracket.map_or(restart, |bound| restart.min(bound - t)));
             }
             if hit_breakpoint
                 && !lte_estimator.uses_accepted_solution_reference()
@@ -13080,6 +13113,7 @@ impl Engine {
                 // whether or not it hit a breakpoint: a chase that resolved
                 // its root away from one must not raise a later restart.
                 veriloga_refinement_approach_step = None;
+                veriloga_chase_root_bound = None;
                 stagnant_root_landings = 0;
             }
             if locked_grid.is_none()

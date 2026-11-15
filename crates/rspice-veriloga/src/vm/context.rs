@@ -1893,6 +1893,14 @@ impl VmContext {
             })
     }
 
+    /// Whether any `cross` or `above` of this instance fired at or after
+    /// `time` in its accepted history; see [`CrossDetector::fired_since`].
+    pub(crate) fn cross_event_fired_since(&self, time: f64) -> bool {
+        self.cross_detectors
+            .iter()
+            .any(|detector| detector.fired_since(time))
+    }
+
     /// Current solver-provided companion coefficients.
     #[inline]
     pub fn integration_coefficients(&self) -> IntegrationCoefficients {

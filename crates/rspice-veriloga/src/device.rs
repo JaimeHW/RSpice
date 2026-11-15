@@ -3347,6 +3347,16 @@ impl VerilogADevice {
             .reduce(f64::min))
     }
 
+    /// Whether a `cross` or `above` of this device fired at or after `time`
+    /// in its accepted history.
+    ///
+    /// Asked with the start of the interval just accepted, this says whether
+    /// that interval fired one. A landing on an interior root that fired
+    /// nothing stopped short of the root it was chasing.
+    pub fn cross_event_fired_since(&self, time: f64) -> bool {
+        self.context.cross_event_fired_since(time)
+    }
+
     /// Earliest exact absolute runtime event owned by accepted operator state.
     pub fn try_transient_event_time(&self) -> Result<Option<f64>, VmError> {
         self.context.transient_event_time()

@@ -605,6 +605,67 @@ fn a_cross_step_costs_no_newton_failure_whatever_its_size() {
     );
 }
 
+/// A smooth root that its landings stop short of still fires, inside its
+/// expression tolerance.
+///
+/// `exp(t / tau) - 2` is convex, so a chord across its root meets zero before
+/// the expression does, and a landing on the chord's root stops short and
+/// fires nothing. The step after such a landing resumes the chase inside the
+/// bracket its rejected candidates measured, not from the step the root
+/// interrupted, so that bracket has to hold the root: the event fires once, at
+/// a point where the expression has crossed and is within `etol` of zero.
+/// `time_tol` is wide so that `expr_tol` alone decides convergence.
+#[test]
+fn a_convex_root_its_landings_stop_short_of_fires_once_inside_expr_tol() {
+    let tau = 1.0e-6_f64;
+    let etol = 1.0e-9_f64;
+    let root = tau * std::f64::consts::LN_2;
+    let model = write_model(
+        &format!("convex_root_{}.va", std::process::id()),
+        &format!(
+            "`include \"disciplines.vams\"\n\
+             module convex(o, n); output o, n; electrical o, n;\n\
+             real tc, fired;\n\
+             analog begin\n\
+             @(initial_step) begin tc = 0; fired = 0; end\n\
+             @(cross(exp($abstime / {tau:e}) - 2, +1, 1e-6, {etol:e})) begin\n\
+             tc = $abstime; fired = fired + 1;\n\
+             end\n\
+             V(o) <+ tc;\n\
+             V(n) <+ fired;\n\
+             end\n\
+             endmodule\n"
+        ),
+    );
+    let deck = Netlist::parse(&format!(
+        "convex root\nX1 o n convex\n.va \"{model}\" convex\n.end\n"
+    ))
+    .expect("the deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&deck, 2e-6, 1e-7)
+        .unwrap_or_else(|error| panic!("the run must complete: {error}"));
+    let node = |name: &str| {
+        result
+            .node_names
+            .iter()
+            .position(|node| node.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("node {name}"))
+    };
+    let fired = &result.voltages[node("n")];
+    assert_eq!(fired.last(), Some(&1.0), "the root fires exactly once");
+    let landed = result.voltages[node("o")]
+        .iter()
+        .copied()
+        .find(|tc| *tc != 0.0)
+        .expect("the event records its time");
+    let residual = (landed / tau).exp() - 2.0;
+    assert!(
+        (-1e-15..=etol).contains(&residual),
+        "the event fired at {landed:e} (root {root:e}), where the expression is {residual:e}"
+    );
+    let _ = std::fs::remove_file(model);
+}
+
 /// B-4, the power-electronics case: a clocked PWM (timer sets the gate, the
 /// ramp crossing the control resets it) driving 20 or 24 V failed with
 /// "Convergence failed after 118 iterations" while 12 V passed. The ramp

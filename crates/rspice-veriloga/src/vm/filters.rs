@@ -739,6 +739,30 @@ mod tests {
     }
 
     #[test]
+    fn a_landing_short_of_its_root_fires_nothing_since_its_start() {
+        let mut cross = CrossDetector::default();
+        assert_eq!(cross.eval_event(-1.0, 0.0, 0, 0.0, 0.0, true), Ok(0.0));
+        cross.commit();
+        assert!(!cross.fired_since(0.0), "initialization is not an event");
+
+        // A candidate past the root asks for a landing and is rejected.
+        assert_eq!(cross.eval_event(1.0, 2.0, 0, 0.0, 0.0, true), Ok(1.0));
+        assert!(cross.candidate_refinement_time().is_some());
+        cross.begin_evaluation();
+        // The landing stops short of the root: accepted, and nothing fired.
+        assert_eq!(cross.eval_event(-0.5, 1.0, 0, 0.0, 0.0, true), Ok(0.0));
+        cross.commit();
+        assert!(!cross.fired_since(0.0));
+
+        // The next interval holds the root and fires inside it.
+        assert_eq!(cross.eval_event(0.0, 1.5, 0, 0.0, 0.0, true), Ok(1.0));
+        assert_eq!(cross.candidate_refinement_time(), None);
+        cross.commit();
+        assert!(cross.fired_since(1.0));
+        assert!(!cross.fired_since(1.75));
+    }
+
+    #[test]
     fn cross_requires_both_root_tolerances_and_validates_them() {
         let mut cross = CrossDetector::default();
         assert_eq!(cross.eval_event(-1.0, 0.0, 1, 0.6, 0.5, true), Ok(0.0));
@@ -2095,6 +2119,17 @@ impl CrossDetector {
     /// Absolute interior root estimate produced by the latest evaluation.
     pub(crate) fn candidate_refinement_time(&self) -> Option<f64> {
         self.candidate_refinement_time
+    }
+
+    /// Whether the accepted history holds an event this detector fired at or
+    /// after `time`.
+    ///
+    /// The event is dated at its crossing estimate, which never precedes the
+    /// interval it was found in. So asked with that interval's start, this
+    /// says whether the interval fired the detector. A crossing estimated at
+    /// the start exactly also answers yes, which only ever overstates.
+    pub(crate) fn fired_since(&self, time: f64) -> bool {
+        self.committed.last_event_time >= time
     }
 
     /// Discard a candidate produced by an earlier complete device pass.

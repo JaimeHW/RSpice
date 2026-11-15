@@ -4858,6 +4858,32 @@ impl CircuitData {
         }
     }
 
+    /// Whether the accepted interval that began at `step_start` stopped short
+    /// of the Verilog-A root it was cut for: no device fired a `cross` or
+    /// `above` in it.
+    ///
+    /// Only runtime devices can say. A build-time generated compact model
+    /// keeps its crossing history in generated code that offers no such
+    /// query, so a circuit holding one answers no, and its landings restart as
+    /// though they had resolved their roots.
+    pub(crate) fn veriloga_landing_left_root_unresolved(&self, step_start: Value) -> bool {
+        #[cfg(feature = "veriloga-builtins-base")]
+        if self.has_generated_veriloga_devices() {
+            return false;
+        }
+        #[cfg(feature = "veriloga")]
+        {
+            !self
+                .veriloga_analog_devices()
+                .any(|device| device.cross_event_fired_since(step_start))
+        }
+        #[cfg(not(feature = "veriloga"))]
+        {
+            let _ = step_start;
+            false
+        }
+    }
+
     /// Earliest instant strictly between `accepted` and `candidate` where some
     /// code model's next accepted evaluation would first act
     /// ([`crate::xspice::CodeModel::candidate_event_time`]).
