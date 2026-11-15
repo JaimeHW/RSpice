@@ -2,11 +2,11 @@
 {
   "schema_version": 7,
   "source_tree_digest": "02168e4bfa108bd4624c2c3d38cce9211ec42f99130fdda3d5495ab94e58db8c",
-  "generator_digest": "73115a31651a7d1b8538aeeb156ed271d3bb4f251293b34f8f90b210c5ac768b",
-  "bundle_digest": "17abb5409adebedc3e8c82b62f8d3df0a14de0a36364a1e3221dd1b170f14135",
+  "generator_digest": "a739ffa6eab65cb9427fcb1d74f27e538d643c7171a4272e0810431603d462ac",
+  "bundle_digest": "3591095dd6d7dc1ec2f359046075ccdf875ec4938b3b78b2c2a12a4c9ee6027a",
   "device_count": 60,
   "file_count": 544,
-  "source_bytes": 53339079,
+  "source_bytes": 53342014,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -447,7 +447,7 @@
       "feature_name": "veriloga-model-angelov-gan",
       "package_name": "rspice-veriloga-model-angelov-gan",
       "file_count": 6,
-      "source_bytes": 251506,
+      "source_bytes": 251707,
       "workspace": {
         "abi_version": 3,
         "variable_count": 164,
@@ -528,7 +528,7 @@
       "feature_name": "veriloga-model-asmhemt",
       "package_name": "rspice-veriloga-model-asmhemt",
       "file_count": 6,
-      "source_bytes": 1255546,
+      "source_bytes": 1258280,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1200,
@@ -1662,8 +1662,8 @@
     },
     {
       "relative_path": "models/angelov-gan/src/angelov_gan__angelov_gan__98687686/noise.rs",
-      "bytes": 89364,
-      "blake3": "c84b75e1c93572dd7f2b7a71914d8c18abfe6214470588c30c3ec74433df0707"
+      "bytes": 89565,
+      "blake3": "4a6869ca8308eabb63e825c55aff7d0eadbdd596ade51f7ecbfdd2aed3b90ee6"
     },
     {
       "relative_path": "models/angelov-gan/src/angelov_gan__angelov_gan__98687686/outputs.rs",
@@ -1842,8 +1842,8 @@
     },
     {
       "relative_path": "models/asmhemt/src/asmhemt__asmhemt__9d86ed5b/noise.rs",
-      "bytes": 236757,
-      "blake3": "d128819d74e33753f09bcafefbd351e71543e559a0e7fcd22cf1616e14d199a8"
+      "bytes": 239491,
+      "blake3": "002e3a37eec0820ffbae5985ac707a25d940f460e576077c79a551b216cb2e2b"
     },
     {
       "relative_path": "models/asmhemt/src/asmhemt__asmhemt__9d86ed5b/outputs.rs",

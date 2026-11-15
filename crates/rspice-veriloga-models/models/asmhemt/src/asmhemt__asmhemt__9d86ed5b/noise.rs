@@ -1518,19 +1518,19 @@ impl Instance {
 		let EGP=parameters[7];
 		let EIG=parameters[246];
 		let EIM=parameters[251];
-		let ELC=true;
+		let ELB=true;
 		let ELF=true;
 		let EMG=parameters[247];
 		let EML=parameters[252];
-		let EOU=true;
+		let EOT=true;
 		let EOX=true;
 		let EPZ=parameters[248];
 		let EQF=parameters[253];
-		let ESQ=true;
+		let ESP=true;
 		let EST=true;
 		let ETV=parameters[249];
 		let EUB=parameters[254];
-		let EWW=true;
+		let EWV=true;
 		let EWZ=true;
 		let EXH=parameters[220];
 		let EXW=parameters[224];
@@ -1757,7 +1757,7 @@ impl Instance {
 		if AV{
 		let AW=0f64+ (-AB);
 		let AZ=A+ (parameters[99]* ((rspice_limited_exp(((AX- AY)/ 10f64)))- B));
-		let BB=ctx.checked_derivative_value(AY, FZF);
+		let BB=ctx.checked_derivative_value(AY, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, AY, FZF), None => FZF });
 		let BC=0f64+ (-(BA* BB));
 		let BE=if BD{
 		BC
@@ -1856,7 +1856,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let CC=ctx.checked_derivative_value(AY, FZF);
+		let CC=ctx.checked_derivative_value(AY, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, AY, FZF), None => FZF });
 		let CD=(ctx.checked_derivative_value(BZ, CB))+ (-(parameters[110]* CC));
 		let CE=0f64+ (-(AX/ parameters[109]));
 		let CG=if CF{
@@ -1870,7 +1870,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let CK=ctx.checked_derivative_value(AX, FZF);
+		let CK=ctx.checked_derivative_value(AX, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(2, AX, FZF), None => FZF });
 		let CL=(ctx.checked_derivative_value(CH, CJ))+ (-(parameters[111]* CK));
 		let CM=parameters[113]* AX;
 		let CN=(((-parameters[116])* AY)+ (parameters[117]* AX))+ parameters[118];
@@ -1954,7 +1954,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let DK=ctx.checked_derivative_value(AY, FZF);
+		let DK=ctx.checked_derivative_value(AY, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(3, AY, FZF), None => FZF });
 		let DL=(ctx.checked_derivative_value(DH, DJ))+ (-(DD* DK));
 		let DM=(AY/ parameters[121])* ((AK/ N).powf(parameters[126]));
 		HH=A;
@@ -2011,13 +2011,13 @@ impl Instance {
 		let DX=A+ DW;
 		let DZ=node_potentials[11]- DY;
 		let EA=A+ (DZ/ (parameters[82]/ (B+ (parameters[85]* ((DZ/ parameters[86]).exp())))));
-		let EB=ctx.checked_derivative_value(DY, FZF);
+		let EB=ctx.checked_derivative_value(DY, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(4, DY, FZF), None => FZF });
 		let ED=0f64+ (-((BA* EB)+ (EC* DY)));
 		let EE=(BU- AF).abs();
 		let EF=A+ EE;
 		let EH=node_potentials[13]- EG;
 		let EI=A+ (EH/ (parameters[84]/ (B+ (parameters[87]* ((EH/ parameters[88]).exp())))));
-		let EJ=ctx.checked_derivative_value(EG, FZF);
+		let EJ=ctx.checked_derivative_value(EG, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(5, EG, FZF), None => FZF });
 		let EK=0f64+ (-((parameters[83]* EJ)+ (EC* EG)));
 		let EL=DY- DW;
 		let EM=BG* ((EL+ A)+ (((EL* EL)+ 2.5000000000000003e-61f64).sqrt()));
@@ -2088,7 +2088,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let FW=ctx.checked_derivative_value(AY, FZF);
+		let FW=ctx.checked_derivative_value(AY, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(6, AY, FZF), None => FZF });
 		let FX=(ctx.checked_derivative_value(FT, FV))+ (-(FP* FW));
 		let FY=((((((parameters[138]* FI)+ (parameters[139]* FJ))+ (parameters[140]* FK))+ parameters[141]).exp())+ parameters[142]).ln();
 		let GA=parameters[143]* (((FZ/ AM)- (FZ/ FN)).exp());
@@ -2104,7 +2104,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let GI=ctx.checked_derivative_value(AX, FZF);
+		let GI=ctx.checked_derivative_value(AX, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(7, AX, FZF), None => FZF });
 		let GJ=(ctx.checked_derivative_value(GF, GH))+ (-(GB* GI));
 		let GK=(AY* EP)/ (((AY* AY)+ (EP* EP)).sqrt());
 		let GL=((EQ* DB).abs())* GK;
@@ -8356,7 +8356,7 @@ impl Instance {
 		EIX=A;
 		FWN=FYE;
 		}
-		let EIY=ctx.checked_derivative_value(EHT, FZF);
+		let EIY=ctx.checked_derivative_value(EHT, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(8, EHT, FZF), None => FZF });
 		let EIZ=(ctx.checked_derivative_value(EIQ, EIX))+ (EGP* EIY);
 		let EJA=ADB== B;
 		let FNH;
@@ -8523,7 +8523,7 @@ impl Instance {
 		EKV=A;
 		FWQ=FYF;
 		}
-		let EKW=ctx.checked_derivative_value(EJT, FZF);
+		let EKW=ctx.checked_derivative_value(EJT, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(9, EJT, FZF), None => FZF });
 		let EKX=(ctx.checked_derivative_value(EKO, EKV))+ (-(EGP* EKW));
 		let EKY=AQD== B;
 		let EOJ;
@@ -8532,20 +8532,20 @@ impl Instance {
 		let FWR;
 		if EKY{
 		let EKZ=ctx.checked_derivative_value(EKA, FZF);
-		let ELA=EGP* EKZ;
-		let ELB=A+ ELA;
-		let ELD;
+		let ELA=A+ (EGP* EKZ);
+		let ELC;
 		let FWS;
-		if ELC{
-		ELD=EKX;
+		if ELB{
+		ELC=EKX;
 		FWS=FWQ;
 		}else{
-		ELD=A;
+		ELC=A;
 		FWS=FYF;
 		}
-		let ELE=(ctx.checked_derivative_value(EKX, ELD))+ (ELA* EIG);
+		let ELD=ctx.checked_derivative_value(EKA, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(10, EKA, FZF), None => FZF });
+		let ELE=(ctx.checked_derivative_value(EKX, ELC))+ ((EGP* ELD)* EIG);
 		EOJ=ELE;
-		FOJ=ELB;
+		FOJ=ELA;
 		FOM=A;
 		FWR=FWS;
 		}else{
@@ -8558,11 +8558,11 @@ impl Instance {
 		ELG=A;
 		FWT=FYF;
 		}
-		let ELH=ctx.checked_derivative_value(EKA, FZF);
-		let ELI=EGP* ELH;
-		let ELJ=(ctx.checked_derivative_value(EKX, ELG))+ ELI;
-		let ELK=A+ (ELI* EIG);
-		EOJ=ELJ;
+		let ELH=ctx.checked_derivative_value(EKA, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(11, EKA, FZF), None => FZF });
+		let ELI=(ctx.checked_derivative_value(EKX, ELG))+ (EGP* ELH);
+		let ELJ=ctx.checked_derivative_value(EKA, FZF);
+		let ELK=A+ ((EGP* ELJ)* EIG);
+		EOJ=ELI;
 		FOJ=A;
 		FOM=ELK;
 		FWR=FWT;
@@ -8706,7 +8706,7 @@ impl Instance {
 		EMU=A;
 		FWW=FYE;
 		}
-		let EMV=ctx.checked_derivative_value(ELU, FZF);
+		let EMV=ctx.checked_derivative_value(ELU, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(12, ELU, FZF), None => FZF });
 		let EMW=(ctx.checked_derivative_value(EMP, EMU))+ (EGP* EMV);
 		let EMX=BCP== B;
 		let FPF;
@@ -8871,7 +8871,7 @@ impl Instance {
 		EON=A;
 		FWZ=FYF;
 		}
-		let EOO=ctx.checked_derivative_value(ENM, FZF);
+		let EOO=ctx.checked_derivative_value(ENM, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(13, ENM, FZF), None => FZF });
 		let EOP=(ctx.checked_derivative_value(EOH, EON))+ (-(EGP* EOO));
 		let EOQ=BPS== B;
 		let ESF;
@@ -8880,20 +8880,20 @@ impl Instance {
 		let FXA;
 		if EOQ{
 		let EOR=ctx.checked_derivative_value(ENT, FZF);
-		let EOS=EGP* EOR;
-		let EOT=A+ EOS;
-		let EOV;
+		let EOS=A+ (EGP* EOR);
+		let EOU;
 		let FXB;
-		if EOU{
-		EOV=EOP;
+		if EOT{
+		EOU=EOP;
 		FXB=FWZ;
 		}else{
-		EOV=A;
+		EOU=A;
 		FXB=FYF;
 		}
-		let EOW=(ctx.checked_derivative_value(EOP, EOV))+ (EOS* EMG);
+		let EOV=ctx.checked_derivative_value(ENT, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(14, ENT, FZF), None => FZF });
+		let EOW=(ctx.checked_derivative_value(EOP, EOU))+ ((EGP* EOV)* EMG);
 		ESF=EOW;
-		FQH=EOT;
+		FQH=EOS;
 		FQK=A;
 		FXA=FXB;
 		}else{
@@ -8906,11 +8906,11 @@ impl Instance {
 		EOY=A;
 		FXC=FYF;
 		}
-		let EOZ=ctx.checked_derivative_value(ENT, FZF);
-		let EPA=EGP* EOZ;
-		let EPB=(ctx.checked_derivative_value(EOP, EOY))+ EPA;
-		let EPC=A+ (EPA* EMG);
-		ESF=EPB;
+		let EOZ=ctx.checked_derivative_value(ENT, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(15, ENT, FZF), None => FZF });
+		let EPA=(ctx.checked_derivative_value(EOP, EOY))+ (EGP* EOZ);
+		let EPB=ctx.checked_derivative_value(ENT, FZF);
+		let EPC=A+ ((EGP* EPB)* EMG);
+		ESF=EPA;
 		FQH=A;
 		FQK=EPC;
 		FXA=FXC;
@@ -9056,7 +9056,7 @@ impl Instance {
 		EQO=A;
 		FXF=FYE;
 		}
-		let EQP=ctx.checked_derivative_value(EPM, FZF);
+		let EQP=ctx.checked_derivative_value(EPM, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(16, EPM, FZF), None => FZF });
 		let EQQ=(ctx.checked_derivative_value(EQJ, EQO))+ (EGP* EQP);
 		let EQR=CCI== B;
 		let FRD;
@@ -9223,7 +9223,7 @@ impl Instance {
 		ESJ=A;
 		FXI=FYF;
 		}
-		let ESK=ctx.checked_derivative_value(ERI, FZF);
+		let ESK=ctx.checked_derivative_value(ERI, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(17, ERI, FZF), None => FZF });
 		let ESL=(ctx.checked_derivative_value(ESD, ESJ))+ (-(EGP* ESK));
 		let ESM=CPL== B;
 		let EWL;
@@ -9232,20 +9232,20 @@ impl Instance {
 		let FXJ;
 		if ESM{
 		let ESN=ctx.checked_derivative_value(ERP, FZF);
-		let ESO=EGP* ESN;
-		let ESP=A+ ESO;
-		let ESR;
+		let ESO=A+ (EGP* ESN);
+		let ESQ;
 		let FXK;
-		if ESQ{
-		ESR=ESL;
+		if ESP{
+		ESQ=ESL;
 		FXK=FXI;
 		}else{
-		ESR=A;
+		ESQ=A;
 		FXK=FYF;
 		}
-		let ESS=(ctx.checked_derivative_value(ESL, ESR))+ (ESO* EPZ);
+		let ESR=ctx.checked_derivative_value(ERP, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(18, ERP, FZF), None => FZF });
+		let ESS=(ctx.checked_derivative_value(ESL, ESQ))+ ((EGP* ESR)* EPZ);
 		EWL=ESS;
-		FSF=ESP;
+		FSF=ESO;
 		FSI=A;
 		FXJ=FXK;
 		}else{
@@ -9258,11 +9258,11 @@ impl Instance {
 		ESU=A;
 		FXL=FYF;
 		}
-		let ESV=ctx.checked_derivative_value(ERP, FZF);
-		let ESW=EGP* ESV;
-		let ESX=(ctx.checked_derivative_value(ESL, ESU))+ ESW;
-		let ESY=A+ (ESW* EPZ);
-		EWL=ESX;
+		let ESV=ctx.checked_derivative_value(ERP, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(19, ERP, FZF), None => FZF });
+		let ESW=(ctx.checked_derivative_value(ESL, ESU))+ (EGP* ESV);
+		let ESX=ctx.checked_derivative_value(ERP, FZF);
+		let ESY=A+ ((EGP* ESX)* EPZ);
+		EWL=ESW;
 		FSF=A;
 		FSI=ESY;
 		FXJ=FXL;
@@ -9408,7 +9408,7 @@ impl Instance {
 		EUK=A;
 		FXO=FYE;
 		}
-		let EUL=ctx.checked_derivative_value(ETI, FZF);
+		let EUL=ctx.checked_derivative_value(ETI, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(20, ETI, FZF), None => FZF });
 		let EUM=(ctx.checked_derivative_value(EUF, EUK))+ (EGP* EUL);
 		let EUN=DCB== B;
 		let FTB;
@@ -9600,7 +9600,7 @@ impl Instance {
 		EWP=A;
 		FXW=FYF;
 		}
-		let EWQ=ctx.checked_derivative_value(EVE, FZF);
+		let EWQ=ctx.checked_derivative_value(EVE, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(21, EVE, FZF), None => FZF });
 		let EWR=(ctx.checked_derivative_value(EWJ, EWP))+ (-(EGP* EWQ));
 		let EWS=DPD== B;
 		let FJR;
@@ -9609,20 +9609,20 @@ impl Instance {
 		let FXX;
 		if EWS{
 		let EWT=ctx.checked_derivative_value(EVL, FZF);
-		let EWU=EGP* EWT;
-		let EWV=A+ EWU;
-		let EWX;
+		let EWU=A+ (EGP* EWT);
+		let EWW;
 		let FXY;
-		if EWW{
-		EWX=EWR;
+		if EWV{
+		EWW=EWR;
 		FXY=FXW;
 		}else{
-		EWX=A;
+		EWW=A;
 		FXY=FYF;
 		}
-		let EWY=(ctx.checked_derivative_value(EWR, EWX))+ (EWU* ETV);
+		let EWX=ctx.checked_derivative_value(EVL, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(22, EVL, FZF), None => FZF });
+		let EWY=(ctx.checked_derivative_value(EWR, EWW))+ ((EGP* EWX)* ETV);
 		FJR=EWY;
-		FTX=EWV;
+		FTX=EWU;
 		FUA=A;
 		FXX=FXY;
 		}else{
@@ -9635,11 +9635,11 @@ impl Instance {
 		EXA=A;
 		FXZ=FYF;
 		}
-		let EXB=ctx.checked_derivative_value(EVL, FZF);
-		let EXC=EGP* EXB;
-		let EXD=(ctx.checked_derivative_value(EWR, EXA))+ EXC;
-		let EXE=A+ (EXC* ETV);
-		FJR=EXD;
+		let EXB=ctx.checked_derivative_value(EVL, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(23, EVL, FZF), None => FZF });
+		let EXC=(ctx.checked_derivative_value(EWR, EXA))+ (EGP* EXB);
+		let EXD=ctx.checked_derivative_value(EVL, FZF);
+		let EXE=A+ ((EGP* EXD)* ETV);
+		FJR=EXC;
 		FTX=A;
 		FUA=EXE;
 		FXX=FXZ;

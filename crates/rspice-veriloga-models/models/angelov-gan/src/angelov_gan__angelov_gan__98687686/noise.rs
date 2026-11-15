@@ -1624,7 +1624,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let KT=ctx.checked_derivative_value(KO, ACX);
+		let KT=ctx.checked_derivative_value(KO, match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(0, KO, ACX), None => ACX });
 		let KU=(ctx.checked_derivative_value(KC, KN))+ KT;
 		MI=KU;
 		SQ=KL;
@@ -1637,7 +1637,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let LJ=ctx.checked_derivative_value((LE* K), ACX);
+		let LJ=ctx.checked_derivative_value((LE* K), match ctx.periodic_frame() { Some(periodic_frame) => periodic_frame.primal(1, (LE* K), ACX), None => ACX });
 		let LK=(ctx.checked_derivative_value(KC, LD))+ LJ;
 		MI=LK;
 		SQ=A;
