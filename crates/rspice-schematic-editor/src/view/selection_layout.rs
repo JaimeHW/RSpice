@@ -38,7 +38,8 @@ impl SelectionLayoutCommand {
         }
     }
 
-    const fn minimum_objects(self) -> usize {
+    /// The fewest objects the command lines up or spaces out.
+    pub const fn minimum_objects(self) -> usize {
         match self {
             Self::DistributeHorizontal | Self::DistributeVertical => 3,
             _ => 2,
@@ -90,14 +91,17 @@ pub enum SelectionLayoutObject {
     Probe(u64),
 }
 
+/// One object a layout moves: what it is, its bounds, and the step its
+/// move is a whole number of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct LayoutTarget {
-    object: SelectionLayoutObject,
-    min: Point,
-    max: Point,
+pub struct LayoutTarget<K> {
+    pub object: K,
+    pub min: Point,
+    pub max: Point,
+    pub grid: i64,
 }
 
-impl LayoutTarget {
+impl<K> LayoutTarget<K> {
     fn center_x(self) -> i64 {
         (i64::from(self.min.x) + i64::from(self.max.x)) / 2
     }
@@ -149,8 +153,10 @@ pub fn prepare(
     command: SelectionLayoutCommand,
 ) -> Result<SelectionLayoutRequest, SelectionLayoutError> {
     let targets = selection_layout_targets(view, command)?;
-    let grid = i64::from(view.design.document.grid_size.max(1));
-    let moves = layout_deltas(&targets, command, grid)?;
+    let moves = layout_deltas(&targets, command)?
+        .into_iter()
+        .map(|(object, delta)| SelectionLayoutMove { object, delta })
+        .collect();
     Ok(SelectionLayoutRequest {
         source,
         selection: view.selection.clone(),
@@ -162,7 +168,7 @@ pub fn prepare(
 fn selection_layout_targets(
     view: &SelectionLayoutView<'_>,
     command: SelectionLayoutCommand,
-) -> Result<Vec<LayoutTarget>, SelectionLayoutError> {
+) -> Result<Vec<LayoutTarget<SelectionLayoutObject>>, SelectionLayoutError> {
     if !view.can_edit {
         return Err(SelectionLayoutError::ReadOnly);
     }
@@ -172,6 +178,7 @@ fn selection_layout_targets(
         return Err(SelectionLayoutError::IncompatibleSelection);
     }
 
+    let grid = i64::from(view.design.document.grid_size.max(1));
     let mut targets = Vec::with_capacity(selection.count());
     for id in &selection.components {
         let component = view
@@ -187,6 +194,7 @@ fn selection_layout_targets(
             object: SelectionLayoutObject::Component(*id),
             min,
             max,
+            grid,
         });
     }
     for id in &selection.design_notes {
@@ -203,6 +211,7 @@ fn selection_layout_targets(
             object: SelectionLayoutObject::DesignNote(*id),
             min,
             max,
+            grid,
         });
     }
     for id in &selection.documentation_shapes {
@@ -219,6 +228,7 @@ fn selection_layout_targets(
             object: SelectionLayoutObject::DocumentationShape(*id),
             min,
             max,
+            grid,
         });
     }
     for id in &selection.probes {
@@ -235,9 +245,20 @@ fn selection_layout_targets(
             object: SelectionLayoutObject::Probe(*id),
             min,
             max,
+            grid,
         });
     }
 
+    require_enough(&targets, command)?;
+    Ok(targets)
+}
+
+/// Whether `targets` are enough for `command`: two to align, three to
+/// distribute.
+fn require_enough<K>(
+    targets: &[LayoutTarget<K>],
+    command: SelectionLayoutCommand,
+) -> Result<(), SelectionLayoutError> {
     let required = command.minimum_objects();
     if targets.len() < required {
         return Err(SelectionLayoutError::TooFewObjects {
@@ -245,7 +266,7 @@ fn selection_layout_targets(
             selected: targets.len(),
         });
     }
-    Ok(targets)
+    Ok(())
 }
 
 fn has_incompatible_selection(selection: &Selection) -> bool {
@@ -266,28 +287,31 @@ fn require_active_sheet(view: &DesignView<'_>, object_id: u64) -> Result<(), Sel
     }
 }
 
-/// Every move is a whole number of `grid` steps, as a drag is, so a part on
-/// the grid stays on it with its pins. A body need not be a whole number of
-/// steps wide around its origin, so edges, centres and gaps then line up to
-/// within one step rather than exactly. A part already on the line, such as
-/// the outermost one an edge is aligned to, never moves.
-fn layout_deltas(
-    targets: &[LayoutTarget],
+/// The move each of `targets` takes for `command`, for any canvas whose
+/// objects have bounds: a schematic's parts and notes, or a symbol's pins,
+/// shapes and labels.
+///
+/// Every move is a whole number of its target's `grid` steps, as a drag is,
+/// so a part on the grid stays on it with its pins. A body need not be a
+/// whole number of steps wide around its origin, so edges, centres and gaps
+/// then line up to within one step rather than exactly. A part already on
+/// the line, such as the outermost one an edge is aligned to, never moves.
+pub fn layout_deltas<K: Copy + Ord>(
+    targets: &[LayoutTarget<K>],
     command: SelectionLayoutCommand,
-    grid: i64,
-) -> Result<Vec<SelectionLayoutMove>, SelectionLayoutError> {
+) -> Result<Vec<(K, Point)>, SelectionLayoutError> {
+    require_enough(targets, command)?;
     match command {
-        SelectionLayoutCommand::DistributeHorizontal => distribute(targets, true, grid),
-        SelectionLayoutCommand::DistributeVertical => distribute(targets, false, grid),
-        _ => align(targets, command, grid),
+        SelectionLayoutCommand::DistributeHorizontal => distribute(targets, true),
+        SelectionLayoutCommand::DistributeVertical => distribute(targets, false),
+        _ => align(targets, command),
     }
 }
 
-fn align(
-    targets: &[LayoutTarget],
+fn align<K: Copy>(
+    targets: &[LayoutTarget<K>],
     command: SelectionLayoutCommand,
-    grid: i64,
-) -> Result<Vec<SelectionLayoutMove>, SelectionLayoutError> {
+) -> Result<Vec<(K, Point)>, SelectionLayoutError> {
     let min_x = targets
         .iter()
         .map(|target| i64::from(target.min.x))
@@ -325,19 +349,19 @@ fn align(
                 SelectionLayoutCommand::DistributeHorizontal
                 | SelectionLayoutCommand::DistributeVertical => unreachable!(),
             };
-            Ok(SelectionLayoutMove {
-                object: target.object,
-                delta: checked_delta(target, on_grid(delta_x, grid), on_grid(delta_y, grid))?,
-            })
+            let grid = target.grid.max(1);
+            Ok((
+                target.object,
+                checked_delta(target, on_grid(delta_x, grid), on_grid(delta_y, grid))?,
+            ))
         })
         .collect()
 }
 
-fn distribute(
-    targets: &[LayoutTarget],
+fn distribute<K: Copy + Ord>(
+    targets: &[LayoutTarget<K>],
     horizontal: bool,
-    grid: i64,
-) -> Result<Vec<SelectionLayoutMove>, SelectionLayoutError> {
+) -> Result<Vec<(K, Point)>, SelectionLayoutError> {
     let mut sorted = targets.to_vec();
     sorted.sort_by_key(|target| {
         let primary = if horizontal {
@@ -393,10 +417,11 @@ fn distribute(
         } else {
             (0, desired_min - current_min)
         };
-        result.push(SelectionLayoutMove {
-            object: target.object,
-            delta: checked_delta(target, on_grid(delta_x, grid), on_grid(delta_y, grid))?,
-        });
+        let grid = target.grid.max(1);
+        result.push((
+            target.object,
+            checked_delta(target, on_grid(delta_x, grid), on_grid(delta_y, grid))?,
+        ));
         preceding_size += if horizontal {
             target.width()
         } else {
@@ -428,8 +453,8 @@ fn on_grid(delta: i64, grid: i64) -> i64 {
     }
 }
 
-fn checked_delta(
-    target: LayoutTarget,
+fn checked_delta<K>(
+    target: LayoutTarget<K>,
     delta_x: i64,
     delta_y: i64,
 ) -> Result<Point, SelectionLayoutError> {
