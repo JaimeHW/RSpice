@@ -257,14 +257,27 @@ pub fn load_model_bound_symbol(
     ModelBoundSymbolDefinition::from_json_bytes(encoded.as_bytes(), &view.name).map(Some)
 }
 
+/// Store `definition` on `view`, drawing the symbol its contract describes.
+///
+/// A drawing the view already holds is its author's and is kept when the
+/// revision changes nothing the drawing is made from (the pins, the graphic
+/// template, the imported graphic): a new parameter form is not a reason to
+/// throw away the artwork and pin placement drawn since the symbol was made.
 pub fn store_model_bound_symbol(
     definition: &ModelBoundSymbolDefinition,
     view: &mut View,
 ) -> Result<(), SymbolDefinitionError> {
     definition.validate()?;
+    let keeps_drawing = view
+        .metadata
+        .contains_key(crate::symbol::SYMBOL_DOCUMENT_METADATA_KEY)
+        && load_model_bound_symbol(view)
+            .ok()
+            .flatten()
+            .is_some_and(|stored| draws_the_same_symbol(&stored, definition));
     let mut candidate = view.clone();
     project_definition_metadata(definition, &mut candidate.metadata)?;
-    if definition.generated_views.symbol || view.view_type == ViewType::Symbol {
+    if (definition.generated_views.symbol || view.view_type == ViewType::Symbol) && !keeps_drawing {
         materialize_symbol_document(definition)
             .store_in_view(&mut candidate)
             .map_err(SymbolDefinitionError::Serialization)?;
@@ -272,6 +285,17 @@ pub fn store_model_bound_symbol(
     candidate.modified = true;
     *view = candidate;
     Ok(())
+}
+
+/// Whether two revisions of a definition draw the same symbol: the same
+/// pins, graphic template and imported graphic.
+fn draws_the_same_symbol(
+    stored: &ModelBoundSymbolDefinition,
+    revision: &ModelBoundSymbolDefinition,
+) -> bool {
+    stored.pins == revision.pins
+        && stored.graphic_template == revision.graphic_template
+        && stored.imported_graphic == revision.imported_graphic
 }
 
 pub fn prepare_symbol_construction(

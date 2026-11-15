@@ -315,6 +315,46 @@ fn replacing_form_synchronizes_the_exact_emitted_parameter_order() {
     assert!(view.metadata["cdf.parameter_inheritance"].contains("model_default"));
 }
 
+/// A new parameter form changes nothing the symbol is drawn from, so the
+/// drawing its author made since keeps every edit; a revision that changes
+/// the pins draws the symbol again from the contract.
+#[test]
+fn a_form_revision_keeps_the_drawing_and_a_pin_revision_redraws_it() {
+    let original = definition(1);
+    let mut view = View::new("symbol", ViewType::Symbol);
+    store_model_bound_symbol(&original, &mut view).unwrap();
+    let mut drawn = SymbolDocument::load_from_view(&view).unwrap();
+    let out = drawn.pins.iter_mut().find(|pin| pin.name == "OUT").unwrap();
+    let moved = Point::new(90, 30);
+    out.position = Some(moved);
+    drawn.store_in_view(&mut view).unwrap();
+
+    let mut form = original.parameter_form.clone();
+    form.revision = 2;
+    form.sections[0].fields[0].label = "Closed-loop gain".to_owned();
+    let form_revision = original.replace_parameter_form(form).unwrap();
+    store_model_bound_symbol(&form_revision, &mut view).unwrap();
+
+    assert_eq!(
+        load_model_bound_symbol(&view).unwrap(),
+        Some(form_revision.clone()),
+        "the new form is stored"
+    );
+    let kept = SymbolDocument::load_from_view(&view).unwrap();
+    assert_eq!(kept, drawn, "the drawing is the author's, edits and all");
+
+    let mut pin_revision = form_revision;
+    pin_revision.identity.revision = 3;
+    pin_revision.pins[3].side = SymbolPinSide::Top;
+    pin_revision.pins[4].side = SymbolPinSide::Right;
+    store_model_bound_symbol(&pin_revision, &mut view).unwrap();
+    assert_eq!(
+        SymbolDocument::load_from_view(&view).unwrap(),
+        materialize_symbol_document(&pin_revision),
+        "new pins are drawn from the contract"
+    );
+}
+
 #[test]
 fn svg_import_retains_geometry_but_never_infers_electrical_semantics() {
     let svg = br#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="10" height="10"/></svg>"#;
