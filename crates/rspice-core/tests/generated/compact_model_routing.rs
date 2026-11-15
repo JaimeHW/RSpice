@@ -869,6 +869,67 @@ mod xyce_vbic_generated {
         }
     }
 
+    /// vbicNand's subcircuit supplies float on picoampere junction and GMIN
+    /// currents (~1e-12 S), while each VBIC 1.3's RBP=1e-9 sits on its 1 mOhm
+    /// floor (1e3 S). The generated module's companion J*x-I rounded that
+    /// branch's picoamperes by ~1e-13 A. The OneStep order-2 history
+    /// 0.5*(F_prev-B_prev) carried the rounding into every step, and with no
+    /// charge to damp it the static first 2 us rang with growing amplitude
+    /// until LTE recovery was exhausted at 0.39 us. With the history taken
+    /// physically, the companion operating point still sat 4.3e-4 V off, and
+    /// the plateau rang +-6e-6 V around it. Xyce 7.10 sums F from device
+    /// loads and runs the same VBIC 1.3 source at LEVEL=11; it holds V(OUT2)
+    /// at 0.8175760 there.
+    #[test]
+    fn a_floating_vbic_nand_supply_holds_its_static_interval() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/xyce/Netlists/Certification_Tests/BUG_1007_SON/vbicNand0.cir");
+        let netlist = Netlist::parse_file(&path).expect("the VBIC NAND deck parses");
+        let engine = Engine::new(rspice_core::engine::resolve_simulation_config(
+            &SimulationConfig {
+                spice_dialect: SpiceDialect::Xyce,
+                ..Default::default()
+            },
+            Some(&netlist.options),
+            &Default::default(),
+        ));
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        assert!(
+            circuit
+                .device_op_report()
+                .entries
+                .iter()
+                .any(|entry| entry.device_kind.eq_ignore_ascii_case("vbic13_3t_et")),
+            "a four-node LEVEL=11 card runs the generated electrothermal VBIC 1.3"
+        );
+        let result = engine
+            .run_tran(&netlist, 10.0e-6, 1.0e-6)
+            .expect("the VBIC NAND transient holds its static interval");
+        let out2 = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out2"))
+            .map(|index| &result.voltages[index])
+            .expect("V(OUT2) is recorded");
+        let plateau = result
+            .time
+            .iter()
+            .zip(out2)
+            .filter(|(time, _)| (0.5e-6..1.9e-6).contains(*time))
+            .collect::<Vec<_>>();
+        assert!(
+            plateau.len() >= 5,
+            "the static interval has {} points",
+            plateau.len()
+        );
+        for (time, voltage) in plateau {
+            assert!(
+                (voltage - 0.817_576_0).abs() < 1.0e-7,
+                "V(OUT2) at {time:e} s is {voltage}, Xyce 0.8175760"
+            );
+        }
+    }
+
     #[test]
     fn too_many_optional_q_terminals_are_rejected() {
         let engine = Engine::new(SimulationConfig {
