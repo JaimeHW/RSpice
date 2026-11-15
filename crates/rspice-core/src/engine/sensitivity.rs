@@ -1,4 +1,5 @@
 mod dc_sweep;
+mod design_gradient;
 #[cfg(test)]
 mod design_parameter_tests;
 #[cfg(test)]
@@ -6,6 +7,9 @@ mod expression_value_tests;
 mod parameter;
 mod refinement;
 pub use dc_sweep::DcSweepSensitivityPoint;
+pub use design_gradient::{
+    DesignParameterTangent, DesignParameterTangents, DesignTangentMethod, OperatingPointDirection,
+};
 
 use super::progress::StudyProgress;
 use super::{Engine, SimulationError};
