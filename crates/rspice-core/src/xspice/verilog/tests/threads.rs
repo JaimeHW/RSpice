@@ -607,28 +607,29 @@ endmodule
     );
 }
 
-/// A task name that reaches another root module is refused by what it is,
-/// never by the symbol the parser stood in for it.
+/// A task name that reaches upward is refused by what it is, never by the
+/// symbol the parser stood in for it.
 #[test]
-fn a_cross_module_task_name_is_refused_in_source_terms() {
+fn an_upward_task_name_is_refused_in_source_terms() {
     let error = super::run_digital_testbench(
         &[(
             "tb.v".into(),
             "module main;
-  initial other.passed;
-endmodule
-module other;
   task passed; $display(\"PASSED\"); endtask
+  child c();
+endmodule
+module child;
+  initial main.passed;
 endmodule
 "
             .into(),
         )],
         &super::HdlTestbenchOptions::default(),
     )
-    .expect_err("a cross-module task name is not supported yet");
+    .expect_err("an upward task name is not supported yet");
     let text = error.to_string();
     assert!(
-        text.contains("`other.passed` calls a task or function of another top-level module"),
+        text.contains("an upward task name (section 12.6) is not supported yet"),
         "{text}"
     );
     assert!(!text.contains("rspice_reference"), "{text}");

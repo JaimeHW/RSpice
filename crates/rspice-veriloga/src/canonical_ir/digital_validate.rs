@@ -646,6 +646,17 @@ impl CanonicalDigitalPlan {
             }
             self.check_routine(routine)?;
         }
+        let mut stand_ins = HashSet::new();
+        for external in &self.external_routines {
+            if external.routine.index() >= self.routines.len()
+                || !stand_ins.insert(external.routine)
+            {
+                return Err(error(
+                    "a digital routine standing for another top-level module's must be one of \
+                     the plan's, named once",
+                ));
+            }
+        }
         let owners = self
             .processes
             .iter()

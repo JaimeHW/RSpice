@@ -128,11 +128,19 @@ pub(super) fn resolve_disables(
             .iter()
             .find_map(|path| blocks.get(path.as_str()).copied())
         else {
-            diagnostics.push(DigitalLoweringDiagnostic::refusal(
+            // A dotted name the parser stood a symbol in for is never shown.
+            let message = if crate::ast::is_reference_symbol(&disable.name) {
+                "`disable` of a hierarchical name (IEEE 1364-2005 section 10.3) is not \
+                 supported yet"
+                    .to_owned()
+            } else {
                 format!(
                     "`disable {}` names no named block or task in scope",
                     disable.name
-                ),
+                )
+            };
+            diagnostics.push(DigitalLoweringDiagnostic::refusal(
+                message,
                 SourceSpanRef::from(disable.span),
             ));
             continue;

@@ -223,6 +223,175 @@ pub(super) fn bind_downward_names(
     }
 }
 
+/// A routine of another top-level module that this plan's hierarchical names
+/// call (IEEE 1364-2005 section 12.5). The plan calls a stand-in of the same
+/// signature, and linking the roots binds every call to the routine itself, so
+/// a call runs there, in that module's scope and storage, as a local one does.
+pub(super) struct StandIn {
+    signature: RoutineSignature,
+    arguments: Vec<SmolStr>,
+    name: SmolStr,
+    root: SmolStr,
+    path: SmolStr,
+    span: Span,
+}
+
+/// Give each scope's table the routines of other top-level modules that its
+/// hierarchical names call: one stand-in per routine, however many scopes
+/// name it, numbered from `next`, after every routine of this plan.
+pub(super) fn bind_top_level_names(
+    digital: &AnalyzedDigital,
+    next: &mut u32,
+    constants: &ResolvedConstants,
+    root: &mut RoutineTable,
+    instances: &mut [RoutineTable],
+    diagnostics: &mut Vec<DigitalLoweringDiagnostic>,
+) -> Vec<StandIn> {
+    let mut stand_ins: Vec<StandIn> = Vec::new();
+    let mut named: HashMap<(SmolStr, SmolStr), usize> = HashMap::new();
+    let scopes = std::iter::once(&digital.top_level_references).chain(
+        digital
+            .instances
+            .iter()
+            .map(|instance| &instance.top_level_references),
+    );
+    for (scope, references) in scopes.enumerate() {
+        for (symbol, reference) in references {
+            let Some(routine) = &reference.routine else {
+                continue;
+            };
+            let key = (reference.root.clone(), reference.path.clone());
+            let index = match named.get(&key) {
+                Some(&index) => index,
+                None => {
+                    // Its ranges are already closed, so no scope's constants
+                    // change its shape.
+                    let analyzed = AnalyzedDigitalRoutine {
+                        routine: (**routine).clone(),
+                        suspends: false,
+                    };
+                    let table = signatures(
+                        std::slice::from_ref(&analyzed),
+                        next,
+                        constants,
+                        digital.time_scale,
+                        diagnostics,
+                    );
+                    let Some(signature) = table.into_values().next() else {
+                        continue;
+                    };
+                    stand_ins.push(StandIn {
+                        signature,
+                        arguments: routine
+                            .arguments
+                            .iter()
+                            .map(|argument| argument.name.clone())
+                            .collect(),
+                        name: format!("{}.{}", reference.root, reference.path).into(),
+                        root: reference.root.clone(),
+                        path: reference.path.clone(),
+                        span: reference.span,
+                    });
+                    named.insert(key, stand_ins.len() - 1);
+                    stand_ins.len() - 1
+                }
+            };
+            let table = match scope {
+                0 => &mut *root,
+                scope => &mut instances[scope - 1],
+            };
+            table.insert(symbol.clone(), stand_ins[index].signature.clone());
+        }
+    }
+    stand_ins
+}
+
+/// Append each stand-in to the plan's routines, whose ids it continues: it
+/// takes its arguments in frame slots and returns at once, since linking
+/// binds every call to it elsewhere. Returns what each stands for.
+pub(super) fn push_stand_ins(
+    stand_ins: Vec<StandIn>,
+    scope: super::super::digital::DigitalScopeId,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    routines: &mut Vec<DigitalRoutine>,
+    diagnostics: &mut Vec<DigitalLoweringDiagnostic>,
+) -> Vec<super::super::digital::DigitalExternalRoutine> {
+    let mut external = Vec::with_capacity(stand_ins.len());
+    for stand_in in stand_ins {
+        let StandIn {
+            signature,
+            arguments,
+            name,
+            root,
+            path,
+            span,
+        } = stand_in;
+        if routines.len() != signature.id.index() {
+            diagnostics.push(DigitalLoweringDiagnostic::invariant(
+                format!("the stand-in for `{name}` does not follow the plan's routines"),
+                span.into(),
+            ));
+            continue;
+        }
+        let mut builder = ProcessBuilder::new();
+        let entry = builder.create_block();
+        builder.seal_block(entry);
+        builder.set_terminator(entry, CfgTerminator::Return);
+        let function = match builder.finish(entry) {
+            Ok(function) => function,
+            Err(error) => {
+                diagnostics.push(DigitalLoweringDiagnostic::invariant(
+                    format!("the stand-in for `{name}` is an invalid graph: {error}"),
+                    span.into(),
+                ));
+                continue;
+            }
+        };
+        let mut frame_slots = Vec::new();
+        let mut slot = |shape: RoutineShape| {
+            frame_slots.push(shape.value_type());
+            DigitalRoutineStorage::Slot(frame_slots.len() as u32 - 1)
+        };
+        let params = arguments
+            .into_iter()
+            .zip(&signature.params)
+            .map(|(argument, &(direction, shape))| DigitalRoutineParam {
+                name: argument,
+                direction,
+                storage: slot(shape),
+                value_type: shape.value_type(),
+                signed: shape.signed,
+            })
+            .collect();
+        let result = signature.result.map(|shape| DigitalRoutineParam {
+            name: name.clone(),
+            direction: PortDirection::Output,
+            storage: slot(shape),
+            value_type: shape.value_type(),
+            signed: shape.signed,
+        });
+        routines.push(DigitalRoutine {
+            id: signature.id,
+            name,
+            kind: signature.kind,
+            automatic: true,
+            function,
+            params,
+            result,
+            frame_slots,
+            scope,
+            time_scale,
+            span: span.into(),
+        });
+        external.push(super::super::digital::DigitalExternalRoutine {
+            routine: signature.id,
+            root,
+            name: path,
+        });
+    }
+    external
+}
+
 /// The signal a static routine variable lives in.
 fn static_signal(
     signals: &mut Vec<DigitalSignal>,
@@ -757,12 +926,12 @@ impl ProcessLowerer<'_> {
             .cloned()
         else {
             // A dotted name the parser replaced with a reference symbol is
-            // bound only when it reaches a task below this scope; the symbol
-            // itself is never shown.
+            // bound only when it reaches a task below this scope or in
+            // another top-level module; the symbol itself is never shown.
             let message = if crate::ast::is_reference_symbol(&enable.name) {
                 "a hierarchical task name reaches only a task of an instance below this \
-                 scope (IEEE 1364-2005 section 12.5); an upward or cross-module task name is \
-                 not supported yet"
+                 scope or of another top-level module (IEEE 1364-2005 section 12.5); an \
+                 upward task name (section 12.6) is not supported yet"
                     .to_owned()
             } else {
                 format!("`{}` is not a task of this scope", enable.name)

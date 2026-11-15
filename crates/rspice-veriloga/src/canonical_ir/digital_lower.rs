@@ -351,6 +351,12 @@ pub(crate) fn lower_module(
     module: &crate::semantic::AnalyzedModule,
     top_levels: HashMap<SmolStr, crate::time_scale::ModuleTimeScale>,
 ) -> Result<CanonicalDigitalPlan, Vec<DigitalLoweringDiagnostic>> {
+    // Tasks and functions alone run only when called. A digital module of
+    // nothing else is a scope another top-level module may call into (IEEE
+    // 1364-2005 section 12.5); no call reaches an analog module's.
+    if module.digital.is_empty() && (!module.body.is_empty() || !module.contributions.is_empty()) {
+        return Ok(CanonicalDigitalPlan::default());
+    }
     lower_with_analog_variables(
         &module.digital,
         &analog_variables(module),
@@ -458,7 +464,7 @@ fn lower_with_analog_variables(
     root_name: &str,
     top_levels: HashMap<SmolStr, crate::time_scale::ModuleTimeScale>,
 ) -> Result<CanonicalDigitalPlan, Vec<DigitalLoweringDiagnostic>> {
-    if digital.is_empty() {
+    if digital.is_empty() && digital.routines.is_empty() {
         return Ok(CanonicalDigitalPlan::default());
     }
 
@@ -1007,6 +1013,14 @@ fn lower_with_analog_variables(
         })
         .collect();
     routines::bind_downward_names(digital, &mut root_routines, &mut instance_routines);
+    let stand_ins = routines::bind_top_level_names(
+        digital,
+        &mut routine_count,
+        &module_constants,
+        &mut root_routines,
+        &mut instance_routines,
+        &mut diagnostics,
+    );
     for routine in &digital.routines {
         match routines::lower_routine(
             routine,
@@ -1191,6 +1205,13 @@ fn lower_with_analog_variables(
         }
         frame_processes.push(frame_start..processes.len());
     }
+    let external_routines = routines::push_stand_ins(
+        stand_ins,
+        root_scope.id,
+        digital.time_scale,
+        &mut plan_routines,
+        &mut diagnostics,
+    );
     let start_order = start_order(digital, root_processes, &frame_processes, processes.len());
 
     disable::resolve_disables(
@@ -1200,7 +1221,12 @@ fn lower_with_analog_variables(
         std::mem::take(&mut calls.pending_disables),
         &mut diagnostics,
     );
-    overrides::subscribe_routine_reads(&mut calls.overrides, &plan_routines);
+    overrides::subscribe_routine_reads(
+        &mut calls.overrides,
+        &plan_routines,
+        &external_routines,
+        &mut diagnostics,
+    );
 
     let mut bit_aliases = Vec::new();
     for alias in digital.bit_aliases.iter().chain(
@@ -1489,6 +1515,7 @@ fn lower_with_analog_variables(
         timing,
         content_identity: [0; 32],
         external_signals,
+        external_routines,
         external_scopes: calls.external_scopes,
         start_order,
         elaboration_parameters: std::iter::once(("", &digital.elaboration_parameters))

@@ -4,7 +4,9 @@
 //! That module is a root of its own and is compiled on its own. The referring
 //! module declares a copy of the named signal as storage of its own, and
 //! linking the roots into one design joins the copy to the signal. A scope
-//! argument records the instance's path, and a parameter is read by value.
+//! argument records the instance's path, a parameter is read by value, and a
+//! task or function name borrows the routine's declaration, which linking
+//! replaces with that module's own routine.
 use super::*;
 
 impl Resolver {
@@ -82,6 +84,7 @@ impl Resolver {
                 root: root.clone(),
                 path: below(&frame.path),
                 scope: Some((frame.source.name.clone(), frame.source.time_scale)),
+                routine: None,
                 span,
             };
             self.frames[owner]
@@ -90,20 +93,31 @@ impl Resolver {
                 .insert(symbol.clone(), named);
             return Ok(());
         }
-        if self.frames[target]
+        if let Some(routine) = self.frames[target]
             .source
             .digital_routines
             .iter()
-            .any(|routine| routine.name == name)
+            .find(|routine| routine.name == name)
         {
-            return Err(error(
-                format!(
-                    "`{}.{name}` calls a task or function of another top-level module, which is \
-                     not supported yet",
-                    self.frames[target].path
-                ),
-                span,
-            ));
+            // A call runs that module's own routine, in its scope (sections
+            // 10.2.2 and 10.4.3); linking binds the call to it.
+            let routine = self.borrowed_routine(target, routine, span)?;
+            let within = below(&self.frames[target].path);
+            self.frames[owner].source.foreign_top_levels.insert(
+                symbol.clone(),
+                DigitalTopLevelReference {
+                    root,
+                    path: if within.is_empty() {
+                        name
+                    } else {
+                        format!("{within}.{name}").into()
+                    },
+                    scope: None,
+                    routine: Some(Box::new(routine)),
+                    span,
+                },
+            );
+            return Ok(());
         }
         if !self.declares_digital(target, &name) {
             self.import_symbol(owner, target, &name, Some(symbol.clone()), span)?;
@@ -124,9 +138,69 @@ impl Resolver {
                     format!("{within}.{name}").into()
                 },
                 scope: None,
+                routine: None,
                 span,
             },
         );
         Ok(())
+    }
+    /// `routine` of `target` as a call from another top-level module sees
+    /// it: its arguments and result, every range closed in `target`'s scope,
+    /// and no body.
+    fn borrowed_routine(
+        &self,
+        target: usize,
+        routine: &DigitalRoutine,
+        span: Span,
+    ) -> CompileResult<DigitalRoutine> {
+        let source = &self.frames[target].source;
+        let constants = DigitalConstants::from_module(source);
+        let time_scale = source.time_scale;
+        let close = |ty: &DigitalRoutineType| -> CompileResult<DigitalRoutineType> {
+            let bound = |expression: &Expression| -> CompileResult<Expression> {
+                let value =
+                    super::super::node_vectors::integer(expression, &constants, time_scale)?;
+                Ok(super::physical::literal(value, span))
+            };
+            let range = match &ty.range {
+                Some(range) => Some(VectorRange {
+                    msb: bound(&range.msb)?,
+                    lsb: bound(&range.lsb)?,
+                    span,
+                }),
+                None => None,
+            };
+            Ok(DigitalRoutineType {
+                kind: ty.kind,
+                signedness: ty.signedness,
+                range,
+            })
+        };
+        Ok(DigitalRoutine {
+            kind: match &routine.kind {
+                crate::ast::DigitalRoutineKind::Task => crate::ast::DigitalRoutineKind::Task,
+                crate::ast::DigitalRoutineKind::Function(ty) => {
+                    crate::ast::DigitalRoutineKind::Function(Box::new(close(ty)?))
+                }
+            },
+            automatic: routine.automatic,
+            name: routine.name.clone(),
+            arguments: routine
+                .arguments
+                .iter()
+                .map(|argument| {
+                    Ok(DigitalRoutineArgument {
+                        direction: argument.direction,
+                        ty: close(&argument.ty)?,
+                        name: argument.name.clone(),
+                        span: argument.span,
+                    })
+                })
+                .collect::<CompileResult<_>>()?,
+            variables: Vec::new(),
+            digital_variables: Vec::new(),
+            body: DigitalStatement::Null(span),
+            span: routine.span,
+        })
     }
 }

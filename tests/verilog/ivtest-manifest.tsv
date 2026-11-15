@@ -605,7 +605,7 @@ meminit	vlg	passed	L1	pass	PASSED
 meminit2	vlg	passed	L1	pass	PASSED
 memport_bs	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
 memref	vlg	passed	L3	pass	PASSED
-mhead_task	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `other_main.passed` calls a task or function of another top-level module, which is not supported ye...
+mhead_task	vlg	passed	L4	pass	PASSED
 mixed_type_div_mod	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
 mixed_width_case	vlg	passed	L3	refused:$realtobits	Semantic error: Unsupported feature: a real value has no four-state form here: Verilog-AMS LRM 2.4 section 3.7 converts one to bits with the explicit `$realtobi...
 modparam	vlg	passed	L1	pass	testbench gap: no root selection (-s top); PASSED
@@ -1027,7 +1027,7 @@ pr2051975	vlg	ce	L1	refused:mixed-named-and-ordered	Parse error: Unsupported mix
 pr2053944	vlg	gold	L3	pass	matches the gold file
 pr2076363	vlg	passed	L4	pass	PASSED
 pr2076391	vlg	gold	L1	pass	matches the gold file
-pr2076425	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `z.delay` calls a task or function of another top-level module, which is not supported yet
+pr2076425	vlg	passed	L4	pass	PASSED
 pr2085984	vlg	passed	L1	pass	PASSED
 pr2091455	vlg	gold	L1	pass	matches the gold file
 pr2109179	vlg	passed	L1	pass	PASSED
@@ -1083,7 +1083,7 @@ pr224	vlg	passed	L3	pass	PASSED
 pr2248925	vlg	gold	L3	pass	matches the gold file
 pr224a	vlg	passed	L1	fail	nothing to run: module `ivltests/pr224a.v` declares no digital nets, processes or drivers
 pr2251119	vlg	gold	L1	pass	matches the gold file
-pr2257003	vlg	passed	L4	refused:feature	Semantic error: Unsupported feature: a hierarchical task name reaches only a task of an instance below this scope (IEEE 1364-2005 section 12.5); an upward or cr...
+pr2257003	vlg	passed	L4	refused:feature	Semantic error: Unsupported feature: a hierarchical task name reaches only a task of an instance below this scope or of another top-level module (IEEE 1364-2005...
 pr2257003b	vlg	passed	L4	pass	PASSED
 pr2270035	vlg	passed	L1	pass	PASSED
 pr2276163	vlg	passed	L3	pass	PASSED
@@ -1601,7 +1601,7 @@ task3.14C	vlg	passed	L3	pass	PASSED
 task3.14D	vlg	passed	L3	pass	PASSED
 task3.14E	vlg	passed	L3	pass	PASSED
 task3.14F	vlg	passed	L3	pass	PASSED
-task_bypath	vlg	passed	L4	refused:feature	Semantic error: Unsupported feature: a hierarchical task name reaches only a task of an instance below this scope (IEEE 1364-2005 section 12.5); an upward or cr...
+task_bypath	vlg	passed	L4	refused:feature	Semantic error: Unsupported feature: a hierarchical task name reaches only a task of an instance below this scope or of another top-level module (IEEE 1364-2005...
 task_in_expr_fail	vlg	ce	-	excluded:systemverilog:int	
 task_inpad	vlg	passed	L3	pass	PASSED
 task_iotypes	vlg	passed	L3	pass	PASSED

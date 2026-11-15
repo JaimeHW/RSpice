@@ -535,9 +535,14 @@ fn statement_suspends(
     let nested = |statement: &DigitalStatement| statement_suspends(statement, routines);
     match statement {
         DigitalStatement::Timing(_) | DigitalStatement::Wait(_) => true,
-        DigitalStatement::TaskEnable(enable) => routines
-            .get(&enable.name)
-            .is_some_and(|signature| signature.suspends),
+        // A hierarchical task name reaches a task of another scope, whose
+        // body only the elaborated design shows; it may suspend.
+        DigitalStatement::TaskEnable(enable) => {
+            is_reference_symbol(&enable.name)
+                || routines
+                    .get(&enable.name)
+                    .is_some_and(|signature| signature.suspends)
+        }
         DigitalStatement::Block(block) | DigitalStatement::Fork(block) => {
             block.statements.iter().any(nested)
         }

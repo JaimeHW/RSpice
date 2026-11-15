@@ -161,6 +161,11 @@ pub struct DigitalTopLevelReference {
     pub path: SmolStr,
     /// For a scope argument, the named instance's module and time scale.
     pub scope: Option<(SmolStr, crate::time_scale::ModuleTimeScale)>,
+    /// For a task or function name (sections 10.2.2 and 10.4.3), its
+    /// declaration with every range closed in that module's scope and no
+    /// body: what a call here is checked against. `path` is the routine's
+    /// scope there, and the call runs that module's own routine.
+    pub routine: Option<Box<crate::ast::DigitalRoutine>>,
     pub span: Span,
 }
 

@@ -1389,6 +1389,13 @@ pub struct CanonicalDigitalPlan {
     /// not a whole design.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub external_signals: Vec<DigitalExternalSignal>,
+    /// Routines this plan calls in another top-level module (sections 10.2.2
+    /// and 10.4.3), each a stand-in in `routines` that takes the call's
+    /// arguments and does nothing. Linking the roots binds every call to the
+    /// routine it stands for; a plan that keeps one unbound is not a whole
+    /// design.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_routines: Vec<DigitalExternalRoutine>,
     /// The order a discrete testbench starts its processes at time zero:
     /// every process once, an instance's children before its own processes,
     /// as Icarus Verilog elaborates them. Empty when it is the id order.
@@ -1534,6 +1541,16 @@ pub struct DigitalExternalSignal {
     /// The top-level module that holds the signal.
     pub root: SmolStr,
     /// The signal's name in that module's plan (`flag`, `u.flag`).
+    pub name: SmolStr,
+}
+
+/// A routine of this plan that stands for one of another top-level module.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalExternalRoutine {
+    pub routine: DigitalRoutineId,
+    /// The top-level module that holds the routine.
+    pub root: SmolStr,
+    /// The routine's scope below that module (`t`, `u.t`).
     pub name: SmolStr,
 }
 

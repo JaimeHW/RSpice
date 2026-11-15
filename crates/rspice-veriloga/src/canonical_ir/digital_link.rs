@@ -125,7 +125,6 @@ struct TableOffsets {
     sites: u32,
     scopes: u32,
     observers: u32,
-    routines: u32,
     overrides: u32,
 }
 
@@ -210,6 +209,11 @@ pub fn link_digital_plans(
             .chain(instance.plan.real_aliases.iter().map(|item| item.span))
             .chain(instance.plan.analog_probes.iter().map(|item| item.span))
             .chain(instance.plan.system_calls.iter().map(|item| item.span))
+            .chain(instance.plan.routines.iter().map(|item| item.span))
+            .chain(instance.plan.overrides.iter().flat_map(|item| {
+                std::iter::once(item.span)
+                    .chain(item.value.as_ref().map(|value| value.evaluator.span))
+            }))
         {
             files.insert(span.source_file_id);
         }
@@ -263,10 +267,6 @@ pub fn link_digital_plans(
             .observers
             .checked_add(index(instance.plan.observers.len(), "observer")?)
             .ok_or_else(|| error("linked observer count exceeds u32"))?;
-        tables.routines = tables
-            .routines
-            .checked_add(index(instance.plan.routines.len(), "routine")?)
-            .ok_or_else(|| error("linked routine count exceeds u32"))?;
         tables.overrides = tables
             .overrides
             .checked_add(index(instance.plan.overrides.len(), "override")?)
@@ -459,8 +459,9 @@ pub fn link_digital_plans(
             )));
         }
     }
+    let routine_maps = routine_maps(&layouts, &instance_names)?;
     let mut driver_counts = vec![0u32; plan.signals.len()];
-    for layout in &mut layouts {
+    for (layout, routines) in layouts.iter_mut().zip(&routine_maps) {
         check_cancel(control)?;
         let source = layout.instance.plan;
         layout.map.signals =
@@ -629,15 +630,22 @@ pub fn link_digital_plans(
                 source,
                 &layout.map,
                 &drivers,
-                layout.tables,
+                (layout.tables, routines),
                 control,
             )?;
             plan.processes.push(process);
         }
         for routine in &source.routines {
             check_cancel(control)?;
+            if source
+                .external_routines
+                .iter()
+                .any(|external| external.routine == routine.id)
+            {
+                continue;
+            }
             let mut routine = routine.clone();
-            routine.id = DigitalRoutineId(routine.id.0 + layout.tables.routines);
+            routine.id = routines[routine.id.index()];
             routine.scope = DigitalScopeId(routine.scope.0 + layout.tables.scopes);
             relocate_span(&mut routine.span, &layout.map);
             for param in routine.params.iter_mut().chain(routine.result.as_mut()) {
@@ -650,7 +658,7 @@ pub fn link_digital_plans(
                 source,
                 &layout.map,
                 &drivers,
-                layout.tables,
+                (layout.tables, routines),
                 control,
             )?;
             plan.routines.push(routine);
@@ -712,7 +720,7 @@ pub fn link_digital_plans(
                     source,
                     &layout.map,
                     &drivers,
-                    layout.tables,
+                    (layout.tables, routines),
                 )?;
             }
             for signal in &mut observer.dependencies {
@@ -742,7 +750,7 @@ pub fn link_digital_plans(
                     source,
                     &layout.map,
                     &drivers,
-                    layout.tables,
+                    (layout.tables, routines),
                     control,
                 )?;
                 for signal in &mut value.dependencies {
@@ -840,7 +848,7 @@ fn relocate_function(
     source: &CanonicalDigitalPlan,
     map: &DigitalLinkedInstance,
     drivers: &BTreeMap<DigitalDriverId, DigitalDriverId>,
-    tables: TableOffsets,
+    (tables, routines): (TableOffsets, &[DigitalRoutineId]),
     control: &dyn PipelineControl,
 ) -> LinkResult<()> {
     for block in &mut function.blocks {
@@ -850,9 +858,7 @@ fn relocate_function(
                 DigitalWait::Call { routine, .. }
                 | DigitalWait::Disable {
                     target: DigitalDisableTarget::Task(routine),
-                } => {
-                    *routine = DigitalRoutineId(routine.0 + tables.routines);
-                }
+                } => relocate_routine(routine, routines)?,
                 DigitalWait::Disable {
                     target: DigitalDisableTarget::Block(scope),
                 } => *scope = DigitalScopeId(scope.0 + tables.scopes),
@@ -864,8 +870,121 @@ fn relocate_function(
         if offset & 1023 == 0 {
             check_cancel(control)?;
         }
-        relocate_value(&mut value.kind, source, map, drivers, tables)?;
+        relocate_value(&mut value.kind, source, map, drivers, (tables, routines))?;
     }
+    Ok(())
+}
+
+/// Where each routine of each instance lands in the linked plan, by the
+/// instance's routine id. A routine standing for one of another top-level
+/// module (IEEE 1364-2005 section 12.5) takes no place of its own: it lands
+/// on the routine it names there, so a call to it calls that routine.
+fn routine_maps(
+    layouts: &[Layout<'_>],
+    instance_names: &BTreeMap<&str, usize>,
+) -> LinkResult<Vec<Vec<DigitalRoutineId>>> {
+    let mut next = 0u32;
+    let mut maps = Vec::with_capacity(layouts.len());
+    for layout in layouts {
+        let plan = layout.instance.plan;
+        let mut map = Vec::with_capacity(plan.routines.len());
+        for routine in &plan.routines {
+            if plan
+                .external_routines
+                .iter()
+                .any(|external| external.routine == routine.id)
+            {
+                map.push(DigitalRoutineId(u32::MAX));
+            } else {
+                map.push(DigitalRoutineId(next));
+                next = next
+                    .checked_add(1)
+                    .ok_or_else(|| error("linked routine count exceeds u32"))?;
+            }
+        }
+        maps.push(map);
+    }
+    for (owner, layout) in layouts.iter().enumerate() {
+        for external in &layout.instance.plan.external_routines {
+            let named = format!("'{}.{}'", external.root, external.name);
+            let target = instance_names
+                .get(external.root.as_str())
+                .copied()
+                .ok_or_else(|| {
+                    error(format!(
+                        "digital instance '{}' calls {named}, whose top-level module is not \
+                         part of this design",
+                        layout.instance.name
+                    ))
+                })?;
+            let plan = layouts[target].instance.plan;
+            let path = plan
+                .scopes
+                .first()
+                .map(|root| format!("{}.{}", root.path, external.name));
+            let held = plan
+                .routines
+                .iter()
+                .find(|routine| {
+                    plan.scopes
+                        .get(routine.scope.index())
+                        .is_some_and(|scope| Some(scope.path.as_str()) == path.as_deref())
+                        && !plan
+                            .external_routines
+                            .iter()
+                            .any(|other| other.routine == routine.id)
+                })
+                .ok_or_else(|| {
+                    error(format!(
+                        "digital instance '{}' calls {named}, which that module does not declare",
+                        layout.instance.name
+                    ))
+                })?;
+            let stand_in = layout
+                .instance
+                .plan
+                .routine(external.routine)
+                .ok_or_else(|| error(format!("the stand-in for {named} is not a routine")))?;
+            let same = |left: &DigitalRoutineParam, right: &DigitalRoutineParam| {
+                left.direction == right.direction
+                    && left.value_type == right.value_type
+                    && left.signed == right.signed
+            };
+            if stand_in.kind != held.kind
+                || stand_in.params.len() != held.params.len()
+                || !stand_in
+                    .params
+                    .iter()
+                    .zip(&held.params)
+                    .all(|(left, right)| same(left, right))
+                || stand_in.result.is_some() != held.result.is_some()
+                || !stand_in
+                    .result
+                    .iter()
+                    .zip(&held.result)
+                    .all(|(left, right)| same(left, right))
+            {
+                return Err(error(format!(
+                    "digital instance '{}' calls {named} with another signature than that \
+                     module declares",
+                    layout.instance.name
+                )));
+            }
+            maps[owner][external.routine.index()] = maps[target][held.id.index()];
+        }
+    }
+    Ok(maps)
+}
+
+fn relocate_routine(
+    routine: &mut DigitalRoutineId,
+    routines: &[DigitalRoutineId],
+) -> LinkResult<()> {
+    *routine = routines.get(routine.index()).copied().ok_or_else(|| {
+        error(format!(
+            "a call names routine {routine}, which is not declared"
+        ))
+    })?;
     Ok(())
 }
 
@@ -938,12 +1057,12 @@ fn relocate_value(
     source: &CanonicalDigitalPlan,
     map: &DigitalLinkedInstance,
     drivers: &BTreeMap<DigitalDriverId, DigitalDriverId>,
-    tables: TableOffsets,
+    (tables, routines): (TableOffsets, &[DigitalRoutineId]),
 ) -> LinkResult<()> {
     match kind {
         CfgValueKind::DigitalExpression { function, .. } => {
             for value in &mut function.values {
-                relocate_value(&mut value.kind, source, map, drivers, tables)?;
+                relocate_value(&mut value.kind, source, map, drivers, (tables, routines))?;
             }
         }
         CfgValueKind::DigitalSystemTask { site, .. }
@@ -956,9 +1075,7 @@ fn relocate_value(
         | CfgValueKind::DigitalRoutineCompleted
         | CfgValueKind::FrameSlotRead { .. }
         | CfgValueKind::FrameSlotWrite { .. } => {}
-        CfgValueKind::DigitalCall { routine, .. } => {
-            *routine = DigitalRoutineId(routine.0 + tables.routines);
-        }
+        CfgValueKind::DigitalCall { routine, .. } => relocate_routine(routine, routines)?,
         CfgValueKind::DigitalUnwinding { scope } => {
             *scope = DigitalScopeId(scope.0 + tables.scopes);
         }

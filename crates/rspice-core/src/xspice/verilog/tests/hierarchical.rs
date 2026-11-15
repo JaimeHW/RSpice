@@ -237,6 +237,178 @@ endmodule
     );
 }
 
+/// Calls into another top-level module run its own tasks and functions, in
+/// its scope and storage (IEEE 1364-2005 sections 10.2.2, 10.4.3 and 12.5):
+/// a static task's arguments and side effects, a function reading that
+/// module's variable, automatic routines with concurrent activations, the
+/// tasks of an instance and a generate block in it, and a call from an
+/// instance of this root.
+#[test]
+fn calls_into_another_top_level_module_run_its_routines_in_its_scope() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module lib;
+  integer calls;
+  reg [7:0] last;
+  initial calls = 0;
+  task bump(input [7:0] by, output [7:0] total);
+    begin
+      calls = calls + 1;
+      last = by;
+      #2 total = by + calls;
+      $display("%0t %m by=%0d calls=%0d", $time, by, calls);
+    end
+  endtask
+  function [7:0] twice(input [7:0] v);
+    twice = 2 * v + calls;
+  endfunction
+  function automatic integer fact(input integer n);
+    fact = n <= 1 ? 1 : n * fact(n - 1);
+  endfunction
+  task automatic hold(input integer n, output integer seen);
+    begin
+      #n seen = n;
+      $display("%0t %m n=%0d", $time, n);
+    end
+  endtask
+  sub u();
+  generate if (1) begin : gb
+    task gt(output [3:0] o);
+      o = 4'd9;
+    endtask
+  end endgenerate
+endmodule
+module sub;
+  reg [3:0] state;
+  initial state = 4'd1;
+  task step;
+    state = state + 1;
+  endtask
+endmodule
+module user;
+  reg [7:0] t;
+  integer s1, s2;
+  initial begin
+    lib.bump(8'd5, t);
+    $display("%0t t=%0d calls=%0d last=%0d twice=%0d fact=%0d", $time, t, lib.calls,
+             lib.last, lib.twice(8'd3), lib.fact(5));
+    fork
+      lib.hold(3, s1);
+      lib.hold(1, s2);
+    join
+    $display("%0t s1=%0d s2=%0d", $time, s1, s2);
+    lib.u.step;
+    lib.u.step;
+    lib.gb.gt(t);
+    $display("%0t state=%0d gt=%0d", $time, lib.u.state, t);
+  end
+  probe p();
+endmodule
+module probe;
+  initial #1 $display("%0t probe twice=%0d", $time, lib.twice(8'd10));
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "1 probe twice=21\n\
+         2 lib.bump by=5 calls=1\n\
+         2 t=6 calls=1 last=5 twice=7 fact=120\n\
+         3 lib.hold n=1\n\
+         5 lib.hold n=3\n\
+         5 s1=3 s2=1\n\
+         5 state=3 gt=9\n"
+    );
+}
+
+/// A top-level module that declares only routines is still a scope the
+/// others call into, here from a task an `always` enables, which suspends
+/// through the call.
+#[test]
+fn a_top_level_module_of_routines_alone_is_called_into() {
+    let report = bench(
+        r#"`timescale 1ns/100ps
+module top;
+  integer n;
+  task step; begin z.wait1(n); n = n + 1; end endtask
+  initial n = 0;
+  always step;
+  initial #4.5 begin $display("%0t n=%0d %0d", $time, n, z.f(n)); $finish; end
+endmodule
+module z;
+  task automatic wait1(input integer k); #1 $display("%t %m k=%0d", $realtime, k); endtask
+  function integer f(input integer v); f = v * 10; endfunction
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "                  10 z.wait1 k=0\n\
+         \x20                 20 z.wait1 k=1\n\
+         \x20                 30 z.wait1 k=2\n\
+         \x20                 40 z.wait1 k=3\n\
+         50 n=4 40\n"
+    );
+}
+
+/// `disable` of a hierarchical name is refused in source terms, never by the
+/// symbol the parser stood in for it.
+#[test]
+fn a_hierarchical_disable_is_refused_in_source_terms() {
+    let error = super::run_digital_testbench(
+        &[(
+            "tb.v".into(),
+            "module top;
+  initial begin
+    fork
+      lib.t;
+      #3 disable lib.t;
+    join
+  end
+endmodule
+module lib;
+  task t; #5; endtask
+endmodule
+"
+            .into(),
+        )],
+        &super::HdlTestbenchOptions::default(),
+    )
+    .expect_err("a hierarchical disable is not supported yet");
+    let text = error.to_string();
+    assert!(
+        text.contains("`disable` of a hierarchical name (IEEE 1364-2005 section 10.3)"),
+        "{text}"
+    );
+    assert!(!text.contains("rspice_reference"), "{text}");
+}
+
+/// Alone, a module that calls into another top-level module has nothing to
+/// link the call to, so it is refused rather than run with a routine that
+/// does nothing.
+#[test]
+fn a_module_compiled_alone_refuses_a_call_into_another_top_level_module() {
+    let Err(error) = super::CompiledDigitalDesign::compile(
+        "module lib;
+  task t; $display(\"t\"); endtask
+endmodule
+module user;
+  initial lib.t;
+endmodule
+",
+        Some("user"),
+    ) else {
+        panic!("the call has no routine to run");
+    };
+    let error = error.to_string();
+    assert!(
+        error.contains("`lib.t`") && error.contains("only a discrete testbench links"),
+        "{error}"
+    );
+}
+
 /// An instance that declares nothing is still a scope, and another top-level
 /// module is named by its name alone.
 #[test]

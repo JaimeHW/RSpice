@@ -2103,6 +2103,11 @@ impl MixedSignalHost {
                 ),
             });
         }
+        if let Some(detail) =
+            super::foreign_root_refusal(&canonical_ir.mir.module_name, &canonical_ir.digital)
+        {
+            return Err(MixedSignalError::Compile { detail });
+        }
 
         // The same backend selection the device builder makes. A mixed module
         // is one more Verilog-A instance as far as the continuous half is

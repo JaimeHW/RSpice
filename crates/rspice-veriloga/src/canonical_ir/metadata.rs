@@ -270,7 +270,10 @@ use smol_str::SmolStr;
 /// `external_scopes`), which linking the roots joins, and the order a
 /// discrete testbench starts its processes (`start_order`). An earlier
 /// artifact refused such a name and starts a parent before its children.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 191;
+/// Version 192 records the routines a digital plan calls in another top-level
+/// module (`CanonicalDigitalPlan::external_routines`), which linking the roots
+/// binds. An earlier artifact refused such a call.
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 192;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

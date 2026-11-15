@@ -285,6 +285,9 @@ impl CompiledDigitalDesign {
                 equations: artifact.mir.equations.len(),
             });
         }
+        if let Some(detail) = foreign_root_refusal(&artifact.mir.module_name, &artifact.digital) {
+            return Err(DigitalRunError::Compile { detail });
+        }
 
         use rspice_veriloga::canonical_ir::digital_link::{DigitalLinkDirection, DigitalLinkPort};
         let mut ports = Vec::new();
@@ -996,7 +999,10 @@ pub fn run_digital_testbench(
     }
     // A name into another top-level module is joined to it by linking, which
     // refuses one whose module is not a root here.
-    let plan = if roots.len() == 1 && roots[0].1.external_signals.is_empty() {
+    let plan = if roots.len() == 1
+        && roots[0].1.external_signals.is_empty()
+        && roots[0].1.external_routines.is_empty()
+    {
         roots.into_iter().next().expect("one root").1
     } else {
         use rspice_veriloga::canonical_ir::digital_link::{
@@ -1118,4 +1124,30 @@ fn parse_four_state(spelling: &str) -> Option<FourStateValue> {
         });
     }
     Some(FourStateValue::from_bits_msb_first(&bits))
+}
+
+/// Why `plan`, compiled from `module` alone, cannot run: it names a signal or
+/// calls a routine of another top-level module (IEEE 1364-2005 section 12.5).
+/// Only a discrete testbench elaborates every root and links them; alone, the
+/// plan would read storage of its own and call a routine that does nothing.
+pub(crate) fn foreign_root_refusal(
+    module: &str,
+    plan: &rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan,
+) -> Option<String> {
+    let (root, name) = plan
+        .external_signals
+        .iter()
+        .map(|signal| (&signal.root, &signal.name))
+        .chain(
+            plan.external_routines
+                .iter()
+                .map(|routine| (&routine.root, &routine.name)),
+        )
+        .next()?;
+    Some(format!(
+        "module `{module}` names `{root}.{name}` in top-level module `{root}`, and only a \
+         discrete testbench links a name into another top-level module (IEEE 1364-2005 \
+         section 12.5); instantiate `{root}` inside `{module}` or run the source as a \
+         testbench"
+    ))
 }

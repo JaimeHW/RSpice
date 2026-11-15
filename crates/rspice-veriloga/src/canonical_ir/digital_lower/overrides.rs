@@ -257,11 +257,17 @@ impl ProcessLowerer<'_> {
 /// follows it. A signal a called function writes is its own working storage
 /// (a static argument, result or local), not an operand: subscribing to it
 /// would only wake the right-hand side on its own evaluation.
+///
+/// A function of another top-level module is refused: this plan holds only
+/// a stand-in for it, whose reads say nothing of the function's.
 pub(super) fn subscribe_routine_reads(
     overrides: &mut [DigitalOverride],
     routines: &[super::super::digital::DigitalRoutine],
+    external: &[super::super::digital::DigitalExternalRoutine],
+    diagnostics: &mut Vec<DigitalLoweringDiagnostic>,
 ) {
     for site in overrides {
+        let span = site.span;
         let Some(value) = site.value.as_mut() else {
             continue;
         };
@@ -273,6 +279,18 @@ pub(super) fn subscribe_routine_reads(
         while let Some(id) = pending.pop() {
             if !visited.insert(id) {
                 continue;
+            }
+            if let Some(external) = external.iter().find(|external| external.routine == id) {
+                diagnostics.push(DigitalLoweringDiagnostic::refusal(
+                    format!(
+                        "the right-hand side calls function `{}.{}` of another top-level \
+                         module, and a procedural continuous assignment does not yet follow \
+                         the signals such a function reads (IEEE 1364-2005 section 9.3)",
+                        external.root, external.name
+                    ),
+                    span,
+                ));
+                break;
             }
             let Some(routine) = routines.get(id.index()).filter(|routine| routine.id == id) else {
                 continue;
