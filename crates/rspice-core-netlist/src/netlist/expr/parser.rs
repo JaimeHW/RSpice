@@ -9,6 +9,11 @@
 
 use super::*;
 
+/// A parsed subtree and its depth, the root being level 1. Each parse step
+/// builds a node's depth from its children's, so the stack-safety bound is
+/// checked in constant time however wide the tree grows.
+type Parsed = (Expr, usize);
+
 //=============================================================================
 // Expression Parser
 //=============================================================================
@@ -71,7 +76,7 @@ impl<'a> ExprParser<'a> {
     ) -> Result<(Expr, usize), ExprError> {
         self.control_vectors = true;
         self.skip_ws();
-        let expression = self.parse_ternary()?;
+        let (expression, _) = self.parse_ternary()?;
         self.skip_ws();
         if self.aborted {
             return Err(ExprError::UnexpectedChar('\0'));
@@ -84,8 +89,8 @@ impl<'a> ExprParser<'a> {
 
     fn nested(
         &mut self,
-        parse: fn(&mut Self) -> Result<Expr, ExprError>,
-    ) -> Result<Expr, ExprError> {
+        parse: fn(&mut Self) -> Result<Parsed, ExprError>,
+    ) -> Result<Parsed, ExprError> {
         if self.parse_depth >= crate::resource::MAX_EXPRESSION_PARSE_DEPTH {
             return Err(ExprError::InvalidArgument(format!(
                 "Expression nesting exceeds the stack safety limit of {}",
@@ -93,14 +98,14 @@ impl<'a> ExprParser<'a> {
             )));
         }
         self.parse_depth += 1;
-        let result = parse(self).and_then(Self::checked_expr);
+        let result = parse(self).and_then(Self::checked);
         self.parse_depth -= 1;
         result
     }
 
-    fn checked_expr(expression: Expr) -> Result<Expr, ExprError> {
-        expression.ensure_stack_safe_depth()?;
-        Ok(expression)
+    fn checked(parsed: Parsed) -> Result<Parsed, ExprError> {
+        ensure_stack_safe_level(parsed.1)?;
+        Ok(parsed)
     }
 
     fn poll_abort(&mut self) -> bool {
@@ -166,7 +171,7 @@ impl<'a> ExprParser<'a> {
             return Err(ExprError::UnexpectedChar('\0'));
         }
         self.skip_ws();
-        let expr = self.parse_ternary()?;
+        let (expr, _) = self.parse_ternary()?;
         self.skip_ws();
         if self.aborted {
             Err(ExprError::UnexpectedChar('\0'))
@@ -178,30 +183,33 @@ impl<'a> ExprParser<'a> {
     }
 
     /// Parse ternary expressions (cond ? then : else) - lowest precedence
-    fn parse_ternary(&mut self) -> Result<Expr, ExprError> {
+    fn parse_ternary(&mut self) -> Result<Parsed, ExprError> {
         self.nested(Self::parse_ternary_inner)
     }
 
-    fn parse_ternary_inner(&mut self) -> Result<Expr, ExprError> {
-        let cond = self.parse_or()?;
+    fn parse_ternary_inner(&mut self) -> Result<Parsed, ExprError> {
+        let (cond, cond_depth) = self.parse_or()?;
 
         self.skip_ws();
         if self.consume('?') {
             self.skip_ws();
-            let then_expr = self.parse_ternary()?;
+            let (then_expr, then_depth) = self.parse_ternary()?;
             self.skip_ws();
             if !self.consume(':') {
                 return Err(ExprError::UnexpectedChar(self.peek().unwrap_or('\0')));
             }
             self.skip_ws();
-            let else_expr = self.parse_ternary()?;
+            let (else_expr, else_depth) = self.parse_ternary()?;
             // Convert to IF function call
-            Ok(Expr::FnCall {
-                name: "IF".to_string(),
-                args: vec![cond, then_expr, else_expr],
-            })
+            Ok((
+                Expr::FnCall {
+                    name: "IF".to_string(),
+                    args: vec![cond, then_expr, else_expr],
+                },
+                1 + cond_depth.max(then_depth).max(else_depth),
+            ))
         } else {
-            Ok(cond)
+            Ok((cond, cond_depth))
         }
     }
 
@@ -210,7 +218,7 @@ impl<'a> ExprParser<'a> {
     /// `<=`, `<>`, `=`, `==`, `!=`), additive (`+`, `-`), modulo (`%`, looser
     /// than `*` and `/` as in Xyce) and multiplicative (`*`, `/`). Every level
     /// is left-associative.
-    fn parse_or(&mut self) -> Result<Expr, ExprError> {
+    fn parse_or(&mut self) -> Result<Parsed, ExprError> {
         self.parse_binary(BinaryLevel::Or)
     }
 
@@ -223,8 +231,8 @@ impl<'a> ExprParser<'a> {
     /// grammar: a parenthesis re-enters the whole grammar, and six recursive
     /// frames per nesting level spent most of a 1 MiB thread's stack in an
     /// unoptimized build before the nesting limit could refuse the input.
-    fn parse_binary(&mut self, lowest: BinaryLevel) -> Result<Expr, ExprError> {
-        let mut left = self.parse_unary()?;
+    fn parse_binary(&mut self, lowest: BinaryLevel) -> Result<Parsed, ExprError> {
+        let (mut left, mut left_depth) = self.parse_unary()?;
         loop {
             self.skip_ws();
             let start = self.pos;
@@ -237,14 +245,17 @@ impl<'a> ExprParser<'a> {
                 break;
             }
             self.skip_ws();
-            let right = self.parse_binary(level.tighter())?;
-            left = Self::checked_expr(Expr::BinOp {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            })?;
+            let (right, right_depth) = self.parse_binary(level.tighter())?;
+            (left, left_depth) = Self::checked((
+                Expr::BinOp {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                1 + left_depth.max(right_depth),
+            ))?;
         }
-        Ok(left)
+        Ok((left, left_depth))
     }
 
     /// Consume one binary operator and name it with its level, or `None`
@@ -332,9 +343,9 @@ impl<'a> ExprParser<'a> {
     /// numparam: `2^3^2` = `(2^3)^2`. A sign in exponent position applies
     /// to the immediate operand only and the chain keeps folding left, so
     /// `2^-3^2` = `(2^-3)^2`.
-    fn parse_power(&mut self) -> Result<Expr, ExprError> {
+    fn parse_power(&mut self) -> Result<Parsed, ExprError> {
         let primary = self.parse_primary()?;
-        let mut base = self.parse_index(primary)?;
+        let (mut base, mut base_depth) = self.parse_index(primary)?;
 
         loop {
             self.skip_ws();
@@ -357,31 +368,36 @@ impl<'a> ExprParser<'a> {
             }
 
             self.skip_ws();
-            let exp = self.parse_power_exponent()?;
-            base = Expr::BinOp {
-                op: BinOpKind::Pow,
-                left: Box::new(base),
-                right: Box::new(exp),
-            };
-            base = Self::checked_expr(base)?;
+            let (exp, exp_depth) = self.parse_power_exponent()?;
+            (base, base_depth) = Self::checked((
+                Expr::BinOp {
+                    op: BinOpKind::Pow,
+                    left: Box::new(base),
+                    right: Box::new(exp),
+                },
+                1 + base_depth.max(exp_depth),
+            ))?;
         }
 
-        Ok(base)
+        Ok((base, base_depth))
     }
 
     /// Exponent operand: optional signs ahead of a primary, nothing more.
-    fn parse_power_exponent(&mut self) -> Result<Expr, ExprError> {
+    fn parse_power_exponent(&mut self) -> Result<Parsed, ExprError> {
         self.nested(Self::parse_power_exponent_inner)
     }
 
-    fn parse_power_exponent_inner(&mut self) -> Result<Expr, ExprError> {
+    fn parse_power_exponent_inner(&mut self) -> Result<Parsed, ExprError> {
         self.skip_ws();
         if self.consume('-') {
-            let operand = self.parse_power_exponent()?;
-            Ok(Expr::UnaryOp {
-                op: UnaryOpKind::Neg,
-                operand: Box::new(operand),
-            })
+            let (operand, depth) = self.parse_power_exponent()?;
+            Ok((
+                Expr::UnaryOp {
+                    op: UnaryOpKind::Neg,
+                    operand: Box::new(operand),
+                },
+                depth + 1,
+            ))
         } else if self.consume('+') {
             self.parse_power_exponent()
         } else {
@@ -395,9 +411,9 @@ impl<'a> ExprParser<'a> {
     /// cmath3.c:95 `cx_comma`): real part re(a) + im(b), imaginary part
     /// im(a) + re(b). The cursor is at the comma.
     #[inline(never)]
-    fn parse_comma(&mut self, first: Expr) -> Result<Expr, ExprError> {
+    fn parse_comma(&mut self, (first, first_depth): Parsed) -> Result<Parsed, ExprError> {
         self.consume(',');
-        let second = self.parse_ternary()?;
+        let (second, second_depth) = self.parse_ternary()?;
         self.skip_ws();
         let part = |name: &str, operand: &Expr| Expr::FnCall {
             name: name.into(),
@@ -413,15 +429,21 @@ impl<'a> ExprParser<'a> {
             left: Box::new(part("IMAG", &first)),
             right: Box::new(part("REAL", &second)),
         };
-        Self::checked_expr(Expr::BinOp {
-            op: BinOpKind::Add,
-            left: Box::new(real),
-            right: Box::new(Expr::BinOp {
-                op: BinOpKind::Mul,
-                left: Box::new(imaginary),
-                right: Box::new(Expr::ComplexNumber(ComplexValue::new(0.0, 1.0))),
-            }),
-        })
+        // REAL and IMAG wrap each operand one level down, a sum joins each
+        // pair, and the product with j puts the imaginary sum a level below
+        // the outer sum's.
+        Self::checked((
+            Expr::BinOp {
+                op: BinOpKind::Add,
+                left: Box::new(real),
+                right: Box::new(Expr::BinOp {
+                    op: BinOpKind::Mul,
+                    left: Box::new(imaginary),
+                    right: Box::new(Expr::ComplexNumber(ComplexValue::new(0.0, 1.0))),
+                }),
+            },
+            4 + first_depth.max(second_depth),
+        ))
     }
 
     /// In a control expression only, `x[i]` or `x[lo,hi]` written directly
@@ -429,26 +451,33 @@ impl<'a> ExprParser<'a> {
     /// frontend/parse-bison.y:93 `%left '[' ']'`). The call `[]` takes the
     /// operand and then the bound or bounds.
     #[inline(never)]
-    fn parse_index(&mut self, mut operand: Expr) -> Result<Expr, ExprError> {
+    fn parse_index(&mut self, (mut operand, mut depth): Parsed) -> Result<Parsed, ExprError> {
         if !self.control_vectors {
-            return Ok(operand);
+            return Ok((operand, depth));
         }
         while self.consume('[') {
-            let mut args = vec![operand, self.parse_ternary()?];
+            let (bound, bound_depth) = self.parse_ternary()?;
+            let mut args_depth = depth.max(bound_depth);
+            let mut args = vec![operand, bound];
             self.skip_ws();
             if self.consume(',') {
-                args.push(self.parse_ternary()?);
+                let (upper, upper_depth) = self.parse_ternary()?;
+                args_depth = args_depth.max(upper_depth);
+                args.push(upper);
                 self.skip_ws();
             }
             if !self.consume(']') {
                 return Err(ExprError::UnexpectedChar(self.peek().unwrap_or('\0')));
             }
-            operand = Self::checked_expr(Expr::FnCall {
-                name: "[]".into(),
-                args,
-            })?;
+            (operand, depth) = Self::checked((
+                Expr::FnCall {
+                    name: "[]".into(),
+                    args,
+                },
+                1 + args_depth,
+            ))?;
         }
-        Ok(operand)
+        Ok((operand, depth))
     }
 
     /// ngspice's `not` in a control expression (frontend/parse.c:817).
@@ -466,20 +495,23 @@ impl<'a> ExprParser<'a> {
     }
 
     /// Parse unary expressions (+, -, !)
-    fn parse_unary(&mut self) -> Result<Expr, ExprError> {
+    fn parse_unary(&mut self) -> Result<Parsed, ExprError> {
         self.nested(Self::parse_unary_inner)
     }
 
-    fn parse_unary_inner(&mut self) -> Result<Expr, ExprError> {
+    fn parse_unary_inner(&mut self) -> Result<Parsed, ExprError> {
         self.skip_ws();
 
         if self.consume('-') {
             self.skip_ws();
-            let operand = self.parse_unary()?;
-            Ok(Expr::UnaryOp {
-                op: UnaryOpKind::Neg,
-                operand: Box::new(operand),
-            })
+            let (operand, depth) = self.parse_unary()?;
+            Ok((
+                Expr::UnaryOp {
+                    op: UnaryOpKind::Neg,
+                    operand: Box::new(operand),
+                },
+                depth + 1,
+            ))
         } else if self.consume('+') {
             self.skip_ws();
             self.parse_unary()
@@ -487,20 +519,26 @@ impl<'a> ExprParser<'a> {
             // `not` binds looser than `+` and tighter than a comparison
             // (frontend/parse-bison.y:89 `%left '~'`).
             self.skip_ws();
-            let operand = self.parse_binary(BinaryLevel::Additive)?;
-            Ok(Expr::UnaryOp {
-                op: UnaryOpKind::Not,
-                operand: Box::new(operand),
-            })
+            let (operand, depth) = self.parse_binary(BinaryLevel::Additive)?;
+            Ok((
+                Expr::UnaryOp {
+                    op: UnaryOpKind::Not,
+                    operand: Box::new(operand),
+                },
+                depth + 1,
+            ))
         } else if self.consume('!') {
             // Check this isn't != operator (already consumed by parse_comparison)
             if !self.check('=') {
                 self.skip_ws();
-                let operand = self.parse_unary()?;
-                Ok(Expr::UnaryOp {
-                    op: UnaryOpKind::Not,
-                    operand: Box::new(operand),
-                })
+                let (operand, depth) = self.parse_unary()?;
+                Ok((
+                    Expr::UnaryOp {
+                        op: UnaryOpKind::Not,
+                        operand: Box::new(operand),
+                    },
+                    depth + 1,
+                ))
             } else {
                 // Put back the '!' - this shouldn't happen in well-formed input
                 self.pos -= 1;
@@ -512,7 +550,7 @@ impl<'a> ExprParser<'a> {
     }
 
     /// Parse primary expressions (numbers, params, functions, parens)
-    fn parse_primary(&mut self) -> Result<Expr, ExprError> {
+    fn parse_primary(&mut self) -> Result<Parsed, ExprError> {
         self.skip_ws();
 
         // Xyce treats braces as ordinary expression-grouping delimiters at
@@ -552,14 +590,14 @@ impl<'a> ExprParser<'a> {
         // in the AST; the runtime behavioral compiler performs the actual
         // file lookup after parameter expansion.
         if self.consume('"') {
-            return self.parse_string_literal();
+            return self.parse_string_literal().map(|literal| (literal, 1));
         }
 
         // Number
         if let Some(c) = self.peek()
             && (c.is_ascii_digit() || c == '.')
         {
-            return self.parse_number();
+            return self.parse_number().map(|number| (number, 1));
         }
 
         // Identifier (parameter or function)
@@ -689,9 +727,12 @@ impl<'a> ExprParser<'a> {
     }
 
     /// Parse identifier or function call
-    fn parse_ident_or_fn(&mut self) -> Result<Expr, ExprError> {
+    fn parse_ident_or_fn(&mut self) -> Result<Parsed, ExprError> {
         let name = match self.parse_identifier()? {
-            Identifier::Operand(operand) => return Ok(operand),
+            Identifier::Operand(operand) => {
+                let depth = operand_depth(&operand);
+                return Ok((operand, depth));
+            }
             Identifier::Call(name) => name,
         };
         // A two-letter `I<lead>` name is also a legal `.FUNC` name, so
@@ -701,12 +742,12 @@ impl<'a> ExprParser<'a> {
         if is_lead_current_call_name(&name) {
             let arguments_start = self.pos;
             match self.parse_call_arguments() {
-                Ok(args)
+                Ok((args, depth))
                     if !is_bare_probe_reference(
                         &self.input[arguments_start..self.pos - ')'.len_utf8()],
                     ) =>
                 {
-                    return Ok(Expr::FnCall { name, args });
+                    return Ok((Expr::FnCall { name, args }, depth + 1));
                 }
                 Err(error) if self.aborted => return Err(error),
                 _ => self.pos = arguments_start,
@@ -718,11 +759,13 @@ impl<'a> ExprParser<'a> {
                     .rsplit_once('.')
                     .is_some_and(|(_, probe)| matches!(probe, "V" | "I" | "N")))
         {
+            // Each raw argument is a name, a leaf one level down.
             let args = self.parse_raw_probe_arguments()?;
-            return Ok(Expr::FnCall { name, args });
+            let depth = if args.is_empty() { 1 } else { 2 };
+            return Ok((Expr::FnCall { name, args }, depth));
         }
-        let args = self.parse_call_arguments()?;
-        Ok(Expr::FnCall { name, args })
+        let (args, depth) = self.parse_call_arguments()?;
+        Ok((Expr::FnCall { name, args }, depth + 1))
     }
 
     /// Scan the identifier at the cursor: a complete operand, or the name of
@@ -845,19 +888,25 @@ impl<'a> ExprParser<'a> {
         Ok(args)
     }
 
-    /// Parse ordinary call arguments after `(`, through the closing `)`.
-    fn parse_call_arguments(&mut self) -> Result<Vec<Expr>, ExprError> {
+    /// Parse ordinary call arguments after `(`, through the closing `)`,
+    /// with the deepest argument's depth (zero without arguments).
+    fn parse_call_arguments(&mut self) -> Result<(Vec<Expr>, usize), ExprError> {
         let mut args = Vec::new();
+        let mut depth = 0;
 
         self.skip_ws();
         if !self.check(')') {
-            args.push(self.parse_ternary()?);
+            let (first, first_depth) = self.parse_ternary()?;
+            args.push(first);
+            depth = first_depth;
 
             loop {
                 self.skip_ws();
                 if self.consume(',') {
                     self.skip_ws();
-                    args.push(self.parse_ternary()?);
+                    let (arg, arg_depth) = self.parse_ternary()?;
+                    args.push(arg);
+                    depth = depth.max(arg_depth);
                 } else {
                     break;
                 }
@@ -868,8 +917,30 @@ impl<'a> ExprParser<'a> {
         if !self.consume(')') {
             return Err(ExprError::MissingCloseParen);
         }
-        Ok(args)
+        Ok((args, depth))
     }
+}
+
+/// The depth of an operand the identifier scan built whole, such as a
+/// device-parameter probe: a few nodes, so walking them is cheap.
+fn operand_depth(operand: &Expr) -> usize {
+    let mut deepest = 0;
+    let mut pending = vec![(operand, 1)];
+    while let Some((node, depth)) = pending.pop() {
+        deepest = deepest.max(depth);
+        match node {
+            Expr::BinOp { left, right, .. } => {
+                pending.push((right, depth + 1));
+                pending.push((left, depth + 1));
+            }
+            Expr::UnaryOp { operand, .. } => pending.push((operand, depth + 1)),
+            Expr::FnCall { args, .. } => {
+                pending.extend(args.iter().map(|arg| (arg, depth + 1)));
+            }
+            _ => {}
+        }
+    }
+    deepest
 }
 
 /// What [`ExprParser::parse_identifier`] found at the cursor.
