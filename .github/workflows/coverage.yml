@@ -49,25 +49,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component llvm-tools-preview
-      # Each Rust cache is keyed on what decides its dependency build: the
-      # external crates Cargo.lock pins, the build profiles, the target
-      # rustflags and the toolchain. Workspace manifests stay out of the key,
-      # since rust-cache never stores workspace crates, so the key changes only
-      # when the stored dependencies would. Caches are saved from main alone;
-      # other refs restore main's.
-      - name: Fingerprint the dependency build
-        id: deps
-        shell: bash
-        run: >-
-          echo "digest=$({ grep -E '^(source|checksum) = ' Cargo.lock;
-          awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
-          cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
-          >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
-        with:
-          shared-key: rust-coverage-${{ matrix.group }}-${{ steps.deps.outputs.digest }}
-          add-rust-environment-hash-key: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --version "$CARGO_LLVM_COV_VERSION" --locked
       - name: Prepare coverage output directory
