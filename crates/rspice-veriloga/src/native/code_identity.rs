@@ -76,6 +76,15 @@ const SHIPPED_CENSUS_MODELS: usize = 60;
 ///   `mosvar`, `r2_cmc`, `r2_et_cmc` and the four VBIC 1.3 modules) changed
 ///   only their digest header there, and their census digests did not move.
 ///
+/// `698ab33c…` is the census of `75ec0848f7`, read from nightly 43719595157.
+/// Six modules moved and fifty-four are digest identical. The six are the
+/// PSP 102.5.0 builds (`PSP102VA`, `PSP102BVA`, `PSP102EVA` and the three
+/// `PSPNQS102*VA`), each at the same image size and helper-call count, and they
+/// are exactly the modules `a52a720644` reaches: it reads PSP 102.5.0 through
+/// `cmc/vacode_102.5.0.patch`, whose one hunk starts `mig` at `1.0e-40` instead
+/// of `0.0` (PSP 103.4.0's own initialisation), so one constant in each image
+/// changed. Nothing else between `fc035ddf98` and `75ec0848f7` moved a module.
+///
 /// # How it is re-baselined
 ///
 /// Only with evidence that names the modules that moved and why. The census
@@ -370,7 +379,7 @@ const SHIPPED_CENSUS_MODELS: usize = 60;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "7e735f564c7d5cf9a55597b3e68394d1bbea568bbd2865f770eb371895dd3a06";
+    "698ab33cda35e9b08a71ced2f6d6403e5c3096fe6262c1af1475b7977634aa4f";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
