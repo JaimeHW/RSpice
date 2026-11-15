@@ -27,7 +27,6 @@ use crate::ui::accessibility::counted;
 use crate::workbench::app_state::{Model, SlotFacts};
 use crate::workbench::state::WorkbenchSession;
 
-use super::symbol_in_place::in_place_session;
 use super::{NavigationParts, read_only_master_message};
 use crate::workbench::app_state::design_checks::location_key;
 use crate::workbench::app_state::diagnostic_store::{
@@ -589,16 +588,8 @@ fn begin_symbol_parent_edit(symbol: &mut SymbolUiState, model: &mut Model) {
         return;
     };
     let key = model.workspace.content.active_key();
-    // Edited in place, the parent's wires are in view and a pin is moved
-    // against them: one left behind is the open-pin mark's to show, not
-    // a wire the edit drags along unseen.
-    if in_place_session(&symbol.in_place, model).is_some() {
-        let parents = Vec::new();
-        symbol
-            .history
-            .begin_parent_edit(key, SymbolParentEdit { base, parents });
-        return;
-    }
+    // Edited in place or in its own view, a moved pin carries the wires its
+    // instances hold with it, on this sheet and every other open one.
     let reference = model.workspace.content.active_view.clone();
     let content = &model.workspace.content;
     let mut parents: Vec<SymbolParentWiring> = content

@@ -88,8 +88,8 @@ fn in_place_pins_land_on_the_instance_pins_in_every_orientation() {
 }
 
 /// A pin dragged in place lands where the pointer let go of it, read back
-/// through the instance's transform into symbol coordinates, and the parent
-/// wire it was attached to stays where it was.
+/// through the instance's transform into symbol coordinates, and the end of
+/// the parent wire it held follows its tip there while the other end stays.
 #[test]
 fn a_pin_dragged_in_place_lands_under_the_pointer_in_symbol_coordinates() {
     let position = Point::new(100, 80);
@@ -115,7 +115,6 @@ fn a_pin_dragged_in_place_lands_under_the_pointer_in_symbol_coordinates() {
         .recalculate_runtime_state();
     fixture.app.state.sync_active_schematic_to_workspace();
     let document = fixture.app.state.model.schematic.document();
-    let wires = document.wires.clone();
     let instance = document
         .components
         .iter()
@@ -138,12 +137,50 @@ fn a_pin_dragged_in_place_lands_under_the_pointer_in_symbol_coordinates() {
         .schematic_buffers
         .get(&fixture.parent.key())
         .unwrap();
-    assert_eq!(parent.document().wires, wires, "no parent wire moved");
+    assert_eq!(
+        parent.document().wires[0].points,
+        vec![world, start + Point::new(0, 60)],
+        "the held end followed the pin's tip; the far end stayed"
+    );
+
+    // The drag is one step of the symbol: Undo puts the pin and the wire
+    // end back together, and Redo carries both again.
+    Command::Undo.execute(&mut fixture.app);
+    fixture.frame(vec![]);
+    let wire = |fixture: &Fixture| {
+        fixture
+            .app
+            .state
+            .model
+            .workspace
+            .content
+            .schematic_buffers
+            .get(&fixture.parent.key())
+            .unwrap()
+            .document()
+            .wires[0]
+            .points[0]
+    };
+    assert_eq!(fixture.symbol_pin("A"), Some(Point::new(-40, -10)));
+    assert_eq!(wire(&fixture), start, "Undo took the wire end back");
+    Command::Redo.execute(&mut fixture.app);
+    fixture.frame(vec![]);
+    assert_eq!(fixture.symbol_pin("A"), Some(target));
+    assert_eq!(wire(&fixture), world, "Redo carried it again");
+
+    // Leaving keeps both: the sheet the session returns to holds the wire
+    // where the pin now stands.
+    fixture.key(egui::Key::Escape);
+    assert!(fixture.on_parent());
+    assert_eq!(
+        fixture.app.state.model.schematic.document().wires[0].points[0],
+        world
+    );
 }
 
 /// An in-place edit is an edit of the master: leaving keeps it without a
 /// question, and a second instance, turned the other way, connects the moved
-/// pin where the edit put it.
+/// pin where the edit put it, the wire it holds there following it.
 #[test]
 fn an_in_place_edit_reaches_every_instance_and_leaving_keeps_it() {
     let (first, second) = (Point::new(100, 80), Point::new(200, 80));
@@ -151,6 +188,23 @@ fn an_in_place_edit_reaches_every_instance_and_leaving_keeps_it() {
         (first, Rotation::R0, false),
         (second, Rotation::R180, false),
     ]);
+    // The second instance's pin A, turned half round, stands at (240, 90).
+    let held = second + Point::new(40, 10);
+    let far = held + Point::new(40, 0);
+    fixture
+        .app
+        .state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .wires = vec![Wire::new(7, vec![held, far])];
+    fixture
+        .app
+        .state
+        .model
+        .schematic
+        .recalculate_runtime_state();
+    fixture.app.state.sync_active_schematic_to_workspace();
     fixture.enter(0);
     let from = fixture.screen(first + Point::new(-40, -10));
     let to = fixture.screen(first + Point::new(-40, 20));
@@ -171,6 +225,11 @@ fn an_in_place_edit_reaches_every_instance_and_leaving_keeps_it() {
         .unwrap()
         .1;
     assert_eq!(terminal, second + Point::new(40, -20));
+    assert_eq!(
+        fixture.app.state.model.schematic.document().wires[0].points,
+        vec![terminal, far],
+        "the other instance's wire followed its pin"
+    );
 }
 
 /// Escape and Return leave at once, with or without an edit, and ask
@@ -343,65 +402,7 @@ impl Fixture {
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
-        app.state.workbench.activate(Workspace::Design);
-        app.state.model.schematic = SchematicState::default();
-        let parent = app.state.model.workspace.content.active_view.clone();
-        let symbol = CellViewRef::new(&parent.library, "amp", "symbol");
-        let mut cell = Cell::new(&symbol.cell);
-        cell.add_view(View::new("schematic", ViewType::Schematic));
-        cell.add_view(View::new(&symbol.view, ViewType::Symbol));
-        app.state
-            .model
-            .library_manager
-            .get_library_mut(&symbol.library)
-            .unwrap()
-            .add_cell(cell);
-        let schematic = amp_schematic();
-        let ports = schematic.document().interface_ports();
-        app.state.model.workspace.insert_schematic_editor(
-            CellViewRef::new(&symbol.library, &symbol.cell, "schematic").key(),
-            schematic,
-        );
-        app.state.open_workspace_view(symbol.clone());
-        let document = amp_symbol(&ports);
-        app.state
-            .store_active_symbol_editor_bundle(
-                &document,
-                &SymbolEditorMetadata::for_document(&document),
-            )
-            .unwrap();
-        app.state.open_workspace_view(parent.clone());
-        app.state.model.workspace.content.close_view(&symbol);
-        assert_eq!(app.state.model.workspace.content.active_view, parent);
-
-        let mut instances = Vec::new();
-        for &(position, rotation, mirror_h) in placements {
-            let id = app.state.model.schematic.add_library_cell_component(
-                position,
-                LibraryCellInstance::new(&symbol.library, &symbol.cell, &symbol.view),
-            );
-            let component = app
-                .state
-                .model
-                .schematic
-                .document_mut_for_test()
-                .components
-                .iter_mut()
-                .find(|component| component.id == id)
-                .unwrap();
-            component.rotation = rotation;
-            component.mirror_h = mirror_h;
-            instances.push(id);
-        }
-        app.state.model.schematic.recalculate_runtime_state();
-        app.state.model.schematic.clear_undo_history();
-        app.state.model.schematic.session.is_dirty = false;
-        let editor = &mut app.state.model.schematic.session.editor;
-        editor.needs_fit = false;
-        editor.needs_drawing_sheet_fit = false;
-        editor.pan = PAN;
-        editor.zoom = ZOOM;
-        app.state.sync_active_schematic_to_workspace();
+        let (parent, symbol, instances) = amp_project(&mut app, placements);
         let mut fixture = Self {
             ctx,
             app,
@@ -414,7 +415,79 @@ impl Fixture {
         fixture.frame(vec![]);
         fixture
     }
+}
 
+/// On the open project of `app`, in Design, a parent schematic placing the
+/// `amp` symbol once per entry, each at its position, turned and mirrored as
+/// the entry says, with the parent's camera at `PAN` and `ZOOM`: the parent,
+/// the symbol, and the instances' ids.
+pub(super) fn amp_project(
+    app: &mut RSpiceApp,
+    placements: &[(Point, Rotation, bool)],
+) -> (CellViewRef, CellViewRef, Vec<u64>) {
+    app.state.workbench.activate(Workspace::Design);
+    app.state.model.schematic = SchematicState::default();
+    let parent = app.state.model.workspace.content.active_view.clone();
+    let symbol = CellViewRef::new(&parent.library, "amp", "symbol");
+    let mut cell = Cell::new(&symbol.cell);
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    cell.add_view(View::new(&symbol.view, ViewType::Symbol));
+    app.state
+        .model
+        .library_manager
+        .get_library_mut(&symbol.library)
+        .unwrap()
+        .add_cell(cell);
+    let schematic = amp_schematic();
+    let ports = schematic.document().interface_ports();
+    app.state.model.workspace.insert_schematic_editor(
+        CellViewRef::new(&symbol.library, &symbol.cell, "schematic").key(),
+        schematic,
+    );
+    app.state.open_workspace_view(symbol.clone());
+    let document = amp_symbol(&ports);
+    app.state
+        .store_active_symbol_editor_bundle(
+            &document,
+            &SymbolEditorMetadata::for_document(&document),
+        )
+        .unwrap();
+    app.state.open_workspace_view(parent.clone());
+    app.state.model.workspace.content.close_view(&symbol);
+    assert_eq!(app.state.model.workspace.content.active_view, parent);
+
+    let mut instances = Vec::new();
+    for &(position, rotation, mirror_h) in placements {
+        let id = app.state.model.schematic.add_library_cell_component(
+            position,
+            LibraryCellInstance::new(&symbol.library, &symbol.cell, &symbol.view),
+        );
+        let component = app
+            .state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .unwrap();
+        component.rotation = rotation;
+        component.mirror_h = mirror_h;
+        instances.push(id);
+    }
+    app.state.model.schematic.recalculate_runtime_state();
+    app.state.model.schematic.clear_undo_history();
+    app.state.model.schematic.session.is_dirty = false;
+    let editor = &mut app.state.model.schematic.session.editor;
+    editor.needs_fit = false;
+    editor.needs_drawing_sheet_fit = false;
+    editor.pan = PAN;
+    editor.zoom = ZOOM;
+    app.state.sync_active_schematic_to_workspace();
+    (parent, symbol, instances)
+}
+
+impl Fixture {
     fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
         self.time += 0.02;
         let Self {
