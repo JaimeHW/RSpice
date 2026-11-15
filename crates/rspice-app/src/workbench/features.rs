@@ -16,7 +16,6 @@ use std::sync::LazyLock;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::cloud::CloudFeature;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::design::DesignFeature;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
@@ -28,10 +27,11 @@ use crate::workbench::framework::feature::{
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::results::ResultsFeature;
-use crate::workbench::settings::SettingsFeature;
 use crate::workbench::simulate::SimulateFeature;
+use rspice_app_cloud::workbench::cloud::CloudFeature;
 use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
+use rspice_app_settings::workbench::settings::SettingsFeature;
 use rspice_app_sheets::workbench::sheets::SheetsFeature;
 
 /// A feature the shell registers: its registry, and its contexts borrowed
@@ -708,10 +708,10 @@ mod tests {
                 .filter(|key| spec(**key).is_some())
                 .count(),
             rspice_app_sheets::workbench::sheets::commands::SheetsCommand::ALL.len()
-                + crate::workbench::settings::commands::SettingsCommand::ALL.len()
+                + rspice_app_settings::workbench::settings::commands::SettingsCommand::ALL.len()
                 + rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand::LISTED.len()
                 + crate::workbench::results::commands::ResultsCommand::ALL.len()
-                + crate::workbench::cloud::commands::CloudCommand::ALL.len()
+                + rspice_app_cloud::workbench::cloud::commands::CloudCommand::ALL.len()
                 + crate::workbench::models::commands::ModelsCommand::ALL.len()
                 + crate::workbench::simulate::commands::SimulateCommand::ALL.len()
                 + crate::workbench::project::commands::ProjectCommand::ALL.len()

@@ -4,12 +4,12 @@
 
 use crate::ui::tokens::{Mode, Tokens};
 use crate::workbench::RSpiceApp;
-use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::WorkbenchSession;
 use crate::workbench::state::{Drawer, Workspace};
 use egui::{Area, Context, Id, Order, Sense, UiKind};
+use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_workbench::workbench::docks::drawers::*;
 
 #[derive(Clone, Copy)]

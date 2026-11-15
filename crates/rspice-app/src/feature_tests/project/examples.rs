@@ -110,7 +110,11 @@ fn open_and_press_run(example: Example, stop: &str) -> RSpiceApp {
     assert!(app.command_key_enabled(SimulateCommand::Run.key()));
     app.execute_command_key(SimulateCommand::Run.key());
     assert!(app.state.runs.preflight.take_run_and_queue_request());
-    crate::workbench::preflight::start(&mut app.state, &mut app.simulation_controller, true);
+    rspice_app_runs::workbench::preflight::start(
+        &mut app.state,
+        &mut app.simulation_controller,
+        true,
+    );
     app.settle_preflight();
     let blockers = app
         .state

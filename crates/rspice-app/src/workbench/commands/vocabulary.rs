@@ -20,18 +20,18 @@ use crate::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
 };
 use crate::state::{SimulationPage, VerificationPage};
-use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::commands::ResultsCommand;
-use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
+use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -32,8 +32,10 @@ use crate::workbench::lifecycle::project_lifecycle::{
     LifecycleParts, PersistenceBinding, ProjectCloseDestination, ProjectLifecycleError,
     RevertReviewToken, has_unsaved_changes,
 };
-use crate::workbench::live_session::{CloudHandles, DiscardMirror, LiveHost, MirrorApply};
 use crate::workbench::state::Workspace;
+use rspice_app_cloud::workbench::live_session::{
+    CloudHandles, DiscardMirror, LiveHost, MirrorApply,
+};
 #[cfg(target_arch = "wasm32")]
 use rspice_app_project::workbench::workflows::file_workflow::BrowserSchematic;
 use rspice_app_project::workbench::workflows::file_workflow::{self, SchematicLoadOrigin};
@@ -1441,8 +1443,8 @@ pub(crate) fn start_local_safe_mode(
 mod tests {
     use super::*;
     use crate::workbench::framework::requests::LiveMirrorEntry;
-    use crate::workbench::live_session::LiveSessionEngine;
     use rspice_app_cloud::services::cloud_account::CloudAccountService;
+    use rspice_app_cloud::workbench::live_session::LiveSessionEngine;
 
     /// A close-to-mirror transaction that outlives its session leaves the
     /// reader where every project close does: on the no-project landing.

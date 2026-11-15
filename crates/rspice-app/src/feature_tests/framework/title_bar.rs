@@ -13,7 +13,6 @@ use crate::ui::panels::WorkbenchIcon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens;
 use crate::workbench::RSpiceApp;
-use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::commands::vocabulary::{Command, command_registry};
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags, ids};
@@ -24,6 +23,7 @@ use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{

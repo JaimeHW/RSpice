@@ -227,7 +227,7 @@ pub struct RSpiceApp {
     pub(crate) code: crate::workbench::documents::code_workspace::CodeHandles,
     /// What the cloud feature runs: the account session boundary and the
     /// live-session engine that drains it.
-    pub(crate) cloud: crate::workbench::live_session::CloudHandles,
+    pub(crate) cloud: rspice_app_cloud::workbench::live_session::CloudHandles,
     /// Distributed model packs: the verified catalog, what is installed, and
     /// the store a background install writes through. It is outside persisted
     /// state because it describes this machine, not this project.
@@ -364,10 +364,11 @@ impl RSpiceApp {
                 automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
                 automation_runtime_project_id,
             },
-            cloud: crate::workbench::live_session::CloudHandles {
+            cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
                 account:
                     rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),
-                live_session: crate::workbench::live_session::LiveSessionEngine::default(),
+                live_session: rspice_app_cloud::workbench::live_session::LiveSessionEngine::default(
+                ),
             },
             // A test opens no real pack store: doing so would make every test
             // read and write this developer's application-data directory.
@@ -537,11 +538,11 @@ impl RSpiceApp {
                 automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
                 automation_runtime_project_id,
             },
-            cloud: crate::workbench::live_session::CloudHandles {
+            cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
                 account: rspice_app_cloud::services::cloud_account::CloudAccountService::new(Some(
                     cc.egui_ctx.clone(),
                 )),
-                live_session: crate::workbench::live_session::LiveSessionEngine::default(),
+                live_session: rspice_app_cloud::workbench::live_session::LiveSessionEngine::default(),
             },
             // Opening sweeps whatever a killed install left behind. A failure
             // here is recorded as a reason and nothing else: a machine that

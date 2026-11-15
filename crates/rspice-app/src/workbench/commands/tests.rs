@@ -34,7 +34,7 @@ use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::commands::ResultsCommand;
-use crate::workbench::settings::commands::SettingsCommand;
+use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 
 fn app_with_selected_authored_symbol() -> RSpiceApp {

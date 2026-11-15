@@ -383,8 +383,8 @@ fn device_rows_follow_one_another_without_overlapping() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn typed_command_and_rendered_surface_disclose_the_same_offline_boundary() {
-    use crate::workbench::cloud::commands::CloudCommand;
     use crate::workbench::commands::vocabulary::command_registry;
+    use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 
     let key = CloudCommand::AccountOrganization.key();
     assert!(command_registry().order().contains(&key));

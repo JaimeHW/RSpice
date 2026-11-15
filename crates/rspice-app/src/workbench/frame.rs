@@ -6,21 +6,22 @@
 //! shell made of" was 470 lines of layout code with the answer buried at the
 //! top.
 
-use rspice_app_workbench::workbench::tools;
 use std::time::Duration;
 
 use egui::{CentralPanel, Context, Frame};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::tokens::Tokens;
-use crate::workbench::cloud::CloudFeature;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::session::project_transactions::{open_confirmed, request_example};
+use rspice_app_cloud::workbench::cloud::CloudFeature;
 use rspice_app_code::workbench::code::CodeFeature;
+use rspice_app_runs::workbench::preflight;
 use rspice_app_workbench::workbench::state::pane_focus::Pane;
+use rspice_app_workbench::workbench::tools;
 use rspice_app_workbench::workbench::{docks, surfaces};
 
 // The shell's submodules and re-exports, as this code saw them when it lived

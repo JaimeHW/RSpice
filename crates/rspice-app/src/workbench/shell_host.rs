@@ -27,7 +27,6 @@ use crate::ui::widgets::NotificationAction;
 use crate::workbench::app::ConfirmationResponse;
 use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::app_state::{Model, PlatformState};
-use crate::workbench::cloud::CloudFeature;
 use crate::workbench::commands::vocabulary::{
     Command, CommandRegistry, command_registry, legacy_command,
 };
@@ -52,6 +51,7 @@ use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 use menus::{APPLICATION_MENU, COMPACT_MENU, application_menu_entries};
+use rspice_app_cloud::workbench::cloud::CloudFeature;
 use rspice_app_code::workbench::code::{CodeFeature, SOURCE_EDITOR_MENU};
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
 use rspice_app_sheets::workbench::sheets::SheetsFeature;
@@ -847,7 +847,7 @@ impl Host for RSpiceApp {
         command_registry().validate(
             ids::named()
                 .chain(keys.into_iter().map(|key| ("a menu", key)))
-                .chain(crate::workbench::settings::named_command_keys()),
+                .chain(rspice_app_settings::workbench::settings::named_command_keys()),
         )
     }
 
@@ -1376,7 +1376,7 @@ mod tests {
     /// cloud feature's command declares.
     #[test]
     fn each_cloud_id_names_its_command() {
-        use crate::workbench::cloud::commands::CloudCommand;
+        use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 
         let command = CloudCommand::AccountOrganization;
         assert_eq!(ids::ACCOUNT_ORGANIZATION, command.key());

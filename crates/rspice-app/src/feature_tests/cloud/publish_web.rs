@@ -56,11 +56,11 @@ fn retained_import_disclosure_only_applies_when_the_netlist_is_included() {
 /// credits the signed-in account.
 #[test]
 fn publish_to_web_opens_its_dialog_over_a_review_build_of_the_project() {
-    use crate::workbench::cloud::commands::CloudCommand;
     use rspice_app_cloud::services::cloud_account::{
         CloudAccountService, CloudSessionPhase, CloudSessionSnapshot, EntitlementSummary,
         PrincipalSummary,
     };
+    use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 
     let mut app = RSpiceApp::test_instance();
     app.cloud.account = CloudAccountService::with_snapshot(

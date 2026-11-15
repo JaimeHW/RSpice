@@ -7,13 +7,13 @@
 //! that skips the gate is invisible to a single aggregate check.
 
 use super::*;
-use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::CommandFlags;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
+use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 

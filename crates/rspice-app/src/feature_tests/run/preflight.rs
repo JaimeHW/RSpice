@@ -10,12 +10,12 @@ use crate::state::{
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::diagnostic_routes::apply_remediation;
-use crate::workbench::preflight::{
+use crate::workbench::simulate::commands::SimulateCommand;
+use crate::workbench::state::{ConsolePage, Workspace};
+use rspice_app_runs::workbench::preflight::{
     collect_report, poll, preparation_remediation, queue_retained_run, start,
     temperature_validity_advisories,
 };
-use crate::workbench::simulate::commands::SimulateCommand;
-use crate::workbench::state::{ConsolePage, Workspace};
 
 mod engine;
 mod pipeline;

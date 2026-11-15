@@ -22,7 +22,6 @@ use crate::workbench::app_state::session::shortcuts::ShortcutContextMatch;
 use crate::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
 };
-use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::commands::vocabulary::{
     COMMAND_REGISTRY, CommandRegistry, command_registry, legacy_command,
 };
@@ -32,6 +31,7 @@ use crate::workbench::framework::host::Host;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
+use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 
