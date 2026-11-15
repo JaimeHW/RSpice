@@ -770,6 +770,70 @@ impl std::fmt::Display for ParameterValueError {
 
 impl std::error::Error for ParameterValueError {}
 
+/// Browser-side entry-table cache, keyed on the same content identity as the
+/// native cache, and shared by every device and by the host qualifying a run
+/// ([`crate::wasm_jit::cached_browser_model`]), so a model is emitted once per
+/// worker session whoever asks first.
+///
+/// The entries here are export-name tables and module bytes: the compiled
+/// modules themselves live in the worker's own bounded registry, and this
+/// cache holds as many models as that registry does
+/// ([`crate::wasm_jit::BROWSER_MODEL_CACHE_MODELS`]) so the two tiers cannot
+/// disagree about how many are resident. A refusal is kept too, so a model
+/// that cannot run in the browser is not emitted again to be refused again.
+#[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+pub(crate) fn cached_browser_model(
+    model: &std::sync::Arc<CompiledModel>,
+    artifact: &CanonicalIrArtifact,
+) -> Result<
+    (
+        std::sync::Arc<WasmJitExecutable>,
+        std::sync::Arc<crate::wasm_jit::WasmJitModelArtifact>,
+    ),
+    String,
+> {
+    use std::cell::RefCell;
+    use std::sync::Arc;
+
+    // The model artifact stays beside its executable: a host collecting the
+    // models a build asks for takes the artifact either way.
+    type Compiled = (
+        Arc<WasmJitExecutable>,
+        Arc<crate::wasm_jit::WasmJitModelArtifact>,
+    );
+    type CacheEntry = (WasmCompileCacheKey, Result<Compiled, String>);
+    thread_local! {
+        /// Most-recently-used first.
+        static WASM_CACHE: RefCell<Vec<CacheEntry>> = const { RefCell::new(Vec::new()) };
+    }
+
+    let cache_key = WasmCompileCacheKey {
+        mir_digest: artifact.mir_digest.clone(),
+        source_digest: model.source_digest.clone(),
+        module: model.name.clone(),
+        layout: compiled_model_layout_identity(model),
+    };
+    WASM_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(index) = cache.iter().position(|(key, _)| *key == cache_key) {
+            let entry = cache.remove(index);
+            let compiled = entry.1.clone();
+            cache.insert(0, entry);
+            return compiled;
+        }
+
+        let compiled = crate::wasm_jit::compile_model_value_module(model, artifact)
+            .and_then(|module| {
+                let executable = WasmJitExecutable::from_artifact(model, &module)?;
+                Ok((Arc::new(executable), Arc::new(module)))
+            })
+            .map_err(|error| error.to_string());
+        cache.insert(0, (cache_key, compiled.clone()));
+        cache.truncate(crate::wasm_jit::BROWSER_MODEL_CACHE_MODELS);
+        compiled
+    })
+}
+
 /// Content identity of one browser-side compilation, matching
 /// [`NativeCompileCacheKey`]'s canonical lane.
 #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
@@ -3063,61 +3127,15 @@ impl VerilogADevice {
             })
     }
 
-    /// Browser-side entry-table cache, keyed on the same content identity as
-    /// the native cache.
-    ///
-    /// The entries here are export-name tables, not code: the compiled modules
-    /// themselves live in the worker's own bounded registry. The bound is an
-    /// entry count matching that registry so the two tiers cannot disagree
-    /// about how many models are resident.
+    /// The browser executable for `model`, from the worker's model cache,
+    /// taken for this device's build.
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
     fn try_wasm_compile_with_canonical_ir(
         model: &std::sync::Arc<CompiledModel>,
         artifact: &CanonicalIrArtifact,
     ) -> Result<std::sync::Arc<WasmJitExecutable>, VmError> {
-        use std::cell::RefCell;
-        use std::sync::Arc;
-
-        /// Mirrors `WASM_JIT_CACHE_MAX_MODELS` in the browser worker.
-        const WASM_CACHE_MAX_MODELS: usize = 64;
-
-        // The model artifact stays beside its executable: a host collecting
-        // the models a build asks for takes the artifact either way.
-        type Compiled = (
-            Arc<WasmJitExecutable>,
-            Arc<crate::wasm_jit::WasmJitModelArtifact>,
-        );
-        type CacheEntry = (WasmCompileCacheKey, Result<Compiled, String>);
-        thread_local! {
-            /// Most-recently-used first.
-            static WASM_CACHE: RefCell<Vec<CacheEntry>> = const { RefCell::new(Vec::new()) };
-        }
-
-        let cache_key = WasmCompileCacheKey {
-            mir_digest: artifact.mir_digest.clone(),
-            source_digest: model.source_digest.clone(),
-            module: model.name.clone(),
-            layout: compiled_model_layout_identity(model),
-        };
-        let (executable, module) = WASM_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            if let Some(index) = cache.iter().position(|(key, _)| *key == cache_key) {
-                let entry = cache.remove(index);
-                let compiled = entry.1.clone();
-                cache.insert(0, entry);
-                return compiled.map_err(VmError::WasmJit);
-            }
-
-            let compiled = crate::wasm_jit::compile_model_value_module(model, artifact)
-                .and_then(|module| {
-                    let executable = WasmJitExecutable::from_artifact(model, &module)?;
-                    Ok((Arc::new(executable), Arc::new(module)))
-                })
-                .map_err(|error| error.to_string());
-            cache.insert(0, (cache_key, compiled.clone()));
-            cache.truncate(WASM_CACHE_MAX_MODELS);
-            compiled.map_err(VmError::WasmJit)
-        })?;
+        let (executable, module) =
+            cached_browser_model(model, artifact).map_err(VmError::WasmJit)?;
         crate::wasm_jit::admit_browser_model(&module, &model.name).map_err(VmError::WasmJit)?;
         Ok(executable)
     }

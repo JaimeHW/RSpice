@@ -18,6 +18,7 @@ pub struct WasmJitWorkerArtifact {
     pub emitter_version: u32,
     pub cache_key: String,
     pub digest: String,
+    #[serde(with = "module_bytes")]
     pub module_bytes: Vec<u8>,
     pub value_exports: Vec<String>,
     /// The module assignment pass, when it has steps to run. A module whose
@@ -32,6 +33,52 @@ pub struct WasmJitWorkerArtifact {
     pub evaluation_kernel_export: Option<String>,
     #[serde(default)]
     pub stamp_kernel_export: Option<String>,
+}
+
+/// A module's bytes as one byte string. Across the worker boundary that is a
+/// `Uint8Array`, where a plain `Vec<u8>` becomes an array holding one number
+/// per byte, built element by element on every run; JSON keeps the array of
+/// numbers it always had. Either form reads back.
+mod module_bytes {
+    pub(super) fn serialize<S: serde::Serializer>(
+        bytes: &[u8],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(bytes)
+    }
+
+    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<u8>, D::Error> {
+        struct Bytes;
+        impl<'de> serde::de::Visitor<'de> for Bytes {
+            type Value = Vec<u8>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("WebAssembly module bytes")
+            }
+
+            fn visit_bytes<E: serde::de::Error>(self, bytes: &[u8]) -> Result<Vec<u8>, E> {
+                Ok(bytes.to_vec())
+            }
+
+            fn visit_byte_buf<E: serde::de::Error>(self, bytes: Vec<u8>) -> Result<Vec<u8>, E> {
+                Ok(bytes)
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut sequence: A,
+            ) -> Result<Vec<u8>, A::Error> {
+                let mut bytes = Vec::with_capacity(sequence.size_hint().unwrap_or(0));
+                while let Some(byte) = sequence.next_element()? {
+                    bytes.push(byte);
+                }
+                Ok(bytes)
+            }
+        }
+        deserializer.deserialize_byte_buf(Bytes)
+    }
 }
 
 /// Available to a host test as well as to the worker build, so the wire shape
@@ -448,5 +495,50 @@ endmodule
             Some(f64::INFINITY.to_bits()),
             "the default the browser device elaborates from must be the declared one"
         );
+    }
+
+    /// A run asks for each runtime's browser model before it starts, every
+    /// time the project runs. The second ask, for the same sealed runtime,
+    /// is handed the model the first one compiled: nothing is parsed or
+    /// emitted again.
+    #[cfg(feature = "wasm-jit")]
+    #[test]
+    fn a_runtime_asked_again_is_handed_the_browser_model_it_compiled() {
+        let runtime = seal_runtime(
+            "bound-step-again.va",
+            "rspice_bound_step_probe",
+            BOUND_STEP_SOURCE,
+        );
+        let first = runtime
+            .compile_wasm_jit_artifact()
+            .expect("the module qualifies for the browser JIT");
+        let second = runtime
+            .clone()
+            .compile_wasm_jit_artifact()
+            .expect("the module qualifies again");
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+    }
+
+    /// The kept model is found by the runtime's digest, but a payload that
+    /// no longer matches that digest is refused before the model is looked up.
+    #[cfg(feature = "wasm-jit")]
+    #[test]
+    fn a_kept_browser_model_is_not_handed_to_a_payload_its_digest_refuses() {
+        let runtime = seal_runtime(
+            "bound-step-altered.va",
+            "rspice_bound_step_probe",
+            BOUND_STEP_SOURCE,
+        );
+        runtime
+            .compile_wasm_jit_artifact()
+            .expect("the module qualifies for the browser JIT");
+        let mut altered = serde_json::to_value(&runtime).unwrap();
+        let model_json = format!("{} ", altered["model_json"].as_str().unwrap());
+        altered["model_json"] = serde_json::Value::String(model_json);
+        let altered: PreparedVerilogARuntime = serde_json::from_value(altered).unwrap();
+        let refused = altered
+            .compile_wasm_jit_artifact()
+            .expect_err("an altered payload does not qualify");
+        assert!(refused.contains("digest"), "{refused}");
     }
 }

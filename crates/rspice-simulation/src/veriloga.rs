@@ -100,19 +100,52 @@ fn is_typical(delay_select: &DigitalDelaySelect) -> bool {
 }
 
 impl PreparedVerilogARuntime {
+    /// The runtime's browser JIT model, compiled once per worker session.
+    ///
+    /// A run asks for every runtime's model before it starts, and the same
+    /// project runs again and again: the model is kept by the runtime's sealed
+    /// artifact digest, so a later run checks the payload against its digest
+    /// and parses and emits nothing. The first run's emission is the one its
+    /// devices take ([`rspice_veriloga::wasm_jit::cached_browser_model`]). A
+    /// refusal is kept the same way. As many models are kept as the worker's
+    /// registry holds.
     #[cfg(feature = "wasm-jit")]
     pub fn compile_wasm_jit_artifact(
         &self,
-    ) -> Result<rspice_veriloga::wasm_jit::WasmJitModelArtifact, String> {
-        self.validate()?;
-        let model: rspice_veriloga::CompiledModel = serde_json::from_str(&self.model_json)
-            .map_err(|error| format!("Compiled Verilog-A model payload is invalid: {error}"))?;
-        let canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
-            serde_json::from_str(&self.canonical_ir_json)
-                .map_err(|error| format!("Canonical Verilog-A IR payload is invalid: {error}"))?;
-        let artifact = rspice_veriloga::wasm_jit::compile_model_value_module(&model, &canonical_ir)
-            .map_err(|error| error.to_string())?;
-        Ok(artifact)
+    ) -> Result<std::sync::Arc<rspice_veriloga::wasm_jit::WasmJitModelArtifact>, String> {
+        use std::cell::RefCell;
+        use std::sync::Arc;
+
+        type Compiled = Result<Arc<rspice_veriloga::wasm_jit::WasmJitModelArtifact>, String>;
+        thread_local! {
+            /// Most recently used first.
+            static COMPILED: RefCell<Vec<(rspice_vocabulary::product::ContentDigest, Compiled)>> =
+                const { RefCell::new(Vec::new()) };
+        }
+
+        self.verify_payload_digest()?;
+        let kept = COMPILED.with(|compiled| {
+            let mut compiled = compiled.borrow_mut();
+            let index = compiled
+                .iter()
+                .position(|(digest, _)| *digest == self.artifact_digest)?;
+            let entry = compiled.remove(index);
+            let result = entry.1.clone();
+            compiled.insert(0, entry);
+            Some(result)
+        });
+        if let Some(kept) = kept {
+            return kept;
+        }
+        let result = self.parsed().and_then(|(model, canonical_ir)| {
+            rspice_veriloga::wasm_jit::cached_browser_model(&Arc::new(model), &canonical_ir)
+        });
+        COMPILED.with(|compiled| {
+            let mut compiled = compiled.borrow_mut();
+            compiled.insert(0, (self.artifact_digest, result.clone()));
+            compiled.truncate(rspice_veriloga::wasm_jit::BROWSER_MODEL_CACHE_MODELS);
+        });
+        result
     }
 
     /// Seal compiled artifacts under a caller-supplied source identity.
@@ -230,12 +263,7 @@ impl PreparedVerilogARuntime {
     }
 
     fn registration(&self) -> Result<rspice_core::ProjectVerilogARuntimeRegistration, String> {
-        self.validate()?;
-        let model: rspice_veriloga::CompiledModel = serde_json::from_str(&self.model_json)
-            .map_err(|error| format!("Compiled Verilog-A model payload is invalid: {error}"))?;
-        let canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
-            serde_json::from_str(&self.canonical_ir_json)
-                .map_err(|error| format!("Canonical Verilog-A IR payload is invalid: {error}"))?;
+        let (model, canonical_ir) = self.parsed()?;
         Ok(rspice_core::ProjectVerilogARuntimeRegistration {
             source_key: self.source_key.clone().into(),
             aliases: vec![self.netlist_alias.clone()],
@@ -247,6 +275,12 @@ impl PreparedVerilogARuntime {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        self.parsed().map(|_| ())
+    }
+
+    /// The identity checks and the payload digest, without parsing either
+    /// payload.
+    fn verify_payload_digest(&self) -> Result<(), String> {
         if !valid_sealed_source_key(&self.source_key) {
             return Err("Verilog-A runtime has an invalid sealed virtual source key".to_owned());
         }
@@ -269,6 +303,21 @@ impl PreparedVerilogARuntime {
         if expected != self.artifact_digest {
             return Err("Verilog-A runtime artifact digest does not match its payload".to_owned());
         }
+        Ok(())
+    }
+
+    /// Both payloads, checked against the digest and against each other, each
+    /// parsed once.
+    fn parsed(
+        &self,
+    ) -> Result<
+        (
+            rspice_veriloga::CompiledModel,
+            rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+        ),
+        String,
+    > {
+        self.verify_payload_digest()?;
         let model: rspice_veriloga::CompiledModel = serde_json::from_str(&self.model_json)
             .map_err(|error| format!("Compiled Verilog-A model payload is invalid: {error}"))?;
         let canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
@@ -286,7 +335,7 @@ impl PreparedVerilogARuntime {
                 canonical_ir.hir.module_name, self.module_name
             ));
         }
-        Ok(())
+        Ok((model, canonical_ir))
     }
 
     pub fn source_key(&self) -> &str {
@@ -328,9 +377,7 @@ impl PreparedVerilogARuntime {
     }
 
     pub fn terminal_names(&self) -> Result<Vec<String>, String> {
-        self.validate()?;
-        let model: rspice_veriloga::CompiledModel = serde_json::from_str(&self.model_json)
-            .map_err(|error| format!("Compiled Verilog-A model payload is invalid: {error}"))?;
+        let (model, _) = self.parsed()?;
         Ok(model
             .terminal_names
             .iter()

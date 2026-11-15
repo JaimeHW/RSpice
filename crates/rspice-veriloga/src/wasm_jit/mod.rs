@@ -430,6 +430,28 @@ pub fn qualify_model_plan(
     summarize_model_plan(artifact, &plan)
 }
 
+/// The most browser models a worker keeps compiled. The worker script's
+/// registry holds as many (`WASM_JIT_CACHE_MAX_MODELS` in
+/// `simulation-worker.js`), and every Rust-side cache of the same models holds
+/// no more, so no tier keeps a model another has dropped.
+pub const BROWSER_MODEL_CACHE_MODELS: usize = 64;
+
+/// `model`'s browser module, emitted once per worker session: in the browser
+/// worker it comes from the cache the run's devices compile through, so a host
+/// qualifying a run and the devices that run builds share one emission. A
+/// build with no browser devices compiles it here.
+pub fn cached_browser_model(
+    model: &std::sync::Arc<CompiledModel>,
+    artifact: &CanonicalIrArtifact,
+) -> Result<std::sync::Arc<WasmJitModelArtifact>, String> {
+    #[cfg(all(not(feature = "native"), target_arch = "wasm32"))]
+    return crate::device::cached_browser_model(model, artifact).map(|(_, module)| module);
+    #[cfg(not(all(not(feature = "native"), target_arch = "wasm32")))]
+    return compile_model_value_module(model, artifact)
+        .map(std::sync::Arc::new)
+        .map_err(|error| error.to_string());
+}
+
 /// Compile every scalar expression in a model through the shared canonical
 /// plan and return one verified standard-WebAssembly module plus its semantic
 /// entry manifest.
