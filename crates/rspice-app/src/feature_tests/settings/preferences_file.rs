@@ -6,10 +6,12 @@ use crate::workbench::framework::command_registry::ids;
 
 #[test]
 fn shortcut_profile_round_trips_inside_user_preferences() {
-    use crate::state::command_catalog::CommandPlatform;
-    use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
     use crate::workbench::commands::vocabulary::CommandRegistry;
     use egui::Key;
+    use rspice_app_state::state::command_catalog::CommandPlatform;
+    use rspice_app_state::state::shortcuts::{
+        ShortcutBindingSlot, ShortcutSequence, ShortcutStroke,
+    };
 
     let mut preferences = UserPreferences::default();
     preferences

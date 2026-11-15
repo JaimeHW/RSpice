@@ -2,8 +2,6 @@
 //! Delete ask and announce, and what leaving the project asks about edits
 //! that were not applied.
 
-use crate::state::ConfigurationSetId;
-use crate::ui::widgets::DialogChoice;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::project_transactions::hold_for_configuration_edits;
 use crate::workbench::examples::hierarchy_reference;
@@ -16,6 +14,8 @@ use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs:
     LeavingAnswer, answer_leaving, open_configuration_dialog, render_configuration_dialog,
 };
 use rspice_app_services::services::recent_files::RecentKind;
+use rspice_app_state::state::ConfigurationSetId;
+use rspice_app_workbench::ui::widgets::DialogChoice;
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
 /// The configuration dialogs' parts over `app`, as the project feature's
@@ -44,7 +44,7 @@ fn reference_app() -> (RSpiceApp, ConfigurationSetId) {
 /// Every accessible name and value one frame of the open dialog announces.
 fn announced(app: &mut RSpiceApp) -> Vec<String> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let output = ctx.run_ui(
         egui::RawInput {
@@ -295,7 +295,7 @@ fn applying_before_leaving_commits_the_edits_and_keeps_the_recent_project_asked_
         Some((path.clone(), RecentKind::Project)),
     ));
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
 
     press(&mut app, &ctx, &[]);
     press(&mut app, &ctx, &[egui::Key::Enter]);
@@ -330,7 +330,7 @@ fn a_refused_apply_before_leaving_stays_on_the_configuration_page() {
         None
     ));
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
 
     press(&mut app, &ctx, &[]);
     press(&mut app, &ctx, &[egui::Key::Enter]);

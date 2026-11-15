@@ -3,17 +3,17 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use crate::product::{ObjectRevision, SavedOutputId, SimulationPlanId};
-use crate::state::{
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::commands::vocabulary::Command;
+use rspice_app_state::product::{ObjectRevision, SavedOutputId, SimulationPlanId};
+use rspice_app_state::state::{
     CellViewRef, ComponentType, ConfigurationSetId, Point, SchematicSnapshot, SchematicState,
 };
-use crate::state::{
+use rspice_app_state::state::{
     Component, ConfigurationBlackBoxPolicy, ConfigurationModelProfile, ConfigurationSetDefinition,
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
     SavedOutputPrecision, SavedOutputStreaming, SchematicProbe, UnresolvedBindingPolicy,
 };
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
 
 fn assert_reference(
     app: &RSpiceApp,
@@ -302,7 +302,7 @@ fn switching_documents_does_not_redirect_rename_history() {
     app.state
         .model
         .workspace
-        .activate_view(other.clone(), crate::state::ViewType::Schematic);
+        .activate_view(other.clone(), rspice_app_state::state::ViewType::Schematic);
     app.state.model.schematic = SchematicState::default();
     app.state
         .model
@@ -396,7 +396,7 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
             },
         )
         .unwrap();
-        let loaded = crate::io::load_project_file(&path).unwrap();
+        let loaded = rspice_app_services::io::load_project_file(&path).unwrap();
         let schematic = &loaded.file.workspace.schematic_buffers
             [&loaded.file.workspace.active_schematic_reference().key()];
         assert_eq!(schematic.document().components[0].name, name);

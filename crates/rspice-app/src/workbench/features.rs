@@ -13,7 +13,6 @@
 
 use std::sync::LazyLock;
 
-use crate::state::command_catalog::CommandKey;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::command_registry;
@@ -33,6 +32,7 @@ use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
 use rspice_app_settings::workbench::settings::SettingsFeature;
 use rspice_app_sheets::workbench::sheets::SheetsFeature;
+use rspice_app_state::state::command_catalog::CommandKey;
 
 /// A feature the shell registers: its registry, and its contexts borrowed
 /// from the application.
@@ -901,7 +901,7 @@ mod tests {
         let mut app = crate::workbench::RSpiceApp::test_instance();
         app.state.workbench.outbox.push(RevealSheetSection);
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let _ = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.set_width(312.0);

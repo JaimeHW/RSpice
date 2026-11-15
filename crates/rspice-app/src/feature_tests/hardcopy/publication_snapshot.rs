@@ -2,12 +2,12 @@
 //! sheets, engineering projection, run results and deck.
 
 use crate::feature_tests::hardcopy::publication_reads;
-use crate::state::AnalysisResult;
-use crate::state::AnalysisType;
-use crate::state::RetainedTrace;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::feature::PublicationDraft;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::publication_snapshot::*;
+use rspice_app_state::state::AnalysisResult;
+use rspice_app_state::state::AnalysisType;
+use rspice_app_state::state::RetainedTrace;
 use rspice_publication_contract::AnalysisRecord;
 use rspice_publication_contract::Dataset;
 use rspice_publication_contract::PublicationSection;
@@ -139,8 +139,8 @@ fn empty_projects_report_nothing_to_publish() {
 
 #[test]
 fn a_multi_sheet_cell_view_publishes_each_sheet_once() {
-    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate, Wire};
     use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate, Wire};
 
     let mut state = AppState::default();
     // Both sheets draw their only wire at the same coordinates, so a page
@@ -153,8 +153,8 @@ fn a_multi_sheet_cell_view_publishes_each_sheet_once() {
             .wires
             .push(Wire::segment(
                 wire_id,
-                crate::state::Point::new(0, 0),
-                crate::state::Point::new(20, 0),
+                rspice_app_state::state::Point::new(0, 0),
+                rspice_app_state::state::Point::new(20, 0),
             ));
     }
     let reference = state.model.workspace.content.active_view.clone();
@@ -199,8 +199,8 @@ fn a_multi_sheet_cell_view_publishes_each_sheet_once() {
 fn native_engineering_projection_preserves_components_nets_and_signal_identity() {
     let mut state = AppState::default();
     state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(0, 0),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(0, 0),
     );
 
     let projected = engineering_publication(publication_reads(&state), true, None)
@@ -297,7 +297,7 @@ fn run_results_and_deck_build_a_valid_snapshot() {
     let mut state = AppState::default();
     state.model.simulation.source.netlist_content =
         "* RSpice Netlist\nR1 in out 1k\n.end".to_string();
-    let mut run = crate::state::SimulationRun::new(1);
+    let mut run = rspice_app_state::state::SimulationRun::new(1);
     run.analyses.push({
         let mut result = analysis(
             "Transient",

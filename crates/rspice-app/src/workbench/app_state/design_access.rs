@@ -8,8 +8,6 @@
 
 use super::AppState;
 use super::waivers::{StoredWaiverEdit, WaiverTarget};
-use crate::diagnostics::LogAnchor;
-use crate::state::{CellViewRef, SchematicState, SymbolDocument};
 use crate::workbench::app::actions::property_edit::open_property_editor_in;
 use crate::workbench::app::actions::workspace::symbol_document::{
     record_symbol_edit, run_active_symbol_pin_checks, store_active_symbol_document,
@@ -19,6 +17,8 @@ use crate::workbench::app::actions::workspace::{
     commit_pending_inspector_edit, new_schematic_document, restore_active_schematic_from_workspace,
     sync_active_schematic,
 };
+use rspice_app_state::diagnostics::LogAnchor;
+use rspice_app_state::state::{CellViewRef, SchematicState, SymbolDocument};
 
 impl AppState {
     /// [`new_schematic_document`] for the session.
@@ -156,7 +156,7 @@ impl AppState {
 
     fn edit_waivers(
         &mut self,
-        cell_view: &crate::state::CellViewRef,
+        cell_view: &rspice_app_state::state::CellViewRef,
         edit: StoredWaiverEdit,
     ) -> Result<(), String> {
         if let Some(edit) = self.model.edit_held_waivers(cell_view, edit)? {

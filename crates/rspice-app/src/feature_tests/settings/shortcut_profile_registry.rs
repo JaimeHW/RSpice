@@ -6,11 +6,11 @@
 
 use serde_json::Value;
 
-use crate::state::command_catalog::CommandCatalog;
-use crate::state::shortcuts::{
+use crate::workbench::commands::vocabulary::CommandRegistry;
+use rspice_app_state::state::command_catalog::CommandCatalog;
+use rspice_app_state::state::shortcuts::{
     ShortcutPolicies, ShortcutPreferences, ShortcutProfileLibrary, ShortcutProfileLibraryError,
 };
-use crate::workbench::commands::vocabulary::CommandRegistry;
 
 /// The options `AppState::from_session_ron` reads the eframe session
 /// with. The session is written by `ron::ser::to_string`.

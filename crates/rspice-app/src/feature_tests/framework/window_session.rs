@@ -12,7 +12,7 @@ use rspice_app_workbench::workbench::app::dialogs::window_session::*;
 fn the_windows_page_carries_no_constant_paragraphs() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state
         .workbench
@@ -53,7 +53,7 @@ fn the_windows_page_carries_no_constant_paragraphs() {
 fn the_windows_page_actions_are_the_window_menu_rows() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state
         .workbench
@@ -112,7 +112,7 @@ fn the_windows_page_actions_are_the_window_menu_rows() {
 fn the_active_window_offers_no_focus() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state
         .workbench
@@ -157,7 +157,7 @@ fn the_window_workflows_are_command_forms_without_a_monitor_row() {
     ] {
         let ctx = Context::default();
         ctx.enable_accesskit();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         open_window_workflow(&mut app, workflow);
         let input = |events: Vec<egui::Event>| egui::RawInput {
@@ -282,7 +282,7 @@ fn consolidate_and_recovery_are_command_forms_without_explainers() {
     ] {
         let ctx = Context::default();
         ctx.enable_accesskit();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = app_with_detached_windows(workflow);
         let texts = window_dialog_texts(&ctx, &mut app);
         for row in rows {
@@ -334,7 +334,7 @@ fn consolidate_and_recovery_are_command_forms_without_explainers() {
 fn consolidate_with_nothing_detached_refuses_before_running() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_window_workflow(&mut app, WindowWorkflow::ConsolidateWindows);
     let texts = window_dialog_texts(&ctx, &mut app);

@@ -167,7 +167,7 @@ const OUTSIDE_THE_APPLICATION_GATE: &[GateRow] = &[
                 file_name: "gain.va".to_owned(),
                 files: std::collections::BTreeMap::new(),
                 folder: None,
-                closure: crate::state::workspace::ImportClosure {
+                closure: rspice_app_state::state::workspace::ImportClosure {
                     files: Vec::new(),
                     edges: Vec::new(),
                     modules: Ok(Vec::new()),

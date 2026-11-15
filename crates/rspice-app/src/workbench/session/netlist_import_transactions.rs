@@ -7,7 +7,6 @@
 //! these methods run the replacement's steps between, in the order the
 //! import has always run them.
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::netlist_document::NetlistImportOperation;
 use crate::workbench::lifecycle::project_lifecycle;
@@ -24,6 +23,7 @@ use rspice_app_code::workbench::workflows::netlist_workflow::{
 use rspice_app_code::workbench::workflows::netlist_workflow::{
     BrowserNetlistImportResult, pick_browser_netlist, take_browser_netlist_completion,
 };
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 
 /// Committing a reviewed netlist import, over the whole application state.
 impl AppState {
@@ -35,9 +35,9 @@ impl AppState {
         display_name: &str,
     ) -> bool {
         let metadata = NetlistImportMetadata {
-            encoding: crate::state::NetlistTextEncoding::Utf8,
-            line_ending: crate::state::NetlistLineEnding::detect(&source),
-            dialect: crate::state::NetlistSourceDialect::RSpice,
+            encoding: rspice_app_state::state::NetlistTextEncoding::Utf8,
+            line_ending: rspice_app_state::state::NetlistLineEnding::detect(&source),
+            dialect: rspice_app_state::state::NetlistSourceDialect::RSpice,
             compatibility_reviewed: false,
             raw_sha256: sha256(source.as_bytes()),
         };
@@ -57,7 +57,7 @@ impl AppState {
         source_path: Option<std::path::PathBuf>,
         display_name: &str,
         metadata: NetlistImportMetadata,
-        dependencies: Vec<crate::state::DependencyMetadata>,
+        dependencies: Vec<rspice_app_state::state::DependencyMetadata>,
     ) -> bool {
         match self.install_imported_netlist(
             source,
@@ -93,7 +93,7 @@ impl AppState {
         display_name: &str,
         initializing_netlist_project: bool,
         metadata: NetlistImportMetadata,
-        dependencies: Vec<crate::state::DependencyMetadata>,
+        dependencies: Vec<rspice_app_state::state::DependencyMetadata>,
     ) -> Result<(), ImportFailure> {
         imported_deck_refusal(
             &self.model,
@@ -135,7 +135,7 @@ impl AppState {
         source_path: Option<std::path::PathBuf>,
         display_name: &str,
         metadata: NetlistImportMetadata,
-        dependencies: Vec<crate::state::DependencyMetadata>,
+        dependencies: Vec<rspice_app_state::state::DependencyMetadata>,
     ) -> bool {
         if source.trim().is_empty() {
             self.record(
@@ -189,7 +189,7 @@ impl AppState {
         source_path: Option<std::path::PathBuf>,
         display_name: &str,
         metadata: NetlistImportMetadata,
-        dependencies: Vec<crate::state::DependencyMetadata>,
+        dependencies: Vec<rspice_app_state::state::DependencyMetadata>,
     ) -> bool {
         match mode {
             NetlistImportMode::OpenProject => self.apply_opened_netlist_project(
@@ -306,19 +306,19 @@ impl AppState {
     /// limit or the project changed after the transaction began.
     pub(crate) fn stage_netlist_import(
         &mut self,
-        transaction: crate::product::TransactionId,
+        transaction: rspice_app_state::product::TransactionId,
         mode: NetlistImportMode,
         bytes: Vec<u8>,
         source_path: Option<std::path::PathBuf>,
         display_name: String,
     ) -> bool {
-        if bytes.len() as u64 > crate::io::project_io::MAX_PROJECT_FILE_BYTES {
+        if bytes.len() as u64 > rspice_app_services::io::project_io::MAX_PROJECT_FILE_BYTES {
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut self.platform);
             record_import_failure(
                 &mut self.model,
                 &format!(
                     "the selected file exceeds the {} B size limit",
-                    crate::io::project_io::MAX_PROJECT_FILE_BYTES
+                    rspice_app_services::io::project_io::MAX_PROJECT_FILE_BYTES
                 ),
             );
             return false;

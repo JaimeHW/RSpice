@@ -32,13 +32,13 @@ use rspice_simulation_contract::design_variable::{
 use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
 use rspice_simulation_contract::run_set::{RunSetDimensionKind, RunSetState, value_id};
 
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::model_library::SimulationPlanModelBinding;
-use crate::state::{Cell, CellViewRef, SchematicState, View, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_app_project::workbench::workflows::file_workflow::SchematicLoadOrigin;
 use rspice_app_services::workbench::slots::platform::foreign_import_refusal_in;
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_state::state::model_library::SimulationPlanModelBinding;
+use rspice_app_state::state::{Cell, CellViewRef, SchematicState, View, ViewType};
 
 use plan::{ForeignPlan, plan_from_cards};
 use sheet::{OwnSheet, place_on_sheet};
@@ -448,7 +448,7 @@ fn add_symbol_cells(
         edit.add_cell(entry);
     }
     let mutation = state.model.preflight_project_library_mutation(
-        crate::state::ProjectLibraryMutation::CreateCell {
+        rspice_app_state::state::ProjectLibraryMutation::CreateCell {
             library: library.to_owned(),
             cell: first,
         },
@@ -848,7 +848,7 @@ fn commit_plan(
         reference_pvt.temperature_celsius = temperature;
         options.temp = temperature;
     }
-    let payload = crate::state::SimulationPlanPayload {
+    let payload = rspice_app_state::state::SimulationPlanPayload {
         design_variables: variables,
         specs: plan
             .measurements
@@ -860,7 +860,7 @@ fn commit_plan(
             .iter()
             .map(|(_, definition)| definition.clone())
             .collect(),
-        ..crate::state::SimulationPlanPayload::default()
+        ..rspice_app_state::state::SimulationPlanPayload::default()
     };
     match commit_plan_document(
         app,
@@ -893,7 +893,7 @@ fn bind_implied_operating_point(
     analyses: &mut rspice_simulation_contract::plan_model::SimulationPlan,
     notices: &mut Vec<(ForeignNoticeSeverity, String)>,
 ) {
-    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+    use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
     let dependents = analyses
         .instances()
         .iter()
@@ -968,7 +968,7 @@ fn commit_plan_document(
     options: rspice_simulation_contract::options::SimulationOptions,
     run_set: RunSetState,
     model_bindings: Vec<SimulationPlanModelBinding>,
-    payload: &crate::state::SimulationPlanPayload,
+    payload: &rspice_app_state::state::SimulationPlanPayload,
 ) -> Result<String, String> {
     use crate::workbench::app_state::{SimulationPlanImportDocument, SimulationPlanName};
 
@@ -1014,7 +1014,10 @@ fn commit_plan_document(
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    crate::io::capture_execution_context(&setup, &app.state.model.model_library_manager)?;
+    rspice_app_services::io::capture_execution_context(
+        &setup,
+        &app.state.model.model_library_manager,
+    )?;
     let first = setup
         .stable_analysis_plan()?
         .instances()

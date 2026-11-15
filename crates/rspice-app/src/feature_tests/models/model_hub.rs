@@ -7,23 +7,23 @@
 //! therefore exercised the actual signature check, the actual staging and
 //! rename, the actual project retention, and the actual placement arming.
 
-use crate::services::model_hub::ModelHubService;
-use crate::simulation::SimulationController;
-use crate::state::model_hub::tests::{
-    NEXT_VERSION, PACK_ID, StubTransport, VERSION, anchor_for, hub_signing_key, signed_archive,
-    signed_archive_at, signed_snapshot, signed_snapshot_of,
-};
-use crate::state::model_hub::{
-    MemoryModelHubStore, ModelHub, ModelHubStore, PartPlacement, PartProvenance, PartState,
-};
-use crate::state::model_library::ModelLibraryManager;
-use crate::state::{ComponentType, Tool};
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::feature::{Cx, LowerHandles, Peers};
 use crate::workbench::framework::requests::ArmPartPlacement;
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::workspace_state::ModelsOperationalState;
+use rspice_app_runs::simulation::controller::SimulationController;
+use rspice_app_services::services::model_hub::ModelHubService;
+use rspice_app_state::state::model_hub::tests::{
+    NEXT_VERSION, PACK_ID, StubTransport, VERSION, anchor_for, hub_signing_key, signed_archive,
+    signed_archive_at, signed_snapshot, signed_snapshot_of,
+};
+use rspice_app_state::state::model_hub::{
+    MemoryModelHubStore, ModelHub, ModelHubStore, PartPlacement, PartProvenance, PartState,
+};
+use rspice_app_state::state::model_library::ModelLibraryManager;
+use rspice_app_state::state::{ComponentType, Tool};
 
 use crate::workbench::models::pdk_workflow::model_hub::{
     ModelHubOutput, ModelHubRequest, emit_model_hub_errors, execute, publish_model_hub_output,
@@ -40,7 +40,7 @@ fn fixture_hub(
     key: &rspice_pack::SigningKey,
 ) -> (
     ModelHub,
-    crate::services::model_hub::ModelHubStoreHandle,
+    rspice_app_services::services::model_hub::ModelHubStoreHandle,
     std::sync::Arc<MemoryModelHubStore>,
 ) {
     let store = std::sync::Arc::new(MemoryModelHubStore::new());
@@ -50,8 +50,9 @@ fn fixture_hub(
         None,
     )
     .expect("a memory hub opens");
-    let handle =
-        crate::services::model_hub::ModelHubStoreHandle::Memory(std::sync::Arc::clone(&store));
+    let handle = rspice_app_services::services::model_hub::ModelHubStoreHandle::Memory(
+        std::sync::Arc::clone(&store),
+    );
     (hub, handle, store)
 }
 
@@ -61,7 +62,7 @@ fn installed_hub(
     transport: &StubTransport,
 ) -> (
     ModelHub,
-    crate::services::model_hub::ModelHubStoreHandle,
+    rspice_app_services::services::model_hub::ModelHubStoreHandle,
     std::sync::Arc<MemoryModelHubStore>,
 ) {
     let (mut hub, handle, store) = fixture_hub(key);
@@ -125,7 +126,7 @@ fn open_project() -> AppState {
 /// the part it placed is armed once the publishing step returns.
 fn publish(
     state: &mut AppState,
-    handle: crate::services::model_hub::ModelHubStoreHandle,
+    handle: rspice_app_services::services::model_hub::ModelHubStoreHandle,
     hub: ModelHub,
     request: &ModelHubRequest,
     output: ModelHubOutput,
@@ -238,7 +239,7 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
     // The same request against a filesystem store completes the whole gesture.
     let tree = std::env::temp_dir().join(format!("rspice-m4-install-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tree);
-    let store = crate::state::model_hub::FilesystemModelHubStore::new(&tree);
+    let store = rspice_app_state::state::model_hub::FilesystemModelHubStore::new(&tree);
     let mut hub = ModelHub::open(
         anchor_for(&key),
         Box::new(store.clone()),
@@ -246,7 +247,7 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
     )
     .expect("a filesystem hub opens");
     hub.refresh_catalog(&transport).expect("catalog");
-    let handle = crate::services::model_hub::ModelHubStoreHandle::Filesystem {
+    let handle = rspice_app_services::services::model_hub::ModelHubStoreHandle::Filesystem {
         store,
         root: tree.join("packs"),
     };
@@ -334,14 +335,14 @@ fn updating_installs_the_newer_release_and_removes_the_older() {
     ));
     let _ = std::fs::remove_dir_all(&tree);
     let packs = tree.join("packs");
-    let store = crate::state::model_hub::FilesystemModelHubStore::new(&tree);
+    let store = rspice_app_state::state::model_hub::FilesystemModelHubStore::new(&tree);
     let mut hub = ModelHub::open(
         anchor_for(&key),
         Box::new(store.clone()),
         Some(packs.clone()),
     )
     .expect("a filesystem hub opens");
-    let handle = crate::services::model_hub::ModelHubStoreHandle::Filesystem {
+    let handle = rspice_app_services::services::model_hub::ModelHubStoreHandle::Filesystem {
         store,
         root: packs.clone(),
     };
@@ -459,7 +460,9 @@ fn updating_installs_the_newer_release_and_removes_the_older() {
     assert_eq!(pin.archive_sha256, rspice_pack::sha256_hex(&archive));
     let cards = reloaded
         .seal_execution_sources()
-        .and_then(|sealed| sealed.reference_process_model_cards(crate::product::ProcessCorner::TT))
+        .and_then(|sealed| {
+            sealed.reference_process_model_cards(rspice_app_state::product::ProcessCorner::TT)
+        })
         .expect("the retained snapshot materializes after the update");
     let deck = format!(
         "model hub update deck\n{}\nV1 IN 0 1\nX1 IN OUT {PART}\n.op\n.end\n",
@@ -686,8 +689,8 @@ fn the_acceptance_sequence_runs_end_to_end_and_survives_uninstalling_the_pack() 
     ));
     let _ = std::fs::remove_dir_all(&tree);
     let packs = tree.join("packs");
-    let store = crate::state::model_hub::FilesystemModelHubStore::new(&tree);
-    let handle = crate::services::model_hub::ModelHubStoreHandle::Filesystem {
+    let store = rspice_app_state::state::model_hub::FilesystemModelHubStore::new(&tree);
+    let handle = rspice_app_services::services::model_hub::ModelHubStoreHandle::Filesystem {
         store: store.clone(),
         root: packs.clone(),
     };
@@ -712,8 +715,9 @@ fn the_acceptance_sequence_runs_end_to_end_and_survives_uninstalling_the_pack() 
 fn the_acceptance_sequence_runs_end_to_end_on_the_browser_store() {
     let key = hub_signing_key();
     let store = std::sync::Arc::new(MemoryModelHubStore::new());
-    let handle =
-        crate::services::model_hub::ModelHubStoreHandle::Memory(std::sync::Arc::clone(&store));
+    let handle = rspice_app_services::services::model_hub::ModelHubStoreHandle::Memory(
+        std::sync::Arc::clone(&store),
+    );
     acceptance_sequence(&key, handle, &|| {
         ModelHub::open(
             anchor_for(&key),
@@ -736,7 +740,7 @@ fn the_acceptance_sequence_runs_end_to_end_on_the_browser_store() {
 /// does.
 fn acceptance_sequence(
     key: &rspice_pack::SigningKey,
-    handle: crate::services::model_hub::ModelHubStoreHandle,
+    handle: rspice_app_services::services::model_hub::ModelHubStoreHandle,
     open: &dyn Fn() -> ModelHub,
 ) {
     let archive = signed_archive(key, &CAPABILITIES);
@@ -788,7 +792,7 @@ fn acceptance_sequence(
     let id = state
         .model
         .schematic
-        .add_library_cell_component(crate::state::Point::new(100, 100), binding);
+        .add_library_cell_component(rspice_app_state::state::Point::new(100, 100), binding);
     assert!(
         state
             .model
@@ -800,7 +804,8 @@ fn acceptance_sequence(
     );
 
     // 4. The netlist names the part as the instance master.
-    let deck = crate::simulation::table_route::generate_netlist(&state.model.schematic).netlist;
+    let deck =
+        rspice_app_state::simulation::table_route::generate_netlist(&state.model.schematic).netlist;
     assert!(
         deck.contains(PART),
         "the emitted deck instantiates the pack part:\n{deck}"
@@ -827,7 +832,9 @@ fn acceptance_sequence(
 
     let cards = reloaded
         .seal_execution_sources()
-        .and_then(|sealed| sealed.reference_process_model_cards(crate::product::ProcessCorner::TT))
+        .and_then(|sealed| {
+            sealed.reference_process_model_cards(rspice_app_state::product::ProcessCorner::TT)
+        })
         .expect("the retained snapshot materializes with the pack uninstalled");
     let offline_deck = format!(
         "model hub acceptance deck\n{}\nV1 IN 0 1\nX1 IN OUT {PART}\n.op\n.end\n",
@@ -873,10 +880,10 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
             .is_none()
     );
 
-    let id = state
-        .model
-        .schematic
-        .add_component(ComponentType::Diode, crate::state::Point::new(100, 100));
+    let id = state.model.schematic.add_component(
+        ComponentType::Diode,
+        rspice_app_state::state::Point::new(100, 100),
+    );
     let placed = state
         .model
         .schematic
@@ -903,10 +910,10 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
             .pending_part_model
             .is_none()
     );
-    let id = state
-        .model
-        .schematic
-        .add_component(ComponentType::Resistor, crate::state::Point::new(200, 200));
+    let id = state.model.schematic.add_component(
+        ComponentType::Resistor,
+        rspice_app_state::state::Point::new(200, 200),
+    );
     let placed = state
         .model
         .schematic
@@ -957,10 +964,10 @@ fn a_failed_catalog_refresh_is_not_asked_again_in_the_same_visit() {
 /// the old one — with both releases on the machine the whole time.
 #[test]
 fn adopting_one_part_moves_its_pin_and_leaves_every_other_pin_where_it_was() {
-    use crate::state::model_hub::tests::{
+    use rspice_app_state::state::model_hub::tests::{
         BIAS_PART_ID, DIVIDER_ALIAS_NEXT, signed_snapshot_projecting, two_part_archive,
     };
-    use crate::state::model_hub::{PartFact, PartStanding};
+    use rspice_app_state::state::model_hub::{PartFact, PartStanding};
 
     let key = hub_signing_key();
     let archive = two_part_archive(&key, &CAPABILITIES, VERSION);
@@ -1152,7 +1159,7 @@ fn pinned_versions(manager: &ModelLibraryManager) -> Vec<(String, String)> {
 /// every other hub refusal uses.
 #[test]
 fn a_release_the_catalog_no_longer_publishes_refuses_adoption_with_the_reason() {
-    use crate::state::model_hub::tests::{signed_snapshot_projecting, two_part_archive};
+    use rspice_app_state::state::model_hub::tests::{signed_snapshot_projecting, two_part_archive};
 
     let key = hub_signing_key();
     let archive = two_part_archive(&key, &CAPABILITIES, VERSION);
@@ -1218,7 +1225,7 @@ fn a_release_the_catalog_no_longer_publishes_refuses_adoption_with_the_reason() 
 /// every test in either layer would still pass.
 #[test]
 fn each_model_hub_trust_refusal_reaches_the_rung_written_for_it() {
-    use crate::state::model_hub::ModelHubError;
+    use rspice_app_state::state::model_hub::ModelHubError;
 
     for (refusal, expected) in [
         (
@@ -1264,7 +1271,7 @@ fn each_model_hub_trust_refusal_reaches_the_rung_written_for_it() {
 /// receipt classifies onto the rung whose consequence line is true of it.
 #[test]
 fn an_update_onto_a_recalled_release_refuses_on_the_operation_machine() {
-    use crate::state::model_hub::tests::{CatalogTerms, signed_snapshot_on};
+    use rspice_app_state::state::model_hub::tests::{CatalogTerms, signed_snapshot_on};
 
     const REASON: &str = "the divider ratio was published against the wrong reference.";
 
@@ -1349,8 +1356,8 @@ fn an_update_onto_a_recalled_release_refuses_on_the_operation_machine() {
 /// walk somewhere else to find is one they find after the work is done.
 #[test]
 fn a_project_pinned_to_a_recalled_release_is_warned_on_open_and_still_solves() {
-    use crate::state::model_hub::tests::{CatalogTerms, signed_snapshot_on};
     use crate::workbench::RSpiceApp;
+    use rspice_app_state::state::model_hub::tests::{CatalogTerms, signed_snapshot_on};
 
     const REASON: &str = "the divider ratio was published against the wrong reference.";
 
@@ -1385,7 +1392,7 @@ fn a_project_pinned_to_a_recalled_release_is_warned_on_open_and_still_solves() {
     // A session opens that project, over a store that already knows.
     let ctx = egui::Context::default();
     let mut app = RSpiceApp::test_instance();
-    app.model_hub = crate::services::model_hub::ModelHubService::with_store(
+    app.model_hub = rspice_app_services::services::model_hub::ModelHubService::with_store(
         handle,
         ModelHub::open(anchor_for(&key), Box::new(store), None).expect("the session hub opens"),
     );
@@ -1443,7 +1450,9 @@ fn a_project_pinned_to_a_recalled_release_is_warned_on_open_and_still_solves() {
 fn divider_output(manager: &ModelLibraryManager) -> f64 {
     let cards = manager
         .seal_execution_sources()
-        .and_then(|sealed| sealed.reference_process_model_cards(crate::product::ProcessCorner::TT))
+        .and_then(|sealed| {
+            sealed.reference_process_model_cards(rspice_app_state::product::ProcessCorner::TT)
+        })
         .expect("the retained snapshot materializes");
     let deck = format!(
         "model hub adoption deck\n{}\nV1 IN 0 1\nX1 IN OUT {PART}\n.op\n.end\n",

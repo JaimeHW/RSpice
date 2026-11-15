@@ -2,7 +2,9 @@
 //! run through the whole application.
 
 use super::state_with_work_cell;
-use crate::state::{CellViewRef, ComponentType, Point, ValidatedRevisionJournal, View, ViewType};
+use rspice_app_state::state::{
+    CellViewRef, ComponentType, Point, ValidatedRevisionJournal, View, ViewType,
+};
 
 #[test]
 fn copy_cell_resets_the_validated_revision_journal() {

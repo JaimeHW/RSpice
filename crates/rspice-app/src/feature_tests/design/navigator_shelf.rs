@@ -5,11 +5,6 @@ use crate::schematic::view::SchematicShelfDragPayload;
 use crate::schematic::{
     ComponentCategory, PaletteRow, component_palette, palette_rows, supply_palette,
 };
-use crate::state::model_hub::PartPlacement;
-use crate::state::{
-    ComponentType, Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports,
-    engine_only_xspice_devices,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design::navigator::shelf::*;
@@ -18,6 +13,11 @@ use crate::workbench::design::navigator::tests::shelf::{
 };
 use crate::workbench::design::navigator::tests::*;
 use crate::workbench::framework::requests::FocusPlacementSearch;
+use rspice_app_state::state::model_hub::PartPlacement;
+use rspice_app_state::state::{
+    ComponentType, Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports,
+    engine_only_xspice_devices,
+};
 use std::collections::HashSet;
 
 /// The Component shelf under test: the application it paints from and the
@@ -37,7 +37,7 @@ impl ShelfHarness {
     /// A themed shelf that has painted nothing yet.
     fn opened() -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         Self {
             ctx,
             app: RSpiceApp::test_instance(),
@@ -235,11 +235,10 @@ fn a_variant_row_places_its_type_with_its_card_and_skin() {
         app.state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::Diode)
     );
-    let id = app
-        .state
-        .model
-        .schematic
-        .add_component(ComponentType::Diode, crate::state::Point::origin());
+    let id = app.state.model.schematic.add_component(
+        ComponentType::Diode,
+        rspice_app_state::state::Point::origin(),
+    );
     let placed = app
         .state
         .model
@@ -258,7 +257,7 @@ fn a_variant_row_places_its_type_with_its_card_and_skin() {
 /// a global label, and the row reads as armed until the tool changes.
 #[test]
 fn a_supply_row_places_its_global_rail_on_every_click() {
-    use crate::state::{NetLabelKind, Point};
+    use rspice_app_state::state::{NetLabelKind, Point};
     use rspice_design::schematic::net_label::SupplyGlyph;
 
     let filed = palette_rows(ComponentCategory::HierarchyConnectivity)
@@ -402,7 +401,7 @@ fn announced_controls(output: &egui::FullOutput) -> Vec<(String, egui::Rect, Opt
 fn a_fresh_shelf_opens_passives_and_folds_the_rest_until_the_reader_moves_one() {
     let mut app = RSpiceApp::test_instance();
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
 
     // Two settling frames: the first builds the font set, the second lays
@@ -640,7 +639,7 @@ fn place(state: &mut AppState, kind: ComponentType) {
     state
         .model
         .schematic
-        .add_component(kind, crate::state::Point::new(40, 40));
+        .add_component(kind, rspice_app_state::state::Point::new(40, 40));
 }
 
 /// A fresh profile takes the shipped pin set, and the first pin or unpin makes
@@ -943,12 +942,10 @@ fn a_design_that_grows_without_the_shelf_writes_no_history() {
     let mut shelf = ShelfHarness::opened().settled();
 
     shelf.app.state.model.schematic.cancel_tool();
-    shelf
-        .app
-        .state
-        .model
-        .schematic
-        .add_component(ComponentType::Diode, crate::state::Point::new(40, 40));
+    shelf.app.state.model.schematic.add_component(
+        ComponentType::Diode,
+        rspice_app_state::state::Point::new(40, 40),
+    );
     let (text, _) = shelf.frame(Vec::new());
 
     assert!(
@@ -981,7 +978,7 @@ fn switching_designs_credits_nothing_to_the_reader() {
     for offset in 0..4 {
         shelf.app.state.model.schematic.add_component(
             ComponentType::Nmos,
-            crate::state::Point::new(40 + offset, 40),
+            rspice_app_state::state::Point::new(40 + offset, 40),
         );
     }
     let _ = shelf.frame(Vec::new());
@@ -1068,12 +1065,10 @@ fn a_drag_onto_the_sheet_credits_the_part_the_drop_consumed() {
 
     // The drop: the canvas takes the payload and commits the object.
     egui::DragAndDrop::clear_payload(&shelf.ctx);
-    shelf
-        .app
-        .state
-        .model
-        .schematic
-        .add_component(ComponentType::Nmos, crate::state::Point::new(40, 40));
+    shelf.app.state.model.schematic.add_component(
+        ComponentType::Nmos,
+        rspice_app_state::state::Point::new(40, 40),
+    );
     let (text, _) = shelf.frame(Vec::new());
 
     assert_eq!(
@@ -1109,12 +1104,10 @@ fn a_tool_the_reader_put_away_credits_no_later_growth() {
     );
 
     // The design grows on its own, well after the offer was withdrawn.
-    shelf
-        .app
-        .state
-        .model
-        .schematic
-        .add_component(ComponentType::Diode, crate::state::Point::new(40, 40));
+    shelf.app.state.model.schematic.add_component(
+        ComponentType::Diode,
+        rspice_app_state::state::Point::new(40, 40),
+    );
     let (text, _) = shelf.frame(Vec::new());
 
     assert!(
@@ -1325,12 +1318,13 @@ fn the_pin_menu_opens_from_the_keyboard_on_the_focused_row() {
 #[test]
 fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
     let mut shelf = ShelfHarness::opened();
-    let mut definition = crate::state::stimulus_library::definition::StimulusDefinition::new(
-        "sensor_drive",
-        ComponentType::VoltageSourceSin,
-        crate::state::stimulus_library::now_unix_ms,
-    )
-    .expect("definition");
+    let mut definition =
+        rspice_app_state::state::stimulus_library::definition::StimulusDefinition::new(
+            "sensor_drive",
+            ComponentType::VoltageSourceSin,
+            rspice_app_state::state::stimulus_library::now_unix_ms,
+        )
+        .expect("definition");
     definition.value = "0".to_owned();
     definition.params = "va=3m freq=1k".to_owned();
     shelf

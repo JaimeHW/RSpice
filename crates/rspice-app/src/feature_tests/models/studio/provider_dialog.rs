@@ -1,8 +1,8 @@
 //! Failed provider publication retains the rendered transaction for retry.
 
 use super::*;
-use crate::state::model_library::ModelConsumerScope;
 use crate::workbench::models::workspace_state::ModelsWorkbenchDialog;
+use rspice_app_state::state::model_library::ModelConsumerScope;
 
 #[test]
 fn resolved_model_and_subcircuit_rows_reopen_and_clear_their_provider_decisions() {
@@ -106,7 +106,7 @@ fn failed_provider_publication_preserves_the_dialog_draft_and_accepted_decision(
         Ok(std::time::Duration::ZERO),
         Ok(std::time::Duration::MAX),
     ] {
-        crate::time_compat::with_unix_epoch(epoch, || {
+        rspice_app_state::time_compat::with_unix_epoch(epoch, || {
             studio.click(|label| label == "Publish provider decision");
         });
         let Some(ModelsWorkbenchDialog::DefinitionConflict {

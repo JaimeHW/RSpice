@@ -1,11 +1,11 @@
 //! Inline instance edits drawn through a whole application: drafts, quoted neighbours,
 //! rejected fields, stale authority, and the functional and gate presets.
 
-use crate::state::ComponentType;
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::inspector::inline_instance::*;
 use crate::workbench::design_system::PropertyRowCaption;
 use crate::workbench::state::{InlineEditField, Workspace};
+use rspice_app_state::state::ComponentType;
 use std::collections::HashMap;
 
 #[test]
@@ -32,14 +32,14 @@ fn parameter_field_commit_preserves_quoted_neighbors_and_undo_restores_duplicate
         .clone();
     assert!(committed.starts_with(r#"label="a  b" note="#));
     assert_eq!(
-        crate::state::parse_params_string(&committed),
+        rspice_app_state::state::parse_params_string(&committed),
         HashMap::from([
             ("label".to_owned(), "a  b".to_owned()),
             ("note".to_owned(), note.to_owned()),
         ])
     );
     assert_eq!(
-        crate::state::params_string::parameter_entries(&committed).count(),
+        rspice_app_state::state::params_string::parameter_entries(&committed).count(),
         2
     );
     assert_eq!(
@@ -93,7 +93,7 @@ fn malformed_parameter_text_retains_the_field_draft_until_raw_text_is_repaired()
         repaired
     );
     assert_eq!(
-        crate::state::parse_params_string(repaired)["label"],
+        rspice_app_state::state::parse_params_string(repaired)["label"],
         " a  b "
     );
     assert!(editor.app.state.workbench.inline_edit.session().is_none());
@@ -158,8 +158,9 @@ fn escape_discards_valid_and_invalid_fields_without_design_or_history_changes() 
         ("Value", "12"),
     ] {
         let mut editor = Editor::new();
-        let before =
-            crate::state::SchematicSnapshot::capture(editor.app.state.model.schematic.document());
+        let before = rspice_app_state::state::SchematicSnapshot::capture(
+            editor.app.state.model.schematic.document(),
+        );
         let topology = editor.app.state.model.schematic.topology_version();
         editor.edit(label, draft);
         assert!(before.is_equal_document(editor.app.state.model.schematic.document()));
@@ -212,7 +213,7 @@ fn changed_document_authority_or_component_never_reauthorizes_an_old_draft() {
             "buffer" => editor.app.state.model.active_schematic_epoch += 1,
             "project" => {
                 editor.app.state.model.workspace.content.project =
-                    crate::state::ProjectDescriptor::default()
+                    rspice_app_state::state::ProjectDescriptor::default()
             }
             "view" => {
                 editor.app.state.model.workspace.content.active_view.cell = "different".to_owned()
@@ -229,8 +230,9 @@ fn changed_document_authority_or_component_never_reauthorizes_an_old_draft() {
             }
             _ => unreachable!(),
         }
-        let before =
-            crate::state::SchematicSnapshot::capture(editor.app.state.model.schematic.document());
+        let before = rspice_app_state::state::SchematicSnapshot::capture(
+            editor.app.state.model.schematic.document(),
+        );
         assert!(
             editor.app.state.commit_inline_component_edit().is_err(),
             "{change}"
@@ -259,10 +261,11 @@ fn changed_document_authority_or_component_never_reauthorizes_an_old_draft() {
 #[test]
 fn choosing_a_functional_preset_inline_fills_its_parameters() {
     let mut app = RSpiceApp::test_instance();
-    let timer = crate::state::functional_part("rspice.functional.timer555").expect("555");
+    let timer =
+        rspice_app_state::state::functional_part("rspice.functional.timer555").expect("555");
     let id = app.state.model.schematic.add_library_cell_component(
-        crate::state::Point::origin(),
-        crate::state::functional_library_binding(timer),
+        rspice_app_state::state::Point::origin(),
+        rspice_app_state::state::functional_library_binding(timer),
     );
     let component = app
         .state
@@ -311,10 +314,10 @@ fn choosing_a_functional_preset_inline_fills_its_parameters() {
 #[test]
 fn choosing_a_gates_input_count_inline_redraws_its_pins() {
     let mut app = RSpiceApp::test_instance();
-    let gate = crate::state::functional_part("rspice.functional.nand").expect("NAND");
+    let gate = rspice_app_state::state::functional_part("rspice.functional.nand").expect("NAND");
     let id = app.state.model.schematic.add_library_cell_component(
-        crate::state::Point::origin(),
-        crate::state::functional_library_binding(gate),
+        rspice_app_state::state::Point::origin(),
+        rspice_app_state::state::functional_library_binding(gate),
     );
     let component = app
         .state
@@ -361,15 +364,14 @@ pub(crate) struct Editor {
 impl Editor {
     pub(crate) fn new() -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Design);
-        let id = app
-            .state
-            .model
-            .schematic
-            .add_component(ComponentType::VoltageSource, crate::state::Point::origin());
+        let id = app.state.model.schematic.add_component(
+            ComponentType::VoltageSource,
+            rspice_app_state::state::Point::origin(),
+        );
         app.state.model.schematic.clear_undo_history();
         app.state.model.schematic.session.is_dirty = false;
         Self {

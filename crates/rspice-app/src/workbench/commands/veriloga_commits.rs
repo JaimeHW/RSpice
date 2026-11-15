@@ -9,11 +9,11 @@
 //! stay methods on the app so that the code feature's tests reach them the
 //! way the shell's arms do.
 
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::CellViewRef;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::app::dialogs::library::{new_veriloga_device, veriloga_import};
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_state::state::CellViewRef;
 
 impl RSpiceApp {
     /// Create the import form's cells and open the first in Design.

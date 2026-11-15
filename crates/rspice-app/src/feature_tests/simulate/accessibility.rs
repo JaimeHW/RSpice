@@ -20,10 +20,10 @@ use egui::{Rect, vec2};
 
 use super::page_contracts::RENDER_VIEWPORT_HEIGHT;
 use super::stage::show_on_stage;
-use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
 use rspice_app_simulate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
 use rspice_app_simulate::workbench::surfaces::simulate::{participation, variable_import};
+use rspice_app_state::state::SimulationPage;
 
 /// A studio fixture that reaches every analysis form and every participation
 /// state the routes have a cell for.
@@ -32,7 +32,7 @@ use rspice_app_simulate::workbench::surfaces::simulate::{participation, variable
 /// participations that are not "everywhere": a nominal-only instance and one
 /// narrowed to a named subset.
 fn studio_fixture() -> RSpiceApp {
-    use crate::simulation::plan::{AnalysisInstance, AnalysisKind};
+    use rspice_app_state::simulation::plan::{AnalysisInstance, AnalysisKind};
     use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
     use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
@@ -134,8 +134,8 @@ fn studio_fixture() -> RSpiceApp {
 /// prerequisites the plan asks for bound to an instance already present. `None`
 /// where the plan refuses the insert outright, which is a kind that cannot be
 /// on a form for this fixture and therefore has no form to measure.
-fn studio_form(kind: crate::simulation::plan::AnalysisKind) -> Option<RSpiceApp> {
-    use crate::simulation::plan::AnalysisInstance;
+fn studio_form(kind: rspice_app_state::simulation::plan::AnalysisKind) -> Option<RSpiceApp> {
+    use rspice_app_state::simulation::plan::AnalysisInstance;
 
     let mut app = studio_fixture();
     app.state.simulate.simulation_page = SimulationPage::Analyses;
@@ -184,8 +184,8 @@ fn studio_form(kind: crate::simulation::plan::AnalysisKind) -> Option<RSpiceApp>
 /// Kinds rather than instance identities: every call to [`studio_fixture`]
 /// mints fresh ones, so an identity taken from one fixture selects nothing in
 /// the next and every route silently falls back to the plan's first analysis.
-fn studio_analysis_kinds() -> Vec<crate::simulation::plan::AnalysisKind> {
-    use crate::simulation::plan::AnalysisInstance;
+fn studio_analysis_kinds() -> Vec<rspice_app_state::simulation::plan::AnalysisKind> {
+    use rspice_app_state::simulation::plan::AnalysisInstance;
     studio_fixture()
         .state
         .model
@@ -210,7 +210,7 @@ pub(super) fn studio_route_nodes(
     width: f32,
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut nodes = Vec::new();
     // Two passes: the surface resolves its content width against the scrollbar
@@ -254,7 +254,7 @@ fn studio_route_passes(
     passes: usize,
 ) -> Vec<Vec<(egui::accesskit::NodeId, egui::accesskit::Rect)>> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut recorded = Vec::with_capacity(passes);
     for _ in 0..passes {
@@ -311,7 +311,7 @@ fn workflow_host_nodes(
     width: f32,
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut nodes = Vec::new();
     for _ in 0..2 {
@@ -350,9 +350,9 @@ const GATE_WIDTHS: [f32; 14] = [
 /// The fixture on one route, with the instance of one kind selected.
 pub(super) fn studio_route(
     page: SimulationPage,
-    kind: Option<crate::simulation::plan::AnalysisKind>,
+    kind: Option<rspice_app_state::simulation::plan::AnalysisKind>,
 ) -> RSpiceApp {
-    use crate::simulation::plan::AnalysisInstance;
+    use rspice_app_state::simulation::plan::AnalysisInstance;
     let mut app = studio_fixture();
     app.state.simulate.simulation_page = page;
     if let Some(kind) = kind {
@@ -380,7 +380,7 @@ pub(super) fn studio_route(
 /// Every route of the studio, and on the Analyses route every form it holds.
 pub(super) fn studio_routes() -> Vec<(
     SimulationPage,
-    Option<crate::simulation::plan::AnalysisKind>,
+    Option<rspice_app_state::simulation::plan::AnalysisKind>,
 )> {
     let mut routes = Vec::new();
     for page in SimulationPage::NAVIGATION {
@@ -398,8 +398,8 @@ pub(super) fn studio_routes() -> Vec<(
 }
 
 /// The first enabled analysis of a fixture, for the overlays that open on one.
-fn first_enabled_instance(app: &RSpiceApp) -> crate::product::AnalysisInstanceId {
-    use crate::simulation::plan::AnalysisInstance;
+fn first_enabled_instance(app: &RSpiceApp) -> rspice_app_state::product::AnalysisInstanceId {
+    use rspice_app_state::simulation::plan::AnalysisInstance;
     app.state
         .model
         .sim_setup
@@ -495,12 +495,12 @@ fn the_analysis_catalogue_is_hosted_by_the_frame_on_every_route() {
 /// [`every_studio_workflow_draft_has_an_overlay_fixture`] counts the list
 /// against the enum rather than trusting the sentence.
 pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
-    use crate::simulation::plan::{
-        AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, SolverOwnership,
-    };
     use crate::workbench::state::{
         CaptureGroupDraft, ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft,
         SavedOutputDraft, SimulationPlanManagerDraft, SimulationWorkflowDialog,
+    };
+    use rspice_app_state::simulation::plan::{
+        AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, SolverOwnership,
     };
 
     let mut overlays: Vec<(String, RSpiceApp)> = analysis_catalogue_fixtures();
@@ -789,7 +789,7 @@ fn no_analyses_page_control_is_cut_off_at_any_gate() {
     let mut measured = 0usize;
     let mut forms = 0usize;
     for width in GATE_WIDTHS {
-        for kind in crate::simulation::plan::AnalysisKind::ALL {
+        for kind in rspice_app_state::simulation::plan::AnalysisKind::ALL {
             let Some(app) = studio_form(kind) else {
                 continue;
             };
@@ -843,7 +843,7 @@ fn no_analyses_page_control_is_cut_off_at_any_gate() {
          it is not reaching the forms it claims to check",
         GATE_WIDTHS.len()
     );
-    let kinds = crate::simulation::plan::AnalysisKind::ALL.len();
+    let kinds = rspice_app_state::simulation::plan::AnalysisKind::ALL.len();
     assert!(
         forms >= (kinds - 4) * GATE_WIDTHS.len(),
         "the sweep opened {forms} forms across {} widths; every one of the {kinds} kinds the \
@@ -1087,7 +1087,7 @@ const PLAN_HEADER_ACTIONS: [&str; 5] = [
 /// theme rather than restated as a constant this test could get wrong.
 fn scroll_track_width() -> f32 {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut width = f32::NAN;
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {

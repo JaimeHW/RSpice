@@ -930,7 +930,7 @@ fn painted_sheet(state: &mut AppState) -> Vec<String> {
     let symbols = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
     let ctx = egui::Context::default();
     ctx.set_os(egui::os::OperatingSystem::Nix);
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut output = None;
     for _ in 0..3 {
         let editor = &mut state.model.schematic.session.editor;
@@ -938,7 +938,7 @@ fn painted_sheet(state: &mut AppState) -> Vec<String> {
         editor.needs_drawing_sheet_fit = false;
         editor.zoom = 2.0;
         editor.pan = (40.0, 40.0);
-        let input = crate::ui::raster::display_input(egui::vec2(1200.0, 900.0), 1.0);
+        let input = rspice_app_workbench::ui::raster::display_input(egui::vec2(1200.0, 900.0), 1.0);
         output = Some(ctx.run_ui(input, |ui| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
@@ -972,9 +972,9 @@ fn painted_sheet(state: &mut AppState) -> Vec<String> {
 /// and every symbol it read gone, the sheet paints the same.
 #[test]
 fn an_imported_sheet_draws_the_same_with_its_source_gone() {
-    use crate::state::ComponentType;
     use crate::workbench::app::project_transactions::apply_loaded_project;
     use rspice_app_project::workbench::workflows::project_workflow::ProjectLoadOrigin;
+    use rspice_app_state::state::ComponentType;
 
     let folder = drawing_folder();
     std::fs::write(
@@ -1015,7 +1015,7 @@ fn an_imported_sheet_draws_the_same_with_its_source_gone() {
     ));
     assert!(app.state.save_project_to_path(&project), "it saves");
     std::fs::remove_dir_all(&folder).expect("the drawing is gone");
-    let loaded = crate::io::load_project_file(&project).expect("it reloads");
+    let loaded = rspice_app_services::io::load_project_file(&project).expect("it reloads");
 
     let mut reopened = RSpiceApp::test_instance();
     assert!(apply_loaded_project(

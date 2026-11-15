@@ -2,7 +2,6 @@
 //! transactions it opens, the creation form a project with no deck opens,
 //! and the properties and rows the frame draws.
 
-use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::workbench::AppState;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::documents::code_workspace::{CodeSourceFileAction, CodeWorkspacePage};
@@ -13,6 +12,7 @@ use rspice_app_code::workbench::app::dialogs::source_document::{
     open_source_document_dialog_in, source_document_dialog_is_available,
 };
 use rspice_app_code::workbench::code::commands::LifecycleAction;
+use rspice_app_state::state::{ProjectSourceLanguage, ProjectSourceOwner};
 
 /// Bring the lifecycle dialog up for the page that is showing, as Manage
 /// source document does.
@@ -178,7 +178,7 @@ fn new_source_document_opens_on_a_project_that_owns_no_deck() {
 fn an_owned_deck_states_its_properties_without_identity_jargon() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = owned_deck_app();
     let mut nodes = std::collections::HashMap::new();
     for _ in 0..3 {
@@ -224,7 +224,7 @@ fn an_owned_deck_states_its_properties_without_identity_jargon() {
 fn a_source_document_states_its_properties_without_identity_jargon() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
     open_source_document_dialog(&mut app.state).unwrap();
@@ -293,7 +293,7 @@ fn owned_deck_app() -> RSpiceApp {
 fn dialog_nodes(app: &mut RSpiceApp) -> Vec<egui::accesskit::Node> {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut nodes = std::collections::HashMap::new();
     for _ in 0..3 {
         let output = ctx.run_ui(

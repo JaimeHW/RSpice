@@ -2,8 +2,8 @@
 
 use crate::schematic::view::interaction::handle_tool_interactions;
 use crate::schematic::view::schematic_symbol_context;
-use crate::state::{ComponentType, Point, Tool, Wire};
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{ComponentType, Point, Tool, Wire};
 use rspice_schematic_editor::view::viewport::Viewport;
 
 /// One frame of the armed tool at `time` seconds with `events`, on a focused

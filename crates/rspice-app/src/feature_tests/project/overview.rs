@@ -4,7 +4,6 @@
 use rspice_design::drc::DrcSeverity;
 use std::collections::BTreeSet;
 
-use crate::state::CellViewRef;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
@@ -16,6 +15,7 @@ use rspice_app_project::workbench::surfaces::project::overview::{
     OverviewIntent, OverviewSnapshot, ProblemSnapshot, Tone, design_objects, problem_snapshot,
     run_plan_intent,
 };
+use rspice_app_state::state::CellViewRef;
 
 /// The Overview's snapshot, as the page takes it in the context the shell
 /// lends it, with the dispatcher's answers for the commands its rows offer.
@@ -223,7 +223,7 @@ fn current_checks_without_a_retained_result_are_never_green() {
     app.state.model.workspace.content.active_view = CellViewRef::new(
         &app.state.model.workspace.content.project.root_library,
         &app.state.model.workspace.content.project.top_cell,
-        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+        rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     let problem = problem_of(&mut app).expect("checks that have not run are a finding");
     assert_eq!(problem.code, "NOT RUN");
@@ -240,7 +240,7 @@ fn a_clean_project_root_states_no_problem() {
     app.state.model.workspace.content.active_view = CellViewRef::new(
         &app.state.model.workspace.content.project.root_library,
         &app.state.model.workspace.content.project.top_cell,
-        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+        rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     let mut result = DrcResult::default();
     result.completed = true;
@@ -259,7 +259,7 @@ fn project_problem_selects_the_highest_severity_finding() {
     app.state.model.workspace.content.active_view = CellViewRef::new(
         &app.state.model.workspace.content.project.root_library,
         &app.state.model.workspace.content.project.top_cell,
-        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+        rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     let mut result = DrcResult::new();
     result.add_violation(DrcViolation {

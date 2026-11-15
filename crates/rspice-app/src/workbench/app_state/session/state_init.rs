@@ -3,12 +3,12 @@
 //! The initial [`AppState`], and the default model library and analysis
 //! viewers behind it; and the state a launch starts from.
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
 use rspice_app_models::workbench::app_state::session::pdk_settings::PdkSettingsDialogState;
 use rspice_app_results::workbench::app_state::session::calculator::CalculatorPanel;
 use rspice_app_results::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
 use rspice_app_settings::workbench::app_state::session::preferences_file::PreferencesStore;
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_state::workbench::workspace::restore_session_model_library_manager;
 
 impl AppState {
@@ -57,10 +57,10 @@ pub(in crate::workbench) fn default_analysis_viewers() -> AnalysisWorkspaceState
 pub(in crate::workbench) fn default_app_state() -> AppState {
     let analysis = default_analysis_viewers();
     #[cfg(all(not(test), not(target_arch = "wasm32")))]
-    let (pdk_config, pdk_load_error) = match crate::state::pdk_config::load() {
+    let (pdk_config, pdk_load_error) = match rspice_app_state::state::pdk_config::load() {
         Ok(config) => (config, None),
         Err(error) => (
-            crate::state::pdk_config::PdkConfig::default(),
+            rspice_app_state::state::pdk_config::PdkConfig::default(),
             Some(error.to_string()),
         ),
     };
@@ -69,7 +69,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     // persisted trust or package authority is present in the live state.
     #[cfg(all(not(test), target_arch = "wasm32"))]
     let (pdk_config, pdk_load_error) = (
-        crate::state::pdk_config::PdkConfig::default(),
+        rspice_app_state::state::pdk_config::PdkConfig::default(),
         None::<String>,
     );
     // Unit tests must never inherit user- or machine-owned trust state. Apart
@@ -77,7 +77,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     // authority it did not explicitly provision.
     #[cfg(test)]
     let (pdk_config, pdk_load_error) = (
-        crate::state::pdk_config::PdkConfig::default(),
+        rspice_app_state::state::pdk_config::PdkConfig::default(),
         None::<String>,
     );
     let model = crate::workbench::app_state::Model::session_start(
@@ -130,7 +130,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
 
 #[cfg(test)]
 mod tests {
-    use crate::state::ProjectSourceLanguage;
+    use rspice_app_state::state::ProjectSourceLanguage;
 
     #[test]
     fn bootstrapped_code_sources_prepare_an_exact_snapshot_without_execution_authority() {
@@ -140,9 +140,11 @@ mod tests {
             .workspace
             .content
             .project_sources
-            .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
-                ProjectSourceLanguage::RSpiceAutomation,
-            ))
+            .bundle_for_owner(
+                &rspice_app_state::state::ProjectSourceOwner::code_workspace(
+                    ProjectSourceLanguage::RSpiceAutomation,
+                ),
+            )
             .expect("bootstrapped Automation workspace");
         let snapshot = state
             .code

@@ -11,7 +11,7 @@ fn a_checkpoint_that_cannot_be_written_is_reported() {
     let blocker = std::env::temp_dir().join(format!(
         "rspice-autosave-blocker-{}-{}",
         std::process::id(),
-        crate::time_compat::unix_epoch().as_nanos()
+        rspice_app_state::time_compat::unix_epoch().as_nanos()
     ));
     std::fs::write(&blocker, b"not a folder").expect("write the blocking file");
 

@@ -11,14 +11,14 @@ use super::stage::show_on_stage;
 use egui::{Rect, vec2};
 use rspice_app_simulate::workbench::surfaces::simulate::{page_outputs, page_runset};
 
-use crate::product::ContentDigest;
-use crate::state::SimulationPage;
-use crate::state::{
+use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_state::product::ContentDigest;
+use rspice_app_state::state::SimulationPage;
+use rspice_app_state::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
     PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, RetainedTrace,
     SavedOutput, SavedOutputMaterializationStatus, SavedOutputReceipt, SpecEntry, SpecPointScope,
 };
-use crate::workbench::{AppState, RSpiceApp};
 
 const RENDER_VIEWPORT_HEIGHT: f32 = 2600.0;
 
@@ -40,7 +40,7 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut AppState
     }
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state.simulate.simulation_page = page;
     seed(&mut app.state);
@@ -70,13 +70,13 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut AppState
 /// One plan-owned saved output over a plain node voltage.
 fn saved_output() -> SavedOutput {
     SavedOutput::new(
-        crate::state::SavedOutputKind::RawVoltageOrCurrent,
+        rspice_app_state::state::SavedOutputKind::RawVoltageOrCurrent,
         "V(out)",
         "V(out)",
-        crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
-        crate::state::SavedOutputPolicy::EveryAcceptedPoint,
-        crate::state::SavedOutputPrecision::FullSourcePrecision,
-        crate::state::SavedOutputStreaming::StoreOnly,
+        rspice_app_state::state::SavedOutputCompatibility::AllCompatibleAnalyses,
+        rspice_app_state::state::SavedOutputPolicy::EveryAcceptedPoint,
+        rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
+        rspice_app_state::state::SavedOutputStreaming::StoreOnly,
     )
     .expect("a valid saved output")
 }
@@ -108,7 +108,7 @@ fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<Ana
         .expect("the default plan holds one instance")
         .id();
     let project_revision = state.model.workspace.content.project.revision();
-    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+    let receipt = PreparedRunReceipt::new(rspice_app_state::state::PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
         simulation_plan_id: Some(plan_id),
         project_revision,
@@ -296,7 +296,7 @@ fn a_point_without_a_retained_family_says_which_kind_of_nothing_it_has() {
 /// retained family actually declares, and nothing else.
 #[test]
 fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
-    use crate::state::AnalysisResultFamilyMetadata;
+    use rspice_app_state::state::AnalysisResultFamilyMetadata;
 
     let mut app = RSpiceApp::test_instance();
     let analysis = AnalysisResult::new(1, AnalysisType::Corner, "corners").with_family_metadata(
@@ -419,7 +419,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
             source_bindings: None,
             output_id: output.id,
             output_revision: output.revision,
-            analysis_id: crate::product::AnalysisInstanceId::new(),
+            analysis_id: rspice_app_state::product::AnalysisInstanceId::new(),
             contract_digest: ContentDigest::from_bytes([0x55; 32]),
             name: output.name.clone(),
             source_expression: output.source_expression.clone(),
@@ -472,11 +472,11 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
 
 #[test]
 fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data() {
-    use crate::state::{
+    use crate::workbench::documents::result_document::AnalysisPresentationKey;
+    use rspice_app_state::state::{
         AnalysisResultPayload, DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily,
         DcSweepQuantity, SavedOutputDcMember,
     };
-    use crate::workbench::documents::result_document::AnalysisPresentationKey;
     use rspice_results::result_presentation::SourceWaveformPresentationKey;
     let mut app = RSpiceApp::test_instance();
     let output = saved_output();
@@ -611,7 +611,7 @@ fn the_heading_the_hop_and_the_contract_card_agree_about_the_prior_run() {
         assert!(run.analyses.is_empty(), "and it has produced nothing yet");
         assert!(
             run.prepared_receipt()
-                .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
+                .and_then(rspice_app_state::state::PreparedRunReceipt::simulation_plan_id)
                 .is_some(),
             "while already carrying the receipt that names the plan"
         );
@@ -693,7 +693,7 @@ fn the_empty_analysis_rail_offers_the_action_that_fills_it() {
             .expect("the test instance owns a stable plan")
             .instances()
             .iter()
-            .map(crate::simulation::plan::AnalysisInstance::id)
+            .map(rspice_app_state::simulation::plan::AnalysisInstance::id)
             .collect::<Vec<_>>();
         let plan = state
             .model

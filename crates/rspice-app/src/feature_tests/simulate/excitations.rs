@@ -4,13 +4,13 @@
 //! family arrived as one self-contained block and reads as one.
 
 use super::page_contracts::render_with;
-use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
+use rspice_app_state::state::SimulationPage;
 
 /// Give the fixture project one more schematic master: the library cell view,
 /// and the content the projection will materialize for it.
-fn add_master(app: &mut RSpiceApp, cell: &str, schematic: crate::state::SchematicState) {
-    use crate::state::{CellViewRef, Library, View, ViewType};
+fn add_master(app: &mut RSpiceApp, cell: &str, schematic: rspice_app_state::state::SchematicState) {
+    use rspice_app_state::state::{CellViewRef, Library, View, ViewType};
 
     if app
         .state
@@ -43,11 +43,15 @@ fn add_master(app: &mut RSpiceApp, cell: &str, schematic: crate::state::Schemati
 /// One component of the fixture design, under the name the deck carries.
 fn seeded(
     id: u64,
-    kind: crate::state::ComponentType,
+    kind: rspice_app_state::state::ComponentType,
     name: &str,
     params: &str,
-) -> crate::state::Component {
-    let mut component = crate::state::Component::new(id, kind, crate::state::Point::new(60, 60));
+) -> rspice_app_state::state::Component {
+    let mut component = rspice_app_state::state::Component::new(
+        id,
+        kind,
+        rspice_app_state::state::Point::new(60, 60),
+    );
     component.name = name.to_owned();
     component.params = params.to_owned();
     component
@@ -56,7 +60,7 @@ fn seeded(
 /// A root placing one supply and two instances of a master that places a sine
 /// source and an RF port.
 fn hierarchical_excitations(app: &mut RSpiceApp) {
-    use crate::state::{ComponentType, LibraryCellInstance, Point};
+    use rspice_app_state::state::{ComponentType, LibraryCellInstance, Point};
 
     app.state
         .model
@@ -65,9 +69,12 @@ fn hierarchical_excitations(app: &mut RSpiceApp) {
         .components
         .push(seeded(801, ComponentType::VoltageSource, "VDD", "dc=5"));
     for (id, name) in [(802, "XA"), (803, "XB")] {
-        let mut instance =
-            crate::state::Component::new(id, ComponentType::CellInstance, Point::new(80, 80))
-                .with_library_cell(LibraryCellInstance::new("work", "afe", "schematic"));
+        let mut instance = rspice_app_state::state::Component::new(
+            id,
+            ComponentType::CellInstance,
+            Point::new(80, 80),
+        )
+        .with_library_cell(LibraryCellInstance::new("work", "afe", "schematic"));
         instance.name = name.to_owned();
         app.state
             .model
@@ -78,7 +85,7 @@ fn hierarchical_excitations(app: &mut RSpiceApp) {
     }
     app.state.sync_active_schematic_to_workspace();
 
-    let mut child = crate::state::SchematicState::default();
+    let mut child = rspice_app_state::state::SchematicState::default();
     child.document_mut_for_test().components.push(seeded(
         811,
         ComponentType::VoltageSourceSin,

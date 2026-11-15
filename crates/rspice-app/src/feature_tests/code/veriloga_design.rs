@@ -7,7 +7,6 @@
 
 use std::sync::mpsc;
 
-use crate::state::{CellViewRef, ProjectSourceId, ProjectSourceLanguage};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, frame_with, module_source, open_in_design, open_project_app,
@@ -19,6 +18,7 @@ use crate::workbench::documents::code_workspace::{
 };
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_state::state::{CellViewRef, ProjectSourceId, ProjectSourceLanguage};
 
 fn editor_id(bundle_id: ProjectSourceId, logical_path: &str) -> egui::Id {
     code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, logical_path)
@@ -143,7 +143,7 @@ fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
 
     super::navigate_source_bundle(
         &mut app.code_workspace_parts(),
-        crate::state::ProjectSourceLanguage::VerilogA,
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         CodeCommand::RenameSymbol,
     )
     .expect("the caret is on g");
@@ -211,7 +211,7 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
 
     super::navigate_source_bundle(
         &mut app.code_workspace_parts(),
-        crate::state::ProjectSourceLanguage::VerilogA,
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         CodeCommand::FindReferences,
     )
     .expect("the caret is on g");
@@ -501,7 +501,8 @@ fn a_manual_deck_design_over_a_deck_cell_validates_and_runs() {
             rspice_simulation::netlist_preparation::project_veriloga_directive(&key, "top")
         )
     };
-    app.state.model.simulation.execution.run_intent = crate::state::SimulationRunIntent::ManualDeck;
+    app.state.model.simulation.execution.run_intent =
+        rspice_app_state::state::SimulationRunIntent::ManualDeck;
     app.state.model.workspace.content.netlist_source = Some(deck(&app));
 
     let ctx = themed_context();
@@ -668,7 +669,7 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
         app.state
             .model
             .log_buffer
-            .count_by_severity(crate::diagnostics::LogSeverity::Error)
+            .count_by_severity(rspice_app_state::diagnostics::LogSeverity::Error)
             > 0,
         "and Problems lists it"
     );

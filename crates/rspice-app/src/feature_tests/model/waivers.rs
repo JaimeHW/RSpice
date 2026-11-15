@@ -3,13 +3,13 @@
 //! like any edit of it, follows its finding's object and nothing else, and is
 //! reported wherever it does not do what it says.
 
-use crate::state::{ComponentType, Point};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
 use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRecord;
 use crate::workbench::app_state::diagnostic_store::listing::listing;
 use crate::workbench::app_state::waivers::*;
+use rspice_app_state::state::{ComponentType, Point};
 use rspice_design::drc::DrcResult;
 use rspice_design::drc::DrcViolation;
 use rspice_design::drc::DrcWaiver;

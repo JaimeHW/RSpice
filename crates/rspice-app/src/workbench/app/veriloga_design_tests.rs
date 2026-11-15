@@ -5,11 +5,11 @@
 //! feature_tests/code/veriloga_design.
 
 use super::*;
-use crate::state::{
+use crate::workbench::state::Workspace;
+use rspice_app_state::state::{
     Cell, CellViewRef, Library, ProjectSourceBundle, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, View, ViewType,
 };
-use crate::workbench::state::Workspace;
 
 const LIBRARY: &str = "behavioral";
 
@@ -115,7 +115,7 @@ pub(crate) fn themed_context() -> egui::Context {
     // a context that inherits it asserts "Ctrl+F" on one machine and "Cmd+F"
     // on another. These tests read menus, so the context states its platform.
     ctx.set_os(egui::os::OperatingSystem::Nix);
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     ctx
 }

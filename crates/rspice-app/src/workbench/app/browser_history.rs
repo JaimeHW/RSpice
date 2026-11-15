@@ -16,8 +16,8 @@ use crate::workbench::app_state::AppState;
 /// may not do what they expect until synchronization recovers.
 fn record_browser_history_warning(state: &mut AppState, text: String) {
     state.record(
-        crate::diagnostics::LogSeverity::Warning,
-        crate::diagnostics::LogSource::Studio,
+        rspice_app_state::diagnostics::LogSeverity::Warning,
+        rspice_app_state::diagnostics::LogSource::Studio,
         text,
     );
 }
@@ -185,8 +185,8 @@ pub(super) fn synchronize_browser_surface_navigation(state: &mut AppState) {
                     .workbench
                     .reset_navigation_history_for_fresh_browser_session();
                 state.record(
-                    crate::diagnostics::LogSeverity::Info,
-                    crate::diagnostics::LogSource::Studio,
+                    rspice_app_state::diagnostics::LogSeverity::Info,
+                    rspice_app_state::diagnostics::LogSource::Studio,
                     "Browser Back and Forward resumed at the current task; earlier browser \
                      history was cleared.",
                 );

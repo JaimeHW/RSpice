@@ -5,7 +5,6 @@
 use std::collections::BTreeSet;
 
 use super::veriloga_interface::{add_module_cell, compile_and_publish, press_strip_button, view};
-use crate::state::{CellViewRef, Point, PortDirection, SymbolDocument, SymbolElectricalType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, frame_with, open_in_design, open_project_app, themed_context,
@@ -19,6 +18,9 @@ use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_code::workbench::surfaces::veriloga;
+use rspice_app_state::state::{
+    CellViewRef, Point, PortDirection, SymbolDocument, SymbolElectricalType,
+};
 use rspice_design::symbol::SymbolShape;
 use rspice_design::symbol::generated::{GENERATED_SYMBOL_VIEW, is_generated_symbol};
 use rspice_design_model::symbol_pin::SymbolPinSide;

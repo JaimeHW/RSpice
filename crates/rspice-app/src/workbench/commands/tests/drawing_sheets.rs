@@ -51,7 +51,7 @@ fn sheet_properties_never_fall_back_to_symbol_hardcopy_media() {
     let mut app = app_with_selected_authored_symbol();
     app.state.open_project_session();
     app.state
-        .open_workspace_view(crate::state::CellViewRef::new(
+        .open_workspace_view(rspice_app_state::state::CellViewRef::new(
             "command_test",
             "amp",
             "symbol",

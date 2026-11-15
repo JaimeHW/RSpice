@@ -3,14 +3,6 @@
 
 use crate::feature_tests::settings::preferences_dialogs;
 use crate::feature_tests::settings::shortcut_preferences::input;
-use crate::state::command_catalog::CommandPlatform;
-use crate::state::shortcuts::ProtectedShortcutPolicy;
-use crate::state::shortcuts::ShortcutBindingSlot;
-use crate::state::shortcuts::ShortcutPreferences;
-use crate::state::shortcuts::ShortcutProfileIssueCode;
-use crate::state::shortcuts::ShortcutProfileIssueSeverity;
-use crate::state::shortcuts::ShortcutSequence;
-use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
@@ -21,6 +13,14 @@ use egui::Modifiers;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_preferences::capture::*;
 use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_preferences::*;
+use rspice_app_state::state::command_catalog::CommandPlatform;
+use rspice_app_state::state::shortcuts::ProtectedShortcutPolicy;
+use rspice_app_state::state::shortcuts::ShortcutBindingSlot;
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
+use rspice_app_state::state::shortcuts::ShortcutProfileIssueCode;
+use rspice_app_state::state::shortcuts::ShortcutProfileIssueSeverity;
+use rspice_app_state::state::shortcuts::ShortcutSequence;
+use rspice_app_state::state::shortcuts::ShortcutStroke;
 
 #[test]
 fn capture_platforms_preserve_defaults_and_protected_alternates() {
@@ -269,7 +269,7 @@ fn invalid_save_keeps_the_draft_open_and_focuses_the_first_issue() {
 #[test]
 fn pending_editor_is_immutable_and_exposes_a_disabled_progress_state() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut state = AppState::default();
     let profile = state.model.preferences.shortcuts().clone();

@@ -23,7 +23,7 @@ pub(super) fn menu_pin_on(
     menu_pin_for(
         entries,
         app,
-        crate::state::command_catalog::CommandPlatform::Desktop,
+        rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
         os,
     )
 }
@@ -32,7 +32,7 @@ pub(super) fn menu_pin_on(
 pub(super) fn menu_pin_for(
     entries: &[MenuEntry],
     app: &RSpiceApp,
-    platform: crate::state::command_catalog::CommandPlatform,
+    platform: rspice_app_state::state::command_catalog::CommandPlatform,
     os: egui::os::OperatingSystem,
 ) -> Vec<String> {
     fn pin(rows: &[menu_entries::MenuRow], indent: &str, out: &mut Vec<String>) {
@@ -86,7 +86,7 @@ pub(super) fn no_project_app() -> RSpiceApp {
 /// The application with the Design workspace showing a symbol view.
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn symbol_view_app() -> RSpiceApp {
-    use crate::state::{
+    use rspice_app_state::state::{
         Cell, CellViewRef, Library, Point, SymbolDocument, SymbolShape, View, ViewType,
     };
     let mut app = title_test_app();
@@ -115,7 +115,7 @@ pub(super) fn symbol_view_app() -> RSpiceApp {
 /// The application with the Design workspace showing a Verilog-A view.
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn veriloga_view_app() -> RSpiceApp {
-    use crate::state::{Cell, CellViewRef, Library, View, ViewType};
+    use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
     let mut app = title_test_app();
     let mut library = Library::new("work");
     let mut cell = Cell::new("gain");

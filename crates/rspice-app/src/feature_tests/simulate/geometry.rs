@@ -16,8 +16,8 @@ use rspice_app_simulate::workbench::surfaces::simulate::{
     ANALYSIS_CATEGORY_ORDER, analysis_split_widths,
 };
 
-use crate::simulation::plan::AnalysisKind;
 use crate::workbench::RSpiceApp;
+use rspice_app_state::simulation::plan::AnalysisKind;
 
 /// One painted line of the Analyses route: its text and where it landed.
 #[derive(Clone, Debug)]
@@ -63,9 +63,9 @@ fn painted_lines(shapes: &[egui::epaint::ClippedShape]) -> Vec<PaintedLine> {
 /// assertion over text alone can ask.
 fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    app.state.simulate.simulation_page = crate::state::SimulationPage::Analyses;
+    app.state.simulate.simulation_page = rspice_app_state::state::SimulationPage::Analyses;
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 900.0))),
@@ -134,7 +134,7 @@ fn the_analysis_header_states_kind_and_lifecycle_short_of_its_action() {
 /// shows only the value.
 #[test]
 fn an_option_field_states_default_only_inside_an_empty_well() {
-    use crate::simulation::plan::NumericOverrideOption as O;
+    use rspice_app_state::simulation::plan::NumericOverrideOption as O;
 
     let lines = analyses_form_lines(AnalysisKind::Transient, 900.0)
         .expect("the default plan holds a transient");
@@ -224,7 +224,7 @@ fn the_contract_block_states_no_defaults_and_spells_the_directive_in_engineering
 /// the plan refuses the insert, which is a kind that has no form to measure.
 fn analyses_form_lines(kind: AnalysisKind, width: f32) -> Option<Vec<PaintedLine>> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     let plan = app.state.model.sim_setup.stable_analysis_plan_mut().ok()?;
     let instance = match plan
@@ -235,7 +235,7 @@ fn analyses_form_lines(kind: AnalysisKind, width: f32) -> Option<Vec<PaintedLine
         Some(instance) => instance.id(),
         None => plan.insert(kind).ok()?.0,
     };
-    app.state.simulate.simulation_page = crate::state::SimulationPage::Analyses;
+    app.state.simulate.simulation_page = rspice_app_state::state::SimulationPage::Analyses;
     app.state.simulate.active_analysis_instance = Some(instance);
     let mut run = || {
         ctx.run_ui(
@@ -363,7 +363,7 @@ fn no_field_caption_overlaps_the_helper_beside_it() {
 /// one-column layout.
 fn analysis_catalogue_code_rows(viewport_width: f32) -> Vec<Vec<PaintedLine>> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state.model.sim_setup.session.palette_open = true;
     let mut run = || {
@@ -463,8 +463,8 @@ struct AnalysesRoute {
 impl AnalysesRoute {
     fn open(mut app: RSpiceApp, height: f32) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        app.state.simulate.simulation_page = crate::state::SimulationPage::Analyses;
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+        app.state.simulate.simulation_page = rspice_app_state::state::SimulationPage::Analyses;
         let mut route = Self { ctx, app, height };
         route.settle(Vec::new());
         route

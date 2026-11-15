@@ -1,7 +1,5 @@
 //! `workbench/app_state/design_checks` observed through a whole session.
 
-use crate::state::CellViewRef;
-use crate::state::ViewType;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::*;
 use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
@@ -9,6 +7,8 @@ use crate::workbench::app_state::diagnostic_store::DiagnosticRecord;
 use crate::workbench::app_state::diagnostic_store::DiagnosticSubject;
 use crate::workbench::app_state::diagnostic_store::FindingKey;
 use crate::workbench::app_state::diagnostic_store::mint_canonical;
+use rspice_app_state::state::CellViewRef;
+use rspice_app_state::state::ViewType;
 use rspice_design::drc::DrcLocation;
 use rspice_design::drc::DrcResult;
 use rspice_design::drc::DrcViolationType;
@@ -24,7 +24,7 @@ fn open_pin(component_id: u64, component: &str, pin: &str) -> DrcLocation {
         component_id,
         component_name: component.to_owned(),
         pin_name: pin.to_owned(),
-        point: crate::state::Point::new(0, 0),
+        point: rspice_app_state::state::Point::new(0, 0),
     }
 }
 
@@ -287,10 +287,10 @@ fn receipts_never_alias_another_active_cell_view() {
     let mut state = AppState::default();
     let root = state.model.workspace.content.active_schematic_reference();
     let other = CellViewRef::new(&root.library, "aux", &root.view);
-    state
-        .model
-        .workspace
-        .insert_schematic_editor(other.key(), crate::state::SchematicState::default());
+    state.model.workspace.insert_schematic_editor(
+        other.key(),
+        rspice_app_state::state::SchematicState::default(),
+    );
     state
         .publish_active_design_check_result(completed_result())
         .expect("publish root receipt");
@@ -300,7 +300,7 @@ fn receipts_never_alias_another_active_cell_view() {
         .workspace
         .insert_schematic_editor(root.key(), state.model.schematic.clone());
     state.model.workspace.content.active_view = other;
-    state.model.schematic = crate::state::SchematicState::default();
+    state.model.schematic = rspice_app_state::state::SchematicState::default();
     state.refresh_active_design_check_projection();
 
     assert!(matches!(
@@ -355,7 +355,7 @@ fn connectivity_changes_stale_previously_current_receipts() {
         .content
         .connectivity
         .policy
-        .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        .width_mismatch = rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
 
     assert!(matches!(
         state.active_design_check_status(),
@@ -396,12 +396,12 @@ fn focusing_a_non_schematic_view_does_not_stale_root_evidence() {
         .workspace
         .content
         .open_views
-        .push(crate::state::OpenCellView::new(
+        .push(rspice_app_state::state::OpenCellView::new(
             layout.clone(),
             ViewType::Layout,
         ));
     state.model.workspace.content.active_view = layout;
-    state.model.schematic = crate::state::SchematicState::default();
+    state.model.schematic = rspice_app_state::state::SchematicState::default();
 
     assert!(matches!(
         state.design_check_status(&root),
@@ -422,7 +422,7 @@ fn symbol_focus_never_aliases_or_clears_its_sibling_schematic_receipt() {
         .workspace
         .content
         .open_views
-        .push(crate::state::OpenCellView::new(
+        .push(rspice_app_state::state::OpenCellView::new(
             symbol.clone(),
             ViewType::Symbol,
         ));
@@ -459,26 +459,20 @@ fn state_with_two_coincident_sheets() -> AppState {
     const SECOND_WIRE: u64 = 102;
 
     let mut state = AppState::default();
-    state
-        .model
-        .schematic
-        .document_mut_for_test()
-        .wires
-        .push(crate::state::Wire::segment(
+    state.model.schematic.document_mut_for_test().wires.push(
+        rspice_app_state::state::Wire::segment(
             FIRST_WIRE,
-            crate::state::Point::new(0, 0),
-            crate::state::Point::new(40, 0),
-        ));
-    state
-        .model
-        .schematic
-        .document_mut_for_test()
-        .wires
-        .push(crate::state::Wire::segment(
+            rspice_app_state::state::Point::new(0, 0),
+            rspice_app_state::state::Point::new(40, 0),
+        ),
+    );
+    state.model.schematic.document_mut_for_test().wires.push(
+        rspice_app_state::state::Wire::segment(
             SECOND_WIRE,
-            crate::state::Point::new(0, 0),
-            crate::state::Point::new(40, 0),
-        ));
+            rspice_app_state::state::Point::new(0, 0),
+            rspice_app_state::state::Point::new(40, 0),
+        ),
+    );
     state.sync_active_schematic_to_workspace();
 
     let key = state
@@ -503,10 +497,10 @@ fn state_with_two_coincident_sheets() -> AppState {
         .expect("the sheet catalog was just created");
     let second = catalog
         .create_sheet(
-            crate::state::SheetDefinition {
+            rspice_app_state::state::SheetDefinition {
                 name: "Page 2".to_owned(),
-                template: crate::state::SheetTemplate::AnalogSchematic,
-                port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
+                port_policy: rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },
             Some(first),
@@ -562,18 +556,18 @@ fn design_checks_state_an_unresolved_configuration_rather_than_checking_the_buff
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: "Unresolvable DUT".to_owned(),
             root,
             dut_path: "/XABSENT".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "projection consumer test".to_owned(),
         })
         .expect("the fixture configuration is well formed");

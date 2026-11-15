@@ -11,7 +11,7 @@ use rspice_app_code::workbench::surfaces::netlist::transfer::export_generated_di
 fn export_is_a_command_form_without_the_sealing_boxes() {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = crate::workbench::RSpiceApp::test_instance();
     app.state.code.netlist.export_dialog.open = true;
     let mut nodes = std::collections::HashMap::new();
@@ -71,9 +71,9 @@ fn every_refusal_is_one_footer_line() {
         app.state.code.netlist.export_dialog.open = true;
         app.state.code.netlist.export_dialog.error = export_error.map(str::to_owned);
         app.state.model.netlist_artifacts.generation_error = generation_error.map(str::to_owned);
-        let painted = crate::ui::widgets::painted_runs::painted_runs(
+        let painted = rspice_app_workbench::ui::widgets::painted_runs::painted_runs(
             egui::vec2(1440.0, 900.0),
-            crate::ui::tokens::Mode::Light,
+            rspice_app_workbench::ui::tokens::Mode::Light,
             3,
             |ctx| {
                 export_generated_dialog_window(ctx, &mut crate::workbench::features::cx(&mut app))

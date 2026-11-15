@@ -20,7 +20,7 @@ use rspice_design::schematic::{
 };
 use rspice_design_model::bus::{BusDeclaration, BusSlice};
 
-use crate::state::{
+use rspice_app_state::state::{
     AnalysisResult, AnalysisType, Component, ComponentType, CrossSheetPortDirection, DcOpResult,
     Junction, LibraryCellInstance, OperatingPointValue, Point, SchematicAnnotationVisibility,
     SimulationRun, Wire,
@@ -418,7 +418,7 @@ pub(super) struct Framing {
 /// framing computes it: about 0.4. (On the smaller review canvas it would be
 /// 0.25 again.)
 pub(super) fn a1_fit_zoom() -> f64 {
-    let mut probe = crate::state::SchematicState::default();
+    let mut probe = rspice_app_state::state::SchematicState::default();
     probe.zoom_to_fit_world_rect(
         (0.0, 0.0, A1_WORLD.0, A1_WORLD.1),
         f64::from(DESKTOP_CANVAS.x),
@@ -434,19 +434,19 @@ pub(super) struct Render {
     /// What the last frame painted, in points.
     pub(super) shapes: Vec<ClippedShape>,
     pub(super) zoom: f64,
-    pub(super) tokens: std::sync::Arc<crate::ui::tokens::Tokens>,
+    pub(super) tokens: std::sync::Arc<rspice_app_workbench::ui::tokens::Tokens>,
 }
 
 /// The dark and the light canvas.
-pub(super) fn themes() -> [(&'static str, crate::ui::Theme); 2] {
+pub(super) fn themes() -> [(&'static str, rspice_app_workbench::ui::Theme); 2] {
     [
-        ("dark", crate::ui::Theme::default()),
+        ("dark", rspice_app_workbench::ui::Theme::default()),
         (
             "light",
-            crate::ui::Theme {
+            rspice_app_workbench::ui::Theme {
                 mode: rspice_ui_kit::Mode::Light,
                 canvas_theme: rspice_ui_kit::EngineeringCanvasTheme::Light,
-                ..crate::ui::Theme::default()
+                ..rspice_app_workbench::ui::Theme::default()
             },
         ),
     ]
@@ -456,7 +456,7 @@ pub(super) fn themes() -> [(&'static str, crate::ui::Theme); 2] {
 /// display of `pixels_per_point`.
 pub(super) fn render(
     state: &mut AppState,
-    theme: crate::ui::Theme,
+    theme: rspice_app_workbench::ui::Theme,
     framing: Framing,
     pixels_per_point: f32,
 ) -> Render {
@@ -467,7 +467,7 @@ pub(super) fn render(
 /// canvas draws whatever it pre-highlights there.
 pub(super) fn render_pointing(
     state: &mut AppState,
-    theme: crate::ui::Theme,
+    theme: rspice_app_workbench::ui::Theme,
     framing: Framing,
     pixels_per_point: f32,
     pointer: Option<egui::Pos2>,
@@ -490,7 +490,7 @@ pub(super) fn render_pointing(
             f64::from(SCREEN.x) * 0.5 - f64::from(framing.centre.x) * zoom,
             f64::from(SCREEN.y) * 0.5 - f64::from(framing.centre.y) * zoom,
         );
-        let mut input = crate::ui::raster::display_input(SCREEN, pixels_per_point);
+        let mut input = rspice_app_workbench::ui::raster::display_input(SCREEN, pixels_per_point);
         input.events.extend(pointer.map(egui::Event::PointerMoved));
         output = Some(ctx.run_ui(input, |ui| {
             egui::CentralPanel::default()
@@ -513,7 +513,7 @@ pub(super) fn render_pointing(
     Render {
         shapes: output.shapes,
         zoom,
-        tokens: crate::ui::tokens::Tokens::get(&ctx),
+        tokens: rspice_app_workbench::ui::tokens::Tokens::get(&ctx),
     }
 }
 
@@ -1094,11 +1094,14 @@ const FUNCTIONAL_CENTRE: Point = Point::new(340, 300);
 /// four to a row, 160 by 140 apart from (100, 90).
 fn functional_sheet() -> AppState {
     let mut state = AppState::default();
-    for (index, descriptor) in crate::state::functional_parts().iter().enumerate() {
+    for (index, descriptor) in rspice_app_state::state::functional_parts()
+        .iter()
+        .enumerate()
+    {
         let (column, row) = (index as i32 % 4, index as i32 / 4);
         state.model.schematic.add_library_cell_component(
             Point::new(100 + 160 * column, 90 + 140 * row),
-            crate::state::functional_library_binding(descriptor),
+            rspice_app_state::state::functional_library_binding(descriptor),
         );
     }
     settle(&mut state);
@@ -1110,19 +1113,21 @@ fn functional_sheet() -> AppState {
 #[test]
 fn a_placed_functional_part_letters_its_name_not_its_subcircuit() {
     let mut state = functional_sheet();
-    let rows = crate::state::functional_parts().len().div_ceil(4);
+    let rows = rspice_app_state::state::functional_parts()
+        .len()
+        .div_ceil(4);
     let mut painted = Vec::new();
     for band in 0..rows.div_ceil(4) {
         let centre = Point::new(FUNCTIONAL_CENTRE.x, FUNCTIONAL_CENTRE.y + 560 * band as i32);
         let render = render(
             &mut state,
-            crate::ui::Theme::default(),
+            rspice_app_workbench::ui::Theme::default(),
             at_zoom(1.0, centre),
             1.0,
         );
         painted.extend(painted_text(&render.shapes));
     }
-    for descriptor in crate::state::functional_parts() {
+    for descriptor in rspice_app_state::state::functional_parts() {
         assert!(
             painted
                 .iter()

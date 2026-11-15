@@ -24,7 +24,7 @@ impl ExportWorkflowIo for SavesTo {
 
     fn write_waveform_csv(
         &self,
-        _dataset: &crate::io::WaveformDataset,
+        _dataset: &rspice_app_services::io::WaveformDataset,
         _path: &std::path::Path,
     ) -> Result<(), String> {
         Ok(())
@@ -41,7 +41,7 @@ fn a_spectre_export_copies_its_sources_beside_the_deck_and_names_them_relatively
     action_export_netlist_with_io(
         &mut user.app.state.model,
         &mut user.app.state.workbench,
-        crate::io::NetlistFormat::Spectre,
+        rspice_app_services::io::NetlistFormat::Spectre,
         &SavesTo(deck_path.clone()),
     );
 

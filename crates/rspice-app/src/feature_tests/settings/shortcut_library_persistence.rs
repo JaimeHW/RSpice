@@ -1,9 +1,9 @@
 //! The device-local shortcut library store, in the case that binds the
 //! product's own commands.
 
-use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::workbench::commands::vocabulary::command_registry;
 use rspice_app_settings::workbench::shortcuts::library_persistence::*;
+use rspice_app_state::state::shortcuts::ShortcutProfileLibrary;
 
 #[test]
 fn protected_override_acknowledgements_round_trip_in_device_local_store() {

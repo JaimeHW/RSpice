@@ -2,17 +2,17 @@
 
 use crate::properties::source_preview::MiniCache;
 use crate::properties::source_preview::ensure_minis;
-use crate::simulation::stimulus_realize::PreviewTiming;
-use crate::state::Component;
-use crate::state::stimulus_library::definition::StimulusDefinition;
-use crate::state::stimulus_library::provenance::ProvenanceState;
-use crate::state::{ComponentType, Point};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::ui::tokens::Mode;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::stimulus_link::adopt::{adopt_groups, stepped};
 use crate::workbench::app::dialogs::stimulus_link::*;
 use crate::workbench::app_state::AppState;
+use rspice_app_state::simulation::stimulus_realize::PreviewTiming;
+use rspice_app_state::state::Component;
+use rspice_app_state::state::stimulus_library::definition::StimulusDefinition;
+use rspice_app_state::state::stimulus_library::provenance::ProvenanceState;
+use rspice_app_state::state::{ComponentType, Point};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_workbench::ui::tokens::Mode;
 
 /// Save the instance's card as the dialog's primary does, over the whole
 /// state.
@@ -70,7 +70,7 @@ fn groups_of(app: &RSpiceApp, id: u64, filter: &str, cache: &mut MiniCache) -> V
 }
 
 fn nets_of(app: &RSpiceApp, id: u64) -> Vec<String> {
-    crate::simulation::placed_sources::placed_sources(
+    rspice_app_state::simulation::placed_sources::placed_sources(
         &app.state.model.schematic,
         &app.state.model.workspace.content.stimulus_library,
         None,
@@ -348,9 +348,7 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
     let mut stale = MiniCache::new();
     stale.insert(
         ("clock".to_owned(), 2),
-        Ok(crate::simulation::stimulus_realize::WaveformTrace::Curve(
-            Vec::new(),
-        )),
+        Ok(rspice_app_state::simulation::stimulus_realize::WaveformTrace::Curve(Vec::new())),
     );
     assert_eq!(
         ensure_minis(
@@ -832,9 +830,12 @@ pub(crate) fn definition(
     value: &str,
     params: &str,
 ) -> StimulusDefinition {
-    let mut definition =
-        StimulusDefinition::new(name, kind, crate::state::stimulus_library::now_unix_ms)
-            .expect("definition");
+    let mut definition = StimulusDefinition::new(
+        name,
+        kind,
+        rspice_app_state::state::stimulus_library::now_unix_ms,
+    )
+    .expect("definition");
     definition.value = value.to_owned();
     definition.params = params.to_owned();
     definition
@@ -1002,9 +1003,9 @@ impl Painted {
 
 /// A theme in one mode, everything else as the product ships it.
 #[cfg(not(target_arch = "wasm32"))]
-fn themed(mode: Mode) -> crate::ui::Theme {
-    crate::ui::Theme {
+fn themed(mode: Mode) -> rspice_app_workbench::ui::Theme {
+    rspice_app_workbench::ui::Theme {
         mode,
-        ..crate::ui::Theme::default()
+        ..rspice_app_workbench::ui::Theme::default()
     }
 }

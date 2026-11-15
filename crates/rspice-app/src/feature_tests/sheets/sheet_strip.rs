@@ -10,15 +10,15 @@
 
 use egui::{Context, Id, RawInput, Rect, Ui, Vec2, containers::panel::PanelState};
 
-use crate::state::{
-    Component, ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::app_state::AppState;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
 use rspice_app_sheets::workbench::chrome::sheet_strip::*;
+use rspice_app_state::state::{
+    Component, ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
+};
 
 const VIEWPORT: Vec2 = Vec2::new(1_440.0, 900.0);
 
@@ -103,7 +103,7 @@ fn one_sheet_is_a_drawing_rather_than_a_set_of_them() {
 #[test]
 fn every_sheet_gets_one_tab_inside_the_strip_tab_list() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = app_with_sheets(3);
 
@@ -149,7 +149,7 @@ fn every_sheet_gets_one_tab_inside_the_strip_tab_list() {
 #[test]
 fn a_single_sheet_drawing_paints_no_strip_at_all() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = app_with_sheets(1);
 
@@ -171,7 +171,7 @@ fn a_single_sheet_drawing_paints_no_strip_at_all() {
 #[test]
 fn the_strip_hangs_directly_from_the_document_row() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = app_with_sheets(2);
 
     // Panel rectangles are stored at the end of the pass that allocates them,
@@ -201,7 +201,7 @@ fn the_strip_hangs_directly_from_the_document_row() {
 fn the_active_chip_carries_the_accent_edge_the_document_row_uses() {
     let mut app = app_with_sheets(2);
     let mut band = Rect::NOTHING;
-    let canvas = crate::ui::raster::render(VIEWPORT, |ui, _| {
+    let canvas = rspice_app_workbench::ui::raster::render(VIEWPORT, |ui, _| {
         chrome_rows(ui, &mut app);
         if let Some(state) = PanelState::load(ui.ctx(), Id::new("workbench.sheet_strip")) {
             band = state.outer_rect;
@@ -211,8 +211,10 @@ fn the_active_chip_carries_the_accent_edge_the_document_row_uses() {
 
     let accent = {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        crate::ui::tokens::Tokens::get(&ctx).color.accent
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::tokens::Tokens::get(&ctx)
+            .color
+            .accent
     };
     let edge = Rect::from_min_max(
         band.left_top(),
@@ -290,7 +292,7 @@ fn after_a_sheet_tab_the_canvas_still_takes_its_keys() {
     }
 
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = app_with_sheets(2);
     app.state.model.schematic.session.editor.needs_fit = false;
@@ -358,13 +360,13 @@ fn after_a_sheet_tab_the_canvas_still_takes_its_keys() {
     }
     assert_eq!(
         tool(&desk.app),
-        crate::state::Tool::Wire,
+        rspice_app_state::state::Tool::Wire,
         "the canvas takes W"
     );
     for events in tap(egui::Key::Escape) {
         desk.frame(events);
     }
-    assert_eq!(tool(&desk.app), crate::state::Tool::Select);
+    assert_eq!(tool(&desk.app), rspice_app_state::state::Tool::Select);
 
     for events in click(second.center()) {
         desk.frame(events);
@@ -379,7 +381,7 @@ fn after_a_sheet_tab_the_canvas_still_takes_its_keys() {
     }
     assert_eq!(
         tool(&desk.app),
-        crate::state::Tool::Wire,
+        rspice_app_state::state::Tool::Wire,
         "W after the tab arms the wire tool"
     );
 }

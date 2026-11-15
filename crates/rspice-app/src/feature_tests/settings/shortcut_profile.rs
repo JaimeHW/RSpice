@@ -2,15 +2,6 @@
 //! the shipped bindings, and the cases that edit or audit a profile through
 //! the commands this build ships.
 
-use crate::state::command_catalog::CommandPlatform;
-use crate::state::shortcuts::ProtectedShortcutPolicy;
-use crate::state::shortcuts::ShortcutBindingSlot;
-use crate::state::shortcuts::ShortcutPreferences;
-use crate::state::shortcuts::ShortcutProfileIssueCode;
-use crate::state::shortcuts::ShortcutProfileIssueSeverity;
-use crate::state::shortcuts::ShortcutSequence;
-use crate::state::shortcuts::ShortcutStroke;
-use crate::state::shortcuts::SingleKeyCanvasPolicy;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::design::commands::DesignCommand;
@@ -19,6 +10,15 @@ use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 use egui::Key;
 use egui::os::OperatingSystem;
+use rspice_app_state::state::command_catalog::CommandPlatform;
+use rspice_app_state::state::shortcuts::ProtectedShortcutPolicy;
+use rspice_app_state::state::shortcuts::ShortcutBindingSlot;
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
+use rspice_app_state::state::shortcuts::ShortcutProfileIssueCode;
+use rspice_app_state::state::shortcuts::ShortcutProfileIssueSeverity;
+use rspice_app_state::state::shortcuts::ShortcutSequence;
+use rspice_app_state::state::shortcuts::ShortcutStroke;
+use rspice_app_state::state::shortcuts::SingleKeyCanvasPolicy;
 
 fn sequence(key: Key, primary: bool) -> ShortcutSequence {
     ShortcutSequence::single(ShortcutStroke::new(key, primary, false, false))
@@ -64,8 +64,8 @@ fn immutable_workspace_ownership_projects_to_results_and_verify() {
 /// command this build lacks, and is not written back.
 #[test]
 fn a_profile_naming_retired_commands_loads_without_an_issue() {
-    use crate::state::command_catalog::CommandCatalog;
-    use crate::state::shortcuts::RETIRED_COMMAND_IDS;
+    use rspice_app_state::state::command_catalog::CommandCatalog;
+    use rspice_app_state::state::shortcuts::RETIRED_COMMAND_IDS;
     let commands = RETIRED_COMMAND_IDS
         .iter()
         .map(|id| format!("\"{id}\":{{\"bindings\":[]}}"))

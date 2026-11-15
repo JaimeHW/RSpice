@@ -11,14 +11,14 @@ use rspice_app_code::workbench::app::dialogs::source_find::{LABEL_COLUMN, LABEL_
 fn initial_focus_accepts_source_search_typing() {
     for read_only in [false, true] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
         app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
         if read_only {
             app.state.model.safe_mode.activate(
-                crate::state::write_policy::LocalSafeModeOptions {
+                rspice_app_state::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()
                 },
@@ -83,7 +83,7 @@ fn find_in_source_is_a_label_grid_whose_fields_end_at_the_footer() {
     use egui::accesskit::{Node, Role};
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
@@ -178,7 +178,7 @@ fn find_in_source_is_a_label_grid_whose_fields_end_at_the_footer() {
 #[test]
 fn a_result_row_announces_its_whole_match_and_not_just_the_focusable_cell() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.code.code_workspace.page = CodeWorkspacePage::Automation;

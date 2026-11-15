@@ -19,7 +19,7 @@ fn render(app: &mut RSpiceApp, ctx: &Context) {
 fn grid_snap_and_routing_is_a_command_form_without_restated_rows() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     assert!(open_grid_snap_routing_dialog(
         &mut app.state.design.grid_snap_routing,
@@ -81,7 +81,7 @@ fn the_routing_fact_reads_at_the_size_of_the_choices_beside_it() {
         }
     }
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     assert!(open_grid_snap_routing_dialog(
         &mut app.state.design.grid_snap_routing,
@@ -117,5 +117,9 @@ fn the_routing_fact_reads_at_the_size_of_the_choices_beside_it() {
     };
     let choice = font_of(grid_style_label(app.state.design.grid));
     assert_eq!(font_of("Orthogonal"), choice, "the routing fact");
-    assert_eq!(choice, crate::ui::theme::field_sans(), "the field size");
+    assert_eq!(
+        choice,
+        rspice_app_workbench::ui::theme::field_sans(),
+        "the field size"
+    );
 }

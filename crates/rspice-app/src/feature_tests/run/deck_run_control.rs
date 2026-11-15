@@ -230,7 +230,7 @@ fn open_in_results_opens_the_run_in_the_frame_it_is_released() {
 fn import_deck_is_answered_in_the_frame_it_is_released() {
     let mut replay = Replay::new();
     replay.app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
+        rspice_app_state::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
         },

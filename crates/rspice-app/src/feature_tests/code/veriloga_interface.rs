@@ -7,12 +7,6 @@
 use crate::workbench::app::project_transactions::WholeStateValidation;
 use std::sync::mpsc;
 
-use crate::state::VerilogAInterfaceOutcome;
-use crate::state::{
-    Cell, CellViewRef, Library, LibraryCellInstance, Point, PortDirection, ProjectSourceBundle,
-    ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, SymbolElectricalType, View,
-    ViewType,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, frame_with, open_in_design, open_project_app,
@@ -23,6 +17,12 @@ use crate::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACellSymbol, VerilogACompileOutcome,
 };
 use rspice_app_code::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
+use rspice_app_state::state::VerilogAInterfaceOutcome;
+use rspice_app_state::state::{
+    Cell, CellViewRef, Library, LibraryCellInstance, Point, PortDirection, ProjectSourceBundle,
+    ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, SymbolElectricalType, View,
+    ViewType,
+};
 use rspice_design::library::metadata::{PortCarrier, SourceViewPort, decode_source_view_ports};
 use rspice_design::symbol::generated::{
     GENERATED_PORTS_KEY, GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
@@ -344,18 +344,18 @@ pub(super) fn ensure_veriloga_configuration(state: &mut AppState) {
             .workspace
             .content
             .configuration_sets
-            .create(crate::state::ConfigurationSetDefinition {
+            .create(rspice_app_state::state::ConfigurationSetDefinition {
                 name: "Behavioral".to_owned(),
                 root: top,
                 dut_path: "/X1".to_owned(),
                 executable_view_policy: vec!["veriloga".to_owned()],
                 stop_views: vec!["veriloga".to_owned()],
-                unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+                unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
                 black_box_policy:
-                    crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                    rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
                 overrides: Vec::new(),
                 cell_bindings: Vec::new(),
-                model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+                model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
                 owner: "Behavioral design".to_owned(),
             })
             .expect("create the executable configuration");
@@ -392,7 +392,7 @@ pub(super) fn configured_deck(app: &RSpiceApp) -> Result<String, String> {
         &[],
         &hierarchy,
         &rspice_simulation::netlist_gen::NetlistSourceData::new(
-            &crate::simulation::table_route::SourceFiles,
+            &rspice_app_state::simulation::table_route::SourceFiles,
         ),
     );
     if generated.errors.is_empty() {
@@ -499,7 +499,7 @@ fn same_named_cells_in_two_libraries_each_bind_their_own_module() {
     let bindings = instances
         .iter()
         .map(|(reference, id)| {
-            let binding = crate::state::workspace::project_veriloga_binding_for_view(
+            let binding = rspice_app_state::state::workspace::project_veriloga_binding_for_view(
                 &app.state.model.workspace,
                 &app.state.model.library_manager,
                 reference,
@@ -646,10 +646,10 @@ fn a_module_that_differs_from_its_cells_schematic_is_refused_and_writes_nothing(
         .and_then(|library| library.get_cell_mut("amp"))
         .expect("the cell")
         .add_view(View::new("schematic", ViewType::Schematic));
-    let mut master = crate::state::SchematicState::default();
+    let mut master = rspice_app_state::state::SchematicState::default();
     for (index, name) in ["p", "n"].into_iter().enumerate() {
         let id = master.add_component(
-            crate::state::ComponentType::Port,
+            rspice_app_state::state::ComponentType::Port,
             Point::new(i32::try_from(index).unwrap_or(0) * 40, 0),
         );
         master
@@ -903,7 +903,8 @@ fn an_instance_placed_before_a_port_change_is_repaired_and_the_run_proceeds() {
 
     let refusal = configured_deck(&app).expect_err("the stale instance is refused");
     assert!(refusal.contains("Update instance interface"), "{refusal}");
-    let masters = std::collections::HashMap::<String, crate::state::SchematicState>::new();
+    let masters =
+        std::collections::HashMap::<String, rspice_app_state::state::SchematicState>::new();
     assert_eq!(
         app.state
             .model

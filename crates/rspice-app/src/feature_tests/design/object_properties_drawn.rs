@@ -1,10 +1,5 @@
 //! The object properties dialog drawn through a whole application.
 
-use crate::state::Bus;
-use crate::state::BusDeclaration;
-use crate::state::DesignNote;
-use crate::state::DesignNoteKind;
-use crate::state::Point;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::object_properties::tests::{
     self as dialog, declared_bus, key_event,
@@ -12,6 +7,11 @@ use crate::workbench::app::dialogs::object_properties::tests::{
 use crate::workbench::app::dialogs::object_properties::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_state::state::Bus;
+use rspice_app_state::state::BusDeclaration;
+use rspice_app_state::state::DesignNote;
+use rspice_app_state::state::DesignNoteKind;
+use rspice_app_state::state::Point;
 use rspice_schematic_editor::object_properties::ObjectPropertiesDraft;
 
 /// Draw the dialog as its dialog step does.
@@ -70,13 +70,14 @@ fn retained_properties_reject_changed_context_without_committing() {
         "missing",
     ] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        let master = crate::state::CellViewRef::new("work", "property_parent", "schematic");
+        let master =
+            rspice_app_state::state::CellViewRef::new("work", "property_parent", "schematic");
         app.state.model.workspace.descend_into(
             "X1".to_owned(),
             master.clone(),
-            crate::state::ViewType::Schematic,
+            rspice_app_state::state::ViewType::Schematic,
         );
         let first = app
             .state
@@ -129,7 +130,7 @@ fn retained_properties_reject_changed_context_without_committing() {
             "project" => app.state.model.workspace.content.project = Default::default(),
             "view" => {
                 app.state.model.workspace.content.active_view =
-                    crate::state::CellViewRef::new("work", "replacement", "schematic")
+                    rspice_app_state::state::CellViewRef::new("work", "replacement", "schematic")
             }
             "design" => app.state.model.design_execution_epoch += 1,
             "buffer" => app.state.model.active_schematic_epoch += 1,
@@ -138,7 +139,7 @@ fn retained_properties_reject_changed_context_without_committing() {
                 app.state.model.workspace.descend_into(
                     "X2".to_owned(),
                     master.clone(),
-                    crate::state::ViewType::Schematic,
+                    rspice_app_state::state::ViewType::Schematic,
                 );
             }
             "sheet" | "sheet-revision" => {
@@ -152,10 +153,11 @@ fn retained_properties_reject_changed_context_without_committing() {
                     .unwrap();
                 let second = catalog
                     .create_sheet(
-                        crate::state::SheetDefinition {
+                        rspice_app_state::state::SheetDefinition {
                             name: "Sheet 2".to_owned(),
-                            template: crate::state::SheetTemplate::AnalogSchematic,
-                            port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                            template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
+                            port_policy:
+                                rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(2),
                         },
                         Some(first),
@@ -192,7 +194,7 @@ fn retained_properties_reject_changed_context_without_committing() {
             }
             "read-only" => app.state.model.schematic.session.read_only = true,
             "safe-mode" => app.state.model.safe_mode.activate(
-                crate::state::write_policy::LocalSafeModeOptions {
+                rspice_app_state::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()
                 },
@@ -213,7 +215,9 @@ fn retained_properties_reject_changed_context_without_committing() {
                 "{change}"
             );
         }
-        let before = crate::state::SchematicSnapshot::capture(app.state.model.schematic.document());
+        let before = rspice_app_state::state::SchematicSnapshot::capture(
+            app.state.model.schematic.document(),
+        );
         let content = app.state.model.schematic.content_version();
         let topology = app.state.model.schematic.topology_version();
         let undo = app
@@ -251,7 +255,7 @@ fn retained_properties_reject_changed_context_without_committing() {
 #[test]
 fn rendered_primary_revalidates_and_commits_one_undoable_bus_transaction() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     let bus = declared_bus(1, 0, "DATA[7:0]");
     app.state
@@ -291,7 +295,7 @@ fn rendered_primary_revalidates_and_commits_one_undoable_bus_transaction() {
 #[test]
 fn rendered_escape_leaves_without_a_second_question() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     let bus = declared_bus(1, 0, "DATA[7:0]");
     app.state
@@ -345,7 +349,7 @@ fn the_title_names_the_selected_object_kind() {
 fn accessibility_tree_exposes_modal_fields_and_actions() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     let bus = declared_bus(1, 0, "DATA[7:0]");
     app.state

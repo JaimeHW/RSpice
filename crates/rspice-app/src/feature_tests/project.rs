@@ -85,7 +85,11 @@ fn shown(app: &crate::workbench::RSpiceApp) -> (Option<String>, Vec<String>, Str
 /// catalog's revision and the design's execution epoch.
 fn published(
     app: &crate::workbench::RSpiceApp,
-) -> (Vec<(crate::state::ProjectLibraryMutation, u64)>, u64, u64) {
+) -> (
+    Vec<(rspice_app_state::state::ProjectLibraryMutation, u64)>,
+    u64,
+    u64,
+) {
     let model = &app.state.model;
     (
         model

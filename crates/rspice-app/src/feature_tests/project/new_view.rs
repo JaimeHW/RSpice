@@ -6,11 +6,6 @@
 use egui::accesskit::Role;
 use egui::{Context, Key, Modifiers};
 
-use crate::state::{
-    Cell, CellViewRef, ComponentType, Library, NetNamingPolicy, Point, PortDirection, PortSpec,
-    ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, SchematicState, SymbolDocument,
-    SymbolPin, View, ViewType,
-};
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::library_dialogs::new_view::{
@@ -19,6 +14,11 @@ use crate::workbench::project::library_dialogs::new_view::{
 };
 use crate::workbench::{ChoicePreference, RSpiceApp};
 use rspice_app_project::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
+use rspice_app_state::state::{
+    Cell, CellViewRef, ComponentType, Library, NetNamingPolicy, Point, PortDirection, PortSpec,
+    ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, SchematicState, SymbolDocument,
+    SymbolPin, View, ViewType,
+};
 
 use super::super::replay::Replay;
 use super::{in_front, published, shown, with_cx};
@@ -54,7 +54,7 @@ fn schematic_with_ports(names: &[&str]) -> SchematicState {
 fn new_view_is_a_command_form_that_says_what_create_waits_for() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     let mut library = Library::new("form_test");
     let mut cell = Cell::new("amp");
@@ -176,7 +176,7 @@ fn creating_schematic_view_freezes_current_defaults_into_its_buffer() {
     app.state.project.new_view_library = "view_policy_test".to_owned();
     app.state.project.new_view_cell = "filter".to_owned();
     app.state.project.new_view_name = "schematic".to_owned();
-    app.state.project.new_view_type = crate::state::ViewType::Schematic;
+    app.state.project.new_view_type = rspice_app_state::state::ViewType::Schematic;
     app.state.project.new_view_library_revision = app.state.model.library_manager.revision();
     let project_revision_before = app.state.model.workspace.content.project.revision().get();
 
@@ -194,13 +194,14 @@ fn creating_schematic_view_freezes_current_defaults_into_its_buffer() {
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
-        Some(crate::state::ProjectLibraryMutation::CreateView {
+        Some(rspice_app_state::state::ProjectLibraryMutation::CreateView {
             library,
             cell,
             view,
         }) if library == "view_policy_test" && cell == "filter" && view == "schematic"
     ));
-    let key = crate::state::CellViewRef::new("view_policy_test", "filter", "schematic").key();
+    let key =
+        rspice_app_state::state::CellViewRef::new("view_policy_test", "filter", "schematic").key();
     let document = app
         .state
         .model
@@ -315,7 +316,7 @@ fn unsupported_view_type_is_rejected_before_project_mutation() {
     app.state.project.new_view_library = "view_policy_test".to_owned();
     app.state.project.new_view_cell = "filter".to_owned();
     app.state.project.new_view_name = "doc".to_owned();
-    app.state.project.new_view_type = crate::state::ViewType::Document;
+    app.state.project.new_view_type = rspice_app_state::state::ViewType::Document;
     app.state.project.new_view_library_revision = app.state.model.library_manager.revision();
 
     let created = create(&mut app);
@@ -508,7 +509,7 @@ fn creating_veriloga_view_atomically_retains_contract_and_opens_exact_editor() {
         project_revision_before + 1
     );
     let reference =
-        crate::state::CellViewRef::new("behavioral_models", "precision_amp", "veriloga");
+        rspice_app_state::state::CellViewRef::new("behavioral_models", "precision_amp", "veriloga");
     let owner = ProjectSourceOwner::cell_view(reference.clone());
     let bundle = app
         .state
@@ -618,7 +619,8 @@ fn duplicate_cell_view_source_owner_rolls_back_view_creation() {
     let mut library = Library::new("behavioral_models");
     library.add_cell(Cell::new("gain_stage"));
     app.state.model.library_manager.add_library(library);
-    let reference = crate::state::CellViewRef::new("behavioral_models", "gain_stage", "veriloga");
+    let reference =
+        rspice_app_state::state::CellViewRef::new("behavioral_models", "gain_stage", "veriloga");
     app.state
         .model
         .workspace
@@ -764,8 +766,8 @@ fn carry_out_in_place(app: &mut RSpiceApp, seeded: SchematicState) {
                     .expect("the reserved revision is published once"),
             );
             state.record(
-                crate::diagnostics::LogSeverity::Info,
-                crate::diagnostics::LogSource::Studio,
+                rspice_app_state::diagnostics::LogSeverity::Info,
+                rspice_app_state::diagnostics::LogSource::Studio,
                 notice,
             );
             if let Some(view) = open {
@@ -796,8 +798,8 @@ fn carry_out_in_place(app: &mut RSpiceApp, seeded: SchematicState) {
                 state.code.code_workspace.veriloga.receipt = Some(*receipt);
             }
             state.record(
-                crate::diagnostics::LogSeverity::Info,
-                crate::diagnostics::LogSource::Studio,
+                rspice_app_state::diagnostics::LogSeverity::Info,
+                rspice_app_state::diagnostics::LogSource::Studio,
                 notice,
             );
         }

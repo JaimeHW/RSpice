@@ -56,7 +56,7 @@ fn first_top_deck_is_authored_without_a_synthetic_generated_baseline() {
     assert!(document.provenance().generated().is_none());
     assert_eq!(
         document.ownership(),
-        crate::state::DocumentOwnership::Editable
+        rspice_app_state::state::DocumentOwnership::Editable
     );
     assert!(
         state

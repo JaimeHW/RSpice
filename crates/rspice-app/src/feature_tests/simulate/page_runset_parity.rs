@@ -7,7 +7,6 @@
 //! the operator budgets against. The snapshot is the authority: if these ever
 //! diverge, the page is what changes.
 
-use crate::simulation::plan::{AnalysisDraft, AnalysisInstance, AnalysisKind};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use rspice_app_simulate::workbench::surfaces::simulate::page_save::capture_workload;
@@ -15,6 +14,7 @@ use rspice_app_simulate::workbench::surfaces::simulate::participation::PlanParti
 use rspice_app_simulate::workbench::surfaces::simulate::workload::{
     PlanWorkload, instance_task_rate,
 };
+use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisInstance, AnalysisKind};
 use rspice_design::drc::DrcResult;
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 use rspice_simulation_contract::run_set::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetDimensionKind};
@@ -77,7 +77,7 @@ pub(super) fn app_with(kinds: &[AnalysisKind]) -> RSpiceApp {
 pub(super) fn instance_of(
     state: &AppState,
     kind: AnalysisKind,
-) -> crate::product::AnalysisInstanceId {
+) -> rspice_app_state::product::AnalysisInstanceId {
     state
         .model
         .sim_setup
@@ -395,7 +395,7 @@ fn put_the_reference_on_a_declared_temperature(state: &mut AppState) {
     state
         .model
         .sim_setup
-        .set_reference_pvt(crate::product::ProcessCorner::TT, 25.0)
+        .set_reference_pvt(rspice_app_state::product::ProcessCorner::TT, 25.0)
         .expect("25 °C is a valid reference temperature");
 }
 

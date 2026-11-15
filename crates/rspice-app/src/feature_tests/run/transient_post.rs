@@ -10,10 +10,6 @@ use rspice_results_ui::fft::{
     data::{FftBuildError, SpectrumAnalysisError},
 };
 
-use crate::product::{AnalysisInstanceId, DatasetId};
-use crate::state::{
-    ActiveViewer, AnalysisResult, AnalysisType, SimulationRun, SpecializedViewerCacheProvenance,
-};
 use crate::workbench::app_state::AppState;
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_runs::simulation::controller::test_execution::{clock, synthetic_result_provenance};
@@ -21,6 +17,10 @@ use rspice_app_runs::simulation::controller::transient_post::{
     DerivedViewAvailability, DerivedViewKind, DerivedViewResultPayload, DerivedViewTaskResult,
     DerivedViewerLoadState, LoadedDerivedView, PendingDerivedViewTask, build_eye_from_waveform,
     eye_matches_timebase,
+};
+use rspice_app_state::product::{AnalysisInstanceId, DatasetId};
+use rspice_app_state::state::{
+    ActiveViewer, AnalysisResult, AnalysisType, SimulationRun, SpecializedViewerCacheProvenance,
 };
 
 fn owner() -> SpecializedViewerCacheProvenance {
@@ -489,7 +489,7 @@ fn transient_specialized_views_never_outlive_their_retained_source() {
         .map(|index| ((index as f64) * 0.4).sin())
         .collect::<Vec<_>>();
     let retained = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        crate::state::RetainedTrace::new("V(out)", x, y, "#ffffff"),
+        rspice_app_state::state::RetainedTrace::new("V(out)", x, y, "#ffffff"),
     ]);
 
     controller.populate_transient_post_views(&mut state, &retained);
@@ -516,7 +516,12 @@ fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failu
         .map(|index| (index as f64 * 0.25).sin())
         .collect::<Vec<_>>();
     let valid = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        crate::state::RetainedTrace::new("V(out)", valid_time.clone(), valid_values, "#ffffff"),
+        rspice_app_state::state::RetainedTrace::new(
+            "V(out)",
+            valid_time.clone(),
+            valid_values,
+            "#ffffff",
+        ),
     ]);
     controller.populate_transient_post_views(&mut state, &valid);
     assert!(state.results.analysis.fft_state.has_data());
@@ -530,7 +535,7 @@ fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failu
     }));
 
     let malformed = AnalysisResult::new(2, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        crate::state::RetainedTrace::new("V(out)", valid_time, vec![0.0; 16], "#ffffff"),
+        rspice_app_state::state::RetainedTrace::new("V(out)", valid_time, vec![0.0; 16], "#ffffff"),
     ]);
     controller.populate_transient_post_views(&mut state, &malformed);
 

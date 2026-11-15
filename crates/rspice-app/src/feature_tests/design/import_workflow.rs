@@ -1,8 +1,8 @@
 //! The symbol definition import workflow driven through a whole application.
 
-use crate::state::SymbolSourceContract;
 use crate::workbench::app::dialogs::symbol_definition::import_workflow::*;
 use crate::workbench::app::dialogs::symbol_definition::state::SymbolImportBindingChoice;
+use rspice_app_state::state::SymbolSourceContract;
 
 #[test]
 fn review_only_svg_import_keeps_real_geometry_without_an_executable_contract() {
@@ -55,7 +55,7 @@ fn import_candidate_never_overwrites_an_existing_cell() {
         .library_manager
         .get_library_mut(&library_name)
         .expect("project library")
-        .add_cell(crate::state::Cell::new("existing"));
+        .add_cell(rspice_app_state::state::Cell::new("existing"));
 
     assert!(
         import_candidate(&app.design.symbol_import, &app.model)

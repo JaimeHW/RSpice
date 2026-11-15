@@ -1,10 +1,10 @@
 //! The device-local shortcut library store over the product's own commands.
 
-use crate::state::shortcuts::ShortcutProfileLibrary;
 use rspice_app_settings::workbench::shortcuts::artifacts::{
     canonical_json_bytes, hex_digest, sha256,
 };
 use rspice_app_settings::workbench::shortcuts::library_persistence::*;
+use rspice_app_state::state::shortcuts::ShortcutProfileLibrary;
 use serde_json::Value;
 use std::cell::RefCell;
 
@@ -43,9 +43,9 @@ fn edited(predecessor: &PersistedShortcutProfileLibrary) -> ShortcutProfileLibra
     let mut candidate = predecessor.library().clone();
     candidate
         .edit_active(|profile| {
-            profile
-                .policies_mut()
-                .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
+            profile.policies_mut().set_chord_timeout(
+                rspice_app_state::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds,
+            );
         })
         .unwrap();
     candidate

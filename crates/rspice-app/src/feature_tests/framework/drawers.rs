@@ -2,7 +2,6 @@
 //! height against its real rows, the workspace entry and the tool groups, the
 //! account and notification entries, and the floor on very narrow viewports.
 
-use crate::ui::tokens::{Mode, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::layout::LayoutSpec;
@@ -10,6 +9,7 @@ use crate::workbench::state::WorkbenchSession;
 use crate::workbench::state::{Drawer, Workspace};
 use egui::{Area, Context, Id, Order, Sense, UiKind};
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
+use rspice_app_workbench::ui::tokens::{Mode, Tokens};
 use rspice_app_workbench::workbench::docks::drawers::*;
 
 #[derive(Clone, Copy)]

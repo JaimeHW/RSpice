@@ -5,7 +5,6 @@
 //! sheet's ink says so in numbers.
 
 use crate::feature_tests::hardcopy::{hardcopy_parts, resolve_retained_hardcopy_source};
-use crate::product::ContentDigest;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
@@ -17,6 +16,7 @@ use rspice_app_hardcopy::workbench::hardcopy_adapters::print::{
     PrinterResolutionCapability, PrinterTrayCapability,
 };
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
+use rspice_app_state::product::ContentDigest;
 use rspice_hardcopy::render::{
     HardcopyRenderError, HardcopyRenderer, HardcopySceneMetadata, RenderedPrinterPages,
 };
@@ -41,10 +41,10 @@ fn exporting_an_a3_sheet() -> (RSpiceApp, ResolvedHardcopyDocument) {
     settings.default_format = settings
         .default_format
         .try_update(|draft| {
-            draft.authored_size = crate::state::AuthoredDrawingSheetSize::Standard {
-                standard: crate::state::DrawingSheetStandard::IsoA3,
+            draft.authored_size = rspice_app_state::state::AuthoredDrawingSheetSize::Standard {
+                standard: rspice_app_state::state::DrawingSheetStandard::IsoA3,
             };
-            draft.orientation = crate::state::SchematicPageOrientation::Landscape;
+            draft.orientation = rspice_app_state::state::SchematicPageOrientation::Landscape;
         })
         .unwrap();
     let revision = design.revision();

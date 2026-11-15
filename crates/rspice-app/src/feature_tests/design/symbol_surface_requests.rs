@@ -8,7 +8,7 @@ use rspice_schematic_editor::symbol_editor::surface::SymbolSurfaceRequest;
 
 #[test]
 fn symbol_surface_requests_recheck_the_view_and_write_authority() {
-    use crate::state::{Cell, CellViewRef, Library, View, ViewType};
+    use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
     for action in [
         SymbolSurfaceAction::CopyToEditableLibrary,
         SymbolSurfaceAction::GenerateFromSchematic,

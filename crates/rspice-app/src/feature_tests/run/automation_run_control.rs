@@ -14,13 +14,13 @@ use egui::accesskit::Role;
 use egui::{Key, Modifiers, Pos2};
 
 use crate::feature_tests::replay::{Control, Replay, controls, only};
-use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::workbench::documents::code_workspace::{
     self, AutomationArtifactStore, AutomationExecutionState, AutomationRuntimeLaunchMode,
     CodeWorkspacePage, PendingAutomationRuntimeExecution, SourceOperationToken,
 };
 use crate::workbench::state::Workspace;
 use rspice_app_code::automation_workflow::{ArtifactKind, RenderedArtifact};
+use rspice_app_state::state::{ProjectSourceLanguage, ProjectSourceOwner};
 
 /// A session with a project open, on the Automation page.
 fn automation_page() -> Replay {
@@ -85,7 +85,12 @@ fn has_button(controls: &[Control], label: &str) -> bool {
 }
 
 /// The exact Automation closure the page shows.
-fn token(replay: &Replay) -> (crate::state::ProjectSourceId, SourceOperationToken) {
+fn token(
+    replay: &Replay,
+) -> (
+    rspice_app_state::state::ProjectSourceId,
+    SourceOperationToken,
+) {
     let bundle = replay
         .app
         .state
@@ -283,7 +288,7 @@ impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for CountedS
 
     fn write_waveform_csv(
         &self,
-        _dataset: &crate::io::WaveformDataset,
+        _dataset: &rspice_app_services::io::WaveformDataset,
         _path: &Path,
     ) -> Result<(), String> {
         Ok(())

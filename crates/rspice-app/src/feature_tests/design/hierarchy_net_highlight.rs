@@ -1,9 +1,9 @@
 //! The net highlight carried across a hierarchy descent, through the whole application:
 //! the hierarchy reference example builds its design as an AppState.
 
-use crate::state::SchematicNetHighlighting;
 use crate::workbench::app_state::AppState;
 use crate::workbench::examples::hierarchy_reference::{self, AMP_INSTANCES};
+use rspice_app_state::state::SchematicNetHighlighting;
 
 fn lit(state: &AppState) -> Option<String> {
     let highlight = &state.model.schematic.session.editor.net_highlight;

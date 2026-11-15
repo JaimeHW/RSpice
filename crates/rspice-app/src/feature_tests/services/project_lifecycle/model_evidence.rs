@@ -1,7 +1,7 @@
 //! Model evidence belongs to the same save/revert boundary as its catalog.
 
 use super::*;
-use crate::state::model_library::{
+use rspice_app_state::state::model_library::{
     ModelConsumerScope, ModelValidationFinding, ModelValidationFindingSeverity,
 };
 
@@ -26,7 +26,7 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
             .model_library_manager
             .seal_execution_sources()
             .unwrap()
-            .reference_model_execution_plan(crate::product::ProcessCorner::TT)
+            .reference_model_execution_plan(rspice_app_state::product::ProcessCorner::TT)
             .unwrap();
         let receipt = state
             .model
@@ -35,7 +35,7 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
                 state.model.workspace.content.project.revision(),
                 plan.digest(),
                 None,
-                crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
+                rspice_app_services::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
                 vec![ModelValidationFinding {
                     code: "SPICE_NAMESPACE_COMPILED".to_owned(),
                     severity: ModelValidationFindingSeverity::Information,
@@ -56,7 +56,7 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
         );
         insert_ac_analysis(&mut state);
         save_native(&mut state, scope, &path, DestinationAuthority::Canonical).unwrap();
-        let reloaded = crate::io::load_project_file(&path)
+        let reloaded = rspice_app_services::io::load_project_file(&path)
             .unwrap()
             .file
             .execution_context
@@ -89,7 +89,7 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
             Ok(std::time::Duration::ZERO),
             Ok(std::time::Duration::MAX),
         ] {
-            crate::time_compat::with_unix_epoch(epoch, || {
+            rspice_app_state::time_compat::with_unix_epoch(epoch, || {
                 assert!(
                     state
                         .model
@@ -169,7 +169,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
             Ok(std::time::Duration::ZERO),
             Ok(std::time::Duration::MAX),
         ] {
-            crate::time_compat::with_unix_epoch(epoch, || {
+            rspice_app_state::time_compat::with_unix_epoch(epoch, || {
                 assert!(
                     state
                         .model
@@ -215,7 +215,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
         );
         insert_ac_analysis(&mut state);
         save_native(&mut state, scope, &path, DestinationAuthority::Canonical).unwrap();
-        let reloaded = crate::io::load_project_file(&path)
+        let reloaded = rspice_app_services::io::load_project_file(&path)
             .unwrap()
             .file
             .execution_context

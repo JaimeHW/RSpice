@@ -76,7 +76,7 @@ fn every_dock_keeps_the_size_it_was_dragged_to() {
         app.state.workbench.console_visible = true;
         app.state.workbench.console_page = ConsolePage::Problems;
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         // How far the dragged dock reaches from its window edge, read off
         // its splitter, which egui centres on the dock's free edge.
         let mut frame = |events: Vec<egui::Event>| {

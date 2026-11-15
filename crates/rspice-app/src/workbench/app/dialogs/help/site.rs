@@ -8,11 +8,11 @@
 //! which topic the reader is looking at: the dialog on top, when it has an
 //! obvious topic, else the workspace on screen.
 
-use crate::state::ViewType;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::dialogs::ModalGate;
 use crate::workbench::framework::requests::{OpenWebPage, Outbox};
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::ViewType;
 
 /// This version's entry in the release notes.
 pub(in crate::workbench) const RELEASE_NOTES_URL: &str =
@@ -204,7 +204,7 @@ mod tests {
     /// handler that takes the whole application.
     fn opened_pages_after(app: &mut impl eframe::App, events: Vec<egui::Event>) -> Vec<OpenUrl> {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut frame = eframe::Frame::_new_kittest();
         let output = ctx.run_ui(
             egui::RawInput {

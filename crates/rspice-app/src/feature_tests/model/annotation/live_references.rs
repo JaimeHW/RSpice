@@ -1,16 +1,16 @@
 //! References added between history operations retain current scope and atomic publication.
 
 use super::*;
-use crate::state::CellViewRef;
-use crate::state::ComponentType;
-use crate::state::SchematicSnapshot;
-use crate::state::SchematicState;
+use rspice_app_state::state::CellViewRef;
+use rspice_app_state::state::ComponentType;
+use rspice_app_state::state::SchematicSnapshot;
+use rspice_app_state::state::SchematicState;
 
 fn add_output(
     state: &mut AppState,
     plan: SimulationPlanId,
     expression: &str,
-) -> crate::product::SavedOutputId {
+) -> rspice_app_state::product::SavedOutputId {
     let output = SavedOutput::new(
         SavedOutputKind::RawVoltageOrCurrent,
         "New reference",
@@ -461,7 +461,7 @@ fn bulk_annotation_history_includes_new_plan_outputs_in_both_directions() {
 
 #[test]
 fn history_resolves_current_configuration_roots_before_rewriting_shared_output_text() {
-    use crate::state::{LibraryCellInstance, View, ViewType};
+    use rspice_app_state::state::{LibraryCellInstance, View, ViewType};
 
     for bulk in [false, true] {
         let (mut fixture, root, child, other) = reused_master_fixture(["X1", "X2"]);

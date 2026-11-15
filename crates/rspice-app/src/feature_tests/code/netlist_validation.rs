@@ -67,7 +67,7 @@ fn validated_owned_source_can_run_before_external_source_synchronization() {
             edited.to_owned()
         )
     );
-    let edited_digest = crate::state::content_digest(edited);
+    let edited_digest = rspice_app_state::state::content_digest(edited);
     assert_ne!(
         app.state.code.netlist.externally_saved_content_digest,
         Some(edited_digest)
@@ -198,7 +198,7 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
         &mut app.state.model,
         generated,
         parameter_source,
-        crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
+        rspice_app_state::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
     app.state.model.workspace.content.netlist_source_path = Some(root.clone());
     app.state.code.netlist.owned_document =
@@ -241,7 +241,7 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
         &mut app.state.model,
         generated,
         include_source,
-        crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride,
+        rspice_app_state::state::OwnedNetlistEditStrategy::IncludeOrderOverride,
     );
     app.state.model.workspace.content.netlist_source_path = Some(root);
     app.state.code.netlist.owned_document =
@@ -297,7 +297,7 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
         &mut app.state.workbench,
         &crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
         false,
-        crate::state::NetlistTextEncoding::Utf8,
+        rspice_app_state::state::NetlistTextEncoding::Utf8,
         "Attempt conflicting save",
     ));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), external);
@@ -323,7 +323,7 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
     assert!(app.state.code.netlist.external_change.is_none());
     assert_eq!(
         app.state.code.netlist.externally_saved_content_digest,
-        Some(crate::state::content_digest(external))
+        Some(rspice_app_state::state::content_digest(external))
     );
     assert!(
         app.state

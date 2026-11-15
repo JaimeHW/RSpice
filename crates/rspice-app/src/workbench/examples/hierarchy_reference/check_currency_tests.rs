@@ -5,7 +5,6 @@
 //! else leaves it current; and asking whether it is current costs nothing
 //! while nothing it read has moved, so a frame with no edit digests nothing.
 
-use crate::state::{CellViewRef, Library, Point, ViewType};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::DesignCheckStatus;
 use crate::workbench::app_state::diagnostic_store::digest_memo::{
@@ -13,6 +12,7 @@ use crate::workbench::app_state::diagnostic_store::digest_memo::{
 };
 use crate::workbench::app_state::diagnostic_store::listing;
 use crate::workbench::examples::hierarchy_reference::{self, AMP_INSTANCES, HierarchyReference};
+use rspice_app_state::state::{CellViewRef, Library, Point, ViewType};
 use rspice_design::connectivity_contract::GlobalAliasComparisonPolicy;
 use rspice_design::projection::{document_digest_counts, reset_document_digest_counts};
 
@@ -139,7 +139,7 @@ fn rebinding_a_configuration_entry_the_check_followed_stales_its_findings() {
         .expect("the amplifier's library")
         .add_view(
             &amp.cell,
-            crate::state::View::new("alternate", ViewType::Schematic),
+            rspice_app_state::state::View::new("alternate", ViewType::Schematic),
         )
         .expect("the amplifier cell");
     let copy = reference.state.model.workspace.content.schematic_buffers[&amp.key()].clone();
@@ -215,14 +215,14 @@ fn every_input_the_memo_is_keyed_by_moves_on_every_way_it_is_changed() {
             "an edit to the drawing in front of the reader",
             |reference| {
                 reference.state.model.schematic.add_component(
-                    crate::state::ComponentType::Resistor,
+                    rspice_app_state::state::ComponentType::Resistor,
                     Point::new(4000, 4000),
                 );
             },
         ),
         ("an undo", |reference| {
             reference.state.model.schematic.add_component(
-                crate::state::ComponentType::Resistor,
+                rspice_app_state::state::ComponentType::Resistor,
                 Point::new(4000, 4000),
             );
             let _ = listing::listing_in_pass(&reference.state, 90);
@@ -253,7 +253,7 @@ fn every_input_the_memo_is_keyed_by_moves_on_every_way_it_is_changed() {
             let management = &mut reference.state.model.workspace.content.design_management;
             let mut settings = management.drawing_sheet_settings().clone();
             settings.title_block_field_values.insert(
-                crate::state::DrawingSheetTitleFieldId::Organization,
+                rspice_app_state::state::DrawingSheetTitleFieldId::Organization,
                 "Edited".to_owned(),
             );
             let revision = management.revision();
@@ -266,7 +266,7 @@ fn every_input_the_memo_is_keyed_by_moves_on_every_way_it_is_changed() {
                 (*reference.state.model.workspace.content.design_management).clone();
             let mut settings = candidate.drawing_sheet_settings().clone();
             settings.title_block_field_values.insert(
-                crate::state::DrawingSheetTitleFieldId::Organization,
+                rspice_app_state::state::DrawingSheetTitleFieldId::Organization,
                 "Replaced".to_owned(),
             );
             let revision = candidate.revision();

@@ -3,10 +3,6 @@
 //! is the code feature's (`code::SOURCE_EDITOR_MENU`).
 
 use crate::schematic::view::sheet_visibility::SchematicObjectKind;
-use crate::state::ModelsPage;
-use crate::state::SimulationPage;
-use crate::state::VerificationPage;
-use crate::state::command_catalog::CommandKey;
 use crate::workbench::ResultViewer;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::commands::DesignCommand;
@@ -21,6 +17,10 @@ use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
+use rspice_app_state::state::ModelsPage;
+use rspice_app_state::state::SimulationPage;
+use rspice_app_state::state::VerificationPage;
+use rspice_app_state::state::command_catalog::CommandKey;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::ApplicationMenu;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
@@ -201,12 +201,12 @@ const EXPORT_MENU: &[MenuEntry] = &[
     )
     .access('I'),
     MenuEntry::command_as(
-        CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
+        CodeCommand::ExportNetlist(rspice_app_services::io::NetlistFormat::Spice).key(),
         "SPICE netlist\u{2026}",
     )
     .access('S'),
     MenuEntry::command_as(
-        CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spectre).key(),
+        CodeCommand::ExportNetlist(rspice_app_services::io::NetlistFormat::Spectre).key(),
         "Spectre netlist\u{2026}",
     )
     .access('N'),
@@ -950,7 +950,7 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             CodeCommand::VerilogABuildSettings => Some(WorkbenchIcon::Sliders),
             CodeCommand::FindCodeDocument => Some(WorkbenchIcon::Search),
             CodeCommand::CompareGeneratedRevisions => Some(WorkbenchIcon::Compare),
-            CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice) => {
+            CodeCommand::ExportNetlist(rspice_app_services::io::NetlistFormat::Spice) => {
                 Some(WorkbenchIcon::Export)
             }
             CodeCommand::AutomationConsole => Some(WorkbenchIcon::Terminal),

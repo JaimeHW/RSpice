@@ -151,7 +151,7 @@ fn restoring_a_page_clears_every_override_behind_it() {
         );
         assert_eq!(
             app.state.workbench.theme,
-            crate::ui::Theme::default(),
+            rspice_app_workbench::ui::Theme::default(),
             "{} left the theme changed",
             category.label()
         );
@@ -173,7 +173,7 @@ fn labels_found_by(query: &str) -> Vec<String> {
     };
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     set_filter_for_review(&ctx, query);
     let mut app = RSpiceApp::test_instance();
@@ -294,7 +294,7 @@ fn override_every_setting_on(category: PreferenceCategory, state: &mut AppState)
         }
     }
     if category == PreferenceCategory::Appearance {
-        state.workbench.theme.mode = crate::ui::Mode::Light;
+        state.workbench.theme.mode = rspice_app_workbench::ui::Mode::Light;
         state.workbench.theme.canvas_contrast = 12;
     }
     if category == PreferenceCategory::Projects {

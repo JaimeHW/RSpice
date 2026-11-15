@@ -2,8 +2,8 @@
 //! and the run gate judge the configured root under it alike.
 
 use super::*;
-use crate::state::Point;
 use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticLevel};
+use rspice_app_state::state::Point;
 use rspice_design::drc::{DrcSeverity, DrcViolationType};
 use rspice_simulation::execution::PreparationStage;
 
@@ -53,7 +53,7 @@ fn preflight_blocks_on_design_rules(app: &RSpiceApp) -> bool {
 /// What the run gate does with the design: `None` where it prepares, the
 /// stage it refused at otherwise.
 fn run_gate(
-    controller: &mut crate::simulation::SimulationController,
+    controller: &mut rspice_app_runs::simulation::controller::SimulationController,
     state: &AppState,
 ) -> Option<PreparationStage> {
     controller

@@ -1,6 +1,5 @@
 //! The project feature's own steps, run in its context lent from RSpiceApp.
 
-use crate::state::{Cell, Library, View, ViewType};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::project_transactions::WholeStateValidation;
 use crate::workbench::framework::dialogs::DialogKey;
@@ -8,6 +7,7 @@ use crate::workbench::framework::feature::{CommandSet, FeatureRegistry};
 use crate::workbench::framework::requests::Drain;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
+use rspice_app_state::state::{Cell, Library, View, ViewType};
 
 use super::with_cx;
 
@@ -182,7 +182,7 @@ fn assert_the_step_raises_nothing(app: &mut RSpiceApp, key: &'static str) {
     );
     let before = format!("{:?}", app.state.workbench.outbox);
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     for _ in 0..2 {
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             with_cx(app, |cx| (dialog.render)(cx, ctx));

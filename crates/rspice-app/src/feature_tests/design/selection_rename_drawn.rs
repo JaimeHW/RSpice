@@ -1,12 +1,12 @@
 //! Renaming a selection, drawn through a whole application.
 
 use crate::feature_tests::design::rename::{apply_commit, component_app};
-use crate::state::Component;
-use crate::state::{ComponentType, NetLabel, Point, Wire};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::selection::rename::tests::{self as dialog, key_event};
 use crate::workbench::app::dialogs::selection::rename::*;
 use egui::Context;
+use rspice_app_state::state::Component;
+use rspice_app_state::state::{ComponentType, NetLabel, Point, Wire};
 
 /// Draw the dialog as its dialog step does.
 fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -231,7 +231,7 @@ fn stale_target_and_cancel_never_mutate() {
 #[test]
 fn rendered_enter_commits_and_escape_cancels() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let (mut app, id) = component_app();
     assert!(open_selected_object_rename(
         &mut app.state.design.rename_selection,

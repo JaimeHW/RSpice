@@ -7,13 +7,6 @@
 //! same frame and the same order as if the feature had run it, and tells the
 //! feature how it went.
 
-use crate::diagnostics::{LogSeverity, LogSource};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::io::SchematicIoError;
-use crate::io::{FileWorkflowIo, ProjectSnapshot};
-use crate::product::TransactionId;
-use crate::state::write_policy::LocalSafeModeOptions;
-use crate::state::{SchematicState, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 #[cfg(doc)]
@@ -45,6 +38,13 @@ use rspice_app_project::workbench::workflows::project_workflow::{
     self, ClosedProject, LiveProjectApply, LoadedProject, NewProject, NewProjectParams,
     OpenedProject, ProjectLoadOrigin, SaveParts, SaveRequestOutcome,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_services::io::SchematicIoError;
+use rspice_app_services::io::{FileWorkflowIo, ProjectSnapshot};
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_state::product::TransactionId;
+use rspice_app_state::state::write_policy::LocalSafeModeOptions;
+use rspice_app_state::state::{SchematicState, ViewType};
 use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::ProjectIoError;
@@ -272,8 +272,8 @@ impl AppState {
         &mut self,
         mut schematic: SchematicState,
         origin: SchematicLoadOrigin<'_>,
-    ) -> Result<crate::state::CellViewRef, String> {
-        use crate::state::{Cell, CellViewRef, ProjectLibraryMutation, View};
+    ) -> Result<rspice_app_state::state::CellViewRef, String> {
+        use rspice_app_state::state::{Cell, CellViewRef, ProjectLibraryMutation, View};
 
         let library = self.model.workspace.content.active_view.library.clone();
         let Some(existing) = self.model.library_manager.get_library(&library) else {
@@ -689,7 +689,7 @@ impl AppState {
     /// Returns whether it opened.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn open_project(&mut self) -> bool {
-        match crate::io::show_open_project_dialog() {
+        match rspice_app_services::io::show_open_project_dialog() {
             Ok(path) => self.load_project_from_path(&path),
             Err(ProjectIoError::Cancelled) => false,
             Err(error) => {
@@ -773,7 +773,7 @@ impl AppState {
         let Ok(text) = std::str::from_utf8(bytes) else {
             return LiveProjectApply::Rejected;
         };
-        let project = match crate::io::project_io::load_project_text(text, None) {
+        let project = match rspice_app_services::io::project_io::load_project_text(text, None) {
             Ok(project) => project,
             Err(error) => {
                 log::warn!("live session project snapshot rejected: {error}");
@@ -982,7 +982,7 @@ impl AppState {
             project_workflow::project_save_dialog_default_name(&self.model, &self.platform);
 
         #[cfg(not(target_arch = "wasm32"))]
-        match crate::io::show_save_project_dialog(Some(default_name.as_str())) {
+        match rspice_app_services::io::show_save_project_dialog(Some(default_name.as_str())) {
             Ok(path) => self.save_project_as_to_path(&path),
             Err(ProjectIoError::Cancelled) => false,
             Err(error) => {
@@ -1239,7 +1239,7 @@ pub(crate) fn apply_workspace_pruned(state: &mut AppState, pruned: WorkspacePrun
 /// waiting, that names one of `sources`: it no longer describes its source.
 pub(crate) fn void_veriloga_evidence(
     state: &mut AppState,
-    sources: &[crate::state::ProjectSourceId],
+    sources: &[rspice_app_state::state::ProjectSourceId],
 ) {
     let veriloga = &mut state.code.code_workspace.veriloga;
     let names_a_moved_source = veriloga
@@ -1484,16 +1484,16 @@ mod tests {
         state.design.schematic_snap.grid_size = 999;
         let mut loaded = SchematicState::default();
         loaded.document_mut_for_test().document_policy.grid_pitch =
-            crate::state::SchematicGridPitch::Metric;
+            rspice_app_state::state::SchematicGridPitch::Metric;
         loaded.document_mut_for_test().grid_size = 123;
-        loaded.session.editor.snap_engine = crate::state::SnapEngine::default();
+        loaded.session.editor.snap_engine = rspice_app_state::state::SnapEngine::default();
 
         replace_active_schematic_document(&mut state, loaded);
 
-        let expected = crate::state::SchematicGridPitch::Metric.canvas_grid_size();
+        let expected = rspice_app_state::state::SchematicGridPitch::Metric.canvas_grid_size();
         assert_eq!(
             state.model.schematic.document().document_policy.grid_pitch,
-            crate::state::SchematicGridPitch::Metric
+            rspice_app_state::state::SchematicGridPitch::Metric
         );
         assert_eq!(state.model.schematic.document().grid_size, expected);
         assert_eq!(

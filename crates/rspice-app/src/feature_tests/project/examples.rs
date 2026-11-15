@@ -7,13 +7,13 @@ use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 use std::time::{Duration, Instant};
 
-use crate::state::AnalysisType;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::session::project_transactions::create_example_project;
 use crate::workbench::session::project_transactions::request_example;
 use crate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_project::workbench::tools::examples_browser::{open_refusal, show};
+use rspice_app_state::state::AnalysisType;
 
 /// Every example opens as a project whose default plan the engine
 /// prepares and authorizes, through the path the toolbar's Run takes:
@@ -166,7 +166,7 @@ fn an_example_asks_to_save_unsaved_work_before_replacing_it() {
 #[test]
 fn open_hands_back_the_selected_example_and_closes_the_dialog() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.project.examples_selection = Some(1);

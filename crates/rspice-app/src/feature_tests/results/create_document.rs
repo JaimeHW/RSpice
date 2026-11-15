@@ -1,25 +1,25 @@
 //! Creating a result document through a whole application: the dialog's
 //! family, name and viewer choices, and a commit that the project owns.
 
-use crate::state::AnalysisResult;
-use crate::state::AnalysisResultFamilyMetadata;
-use crate::state::AnalysisResultPayload;
-use crate::state::AnalysisType;
-use crate::state::DigitalEventPointEvidence;
-use crate::state::DigitalEventTraceEvidence;
-use crate::state::RetainedTrace;
-use crate::state::SimulationRun;
-use crate::state::SimulationRunLifecycle;
-use crate::state::SoaEvaluationEvidence;
-use crate::state::SoaParameterEvidence;
-use crate::state::SoaRuleVerdictEvidence;
-use crate::state::SoaViolationEvidence;
-use crate::state::SoaViolationSeverityEvidence;
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::create_document::*;
 use crate::workbench::state::Workspace;
 use crate::workbench::state::WorkspaceDocumentId;
 use rspice_app_state::results::visualization_document::ResultDocumentTracking;
+use rspice_app_state::state::AnalysisResult;
+use rspice_app_state::state::AnalysisResultFamilyMetadata;
+use rspice_app_state::state::AnalysisResultPayload;
+use rspice_app_state::state::AnalysisType;
+use rspice_app_state::state::DigitalEventPointEvidence;
+use rspice_app_state::state::DigitalEventTraceEvidence;
+use rspice_app_state::state::RetainedTrace;
+use rspice_app_state::state::SimulationRun;
+use rspice_app_state::state::SimulationRunLifecycle;
+use rspice_app_state::state::SoaEvaluationEvidence;
+use rspice_app_state::state::SoaParameterEvidence;
+use rspice_app_state::state::SoaRuleVerdictEvidence;
+use rspice_app_state::state::SoaViolationEvidence;
+use rspice_app_state::state::SoaViolationSeverityEvidence;
 use rspice_results::document_creation::ResultDocumentFamily;
 use rspice_results::document_creation::ResultDocumentLayout;
 use rspice_results_ui::create_document::{CreateDocumentHost, CreateResultDocumentDialogState};
@@ -193,8 +193,8 @@ fn commit_is_project_owned_dirty_and_stably_selected() {
 fn release_target_table_commits_from_typed_operating_point_without_waveforms() {
     let mut app = RSpiceApp::test_instance();
     let mut analysis = AnalysisResult::new(11, AnalysisType::DcOp, "Operating point");
-    analysis.dc_op = Some(crate::state::DcOpResult {
-        node_voltages: vec![crate::state::OperatingPointValue {
+    analysis.dc_op = Some(rspice_app_state::state::DcOpResult {
+        node_voltages: vec![rspice_app_state::state::OperatingPointValue {
             name: "V(out)".to_owned(),
             value: 1.234_567_890_123_456,
             unit: "V".to_owned(),
@@ -424,21 +424,23 @@ struct ResultsWindow {
     app: RSpiceApp,
     frame: eframe::Frame,
     time: f64,
-    dataset_id: crate::product::DatasetId,
+    dataset_id: rspice_app_state::product::DatasetId,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl ResultsWindow {
     fn new() -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
         let mut run = retained_run_with(AnalysisType::Transient);
         // A project saves a run only once its provenance is classified.
-        run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
-            .expect("the fixture run is explicitly legacy");
+        run.restore_provenance(
+            rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed,
+        )
+        .expect("the fixture run is explicitly legacy");
         let dataset_id = run.dataset_id;
         app.state.model.simulation.retained.runs = vec![run].into();
         assert!(app.state.model.simulation.select_run(0));
@@ -488,7 +490,7 @@ impl ResultsWindow {
     fn create(
         &mut self,
         name: &str,
-    ) -> Result<crate::product::ResultDocumentId, CreateResultDocumentError> {
+    ) -> Result<rspice_app_state::product::ResultDocumentId, CreateResultDocumentError> {
         self.app.state.results.create_result_document = CreateResultDocumentDialogState {
             open: true,
             name: name.to_owned(),

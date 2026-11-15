@@ -3,8 +3,8 @@
 //! the byte limit is enforced before decoding; a repeated import is stored once
 //! and survives a project round trip; a stale inspection closes.
 
-use crate::io::file_exchange;
 use crate::workbench::RSpiceApp;
+use rspice_app_services::io::file_exchange;
 use rspice_app_simulate::workbench::surfaces::simulate::transient_checkpoint_exchange::{
     Action, Inspection, KIND, apply, import_id, inspection_id, poll,
 };
@@ -104,8 +104,8 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
             .count(),
         1
     );
-    let json = crate::io::project_io::serialize_project_file(&after).unwrap();
-    let restored = crate::io::project_io::load_project_text(&json, None).unwrap();
+    let json = rspice_app_services::io::project_io::serialize_project_file(&after).unwrap();
+    let restored = rspice_app_services::io::project_io::load_project_text(&json, None).unwrap();
     assert!(restored.file.simulation_results_warning.is_none());
     assert_eq!(
         restored

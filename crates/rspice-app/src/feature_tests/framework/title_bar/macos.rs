@@ -5,9 +5,9 @@
 //! writes it. Read for the macOS platform value on any host.
 
 use super::*;
-use crate::state::command_catalog::CommandPlatform;
 use crate::workbench::framework::requests::WindowFrame;
 use egui::os::OperatingSystem;
+use rspice_app_state::state::command_catalog::CommandPlatform;
 
 /// `rows` without their key: `label | command id | state`.
 fn without_keys(rows: &[String]) -> Vec<String> {
@@ -208,7 +208,7 @@ impl TitleBar {
     fn new(os: OperatingSystem) -> Self {
         let ctx = Context::default();
         ctx.set_os(os);
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         Self {
             ctx,
             app: title_test_app(),

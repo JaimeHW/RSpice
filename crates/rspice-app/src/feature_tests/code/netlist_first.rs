@@ -131,16 +131,16 @@ fn truncated_netlist_first_app() -> RSpiceApp {
     app
 }
 
-fn netlist_first_canvas(size: Vec2, truncated: bool) -> crate::ui::raster::Canvas {
+fn netlist_first_canvas(size: Vec2, truncated: bool) -> rspice_app_workbench::ui::raster::Canvas {
     let mut app = if truncated {
         truncated_netlist_first_app()
     } else {
         netlist_first_app()
     };
-    crate::ui::raster::render(size, |ui, _| landing(&mut app, ui))
+    rspice_app_workbench::ui::raster::render(size, |ui, _| landing(&mut app, ui))
 }
 
-fn regression_height(canvas: &crate::ui::raster::Canvas) -> usize {
+fn regression_height(canvas: &rspice_app_workbench::ui::raster::Canvas) -> usize {
     canvas.content_height().max(1)
 }
 
@@ -193,7 +193,7 @@ fn painted_text(size: Vec2, mut pass: impl FnMut(&mut Ui)) -> Vec<String> {
     }
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut shapes = Vec::new();
     for _ in 0..2 {
         shapes = ctx
@@ -305,7 +305,7 @@ fn the_page_paints_the_full_landing_at_all_supported_viewports() {
 fn the_two_column_landing_fills_both_columns() {
     let mut app = netlist_first_app();
     let size = vec2(1440.0, 900.0);
-    let canvas = crate::ui::raster::render(size, |ui, _| landing(&mut app, ui));
+    let canvas = rspice_app_workbench::ui::raster::render(size, |ui, _| landing(&mut app, ui));
 
     // Content column: 1240 centered in 1440 leaves 100 on each side. The
     // preview occupies the left column and the rail the last 322 points.

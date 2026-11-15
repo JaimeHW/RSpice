@@ -5,14 +5,14 @@
 use crate::schematic::view::move_interaction::*;
 use crate::schematic::view::requests::editor_request_source;
 use crate::schematic::view::schematic_symbol_context;
-use crate::state::ComponentType;
-use crate::state::Point;
-use crate::state::Tool;
 use crate::workbench::app::cancel_armed_move_selection_in;
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::ComponentType;
+use rspice_app_state::state::Point;
+use rspice_app_state::state::Tool;
 use rspice_schematic_editor::view::transform_input::TransformInputTransition;
 
-fn arm_test_move(state: &mut AppState, mode: crate::state::MoveSelectionMode) {
+fn arm_test_move(state: &mut AppState, mode: rspice_app_state::state::MoveSelectionMode) {
     state.design.move_selection.mode = mode;
     crate::workbench::app::arm_move_selection_in(
         &mut state.design.move_selection,
@@ -49,7 +49,10 @@ fn move_requests_recheck_source_mode_and_draft_without_cancelling_a_replacement(
             .selection
             .select_only_component(id);
         state.model.schematic.clear_undo_history();
-        arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
+        arm_test_move(
+            &mut state,
+            rspice_app_state::state::MoveSelectionMode::Connected,
+        );
         let expected = state.design.move_selection.canvas.clone();
         let mut next = expected.clone();
         next.preview_delta = Point::new(100, 0);
@@ -64,14 +67,19 @@ fn move_requests_recheck_source_mode_and_draft_without_cancelling_a_replacement(
         match change {
             "document" => state.model.active_schematic_epoch += 1,
             "selection" => state.model.schematic.session.editor.selection.clear(),
-            "mode" => state.design.move_selection.mode = crate::state::MoveSelectionMode::Shove,
+            "mode" => {
+                state.design.move_selection.mode = rspice_app_state::state::MoveSelectionMode::Shove
+            }
             "draft" => state.design.move_selection.canvas.anchor = Some(Point::new(10, 0)),
             "modal" => state.settings.preferences_open = true,
             "read-only" => state.model.schematic.session.read_only = true,
             "tool" => state.model.schematic.arm_tool(Tool::Select),
             "replacement" => {
                 cancel_armed_move_selection_in(&mut state.design.move_selection, &mut state.model);
-                arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
+                arm_test_move(
+                    &mut state,
+                    rspice_app_state::state::MoveSelectionMode::Connected,
+                );
                 assert_eq!(
                     request.transition.expected,
                     state.design.move_selection.canvas

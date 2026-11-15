@@ -42,7 +42,7 @@ fn the_import_table_prints_nothing_outside_the_dialog_surface() {
 
     for width in [1000.0f32, 1600.0] {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         let plan_id = plan(&app.state.model);
@@ -127,7 +127,7 @@ fn every_refused_row_is_inside_the_dialog_that_refuses_it() {
     // refusal below the fold, and the one this was not measuring.
     for width in [1000.0f32, 1600.0, 2560.0] {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         let plan_id = plan(&app.state.model);

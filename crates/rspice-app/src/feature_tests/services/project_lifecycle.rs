@@ -5,10 +5,6 @@
 //! Each case pins a scope boundary: revert must not race the active document,
 //! and a close is presentation-only.
 
-use crate::io::ProjectSnapshot;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::simulation::plan::AnalysisKind;
-use crate::state::{CellViewRef, ComponentType, Point, ViewType};
 use crate::workbench::app_state::{
     AppState,
     services_access::{
@@ -17,6 +13,10 @@ use crate::workbench::app_state::{
     },
 };
 use crate::workbench::lifecycle::project_lifecycle::*;
+use rspice_app_services::io::ProjectSnapshot;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_state::simulation::plan::AnalysisKind;
+use rspice_app_state::state::{CellViewRef, ComponentType, Point, ViewType};
 use rspice_project::SnapshotContent;
 use std::path::{Path, PathBuf};
 
@@ -34,7 +34,7 @@ mod model_evidence;
 mod result_cache;
 
 #[cfg(not(target_arch = "wasm32"))]
-fn insert_ac_analysis(state: &mut AppState) -> crate::product::AnalysisInstanceId {
+fn insert_ac_analysis(state: &mut AppState) -> rspice_app_state::product::AnalysisInstanceId {
     state
         .model
         .sim_setup
@@ -91,7 +91,7 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
     );
     let bytes = prepared.save.take_bytes();
     let staged_text = std::str::from_utf8(&bytes).expect("UTF-8 project bytes");
-    let decoded = crate::io::project_io::load_project_text(staged_text, None)
+    let decoded = rspice_app_services::io::project_io::load_project_text(staged_text, None)
         .expect("decode staged browser project");
     assert_eq!(
         decoded.file.workspace.configuration_sets,
@@ -114,7 +114,7 @@ fn edit_automation_source(state: &mut AppState, content: &str) {
         .workspace
         .content
         .replace_project_source(
-            crate::state::ProjectSourceLanguage::RSpiceAutomation,
+            rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation,
             content.to_owned(),
         )
         .unwrap();
@@ -124,7 +124,7 @@ fn insert_cell_veriloga_source(
     state: &mut AppState,
     view_name: &str,
     content: &str,
-) -> (CellViewRef, crate::state::ProjectSourceId) {
+) -> (CellViewRef, rspice_app_state::state::ProjectSourceId) {
     let reference = CellViewRef::new(
         state.model.workspace.content.active_view.library.clone(),
         state.model.workspace.content.active_view.cell.clone(),
@@ -136,13 +136,13 @@ fn insert_cell_veriloga_source(
         .get_library_mut(&reference.library)
         .and_then(|library| library.get_cell_mut(&reference.cell))
         .expect("active cell exists")
-        .add_view(crate::state::View::new(
+        .add_view(rspice_app_state::state::View::new(
             view_name,
-            crate::state::ViewType::VerilogA,
+            rspice_app_state::state::ViewType::VerilogA,
         ));
-    let bundle = crate::state::ProjectSourceBundle::try_new(
-        crate::state::ProjectSourceOwner::cell_view(reference.clone()),
-        crate::state::ProjectSourceLanguage::VerilogA,
+    let bundle = rspice_app_state::state::ProjectSourceBundle::try_new(
+        rspice_app_state::state::ProjectSourceOwner::cell_view(reference.clone()),
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         format!("{view_name}.va"),
         content,
         std::iter::empty(),
@@ -164,24 +164,24 @@ fn insert_configuration_root(
     state: &mut AppState,
     name: &str,
     root: CellViewRef,
-) -> crate::state::ConfigurationSetId {
+) -> rspice_app_state::state::ConfigurationSetId {
     state
         .model
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: name.to_owned(),
             root,
             dut_path: "/".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Lifecycle test".to_owned(),
         })
         .expect("valid configuration")
@@ -267,9 +267,9 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
         .workspace
         .content
         .open_views
-        .push(crate::state::OpenCellView::new(
+        .push(rspice_app_state::state::OpenCellView::new(
             reference.clone(),
-            crate::state::ViewType::VerilogA,
+            rspice_app_state::state::ViewType::VerilogA,
         ));
     // A Verilog-A view is edited as a Design document.
     state
@@ -408,14 +408,14 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
     let mut state = AppState::default();
     let baseline = snapshot(&state).expect("baseline");
     let reference = CellViewRef::new("user", "new_behavioral_cell", "behavior");
-    let mut cell = crate::state::Cell::new(reference.cell.as_str());
-    cell.add_view(crate::state::View::new(
+    let mut cell = rspice_app_state::state::Cell::new(reference.cell.as_str());
+    cell.add_view(rspice_app_state::state::View::new(
         "schematic",
-        crate::state::ViewType::Schematic,
+        rspice_app_state::state::ViewType::Schematic,
     ));
-    cell.add_view(crate::state::View::new(
+    cell.add_view(rspice_app_state::state::View::new(
         reference.view.as_str(),
-        crate::state::ViewType::VerilogA,
+        rspice_app_state::state::ViewType::VerilogA,
     ));
     state
         .model
@@ -423,9 +423,9 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
         .get_library_mut(&reference.library)
         .expect("project library")
         .add_cell(cell);
-    let bundle = crate::state::ProjectSourceBundle::try_new(
-        crate::state::ProjectSourceOwner::cell_view(reference.clone()),
-        crate::state::ProjectSourceLanguage::VerilogA,
+    let bundle = rspice_app_state::state::ProjectSourceBundle::try_new(
+        rspice_app_state::state::ProjectSourceOwner::cell_view(reference.clone()),
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         "behavior.va",
         "module behavior(p, n); inout p, n; endmodule",
         std::iter::empty(),
@@ -451,9 +451,9 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
         .workspace
         .content
         .open_views
-        .push(crate::state::OpenCellView::new(
+        .push(rspice_app_state::state::OpenCellView::new(
             reference.clone(),
-            crate::state::ViewType::VerilogA,
+            rspice_app_state::state::ViewType::VerilogA,
         ));
     state.open_project_session();
     state
@@ -538,8 +538,8 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
             .workspace
             .content
             .project_sources
-            .get(crate::state::ProjectSourceLanguage::RSpiceAutomation),
-        code_workspace.get(crate::state::ProjectSourceLanguage::RSpiceAutomation)
+            .get(rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation),
+        code_workspace.get(rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation)
     );
     assert!(
         state
@@ -581,7 +581,7 @@ fn lifecycle_epoch_advances_across_new_and_close() {
     let receipt = NativeBindingReceipt {
         canonical_path: PathBuf::from("accepted.rspiceproj"),
         project_id: state.model.workspace.content.project.id().to_string(),
-        accepted_digest: crate::product::ContentDigest::from_bytes([0x44; 32]),
+        accepted_digest: rspice_app_state::product::ContentDigest::from_bytes([0x44; 32]),
     };
     state.platform.native_project_binding_receipt = Some(receipt.clone());
     let initial = state.platform.project_lifecycle.authority.epoch();
@@ -637,7 +637,7 @@ fn the_model_reads_the_open_project_every_transition_leaves() {
 
 #[test]
 fn project_replacement_clears_open_model_editor_state() {
-    use crate::state::model_library::ProjectModelDefinition;
+    use rspice_app_state::state::model_library::ProjectModelDefinition;
     use std::collections::BTreeMap;
 
     let mut state = AppState::default();
@@ -755,15 +755,16 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     assert!(exact.platform.project_lifecycle.accepted().is_some());
 
     let mut same_project =
-        Box::new(crate::io::load_project_file(&canonical).expect("load fixture"));
+        Box::new(rspice_app_services::io::load_project_file(&canonical).expect("load fixture"));
     same_project
         .file
         .workspace
         .project
         .rename("Externally renamed project")
         .expect("valid project name");
-    let changed = crate::io::project_io::serialize_project_file(same_project.as_ref())
-        .expect("serialize same-UUID replacement");
+    let changed =
+        rspice_app_services::io::project_io::serialize_project_file(same_project.as_ref())
+            .expect("serialize same-UUID replacement");
     std::fs::write(&canonical, changed).expect("write same-UUID replacement");
     let changed_bytes = std::fs::read(&canonical).expect("capture replacement bytes");
 
@@ -792,8 +793,9 @@ fn native_session_restore_requires_exact_path_project_and_digest_receipt() {
     let mut different =
         Box::new(snapshot(&AppState::default()).expect("snapshot different project"));
     different.file.workspace.project.set_path(canonical.clone());
-    let different_bytes = crate::io::project_io::serialize_project_file(different.as_ref())
-        .expect("serialize different-UUID replacement");
+    let different_bytes =
+        rspice_app_services::io::project_io::serialize_project_file(different.as_ref())
+            .expect("serialize different-UUID replacement");
     std::fs::write(&canonical, different_bytes.as_bytes())
         .expect("write different-UUID replacement");
     let mut identity_conflict =
@@ -954,7 +956,8 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
     )
     .expect("save active project configuration");
 
-    let persisted = crate::io::load_project_file(&path).expect("reload configuration save");
+    let persisted =
+        rspice_app_services::io::load_project_file(&path).expect("reload configuration save");
     assert_eq!(
         persisted.file.workspace.configuration_sets,
         state.model.workspace.content.configuration_sets
@@ -1001,10 +1004,10 @@ fn native_save_active_and_revert_preserve_exact_configuration_catalog() {
         .sheet_catalog_mut("user/top/schematic")
         .expect("sheet catalog")
         .create_sheet(
-            crate::state::SheetDefinition {
+            rspice_app_state::state::SheetDefinition {
                 name: "Characterization".to_owned(),
-                template: crate::state::SheetTemplate::AnalogSchematic,
-                port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
+                port_policy: rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },
             None,
@@ -1112,8 +1115,11 @@ fn revert_is_document_scoped_and_rejects_active_document_and_baseline_races() {
 fn close_active_document_is_presentation_only() {
     let mut state = AppState::default();
     let second = CellViewRef::new("user", "second", "schematic");
-    let mut cell = crate::state::Cell::new("second");
-    cell.add_view(crate::state::View::new("schematic", ViewType::Schematic));
+    let mut cell = rspice_app_state::state::Cell::new("second");
+    cell.add_view(rspice_app_state::state::View::new(
+        "schematic",
+        ViewType::Schematic,
+    ));
     state
         .model
         .library_manager

@@ -3,17 +3,17 @@
 use std::collections::HashMap;
 
 use super::apply_drawing_sheet_edit;
-use crate::state::{
-    DrawingSheetReleaseStatus, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
-    DrawingSheetTitleFieldId, SchematicPageOrientation, SchematicSheetFormat, SheetDefinition,
-    SheetPortPolicy, SheetTemplate,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::design::inspector::tests::{accesskit_nodes, painted_panel};
 use rspice_app_sheets::workbench::app::drawing_sheet_edit::DrawingSheetEdit;
 use rspice_app_sheets::workbench::docks::inspector::design::sheet::*;
+use rspice_app_state::state::{
+    DrawingSheetReleaseStatus, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
+    DrawingSheetTitleFieldId, SchematicPageOrientation, SchematicSheetFormat, SheetDefinition,
+    SheetPortPolicy, SheetTemplate,
+};
 
 /// The sheet's section over `state`'s parts, as the sheets feature hands
 /// them to it.
@@ -44,7 +44,7 @@ struct SheetPanel {
 impl SheetPanel {
     fn new() -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         Self {
             ctx,
@@ -556,7 +556,7 @@ fn only_the_fields_this_block_shows_are_offered() {
 /// snap with it.
 #[test]
 fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
-    use crate::state::{NetNamingPolicy, SchematicGridPitch};
+    use rspice_app_state::state::{NetNamingPolicy, SchematicGridPitch};
 
     let mut app = RSpiceApp::test_instance();
     apply_schematic_edit(
@@ -739,7 +739,7 @@ fn a_size_chosen_in_the_panel_lands_on_the_sheet() {
 fn a_read_only_sheet_states_its_properties_without_controls() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
+        rspice_app_state::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
         },
@@ -831,7 +831,7 @@ fn a_custom_size_is_typed_in_the_panel_and_saved_to_custom_sizes() {
     panel.enter("Size name", "Lab panel");
     apply_drawing_sheet_edit(
         &mut panel.app.state,
-        DrawingSheetEdit::SaveCustomSize(crate::state::DrawingSheetPresetScope::Project),
+        DrawingSheetEdit::SaveCustomSize(rspice_app_state::state::DrawingSheetPresetScope::Project),
     )
     .unwrap();
     let settings = panel
@@ -889,12 +889,15 @@ fn the_frame_its_zones_its_marks_and_the_units_are_chosen_in_the_panel() {
     for edit in [
         DrawingSheetEdit::Zones(false),
         DrawingSheetEdit::CentringMarks(false),
-        DrawingSheetEdit::Units(crate::state::DrawingSheetDisplayUnit::Inches),
+        DrawingSheetEdit::Units(rspice_app_state::state::DrawingSheetDisplayUnit::Inches),
     ] {
         apply_drawing_sheet_edit(&mut app.state, edit).unwrap();
     }
     let format = sheet_format(&app.state);
-    assert_eq!(format.zones.mode, crate::state::DrawingSheetZoneMode::None);
+    assert_eq!(
+        format.zones.mode,
+        rspice_app_state::state::DrawingSheetZoneMode::None
+    );
     assert!(!format.marks.centring);
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(
@@ -907,7 +910,7 @@ fn the_frame_its_zones_its_marks_and_the_units_are_chosen_in_the_panel() {
     let mut inches = SheetPanel::new();
     apply_drawing_sheet_edit(
         &mut inches.app.state,
-        DrawingSheetEdit::Units(crate::state::DrawingSheetDisplayUnit::Inches),
+        DrawingSheetEdit::Units(rspice_app_state::state::DrawingSheetDisplayUnit::Inches),
     )
     .unwrap();
     let menu = inches.open("Size");
@@ -915,7 +918,7 @@ fn the_frame_its_zones_its_marks_and_the_units_are_chosen_in_the_panel() {
 
     apply_drawing_sheet_edit(
         &mut app.state,
-        DrawingSheetEdit::Frame(crate::state::DrawingSheetBorderTemplate::None),
+        DrawingSheetEdit::Frame(rspice_app_state::state::DrawingSheetBorderTemplate::None),
     )
     .unwrap();
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
@@ -931,7 +934,7 @@ fn the_frame_its_zones_its_marks_and_the_units_are_chosen_in_the_panel() {
     }
     assert_eq!(
         sheet_format(&app.state).zones.mode,
-        crate::state::DrawingSheetZoneMode::Automatic
+        rspice_app_state::state::DrawingSheetZoneMode::Automatic
     );
 }
 
@@ -972,7 +975,7 @@ fn a_sheet_follows_the_project_default_until_it_takes_its_own_format() {
     let format = sheet_format(&app.state);
     assert_eq!(
         format.inheritance,
-        crate::state::DrawingSheetInheritance::Explicit
+        rspice_app_state::state::DrawingSheetInheritance::Explicit
     );
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(painted.contains("Format from\nThis sheet\n"), "{painted}");
@@ -981,7 +984,7 @@ fn a_sheet_follows_the_project_default_until_it_takes_its_own_format() {
     let format = sheet_format(&app.state);
     assert_eq!(
         format.inheritance,
-        crate::state::DrawingSheetInheritance::ProjectDefault
+        rspice_app_state::state::DrawingSheetInheritance::ProjectDefault
     );
     assert_eq!(format.authored_size.label(), "ISO A4");
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
@@ -1080,7 +1083,7 @@ fn the_optional_boxes_are_a_checklist() {
 fn a_printed_default_reads_apart_from_a_format_hint() {
     let mut panel = SheetPanel::new();
     panel.pass(Vec::new());
-    let palette = crate::ui::tokens::Tokens::default().color;
+    let palette = rspice_app_workbench::ui::tokens::Tokens::default().color;
     assert_eq!(panel.ink("Circuit diagram"), palette.text_dim);
     assert_eq!(panel.ink("YYYY-MM-DD"), palette.text_faint);
     assert_eq!(panel.ink("ECO or ticket"), palette.text_faint);
@@ -1124,11 +1127,11 @@ fn content_outside_the_drawing_area_is_counted_under_the_size() {
         .schematic
         .document_mut_for_test()
         .wires
-        .push(crate::state::Wire::new(
+        .push(rspice_app_state::state::Wire::new(
             31,
             vec![
-                crate::state::Point::new(-92, 100),
-                crate::state::Point::new(-88, 100),
+                rspice_app_state::state::Point::new(-92, 100),
+                rspice_app_state::state::Point::new(-88, 100),
             ],
         ));
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
@@ -1148,7 +1151,7 @@ fn content_outside_the_drawing_area_is_counted_under_the_size() {
 /// twelve-character name and not a twenty-five-character one.
 #[test]
 fn a_value_the_block_cuts_short_says_so_under_its_row() {
-    use crate::state::DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY as CUT;
+    use rspice_app_state::state::DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY as CUT;
 
     let mut panel = SheetPanel::new();
     for edit in [
@@ -1207,7 +1210,7 @@ fn the_panel_fits_the_inspectors_default_width() {
     let iso_a3 = vec![DrawingSheetEdit::Size(DrawingSheetStandard::IsoA3)];
     let ansi_d = vec![
         DrawingSheetEdit::Size(DrawingSheetStandard::AnsiD),
-        DrawingSheetEdit::Units(crate::state::DrawingSheetDisplayUnit::Inches),
+        DrawingSheetEdit::Units(rspice_app_state::state::DrawingSheetDisplayUnit::Inches),
     ];
     let custom = vec![
         DrawingSheetEdit::CustomSize {
@@ -1222,7 +1225,7 @@ fn the_panel_fits_the_inspectors_default_width() {
             apply_drawing_sheet_edit(&mut app.state, edit).unwrap();
         }
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut rows = egui::Rect::NOTHING;
         let output = ctx.run_ui(
             egui::RawInput {

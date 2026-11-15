@@ -2,10 +2,10 @@
 //! lands on that run in Results, and a pruned run is refused without moving
 //! the reader.
 
-use crate::state::{AnalysisResult, AnalysisType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::features;
 use rspice_app_simulate::workbench::tools::jobs_manager::open_run_in_results;
+use rspice_app_state::state::{AnalysisResult, AnalysisType};
 
 /// The history is where a run is found; opening one is what a reader came
 /// to do next. The stable identity is re-resolved at that moment, because

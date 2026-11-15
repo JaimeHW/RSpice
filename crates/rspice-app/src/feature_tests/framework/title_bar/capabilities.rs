@@ -5,12 +5,12 @@
 
 use super::*;
 use crate::schematic::view::sheet_visibility::SchematicObjectKind;
-use crate::state::{
+use crate::workbench::framework::requests::ClipboardImage;
+use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
+use rspice_app_state::state::{
     ComponentType, DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry,
     Point, Selection,
 };
-use crate::workbench::framework::requests::ClipboardImage;
-use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
 
 /// A sheet holding objects of every kind Edit ▸ Select ▸ names, each kind's
 /// expected selection beside it.
@@ -138,7 +138,7 @@ fn canvas_frame(ctx: &Context, app: &mut RSpiceApp, time: f64) {
 #[test]
 fn zoom_previous_steps_back_through_the_views_the_canvas_showed() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = title_test_app();
     app.state.workbench.activate(Workspace::Design);
     let view = |app: &RSpiceApp| {
@@ -177,10 +177,10 @@ fn waveform_sheet_app() -> (
     RSpiceApp,
     crate::workbench::documents::result_document::AnalysisPresentationKey,
 ) {
-    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
     use crate::workbench::documents::result_document::{
         AnalysisPresentationKey, WavePanePresentationKey,
     };
+    use rspice_app_state::state::{AnalysisResult, AnalysisType, RetainedTrace};
     let mut app = title_test_app();
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Results);
@@ -239,7 +239,7 @@ fn results_frame(ctx: &Context, app: &mut RSpiceApp, time: f64) {
 #[test]
 fn zoom_previous_steps_a_waveform_sheet_back_through_the_views_it_showed() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let (mut app, analysis) = waveform_sheet_app();
     let view = |app: &RSpiceApp| {
         let pane = app.state.results.results.session.analysis_plot_view_pane(

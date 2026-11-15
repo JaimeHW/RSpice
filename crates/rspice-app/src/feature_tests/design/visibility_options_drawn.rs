@@ -1,10 +1,10 @@
 //! The visibility options dialog drawn through a whole application.
 
-use crate::state::SchematicParameterLabelVisibility;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::visibility_options::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_state::state::SchematicParameterLabelVisibility;
 
 /// Draw the dialog as its dialog step does.
 fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -41,7 +41,7 @@ fn one_display_options_dialog_owns_visibility_and_sheet_layers() {
     );
 
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     // A later pass publishes only the nodes that changed, so the tree is
     // what every pass published.

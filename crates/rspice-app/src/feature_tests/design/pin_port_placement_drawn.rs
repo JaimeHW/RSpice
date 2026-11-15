@@ -1,10 +1,5 @@
 //! Placing a pin or port, drawn through a whole application.
 
-use crate::state::ComponentType;
-use crate::state::Tool;
-use crate::state::{Point, PortDirection, PortDiscipline, PortSignalType};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::ui::tokens::Mode;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::placement::pin_port::tests::{
     self as form, dialog_input, key_event,
@@ -12,6 +7,11 @@ use crate::workbench::app::dialogs::placement::pin_port::tests::{
 use crate::workbench::app::dialogs::placement::pin_port::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_state::state::ComponentType;
+use rspice_app_state::state::Tool;
+use rspice_app_state::state::{Point, PortDirection, PortDiscipline, PortSignalType};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_workbench::ui::tokens::Mode;
 
 /// Draw the form as its dialog step does.
 fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -42,10 +42,10 @@ fn open_with(state: &mut AppState, names: &str) {
 /// One port already on the sheet, so duplicate refusals have something to
 /// collide with.
 fn place_port(state: &mut AppState, name: &str) {
-    let id = state
-        .model
-        .schematic
-        .add_component(crate::state::ComponentType::Port, Point::origin());
+    let id = state.model.schematic.add_component(
+        rspice_app_state::state::ComponentType::Port,
+        Point::origin(),
+    );
     state
         .model
         .schematic
@@ -138,7 +138,7 @@ fn the_derived_line_states_pins_conductors_and_port_list_positions() {
 #[test]
 fn enter_arms_the_whole_sequence_without_touching_the_document() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_with(&mut app.state, "INP INN OUT VDD");
     let authority = app.state.design.pin_port.authority.clone();
@@ -153,7 +153,7 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
     assert!(!app.state.design.pin_port.open);
     assert_eq!(
         app.state.model.schematic.session.editor.tool,
-        Tool::Place(crate::state::ComponentType::Port)
+        Tool::Place(rspice_app_state::state::ComponentType::Port)
     );
     let sequence = app
         .state
@@ -189,7 +189,7 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
 #[test]
 fn reopening_while_armed_offers_the_remaining_names() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_with(&mut app.state, "INP INN OUT");
     app.state.design.pin_port.fields.signal_type = PortSignalType::Logic;
@@ -229,7 +229,7 @@ fn reopening_while_armed_offers_the_remaining_names() {
 #[test]
 fn the_prefill_is_empty_until_a_batch_has_been_armed() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_create_pins(&mut app.state.design.pin_port, &app.state.model);
     assert_eq!(app.state.design.pin_port.fields.names, "");
@@ -267,7 +267,9 @@ fn a_read_only_or_changed_document_blocks_the_form_and_says_so() {
 
 #[test]
 fn a_blocked_form_never_arms_on_enter() {
-    use crate::state::{CellViewRef, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType};
+    use rspice_app_state::state::{
+        CellViewRef, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType,
+    };
 
     for change in [
         "document",
@@ -279,7 +281,7 @@ fn a_blocked_form_never_arms_on_enter() {
         "safe-mode",
     ] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         let master = CellViewRef::new("work", "pin_child", "schematic");
         app.state.model.workspace.descend_into(
@@ -333,7 +335,7 @@ fn a_blocked_form_never_arms_on_enter() {
             "missing" => app.state.design.pin_port.authority = None,
             "read-only" => app.state.model.schematic.session.read_only = true,
             "safe-mode" => app.state.model.safe_mode.activate(
-                crate::state::write_policy::LocalSafeModeOptions {
+                rspice_app_state::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()
                 },
@@ -377,7 +379,7 @@ fn a_blocked_form_never_arms_on_enter() {
 #[test]
 fn escape_closes_the_form_at_once() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_with(&mut app.state, "INP INN");
 
@@ -465,10 +467,14 @@ fn create_pins_fits_every_viewport() {
                 let mut app = RSpiceApp::test_instance();
                 prepare(&mut app.state);
                 let names = app.state.design.pin_port.fields.names.clone();
-                let painted =
-                    crate::ui::widgets::painted_runs::painted_runs(screen, mode, 3, |ctx| {
+                let painted = rspice_app_workbench::ui::widgets::painted_runs::painted_runs(
+                    screen,
+                    mode,
+                    3,
+                    |ctx| {
                         render(&mut app, ctx);
-                    });
+                    },
+                );
                 let label = format!("{screen:?} {mode:?} {draft_stem}");
                 painted.assert_inside_clip_and_surface_with_horizontal_scroll(&label, &[&names]);
                 assert!(

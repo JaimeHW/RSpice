@@ -83,13 +83,14 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
         !app.command_key_enabled(CodeCommand::CompileVerilogA.key()),
         "with no Verilog-A view open there is nothing to compile"
     );
-    let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
-    let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
+    let reference = rspice_app_state::state::CellViewRef::new("behavioral", "gain", "veriloga");
+    let mut view =
+        rspice_app_state::state::View::new("veriloga", rspice_app_state::state::ViewType::VerilogA);
     view.metadata
         .insert("veriloga.module".to_owned(), "gain".to_owned());
-    let mut cell = crate::state::Cell::new("gain");
+    let mut cell = rspice_app_state::state::Cell::new("gain");
     cell.add_view(view);
-    let mut library = crate::state::Library::new("behavioral");
+    let mut library = rspice_app_state::state::Library::new("behavioral");
     library.add_cell(cell);
     app.state.model.library_manager.add_library(library);
     app.state
@@ -98,9 +99,9 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
         .content
         .project_sources
         .insert_bundle(
-            crate::state::ProjectSourceBundle::try_new(
-                crate::state::ProjectSourceOwner::cell_view(reference.clone()),
-                crate::state::ProjectSourceLanguage::VerilogA,
+            rspice_app_state::state::ProjectSourceBundle::try_new(
+                rspice_app_state::state::ProjectSourceOwner::cell_view(reference.clone()),
+                rspice_app_state::state::ProjectSourceLanguage::VerilogA,
                 "gain.va",
                 "module gain(p, n); inout p, n; electrical p, n; endmodule\n",
                 [],
@@ -136,6 +137,6 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
         .expect("the click took the view's closure for the compile");
     assert_eq!(
         request.bundle().owner(),
-        &crate::state::ProjectSourceOwner::cell_view(reference)
+        &rspice_app_state::state::ProjectSourceOwner::cell_view(reference)
     );
 }

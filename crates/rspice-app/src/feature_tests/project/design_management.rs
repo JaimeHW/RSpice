@@ -5,10 +5,6 @@
 use egui::Context;
 use std::collections::BTreeMap;
 
-use crate::state::{
-    AssemblyVariantDraft, ComponentType, Point, SchematicObjectKey, VariantInheritance,
-    VariantQualificationPlan,
-};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::project::commands::ProjectRequest;
@@ -18,6 +14,10 @@ use rspice_app_project::workbench::app::dialogs::design_management::widgets;
 use rspice_app_project::workbench::app::dialogs::design_management::{
     DesignManagementPage, DesignManagementParts, DesignManagementTab, MANAGER_PRIMARY,
     open_design_management_dialog, open_design_management_on,
+};
+use rspice_app_state::state::{
+    AssemblyVariantDraft, ComponentType, Point, SchematicObjectKey, VariantInheritance,
+    VariantQualificationPlan,
 };
 
 /// Design management's parts over `app`, as the project feature's context
@@ -40,7 +40,7 @@ fn parts(app: &mut RSpiceApp) -> DesignManagementParts<'_> {
 fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation() {
     for confirmed_before_edit in [false, true] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         let catalog = app.state.model.workspace.content.design_management.clone();
         open_design_management_dialog(
@@ -138,7 +138,7 @@ fn the_manager_tabs_stand_their_settings_on_one_grid_at_the_subflow_width() {
     ];
     for (tab, labels) in tabs {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         open_design_management_dialog(
@@ -230,8 +230,8 @@ fn the_manager_tabs_stand_their_settings_on_one_grid_at_the_subflow_width() {
 fn connectivity_only_variant_comparison_detects_dnp_topology_change() {
     let mut state = AppState::default();
     let component = state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::origin(),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::origin(),
     );
     let owner = state.model.workspace.content.active_view.key();
     state
@@ -266,7 +266,7 @@ fn connectivity_only_variant_comparison_detects_dnp_topology_change() {
             qualification_plan: VariantQualificationPlan::InvalidateAffectedTests,
             overrides: BTreeMap::from([(
                 object,
-                crate::state::VariantObjectOverride::DoNotPopulate {
+                rspice_app_state::state::VariantObjectOverride::DoNotPopulate {
                     approval_reference: "review-1".to_owned(),
                 },
             )]),
@@ -354,7 +354,7 @@ fn a_create_hierarchy_handed_to_the_shell_opens_where_it_opened_in_place() {
 #[test]
 fn a_manager_at_rest_states_facts_not_failures() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     open_design_management_dialog(

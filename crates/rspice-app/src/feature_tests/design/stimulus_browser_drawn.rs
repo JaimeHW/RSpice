@@ -1,10 +1,10 @@
 //! The navigator's stimulus browser drawn through a whole application.
 
 use super::stimulus_browser::library;
-use crate::state::ComponentType;
 use crate::workbench::app::actions::stimulus as stimulus_verbs;
 use crate::workbench::state::PURPOSE_FIELD;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_state::state::ComponentType;
 
 /// Whether the console holds a user line containing `fragment`.
 fn prompt_says(state: &AppState, fragment: &str) -> bool {
@@ -71,7 +71,7 @@ fn editing_the_purpose_goes_through_the_draft_and_is_undoable() {
 /// the editor is holding a draft it is not placing.
 #[test]
 fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
-    use crate::state::Tool;
+    use rspice_app_state::state::Tool;
 
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
@@ -137,7 +137,7 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
             .editor
             .pending_stimulus
             .as_ref()
-            .map(crate::state::PendingStimulusPlacement::revision),
+            .map(rspice_app_state::state::PendingStimulusPlacement::revision),
         Some(1),
         "the draft was armed instead of the published revision"
     );

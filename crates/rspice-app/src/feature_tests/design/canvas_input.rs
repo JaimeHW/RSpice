@@ -3,11 +3,11 @@
 //! results' own specifications or a safe external address.
 
 use crate::schematic::view::interaction::*;
-use crate::state::Point;
-use crate::state::{
+use crate::workbench::app_state::AppState;
+use rspice_app_state::state::Point;
+use rspice_app_state::state::{
     DesignNoteKind, DocumentationShapeKind, PendingDocumentationShapePlacement, Tool,
 };
-use crate::workbench::app_state::AppState;
 use rspice_schematic_editor::view::documentation_shape_input::ShapeInputAction;
 use rspice_schematic_editor::view::documentation_shape_input::ShapeInputTransition;
 
@@ -156,7 +156,7 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
         .document_mut_for_test()
         .design_notes
         .push(
-            crate::state::DesignNote::new(
+            rspice_app_state::state::DesignNote::new(
                 32,
                 Point::new(20, 20),
                 DesignNoteKind::RequirementLink,
@@ -187,7 +187,7 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
         .document_mut_for_test()
         .design_notes
         .push(
-            crate::state::DesignNote::new(
+            rspice_app_state::state::DesignNote::new(
                 33,
                 Point::new(30, 20),
                 DesignNoteKind::RequirementLink,

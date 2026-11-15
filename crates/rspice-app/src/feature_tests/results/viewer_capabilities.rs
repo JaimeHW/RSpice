@@ -5,8 +5,8 @@
 
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::AppState;
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 
 #[test]
 fn clearing_design_execution_context_clears_source_runtime_and_keeps_the_console() {
@@ -21,10 +21,12 @@ fn clearing_design_execution_context_clears_source_runtime_and_keeps_the_console
         },
     );
     state.code.netlist.diagnostics = std::sync::Arc::new(
-        crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
-            vec![crate::state::netlist_diagnostics::Diagnostic::error(
-                "old project diagnostic",
-            )],
+        rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
+            vec![
+                rspice_app_state::state::netlist_diagnostics::Diagnostic::error(
+                    "old project diagnostic",
+                ),
+            ],
             "",
         )
         .unwrap(),
@@ -82,7 +84,7 @@ fn seed_blocking_drc_result(state: &mut AppState) {
 /// following nothing cannot open the wrong run.
 #[test]
 fn replacing_the_design_retires_run_offers_and_keeps_the_notices() {
-    use crate::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
+    use rspice_app_workbench::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
 
     let ctx = egui::Context::default();
     let mut state = AppState::default();
@@ -148,9 +150,13 @@ fn clearing_design_execution_context_clears_project_scoped_results_state() {
     use rspice_results_ui::session::ExprEditor;
 
     let mut state = AppState::default();
-    let analysis =
-        crate::state::AnalysisResult::new(71, crate::state::AnalysisType::Transient, "Transient");
-    let analysis_key = AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis);
+    let analysis = rspice_app_state::state::AnalysisResult::new(
+        71,
+        rspice_app_state::state::AnalysisType::Transient,
+        "Transient",
+    );
+    let analysis_key =
+        AnalysisPresentationKey::new(rspice_app_state::product::DatasetId::new(), &analysis);
     state.results.results_seen_version = 99;
     let results = &mut state.results.results;
     results.session.viewer = ResultViewer::Fft;
@@ -168,7 +174,7 @@ fn clearing_design_execution_context_clears_project_scoped_results_state() {
         analysis_key,
         vec![ExprTrace {
             text: "V(out)/V(in)".to_string(),
-            complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
+            complex_policy: rspice_app_state::state::ComplexExpressionPolicy::Rectangular,
             visible: true,
         }],
     );

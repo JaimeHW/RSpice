@@ -110,7 +110,7 @@ fn the_detail_region_states_where_the_batch_stands_only_when_it_is_not_current()
         .content
         .connectivity
         .policy
-        .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        .width_mismatch = rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
     let reason = {
         use crate::workbench::app_state::diagnostic_store::listing::RowStanding;
         let listed = listing(&state);

@@ -4,9 +4,6 @@
 //! evidence verdict.
 
 use super::verify_fixtures::soa_app;
-use crate::product::AnalysisInstanceId;
-use crate::state::VerificationPage;
-use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
 use crate::workbench::RSpiceApp;
 use rspice_app_simulate::workbench::surfaces::verify::latest_validated_analysis;
 use rspice_app_simulate::workbench::surfaces::verify::raster::add_tuning_variable;
@@ -23,6 +20,9 @@ use rspice_app_simulate::workbench::surfaces::verify::tuning::sync_tuning_sessio
 use rspice_app_simulate::workbench::surfaces::verify::tuning::{
     tuning_commit_block_reason, tuning_is_dirty,
 };
+use rspice_app_state::product::AnalysisInstanceId;
+use rspice_app_state::state::VerificationPage;
+use rspice_app_state::state::{AnalysisResult, AnalysisType, RetainedTrace};
 
 /// A tuning commit prepares the run it requires in its own frame and queues
 /// it. An edit to the design before the frame that dispatches it refuses the
@@ -86,7 +86,7 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
         .document()
         .components
         .iter()
-        .find(|component| component.kind == crate::state::ComponentType::Resistor)
+        .find(|component| component.kind == rspice_app_state::state::ComponentType::Resistor)
         .map(|component| component.id)
         .expect("voltage divider resistor");
     let component_index = app
@@ -124,7 +124,7 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
     let can_undo_before = app.state.model.schematic.can_undo();
 
     app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
+        rspice_app_state::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
         },
@@ -185,7 +185,7 @@ const EVIDENCE_IDLE_FRAMES: usize = 10;
 /// An SOA analysis whose retained evidence validates, built in the shape the
 /// validator accepts: one exact worst-point event per warned rule.
 fn soa_evidence_analysis() -> AnalysisResult {
-    use crate::state::{
+    use rspice_app_state::state::{
         SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
         SoaViolationSeverityEvidence,
     };
@@ -237,9 +237,9 @@ fn soa_evidence_analysis() -> AnalysisResult {
         });
     }
     AnalysisResult::new(1, AnalysisType::Soa, "SOA")
-        .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Soa { time })
+        .with_family_metadata(rspice_app_state::state::AnalysisResultFamilyMetadata::Soa { time })
         .with_waveforms(waveforms)
-        .with_result_payload(crate::state::AnalysisResultPayload::Soa {
+        .with_result_payload(rspice_app_state::state::AnalysisResultPayload::Soa {
             source_history: None,
             evaluations,
             violations,
@@ -273,7 +273,7 @@ fn the_soa_pane_validate_retained_evidence_once_per_dataset_generation() {
 
     let mut app = app_retaining_soa_evidence();
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     // One frame of the SOA tab against unchanged state and identical
     // input, drawn through the pane's own entry point.
     let mut frame = || {
@@ -365,7 +365,7 @@ fn soa_rows_put_violations_first_and_the_summary_counts_devices() {
     let analysis =
         latest_validated_analysis(&app.state.model, &*app.state.results, AnalysisType::Soa)
             .expect("the SOA fixture's evidence validates");
-    let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
+    let Some(rspice_app_state::state::AnalysisResultPayload::Soa { evaluations, .. }) =
         &analysis.result_payload
     else {
         panic!("the fixture holds an SOA payload");

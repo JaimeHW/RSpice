@@ -30,8 +30,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::Bench;
 use crate::schematic::view::selection_transform::SelectionTransform;
-use crate::state::{Component, ComponentType, Junction, MoveSelectionMode, Point, Rotation, Wire};
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{
+    Component, ComponentType, Junction, MoveSelectionMode, Point, Rotation, Wire,
+};
 use rspice_design::schematic::bus::{Bus, BusTap};
 use rspice_design::schematic::clipboard::ClipboardData;
 use rspice_design::schematic::design_note::DesignNote;

@@ -2,9 +2,9 @@
 //! through a whole application.
 
 use crate::schematic::view::selection_drag::*;
-use crate::state::{CellViewRef, ComponentType, Point, ViewType};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::DragType;
+use rspice_app_state::state::{CellViewRef, ComponentType, Point, ViewType};
 use rspice_schematic_editor::view::pointer_target::PointerTarget;
 use rspice_schematic_editor::view::selection_drag::SelectionDragAction;
 
@@ -168,7 +168,7 @@ fn resistor_wired_right(state: &mut AppState) -> (PointerTarget, Point, Point) {
         .schematic
         .document_mut_for_test()
         .wires
-        .push(crate::state::Wire::segment(9, pin, far));
+        .push(rspice_app_state::state::Wire::segment(9, pin, far));
     state.model.schematic.init_undo_history();
     (PointerTarget::Component(id), pin, far)
 }
@@ -306,7 +306,7 @@ fn a_drag_passing_over_a_loose_wire_end_leaves_it_behind() {
     let ctx = egui::Context::default();
     let mut state = AppState::default();
     let (target, pin, _) = resistor_wired_right(&mut state);
-    let loose = crate::state::Wire::segment(
+    let loose = rspice_app_state::state::Wire::segment(
         11,
         Point::new(pin.x, pin.y + 20),
         Point::new(pin.x + 60, pin.y + 20),
@@ -349,7 +349,7 @@ fn an_angled_routing_style_stretches_the_dragged_wire_straight() {
         .session
         .editor
         .wire_drawing
-        .set_routing_mode(crate::state::WireRoutingMode::Diagonal);
+        .set_routing_mode(rspice_app_state::state::WireRoutingMode::Diagonal);
     let symbols = crate::schematic::view::schematic_symbol_context(&state);
 
     drag_through(
@@ -379,15 +379,15 @@ fn a_drag_leaves_another_sheets_wire_end_in_place() {
         .schematic
         .document_mut_for_test()
         .components
-        .push(crate::state::Component::new(
+        .push(rspice_app_state::state::Component::new(
             1,
             ComponentType::Resistor,
             Point::origin(),
         ));
     let pin = state.model.schematic.document().components[0].terminal_positions()[1].1;
-    let hidden = crate::state::Wire::segment(20, pin, Point::new(pin.x, pin.y - 100));
+    let hidden = rspice_app_state::state::Wire::segment(20, pin, Point::new(pin.x, pin.y - 100));
     state.model.schematic.document_mut_for_test().wires = vec![
-        crate::state::Wire::segment(9, pin, Point::new(pin.x + 100, pin.y)),
+        rspice_app_state::state::Wire::segment(9, pin, Point::new(pin.x + 100, pin.y)),
         hidden.clone(),
     ];
     state.model.schematic.init_undo_history();
@@ -426,16 +426,13 @@ fn a_pin_dragged_into_a_wire_splits_it_and_the_next_drag_carries_it() {
         .add_component(ComponentType::Resistor, Point::origin());
     let pin = state.model.schematic.document().components[0].terminal_positions()[1].1;
     let landing = Point::new(pin.x + 20, pin.y);
-    state
-        .model
-        .schematic
-        .document_mut_for_test()
-        .wires
-        .push(crate::state::Wire::segment(
+    state.model.schematic.document_mut_for_test().wires.push(
+        rspice_app_state::state::Wire::segment(
             9,
             Point::new(landing.x, landing.y - 100),
             Point::new(landing.x, landing.y + 100),
-        ));
+        ),
+    );
     state.model.schematic.init_undo_history();
     let symbols = crate::schematic::view::schematic_symbol_context(&state);
     let target = PointerTarget::Component(id);

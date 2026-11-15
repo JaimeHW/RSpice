@@ -19,9 +19,6 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use rspice_results_ui::report::session::ReportAuthoringState;
 use serde::{Deserialize, Serialize};
 
-use crate::state::{GridStyle, SchematicVisibilityPolicy, SchematicWireRoutingStyle};
-use crate::state::{SimulationPage, VerificationPage};
-use crate::ui::Theme;
 use crate::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::window_session::WindowSessionRegistry;
@@ -39,6 +36,9 @@ use crate::workbench::state::{
 };
 use crate::workbench::{SurfaceNavigation, WorkspacePreset};
 use rspice_app_models::workbench::documents::model_editor::ModelEditorRecoveryDraft;
+use rspice_app_state::state::{GridStyle, SchematicVisibilityPolicy, SchematicWireRoutingStyle};
+use rspice_app_state::state::{SimulationPage, VerificationPage};
+use rspice_app_workbench::ui::Theme;
 
 /// What a session keeps of the document engines' session state, which the
 /// workbench and the design, results, platform and settings slots hold.
@@ -61,21 +61,21 @@ pub(in crate::workbench) struct UiSessionWire {
     #[serde(default)]
     grid_restore_style: Option<GridStyle>,
     #[serde(default)]
-    schematic_selection_filter: crate::state::SchematicSelectionFilter,
+    schematic_selection_filter: rspice_app_state::state::SchematicSelectionFilter,
     #[serde(default)]
     schematic_bulk_edit_filters: SelectionBulkFilterSession,
     #[serde(default)]
     schematic_visibility: SchematicVisibilityPolicy,
     #[serde(default)]
-    drawing_sheet_layers: crate::state::DrawingSheetLayerVisibility,
+    drawing_sheet_layers: rspice_app_state::state::DrawingSheetLayerVisibility,
     #[serde(default)]
-    schematic_snap: crate::state::SnapEngine,
+    schematic_snap: rspice_app_state::state::SnapEngine,
     #[serde(default)]
-    schematic_routing_mode: Option<crate::state::WireRoutingMode>,
+    schematic_routing_mode: Option<rspice_app_state::state::WireRoutingMode>,
     #[serde(default)]
-    duplicate_external_nets: crate::state::DuplicateExternalNets,
+    duplicate_external_nets: rspice_app_state::state::DuplicateExternalNets,
     #[serde(default)]
-    engineering_table_views: crate::state::engineering_table::EngineeringTableViewStore,
+    engineering_table_views: rspice_app_state::state::engineering_table::EngineeringTableViewStore,
     // `theme` and the next three fields are still written here so an older
     // build finds them, but the session no longer owns them: the preferences
     // file is read over this copy at launch
@@ -226,12 +226,14 @@ impl UiSessionWire {
             ser.schematic_routing_mode
                 .unwrap_or(match ser.schematic_visibility.wire_routing {
                     SchematicWireRoutingStyle::Orthogonal => {
-                        crate::state::WireRoutingMode::HorizontalFirst
+                        rspice_app_state::state::WireRoutingMode::HorizontalFirst
                     }
                     SchematicWireRoutingStyle::FortyFiveDegree => {
-                        crate::state::WireRoutingMode::FortyFiveDegree
+                        rspice_app_state::state::WireRoutingMode::FortyFiveDegree
                     }
-                    SchematicWireRoutingStyle::FreeAngle => crate::state::WireRoutingMode::Diagonal,
+                    SchematicWireRoutingStyle::FreeAngle => {
+                        rspice_app_state::state::WireRoutingMode::Diagonal
+                    }
                 });
         state.workbench.theme = ser.theme;
         state.design.grid = grid;
@@ -329,13 +331,13 @@ pub(crate) struct WorkbenchWire {
     #[serde(default)]
     verification: VerificationSessionState,
     #[serde(default)]
-    models_page: crate::state::ModelsPage,
+    models_page: rspice_app_state::state::ModelsPage,
     #[serde(default)]
     models_view: ModelsWorkbenchViewState,
     #[serde(default = "default_analysis_index")]
     active_analysis: usize,
     #[serde(default)]
-    active_analysis_instance: Option<crate::product::AnalysisInstanceId>,
+    active_analysis_instance: Option<rspice_app_state::product::AnalysisInstanceId>,
     #[serde(default)]
     selected_specification: Option<String>,
     #[serde(default)]
@@ -343,13 +345,13 @@ pub(crate) struct WorkbenchWire {
     #[serde(default)]
     selected_saved_output: Option<String>,
     #[serde(default)]
-    selected_capture_group: Option<crate::product::CaptureGroupId>,
+    selected_capture_group: Option<rspice_app_state::product::CaptureGroupId>,
     #[serde(default)]
     selected_run_set_dimension: Option<String>,
     #[serde(default)]
     selected_model: Option<String>,
     #[serde(default)]
-    netlist_outline_collapsed: BTreeSet<crate::state::OutlineSectionKind>,
+    netlist_outline_collapsed: BTreeSet<rspice_app_state::state::OutlineSectionKind>,
     #[serde(default)]
     command_query: String,
     // A `specialist_tool_browser` block from older sessions is ignored: the
@@ -434,13 +436,13 @@ pub(crate) struct WorkbenchWireRef<'a> {
     #[serde(default)]
     verification: &'a VerificationSessionState,
     #[serde(default)]
-    models_page: &'a crate::state::ModelsPage,
+    models_page: &'a rspice_app_state::state::ModelsPage,
     #[serde(default)]
     models_view: &'a ModelsWorkbenchViewState,
     #[serde(default = "default_analysis_index")]
     active_analysis: &'a usize,
     #[serde(default)]
-    active_analysis_instance: &'a Option<crate::product::AnalysisInstanceId>,
+    active_analysis_instance: &'a Option<rspice_app_state::product::AnalysisInstanceId>,
     #[serde(default)]
     selected_specification: &'a Option<String>,
     #[serde(default)]
@@ -448,13 +450,13 @@ pub(crate) struct WorkbenchWireRef<'a> {
     #[serde(default)]
     selected_saved_output: &'a Option<String>,
     #[serde(default)]
-    selected_capture_group: &'a Option<crate::product::CaptureGroupId>,
+    selected_capture_group: &'a Option<rspice_app_state::product::CaptureGroupId>,
     #[serde(default)]
     selected_run_set_dimension: &'a Option<String>,
     #[serde(default)]
     selected_model: &'a Option<String>,
     #[serde(default)]
-    netlist_outline_collapsed: &'a BTreeSet<crate::state::OutlineSectionKind>,
+    netlist_outline_collapsed: &'a BTreeSet<rspice_app_state::state::OutlineSectionKind>,
     #[serde(default)]
     command_query: &'a String,
     #[serde(default)]
@@ -827,12 +829,12 @@ impl WorkbenchWire {
 #[cfg(test)]
 mod ui_session_tests {
     use super::*;
-    use crate::state::{
-        SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicNetHighlighting,
-        SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility,
-    };
     use crate::workbench::app::dialogs::selection::bulk_filter::{
         SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind,
+    };
+    use rspice_app_state::state::{
+        SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicNetHighlighting,
+        SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility,
     };
 
     #[test]
@@ -919,15 +921,17 @@ mod ui_session_tests {
     #[test]
     fn personal_engineering_table_views_round_trip_with_the_ui_session() {
         let mut session = AppState::default();
-        let dataset =
-            crate::state::engineering_table::active_schematic_dataset(&Default::default());
-        let view = crate::state::engineering_table::EngineeringTableView::for_dataset(&dataset);
+        let dataset = rspice_app_state::state::engineering_table::active_schematic_dataset(
+            &Default::default(),
+        );
+        let view =
+            rspice_app_state::state::engineering_table::EngineeringTableView::for_dataset(&dataset);
         session
             .design
             .engineering_table_views
             .save(
                 "My device view",
-                crate::state::engineering_table::EngineeringViewScope::Personal,
+                rspice_app_state::state::engineering_table::EngineeringViewScope::Personal,
                 view,
                 true,
                 &dataset,
@@ -1056,7 +1060,8 @@ mod ui_session_tests {
         session.design.schematic_snap.enabled = false;
         session.design.schematic_snap.snap_to_wire_segments = false;
         session.design.schematic_snap.snap_radius = 7;
-        session.design.schematic_routing_mode = crate::state::WireRoutingMode::VerticalFirst;
+        session.design.schematic_routing_mode =
+            rspice_app_state::state::WireRoutingMode::VerticalFirst;
 
         let serialized =
             serde_json::to_value(UiSessionWire::from(&session)).expect("serialize session");
@@ -1070,7 +1075,7 @@ mod ui_session_tests {
         );
         assert_eq!(
             restored.design.schematic_routing_mode,
-            crate::state::WireRoutingMode::VerticalFirst
+            rspice_app_state::state::WireRoutingMode::VerticalFirst
         );
     }
 
@@ -1078,7 +1083,7 @@ mod ui_session_tests {
     fn duplicate_external_nets_round_trips_with_the_ui_session() {
         let mut session = AppState::default();
         session.design.duplicate_external_nets =
-            crate::state::DuplicateExternalNets::PreserveNamedNetAttachment;
+            rspice_app_state::state::DuplicateExternalNets::PreserveNamedNetAttachment;
 
         let serialized =
             serde_json::to_value(UiSessionWire::from(&session)).expect("serialize session");
@@ -1088,7 +1093,7 @@ mod ui_session_tests {
 
         assert_eq!(
             restored.design.duplicate_external_nets,
-            crate::state::DuplicateExternalNets::PreserveNamedNetAttachment
+            rspice_app_state::state::DuplicateExternalNets::PreserveNamedNetAttachment
         );
     }
 
@@ -1101,15 +1106,15 @@ mod ui_session_tests {
 
         assert_eq!(
             restored.design.schematic_snap,
-            crate::state::SnapEngine::default()
+            rspice_app_state::state::SnapEngine::default()
         );
         assert_eq!(
             restored.design.schematic_routing_mode,
-            crate::state::WireRoutingMode::HorizontalFirst
+            rspice_app_state::state::WireRoutingMode::HorizontalFirst
         );
         assert_eq!(
             restored.design.duplicate_external_nets,
-            crate::state::DuplicateExternalNets::LeaveUnconnected
+            rspice_app_state::state::DuplicateExternalNets::LeaveUnconnected
         );
     }
 }

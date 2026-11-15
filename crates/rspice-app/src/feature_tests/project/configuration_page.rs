@@ -4,12 +4,12 @@
 
 use egui::Color32;
 
-use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
 use crate::workbench::examples::hierarchy_reference;
 use crate::workbench::features;
 use crate::workbench::project::configuration_state::ConfigurationSelection;
 use rspice_app_project::workbench::surfaces::project::configuration::configuration;
+use rspice_app_workbench::ui::tokens::Tokens;
 
 /// Words that name the implementation rather than anything an engineer
 /// acts on. None may reach the page.
@@ -45,7 +45,7 @@ struct Frame {
 
 fn frame(app: &mut RSpiceApp, width: f32) -> Frame {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let output = ctx.run_ui(
         egui::RawInput {
@@ -226,7 +226,7 @@ fn unbound_instances_are_marked_rather_than_painted_red() {
         "the status carries the mark: {status}"
     );
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let tokens = Tokens::get(&ctx);
     for (text, color) in &shown.painted {
         assert!(

@@ -5,9 +5,9 @@
 use crate::schematic::view::array_interaction::*;
 use crate::schematic::view::requests::editor_request_source;
 use crate::schematic::view::schematic_symbol_context;
-use crate::state::Tool;
-use crate::state::{ComponentType, Point};
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::Tool;
+use rspice_app_state::state::{ComponentType, Point};
 use rspice_schematic_editor::view::transform_input::TransformInputTransition;
 
 #[test]
@@ -62,7 +62,8 @@ fn array_requests_recheck_the_source_draft_and_operation_without_cancelling_a_re
             "document" => state.model.active_schematic_epoch += 1,
             "selection" => state.model.schematic.session.editor.selection.clear(),
             "kind" => {
-                state.design.array_selection.kind = crate::state::SchematicArrayKind::Rectangular
+                state.design.array_selection.kind =
+                    rspice_app_state::state::SchematicArrayKind::Rectangular
             }
             "count" => state.design.array_selection.count = "4".to_owned(),
             "naming" => state.design.array_selection.naming = "R20…R27".to_owned(),

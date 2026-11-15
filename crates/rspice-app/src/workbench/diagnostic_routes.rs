@@ -21,8 +21,6 @@
 
 use egui::Context;
 
-use crate::state::SimulationPage;
-use crate::state::{DrawnObject, PreflightRemediation};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::commands::vocabulary::Command;
@@ -32,6 +30,8 @@ use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::SimulationPage;
+use rspice_app_state::state::{DrawnObject, PreflightRemediation};
 
 /// Apply the route a consumer asked for, if one is outstanding.
 ///
@@ -93,13 +93,13 @@ pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
 fn open_code_document(
     ctx: &Context,
     app: &mut RSpiceApp,
-    bundle: crate::state::ProjectSourceId,
+    bundle: rspice_app_state::state::ProjectSourceId,
     logical_path: &str,
     line: Option<usize>,
     column: Option<usize>,
 ) {
-    use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
     use crate::workbench::documents::code_workspace;
+    use rspice_app_state::state::{ProjectSourceLanguage, ProjectSourceOwner};
 
     let owner = app
         .state
@@ -136,7 +136,7 @@ fn open_code_document(
         .model
         .workspace
         .active_source_bundle(language)
-        .map(crate::state::ProjectSourceBundle::id);
+        .map(rspice_app_state::state::ProjectSourceBundle::id);
     if active != Some(bundle) {
         app.state.prompt(format!(
             "{logical_path} was not opened: the editor that owns it could not be brought forward."

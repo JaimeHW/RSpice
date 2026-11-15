@@ -3,17 +3,17 @@
 
 use super::navigator::{NavigatorPanel, interface_design, two_sheet_named_signals};
 use crate::schematic::view::sheet_visibility::SheetScope;
-use crate::state::CellViewRef;
-use crate::state::ComponentType;
-use crate::state::InstancePath;
-use crate::state::PortDirection;
-use crate::state::SchematicState;
-use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::navigator::hierarchy_tree;
 use crate::workbench::design::navigator::tests::*;
 use crate::workbench::design::navigator::*;
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::CellViewRef;
+use rspice_app_state::state::ComponentType;
+use rspice_app_state::state::InstancePath;
+use rspice_app_state::state::PortDirection;
+use rspice_app_state::state::SchematicState;
+use rspice_app_workbench::ui::tokens::Tokens;
 
 /// The ports rail lists the interface in the order the deck has it, and numbers
 /// every pin with the position it occupies there.
@@ -148,10 +148,10 @@ fn a_port_name_declared_twice_is_marked_on_both_rows() {
 #[test]
 fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
     let mut app = RSpiceApp::test_instance();
-    let mut source = crate::state::Component::new(
+    let mut source = rspice_app_state::state::Component::new(
         501,
         ComponentType::VoltageSource,
-        crate::state::Point::new(60, 80),
+        rspice_app_state::state::Point::new(60, 80),
     );
     source.name = "VIN".to_owned();
     app.state
@@ -162,7 +162,7 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
         .push(source);
     app.state.sync_active_schematic_to_workspace();
 
-    let sources = crate::simulation::placed_sources::placed_sources(
+    let sources = rspice_app_state::simulation::placed_sources::placed_sources(
         &app.state.model.schematic,
         &app.state.model.workspace.content.stimulus_library,
         app.state.model.sim_setup.analysis_plan.as_ref(),
@@ -177,7 +177,7 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
         Some(NavigatorObject::Component {
             id: 501,
             label: "VIN".to_owned(),
-            position: crate::state::Point::new(60, 80),
+            position: rspice_app_state::state::Point::new(60, 80),
         })
     );
 
@@ -199,11 +199,11 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
 
 /// One RF port, as the palette places it: a reference and the parameter string
 /// the property sheet writes.
-fn rf_port(id: u64, name: &str, params: &str) -> crate::state::Component {
-    let mut component = crate::state::Component::new(
+fn rf_port(id: u64, name: &str, params: &str) -> rspice_app_state::state::Component {
+    let mut component = rspice_app_state::state::Component::new(
         id,
         ComponentType::RfPort,
-        crate::state::Point::new(80, 40 + id as i32),
+        rspice_app_state::state::Point::new(80, 40 + id as i32),
     );
     component.name = name.to_owned();
     component.params = params.to_owned();
@@ -211,7 +211,7 @@ fn rf_port(id: u64, name: &str, params: &str) -> crate::state::Component {
 }
 
 /// A design whose ports carry `params`, with the navigator active over it.
-fn rf_bench(ports: Vec<crate::state::Component>) -> RSpiceApp {
+fn rf_bench(ports: Vec<rspice_app_state::state::Component>) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
     app.state
@@ -225,8 +225,10 @@ fn rf_bench(ports: Vec<crate::state::Component>) -> RSpiceApp {
 }
 
 /// The ports the rail lists, resolved the way the section resolves them.
-fn listed_rf_ports(app: &RSpiceApp) -> Vec<crate::simulation::placed_sources::PlacedRfPort> {
-    crate::simulation::placed_sources::placed_rf_ports(
+fn listed_rf_ports(
+    app: &RSpiceApp,
+) -> Vec<rspice_app_state::simulation::placed_sources::PlacedRfPort> {
+    rspice_app_state::simulation::placed_sources::placed_rf_ports(
         &app.state.model.schematic,
         app.state.model.sim_setup.analysis_plan.as_ref(),
     )
@@ -234,9 +236,9 @@ fn listed_rf_ports(app: &RSpiceApp) -> Vec<crate::simulation::placed_sources::Pl
 
 /// A plan holding one analysis of `kind`, enabled.
 fn plan_with(
-    kind: crate::simulation::plan::AnalysisKind,
-) -> crate::simulation::plan::SimulationPlan {
-    let mut plan = crate::simulation::plan::SimulationPlan::empty();
+    kind: rspice_app_state::simulation::plan::AnalysisKind,
+) -> rspice_app_state::simulation::plan::SimulationPlan {
+    let mut plan = rspice_app_state::simulation::plan::SimulationPlan::empty();
     let (instance, _) = plan.insert(kind).expect("the fixture analysis inserts");
     plan.set_enabled(instance, true)
         .expect("the fixture analysis takes its enabled flag");
@@ -331,16 +333,18 @@ fn an_rf_port_row_names_the_s_parameter_run_that_reads_it() {
     // A transient reaches the port as the two-terminal element the netlist
     // already carries, which is not readership: it would make every plan read
     // every port.
-    app.state.model.sim_setup.analysis_plan =
-        Some(plan_with(crate::simulation::plan::AnalysisKind::Transient));
+    app.state.model.sim_setup.analysis_plan = Some(plan_with(
+        rspice_app_state::simulation::plan::AnalysisKind::Transient,
+    ));
     let loaded = rf_port_meta(&listed_rf_ports(&app)[0]);
     assert!(
         loaded.ends_with("unused"),
         "only an `.sp` run indexes a port: {loaded}"
     );
 
-    app.state.model.sim_setup.analysis_plan =
-        Some(plan_with(crate::simulation::plan::AnalysisKind::SParameter));
+    app.state.model.sim_setup.analysis_plan = Some(plan_with(
+        rspice_app_state::simulation::plan::AnalysisKind::SParameter,
+    ));
     let read = rf_port_meta(&listed_rf_ports(&app)[0]);
     assert!(
         read.ends_with("S-parameter port"),
@@ -371,7 +375,7 @@ fn two_rf_ports_claiming_one_number_are_marked_on_both_rows() {
     ]);
 
     let rows = listed_rf_ports(&app);
-    let collisions = crate::simulation::placed_sources::duplicate_port_numbers(&rows);
+    let collisions = rspice_app_state::simulation::placed_sources::duplicate_port_numbers(&rows);
     assert_eq!(collisions, vec![1]);
 
     let tooltip = rf_port_tooltip(&rows[0], true, None);
@@ -427,9 +431,17 @@ fn an_rf_port_tooltip_reads_the_port_the_row_could_only_summarise() {
 // -------------------------------------------- the whole design's excitations
 
 /// One independent source, as the palette places it.
-fn source(id: u64, kind: ComponentType, name: &str, params: &str) -> crate::state::Component {
-    let mut component =
-        crate::state::Component::new(id, kind, crate::state::Point::new(120, 40 + id as i32));
+fn source(
+    id: u64,
+    kind: ComponentType,
+    name: &str,
+    params: &str,
+) -> rspice_app_state::state::Component {
+    let mut component = rspice_app_state::state::Component::new(
+        id,
+        kind,
+        rspice_app_state::state::Point::new(120, 40 + id as i32),
+    );
     component.name = name.to_owned();
     component.params = params.to_owned();
     component

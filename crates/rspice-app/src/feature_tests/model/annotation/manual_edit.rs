@@ -1,7 +1,7 @@
 //! Manual annotation authority across projection, compensation and native persistence.
 
 use super::*;
-use crate::state::SchematicSnapshot;
+use rspice_app_state::state::SchematicSnapshot;
 
 fn executable_fixture() -> Fixture {
     let mut fixture = fixture(&["V42"]);
@@ -267,10 +267,10 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
             },
         )
         .unwrap();
-        let loaded = crate::io::load_project_file(&path).unwrap();
+        let loaded = rspice_app_services::io::load_project_file(&path).unwrap();
         let reference = loaded.file.workspace.active_schematic_reference();
         let source = loaded.schematic_editor(&reference.key()).unwrap();
-        let workspace = crate::state::ProjectWorkspace::from_parts(
+        let workspace = rspice_app_state::state::ProjectWorkspace::from_parts(
             loaded.file.workspace.clone(),
             loaded.workspace_session.clone(),
         );

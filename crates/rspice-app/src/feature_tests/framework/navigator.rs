@@ -16,7 +16,7 @@ fn navigator_search_and_empty_hint_match_mockup_spacing() {
 #[test]
 fn navigator_heading_and_search_expose_explicit_accesskit_names() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);

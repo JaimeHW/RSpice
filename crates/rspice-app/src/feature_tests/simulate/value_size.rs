@@ -3,8 +3,8 @@
 use egui::accesskit::Role;
 use egui::{Rect, vec2};
 
-use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
+use rspice_app_state::state::SimulationPage;
 
 /// A text as painted: what it says, its font and its centre.
 type Painted = (String, egui::FontId, egui::Pos2);
@@ -29,7 +29,7 @@ fn paint(
         }
     }
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.simulate.simulation_page = page;
@@ -99,7 +99,7 @@ fn painted_field_values(page: SimulationPage) -> Vec<(String, f32)> {
 /// beside it.
 #[test]
 fn every_value_a_studio_page_holds_is_painted_at_the_field_size() {
-    let field = crate::ui::theme::field_mono().size;
+    let field = rspice_app_workbench::ui::theme::field_mono().size;
     let mut checked = 0;
     for page in SimulationPage::NAVIGATION {
         for (value, size) in painted_field_values(page) {
@@ -126,11 +126,14 @@ fn the_analyses_cards_facts_read_in_their_faces_at_the_field_size() {
             .map(|(_, font, _)| font.clone())
             .unwrap_or_else(|| panic!("{wanted:?} is painted"))
     };
-    assert_eq!(font_of("No prior datasets"), crate::ui::theme::field_sans());
+    assert_eq!(
+        font_of("No prior datasets"),
+        rspice_app_workbench::ui::theme::field_sans()
+    );
     let statement = texts
         .iter()
         .find(|(text, _, _)| text.starts_with(".tran"))
         .map(|(_, font, _)| font.clone())
         .expect("the plan statement is painted");
-    assert_eq!(statement, crate::ui::theme::field_mono());
+    assert_eq!(statement, rspice_app_workbench::ui::theme::field_mono());
 }

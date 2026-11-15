@@ -3,10 +3,10 @@
 
 use crate::properties::property_bridge::collect_properties_from_component;
 use crate::properties::property_bridge::property_value_to_string;
-use crate::state::ComponentType;
 use crate::workbench::app::dialogs::selection::shared_properties::SharedField;
 use crate::workbench::app::dialogs::selection::shared_properties::tests::resistor;
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::ComponentType;
 
 /// Open the form, over the parts it reads and edits.
 fn open_shared_properties(state: &mut AppState) -> bool {

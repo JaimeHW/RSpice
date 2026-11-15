@@ -10,8 +10,8 @@ use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
 use super::design_checks::CheckScope;
 use super::{AppState, Model, RunsState, SlotFacts};
-use crate::state::{CellViewRef, SpecializedViewerCacheProvenance};
 use rspice_app_runs::simulation::{NetlistShown, RunHost, ViewerHost, ViewerReading};
+use rspice_app_state::state::{CellViewRef, SpecializedViewerCacheProvenance};
 
 impl ViewerHost for AppState {
     fn model(&self) -> &Model {

@@ -2,7 +2,6 @@
 //! reader: the Edit menu, the shortcuts and the palette reach the text rather
 //! than a schematic hidden behind it, and no page carries a menu of its own.
 
-use crate::state::{Point, ProjectSourceId, ProjectSourceLanguage, Wire};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
@@ -11,6 +10,7 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::code_workspace::{self, CodeWorkspacePage};
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_state::state::{Point, ProjectSourceId, ProjectSourceLanguage, Wire};
 
 const FIRST_LINE: &str = "// Behavioral conductance.";
 
@@ -553,9 +553,9 @@ fn right_click_opens_the_source_menu_and_toggle_line_comment_acts_on_the_clicked
 fn on_a_read_only_source_the_menu_disables_cut_and_paste() {
     let (ctx, mut app, _) = veriloga_with_focused_editor();
     app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
+        rspice_app_state::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
-            ..crate::state::write_policy::LocalSafeModeOptions::default()
+            ..rspice_app_state::state::write_policy::LocalSafeModeOptions::default()
         },
         String::new(),
     );
@@ -637,9 +637,11 @@ fn automation_with_focused_editor() -> (egui::Context, RSpiceApp, ProjectSourceI
         .workspace
         .content
         .project_sources
-        .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
-            ProjectSourceLanguage::RSpiceAutomation,
-        ))
+        .bundle_for_owner(
+            &rspice_app_state::state::ProjectSourceOwner::code_workspace(
+                ProjectSourceLanguage::RSpiceAutomation,
+            ),
+        )
         .expect("the project's Automation workspace");
     let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
     let editor =
@@ -693,9 +695,9 @@ fn the_automation_pages_menu_comments_the_line_it_was_opened_on() {
 fn on_a_read_only_project_the_automation_pages_menu_disables_cut_and_paste() {
     let (ctx, mut app, _) = automation_with_focused_editor();
     app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
+        rspice_app_state::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
-            ..crate::state::write_policy::LocalSafeModeOptions::default()
+            ..rspice_app_state::state::write_policy::LocalSafeModeOptions::default()
         },
         String::new(),
     );

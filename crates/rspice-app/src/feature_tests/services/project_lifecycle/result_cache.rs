@@ -1,8 +1,10 @@
 //! Result-cache correctness through the real project snapshot and dirty paths.
 
 use super::*;
-use crate::state::{ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, SimulationState};
 use crate::workbench::documents::result_document::frame_work::{DatasetWalk, WorkCounts};
+use rspice_app_state::state::{
+    ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, SimulationState,
+};
 
 fn deck(text: &str) -> ExecutedDeck {
     ExecutedDeck {
@@ -20,7 +22,7 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
     for samples in [2, 100_000] {
         let (mut state, _) = super::durable_content::retained_results();
         state.model.simulation.retained.runs[0].analyses[0].waveforms =
-            vec![crate::state::RetainedTrace::new(
+            vec![rspice_app_state::state::RetainedTrace::new(
                 "V(out)",
                 (0..samples).map(|n| n as f64).collect::<Vec<_>>(),
                 vec![1.0; samples],
@@ -53,7 +55,7 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
         );
         let mut oracle = snapshot(&state).unwrap();
         oracle.file.simulation_results =
-            crate::io::capture_simulation_results(&state.model.simulation);
+            rspice_app_services::io::capture_simulation_results(&state.model.simulation);
         assert_eq!(
             state
                 .platform
@@ -155,7 +157,7 @@ fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_captu
             .project_lifecycle
             .result_cache
             .capture(&state.model.simulation);
-        let fresh = crate::io::capture_simulation_results(&state.model.simulation);
+        let fresh = rspice_app_services::io::capture_simulation_results(&state.model.simulation);
         assert!(
             !cached.shares_content_with(&before),
             "edit {index} reused an old snapshot"

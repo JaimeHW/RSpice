@@ -1,13 +1,13 @@
 //! When live checking runs, what it states, and how it composes with the
 //! explicit checks on the one list.
 
-use crate::state::{ComponentType, Point};
-use crate::time_compat::Instant;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::DiagnosticInputs;
 use crate::workbench::app_state::diagnostic_store::listing;
 use crate::workbench::app_state::waivers::WaiverAction;
 use crate::workbench::preferences::TogglePreference;
+use rspice_app_state::state::{ComponentType, Point};
+use rspice_app_state::time_compat::Instant;
 
 fn open_state() -> AppState {
     let mut state = AppState::default();
@@ -399,18 +399,18 @@ fn a_drawing_that_cannot_be_checked_says_so_once() {
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: "Unresolvable DUT".to_owned(),
             root,
             dut_path: "/XABSENT".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "live check test".to_owned(),
         })
         .expect("the fixture configuration is well formed");
@@ -431,6 +431,9 @@ fn a_drawing_that_cannot_be_checked_says_so_once() {
         .filter(|entry| entry.message.starts_with("Live checks could not run: "))
         .collect::<Vec<_>>();
     assert_eq!(said.len(), 1, "{said:?}");
-    assert_eq!(said[0].severity, crate::diagnostics::LogSeverity::Error);
+    assert_eq!(
+        said[0].severity,
+        rspice_app_state::diagnostics::LogSeverity::Error
+    );
     assert!(said[0].message.contains("XABSENT"), "{}", said[0].message);
 }

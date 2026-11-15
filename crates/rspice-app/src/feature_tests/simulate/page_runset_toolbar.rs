@@ -22,7 +22,7 @@ struct Fixture {
 impl Fixture {
     fn new(width: f32, coarse: bool, revision: u32) -> Self {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.coarse_pointer = coarse;

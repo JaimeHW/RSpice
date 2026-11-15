@@ -5,7 +5,6 @@
 
 use egui::{Rect, vec2};
 
-use crate::state::{Cell, CellViewRef, Library, View, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::features;
@@ -17,6 +16,7 @@ use crate::workbench::state::Workspace;
 use rspice_app_project::workbench::surfaces::project::library::{
     AUDIT_REPORT_ID, LibraryIntent, apply_library_intent, icon_for_view, library_context,
 };
+use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
 
 /// Carry `intent` out as the page does, then answer what it raised, as
 /// the shell does once the page returns.
@@ -40,7 +40,7 @@ fn a_long_selection_is_cut_so_access_stays_on_the_page() {
     );
     builtin.file = Some("a_source_file_whose_name_fills_the_whole_of_the_strip.va".to_owned());
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(
@@ -322,11 +322,11 @@ fn publication_exports_exact_pre_receipt_project_and_commits_one_audited_revisio
     assert_eq!(receipt.snapshot_byte_len(), bytes.len() as u64);
     assert_eq!(
         receipt.snapshot_digest(),
-        crate::product::ContentDigest::from_bytes(sha2::Sha256::digest(&bytes).into())
+        rspice_app_state::product::ContentDigest::from_bytes(sha2::Sha256::digest(&bytes).into())
     );
     let text = std::str::from_utf8(&bytes).expect("publication is UTF-8");
-    let artifact =
-        crate::io::project_io::load_project_text(text, None).expect("artifact validates");
+    let artifact = rspice_app_services::io::project_io::load_project_text(text, None)
+        .expect("artifact validates");
     assert_eq!(artifact.file.workspace.project.id(), project_id);
     assert_eq!(artifact.file.workspace.project.revision(), project_revision);
     assert!(
@@ -351,7 +351,7 @@ fn publication_exports_exact_pre_receipt_project_and_commits_one_audited_revisio
         .expect("descriptor serializes");
     tampered_descriptor["library_publications"][0]["reason"] =
         serde_json::json!("silently changed reason");
-    let tampered_descriptor: crate::state::ProjectDescriptor =
+    let tampered_descriptor: rspice_app_state::state::ProjectDescriptor =
         serde_json::from_value(tampered_descriptor).expect("wire shape remains valid");
     assert!(
         tampered_descriptor.validate().is_err(),
@@ -371,17 +371,21 @@ fn publication_exports_exact_pre_receipt_project_and_commits_one_audited_revisio
     let prepared = app
         .state
         .model
-        .preflight_project_library_mutation(crate::state::ProjectLibraryMutation::CreateCell {
-            library: writable_library.clone(),
-            cell: "post_publication_change".to_owned(),
-        })
+        .preflight_project_library_mutation(
+            rspice_app_state::state::ProjectLibraryMutation::CreateCell {
+                library: writable_library.clone(),
+                cell: "post_publication_change".to_owned(),
+            },
+        )
         .expect("post-publication mutation preflights");
     app.state
         .model
         .library_manager
         .get_library_mut(&writable_library)
         .expect("writable library")
-        .add_cell(crate::state::Cell::new("post_publication_change"));
+        .add_cell(rspice_app_state::state::Cell::new(
+            "post_publication_change",
+        ));
     app.state.model.publish_project_library_mutation(prepared);
     assert!(
         app.state
@@ -453,7 +457,7 @@ fn publication_exports_exact_pre_receipt_project_and_commits_one_audited_revisio
             .library_mutation_audit()
             .last()
             .map(|entry| entry.mutation()),
-        Some(crate::state::ProjectLibraryMutation::RollbackPublication {
+        Some(rspice_app_state::state::ProjectLibraryMutation::RollbackPublication {
             publication_id,
             actor_id,
             authority_id,
@@ -505,17 +509,19 @@ fn publication_commit_rejects_intervening_catalog_change_atomically() {
     let prepared_mutation = app
         .state
         .model
-        .preflight_project_library_mutation(crate::state::ProjectLibraryMutation::CreateCell {
-            library: writable_library.clone(),
-            cell: "intervening_change".to_owned(),
-        })
+        .preflight_project_library_mutation(
+            rspice_app_state::state::ProjectLibraryMutation::CreateCell {
+                library: writable_library.clone(),
+                cell: "intervening_change".to_owned(),
+            },
+        )
         .expect("intervening mutation preflights");
     app.state
         .model
         .library_manager
         .get_library_mut(&writable_library)
         .expect("writable library")
-        .add_cell(crate::state::Cell::new("intervening_change"));
+        .add_cell(rspice_app_state::state::Cell::new("intervening_change"));
     app.state
         .model
         .publish_project_library_mutation(prepared_mutation);
@@ -553,9 +559,9 @@ fn a_double_click_on_a_symbol_view_opens_it_in_the_symbol_editor() {
     let mut view = View::new("symbol", ViewType::Symbol);
     rspice_design::symbol::generated::store_generated_symbol(
         &mut view,
-        &[crate::state::PortSpec {
+        &[rspice_app_state::state::PortSpec {
             name: "a".to_owned(),
-            direction: crate::state::PortDirection::InOut,
+            direction: rspice_app_state::state::PortDirection::InOut,
         }],
         |_| None,
     )

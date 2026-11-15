@@ -6,14 +6,14 @@
 use crate::workbench::docks::inspector;
 use egui::Vec2;
 
-use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-use crate::state::VerificationPage;
-use crate::state::{
+use crate::workbench::RSpiceApp;
+use crate::workbench::state::Workspace;
+use rspice_app_state::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+use rspice_app_state::state::VerificationPage;
+use rspice_app_state::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun, SimulationRunLifecycle,
     SpecEntry, SpecPointScope,
 };
-use crate::workbench::RSpiceApp;
-use crate::workbench::state::Workspace;
 use rspice_results::yield_analysis::{
     DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
 };
@@ -36,7 +36,7 @@ fn first_instance(app: &RSpiceApp) -> AnalysisInstanceId {
 /// Retain Run 12 of `instance`, finished in `elapsed` seconds, failed with
 /// `error` when there is one.
 fn retain_run(
-    runs: &mut crate::state::RunHistory,
+    runs: &mut rspice_app_state::state::RunHistory,
     instance: AnalysisInstanceId,
     error: Option<&str>,
     elapsed: f64,
@@ -168,7 +168,7 @@ fn verify_tuning() -> RSpiceApp {
 fn inspector_context() -> egui::Context {
     let ctx = egui::Context::default();
     ctx.set_os(egui::os::OperatingSystem::Nix);
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx
 }
 

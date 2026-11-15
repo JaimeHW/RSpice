@@ -6,17 +6,17 @@
 //! lands on is the instance's own, and that the round trip back through the
 //! netlist returns the instance it started from.
 
-use crate::state::ComponentType;
-use crate::state::Point;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::ComponentType;
+use rspice_app_state::state::Point;
 
 const DECK: &str = "show-in-netlist fixture\nV1 in 0 1\nR1 in out 1k\n+ tc1=0\n.op\n.end\n";
 
 /// A project whose retained generated deck states two of its three instances,
 /// with `R1` spread over a card and its continuation.
 fn located_instance_state() -> (AppState, u64, u64, u64) {
-    use crate::state::{
+    use rspice_app_state::state::{
         GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,
         NetlistDocument, NetlistDocumentId,
     };
@@ -64,11 +64,11 @@ fn located_instance_state() -> (AppState, u64, u64, u64) {
         )
         .expect("mapping")
     };
-    let digest = crate::state::content_digest("show-in-netlist-input");
+    let digest = rspice_app_state::state::content_digest("show-in-netlist-input");
     let artifact = GeneratedArtifact::try_from_utf8(
         GeneratedProvenance::try_new(
             "rspice-show-in-netlist-test",
-            GenerationInput::new(crate::product::ObjectRevision::INITIAL, digest),
+            GenerationInput::new(rspice_app_state::product::ObjectRevision::INITIAL, digest),
         )
         .expect("provenance"),
         DECK.as_bytes().to_vec(),
@@ -220,7 +220,8 @@ fn showing_an_instance_from_a_stale_deck_says_so_without_blocking_the_jump() {
     state
         .model
         .netlist_artifacts
-        .current_generation_input_digest = Some(crate::state::content_digest("edited-schematic"));
+        .current_generation_input_digest =
+        Some(rspice_app_state::state::content_digest("edited-schematic"));
 
     assert_eq!(state.model.selected_instance_generated_line().err(), None);
     state.show_selected_instance_in_netlist();
@@ -266,9 +267,9 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
         .netlist_artifacts
         .generated_document
         .as_ref()
-        .and_then(crate::state::NetlistDocument::generated_artifact)
+        .and_then(rspice_app_state::state::NetlistDocument::generated_artifact)
         .and_then(|artifact| artifact.source_map_entry(active_line))
-        .and_then(crate::state::GeneratedSourceMapEntry::component_id)
+        .and_then(rspice_app_state::state::GeneratedSourceMapEntry::component_id)
         .expect("the active line names a component");
     assert_eq!(revealed, load_id);
 

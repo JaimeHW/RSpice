@@ -4,15 +4,15 @@
 //! live outside the drawing, so a schematic edit can destroy them without the
 //! drawing remembering anything. These cases pin what comes back.
 
-use crate::state::{
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
+use crate::workbench::commands::vocabulary::Command;
+use rspice_app_state::state::{
     CellViewRef, ComponentType, CrossSheetDiscipline, CrossSheetPortAnchor,
     CrossSheetPortDefinition, CrossSheetPortDirection, CrossSheetPortEndpoint,
     CrossSheetSignalType, MoveBoundaryResolution, MoveSelectionRequest, Point, SheetDefinition,
     SheetId, SheetPortPolicy, SheetTemplate,
 };
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
-use crate::workbench::commands::vocabulary::Command;
 
 /// A governed two-sheet cell whose one cross-sheet contract is anchored to a
 /// terminal of the component that sits on the second sheet, plus a spare part

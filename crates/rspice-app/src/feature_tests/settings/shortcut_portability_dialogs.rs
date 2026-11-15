@@ -1,10 +1,5 @@
 //! The shortcut import and export windows over the product's own commands.
 
-use crate::state::command_catalog::CommandPlatform;
-use crate::state::command_catalog::ShortcutContext;
-use crate::state::shortcuts::ShortcutPreferences;
-use crate::state::shortcuts::ShortcutProfileLibrary;
-use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::command_registry;
 use egui::Context;
@@ -25,6 +20,11 @@ use rspice_app_settings::workbench::shortcuts::artifacts::{
     apply_shortcut_import, decode_shortcut_artifact_json, detect_shortcut_artifact,
     serialize_shortcut_reference_json,
 };
+use rspice_app_state::state::command_catalog::CommandPlatform;
+use rspice_app_state::state::command_catalog::ShortcutContext;
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
+use rspice_app_state::state::shortcuts::ShortcutProfileLibrary;
+use rspice_app_state::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
 
 pub(crate) fn exported_artifact(profile: &ShortcutPreferences) -> DecodedShortcutArtifact {
     let model = build_shortcut_reference_model(
@@ -245,7 +245,7 @@ fn failed_commit_cancellation_keeps_ownership_until_receipt_arrives() {
 #[test]
 fn export_effect_contains_fully_prepared_private_artifact() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut state = ShortcutPortabilityDialogsState::default();
     state.open_export();
     let library = ShortcutProfileLibrary::default();
@@ -311,7 +311,7 @@ fn export_effect_contains_fully_prepared_private_artifact() {
 #[test]
 fn modal_accessibility_tree_exposes_exact_titles_and_summary_table() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let library = ShortcutProfileLibrary::default();
     let artifact = exported_artifact(&ShortcutPreferences::default());
@@ -378,7 +378,7 @@ fn modal_accessibility_tree_exposes_exact_titles_and_summary_table() {
 #[test]
 fn pending_import_controls_are_accessibly_disabled_and_source_keeps_picker_semantics() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let library = ShortcutProfileLibrary::default();
     let mut state = ShortcutPortabilityDialogsState::default();
@@ -423,7 +423,7 @@ fn pending_import_controls_are_accessibly_disabled_and_source_keeps_picker_seman
 #[test]
 fn pending_render_is_structurally_immutable_even_for_incomplete_restored_state() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let library = ShortcutProfileLibrary::default();
     let mut state = ShortcutImportDialogState {
         open: true,
@@ -456,7 +456,7 @@ fn pending_render_is_structurally_immutable_even_for_incomplete_restored_state()
 #[test]
 fn pending_export_controls_are_accessibly_disabled() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let library = ShortcutProfileLibrary::default();
     let mut state = ShortcutPortabilityDialogsState::default();

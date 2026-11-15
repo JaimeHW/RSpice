@@ -7,18 +7,18 @@ use std::time::Duration;
 
 use egui::{Event, Key, Modifiers};
 
-use crate::state::ViewType;
-use crate::state::command_catalog::{CommandKey, CommandPlatform};
-use crate::state::shortcuts::{
-    ChordTimeoutPolicy, ContextPrecedencePolicy, ShortcutBindingSlot, ShortcutPreferences,
-    ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
-};
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_state::state::ViewType;
+use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
+use rspice_app_state::state::shortcuts::{
+    ChordTimeoutPolicy, ContextPrecedencePolicy, ShortcutBindingSlot, ShortcutPreferences,
+    ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
+};
 use rspice_app_workbench::workbench::app_state::session::shortcuts::ShortcutInputSnapshot;
 use rspice_app_workbench::workbench::app_state::session::shortcuts::resolver::*;
 

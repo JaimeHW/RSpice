@@ -1,10 +1,10 @@
 //! The document registry's dirty marks, against an edit that also fills the
 //! design's clipboard.
 
-use crate::state::{ComponentType, Point};
 use crate::workbench::app::copy_active_schematic_selection;
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::project_lifecycle::{ProjectDocumentId, snapshot};
+use rspice_app_state::state::{ComponentType, Point};
 use rspice_project::registry::{DocumentRegistry, document_fingerprints};
 
 #[test]

@@ -10,8 +10,8 @@
 
 use super::*;
 
-use crate::io::project_io::{load_project_text, serialize_project_file};
 use crate::workbench::lifecycle::project_lifecycle::snapshot;
+use rspice_app_services::io::project_io::{load_project_text, serialize_project_file};
 use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
@@ -79,7 +79,7 @@ fn the_reference_project_round_trips_through_the_persisted_format() {
         catalog
             .sheets()
             .iter()
-            .map(crate::state::DesignSheet::id)
+            .map(rspice_app_state::state::DesignSheet::id)
             .collect::<Vec<_>>(),
         reference.amp_sheets.to_vec()
     );
@@ -173,7 +173,7 @@ fn the_reference_project_netlists_through_the_configured_execution_projection() 
         &[],
         &hierarchy,
         &rspice_simulation::netlist_gen::NetlistSourceData::new(
-            &crate::simulation::table_route::SourceFiles,
+            &rspice_app_state::simulation::table_route::SourceFiles,
         ),
     );
     assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
@@ -294,7 +294,7 @@ fn the_reference_libraries_hold_the_cross_library_name_collision() {
         .and_then(|library| library.get_cell(&reference.amp_symbol.cell))
         .and_then(|cell| cell.get_view(&reference.amp_symbol.view))
         .expect("the authored amp symbol view exists");
-    let document = crate::state::SymbolDocument::load_from_view(amp_symbol)
+    let document = rspice_app_state::state::SymbolDocument::load_from_view(amp_symbol)
         .expect("the authored symbol document loads");
     assert_eq!(
         document

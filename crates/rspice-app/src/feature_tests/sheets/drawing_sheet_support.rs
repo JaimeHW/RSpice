@@ -1,12 +1,12 @@
 //! The sheet format manager over a whole application.
 
-use crate::state::{
+use crate::workbench::app::RSpiceApp;
+use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_support::*;
+use rspice_app_state::state::{
     DrawingSheetStandard, DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId,
     DrawingSheetTransactionKind, SchematicPageOrientation, SchematicSheetFormat, SheetDefinition,
     SheetPortPolicy, SheetTemplate,
 };
-use crate::workbench::app::RSpiceApp;
-use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_support::*;
 
 /// [`open_sheet_format_manager`] on the application's own parts.
 fn open_manager(state: &mut crate::workbench::app_state::AppState) -> Result<(), String> {
@@ -27,7 +27,7 @@ fn the_apply_panel_states_no_constant_notes() {
     let mut app = RSpiceApp::test_instance();
     open_manager(&mut app.state).expect("the manager opens");
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut frame = eframe::Frame::_new_kittest();
     let mut texts = Vec::new();
@@ -387,7 +387,7 @@ fn sheet_formats_fit_a_touch_screen_in_the_design_systems_controls() {
     app.state.workbench.coarse_pointer = true;
     open_manager(&mut app.state).expect("the manager opens");
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut frame = eframe::Frame::_new_kittest();
     let mut output = None;

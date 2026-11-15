@@ -1,8 +1,6 @@
 //! The shortcut reference PDF, in the case that binds the product's own
 //! commands.
 
-use crate::state::command_catalog::CommandPlatform;
-use crate::state::shortcuts::ShortcutPreferences;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::ids;
 use egui::os::OperatingSystem;
@@ -11,6 +9,8 @@ use rspice_app_settings::workbench::shortcuts::artifacts::pdf::*;
 use rspice_app_settings::workbench::shortcuts::artifacts::projection::ShortcutExportRequest;
 use rspice_app_settings::workbench::shortcuts::artifacts::projection::ShortcutExportScope;
 use rspice_app_settings::workbench::shortcuts::artifacts::projection::build_shortcut_reference_model;
+use rspice_app_state::state::command_catalog::CommandPlatform;
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
 
 #[test]
 fn pdf_excludes_private_profile_state_and_filesystem_paths() {

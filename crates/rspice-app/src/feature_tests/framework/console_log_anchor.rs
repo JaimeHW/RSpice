@@ -2,12 +2,12 @@
 //! named, an anchor that no longer resolves renders inert and says why, and a
 //! run line refuses once its run is gone.
 
-use crate::diagnostics::LogAnchor;
-use crate::diagnostics::LogSource;
-use crate::state::SimulationRun;
 use crate::workbench::state::{ConsoleChannel, ConsoleView};
 use crate::workbench::{AppState, RSpiceApp};
 use egui::Vec2;
+use rspice_app_state::diagnostics::LogAnchor;
+use rspice_app_state::diagnostics::LogSource;
+use rspice_app_state::state::SimulationRun;
 use rspice_app_workbench::workbench::docks::console::log_anchor::*;
 use rspice_app_workbench::workbench::docks::console::transcript::console;
 
@@ -45,7 +45,7 @@ fn console_row_position(ctx: &egui::Context, state: &mut AppState, needle: &str)
 
 fn console_context_for_tests() -> egui::Context {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx
 }
 
@@ -92,7 +92,7 @@ fn double_click_console_row(state: &mut AppState, needle: &str) {
 /// A sheet drawing the conductor `OUT`, with a cross-probe map captured at
 /// the topology it is currently drawn at.
 fn state_with_probed_conductor() -> AppState {
-    use crate::state::{Point, Wire};
+    use rspice_app_state::state::{Point, Wire};
     use std::collections::HashMap;
 
     let mut state = AppState::default();
@@ -124,7 +124,7 @@ fn double_clicking_an_anchored_console_row_marks_what_the_run_named() {
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
     state.model.log_buffer.log_anchored(
-        crate::diagnostics::LogSeverity::Error,
+        rspice_app_state::diagnostics::LogSeverity::Error,
         LogSource::Run,
         "Analysis failed: no DC path at OUT",
         Some(LogAnchor::Simulation {
@@ -166,7 +166,7 @@ fn an_unresolvable_anchor_renders_inert_and_says_why() {
         devices: Vec::new(),
     };
     state.model.log_buffer.log_anchored(
-        crate::diagnostics::LogSeverity::Error,
+        rspice_app_state::diagnostics::LogSeverity::Error,
         LogSource::Run,
         "Analysis failed: no DC path at DELETED",
         Some(anchor.clone()),
@@ -220,7 +220,7 @@ fn a_run_line_opens_its_log_and_refuses_once_the_run_is_gone() {
         .runs
         .push(SimulationRun::new(7));
     app.state.model.log_buffer.log_anchored(
-        crate::diagnostics::LogSeverity::Info,
+        rspice_app_state::diagnostics::LogSeverity::Info,
         LogSource::Run,
         "Run 7 started: Transient",
         Some(LogAnchor::ResultRun { run_sequence: 7 }),

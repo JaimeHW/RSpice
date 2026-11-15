@@ -1,9 +1,9 @@
 //! The canvas scene composed for a whole application.
 
-use crate::state::Point;
-use crate::state::{Component, ComponentType};
 use crate::workbench::app_state::AppState;
 use egui::Rect;
+use rspice_app_state::state::Point;
+use rspice_app_state::state::{Component, ComponentType};
 
 /// The centres of the open-pin squares one canvas frame paints, in
 /// schematic units: the view is at 100 % with the origin at the canvas's
@@ -53,7 +53,7 @@ fn open_pin_marks(ctx: &egui::Context, state: &mut AppState) -> Vec<Point> {
 #[test]
 fn an_open_pin_on_sheet_two_is_marked_at_its_own_point() {
     let mut state = super::two_sheet_state(&[6], &[7]);
-    state.design.grid = crate::state::GridStyle::Off;
+    state.design.grid = rspice_app_state::state::GridStyle::Off;
     let first = Component::new(6, ComponentType::Resistor, Point::new(100, 100));
     let second = Component::new(7, ComponentType::Capacitor, Point::new(300, 200));
     let terminals = |component: &Component| {
@@ -71,7 +71,7 @@ fn an_open_pin_on_sheet_two_is_marked_at_its_own_point() {
     state.model.schematic.bump_topology_version();
     state.sync_active_schematic_to_workspace();
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
 
     assert_eq!(open_pin_marks(&ctx, &mut state), first_pins, "Sheet 1");
 

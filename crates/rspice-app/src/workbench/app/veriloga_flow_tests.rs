@@ -7,11 +7,11 @@
 use std::time::{Duration, Instant};
 
 use super::*;
-use crate::state::{CellViewRef, Component, ComponentType, Point, SymbolDocument, Tool};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_state::state::{CellViewRef, Component, ComponentType, Point, SymbolDocument, Tool};
 use rspice_design::library::metadata::{cell_parameter_contract, decode_source_view_ports};
 use rspice_design::symbol::generated::GENERATED_SYMBOL_VIEW;
 
@@ -45,7 +45,7 @@ pub(crate) struct User {
 impl User {
     pub(crate) fn new(app: RSpiceApp) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut user = Self {
             ctx,
@@ -554,7 +554,7 @@ pub(crate) fn wired_device() -> (User, Device) {
     }]);
     user.settle();
     assert_eq!(
-        crate::state::parse_params_string(&user.component(instance).params).get("gain"),
+        rspice_app_state::state::parse_params_string(&user.component(instance).params).get("gain"),
         Some(&"5".to_owned())
     );
 
@@ -597,7 +597,7 @@ pub(crate) fn run_plan_of_instance(
         );
     }
     // Every deck preflight retained until the run took one.
-    let mut retained = Vec::<(String, crate::product::ContentDigest)>::new();
+    let mut retained = Vec::<(String, rspice_app_state::product::ContentDigest)>::new();
     let deadline = Instant::now() + Duration::from_secs(300);
     loop {
         if let Some((deck, digest)) = user.app.simulation_controller.retained_run_deck()
@@ -655,7 +655,8 @@ pub(crate) fn run_plan_of_instance(
         .filter(|entry| {
             matches!(
                 entry.severity,
-                crate::diagnostics::LogSeverity::Error | crate::diagnostics::LogSeverity::Warning
+                rspice_app_state::diagnostics::LogSeverity::Error
+                    | rspice_app_state::diagnostics::LogSeverity::Warning
             )
         })
         .map(|entry| entry.message.clone())

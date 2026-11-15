@@ -10,11 +10,11 @@ use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 
 use crate::feature_tests::replay::{Replay, only};
-use crate::services::model_hub::{ModelHubService, ModelHubStoreHandle};
-use crate::state::model_hub::tests::{anchor_for, hub_signing_key};
-use crate::state::model_hub::{MemoryModelHubStore, ModelHub};
 use crate::workbench::RSpiceApp;
 use rspice_app_cloud::services::cloud_account::model_hub_transport::CloudModelHubTransportProvider;
+use rspice_app_services::services::model_hub::{ModelHubService, ModelHubStoreHandle};
+use rspice_app_state::state::model_hub::tests::{anchor_for, hub_signing_key};
+use rspice_app_state::state::model_hub::{MemoryModelHubStore, ModelHub};
 
 /// A session as a build made without cloud endpoints opens it: a pack store
 /// that works and holds no catalog yet, behind the shell's own transport

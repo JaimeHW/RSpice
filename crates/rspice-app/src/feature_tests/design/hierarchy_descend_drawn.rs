@@ -8,7 +8,7 @@ use egui::Context;
 /// Every text the descent form paints over `app`, after three frames.
 fn painted_texts(app: &mut RSpiceApp) -> Vec<String> {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut shapes = Vec::new();
     for _ in 0..3 {
         shapes = ctx
@@ -71,9 +71,9 @@ fn the_cell_view_row_names_the_symbol_the_in_place_mode_edits() {
         .get_library_mut("hierarchy_test")
         .and_then(|library| library.get_cell_mut("afe_core"))
         .expect("the instance's cell")
-        .add_view(crate::state::View::new(
+        .add_view(rspice_app_state::state::View::new(
             "symbol",
-            crate::state::ViewType::Symbol,
+            rspice_app_state::state::ViewType::Symbol,
         ));
     let named = painted_texts(&mut app);
     assert!(
@@ -99,7 +99,7 @@ fn the_form_has_one_label_style_and_values_in_the_kit_face() {
     let mut app = RSpiceApp::test_instance();
     app.state = state;
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut shapes = Vec::new();
     for _ in 0..3 {
         shapes = ctx
@@ -144,11 +144,14 @@ fn the_form_has_one_label_style_and_values_in_the_kit_face() {
     for other in ["Cell view", "Edit mode", "Unsaved parent changes"] {
         assert_eq!(font(other), label, "{other} is not in the label style");
     }
-    assert_eq!(font("/XAFE"), crate::ui::theme::field_mono());
-    assert_eq!(font("Edit in place"), crate::ui::theme::field_sans());
+    assert_eq!(font("/XAFE"), rspice_app_workbench::ui::theme::field_mono());
+    assert_eq!(
+        font("Edit in place"),
+        rspice_app_workbench::ui::theme::field_sans()
+    );
     assert_eq!(
         font("Kept as a working checkpoint"),
-        crate::ui::theme::field_sans()
+        rspice_app_workbench::ui::theme::field_sans()
     );
     for (text, _) in &painted {
         for gone in [

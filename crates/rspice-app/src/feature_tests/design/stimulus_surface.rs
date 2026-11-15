@@ -2,11 +2,11 @@
 //! lends: what the stage publishes and paints, its verbs, and whether it fits
 //! the column the shell leaves it.
 
-use crate::state::stimulus_library::fixtures;
 use crate::workbench::RSpiceApp;
 use crate::workbench::surfaces::stimulus::tests::stage_size;
 use crate::workbench::surfaces::stimulus::*;
 use egui::{Pos2, Rect, vec2};
+use rspice_app_state::state::stimulus_library::fixtures;
 
 /// An application whose project holds the fixture library.
 pub(super) fn seeded(selection: &str) -> RSpiceApp {
@@ -24,7 +24,7 @@ const VIEWPORTS: [(&str, f32, f32); 2] = [("1024x640", 1024.0, 640.0), ("1440x90
 /// Render the stage at one size and return every string it publishes.
 fn published(app: &mut RSpiceApp, size: egui::Vec2) -> Vec<String> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let output = ctx.run_ui(
         egui::RawInput {
@@ -54,7 +54,7 @@ fn published(app: &mut RSpiceApp, size: egui::Vec2) -> Vec<String> {
 /// Every text shape the stage painted, with the clip rectangle it landed in.
 fn painted(app: &mut RSpiceApp, size: egui::Vec2) -> Vec<(String, Rect, Rect)> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
@@ -401,7 +401,7 @@ fn a_frame_that_changed_nothing_does_not_re_evaluate_the_waveform() {
 /// The number a tick label states, read back the way a reader would.
 fn tick_value(text: &str) -> Option<f64> {
     let digits = text.strip_suffix('V').unwrap_or(text);
-    crate::quantity::parse_engineering_value(&digits.replace('\u{b5}', "u")).ok()
+    rspice_app_state::quantity::parse_engineering_value(&digits.replace('\u{b5}', "u")).ok()
 }
 
 /// The value axis of one painted frame: `(value, y)` for every label in the

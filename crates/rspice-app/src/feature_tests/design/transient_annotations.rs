@@ -5,9 +5,9 @@ use super::app_state_of;
 use crate::schematic::view::scene::tests::text;
 use crate::schematic::view::scene::*;
 use crate::schematic::view::transient_annotation_status;
-use crate::state::SchematicAnnotationVisibility;
-use crate::state::{AnalysisResult, AnalysisType};
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::SchematicAnnotationVisibility;
+use rspice_app_state::state::{AnalysisResult, AnalysisType};
 
 /// [`state_with_operating_point`](crate::schematic::view::scene::tests::state_with_operating_point) made a whole application.
 fn state_with_operating_point() -> AppState {
@@ -23,13 +23,13 @@ fn transient_voltages_annotate_the_transient_at_cursor_a() {
     let mut state = state_with_operating_point();
     state.model.simulation.retained.runs[0].add_analysis(
         AnalysisResult::new(2, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-            crate::state::RetainedTrace::new(
+            rspice_app_state::state::RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0e-3, 2.0e-3],
                 vec![0.0, 1.0, 3.0],
                 "#ffbd2e",
             ),
-            crate::state::RetainedTrace::new(
+            rspice_app_state::state::RetainedTrace::new(
                 "I(vbias)",
                 vec![0.0, 1.0e-3, 2.0e-3],
                 vec![0.0, -1.0e-3, -3.0e-3],

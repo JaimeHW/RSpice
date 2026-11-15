@@ -9,8 +9,6 @@ use rspice_results_ui::fft::{FftData, window::WindowFunction};
 use rspice_results_ui::nyquist::NyquistData;
 use std::path::Path;
 
-use crate::io::{ProjectExecutionContext, ProjectSimulationResults, ProjectSnapshot};
-use crate::state::ActiveViewer;
 use crate::workbench::app::project_transactions::apply_loaded_project;
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::project_lifecycle::{
@@ -20,6 +18,8 @@ use rspice_app_project::workbench::workflows::project_workflow::{
     LiveProjectApply, NewProjectParams, ProjectLoadOrigin, SaveRequestOutcome,
     live_mirror_save_block, project_save_dialog_default_name,
 };
+use rspice_app_services::io::{ProjectExecutionContext, ProjectSimulationResults, ProjectSnapshot};
+use rspice_app_state::state::ActiveViewer;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod marker_history;
@@ -27,14 +27,14 @@ mod marker_history;
 #[cfg(not(target_arch = "wasm32"))]
 mod waivers;
 
-fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
-    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+fn seal_legacy_unattributed(run: &mut rspice_app_state::state::SimulationRun) {
+    run.restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("synthetic historical run has valid unattributed legacy provenance");
 }
 
 fn project_named(path: &str) -> ProjectSnapshot {
-    let mut libraries = crate::state::LibraryManager::with_primitives();
-    let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let mut libraries = rspice_app_state::state::LibraryManager::with_primitives();
+    let mut workspace = rspice_app_state::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
     workspace
         .content
         .project
@@ -42,7 +42,10 @@ fn project_named(path: &str) -> ProjectSnapshot {
     ProjectSnapshot::new(workspace, libraries)
 }
 
-fn assert_active_grid_pitch_contract(state: &AppState, pitch: crate::state::SchematicGridPitch) {
+fn assert_active_grid_pitch_contract(
+    state: &AppState,
+    pitch: rspice_app_state::state::SchematicGridPitch,
+) {
     let expected = pitch.canvas_grid_size();
     assert_eq!(
         state.model.schematic.document().document_policy.grid_pitch,
@@ -73,7 +76,7 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
     state.create_new_project();
     state.assert_project_open_fact();
 
-    assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Mil25);
+    assert_active_grid_pitch_contract(&state, rspice_app_state::state::SchematicGridPitch::Mil25);
     assert_eq!(
         state.model.schematic.session.editor.snap_engine.snap_radius,
         8
@@ -96,7 +99,7 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
     state.design.schematic_snap.grid_size = 777;
 
     assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
-    assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Metric);
+    assert_active_grid_pitch_contract(&state, rspice_app_state::state::SchematicGridPitch::Metric);
     assert_eq!(
         state.model.schematic.session.editor.snap_engine.snap_radius,
         8
@@ -154,9 +157,9 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn startup_closes_a_saved_project_only_when_asked_and_nothing_is_lost() {
-    use crate::state::{ComponentType, Point};
     use crate::workbench::ChoicePreference;
     use crate::workbench::lifecycle::project_lifecycle::{SaveScope, save_native};
+    use rspice_app_state::state::{ComponentType, Point};
 
     let folder = std::env::temp_dir().join(format!(
         "rspice-startup-choice-{}-{}",
@@ -253,9 +256,9 @@ fn a_session_saved_after_close_project_restarts_with_no_project() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_saved_project_comes_back_through_its_session() {
-    use crate::state::{ComponentType, Point};
     use crate::workbench::ChoicePreference;
     use crate::workbench::lifecycle::project_lifecycle::{SaveScope, save_native};
+    use rspice_app_state::state::{ComponentType, Point};
 
     let folder = std::env::temp_dir().join(format!(
         "rspice-startup-session-{}-{}",
@@ -332,16 +335,16 @@ fn a_saved_project_comes_back_through_its_session() {
 /// check failed.
 #[test]
 fn closing_a_project_as_an_edit_settles_checks_nothing() {
-    use crate::state::{ComponentType, Point};
     use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
     use crate::workbench::examples::hierarchy_reference;
+    use rspice_app_state::state::{ComponentType, Point};
 
     let reference = hierarchy_reference::build();
     let mut state = reference.state;
     state.open_project_session();
     let amp = reference.amp_schematic;
     state.open_workspace_view(amp.clone());
-    let start = crate::time_compat::Instant::now();
+    let start = rspice_app_state::time_compat::Instant::now();
     let _ = state.refresh_live_checks(start);
     state
         .model
@@ -398,8 +401,8 @@ fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
         .set_path(std::path::PathBuf::from("C:/host-only/design.rspiceproj"));
     let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&host)
         .expect("host state snapshots");
-    let text =
-        crate::io::project_io::serialize_project_file(&snapshot).expect("snapshot serializes");
+    let text = rspice_app_services::io::project_io::serialize_project_file(&snapshot)
+        .expect("snapshot serializes");
 
     let mut guest = AppState::default();
     assert!(matches!(
@@ -425,8 +428,8 @@ fn live_project_snapshot_waits_out_a_local_run_and_rejects_garbage() {
     let host = AppState::default();
     let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&host)
         .expect("host state snapshots");
-    let text =
-        crate::io::project_io::serialize_project_file(&snapshot).expect("snapshot serializes");
+    let text = rspice_app_services::io::project_io::serialize_project_file(&snapshot)
+        .expect("snapshot serializes");
 
     let mut guest = AppState::default();
     guest.model.simulation.execution.is_running = true;
@@ -479,27 +482,31 @@ fn save_copy_permission_never_turns_a_live_mirror_into_a_canonical_project() {
 }
 
 fn project_named_with_results(path: &str) -> ProjectSnapshot {
-    let mut libraries = crate::state::LibraryManager::with_primitives();
-    let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let mut libraries = rspice_app_state::state::LibraryManager::with_primitives();
+    let mut workspace = rspice_app_state::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
     workspace
         .content
         .project
         .set_path(std::path::PathBuf::from(path));
 
-    let waveform = crate::state::RetainedTrace::new(
+    let waveform = rspice_app_state::state::RetainedTrace::new(
         "V(out)",
         vec![0.0, 1.0, 2.0],
         vec![0.0, 0.5, 1.0],
         "#00aaff",
     );
-    let mut run = crate::state::SimulationRun::new(4);
+    let mut run = rspice_app_state::state::SimulationRun::new(4);
     run.label = "Run 4 (import fixture)".to_string();
     run.add_analysis(
-        crate::state::AnalysisResult::new(2, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![waveform]),
+        rspice_app_state::state::AnalysisResult::new(
+            2,
+            rspice_app_state::state::AnalysisType::Transient,
+            "TRAN",
+        )
+        .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
-    let mut simulation = crate::state::SimulationState::default();
+    let mut simulation = rspice_app_state::state::SimulationState::default();
     simulation.retained.runs = vec![run].into();
     simulation.retained.next_run_id = 4;
     simulation.view.active_run_idx = Some(0);
@@ -508,21 +515,25 @@ fn project_named_with_results(path: &str) -> ProjectSnapshot {
     ProjectSnapshot::new_with_simulation_results(
         workspace,
         libraries,
-        crate::io::capture_simulation_results(&simulation),
+        rspice_app_services::io::capture_simulation_results(&simulation),
     )
 }
 
 fn seed_specialized_viewer_caches(state: &mut AppState) {
-    let waveform = crate::state::RetainedTrace::new(
+    let waveform = rspice_app_state::state::RetainedTrace::new(
         "V(out)",
         vec![0.0, 1.0, 2.0],
         vec![0.0, 0.5, 1.0],
         "#00aaff",
     );
-    let mut run = crate::state::SimulationRun::new(1);
+    let mut run = rspice_app_state::state::SimulationRun::new(1);
     run.add_analysis(
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![waveform]),
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Transient,
+            "TRAN",
+        )
+        .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
     state.model.simulation.retained.runs = vec![run].into();
@@ -722,8 +733,8 @@ fn create_new_project_clears_stale_specialized_viewer_caches() {
 
 #[test]
 fn create_new_project_resets_project_owned_plan_and_model_context() {
-    use crate::simulation::plan::AnalysisKind;
-    use crate::state::model_library::{ModelLibrary, ModelLibraryManager};
+    use rspice_app_state::simulation::plan::AnalysisKind;
+    use rspice_app_state::state::model_library::{ModelLibrary, ModelLibraryManager};
 
     let mut state = AppState::default();
     let stale_plan = state
@@ -766,7 +777,7 @@ fn create_new_project_resets_project_owned_plan_and_model_context() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn new_and_closed_projects_restore_configured_sources_without_leaking_project_libraries() {
-    use crate::state::model_library::ModelLibrary;
+    use rspice_app_state::state::model_library::ModelLibrary;
 
     let root = std::env::temp_dir().join(format!(
         "rspice-project-lifecycle-pdk-{}",
@@ -780,7 +791,7 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
     .expect("write configured PDK source");
 
     let mut state = AppState::default();
-    state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    state.model.pdk_config = rspice_app_state::state::pdk_config::PdkConfig::default();
     state
         .model
         .pdk_config
@@ -913,7 +924,7 @@ fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
 
 #[test]
 fn create_new_project_captures_the_personal_drawing_sheet_default() {
-    use crate::state::{
+    use rspice_app_state::state::{
         DrawingSheetInheritance, DrawingSheetStandard, SchematicPageOrientation,
         SchematicSheetFormat,
     };
@@ -947,7 +958,7 @@ fn create_new_project_captures_the_personal_drawing_sheet_default() {
     assert!(
         matches!(
             &project_default.authored_size,
-            crate::state::AuthoredDrawingSheetSize::Standard {
+            rspice_app_state::state::AuthoredDrawingSheetSize::Standard {
                 standard: DrawingSheetStandard::AnsiC
             }
         ),
@@ -971,7 +982,7 @@ fn create_new_project_captures_the_personal_drawing_sheet_default() {
 
 #[test]
 fn new_project_custom_default_is_exact_and_has_no_personal_preset_dependency() {
-    use crate::state::{
+    use rspice_app_state::state::{
         AuthoredDrawingSheetSize, DrawingSheetInheritance, SchematicPageOrientation,
         SchematicSheetFormat,
     };
@@ -1029,9 +1040,9 @@ fn new_project_custom_default_is_exact_and_has_no_personal_preset_dependency() {
 
 #[test]
 fn project_import_restores_plan_order_solver_options_and_model_catalog() {
-    use crate::simulation::plan::{AnalysisKind, AnalysisLifecycleState};
-    use crate::state::model_library::{ModelLibrary, ModelLibraryManager};
     use rspice_app_simulate::simulation::dialog::{IntegrationMethod, MatrixSolver};
+    use rspice_app_state::simulation::plan::{AnalysisKind, AnalysisLifecycleState};
+    use rspice_app_state::state::model_library::{ModelLibrary, ModelLibraryManager};
 
     let mut source = AppState::default();
     let source_plan = source
@@ -1064,15 +1075,16 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
     project_models.add_library(ModelLibrary::new("project_exact_models"));
     source.model.model_library_manager = project_models;
 
-    let context = crate::io::capture_execution_context(
+    let context = rspice_app_services::io::capture_execution_context(
         &source.model.sim_setup,
         &source.model.model_library_manager,
     )
     .expect("source context validates");
     let expected_plan =
         serde_json::to_value(&context.simulation_plan).expect("expected plan serializes");
-    let mut design_libraries = crate::state::LibraryManager::with_primitives();
-    let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut design_libraries);
+    let mut design_libraries = rspice_app_state::state::LibraryManager::with_primitives();
+    let mut workspace =
+        rspice_app_state::state::ProjectWorkspace::new_bootstrapped(&mut design_libraries);
     workspace
         .content
         .project
@@ -1154,9 +1166,9 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
 #[test]
 fn invalid_execution_context_does_not_partially_replace_open_project() {
     let mut project = project_named("invalid-context.rspiceproj");
-    let context = crate::io::capture_execution_context(
+    let context = rspice_app_services::io::capture_execution_context(
         &crate::workbench::app_state::SimSetupState::new(),
-        &crate::state::model_library::ModelLibraryManager::new(),
+        &rspice_app_state::state::model_library::ModelLibraryManager::new(),
     )
     .expect("baseline context validates");
     let mut value = serde_json::to_value(context).expect("context serializes");
@@ -1265,18 +1277,20 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         },
     );
     state.code.netlist.diagnostics = std::sync::Arc::new(
-        crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
-            vec![crate::state::netlist_diagnostics::Diagnostic::error(
-                "old project diagnostic",
-            )],
+        rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
+            vec![
+                rspice_app_state::state::netlist_diagnostics::Diagnostic::error(
+                    "old project diagnostic",
+                ),
+            ],
             "",
         )
         .unwrap(),
     );
-    state
-        .model
-        .log_buffer
-        .warning(crate::diagnostics::LogSource::Run, "old project warning");
+    state.model.log_buffer.warning(
+        rspice_app_state::diagnostics::LogSource::Run,
+        "old project warning",
+    );
     let project = project_named_with_results("browser-import.rspiceproj");
 
     assert!(apply_loaded_project(
@@ -1336,16 +1350,20 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
 #[test]
 fn save_project_to_path_writes_simulation_results() {
     let mut state = AppState::default();
-    let waveform = crate::state::RetainedTrace::new(
+    let waveform = rspice_app_state::state::RetainedTrace::new(
         "V(out)",
         vec![0.0, 1.0, 2.0],
         vec![0.0, 1.5, 3.0],
         "#00aaff",
     );
-    let mut run = crate::state::SimulationRun::new(9);
+    let mut run = rspice_app_state::state::SimulationRun::new(9);
     run.add_analysis(
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![waveform]),
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Transient,
+            "TRAN",
+        )
+        .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
     state.model.simulation.retained.runs = vec![run].into();
@@ -1363,7 +1381,7 @@ fn save_project_to_path_writes_simulation_results() {
     ));
 
     let saved = state.save_project_to_path(&path);
-    let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+    let loaded = rspice_app_services::io::load_project_file(&path).expect("saved project reloads");
     let _ = std::fs::remove_file(&path);
 
     assert!(saved);
@@ -1384,16 +1402,20 @@ fn save_project_to_path_round_trips_result_markers() {
     use crate::workbench::documents::result_document::AnalysisPresentationKey;
 
     let mut state = AppState::default();
-    let waveform = crate::state::RetainedTrace::new(
+    let waveform = rspice_app_state::state::RetainedTrace::new(
         "V(out)",
         vec![0.0, 1.0, 2.0],
         vec![0.0, 1.5, 3.0],
         "#00aaff",
     );
-    let mut run = crate::state::SimulationRun::new(11);
+    let mut run = rspice_app_state::state::SimulationRun::new(11);
     run.add_analysis(
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![waveform]),
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Transient,
+            "TRAN",
+        )
+        .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
     state.model.simulation.retained.runs = vec![run].into();
@@ -1439,7 +1461,7 @@ fn save_project_to_path_round_trips_result_markers() {
     ));
 
     let saved = state.save_project_to_path(&path);
-    let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+    let loaded = rspice_app_services::io::load_project_file(&path).expect("saved project reloads");
     let _ = std::fs::remove_file(&path);
 
     assert!(saved);
@@ -1476,16 +1498,19 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
     };
 
     let mut state = AppState::default();
-    let mut run = crate::state::SimulationRun::new(12);
+    let mut run = rspice_app_state::state::SimulationRun::new(12);
     run.add_analysis(
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC").with_waveforms(
-            vec![crate::state::RetainedTrace::new(
-                "V(out)",
-                vec![1.0, 10.0, 100.0],
-                vec![1.0, 0.5, 0.1],
-                "#00aaff",
-            )],
-        ),
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Ac,
+            "AC",
+        )
+        .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
+            "V(out)",
+            vec![1.0, 10.0, 100.0],
+            vec![1.0, 0.5, 0.1],
+            "#00aaff",
+        )]),
     );
     seal_legacy_unattributed(&mut run);
     state.model.simulation.retained.runs = vec![run].into();
@@ -1508,8 +1533,12 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
     // from it — either would put an axis in log space for nothing on screen.
     let orphan = WavePanePresentationKey {
         analysis: AnalysisPresentationKey::new(
-            crate::product::DatasetId::new(),
-            &crate::state::AnalysisResult::new(9, crate::state::AnalysisType::Transient, "gone"),
+            rspice_app_state::product::DatasetId::new(),
+            &rspice_app_state::state::AnalysisResult::new(
+                9,
+                rspice_app_state::state::AnalysisType::Transient,
+                "gone",
+            ),
         ),
         unit: "A".to_owned(),
     };
@@ -1536,7 +1565,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
     ));
 
     let saved = state.save_project_to_path(&path);
-    let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+    let loaded = rspice_app_services::io::load_project_file(&path).expect("saved project reloads");
     let _ = std::fs::remove_file(&path);
 
     assert!(saved);
@@ -1572,15 +1601,19 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
 #[test]
 fn save_project_to_path_round_trips_stable_expression_traces() {
     let mut state = AppState::default();
-    let mut run = crate::state::SimulationRun::new(13);
+    let mut run = rspice_app_state::state::SimulationRun::new(13);
     run.add_analysis(
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![crate::state::RetainedTrace::new(
-                "V(out)",
-                vec![0.0, 1.0, 2.0],
-                vec![0.0, 0.5, 1.0],
-                "#00aaff",
-            )]),
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Transient,
+            "TRAN",
+        )
+        .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
+            "V(out)",
+            vec![0.0, 1.0, 2.0],
+            vec![0.0, 0.5, 1.0],
+            "#00aaff",
+        )]),
     );
     seal_legacy_unattributed(&mut run);
     state.model.simulation.retained.runs = vec![run].into();
@@ -1615,7 +1648,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
     ));
 
     let saved = state.save_project_to_path(&path);
-    let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+    let loaded = rspice_app_services::io::load_project_file(&path).expect("saved project reloads");
     let _ = std::fs::remove_file(&path);
 
     assert!(saved);
@@ -1624,7 +1657,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
         loaded.file.result_presentation.expression_groups[0].traces,
         vec![crate::workbench::documents::result_document::ExprTrace {
             text: "V(out) * 2".to_owned(),
-            complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
+            complex_policy: rspice_app_state::state::ComplexExpressionPolicy::Rectangular,
             visible: true,
         }]
     );
@@ -1655,15 +1688,19 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
     };
 
     let mut state = AppState::default();
-    let mut run = crate::state::SimulationRun::new(21);
+    let mut run = rspice_app_state::state::SimulationRun::new(21);
     run.add_analysis(
-        crate::state::AnalysisResult::new(4, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![crate::state::RetainedTrace::new(
-                "V(out)",
-                vec![0.0, 1.0, 2.0],
-                vec![0.0, 0.5, 1.0],
-                "#00aaff",
-            )]),
+        rspice_app_state::state::AnalysisResult::new(
+            4,
+            rspice_app_state::state::AnalysisType::Transient,
+            "TRAN",
+        )
+        .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
+            "V(out)",
+            vec![0.0, 1.0, 2.0],
+            vec![0.0, 0.5, 1.0],
+            "#00aaff",
+        )]),
     );
     seal_legacy_unattributed(&mut run);
     state.model.simulation.retained.runs = vec![run].into();
@@ -1678,7 +1715,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
     let analysis_id = analysis.provenance().map_or_else(
         || {
             let name = format!("legacy-analysis-v1/{}", analysis.id);
-            crate::product::AnalysisInstanceId::from_namespace(
+            rspice_app_state::product::AnalysisInstanceId::from_namespace(
                 run.dataset_id.as_uuid(),
                 name.as_bytes(),
             )
@@ -1773,7 +1810,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
         std::process::id()
     ));
     let saved = state.save_project_to_path(&path);
-    let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
+    let loaded = rspice_app_services::io::load_project_file(&path).expect("saved project reloads");
     let _ = std::fs::remove_file(&path);
 
     assert!(saved);
@@ -1800,16 +1837,20 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
 #[test]
 fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() {
     let mut state = AppState::default();
-    let waveform = crate::state::RetainedTrace::new(
+    let waveform = rspice_app_state::state::RetainedTrace::new(
         "V(out)",
         vec![0.0, 1.0, 2.0],
         vec![0.0, f64::NAN, 3.0],
         "#00aaff",
     );
-    let mut run = crate::state::SimulationRun::new(10);
+    let mut run = rspice_app_state::state::SimulationRun::new(10);
     run.add_analysis(
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![waveform]),
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Transient,
+            "TRAN",
+        )
+        .with_waveforms(vec![waveform]),
     );
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.retained.next_run_id = 10;
@@ -1844,10 +1885,13 @@ fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() 
     let activity = state.workbench.toasts.activity();
     assert_eq!(activity.len(), 1);
     assert_eq!(activity[0].title(), "Project save failed");
-    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
+    assert_eq!(
+        activity[0].kind(),
+        rspice_app_workbench::ui::widgets::ToastKind::Error
+    );
     assert_eq!(
         activity[0].action(),
-        Some(crate::ui::widgets::NotificationAction::ShowInConsole { log_id: line })
+        Some(rspice_app_workbench::ui::widgets::NotificationAction::ShowInConsole { log_id: line })
     );
 }
 
@@ -1858,7 +1902,7 @@ fn a_project_that_cannot_be_read_is_reported_when_it_is_opened() {
     let path = std::env::temp_dir().join(format!(
         "rspice-open-missing-{}-{}.rspiceproj",
         std::process::id(),
-        crate::time_compat::unix_epoch().as_nanos()
+        rspice_app_state::time_compat::unix_epoch().as_nanos()
     ));
 
     assert!(!state.load_project_from_path(&path));
@@ -1867,7 +1911,10 @@ fn a_project_that_cannot_be_read_is_reported_when_it_is_opened() {
     let activity = state.workbench.toasts.activity();
     assert_eq!(activity.len(), 1, "an open that failed is said now");
     assert_eq!(activity[0].title(), "Project open failed");
-    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
+    assert_eq!(
+        activity[0].kind(),
+        rspice_app_workbench::ui::widgets::ToastKind::Error
+    );
 }
 
 #[test]
@@ -1887,10 +1934,10 @@ fn a_named_new_project_seeds_every_owner_of_its_identity() {
     assert_eq!(workspace.content.project.root_library, "afe");
     assert_eq!(workspace.content.project.top_cell, "core");
 
-    let expected = crate::state::CellViewRef::new(
+    let expected = rspice_app_state::state::CellViewRef::new(
         "afe",
         "core",
-        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+        rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     assert_eq!(workspace.content.active_view, expected);
     assert_eq!(
@@ -1926,7 +1973,9 @@ fn a_named_new_project_seeds_every_owner_of_its_identity() {
     assert!(
         library
             .get_cell("core")
-            .and_then(|cell| cell.get_view(crate::state::workspace::DEFAULT_SCHEMATIC_VIEW))
+            .and_then(
+                |cell| cell.get_view(rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW)
+            )
             .is_some()
     );
 
@@ -1984,7 +2033,7 @@ fn netlist_import_keeps_creating_the_default_project_without_a_dialog() {
     );
     assert_eq!(
         state.model.workspace.content.active_view,
-        crate::state::CellViewRef::default_top()
+        rspice_app_state::state::CellViewRef::default_top()
     );
     assert!(
         state

@@ -1,13 +1,13 @@
 //! What New Verilog-A device… refuses, and what it makes when it does not.
 
-use crate::state::{
-    Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
-    ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, View,
-};
 use crate::workbench::AppState;
 use crate::workbench::app::RSpiceApp;
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::{
     Draft, Line, cell_line, draft_in, open_new_veriloga_device_form_in, ports_line,
+};
+use rspice_app_state::state::{
+    Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
+    ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, View,
 };
 use rspice_design::library::metadata::decode_source_view_ports;
 use rspice_design::symbol::generated::is_generated_symbol;
@@ -197,7 +197,7 @@ fn creating_a_device_makes_the_cell_its_module_and_its_generated_symbol_at_once(
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
-        Some(crate::state::ProjectLibraryMutation::CreateCell { library, cell })
+        Some(rspice_app_state::state::ProjectLibraryMutation::CreateCell { library, cell })
             if library == LIBRARY && cell == "opamp"
     ));
     let source = root_source(&app, &reference);
@@ -369,8 +369,8 @@ fn a_device_typed_without_ports_starts_a_module_that_declares_none() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn nothing_moves_while_the_draft_is_typed() {
-    use crate::ui::tokens::Mode;
-    use crate::ui::widgets::painted_runs::{PaintedRuns, painted_runs};
+    use rspice_app_workbench::ui::tokens::Mode;
+    use rspice_app_workbench::ui::widgets::painted_runs::{PaintedRuns, painted_runs};
 
     let screen = egui::vec2(1024.0, 640.0);
     let paint = |name: &str, ports: &str, error: Option<&str>| {

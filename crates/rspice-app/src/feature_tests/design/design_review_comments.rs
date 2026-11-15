@@ -8,7 +8,7 @@ use egui::Context;
 #[test]
 fn initial_focus_accepts_review_reply_typing() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let mut app = RSpiceApp::test_instance();
     app.state
@@ -43,7 +43,7 @@ fn initial_focus_accepts_review_reply_typing() {
 fn initial_focus_rejects_unavailable_review_reply() {
     for case in ["read-only", "stale", "empty"] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let mut app = RSpiceApp::test_instance();
         if case != "empty" {
@@ -61,7 +61,7 @@ fn initial_focus_rejects_unavailable_review_reply() {
         );
         if case == "read-only" {
             app.state.model.safe_mode.activate(
-                crate::state::write_policy::LocalSafeModeOptions {
+                rspice_app_state::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()
                 },
@@ -119,7 +119,7 @@ fn opening_input_follows_a_new_comment_click_onto_the_next_frame() {
         )
     }
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let mut app = RSpiceApp::test_instance();
@@ -234,7 +234,7 @@ fn failed_review_clock_retains_the_draft_and_durable_thread() {
             Ok(std::time::Duration::ZERO),
             Ok(std::time::Duration::MAX),
         ] {
-            crate::time_compat::with_unix_epoch(epoch, || {
+            rspice_app_state::time_compat::with_unix_epoch(epoch, || {
                 comments(&mut app).handle_design_review_action(action.clone())
             });
             assert_eq!(app.state.model.schematic.document().design_notes, notes);
@@ -273,8 +273,10 @@ fn failed_review_clock_retains_the_draft_and_durable_thread() {
 #[test]
 fn a_posted_reply_is_signed_with_the_users_name() {
     let mut app = RSpiceApp::test_instance();
-    let license = crate::services::license::parse_and_verify(crate::services::license::SAMPLE_KEY)
-        .expect("signed sample license");
+    let license = rspice_app_cloud::services::license::parse_and_verify(
+        rspice_app_cloud::services::license::SAMPLE_KEY,
+    )
+    .expect("signed sample license");
     let holder = license.licensed_to.clone();
     app.state.cloud.license = Some(license);
     app.state
@@ -308,7 +310,7 @@ fn a_posted_reply_is_signed_with_the_users_name() {
 fn an_empty_review_is_one_block_and_post_reply_says_why() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_design_review_comments(
         &mut app.state.design.design_review_comments,
@@ -361,7 +363,7 @@ fn an_empty_review_is_one_block_and_post_reply_says_why() {
 #[test]
 fn the_filter_selects_show_their_whole_choice() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_design_review_comments(
         &mut app.state.design.design_review_comments,

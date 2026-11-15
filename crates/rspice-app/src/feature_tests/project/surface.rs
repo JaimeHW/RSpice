@@ -4,7 +4,6 @@
 
 use egui::{Color32, Modifiers, Rect, Ui, pos2};
 
-use crate::ui::tokens::Tokens;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::host::{Host, Point};
 use crate::workbench::lifecycle::project_lifecycle::begin_project_replacement;
@@ -15,6 +14,7 @@ use crate::workbench::shell_host::project::library_publication::prepare_project_
 use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_project::workbench::surfaces::project::recovery;
+use rspice_app_workbench::ui::tokens::Tokens;
 
 /// The Project workspace as the shell draws it on the stage.
 fn show(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -45,7 +45,7 @@ fn painted_text(output: &egui::FullOutput) -> String {
 
 fn render_project_workspace(project_open: bool) -> String {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     if !project_open {
         app.state.close_project_session();
@@ -113,7 +113,7 @@ fn project_frame(
 /// The Project workspace on `page`, drawn until its layout settles.
 fn settled_on(page: ProjectPage) -> (egui::Context, RSpiceApp, egui::FullOutput) {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.project.project_page = page;
@@ -237,7 +237,7 @@ fn the_configuration_chip_is_held_while_a_project_operation_runs() {
 /// asked of the browser is carried out before the detail draws.
 #[test]
 fn the_library_detail_shows_the_view_the_browser_selects_in_the_frame_it_was_clicked_in() {
-    use crate::state::{Cell, CellViewRef, Library, View, ViewType};
+    use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
     let (ctx, mut app, _) = settled_on(ProjectPage::Library);
     let mut library = Library::new("frame_test");
     let mut cell = Cell::new("divider");
@@ -325,10 +325,10 @@ fn overview_root_actions_open_the_root_in_the_frame_they_were_clicked_in() {
         let (ctx, mut app, settled) = settled_on(ProjectPage::Overview);
         let label = announced_starting(&settled, label);
         let project = &app.state.model.workspace.content.project;
-        let root = crate::state::CellViewRef::new(
+        let root = rspice_app_state::state::CellViewRef::new(
             &project.root_library,
             &project.top_cell,
-            crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+            rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW,
         );
 
         click_announced(&ctx, &mut app, settled, &label);
@@ -379,7 +379,7 @@ fn the_chrome_and_the_page_share_one_fill_across_the_stage() {
     let size = egui::vec2(1440.0, 900.0);
     let stage = Rect::from_min_size(egui::Pos2::ZERO, size);
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let bg_app = Tokens::get(&ctx).color.bg_app;
     let mut app = RSpiceApp::test_instance();
     app.state.project.project_page = ProjectPage::Library;
@@ -421,7 +421,7 @@ fn the_chrome_and_the_page_share_one_fill_across_the_stage() {
         "one shape fills the stage with the application background"
     );
 
-    let canvas = crate::ui::raster::render(size, |ui, _| {
+    let canvas = rspice_app_workbench::ui::raster::render(size, |ui, _| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(BENEATH))
             .show(ui, |ui| show(ui, &mut app));
@@ -447,7 +447,7 @@ fn every_project_page_renders_at_desktop_tablet_and_phone_widths() {
             egui::vec2(390.0, 844.0),
         ] {
             let ctx = egui::Context::default();
-            crate::ui::Theme::default().apply(&ctx);
+            rspice_app_workbench::ui::Theme::default().apply(&ctx);
             let mut app = RSpiceApp::test_instance();
             app.state.project.project_page = page;
 
@@ -473,7 +473,7 @@ fn every_project_page_renders_at_desktop_tablet_and_phone_widths() {
 }
 
 fn populated_project_app() -> RSpiceApp {
-    use crate::state::{
+    use rspice_app_state::state::{
         AnalysisResult, AnalysisType, SimulationRunLifecycle, SimulationRunProvenance,
     };
 
@@ -486,7 +486,7 @@ fn populated_project_app() -> RSpiceApp {
         .content
         .project
         .rename("lna-frontend-28g");
-    let now = crate::time_compat::unix_epoch().as_secs_f64();
+    let now = rspice_app_state::time_compat::unix_epoch().as_secs_f64();
     {
         let run = app.state.model.simulation.start_run();
         run.lifecycle = SimulationRunLifecycle::Completed;
@@ -543,10 +543,10 @@ fn populated_project_app() -> RSpiceApp {
         use rspice_design::drc::{
             DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
         };
-        app.state.model.workspace.content.active_view = crate::state::CellViewRef::new(
+        app.state.model.workspace.content.active_view = rspice_app_state::state::CellViewRef::new(
             &app.state.model.workspace.content.project.root_library,
             &app.state.model.workspace.content.project.top_cell,
-            crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+            rspice_app_state::state::workspace::DEFAULT_SCHEMATIC_VIEW,
         );
         let mut result = DrcResult::new();
         result.add_violation(DrcViolation {
@@ -579,7 +579,7 @@ fn netlist_first_project_app() -> RSpiceApp {
 
 fn painted_project_page(size: egui::Vec2, mut pass: impl FnMut(&mut Ui)) -> String {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
@@ -655,7 +655,7 @@ fn recovery_project_app(checkpoints: usize, set_aside: bool, error: bool) -> RSp
 
     let mut app = populated_project_app();
     app.state.project.project_page = ProjectPage::Recovery;
-    let now = crate::time_compat::checked_unix_time_ms().expect("clock");
+    let now = rspice_app_state::time_compat::checked_unix_time_ms().expect("clock");
     let name = app.state.model.workspace.content.project.name().to_owned();
     let project_id = app.state.model.workspace.content.project.id().to_string();
     let catalog = [
@@ -770,7 +770,7 @@ fn checkpoint_rows_follow_one_another_without_overlapping() {
     ] {
         let mut app = recovery_project_app(3, false, false);
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut rows = Vec::new();
         for _ in 0..3 {

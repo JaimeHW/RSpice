@@ -5,13 +5,6 @@ use crate::feature_tests::settings::shortcut_merge_rollback::{
     artifact_from, artifact_value_with_coverage, artifact_with_coverage, set, set_key,
     with_command_extra,
 };
-use crate::state::command_catalog::{CommandKey, CommandPlatform};
-use crate::state::shortcuts::ProtectedShortcutPolicy;
-use crate::state::shortcuts::ShortcutBindingSlot;
-use crate::state::shortcuts::ShortcutPreferences;
-use crate::state::shortcuts::ShortcutProfileLibrary;
-use crate::state::shortcuts::ShortcutSequence;
-use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
@@ -21,6 +14,13 @@ use crate::workbench::results::commands::ResultsCommand;
 use egui::Key;
 use egui::os::OperatingSystem;
 use rspice_app_settings::workbench::shortcuts::artifacts::merge::*;
+use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
+use rspice_app_state::state::shortcuts::ProtectedShortcutPolicy;
+use rspice_app_state::state::shortcuts::ShortcutBindingSlot;
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
+use rspice_app_state::state::shortcuts::ShortcutProfileLibrary;
+use rspice_app_state::state::shortcuts::ShortcutSequence;
+use rspice_app_state::state::shortcuts::ShortcutStroke;
 use std::collections::BTreeSet;
 
 fn set_sequence(

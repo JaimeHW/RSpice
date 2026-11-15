@@ -2,14 +2,14 @@
 //! by a whole application.
 
 use super::result_import_adapters::apply_imported_result_dataset;
-use crate::io::file_exchange::MAX_RESULT_DATASET_BYTES;
-use crate::state::AnalysisResultFamilyMetadata;
-use crate::state::AnalysisType;
-use crate::state::SimulationRunLifecycle;
-use crate::state::SimulationRunProvenance;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::import::ResultImportStage;
 use rspice_app_results::workbench::workflows::result_import_workflow::*;
+use rspice_app_services::io::file_exchange::MAX_RESULT_DATASET_BYTES;
+use rspice_app_state::state::AnalysisResultFamilyMetadata;
+use rspice_app_state::state::AnalysisType;
+use rspice_app_state::state::SimulationRunLifecycle;
+use rspice_app_state::state::SimulationRunProvenance;
 
 fn loaded_project_state() -> AppState {
     let mut state = AppState::default();
@@ -26,15 +26,16 @@ fn assert_nullable_import_round_trip(name: &str, bytes: &[u8]) {
     assert_eq!(state.results.result_import.waveforms[0].sample(1), None);
     commit_result_import_draft(&mut state.results_parts()).unwrap();
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
-    let project = crate::io::project_io::load_project_text(&text, None).unwrap();
+    let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
+    let project = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(
         project.file.simulation_results_warning.is_none(),
         "{:?}",
         project.file.simulation_results_warning
     );
     let simulation =
-        crate::io::simulation_state_from_results(project.file.simulation_results).unwrap();
+        rspice_app_services::io::simulation_state_from_results(project.file.simulation_results)
+            .unwrap();
     let restored = &simulation.active_run().unwrap().analyses[0];
     restored.validate_retained_evidence().unwrap();
     assert_eq!(restored.waveforms[0].x.as_ref(), &[0.0, 1.0, 2.0]);
@@ -89,11 +90,12 @@ fn imported_angles_and_temperatures_retain_normalized_values_and_units() {
     let mut state = loaded_project_state();
     apply_imported_result_dataset(&mut state.results_parts(), "units.csv", csv).unwrap();
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
-    let project = crate::io::project_io::load_project_text(&text, None).unwrap();
+    let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
+    let project = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(project.file.simulation_results_warning.is_none());
     let simulation =
-        crate::io::simulation_state_from_results(project.file.simulation_results).unwrap();
+        rspice_app_services::io::simulation_state_from_results(project.file.simulation_results)
+            .unwrap();
     let restored = &simulation.active_run().unwrap().analyses[0];
     restored.validate_retained_evidence().unwrap();
     for (before, after) in parsed.waveforms.iter().zip(&restored.waveforms) {
@@ -143,11 +145,12 @@ fn raw_coordinate_units_survive_import_review_project_reload_and_waveform_projec
         );
         commit_result_import_draft(&mut state.results_parts()).unwrap();
         let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-        let text = crate::io::project_io::serialize_project_file(&project).unwrap();
-        let project = crate::io::project_io::load_project_text(&text, None).unwrap();
+        let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
+        let project = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
         assert!(project.file.simulation_results_warning.is_none());
         let simulation =
-            crate::io::simulation_state_from_results(project.file.simulation_results).unwrap();
+            rspice_app_services::io::simulation_state_from_results(project.file.simulation_results)
+                .unwrap();
         let restored = &simulation.active_run().unwrap().analyses[0];
         let coordinate = restored.imported_coordinate().unwrap();
         assert_eq!(coordinate.name, name);
@@ -267,11 +270,12 @@ fn delimited_metadata_survives_review_project_reload_and_reexport() {
     apply_imported_result_dataset(&mut state.results_parts(), "units.csv", text.as_bytes())
         .unwrap();
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
-    let project = crate::io::project_io::load_project_text(&text, None).unwrap();
+    let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
+    let project = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(project.file.simulation_results_warning.is_none());
     let simulation =
-        crate::io::simulation_state_from_results(project.file.simulation_results).unwrap();
+        rspice_app_services::io::simulation_state_from_results(project.file.simulation_results)
+            .unwrap();
     let restored = &simulation.active_run().unwrap().analyses[0];
     restored.validate_retained_evidence().unwrap();
     let projected = rspice_formats::waveform_io::result::project_waveforms(
@@ -390,11 +394,12 @@ fn touchstone_noise_import_commits_independent_axes_and_persists_units() {
         .unwrap();
     assert_eq!(network.x.as_slice(), [1e6, 3e6]);
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
-    let project = crate::io::project_io::load_project_text(&text, None).unwrap();
+    let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
+    let project = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(project.file.simulation_results_warning.is_none());
     let simulation =
-        crate::io::simulation_state_from_results(project.file.simulation_results).unwrap();
+        rspice_app_services::io::simulation_state_from_results(project.file.simulation_results)
+            .unwrap();
     let restored = &simulation.active_run().unwrap().analyses[0];
     restored.validate_retained_evidence().unwrap();
     assert_eq!(
@@ -511,16 +516,17 @@ fn imported_dataset_is_unattributed_stable_immutable_and_saveable() {
         "retaining external evidence must dirty canonical result history"
     );
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    let text = crate::io::project_io::serialize_project_file(&project)
+    let text = rspice_app_services::io::project_io::serialize_project_file(&project)
         .expect("imported evidence must be saveable");
-    let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
+    let restored = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(restored.file.simulation_results_warning.is_none());
     assert_eq!(
         restored.file.simulation_results,
         project.file.simulation_results
     );
     let restored =
-        crate::io::simulation_state_from_results(restored.file.simulation_results).unwrap();
+        rspice_app_services::io::simulation_state_from_results(restored.file.simulation_results)
+            .unwrap();
     let run = restored.active_run().unwrap();
     assert_eq!(run.lifecycle, SimulationRunLifecycle::LegacyUnknown);
     assert_eq!(run.elapsed_time, 0.0);
@@ -537,8 +543,8 @@ fn event_source_import_format_and_name_survive_project_publication() {
         b"$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n#1\n1!\n")
         .unwrap();
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
-    let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
+    let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
+    let restored = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(restored.file.simulation_results_warning.is_none());
     let json = serde_json::to_value(&restored.file.simulation_results).unwrap();
     let source = &json["runs"][0]["analyses"][0]["import_source"];

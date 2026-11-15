@@ -1,14 +1,16 @@
 //! [`SchematicEditAuthority`] against a whole session: the authority is
 //! captured from and validated against the model an `AppState` holds.
 
-use crate::state::write_policy::LocalSafeModeOptions;
-use crate::state::{ComponentType, Point};
 use crate::workbench::app::{SchematicEditAuthority, schematic_editor_request_source};
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::write_policy::LocalSafeModeOptions;
+use rspice_app_state::state::{ComponentType, Point};
 
 #[test]
 fn authority_rejects_another_occurrence_or_sheet_of_the_same_master() {
-    use crate::state::{CellViewRef, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType};
+    use rspice_app_state::state::{
+        CellViewRef, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType,
+    };
     for occurrence_change in [true, false] {
         let mut state = AppState::default();
         let parent = state.model.workspace.content.active_view.clone();

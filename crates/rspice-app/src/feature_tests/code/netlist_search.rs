@@ -8,7 +8,7 @@ use rspice_app_code::workbench::surfaces::netlist::search::find_replace_window;
 fn find_dialog_names(app: &mut RSpiceApp) -> Vec<String> {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut nodes = std::collections::HashMap::new();
     for _ in 0..3 {
         let output = ctx.run_ui(
@@ -88,10 +88,10 @@ fn the_find_field_is_as_tall_as_the_scope_select() {
         app.state.code.netlist.find.open = true;
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        crate::ui::Theme::default().apply(&ctx);
-        crate::ui::Theme::default().apply_responsive_metrics_with_target(
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply_responsive_metrics_with_target(
             &ctx,
-            coarse.then_some(crate::ui::tokens::TOUCH_TARGET),
+            coarse.then_some(rspice_app_workbench::ui::tokens::TOUCH_TARGET),
         );
         let mut nodes = std::collections::HashMap::new();
         for _ in 0..3 {
@@ -137,7 +137,7 @@ fn the_options_start_where_the_fields_do() {
     app.state.code.netlist.find.open = true;
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut nodes = std::collections::HashMap::new();
     for _ in 0..3 {
         let output = ctx.run_ui(

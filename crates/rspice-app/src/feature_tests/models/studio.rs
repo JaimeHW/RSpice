@@ -7,12 +7,14 @@ use std::path::PathBuf;
 
 use egui::Color32;
 
-use crate::state::model_library::{DeviceModel, ModelLibrary, ModelQualificationState, ModelType};
-use crate::state::{Component, ComponentType, ModelsPage, Point};
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::tests::painted_text;
 use crate::workbench::models::workspace_state::{ModelsCatalogScope, ModelsOperationalState};
 use crate::workbench::{RSpiceApp, features};
+use rspice_app_state::state::model_library::{
+    DeviceModel, ModelLibrary, ModelQualificationState, ModelType,
+};
+use rspice_app_state::state::{Component, ComponentType, ModelsPage, Point};
 
 mod binned_family;
 mod provider_dialog;
@@ -39,7 +41,7 @@ const STUDIO_SIZE: egui::Vec2 = egui::vec2(1400.0, 1000.0);
 impl ModelsStudio {
     fn open(app: RSpiceApp) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut studio = Self {
             ctx,

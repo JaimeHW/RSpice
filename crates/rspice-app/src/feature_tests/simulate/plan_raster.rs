@@ -5,13 +5,13 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use super::plan_manager::{app_with_every_lifecycle_state, route_draft};
-use crate::ui::raster::Canvas;
 use crate::workbench::state::SimulationPlanManagerMode;
 use egui::Vec2;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::plan_manager_dialog;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::raster::{
     PLAN_MANAGER_FINGERPRINTS, baseline_cases, file_stem,
 };
+use rspice_app_workbench::ui::raster::Canvas;
 
 /// Render one route at one gated viewport and rasterize it.
 ///
@@ -32,7 +32,7 @@ fn raster(mode: SimulationPlanManagerMode, screen: Vec2) -> Canvas {
     // `tests/module_layering.rs` counts every whole-application mutable
     // parameter in the crate, test-only files included, and a render harness is
     // not a reason for that ceiling to move.
-    crate::ui::raster::render(screen, |ui, _| {
+    rspice_app_workbench::ui::raster::render(screen, |ui, _| {
         plan_manager_dialog(
             ui,
             &mut crate::workbench::features::cx(&mut app),

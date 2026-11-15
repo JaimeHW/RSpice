@@ -7,14 +7,14 @@
 use super::veriloga_interface::{
     add_module_cell, compile_and_publish, configured_deck, ensure_veriloga_configuration, view,
 };
-use crate::state::{
-    CellViewRef, Point, PropertySheet, PropertyType, PropertyValue, View, ViewType,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::project_transactions::WholeStateValidation;
 use crate::workbench::app::veriloga_design_tests::{open_in_design, open_project_app};
 use crate::workbench::app::veriloga_interface_tests::edit_source;
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{
+    CellViewRef, Point, PropertySheet, PropertyType, PropertyValue, View, ViewType,
+};
 use rspice_design::library::metadata::{
     CellParameter, ParameterDeclaration, ParameterRange, ParameterScope, ParameterValueType,
     VERILOGA_PARAMETER_CONTRACT_KEY, cell_parameter_contract,
@@ -65,7 +65,7 @@ fn range_text(parameter: &CellParameter) -> Option<String> {
 /// the allowlist its contract states now, under a configuration that executes
 /// Verilog-A views.
 fn place_from_shelf(state: &mut AppState, reference: &CellViewRef) -> u64 {
-    let candidate = crate::state::library_cell_placement_candidates(
+    let candidate = rspice_app_state::state::library_cell_placement_candidates(
         &state.model.library_manager,
         &state.model.workspace,
     )
@@ -86,7 +86,7 @@ fn place_from_shelf(state: &mut AppState, reference: &CellViewRef) -> u64 {
     id
 }
 
-fn placed(state: &AppState, id: u64) -> crate::state::Component {
+fn placed(state: &AppState, id: u64) -> rspice_app_state::state::Component {
     state
         .model
         .schematic
@@ -206,10 +206,10 @@ fn a_read_only_library_is_never_given_a_parameter_contract() {
                 .and_then(|library| library.get_cell_mut("amp"))
                 .expect("the cell")
                 .add_view(View::new("schematic", ViewType::Schematic));
-            let mut master = crate::state::SchematicState::default();
+            let mut master = rspice_app_state::state::SchematicState::default();
             for (index, name) in ["p", "n"].into_iter().enumerate() {
                 let id = master.add_component(
-                    crate::state::ComponentType::Port,
+                    rspice_app_state::state::ComponentType::Port,
                     Point::new(i32::try_from(index).unwrap_or(0) * 40, 0),
                 );
                 let port = master

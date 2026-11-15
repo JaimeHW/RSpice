@@ -1,8 +1,8 @@
 //! `workbench/app_state/diagnostic_store/current` observed through a whole session.
 
-use crate::state::netlist_diagnostics::Diagnostic;
-use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::netlist_diagnostics::Diagnostic;
+use rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use std::sync::Arc;
 
 fn collection(diagnostics: Vec<Diagnostic>) -> Arc<NetlistDiagnosticCollection> {

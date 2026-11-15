@@ -6,11 +6,11 @@ use egui::{FullOutput, Rect, pos2};
 
 use super::app_state_of;
 use crate::feature_tests::replay::{Replay, only};
-use crate::state::{Point, SymbolShape};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::actions::workspace::tests::state_with_amp_symbol_pin;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::{Point, SymbolShape};
 
 /// The amp whose schematic declares IN; its symbol has the pin, unplaced,
 /// and nothing drawn, or one pin placed and a circle drawn.

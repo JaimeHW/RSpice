@@ -15,13 +15,14 @@ use rspice_app_code::workbench::code::commands::CodeCommand;
 fn compiling_verilog_a_is_refused_while_a_compile_is_already_pending() {
     let mut app = RSpiceApp::test_instance();
     // A Verilog-A cell view open in Design: the place Compile is offered.
-    let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
-    let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
+    let reference = rspice_app_state::state::CellViewRef::new("behavioral", "gain", "veriloga");
+    let mut view =
+        rspice_app_state::state::View::new("veriloga", rspice_app_state::state::ViewType::VerilogA);
     view.metadata
         .insert("veriloga.module".to_owned(), "gain".to_owned());
-    let mut cell = crate::state::Cell::new("gain");
+    let mut cell = rspice_app_state::state::Cell::new("gain");
     cell.add_view(view);
-    let mut library = crate::state::Library::new("behavioral");
+    let mut library = rspice_app_state::state::Library::new("behavioral");
     library.add_cell(cell);
     app.state.model.library_manager.add_library(library);
     app.state
@@ -30,9 +31,9 @@ fn compiling_verilog_a_is_refused_while_a_compile_is_already_pending() {
         .content
         .project_sources
         .insert_bundle(
-            crate::state::ProjectSourceBundle::try_new(
-                crate::state::ProjectSourceOwner::cell_view(reference.clone()),
-                crate::state::ProjectSourceLanguage::VerilogA,
+            rspice_app_state::state::ProjectSourceBundle::try_new(
+                rspice_app_state::state::ProjectSourceOwner::cell_view(reference.clone()),
+                rspice_app_state::state::ProjectSourceLanguage::VerilogA,
                 "gain.va",
                 "module gain(p, n); inout p, n; electrical p, n; endmodule\n",
                 [],
@@ -67,8 +68,8 @@ fn rename_form_over_two_files(locked: bool) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.code.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
-    let language = crate::state::ProjectSourceLanguage::RSpiceAutomation;
-    let owner = crate::state::ProjectSourceOwner::code_workspace(language);
+    let language = rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation;
+    let owner = rspice_app_state::state::ProjectSourceOwner::code_workspace(language);
     let content = &mut app.state.model.workspace.content;
     let bundle = content
         .project_sources
@@ -76,7 +77,7 @@ fn rename_form_over_two_files(locked: bool) -> RSpiceApp {
         .expect("the fixture project owns an Automation bundle");
     let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
     let locks = bundle
-        .paths_for_role(crate::state::ProjectSourceRole::AutomationEnvironmentLock)
+        .paths_for_role(rspice_app_state::state::ProjectSourceRole::AutomationEnvironmentLock)
         .map(str::to_owned)
         .collect::<Vec<_>>();
     let entry = "def helper():
@@ -94,7 +95,7 @@ helper()
         .add_project_source_bundle_file(
             bundle_id,
             &root,
-            crate::state::ProjectSourceFile::try_new(
+            rspice_app_state::state::ProjectSourceFile::try_new(
                 "shared.py",
                 "value = helper()
 ",
@@ -112,7 +113,7 @@ helper()
             .set_project_source_bundle_non_entry_role(
                 bundle_id,
                 "shared.py",
-                Some(crate::state::ProjectSourceRole::AutomationEnvironmentLock),
+                Some(rspice_app_state::state::ProjectSourceRole::AutomationEnvironmentLock),
             )
             .expect("the second file is the lock");
     }
@@ -192,7 +193,7 @@ fn a_confirmed_rename_shows_its_outcome_on_the_next_frame_without_input() {
         let mut app = rename_form_over_two_files(locked);
         let ctx = Context::default();
         ctx.enable_accesskit();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         for _ in 0..2 {
             let (_, text) = dialog_frame(&ctx, &mut app, Vec::new());
             assert!(

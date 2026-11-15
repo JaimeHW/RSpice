@@ -2,8 +2,6 @@
 //! strip at every viewport, and the widget identities they keep.
 
 use crate::feature_tests::hardcopy::hardcopy_parts;
-use crate::ui::tokens;
-use crate::ui::tokens::Tokens;
 use crate::workbench::app::RSpiceApp;
 use egui::Align;
 use egui::Context;
@@ -17,6 +15,8 @@ use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopySection;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::publish;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::render::*;
+use rspice_app_workbench::ui::tokens;
+use rspice_app_workbench::ui::tokens::Tokens;
 
 /// Viewports the studio has to fit: the desktop sizes the workbench ships
 /// against, the widths where its three columns stop fitting side by side,
@@ -195,7 +195,7 @@ fn overflow_beyond(surface: Rect, control: Rect) -> f32 {
 fn the_studio_fits_every_viewport_and_section_without_scrolling() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = studio_app();
     // The workflow resolves its source on a worker thread and rewrites the
     // draft when it lands, so the matrix starts from a settled one.
@@ -377,7 +377,7 @@ fn control_rect(controls: &[(String, Rect)], label: &str) -> Option<Rect> {
 fn the_tab_strip_fills_the_track_it_was_given() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = studio_app();
     let viewport = vec2(900.0, 700.0);
     let surface = studio_surface(viewport);
@@ -427,7 +427,7 @@ fn the_tab_strip_fills_the_track_it_was_given() {
 fn the_narrow_strip_asks_one_question_per_control() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = studio_app();
     let viewport = vec2(390.0, 844.0);
 
@@ -459,8 +459,9 @@ fn the_narrow_strip_asks_one_question_per_control() {
 fn navigation_targets_meet_the_touch_minimum() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
-    crate::ui::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(44.0));
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default()
+        .apply_responsive_metrics_with_target(&ctx, Some(44.0));
     let mut app = studio_app();
 
     let rail = dialog_controls(&settled_studio(&ctx, &mut app, vec2(1_440.0, 900.0)));
@@ -545,7 +546,7 @@ fn id_change_marks(output: &egui::FullOutput) -> Vec<Rect> {
 fn no_widget_changes_its_id_as_the_studio_changes() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = studio_app();
     let viewport = vec2(1_440.0, 900.0);
 
@@ -627,7 +628,7 @@ fn a_blocked_section_is_marked_on_the_rail_from_every_other_section() {
     for ready_preview in [false, true] {
         let ctx = Context::default();
         ctx.enable_accesskit();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let err = Tokens::get(&ctx).color.err;
         let mut app = studio_app();
         let viewport = vec2(1_440.0, 900.0);
@@ -637,7 +638,7 @@ fn a_blocked_section_is_marked_on_the_rail_from_every_other_section() {
             // fading in. Warm the real source/preview pipeline in another context
             // so this case does not depend on the machine's worker scheduling.
             let warm_context = Context::default();
-            crate::ui::Theme::default().apply(&warm_context);
+            rspice_app_workbench::ui::Theme::default().apply(&warm_context);
             let _ = settled_studio(&warm_context, &mut app, viewport);
         }
 
@@ -728,7 +729,7 @@ fn a_blocked_section_is_marked_on_the_rail_from_every_other_section() {
 fn the_narrow_strip_marks_the_blocked_section_too() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = studio_app();
     let viewport = vec2(390.0, 844.0);
     let _ = settled_studio(&ctx, &mut app, viewport);
@@ -752,7 +753,7 @@ fn editor_extent(app: &mut RSpiceApp, section: HardcopySection, measure: f32) ->
     let draft = &mut app.state.hardcopy.hardcopy;
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut natural = 0.0_f32;
     let output = ctx.run_ui(
         egui::RawInput {
@@ -797,7 +798,7 @@ fn editor_extent(app: &mut RSpiceApp, section: HardcopySection, measure: f32) ->
 fn every_section_reaches_the_edge_of_the_measure_it_is_given() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = studio_app();
     // Sections draw what the resolved source gives them, so the measurement
     // is only of the real form once the source has landed.

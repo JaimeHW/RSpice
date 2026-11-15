@@ -51,12 +51,13 @@ fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
     );
 
     let project = project_lifecycle::snapshot(&state).expect("campaign member project snapshot");
-    let json = crate::io::project_io::serialize_project_file(&project)
+    let json = rspice_app_services::io::project_io::serialize_project_file(&project)
         .expect("campaign member serializes");
-    let loaded =
-        crate::io::project_io::load_project_text(&json, None).expect("campaign member reloads");
-    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
-        .expect("campaign result history restores");
+    let loaded = rspice_app_services::io::project_io::load_project_text(&json, None)
+        .expect("campaign member reloads");
+    let restored =
+        rspice_app_services::io::simulation_state_from_results(loaded.file.simulation_results)
+            .expect("campaign result history restores");
     let restored_membership = restored.retained.runs[0]
         .campaign_membership()
         .expect("campaign identity survives project round trip");

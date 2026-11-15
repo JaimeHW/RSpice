@@ -99,7 +99,7 @@ fn painted_launcher_page(
     page: ProjectLauncherPage,
 ) -> Vec<(String, Rect)> {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     crate::workbench::project::open_project_launcher(
         &mut app.state.project,

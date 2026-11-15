@@ -1,10 +1,5 @@
 //! Placing a net label, drawn through a whole application.
 
-use crate::state::CrossSheetPortDirection;
-use crate::state::NetLabel;
-use crate::state::NetLabelKind;
-use crate::state::Point;
-use crate::state::Tool;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::placement::net_label::tests::{self as entry, key_event};
 use crate::workbench::app::dialogs::placement::net_label::*;
@@ -12,6 +7,11 @@ use crate::workbench::app::open_net_label_placement_in;
 use crate::workbench::app::place_sequenced_net_label_in;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_state::state::CrossSheetPortDirection;
+use rspice_app_state::state::NetLabel;
+use rspice_app_state::state::NetLabelKind;
+use rspice_app_state::state::Point;
+use rspice_app_state::state::Tool;
 
 /// Draw the entry as its dialog step does.
 fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -73,7 +73,7 @@ fn open_connector_at(app: &mut RSpiceApp, anchor: Point) {
 fn opening_input_reaches_the_name_field_for_both_placement_kinds() {
     for connector in [false, true] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         if connector {
             open_connector_at(&mut app, Point::origin());
@@ -265,7 +265,7 @@ fn a_list_or_a_bus_range_places_one_name_per_click() {
         .document_mut_for_test()
         .buses
         .push(
-            crate::state::Bus::segment(90, Point::new(-50, 0), Point::new(50, 0), None)
+            rspice_app_state::state::Bus::segment(90, Point::new(-50, 0), Point::new(50, 0), None)
                 .expect("bus"),
         );
     commit_entry(&mut app.state, Point::new(0, 0), "D<0:2>");
@@ -316,7 +316,7 @@ fn read_only_and_stale_authority_fail_closed() {
 #[test]
 fn rendered_enter_commits_and_escape_closes_at_once() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_at(&mut app, Point::new(30, 50));
     app.state.design.net_label_placement.name = "sense_out".to_owned();
@@ -347,7 +347,7 @@ fn rendered_enter_commits_and_escape_closes_at_once() {
 #[test]
 fn the_entry_is_anchored_at_the_click_and_does_not_follow_the_pointer() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_at(&mut app, Point::new(30, 50));
     let click = egui::pos2(420.0, 260.0);

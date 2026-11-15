@@ -5,11 +5,6 @@
 use rspice_results_ui::session::PaneAxis;
 use rspice_results_ui::soa::SoaRuleSelection;
 
-use crate::state::{
-    ActiveViewer, AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace,
-    SensitivityResultMode, SensitivityResultRow, SimulationRun, SpecializedViewerCacheProvenance,
-};
-use crate::ui::tokens::Tokens;
 use crate::workbench::documents::result_document::test_fixtures::{
     events_analysis, network_matrix_analysis, optimization_analysis, soa_analysis,
 };
@@ -19,6 +14,11 @@ use crate::workbench::documents::result_document::{
     sheet_purpose, show, show_persistent_pane_viewer, smith, viewer_availability, waves,
 };
 use crate::workbench::{AppState, RSpiceApp, ResultViewer};
+use rspice_app_state::state::{
+    ActiveViewer, AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace,
+    SensitivityResultMode, SensitivityResultRow, SimulationRun, SpecializedViewerCacheProvenance,
+};
+use rspice_app_workbench::ui::tokens::Tokens;
 
 /// The two gates a Results sheet is looked at through: the small window the
 /// display scaling of a real workstation produces, and a wide one.
@@ -44,7 +44,7 @@ pub(super) const AC_FIXTURE_POINTS: usize = 8_192;
 /// the product never takes.
 fn draw_sheet_and_tessellate(app: &mut RSpiceApp, viewer: ResultViewer) {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -94,7 +94,7 @@ fn sheet_route_nodes(
     height: f32,
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut nodes = Vec::new();
     for _ in 0..2 {
@@ -133,7 +133,7 @@ fn sheet_route_nodes(
 /// Paint one sheet and count the primitives it actually emits.
 fn drawn_shape_count(app: &mut RSpiceApp, viewer: ResultViewer) -> usize {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -267,7 +267,7 @@ fn every_newly_reachable_sheet_draws_and_meshes() {
             state.results.results.session.selected_soa_rule = Some(SoaRuleSelection {
                 analysis: active_analysis_key(&state),
                 device_id: "M1".to_owned(),
-                parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+                parameter: rspice_app_state::state::SoaParameterEvidence::DrainSourceVoltage,
             });
         }
         let mut app = RSpiceApp::test_instance();
@@ -482,7 +482,7 @@ fn a_run_that_did_not_complete_says_so_on_the_sheet_that_draws_it() {
     // And the strip that draws it carries the mark, so a stack whose
     // other analyses converged cannot pass the failed one off as clean.
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let output = ctx.run_ui(
         egui::RawInput {
@@ -622,9 +622,11 @@ fn every_sheet_draws_at_a_touch_composition() {
         let mut app = app_showing(viewer);
         app.state.results.results.session.viewer = viewer;
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        crate::ui::Theme::default()
-            .apply_responsive_metrics_with_target(&ctx, Some(crate::ui::tokens::TOUCH_TARGET));
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply_responsive_metrics_with_target(
+            &ctx,
+            Some(rspice_app_workbench::ui::tokens::TOUCH_TARGET),
+        );
         assert!(
             Tokens::get(&ctx).metrics.is_touch(),
             "the fixture did not reach a touch composition"
@@ -704,13 +706,13 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
                 .workspace
                 .content
                 .specs
-                .push(crate::state::SpecEntry {
+                .push(rspice_app_state::state::SpecEntry {
                     measurement: "gain_dc".to_owned(),
                     expression: String::new(),
                     min: Some(39.5),
                     max: None,
                     unit: "dB".to_owned(),
-                    scope: crate::state::SpecPointScope::AllPoints,
+                    scope: rspice_app_state::state::SpecPointScope::AllPoints,
                 });
             monte_carlo_population_analysis()
         }
@@ -730,8 +732,8 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
             ])
         }
         ResultViewer::PhaseNoise => AnalysisResult::new(1, AnalysisType::Pnoise, "PNOISE")
-            .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::PeriodicNoise {
-                output_quantity: crate::state::PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
+            .with_family_metadata(rspice_app_state::state::AnalysisResultFamilyMetadata::PeriodicNoise {
+                output_quantity: rspice_app_state::state::PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
                 carrier_frequency_hz: Some(2.4e9),
             })
             .with_waveforms(vec![RetainedTrace::new(
@@ -783,41 +785,41 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
                 .workspace
                 .content
                 .specs
-                .push(crate::state::SpecEntry {
+                .push(rspice_app_state::state::SpecEntry {
                     measurement: "V(out)".to_owned(),
                     expression: String::new(),
                     min: Some(-2.0),
                     max: Some(5.0),
                     unit: "V".to_owned(),
-                    scope: crate::state::SpecPointScope::AllPoints,
+                    scope: rspice_app_state::state::SpecPointScope::AllPoints,
                 });
             transient_analysis()
         }
         ResultViewer::PoleZero => AnalysisResult::new(1, AnalysisType::PoleZero, "PZ")
             .with_result_payload(AnalysisResultPayload::PoleZero {
-                poles: vec![crate::state::ComplexResultValue {
+                poles: vec![rspice_app_state::state::ComplexResultValue {
                     real: -1.0e3,
                     imaginary: 2.0e3,
                 }],
-                zeros: vec![crate::state::ComplexResultValue {
+                zeros: vec![rspice_app_state::state::ComplexResultValue {
                     real: -5.0e3,
                     imaginary: 0.0,
                 }],
-                pole_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
-                    certificate: crate::state::PoleZeroSpectrumCertificate {
+                pole_evidence: rspice_app_state::state::PoleZeroRootSetEvidence::Qualified {
+                    certificate: rspice_app_state::state::PoleZeroSpectrumCertificate {
                         problem_order: 1,
                         infinite_count: 0,
                         max_backward_error: 0.0,
-                        qualification_tolerance: crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+                        qualification_tolerance: rspice_app_state::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
                         asymptotically_stable: None,
                     },
                 },
-                zero_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
-                    certificate: crate::state::PoleZeroSpectrumCertificate {
+                zero_evidence: rspice_app_state::state::PoleZeroRootSetEvidence::Qualified {
+                    certificate: rspice_app_state::state::PoleZeroSpectrumCertificate {
                         problem_order: 1,
                         infinite_count: 0,
                         max_backward_error: 0.0,
-                        qualification_tolerance: crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+                        qualification_tolerance: rspice_app_state::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
                         asymptotically_stable: None,
                     },
                 },
@@ -830,7 +832,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
 
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    run.lifecycle = crate::state::SimulationRunLifecycle::Completed;
+    run.lifecycle = rspice_app_state::state::SimulationRunLifecycle::Completed;
     app.state.model.simulation.retained.runs = vec![run].into();
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
@@ -856,7 +858,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
         app.state.results.results.session.selected_soa_rule = Some(SoaRuleSelection {
             analysis: active_analysis_key(&app.state),
             device_id: "M1".to_owned(),
-            parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+            parameter: rspice_app_state::state::SoaParameterEvidence::DrainSourceVoltage,
         });
     }
     app
@@ -916,10 +918,12 @@ pub(super) fn sparameter_analysis() -> AnalysisResult {
         .as_mut()
         .expect("AC fixture complex components")
         .source_name = "S11".to_owned();
-    analysis.with_family_metadata(crate::state::AnalysisResultFamilyMetadata::SParameter {
-        noise_reference_temperature_kelvin: None,
-        reference_impedances_ohm: vec![75.0, 100.0],
-    })
+    analysis.with_family_metadata(
+        rspice_app_state::state::AnalysisResultFamilyMetadata::SParameter {
+            noise_reference_temperature_kelvin: None,
+            reference_impedances_ohm: vec![75.0, 100.0],
+        },
+    )
 }
 
 /// A Monte Carlo that retained both halves of its evidence: the sampled
@@ -929,7 +933,7 @@ pub(super) fn sparameter_analysis() -> AnalysisResult {
 /// exercises the path where a distribution comes from the derived histogram
 /// cache — so the correlation and distribution sheets need their own.
 pub(super) fn monte_carlo_population_analysis() -> AnalysisResult {
-    use crate::state::{
+    use rspice_app_state::state::{
         FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,
         MonteCarloVariableMetadata,
     };
@@ -969,7 +973,7 @@ pub(super) fn monte_carlo_population_analysis() -> AnalysisResult {
     let mean = samples.iter().sum::<f64>() / TRIALS as f64;
     let variance = samples.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (TRIALS - 1) as f64;
     AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_family_metadata(
-        crate::state::AnalysisResultFamilyMetadata::MonteCarlo {
+        rspice_app_state::state::AnalysisResultFamilyMetadata::MonteCarlo {
             seed: 0x73a4,
             runs_requested: TRIALS,
             runs_completed: TRIALS,
@@ -997,27 +1001,29 @@ pub(super) fn monte_carlo_analysis() -> AnalysisResult {
             vec![0.95, 1.02, 0.98, 1.05],
             "#00aaff",
         )])
-        .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::MonteCarlo {
-            seed: 7,
-            runs_requested: 4,
-            runs_completed: 4,
-            failures: 0,
-            all_converged: true,
-            member_measurements: Vec::new(),
-            variables: vec![crate::state::MonteCarloVariableMetadata {
-                mean_confidence: None,
-                name: "V(out)".to_owned(),
-                samples: vec![0.95, 1.02, 0.98, 1.05],
-                mean: 1.0,
-                std_dev: (0.0058_f64 / 3.0).sqrt(),
-                min: 0.95,
-                max: 1.05,
-            }],
-        })
+        .with_family_metadata(
+            rspice_app_state::state::AnalysisResultFamilyMetadata::MonteCarlo {
+                seed: 7,
+                runs_requested: 4,
+                runs_completed: 4,
+                failures: 0,
+                all_converged: true,
+                member_measurements: Vec::new(),
+                variables: vec![rspice_app_state::state::MonteCarloVariableMetadata {
+                    mean_confidence: None,
+                    name: "V(out)".to_owned(),
+                    samples: vec![0.95, 1.02, 0.98, 1.05],
+                    mean: 1.0,
+                    std_dev: (0.0058_f64 / 3.0).sqrt(),
+                    min: 0.95,
+                    max: 1.05,
+                }],
+            },
+        )
 }
 
 pub(super) fn transfer_function_analysis() -> AnalysisResult {
-    use crate::state::{
+    use rspice_app_state::state::{
         TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
         TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
     };

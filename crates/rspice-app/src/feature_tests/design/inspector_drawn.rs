@@ -2,17 +2,17 @@
 //! the models a bound instance is offered.
 
 use super::inspector::app_with_model_bound_instance;
-use crate::state::{Point, SchematicProbe};
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::inspector::component::{bound_model_choices, catalog_model_location};
 use crate::workbench::design::inspector::tests::painted_panel;
 use crate::workbench::design::inspector::*;
+use rspice_app_state::state::{Point, SchematicProbe};
 
 /// One retained probe on a cell view whose sheet catalog holds `sheets`
 /// sheets. With two, the probe is assigned to the second one.
 #[cfg(not(target_arch = "wasm32"))]
 fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
-    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
     const PROBE: u64 = 77;
     let mut app = RSpiceApp::test_instance();

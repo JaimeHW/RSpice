@@ -1,25 +1,25 @@
 //! Annotation publication, dependent references and shared project history.
 
-use crate::state::CellViewRef;
-use crate::state::ComponentType;
-use crate::state::DesignManagementCatalog;
-use crate::state::SchematicSnapshot;
-use crate::state::SchematicState;
 use crate::workbench::app_state::design_history::DesignManagementHistoryEntry;
 use crate::workbench::app_state::design_history::schematic_for_reference;
+use rspice_app_state::state::CellViewRef;
+use rspice_app_state::state::ComponentType;
+use rspice_app_state::state::DesignManagementCatalog;
+use rspice_app_state::state::SchematicSnapshot;
+use rspice_app_state::state::SchematicState;
 
 mod live_references;
 mod manual_edit;
 mod reused_rename;
-use crate::product::{ObjectRevision, SimulationPlanId};
-use crate::state::{
+use crate::workbench::app_state::AppState;
+use rspice_app_state::product::{ObjectRevision, SimulationPlanId};
+use rspice_app_state::state::{
     AnnotationObject, AnnotationPosition, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
     ConfigurationSetDefinition, ConfigurationSetId, Point, ProtectedReferencePolicy, RenumberOrder,
     RenumberRequest, RenumberScope, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
     SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicObjectKey,
     SchematicProbe, UnresolvedBindingPolicy,
 };
-use crate::workbench::app_state::AppState;
 
 struct Fixture {
     state: AppState,
@@ -435,7 +435,7 @@ fn annotation_updates_reused_masters_and_probes_in_independent_document_roots() 
 fn reused_master_fixture(
     original_names: [&str; 2],
 ) -> (Fixture, CellViewRef, CellViewRef, CellViewRef) {
-    use crate::state::{LibraryCellInstance, OpenCellView, View, ViewType};
+    use rspice_app_state::state::{LibraryCellInstance, OpenCellView, View, ViewType};
     let mut fixture = fixture(&["V42"]);
     let state = &mut fixture.state;
     state
@@ -468,7 +468,7 @@ fn reused_master_fixture(
         .iter_mut()
         .find(|open| open.reference == child_ref)
         .unwrap();
-    open.occurrence = crate::state::workspace::DocumentOccurrence::rooted(root.clone());
+    open.occurrence = rspice_app_state::state::workspace::DocumentOccurrence::rooted(root.clone());
     open.occurrence
         .descend(original_names[0].to_owned(), child_ref.clone());
     let mut child = std::mem::take(&mut state.model.schematic);

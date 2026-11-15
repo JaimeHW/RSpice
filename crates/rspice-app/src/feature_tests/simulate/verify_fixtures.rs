@@ -3,13 +3,13 @@
 //! run on the feature harness. The application is a Verify page stage too, so
 //! the one page driver draws over either.
 
-use crate::state::VerificationPage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::Workspace;
 use rspice_app_simulate::workbench::surfaces::verify::raster::{
     VerifyStage, seed_corner, seed_monte_carlo, seed_optimization, seed_soa,
 };
 use rspice_app_simulate::workbench::surfaces::verify::show;
+use rspice_app_state::state::VerificationPage;
 
 /// Forty trials of the plan's Monte Carlo analysis, three under its gain floor.
 pub(super) fn monte_carlo_app() -> RSpiceApp {

@@ -1,12 +1,12 @@
 //! The symbol editor's actions run through a whole application.
 
 use crate::feature_tests::design::symbol_actions_drawn::open_symbol;
-use crate::state::Point;
-use crate::state::{CellViewRef, SymbolEditorMetadata, SymbolShape};
 use crate::workbench::app::actions::symbol::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::commands::DesignCommand;
+use rspice_app_state::state::Point;
+use rspice_app_state::state::{CellViewRef, SymbolEditorMetadata, SymbolShape};
 use rspice_design::symbol::{SYMBOL_EDITOR_METADATA_KEY, SymbolAttributeKind};
 use rspice_schematic_editor::symbol_editor::commands::{SymbolEditAction, SymbolTransform};
 use rspice_schematic_editor::symbol_editor::interaction::bind_canvas_source;
@@ -196,17 +196,20 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     app.execute_command_key(DesignCommand::RotateSelection.key());
     assert_eq!(
         pin_at(&app),
-        (placed, crate::state::SymbolPinSide::Top),
+        (placed, rspice_app_state::state::SymbolPinSide::Top),
         "Rotate turns the selected pin's lead about its tip"
     );
     app.execute_command_key(DesignCommand::MirrorSelectionVertical.key());
     assert_eq!(
         pin_at(&app),
-        (placed, crate::state::SymbolPinSide::Bottom),
+        (placed, rspice_app_state::state::SymbolPinSide::Bottom),
         "Mirror flips the selected pin's lead across its tip"
     );
     assert!(app.state.undo_active_symbol_document().unwrap());
-    assert_eq!(pin_at(&app), (placed, crate::state::SymbolPinSide::Top));
+    assert_eq!(
+        pin_at(&app),
+        (placed, rspice_app_state::state::SymbolPinSide::Top)
+    );
 }
 
 /// Align and Snap to grid act on the symbol's own selection, each as one

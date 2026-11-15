@@ -15,9 +15,9 @@ use rspice_app_code::workbench::surfaces::netlist::{
 /// finding of the deck's own file counts though it names that file.
 #[test]
 fn a_problem_step_in_the_deck_goes_to_the_finding_and_says_which() {
-    use crate::state::netlist_diagnostics::{Diagnostic, NetlistDiagnosticCollection};
     use crate::workbench::documents::code_workspace::{ProblemStep, queue_problem_step};
     use crate::workbench::documents::netlist_document;
+    use rspice_app_state::state::netlist_diagnostics::{Diagnostic, NetlistDiagnosticCollection};
     use rspice_vocabulary::diagnostics::DiagnosticSeverity;
 
     let deck = "deck\nR1 1 0 1k\nC1 1 0 1pp\n.end\n";
@@ -41,7 +41,7 @@ fn a_problem_step_in_the_deck_goes_to_the_finding_and_says_which() {
     app.state.code.netlist.mark_validated_for_test(revision);
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -105,7 +105,10 @@ fn a_problem_step_in_the_deck_goes_to_the_finding_and_says_which() {
 /// The band is where the strip is or is not: a phase that painted nothing
 /// there, or two phases that painted the same thing, would be a strip that
 /// states its status in prose only.
-fn run_strip_band(width: f32, phase: RunStripPhase) -> (crate::ui::raster::Canvas, Vec<u8>) {
+fn run_strip_band(
+    width: f32,
+    phase: RunStripPhase,
+) -> (rspice_app_workbench::ui::raster::Canvas, Vec<u8>) {
     const DECK: &str = "run strip fixture\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
     const EDITED: &str = "run strip fixture\nV1 out 0 1\nR1 out 0 2k\n.op\n.end\n";
 
@@ -145,7 +148,7 @@ fn run_strip_band(width: f32, phase: RunStripPhase) -> (crate::ui::raster::Canva
         "the raster fixture must actually be in the phase it renders"
     );
 
-    let canvas = crate::ui::raster::render(vec2(width, 520.0), |ui, background| {
+    let canvas = rspice_app_workbench::ui::raster::render(vec2(width, 520.0), |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
             .show(ui, |ui| {

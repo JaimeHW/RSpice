@@ -45,7 +45,7 @@ fn command_catalog_has_unique_stable_ids() {
 /// registry order, and a retired id resolves to the command it became.
 #[test]
 fn the_registry_catalog_answers_for_every_command_as_the_command_does() {
-    use crate::state::command_catalog::{CommandCatalog, CommandKey, CommandPlatform};
+    use rspice_app_state::state::command_catalog::{CommandCatalog, CommandKey, CommandPlatform};
 
     let catalog = vocabulary::CommandRegistry;
     let shell_commands = catalog

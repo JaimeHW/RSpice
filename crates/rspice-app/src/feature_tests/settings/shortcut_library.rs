@@ -1,7 +1,5 @@
 //! The shortcut library in use over a whole application.
 
-use crate::state::command_catalog::CommandPlatform;
-use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
@@ -9,6 +7,8 @@ use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::requests::ResetShortcutResolver;
 use rspice_app_settings::workbench::app_state::session::shortcut_library::*;
 use rspice_app_settings::workbench::shortcuts::library_persistence::PersistedShortcutProfileLibrary;
+use rspice_app_state::state::command_catalog::CommandPlatform;
+use rspice_app_state::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
 use rspice_app_workbench::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot,
 };
@@ -35,7 +35,7 @@ fn unacknowledged_completion_blocks_reentrant_publication() {
     candidate
         .insert_named_preset(
             "Reentrant candidate",
-            crate::state::shortcuts::ShortcutPreferences::default(),
+            rspice_app_state::state::shortcuts::ShortcutPreferences::default(),
             false,
         )
         .unwrap();
@@ -64,7 +64,7 @@ fn type_stroke(
     state: &mut AppState,
     key: egui::Key,
     at: std::time::Duration,
-) -> Option<crate::state::command_catalog::CommandKey> {
+) -> Option<rspice_app_state::state::command_catalog::CommandKey> {
     let press = egui::Event::Key {
         key,
         physical_key: Some(key),
@@ -86,7 +86,7 @@ fn type_stroke(
             CommandPlatform::Desktop,
             ShortcutEnvironment {
                 workspace: crate::workbench::state::Workspace::Design,
-                active_view: Some(crate::state::ViewType::Schematic),
+                active_view: Some(rspice_app_state::state::ViewType::Schematic),
                 canvas_focus: false,
                 source_editor_focus: false,
             },
@@ -183,7 +183,7 @@ fn a_library_put_in_use_resets_the_resolver_before_the_next_shortcut() {
     candidate
         .insert_named_preset(
             "Another preset",
-            crate::state::shortcuts::ShortcutPreferences::default(),
+            rspice_app_state::state::shortcuts::ShortcutPreferences::default(),
             false,
         )
         .unwrap();

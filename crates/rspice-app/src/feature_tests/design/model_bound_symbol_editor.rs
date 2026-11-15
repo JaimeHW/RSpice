@@ -6,13 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::diagnostics::LogAnchor;
 use crate::feature_tests::design::create_model_bound_symbol::{
     open_create_model_bound_symbol_dialog, state_with_bound_mos_model,
-};
-use crate::state::{
-    CellViewRef, ModelBoundSymbolDefinition, Point, PortDirection, SymbolDocument,
-    SymbolEditorMetadata, SymbolElectricalType, SymbolPin, SymbolPinSide,
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::dialogs::create_model_bound_symbol::state::PRIMARY;
@@ -26,6 +21,11 @@ use crate::workbench::lifecycle::project_lifecycle::{
 };
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_state::diagnostics::LogAnchor;
+use rspice_app_state::state::{
+    CellViewRef, ModelBoundSymbolDefinition, Point, PortDirection, SymbolDocument,
+    SymbolEditorMetadata, SymbolElectricalType, SymbolPin, SymbolPinSide,
+};
 
 fn unique_path(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -96,7 +96,7 @@ fn saveable_bound_mos_model() -> AppState {
     state
         .model
         .library_manager
-        .add_library(crate::state::Library::new("analog_blocks"));
+        .add_library(rspice_app_state::state::Library::new("analog_blocks"));
     state.model.library_manager.selected_library = Some("analog_blocks".to_owned());
     state.model.model_library_manager = bound.model.model_library_manager;
     state.models.selected_model = bound.models.selected_model;
@@ -105,7 +105,8 @@ fn saveable_bound_mos_model() -> AppState {
         .model_library_manager
         .get_library_mut("vendor_cmos")
         .expect("the model's library");
-    library.source_authority = crate::state::model_library::ModelSourceAuthority::External;
+    library.source_authority =
+        rspice_app_state::state::model_library::ModelSourceAuthority::External;
     library.root_path = Some(PathBuf::from(r"C:\models"));
     state
 }
@@ -205,7 +206,8 @@ impl Fixture {
 
     /// The symbol as the project file on disk holds it, with its binding.
     fn saved(&self) -> (SymbolDocument, Option<ModelBoundSymbolDefinition>) {
-        let persisted = crate::io::load_project_file(&self.path).expect("the project reloads");
+        let persisted =
+            rspice_app_services::io::load_project_file(&self.path).expect("the project reloads");
         let view = persisted
             .file
             .libraries
@@ -216,7 +218,8 @@ impl Fixture {
             .clone();
         (
             SymbolDocument::load_from_view(&view).expect("the saved symbol loads"),
-            crate::state::load_model_bound_symbol(&view).expect("the saved binding loads"),
+            rspice_app_state::state::load_model_bound_symbol(&view)
+                .expect("the saved binding loads"),
         )
     }
 

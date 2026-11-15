@@ -5,11 +5,11 @@
 //! render helpers here.
 
 use super::stage::show_on_stage;
-use crate::state::SimulationPage;
 use crate::workbench::{AppState, RSpiceApp};
 use egui::{Rect, vec2};
 use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
 use rspice_app_simulate::workbench::surfaces::simulate::page_outputs;
+use rspice_app_state::state::SimulationPage;
 
 /// Render one page and collect the text it painted.
 pub(super) fn render(page: SimulationPage, width: f32) -> String {
@@ -51,7 +51,7 @@ pub(super) fn render_with(
     }
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state.simulate.simulation_page = page;
     seed(&mut app);
@@ -129,7 +129,7 @@ fn no_studio_page_paints_a_sentence_under_its_title() {
 /// would take its capability with it.
 #[test]
 fn a_selected_record_paints_every_field_of_its_contract() {
-    use crate::state::{
+    use rspice_app_state::state::{
         DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
         DesignVariableSweepEligibility, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
         SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
@@ -330,7 +330,7 @@ fn the_resolved_policy_ledger_only_claims_analyses_the_plan_holds() {
 /// row still has to appear when the form is what wrote it.
 #[test]
 fn an_analysis_that_leaves_the_plan_policy_is_named_in_the_ledger() {
-    use crate::simulation::plan::AnalysisDraft;
+    use rspice_app_state::simulation::plan::AnalysisDraft;
 
     // The page title contains "per-analysis overrides", so the owner cell is
     // counted rather than searched for — the title would match either way.
@@ -367,7 +367,7 @@ fn an_analysis_that_leaves_the_plan_policy_is_named_in_the_ledger() {
         "a transient with its own step ceiling must be named as an override:\n{overridden}"
     );
     assert!(
-        overridden.contains(crate::simulation::plan::AnalysisKind::Transient.label()),
+        overridden.contains(rspice_app_state::simulation::plan::AnalysisKind::Transient.label()),
         "the override row must name which analysis diverged, by the name the rest of the \
          product shows it under rather than by its directive code:\n{overridden}"
     );
@@ -384,7 +384,7 @@ fn an_analysis_that_leaves_the_plan_policy_is_named_in_the_ledger() {
 /// margin is the exact failure this page exists to prevent.
 #[test]
 fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
-    use crate::state::SpecEntry;
+    use rspice_app_state::state::SpecEntry;
 
     fn spec(measurement: &str) -> SpecEntry {
         SpecEntry {
@@ -393,7 +393,7 @@ fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
             min: Some(0.0),
             max: Some(1.0),
             unit: "V".to_owned(),
-            scope: crate::state::SpecPointScope::AllPoints,
+            scope: rspice_app_state::state::SpecPointScope::AllPoints,
         }
     }
 
@@ -439,7 +439,7 @@ fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
 /// number alone cannot state it.
 #[test]
 fn the_ledger_reports_the_effective_value_of_an_authored_override() {
-    use crate::simulation::plan::{
+    use rspice_app_state::simulation::plan::{
         AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption,
     };
 
@@ -460,7 +460,7 @@ fn the_ledger_reports_the_effective_value_of_an_authored_override() {
         record
             .set_for_instance(
                 AnalysisKind::Transient,
-                crate::simulation::plan::SolverOwnership::NONE,
+                rspice_app_state::simulation::plan::SolverOwnership::NONE,
                 NumericOverrideOption::Itl4,
                 "137",
             )
@@ -494,8 +494,8 @@ fn the_ledger_reports_the_effective_value_of_an_authored_override() {
 /// declare, would offer a scope no run can answer.
 #[test]
 fn the_applies_to_control_is_built_from_the_declared_run_set() {
-    use crate::product::ProcessCorner;
-    use crate::state::{SpecEntry, SpecPointScope};
+    use rspice_app_state::product::ProcessCorner;
+    use rspice_app_state::state::{SpecEntry, SpecPointScope};
     use rspice_simulation_contract::corner_config::{CornerBaseAnalysis, CornerConfig};
     use rspice_simulation_contract::run_set::RunSetState;
 
@@ -589,7 +589,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
 }
 
 /// The active plan's identity, for seeds that hold only the session state.
-fn seeded_plan_id(state: &AppState) -> crate::product::SimulationPlanId {
+fn seeded_plan_id(state: &AppState) -> rspice_app_state::product::SimulationPlanId {
     state
         .model
         .sim_setup
@@ -601,7 +601,7 @@ fn seeded_plan_id(state: &AppState) -> crate::product::SimulationPlanId {
 /// Three saved outputs whose names, expressions and kinds differ, so a filter
 /// has something to discriminate on.
 fn seed_three_outputs(state: &mut AppState) {
-    use crate::state::{
+    use rspice_app_state::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
         SavedOutputPrecision, SavedOutputStreaming,
     };
@@ -699,7 +699,7 @@ fn an_output_filter_matching_nothing_is_distinguishable_from_an_empty_registry()
     assert!(
         empty.contains("No saved outputs")
             && empty.contains(&page_outputs::empty_registry_outcome(
-                crate::state::OutputSelectionMode::default(),
+                rspice_app_state::state::OutputSelectionMode::default(),
                 0
             )),
         "a plan with no outputs states what its selection mode will save:\n{empty}"
@@ -731,7 +731,7 @@ fn an_output_filter_matching_nothing_is_distinguishable_from_an_empty_registry()
 /// measured at all, so both the text filter and the evidence class have
 /// something to discriminate on.
 fn seed_two_specifications(state: &mut AppState) {
-    use crate::state::{
+    use rspice_app_state::state::{
         AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun, SpecEntry,
         SpecPointScope,
     };
@@ -765,9 +765,9 @@ fn seed_two_specifications(state: &mut AppState) {
             .with_measurements(vec![rspice_core::MeasureResult::success("gain_dc", 31.0)])
             .with_provenance(
                 AnalysisResultProvenance::new(
-                    crate::product::AnalysisInstanceId::new(),
-                    crate::product::ObjectRevision::INITIAL,
-                    crate::product::ContentDigest::from_bytes([0x5a; 32]),
+                    rspice_app_state::product::AnalysisInstanceId::new(),
+                    rspice_app_state::product::ObjectRevision::INITIAL,
+                    rspice_app_state::product::ContentDigest::from_bytes([0x5a; 32]),
                     Vec::new(),
                 )
                 .expect("valid test provenance"),
@@ -947,7 +947,7 @@ fn a_dataset_backed_handoff_states_its_condition_before_a_run_exists() {
 /// offering a choice the engine does not implement.
 #[test]
 fn the_variables_page_states_the_rules_it_enforces_instead_of_offering_them() {
-    use crate::state::{
+    use rspice_app_state::state::{
         DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
         DesignVariableScope, DesignVariableSweepEligibility,
     };

@@ -6,12 +6,12 @@
 //! bind either key on its own.
 
 use super::*;
-use crate::state::command_catalog::{
-    CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
-};
-use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::CommandFlags;
+use rspice_app_state::state::command_catalog::{
+    CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
+};
+use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
 const SHEET_COMMANDS: [SheetsCommand; 4] = [
     SheetsCommand::NextSheet,

@@ -5,23 +5,6 @@ mod app_resolution;
 mod quick_view;
 
 use crate::feature_tests::hardcopy::{resolve_retained_hardcopy_source, source_reads};
-use crate::product::ContentDigest;
-use crate::product::DatasetBinding;
-use crate::product::DatasetId;
-use crate::product::ObjectRevision;
-use crate::state::AnalysisResult;
-use crate::state::AnalysisResultFamilyMetadata;
-use crate::state::AnalysisType;
-use crate::state::MonteCarloVariableMetadata;
-use crate::state::PeriodicNoiseOutputQuantity;
-use crate::state::Point;
-use crate::state::RetainedTrace;
-use crate::state::SheetDefinition;
-use crate::state::SheetPortPolicy;
-use crate::state::SheetTemplate;
-use crate::state::SimulationRun;
-use crate::state::SimulationRunLifecycle;
-use crate::state::Wire;
 use crate::workbench::AppState;
 use crate::workbench::documents::result_document::ResultViewer;
 use crate::workbench::state::Workspace;
@@ -34,6 +17,10 @@ use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::prepare_retained
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::quick_result_analysis_index;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::quick_result_availability;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::*;
+use rspice_app_state::product::ContentDigest;
+use rspice_app_state::product::DatasetBinding;
+use rspice_app_state::product::DatasetId;
+use rspice_app_state::product::ObjectRevision;
 use rspice_app_state::results::report_document::DataTableBlock;
 use rspice_app_state::results::report_document::FigureSizing;
 use rspice_app_state::results::report_document::FrozenReportArtifact;
@@ -64,6 +51,19 @@ use rspice_app_state::results::visualization_document::SourceRow;
 use rspice_app_state::results::visualization_document::TypedValue;
 use rspice_app_state::results::visualization_document::ValueType;
 use rspice_app_state::results::visualization_document::VisualizationDocument;
+use rspice_app_state::state::AnalysisResult;
+use rspice_app_state::state::AnalysisResultFamilyMetadata;
+use rspice_app_state::state::AnalysisType;
+use rspice_app_state::state::MonteCarloVariableMetadata;
+use rspice_app_state::state::PeriodicNoiseOutputQuantity;
+use rspice_app_state::state::Point;
+use rspice_app_state::state::RetainedTrace;
+use rspice_app_state::state::SheetDefinition;
+use rspice_app_state::state::SheetPortPolicy;
+use rspice_app_state::state::SheetTemplate;
+use rspice_app_state::state::SimulationRun;
+use rspice_app_state::state::SimulationRunLifecycle;
+use rspice_app_state::state::Wire;
 use rspice_hardcopy::sources::HardcopySemanticDocument;
 use rspice_hardcopy::sources::PLOT_INSET_UM;
 use rspice_hardcopy::sources::PLOT_WIDTH_UM;
@@ -347,7 +347,7 @@ fn production_manifest_hardcopy_retains_the_complete_displayed_dataset_through_w
         .analyses
         .push(AnalysisResult::new(2, AnalysisType::Ac, "AC"));
     displayed
-        .restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("terminal fixture has explicit legacy provenance");
     let displayed_dataset = displayed.dataset_id;
 
@@ -357,7 +357,7 @@ fn production_manifest_hardcopy_retains_the_complete_displayed_dataset_through_w
         .analyses
         .push(AnalysisResult::new(3, AnalysisType::DcOp, "Background OP"));
     background
-        .restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+        .restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("background fixture has explicit legacy provenance");
     state.model.simulation.retained.runs = vec![displayed, background].into();
     state.model.simulation.view.active_run_idx = Some(1);
@@ -410,7 +410,7 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
             RetainedTrace::new("V(second)", vec![0.0, 2.0], vec![2.0, 3.0], "#ff00aa"),
         ]),
     );
-    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+    run.restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("terminal fixture has explicit legacy provenance");
     let dataset_id = run.dataset_id;
     state.model.simulation.retained.runs = vec![run].into();
@@ -439,7 +439,7 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
     let encoded: serde_json::Value = serde_json::from_slice(&worker_bytes).unwrap();
     assert_eq!(
         encoded["payload"]["simulation_results"],
-        serde_json::to_value(crate::io::capture_simulation_results(
+        serde_json::to_value(rspice_app_services::io::capture_simulation_results(
             &state.model.simulation
         ))
         .unwrap(),
@@ -481,28 +481,28 @@ fn production_specs_hardcopy_judges_the_complete_dataset() {
         AnalysisResult::new(2, AnalysisType::Ac, "AC")
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.5)]),
     );
-    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+    run.restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("terminal fixture has explicit legacy provenance");
     let dataset_id = run.dataset_id;
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
     state.model.workspace.content.specs = vec![
-        crate::state::SpecEntry {
+        rspice_app_state::state::SpecEntry {
             measurement: "gain".to_owned(),
             expression: "max gain".to_owned(),
             min: Some(1.0),
             max: Some(2.0),
             unit: "V/V".to_owned(),
-            scope: crate::state::SpecPointScope::AllPoints,
+            scope: rspice_app_state::state::SpecPointScope::AllPoints,
         },
-        crate::state::SpecEntry {
+        rspice_app_state::state::SpecEntry {
             measurement: "delay".to_owned(),
             expression: "propagation delay".to_owned(),
             min: None,
             max: Some(3.0e-9),
             unit: "s".to_owned(),
-            scope: crate::state::SpecPointScope::AllPoints,
+            scope: rspice_app_state::state::SpecPointScope::AllPoints,
         },
     ];
     state.results.results.session.viewer = ResultViewer::Specs;
@@ -543,8 +543,10 @@ fn production_specs_hardcopy_judges_the_complete_dataset() {
 /// A workspace on the Specs sheet of one completed run whose receipt froze
 /// `gain >= 10 dB`, with one attributed analysis that measured 12 dB.
 fn signed_off_specification_workspace() -> (AppState, String) {
-    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
-    use crate::state::{
+    use rspice_app_state::product::{
+        AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId,
+    };
+    use rspice_app_state::state::{
         AnalysisResultProvenance, AnalysisResultSourceDomain, PreparedRunReceipt,
         PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecification, SpecEntry,
         SpecPointScope,
@@ -552,7 +554,7 @@ fn signed_off_specification_workspace() -> (AppState, String) {
 
     let task_id = AnalysisInstanceId::new();
     let snapshot = ContentDigest::from_bytes([0x71; 32]);
-    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+    let receipt = PreparedRunReceipt::new(rspice_app_state::state::PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
         simulation_plan_id: Some(SimulationPlanId::new()),
         project_revision: ObjectRevision::INITIAL,
@@ -659,13 +661,13 @@ fn printed_specification_bounds(
 #[test]
 fn printed_specifications_are_the_ones_the_run_froze_not_the_ones_now_authored() {
     let (mut state, source_key) = signed_off_specification_workspace();
-    state.model.workspace.content.specs = vec![crate::state::SpecEntry {
+    state.model.workspace.content.specs = vec![rspice_app_state::state::SpecEntry {
         measurement: "gain".to_owned(),
         expression: "max gain".to_owned(),
         min: Some(10.0),
         max: None,
         unit: "dB".to_owned(),
-        scope: crate::state::SpecPointScope::AllPoints,
+        scope: rspice_app_state::state::SpecPointScope::AllPoints,
     }];
     let (before, identity_before) = printed_specification_bounds(&state, &source_key);
 
@@ -839,7 +841,7 @@ fn project_visualization_hardcopy_uses_the_selected_pane_not_the_first_pane() {
     let page_id = document.pages()[0].id;
     let first_pane = document.panes()[0].id;
     let pane_binding = rspice_app_state::results::visualization_document::PaneDataBinding {
-        analysis_id: crate::product::AnalysisInstanceId::new(),
+        analysis_id: rspice_app_state::product::AnalysisInstanceId::new(),
         dataset: binding,
     };
     document

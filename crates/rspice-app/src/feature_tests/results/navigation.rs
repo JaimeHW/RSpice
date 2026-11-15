@@ -6,15 +6,15 @@
 //! result, has lost the object it was taken for — which is the defect these
 //! edges exist to close.
 
-use crate::state::SimulationPage;
-use crate::state::{AnalysisResult, AnalysisType};
-use crate::ui::widgets::NotificationAction;
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::tests::{RunOrigin, app_with_prepared_run, plan_binding};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::host::Host;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::SimulationPage;
+use rspice_app_state::state::{AnalysisResult, AnalysisType};
+use rspice_app_workbench::ui::widgets::NotificationAction;
 
 #[test]
 fn opening_a_run_in_results_needs_a_dataset_and_lands_on_the_selected_one() {
@@ -222,7 +222,7 @@ fn each_reason_a_dataset_cannot_name_its_plan_is_stated_exactly() {
 /// notification center can take the reader to the same place.
 #[test]
 fn a_retained_notice_keeps_the_offer_its_toast_carried() {
-    use crate::ui::widgets::{NotificationCategory, ToastKind, Toasts};
+    use rspice_app_workbench::ui::widgets::{NotificationCategory, ToastKind, Toasts};
 
     let ctx = egui::Context::default();
     let mut toasts = Toasts::default();
@@ -260,7 +260,7 @@ fn a_retained_notice_keeps_the_offer_its_toast_carried() {
 /// remedies.
 #[test]
 fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
-    use crate::state::{ExecutedDeck, ExecutedDeckPoint};
+    use rspice_app_state::state::{ExecutedDeck, ExecutedDeckPoint};
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
@@ -272,7 +272,7 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
     let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
     assert_eq!(
         app.command_availability(ResultsCommand::OpenTaskDeck.key()),
-        CommandAvailability::Disabled(crate::state::absent_deck_reason()),
+        CommandAvailability::Disabled(rspice_app_state::state::absent_deck_reason()),
         "a run whose deck was released has something to open and cannot"
     );
 
@@ -333,8 +333,8 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
 /// the first would be the studio deciding what was asked for.
 #[test]
 fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
-    use crate::state::AnalysisResultPayload;
     use crate::workbench::documents::result_document::AnalysisPresentationKey;
+    use rspice_app_state::state::AnalysisResultPayload;
     use rspice_results::result_presentation::ResultArtifactPresentationKey;
     use rspice_results_ui::selection::ResultBrowserSelectionKey;
 

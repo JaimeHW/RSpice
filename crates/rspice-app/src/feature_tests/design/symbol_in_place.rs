@@ -1,23 +1,23 @@
 //! Editing a symbol in place on its parent sheet, drawn through a whole application.
 
 use crate::schematic::view::schematic_symbol_context;
-use crate::state::{
-    Cell, CellViewRef, ComponentType, LibraryCellInstance, Point, PortSpec, Rotation,
-    SchematicState, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolShape, View, ViewType,
-    Wire,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
 use egui::{Color32, Context, Pos2, Rect, Vec2, vec2};
+use rspice_app_state::state::{
+    Cell, CellViewRef, ComponentType, LibraryCellInstance, Point, PortSpec, Rotation,
+    SchematicState, SymbolDocument, SymbolEditorMetadata, SymbolPin, SymbolShape, View, ViewType,
+    Wire,
+};
 use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 use rspice_schematic_editor::view::coordinates::viewport_from_camera;
 
 /// The centre of the `accent` ink within ten pixels of `around`, and how
 /// many pixels of it there are.
 fn accent_centroid(
-    canvas: &crate::ui::raster::Canvas,
+    canvas: &rspice_app_workbench::ui::raster::Canvas,
     accent: Color32,
     around: Pos2,
 ) -> (Pos2, usize) {
@@ -70,8 +70,10 @@ fn in_place_pins_land_on_the_instance_pins_in_every_orientation() {
                 .set_selection(selection);
             fixture.frame(vec![]);
             let output = fixture.frame(vec![]);
-            let accent = crate::ui::tokens::Tokens::get(&fixture.ctx).color.accent;
-            let canvas = crate::ui::raster::rasterize(&fixture.ctx, SCREEN, &output);
+            let accent = rspice_app_workbench::ui::tokens::Tokens::get(&fixture.ctx)
+                .color
+                .accent;
+            let canvas = rspice_app_workbench::ui::raster::rasterize(&fixture.ctx, SCREEN, &output);
             for (name, world) in &terminals {
                 let expected = fixture.screen(*world);
                 let (centre, count) = accent_centroid(&canvas, accent, expected);
@@ -451,7 +453,7 @@ impl Fixture {
     /// its position, turned and mirrored as the entry says.
     fn new(placements: &[(Point, Rotation, bool)]) -> Self {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
         let (parent, symbol, instances) = amp_project(&mut app, placements);

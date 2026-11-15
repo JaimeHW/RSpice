@@ -7,10 +7,6 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::state::{
-    CellViewRef, ComponentType, Point, PortSpec, SchematicState, SymbolDocument,
-    SymbolEditorMetadata, SymbolInterface, View, ViewType,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::lifecycle::project_lifecycle::{
@@ -18,6 +14,10 @@ use crate::workbench::lifecycle::project_lifecycle::{
 };
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::{
+    CellViewRef, ComponentType, Point, PortSpec, SchematicState, SymbolDocument,
+    SymbolEditorMetadata, SymbolInterface, View, ViewType,
+};
 use rspice_schematic_editor::symbol_editor::surface::canvas_check_lines;
 
 fn unique_path(label: &str) -> PathBuf {
@@ -65,13 +65,13 @@ impl Fixture {
     fn new(label: &str, schematic: Option<&[&str]>, pins: &[&str]) -> Self {
         let mut app = RSpiceApp::test_instance();
         let symbol = CellViewRef::new("user", "amp", "symbol");
-        let mut cell = crate::state::Cell::new("amp");
+        let mut cell = rspice_app_state::state::Cell::new("amp");
         let mut symbol_view = View::new("symbol", ViewType::Symbol);
         let ports: Vec<PortSpec> = pins
             .iter()
             .map(|name| PortSpec {
                 name: (*name).to_owned(),
-                direction: crate::state::PortDirection::InOut,
+                direction: rspice_app_state::state::PortDirection::InOut,
             })
             .collect();
         SymbolDocument::generated_from_ports(&ports)
@@ -118,7 +118,8 @@ impl Fixture {
 
     /// The symbol as the project file on disk holds it.
     fn saved(&self) -> (SymbolDocument, SymbolEditorMetadata) {
-        let persisted = crate::io::load_project_file(&self.path).expect("the project reloads");
+        let persisted =
+            rspice_app_services::io::load_project_file(&self.path).expect("the project reloads");
         let view = persisted
             .file
             .libraries
@@ -190,7 +191,7 @@ impl Fixture {
     /// Place an instance of the symbol on the sheet `user/top/schematic`,
     /// unturned at the origin, with a wire held at its pin `pin`.
     fn place_instance_wired_at(&mut self, pin: &str) -> CellViewRef {
-        use crate::state::{Component, LibraryCellInstance, Wire, WireConnection};
+        use rspice_app_state::state::{Component, LibraryCellInstance, Wire, WireConnection};
 
         let document = self.document();
         let parent = CellViewRef::new("user", "top", "schematic");
@@ -536,7 +537,7 @@ fn a_pin_mismatch_is_counted_by_kind() {
 /// every wire a placed instance holds following the pin back.
 #[test]
 fn reverting_the_symbol_restores_it_and_its_placed_instances() {
-    use crate::state::{Component, LibraryCellInstance, Wire, WireConnection};
+    use rspice_app_state::state::{Component, LibraryCellInstance, Wire, WireConnection};
 
     let mut fixture = Fixture::new("revert", Some(&["IN", "OUT"]), &["IN", "OUT"]);
     let saved = fixture.document();

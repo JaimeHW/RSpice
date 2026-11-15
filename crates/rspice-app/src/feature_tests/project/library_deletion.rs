@@ -2,10 +2,6 @@
 //! review, the staged deletion and what it leaves behind, answered as the
 //! dialog walk takes it.
 
-use crate::state::{
-    Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, OpenCellView, Point,
-    SchematicState, View, ViewType,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
@@ -15,6 +11,10 @@ use crate::workbench::project::workspace_state::{
 };
 use crate::workbench::session::project_transactions::{
     apply_workspace_pruned, void_veriloga_evidence,
+};
+use rspice_app_state::state::{
+    Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, OpenCellView, Point,
+    SchematicState, View, ViewType,
 };
 
 use super::{in_front, published, shown, with_cx};
@@ -72,7 +72,7 @@ fn insert_cell_source(
     state: &mut crate::workbench::app_state::AppState,
     cell: &str,
     view: &str,
-) -> crate::state::ProjectSourceId {
+) -> rspice_app_state::state::ProjectSourceId {
     state
         .model
         .library_manager
@@ -80,9 +80,11 @@ fn insert_cell_source(
         .and_then(|library| library.get_cell_mut(cell))
         .expect("fixture cell")
         .add_view(View::new(view, ViewType::VerilogA));
-    let bundle = crate::state::ProjectSourceBundle::try_new(
-        crate::state::ProjectSourceOwner::cell_view(CellViewRef::new("work", cell, view)),
-        crate::state::ProjectSourceLanguage::VerilogA,
+    let bundle = rspice_app_state::state::ProjectSourceBundle::try_new(
+        rspice_app_state::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+            "work", cell, view,
+        )),
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         format!("{view}.va"),
         format!("module {view}(p, n); inout p, n; endmodule"),
         std::iter::empty(),
@@ -104,24 +106,24 @@ fn add_configuration_root(
     state: &mut crate::workbench::app_state::AppState,
     name: &str,
     root: CellViewRef,
-) -> crate::state::ConfigurationSetId {
+) -> rspice_app_state::state::ConfigurationSetId {
     state
         .model
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: name.to_owned(),
             root,
             dut_path: "/".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Lifecycle test".to_owned(),
         })
         .expect("valid configuration root")
@@ -396,7 +398,7 @@ fn deleting_open_cell_prunes_workspace_references_and_restores_valid_focus() {
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
-        Some(crate::state::ProjectLibraryMutation::DeleteCell { library, cell })
+        Some(rspice_app_state::state::ProjectLibraryMutation::DeleteCell { library, cell })
             if library == "work" && cell == "amp"
     ));
     assert!(app.state.model.workspace.content.project_metadata_dirty);
@@ -483,7 +485,7 @@ fn deleting_active_view_prunes_workspace_references_and_falls_back_to_schematic(
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
-        Some(crate::state::ProjectLibraryMutation::DeleteView {
+        Some(rspice_app_state::state::ProjectLibraryMutation::DeleteView {
             library,
             cell,
             view,
@@ -805,39 +807,41 @@ fn deleting_cell_blocks_live_variant_then_removes_and_tombstones_design_manageme
         .design_management
         .bootstrap_for_cell_view(&owner, "Main", [object_id])
         .expect("owned sheet catalog");
-    let object =
-        crate::state::SchematicObjectKey::new(&owner, object_id).expect("scoped schematic object");
+    let object = rspice_app_state::state::SchematicObjectKey::new(&owner, object_id)
+        .expect("scoped schematic object");
     let variant_id = state
         .model
         .workspace
         .content
         .design_management
         .variants_mut()
-        .create(crate::state::AssemblyVariantDraft {
+        .create(rspice_app_state::state::AssemblyVariantDraft {
             name: "Industrial".to_owned(),
             parent_id: None,
-            inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
-            qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+            inheritance: rspice_app_state::state::VariantInheritance::OverrideChangedObjectsOnly,
+            qualification_plan:
+                rspice_app_state::state::VariantQualificationPlan::InvalidateAffectedTests,
             overrides: std::collections::BTreeMap::from([(
                 object.clone(),
-                crate::state::VariantObjectOverride::DoNotPopulate {
+                rspice_app_state::state::VariantObjectOverride::DoNotPopulate {
                     approval_reference: "ECO-23".to_owned(),
                 },
             )]),
         })
         .expect("live variant");
-    let renumber_request = crate::state::RenumberRequest {
-        scope: crate::state::RenumberScope::WholeProject,
-        order: crate::state::RenumberOrder::HierarchyThenCoordinates,
-        protected_references: crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+    let renumber_request = rspice_app_state::state::RenumberRequest {
+        scope: rspice_app_state::state::RenumberScope::WholeProject,
+        order: rspice_app_state::state::RenumberOrder::HierarchyThenCoordinates,
+        protected_references:
+            rspice_app_state::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
-        objects: vec![crate::state::AnnotationObject {
+        objects: vec![rspice_app_state::state::AnnotationObject {
             object: object.clone(),
             current_reference: "R8".to_owned(),
             device_family: "R".to_owned(),
             sheet_id: Some(sheet_id),
             hierarchy_path: "/top".to_owned(),
-            position: crate::state::AnnotationPosition::default(),
+            position: rspice_app_state::state::AnnotationPosition::default(),
             connectivity_order: Some(1),
             locked: false,
             external: false,
@@ -905,11 +909,13 @@ fn deleting_cell_blocks_live_variant_then_removes_and_tombstones_design_manageme
         .update(
             variant_id,
             variant_revision,
-            crate::state::AssemblyVariantDraft {
+            rspice_app_state::state::AssemblyVariantDraft {
                 name: "Industrial".to_owned(),
                 parent_id: None,
-                inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
-                qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+                inheritance:
+                    rspice_app_state::state::VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan:
+                    rspice_app_state::state::VariantQualificationPlan::InvalidateAffectedTests,
                 overrides: std::collections::BTreeMap::new(),
             },
         )
@@ -976,7 +982,7 @@ fn deleting_cell_blocks_live_variant_then_removes_and_tombstones_design_manageme
             .annotation()
             .object_authorities()
             .get(&object),
-        Some(crate::state::AnnotationObjectAuthority::Tombstone)
+        Some(rspice_app_state::state::AnnotationObjectAuthority::Tombstone)
     ));
 }
 
@@ -985,20 +991,21 @@ fn deleting_cell_publishes_annotation_tombstones_without_a_sheet_catalog() {
     let mut state = state_with_open_amp_cell();
     let object_id = state.model.schematic.document().components[0].id;
     let owner = CellViewRef::new("work", "amp", "schematic").key();
-    let object =
-        crate::state::SchematicObjectKey::new(&owner, object_id).expect("scoped schematic object");
-    let renumber_request = crate::state::RenumberRequest {
-        scope: crate::state::RenumberScope::WholeProject,
-        order: crate::state::RenumberOrder::HierarchyThenCoordinates,
-        protected_references: crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+    let object = rspice_app_state::state::SchematicObjectKey::new(&owner, object_id)
+        .expect("scoped schematic object");
+    let renumber_request = rspice_app_state::state::RenumberRequest {
+        scope: rspice_app_state::state::RenumberScope::WholeProject,
+        order: rspice_app_state::state::RenumberOrder::HierarchyThenCoordinates,
+        protected_references:
+            rspice_app_state::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
-        objects: vec![crate::state::AnnotationObject {
+        objects: vec![rspice_app_state::state::AnnotationObject {
             object: object.clone(),
             current_reference: "R28".to_owned(),
             device_family: "R".to_owned(),
             sheet_id: None,
             hierarchy_path: "/top".to_owned(),
-            position: crate::state::AnnotationPosition::default(),
+            position: rspice_app_state::state::AnnotationPosition::default(),
             connectivity_order: Some(1),
             locked: false,
             external: false,
@@ -1083,7 +1090,7 @@ fn deleting_cell_publishes_annotation_tombstones_without_a_sheet_catalog() {
             .annotation()
             .object_authorities()
             .get(&object),
-        Some(crate::state::AnnotationObjectAuthority::Tombstone)
+        Some(rspice_app_state::state::AnnotationObjectAuthority::Tombstone)
     ));
 }
 
@@ -1265,8 +1272,8 @@ fn carry_out_in_place(app: &mut RSpiceApp) {
         );
     }
     state.record(
-        crate::diagnostics::LogSeverity::Info,
-        crate::diagnostics::LogSource::Studio,
+        rspice_app_state::diagnostics::LogSeverity::Info,
+        rspice_app_state::diagnostics::LogSource::Studio,
         notice,
     );
 }

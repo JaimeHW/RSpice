@@ -8,16 +8,16 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::diagnostics::LogSeverity;
-use crate::time_compat::Instant;
-use crate::ui::Mode;
-use crate::ui::Theme;
 use crate::workbench::UserPreferences;
 use crate::workbench::app_state::AppState;
 use crate::workbench::{
     ChoicePreference, FolderListPreference, ScalarPreference, TogglePreference,
 };
 use rspice_app_settings::workbench::app_state::session::preferences_file::*;
+use rspice_app_state::diagnostics::LogSeverity;
+use rspice_app_state::time_compat::Instant;
+use rspice_app_workbench::ui::Mode;
+use rspice_app_workbench::ui::Theme;
 use std::time::Duration;
 
 /// A preferences file in a folder of its own, never the real settings folder.
@@ -533,7 +533,7 @@ fn pointer_movement_alone_never_hashes_the_settings() {
         .active_mut()
         .unwrap()
         .policies_mut()
-        .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
+        .set_chord_timeout(rspice_app_state::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
     let edited = state.model.preferences.shortcut_profiles().clone();
     assert_eq!(
         fingerprint(
@@ -614,7 +614,7 @@ fn exported(label: &str) -> (AppState, Vec<u8>) {
         .active_mut()
         .unwrap()
         .policies_mut()
-        .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
+        .set_chord_timeout(rspice_app_state::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
     *source.model.preferences.shortcut_profiles_mut() = shortcuts;
     source.preferences_file_parts().bind_preferences_file(store);
     let bytes = source
@@ -781,8 +781,8 @@ fn show_file_opens_the_folder_that_holds_it() {
 
 #[test]
 fn future_incompatible_shortcut_root_does_not_invalidate_the_session() {
-    use crate::state::shortcuts::ShortcutProfileLibraryError;
     use crate::workbench::commands::vocabulary::CommandRegistry;
+    use rspice_app_state::state::shortcuts::ShortcutProfileLibraryError;
 
     let mut preferences: UserPreferences = serde_json::from_str(r#"{"shortcuts":17}"#).unwrap();
     assert_eq!(serde_json::to_value(&preferences).unwrap()["shortcuts"], 17);

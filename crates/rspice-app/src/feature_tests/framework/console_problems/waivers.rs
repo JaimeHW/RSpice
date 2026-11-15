@@ -208,7 +208,7 @@ fn a_waiver_that_cannot_be_recorded_here_is_not_offered() {
     use crate::workbench::app_state::waivers::WaiverTarget;
 
     let mut state = open_state();
-    let symbol = crate::state::CellViewRef::new("work", "amp", "symbol");
+    let symbol = rspice_app_state::state::CellViewRef::new("work", "amp", "symbol");
     let finding = record(
         &state,
         "SYMBOL-PIN-OFF-GRID",
@@ -254,7 +254,7 @@ fn a_copied_row_carries_its_waiver() {
     publish(&mut state, vec![waived, open]);
     let listed = listing(&state);
 
-    let stamp = crate::time_compat::utc_stamp(1_760_000_000_000);
+    let stamp = rspice_app_state::time_compat::utc_stamp(1_760_000_000_000);
     assert!(copy_of(&listed.row(0).expect("listed")).ends_with(&format!(
         "\taccepted at review \u{00b7} ana \u{00b7} {stamp}"
     )),);
@@ -392,11 +392,11 @@ fn a_waiver_recorded_on_the_page_drops_the_report_that_refused_the_run() {
     );
     retain_report(
         &mut app.state,
-        vec![crate::state::PreflightIssue {
+        vec![rspice_app_state::state::PreflightIssue {
             check: "Schematic validation".to_owned(),
             observed: "1 design-rule error".to_owned(),
             required: "No error-level design-rule findings".to_owned(),
-            remediation: crate::state::PreflightRemediation::DesignChecks,
+            remediation: rspice_app_state::state::PreflightRemediation::DesignChecks,
         }],
     );
     collision_current(&mut app.state);
@@ -431,11 +431,11 @@ fn a_waiver_recorded_on_the_page_drops_the_report_that_refused_the_run() {
 
 /// Retain a preflight report over the design as it stands, as a pass does,
 /// with `blockers` against it.
-fn retain_report(state: &mut AppState, blockers: Vec<crate::state::PreflightIssue>) {
+fn retain_report(state: &mut AppState, blockers: Vec<rspice_app_state::state::PreflightIssue>) {
     let (topology_root, topology_revision, topology_closure) =
         state.model.configured_topology_revision();
     let plan = state.model.active_plan_revision();
-    state.runs.preflight.report = Some(crate::state::PreflightReport {
+    state.runs.preflight.report = Some(rspice_app_state::state::PreflightReport {
         project_revision: state.model.workspace.content.project.revision().get(),
         topology_root,
         topology_revision,

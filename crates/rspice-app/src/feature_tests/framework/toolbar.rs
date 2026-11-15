@@ -1,13 +1,6 @@
 //! Tests for the context toolbar: run currentness, the mockup's command rows
 //! and glyphs, and the responsive widths every breakpoint reserves.
 
-use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
-use crate::state::{
-    AnalysisResultSourceDomain, ComponentType, PreparedRunReceipt, PreparedRunTaskReceipt,
-    PreparedSourceCheckReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
-    Tool,
-};
-use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::RSpiceApp;
 use crate::workbench::chrome::toolbar::*;
 use crate::workbench::design::commands::DesignCommand;
@@ -22,6 +15,15 @@ use rspice_app_results::workbench::chrome::toolbar::results::{
     results_document_is_historical, run_has_current_success_authority,
 };
 use rspice_app_simulate::workbench::chrome::toolbar::simulate::pvt_menu_height_for_viewport;
+use rspice_app_state::product::{
+    AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId,
+};
+use rspice_app_state::state::{
+    AnalysisResultSourceDomain, ComponentType, PreparedRunReceipt, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
+    Tool,
+};
+use rspice_app_workbench::ui::panels::WorkbenchIcon;
 
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
@@ -39,7 +41,7 @@ fn completed_prepared_run(
         digest(0x64),
     )
     .expect("task receipt");
-    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+    let receipt = PreparedRunReceipt::new(rspice_app_state::state::PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
         simulation_plan_id: Some(SimulationPlanId::new()),
         project_revision,
@@ -104,7 +106,7 @@ fn running_dataset_is_never_presented_as_current() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Results;
     let source = "R1 1 0 1k\n";
-    let source_digest = crate::state::content_digest(source);
+    let source_digest = rspice_app_state::state::content_digest(source);
     let generation_input = digest(0x81);
     app.state.model.simulation.source.netlist_content = source.to_owned();
     app.state.model.netlist_artifacts.generated_input_digest = Some(generation_input);
@@ -378,7 +380,7 @@ fn reference_pvt_commit_advances_the_plan_and_invalidates_preflight() {
         .expect("default plan");
     let (topology_root, topology_revision, topology_closure) =
         app.state.model.configured_topology_revision();
-    app.state.runs.preflight.report = Some(crate::state::PreflightReport {
+    app.state.runs.preflight.report = Some(rspice_app_state::state::PreflightReport {
         project_revision: app.state.model.workspace.content.project.revision().get(),
         topology_root,
         topology_revision,
@@ -393,7 +395,7 @@ fn reference_pvt_commit_advances_the_plan_and_invalidates_preflight() {
     assert!(
         crate::workbench::simulate::chrome::commit_reference_pvt(
             &mut crate::workbench::features::cx(&mut app),
-            crate::product::ProcessCorner::FF,
+            rspice_app_state::product::ProcessCorner::FF,
             -40.0,
         )
         .expect("PVT selection commits")
@@ -427,7 +429,7 @@ struct Desk {
 impl Desk {
     fn new(app: RSpiceApp) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut desk = Self {
             ctx,

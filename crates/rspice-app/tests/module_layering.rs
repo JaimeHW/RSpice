@@ -69,11 +69,6 @@ const LAYERS: &[(&str, u32)] = &[
     // It references nothing, so the bottom layer clears every inbound edge
     // at once.
     ("source_guard", 0),
-    // The design system.
-    ("ui", 1),
-    // Domain services over the persisted model.
-    ("services", 5),
-    ("simulation", 6),
     // Editors and inspectors.
     ("properties", 7),
     ("schematic", 8),

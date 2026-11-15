@@ -1,8 +1,8 @@
 //! The symbol editor's inspector drawn through a whole application.
 
 use crate::feature_tests::design::symbol_inspector_drawn::Editor;
-use crate::state::{Library, Point};
 use crate::workbench::design::inspector::symbol::*;
+use rspice_app_state::state::{Library, Point};
 
 #[test]
 fn queued_symbol_inspector_edits_revalidate_source_selection_and_authority() {

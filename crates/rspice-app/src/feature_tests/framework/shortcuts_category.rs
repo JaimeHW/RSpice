@@ -1,9 +1,9 @@
 //! The shortcut reference lists every discoverable command exactly once.
 
-use crate::state::command_catalog::CommandPlatform;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::CommandFlags;
 use crate::workbench::project::commands::ProjectCommand;
+use rspice_app_state::state::command_catalog::CommandPlatform;
 use rspice_app_workbench::workbench::app_state::session::shortcuts::category::*;
 
 #[test]

@@ -14,9 +14,9 @@
 //! single owner, and pin that the per-analysis rows honour participation
 //! rather than pricing every analysis at the full matrix.
 
-use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::workbench::RSpiceApp;
 use rspice_app_simulate::workbench::surfaces::simulate::participation::PlanParticipation;
+use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 use rspice_simulation_contract::run_set;
 

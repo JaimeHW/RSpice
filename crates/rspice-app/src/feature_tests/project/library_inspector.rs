@@ -4,11 +4,11 @@
 use egui::Ui;
 use rspice_app_state::veriloga_library::{BUILTIN_VERILOGA_MODELS, BuiltinVerilogAModel};
 
-use crate::state::ViewType;
 use crate::workbench::app_state::{AppState, SlotFacts};
 use crate::workbench::lifecycle::project_lifecycle::LifecycleView;
 use crate::workbench::project::workspace_state::ProjectPage;
 use rspice_app_project::workbench::docks::inspector::project::{ProjectInspector, project_library};
+use rspice_app_state::state::ViewType;
 
 /// Everything the Library page's inspector announces for `state`.
 fn announced(
@@ -17,7 +17,7 @@ fn announced(
     builtin_model: Option<&'static BuiltinVerilogAModel>,
 ) -> Vec<String> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let input = || egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
@@ -101,9 +101,12 @@ fn the_open_built_in_library_is_what_the_inspector_describes() {
 #[test]
 fn a_verilog_a_view_reads_as_verilog_a() {
     let mut state = AppState::default();
-    let mut cell = crate::state::Cell::new("amp");
-    cell.add_view(crate::state::View::new("veriloga", ViewType::VerilogA));
-    let mut library = crate::state::Library::new("analog");
+    let mut cell = rspice_app_state::state::Cell::new("amp");
+    cell.add_view(rspice_app_state::state::View::new(
+        "veriloga",
+        ViewType::VerilogA,
+    ));
+    let mut library = rspice_app_state::state::Library::new("analog");
     library.add_cell(cell);
     let libraries = &mut state.model.library_manager;
     libraries.add_library(library);

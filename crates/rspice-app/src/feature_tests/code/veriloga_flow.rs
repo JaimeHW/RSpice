@@ -8,7 +8,6 @@
 //! the user's gesture reaches, every frame is a whole application frame, and
 //! no configuration is ever made by hand.
 
-use crate::state::CellViewRef;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_flow_tests::{
     CELL, MODULE, PORTS, User, assert_five_volts, compile, new_device, new_project, run_plan,
@@ -16,6 +15,7 @@ use crate::workbench::app::veriloga_flow_tests::{
 };
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_state::state::CellViewRef;
 
 /// A device bound to a card of the project's model library runs with the
 /// card's parameters: the output follows the card's gain of 2, not the
@@ -593,8 +593,8 @@ const CMC_ROOTS: [(&str, &str, &str); 4] = [
 /// the library shelf on the top schematic, each model one cell of its own.
 #[test]
 fn compact_models_import_from_their_source_folders_compile_and_place() {
-    use crate::state::workspace::ImportedInclude;
     use crate::workbench::documents::code_workspace;
+    use rspice_app_state::state::workspace::ImportedInclude;
 
     let (mut user, top) = new_project();
     let models = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/veriloga/cmc");
@@ -648,7 +648,7 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
 
         // The library shelf arms the cell as its row does, then a click on
         // the top schematic places it.
-        let candidate = crate::state::library_cell_placement_candidates(
+        let candidate = rspice_app_state::state::library_cell_placement_candidates(
             &user.app.state.model.library_manager,
             &user.app.state.model.workspace,
         )
@@ -774,7 +774,7 @@ fn a_builtin_model_copied_from_the_library_page_compiles_and_places() {
         "the copy builds the branch the shipped model was built from"
     );
 
-    let candidate = crate::state::library_cell_placement_candidates(
+    let candidate = rspice_app_state::state::library_cell_placement_candidates(
         &user.app.state.model.library_manager,
         &user.app.state.model.workspace,
     )
@@ -822,8 +822,8 @@ mod size_and_zoom;
 /// the sheet around it, and a pin moved there takes the instance's wire.
 #[test]
 fn a_placed_devices_symbol_is_edited_in_place() {
-    use crate::state::Point;
     use crate::workbench::design::commands::DesignCommand;
+    use rspice_app_state::state::Point;
 
     let (mut user, device) = wired_device();
     let top = user.app.state.model.workspace.content.active_view.clone();

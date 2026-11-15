@@ -3,7 +3,7 @@
 
 use super::Bench;
 use super::property::{Drawing, Pick, Step::*, Turn, p, replay, replay_on};
-use crate::state::{ComponentType, MoveSelectionMode, Point, Rotation};
+use rspice_app_state::state::{ComponentType, MoveSelectionMode, Point, Rotation};
 use rspice_schematic_editor::view::pointer_target::PointerTarget;
 
 /// Replay a shrunk sequence the property test reported, from the wiring

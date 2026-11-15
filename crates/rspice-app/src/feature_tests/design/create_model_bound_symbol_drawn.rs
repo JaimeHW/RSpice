@@ -59,7 +59,7 @@ fn rects_overlap(a: egui::accesskit::Rect, b: egui::accesskit::Rect) -> bool {
 fn accessibility_tree_exposes_the_mockup_dialog_and_complete_actions() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state = state_with_bound_mos_model();
     open_create_model_bound_symbol_dialog(&mut app.state);
@@ -96,7 +96,7 @@ fn accessibility_tree_exposes_the_mockup_dialog_and_complete_actions() {
 fn mockup_width_keeps_pin_actions_and_generated_views_in_separate_tracks() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state = state_with_bound_mos_model();
     open_create_model_bound_symbol_dialog(&mut app.state);
@@ -142,7 +142,7 @@ fn mockup_width_keeps_pin_actions_and_generated_views_in_separate_tracks() {
 fn validation_status_reserves_height_and_desktop_generated_views_do_not_clip() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state = state_with_bound_mos_model();
     open_create_model_bound_symbol_dialog(&mut app.state);

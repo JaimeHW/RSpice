@@ -3,8 +3,8 @@
 
 use super::*;
 use crate::feature_tests::hardcopy::{resolve_retained_hardcopy_source, source_reads};
-use crate::state::DrawingSheetTitleFieldId;
-use crate::state::SheetId;
+use rspice_app_state::state::DrawingSheetTitleFieldId;
+use rspice_app_state::state::SheetId;
 use rspice_hardcopy_contract::HardcopyDocumentKind;
 use rspice_hardcopy_contract::sources::HardcopySourceSet;
 
@@ -141,10 +141,10 @@ fn ungoverned_current_sheet_and_worker_use_the_canvas_project_default() {
     settings.default_format = settings
         .default_format
         .try_update(|draft| {
-            draft.authored_size = crate::state::AuthoredDrawingSheetSize::Standard {
-                standard: crate::state::DrawingSheetStandard::IsoA3,
+            draft.authored_size = rspice_app_state::state::AuthoredDrawingSheetSize::Standard {
+                standard: rspice_app_state::state::DrawingSheetStandard::IsoA3,
             };
-            draft.orientation = crate::state::SchematicPageOrientation::Landscape;
+            draft.orientation = rspice_app_state::state::SchematicPageOrientation::Landscape;
         })
         .unwrap();
     settings.title_block_field_values.insert(

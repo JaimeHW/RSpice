@@ -1,7 +1,7 @@
 //! Single edits must preserve references in every occurrence of a reused master.
 
 use super::*;
-use crate::state::SchematicSnapshot;
+use rspice_app_state::state::SchematicSnapshot;
 use std::collections::BTreeSet;
 
 #[test]
@@ -449,7 +449,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
         .unwrap()
         .saved_outputs[0]
         .clone();
-    output.id = crate::product::SavedOutputId::new();
+    output.id = rspice_app_state::product::SavedOutputId::new();
     output.name = "First occurrence".to_owned();
     output.source_expression = "I(/X1/V42)".to_owned();
     let second_output = output.id;
@@ -546,7 +546,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
             },
         )
         .unwrap();
-        let loaded = crate::io::load_project_file(&path).unwrap();
+        let loaded = rspice_app_services::io::load_project_file(&path).unwrap();
         for (reference, parents) in [
             (&root, vec!["X1", "X2"]),
             (&child, vec!["X1"]),
@@ -612,7 +612,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
             Some(second_output)
         );
         assert_eq!(source.document().probes[0].plan_id, Some(second_plan));
-        let workspace = crate::state::ProjectWorkspace::from_parts(
+        let workspace = rspice_app_state::state::ProjectWorkspace::from_parts(
             loaded.file.workspace.clone(),
             loaded.workspace_session.clone(),
         );

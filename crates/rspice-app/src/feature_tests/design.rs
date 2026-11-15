@@ -105,10 +105,6 @@ mod wiring_acceptance;
 use egui::accesskit::{Node, Role};
 use egui::{Context, Rect, pos2, vec2};
 
-use crate::state::{
-    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance,
-    ModelBoundSymbolDefinition, Point, SymbolDefinitionImport, View, ViewType,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design::DesignFeature;
@@ -116,6 +112,10 @@ use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::design::test_host::DesignTestHost;
 use crate::workbench::features::{self, Registered};
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::{
+    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance,
+    ModelBoundSymbolDefinition, Point, SymbolDefinitionImport, View, ViewType,
+};
 
 use super::replay::Replay;
 
@@ -248,7 +248,7 @@ fn resistor(app: &mut RSpiceApp, at: Point) -> u64 {
 /// Three frames of the whole application; the last one's AccessKit nodes.
 fn frame_nodes(app: &mut RSpiceApp) -> Vec<Node> {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut frame = eframe::Frame::_new_kittest();
     let mut nodes = Vec::new();
@@ -478,7 +478,7 @@ fn a_descent_is_carried_out_in_the_frame_it_is_chosen() {
     let child = selected_hierarchy_instance(&mut app);
     app.execute_command_key(DesignCommand::DescendHierarchy.key());
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut frame = eframe::Frame::_new_kittest();
     let mut run = |app: &mut RSpiceApp, time: f64, events: Vec<egui::Event>| {
         let _ = ctx.run_ui(
@@ -556,7 +556,7 @@ fn the_component_form_designer_opens_and_draws_in_the_frame() {
         .library_manager
         .get_library_mut(&library_name)
         .expect("project library");
-    crate::state::prepare_symbol_construction(&imported.definition, library)
+    rspice_app_state::state::prepare_symbol_construction(&imported.definition, library)
         .expect("construction plan")
         .commit(library)
         .expect("commit definition");
@@ -678,9 +678,9 @@ fn the_component_editor_opens_and_draws_in_the_frame() {
 /// bar says so.
 #[test]
 fn a_readoption_reopens_the_editor_in_the_frame_it_is_chosen() {
-    use crate::state::stimulus_library::definition::StimulusDefinition;
-    use crate::state::stimulus_library::draft::DefinitionDraft;
-    use crate::state::stimulus_library::now_unix_ms;
+    use rspice_app_state::state::stimulus_library::definition::StimulusDefinition;
+    use rspice_app_state::state::stimulus_library::draft::DefinitionDraft;
+    use rspice_app_state::state::stimulus_library::now_unix_ms;
 
     let mut replay = Replay::of(RSpiceApp::test_instance());
     replay.app.state.workbench.activate(Workspace::Design);
@@ -881,11 +881,12 @@ fn a_replacement_is_carried_out_in_the_frame_it_is_chosen() {
 /// The lookup-table XSPICE device's placement form, opened over the open
 /// schematic; the device's display name.
 fn open_lookup_table_placement(app: &mut RSpiceApp) -> &'static str {
-    let descriptor = crate::state::engine_only_xspice_devices()
+    let descriptor = rspice_app_state::state::engine_only_xspice_devices()
         .iter()
         .find(|descriptor| descriptor.model_type == "d_lut")
         .expect("the lookup-table device");
-    let ports = crate::state::builtin_xspice_vector_ports(descriptor).expect("its vector ports");
+    let ports =
+        rspice_app_state::state::builtin_xspice_vector_ports(descriptor).expect("its vector ports");
     let source = crate::workbench::app::schematic_editor_request_source(&app.state);
     app.state.design.builtin_xspice_placement.open(
         descriptor.stable_id,
@@ -929,7 +930,7 @@ fn design_surface_pass(app: &mut RSpiceApp) {
     let surface = DesignFeature::registry()
         .surface_section()
         .expect("the design feature registers its surface");
-    crate::ui::raster::render(vec2(720.0, 480.0), |ui, background| {
+    rspice_app_workbench::ui::raster::render(vec2(720.0, 480.0), |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
             .show(ui, |ui| {

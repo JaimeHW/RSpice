@@ -2,15 +2,15 @@
 //! and the symbol's pins kept in step, through whole frames of the
 //! application on a project that has just been created.
 
-use crate::state::{
-    CellViewRef, Component, ComponentType, PinFindingKind, Point, PortDirection, SymbolDocument,
-    SymbolInterface, SymbolPin, SymbolPinSide, ViewType,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::project_transactions::open_new_project_dialog;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::{
+    CellViewRef, Component, ComponentType, PinFindingKind, Point, PortDirection, SymbolDocument,
+    SymbolInterface, SymbolPin, SymbolPinSide, ViewType,
+};
 
 use super::super::replay::Replay;
 
@@ -666,8 +666,8 @@ fn update_pins_is_named_for_the_schematic_wherever_it_shows() {
 /// Update pins says so, from the menu row to the step Undo takes back.
 #[test]
 fn update_pins_is_named_for_the_module_of_a_module_defined_cell() {
-    use crate::state::{Cell, View};
     use crate::workbench::framework::host::Host;
+    use rspice_app_state::state::{Cell, View};
 
     let mut replay = new_project();
     let library = replay
@@ -801,7 +801,7 @@ fn terminal(document: &SymbolDocument, name: &str) -> Point {
 /// 40 to the left from its pin `pin`. The sheet is held as the project holds
 /// a sheet that is not open.
 fn place_wired_instance(replay: &mut Replay, schematic: &CellViewRef, pin: &str) -> CellViewRef {
-    use crate::state::{Cell, LibraryCellInstance, View, Wire, WireConnection};
+    use rspice_app_state::state::{Cell, LibraryCellInstance, View, Wire, WireConnection};
 
     let symbol = symbol_of(schematic);
     let at = terminal(&document(&replay.app, &symbol), pin);
@@ -816,7 +816,7 @@ fn place_wired_instance(replay: &mut Replay, schematic: &CellViewRef, pin: &str)
         .get_library_mut(&schematic.library)
         .expect("the project library")
         .add_cell(cell);
-    let mut sheet = crate::state::SchematicState::default();
+    let mut sheet = rspice_app_state::state::SchematicState::default();
     let mut binding = LibraryCellInstance::new(&schematic.library, &schematic.cell, "schematic");
     binding.bind_interface(&replay.app.state.model.symbol_ports(&symbol));
     let drawing = sheet.document_mut_for_test();

@@ -166,8 +166,8 @@ fn stop_during_preparation_queues_nothing_and_leaves_nothing_behind() {
 /// as it stood at the press, so it reads stale. Nothing is retained or queued.
 #[test]
 fn an_edit_during_preparation_queues_nothing_and_stales_what_the_pass_found() {
-    use crate::state::{ComponentType, Point};
     use crate::workbench::app_state::diagnostic_store::{BatchStanding, DiagnosticOwner};
+    use rspice_app_state::state::{ComponentType, Point};
 
     let (mut app, _) = app_with_a_forced_capacitor_island(true);
     let release = app.simulation_controller.hold_next_preflight_worker();
@@ -317,7 +317,7 @@ impl RSpiceApp {
     /// Press Run and let the pass authorize and queue the run, as the frames
     /// before the one that dispatches it would. Returns the digest it
     /// authorized.
-    pub(super) fn queued_by_its_check(&mut self) -> crate::product::ContentDigest {
+    pub(super) fn queued_by_its_check(&mut self) -> rspice_app_state::product::ContentDigest {
         start(&mut self.state, &mut self.simulation_controller, true);
         self.settle_preflight();
         assert!(
@@ -340,7 +340,7 @@ impl RSpiceApp {
     fn queued_as_automation_queues(
         &mut self,
     ) -> (
-        crate::product::ContentDigest,
+        rspice_app_state::product::ContentDigest,
         rspice_app_runs::simulation::controller::PreparedRunSetInputs,
     ) {
         use rspice_app_runs::simulation::controller::prepared_run::thread_preparations;
@@ -683,7 +683,7 @@ fn edit_the_transient(
     state: &mut AppState,
     edit: impl FnOnce(&mut rspice_simulation_contract::drafts::TranSetup),
 ) {
-    use crate::simulation::plan::AnalysisDraft;
+    use rspice_app_state::simulation::plan::AnalysisDraft;
 
     let plan = state
         .model
@@ -712,7 +712,7 @@ impl RSpiceApp {
         &mut self,
     ) -> (
         rspice_app_runs::simulation::controller::PreparedRunSetInputs,
-        crate::product::ContentDigest,
+        rspice_app_state::product::ContentDigest,
     ) {
         edit_the_transient(&mut self.state, |draft| {
             draft.stop = "20u".to_owned();
@@ -753,7 +753,7 @@ impl RSpiceApp {
     fn queued_resuming_from_a_checkpoint(
         &mut self,
     ) -> (
-        crate::product::ContentDigest,
+        rspice_app_state::product::ContentDigest,
         rspice_app_runs::simulation::controller::PreparedRunSetInputs,
     ) {
         let (_, image) = self.ran_capturing_checkpoints();
@@ -965,7 +965,7 @@ fn the_evidence_check_and_the_dispatch_agree_for_the_same_edit() {
             state
                 .model
                 .sim_setup
-                .set_reference_pvt(crate::product::ProcessCorner::TT, 125.0)
+                .set_reference_pvt(rspice_app_state::product::ProcessCorner::TT, 125.0)
                 .expect("a physical temperature");
         }),
     ];

@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 
 use super::veriloga_design::wait_for_compile;
 use super::veriloga_interface::compile_and_publish;
-use crate::state::ProjectSourceRole;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame_with, open_in_design, open_project_app, themed_context,
@@ -18,6 +17,7 @@ use rspice_app_code::workbench::app::dialogs::veriloga_build_settings::{
     VerilogABuildSettingsDraft, save_veriloga_build_settings,
 };
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_state::state::ProjectSourceRole;
 use rspice_simulation::project_veriloga::build_profile::{
     VerilogAFallbackPolicy, resolve_veriloga_build_profile,
 };
@@ -288,7 +288,7 @@ fn undoing_build_settings_voids_the_compile_evidence_in_its_frame() {
     open_in_design(&mut app.state, &schematic);
     assert_eq!(
         app.state.model.workspace.content.active_view_type(),
-        Some(crate::state::ViewType::Schematic)
+        Some(rspice_app_state::state::ViewType::Schematic)
     );
     assert!(app.state.code.code_workspace.veriloga.receipt.is_some());
 
@@ -357,7 +357,7 @@ fn build_settings_undo_refuses_after_a_later_source_edit() {
 fn build_settings_save_is_refused_on_a_read_only_project() {
     let mut app = veriloga_view_holding(TWO_MODULES);
     app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
+        rspice_app_state::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
         },

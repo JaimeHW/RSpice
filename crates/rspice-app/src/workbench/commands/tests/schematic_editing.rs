@@ -11,7 +11,9 @@ use crate::workbench::design::commands::DesignCommand;
 
 #[test]
 fn descend_requires_a_resolved_schematic_master() {
-    use crate::state::{Cell, Component, Library, LibraryCellInstance, Point, View, ViewType};
+    use rspice_app_state::state::{
+        Cell, Component, Library, LibraryCellInstance, Point, View, ViewType,
+    };
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
@@ -94,7 +96,7 @@ fn descend_requires_a_resolved_schematic_master() {
 
 #[test]
 fn transform_commands_keep_wires_attached_to_authored_symbol_pins() {
-    use crate::state::Rotation;
+    use rspice_app_state::state::Rotation;
 
     // The part turns about the middle of the selection rather than its own
     // origin (audit E-2), so the pin's new place is read back from the
@@ -141,7 +143,7 @@ fn transform_commands_keep_wires_attached_to_authored_symbol_pins() {
 /// selected, plus `stub`: a wire from R2's right pin running on to the
 /// right, left unselected.
 fn app_with_selected_resistor_pair() -> (RSpiceApp, u64) {
-    use crate::state::{Component, ComponentType, NetLabel, Point, Wire};
+    use rspice_app_state::state::{Component, ComponentType, NetLabel, Point, Wire};
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
@@ -169,8 +171,8 @@ fn app_with_selected_resistor_pair() -> (RSpiceApp, u64) {
     (app, 4)
 }
 
-fn rotated_cw(vector: crate::state::Point) -> crate::state::Point {
-    crate::state::Point::new(-vector.y, vector.x)
+fn rotated_cw(vector: rspice_app_state::state::Point) -> rspice_app_state::state::Point {
+    rspice_app_state::state::Point::new(-vector.y, vector.x)
 }
 
 /// Rotate used to turn each selected part about its own origin and leave
@@ -277,7 +279,7 @@ fn a_wire_attached_to_a_turned_part_keeps_square_corners() {
 /// the turn's one undo step.
 #[test]
 fn turning_a_part_off_a_pin_it_touched_wires_the_two_pins() {
-    use crate::state::{Component, ComponentType, Point};
+    use rspice_app_state::state::{Component, ComponentType, Point};
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
@@ -331,7 +333,7 @@ fn turning_a_part_off_a_pin_it_touched_wires_the_two_pins() {
 /// with them as a schematic does.
 #[test]
 fn rotate_and_mirror_have_their_keys_on_the_canvas() {
-    use crate::state::command_catalog::{CommandKey, CommandPlatform, ShortcutContext};
+    use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform, ShortcutContext};
 
     let counter_clockwise = DesignCommand::from_key(CommandKey::new("rotate-selection-ccw"))
         .expect("a counter-clockwise rotate");
@@ -407,7 +409,7 @@ fn horizontal_coordinate_reflection_is_labeled_by_its_vertical_mirror_axis() {
 }
 
 fn app_with_every_complete_schematic_object() -> RSpiceApp {
-    use crate::state::{
+    use rspice_app_state::state::{
         Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Component, Junction, NetLabel,
         Point, Wire,
     };
@@ -543,7 +545,7 @@ fn edit_command_enablement_covers_every_complete_schematic_object_class() {
         .session
         .editor
         .selection
-        .select_only_junction(crate::state::Point::new(10, 0));
+        .select_only_junction(rspice_app_state::state::Point::new(10, 0));
     assert!(Command::Copy.is_enabled(&app));
     assert!(Command::Cut.is_enabled(&app));
     assert!(Command::Delete.is_enabled(&app));
@@ -565,9 +567,9 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
         .push(Wire::new(
             17,
             vec![
-                crate::state::Point::new(0, 0),
-                crate::state::Point::new(20, 0),
-                crate::state::Point::new(20, 20),
+                rspice_app_state::state::Point::new(0, 0),
+                rspice_app_state::state::Point::new(20, 0),
+                rspice_app_state::state::Point::new(20, 20),
             ],
         ));
 
@@ -708,7 +710,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
 
 #[test]
 fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
-    use crate::state::{Component, Point};
+    use rspice_app_state::state::{Component, Point};
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
@@ -756,7 +758,7 @@ fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
 
 #[test]
 fn stretch_selection_requires_one_live_eligible_geometry_target() {
-    use crate::state::{Point, Wire};
+    use rspice_app_state::state::{Point, Wire};
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
@@ -798,7 +800,7 @@ fn stretch_selection_requires_one_live_eligible_geometry_target() {
 
 #[test]
 fn array_selection_requires_a_live_eligible_editable_selection() {
-    use crate::state::{Component, Point};
+    use rspice_app_state::state::{Component, Point};
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
@@ -856,7 +858,7 @@ fn cancel_retires_an_armed_array_transaction_and_restores_select() {
 
 #[test]
 fn rename_command_opens_the_stable_target_dialog() {
-    use crate::state::Point;
+    use rspice_app_state::state::Point;
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
@@ -884,7 +886,9 @@ fn rename_command_opens_the_stable_target_dialog() {
 
 #[test]
 fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() {
-    use crate::state::{Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Point};
+    use rspice_app_state::state::{
+        Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation, Point,
+    };
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
@@ -954,7 +958,7 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
 
 #[test]
 fn object_properties_availability_includes_one_selected_net_label() {
-    use crate::state::Point;
+    use rspice_app_state::state::Point;
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
@@ -1006,7 +1010,9 @@ fn object_properties_availability_includes_one_selected_net_label() {
 /// console warning.
 #[test]
 fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
-    use crate::state::{Cell, CellViewRef, Library, Point, SchematicState, View, ViewType};
+    use rspice_app_state::state::{
+        Cell, CellViewRef, Library, Point, SchematicState, View, ViewType,
+    };
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
@@ -1071,7 +1077,7 @@ fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
 /// at placement, and a testbench around the instance so the deck has a
 /// complete circuit to emit.
 fn app_with_a_placed_cell_instance() -> (RSpiceApp, String) {
-    use crate::state::{
+    use rspice_app_state::state::{
         Cell, CellViewRef, Library, LibraryCellInstance, Point, SchematicState, View, ViewType,
         Wire,
     };
@@ -1128,7 +1134,7 @@ fn app_with_a_placed_cell_instance() -> (RSpiceApp, String) {
     (app, master_key)
 }
 
-fn rename_master_port(master: &mut crate::state::SchematicState, from: &str, to: &str) {
+fn rename_master_port(master: &mut rspice_app_state::state::SchematicState, from: &str, to: &str) {
     master
         .document_mut_for_test()
         .components
@@ -1223,7 +1229,7 @@ fn repairing_a_stale_instance_restores_its_x_line() {
             &[],
             &hierarchy,
             &rspice_simulation::netlist_gen::NetlistSourceData::new(
-                &crate::simulation::table_route::SourceFiles,
+                &rspice_app_state::simulation::table_route::SourceFiles,
             ),
         )
     };
@@ -1254,7 +1260,7 @@ fn repairing_a_stale_instance_restores_its_x_line() {
             &[],
             &hierarchy,
             &rspice_simulation::netlist_gen::NetlistSourceData::new(
-                &crate::simulation::table_route::SourceFiles,
+                &rspice_app_state::simulation::table_route::SourceFiles,
             ),
         )
     };
@@ -1279,7 +1285,7 @@ fn repairing_a_stale_instance_restores_its_x_line() {
 /// A design app with `wires` on the canvas, the wire with id `copied`
 /// selected and copied, and the pointer over grid point `hover`.
 fn app_with_copied_wire(
-    wires: Vec<crate::state::Wire>,
+    wires: Vec<rspice_app_state::state::Wire>,
     copied: u64,
     hover: (f64, f64),
 ) -> RSpiceApp {
@@ -1306,7 +1312,7 @@ fn app_with_copied_wire(
 /// step (audit W-9).
 #[test]
 fn a_pasted_wire_ending_inside_another_splits_it_and_dots_the_t() {
-    use crate::state::{Point, Wire};
+    use rspice_app_state::state::{Point, Wire};
 
     let through = Wire::segment(1, Point::new(0, 100), Point::new(200, 100));
     let stub = Wire::segment(2, Point::new(300, 0), Point::new(300, 50));
@@ -1353,7 +1359,7 @@ fn a_pasted_wire_ending_inside_another_splits_it_and_dots_the_t() {
 /// placed or moved part does (audit W-9, with the pin rule of W-5).
 #[test]
 fn a_pasted_pin_landing_inside_a_wire_splits_it() {
-    use crate::state::{Component, ComponentType, Point, Wire};
+    use rspice_app_state::state::{Component, ComponentType, Point, Wire};
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
@@ -1403,7 +1409,7 @@ fn a_pasted_pin_landing_inside_a_wire_splits_it() {
 /// Library `work` with cells `a` and `b`, each with a schematic view; `a`
 /// is open on the design canvas.
 fn app_with_two_cells() -> RSpiceApp {
-    use crate::state::{Cell, Library, View, ViewType};
+    use rspice_app_state::state::{Cell, Library, View, ViewType};
 
     let mut app = RSpiceApp::test_instance();
     let mut library = Library::new("work");
@@ -1414,14 +1420,18 @@ fn app_with_two_cells() -> RSpiceApp {
     }
     app.state.model.library_manager.add_library(library);
     app.state
-        .open_workspace_view(crate::state::CellViewRef::new("work", "a", "schematic"));
+        .open_workspace_view(rspice_app_state::state::CellViewRef::new(
+            "work",
+            "a",
+            "schematic",
+        ));
     app.state.workbench.activate(Workspace::Design);
     app
 }
 
 /// Two inductors named L1 and L2 and a K1 coupling them, ids from `first`.
-fn coupled_pair(first: u64) -> Vec<crate::state::Component> {
-    use crate::state::{Component, ComponentType, Point};
+fn coupled_pair(first: u64) -> Vec<rspice_app_state::state::Component> {
+    use rspice_app_state::state::{Component, ComponentType, Point};
 
     let x = i32::try_from(first).expect("small id") * 100;
     let mut l1 = Component::new(first, ComponentType::Inductor, Point::new(x, 0));
@@ -1459,7 +1469,11 @@ fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
     Command::Copy.execute(&mut app);
 
     app.state
-        .open_workspace_view(crate::state::CellViewRef::new("work", "b", "schematic"));
+        .open_workspace_view(rspice_app_state::state::CellViewRef::new(
+            "work",
+            "b",
+            "schematic",
+        ));
     app.state.workbench.activate(Workspace::Design);
     app.state.model.schematic.document_mut_for_test().components = coupled_pair(11);
     app.state.model.schematic.init_undo_history();
@@ -1506,7 +1520,7 @@ fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
 /// progress, by menu, palette or key.
 #[test]
 fn undo_and_redo_wait_for_the_edit_in_progress() {
-    use crate::state::{ComponentType, Point};
+    use rspice_app_state::state::{ComponentType, Point};
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
@@ -1529,7 +1543,7 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
         .with_undo("place R2", |schematic| {
             schematic.add_component(ComponentType::Resistor, Point::new(200, 0));
         });
-    let carry = |schematic: &mut crate::state::SchematicState, to: Point| {
+    let carry = |schematic: &mut rspice_app_state::state::SchematicState, to: Point| {
         schematic
             .document_mut_for_test()
             .components
@@ -1599,7 +1613,7 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
 /// one. Join collinear wires does, as one undo step.
 #[test]
 fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
-    use crate::state::{Point, Wire};
+    use rspice_app_state::state::{Point, Wire};
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
@@ -1633,8 +1647,8 @@ fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
 /// (audit G-11).
 #[test]
 fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
-    use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
     use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
+    use rspice_app_state::state::command_catalog::{CommandPlatform, ShortcutContext};
 
     let repeat = Command::RepeatLastCommand;
     assert_eq!(repeat.default_shortcut_label(CommandPlatform::Desktop), ".");

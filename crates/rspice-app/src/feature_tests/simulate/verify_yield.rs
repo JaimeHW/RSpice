@@ -3,13 +3,13 @@
 //! and a restored session and a reopened project state the same yield.
 
 use super::verify_fixtures::monte_carlo_app;
-use crate::state::VerificationPage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{YieldLimitBound, YieldLimitDraft};
 use rspice_app_simulate::workbench::surfaces::verify::raster::fixture_yield_results;
 use rspice_app_simulate::workbench::surfaces::verify::raster::{page_input, page_pass};
 use rspice_app_simulate::workbench::surfaces::verify::show;
+use rspice_app_state::state::VerificationPage;
 
 /// Edit specifications pressed while a limit is being typed: the press takes
 /// the cell's focus, so the typed limit is the plan's in that frame, and the

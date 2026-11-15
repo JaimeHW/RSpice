@@ -1,14 +1,14 @@
 //! A Verilog-A module instance's inspector drawn through a whole application: the
 //! temperature row and the title that names what it instantiates.
 
-use crate::state::{
-    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
-    PortDirection, View, ViewType,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::inspector::component::{
     TEMPERATURE_PARAM, component_title_kind, inline_parameter_contract,
     supports_instance_temperature,
+};
+use rspice_app_state::state::{
+    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
+    PortDirection, View, ViewType,
 };
 use std::collections::HashMap;
 
@@ -132,11 +132,11 @@ pub(crate) fn app_with_owned_veriloga_instance() -> (RSpiceApp, Component) {
     );
     let reference = CellViewRef::new("behavioral", "amp", "veriloga");
     let ports = [
-        crate::state::PortSpec {
+        rspice_app_state::state::PortSpec {
             name: "p".to_owned(),
             direction: PortDirection::InOut,
         },
-        crate::state::PortSpec {
+        rspice_app_state::state::PortSpec {
             name: "n".to_owned(),
             direction: PortDirection::InOut,
         },
@@ -151,9 +151,9 @@ pub(crate) fn app_with_owned_veriloga_instance() -> (RSpiceApp, Component) {
         .and_then(|library| library.get_cell_mut("amp"))
         .expect("the cell")
         .add_view(symbol);
-    let bundle = crate::state::ProjectSourceBundle::try_new(
-        crate::state::ProjectSourceOwner::cell_view(reference),
-        crate::state::ProjectSourceLanguage::VerilogA,
+    let bundle = rspice_app_state::state::ProjectSourceBundle::try_new(
+        rspice_app_state::state::ProjectSourceOwner::cell_view(reference),
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         "amp.va",
         "module amp(p, n);\n  inout p, n;\n  electrical p, n;\n  parameter real gain = 10;\n  analog I(p, n) <+ gain * V(p, n);\nendmodule\n",
         [],

@@ -1,13 +1,13 @@
 //! The drawing-sheet preview over a whole application.
 
-use crate::state::{
+use crate::workbench::app_state::AppState;
+use egui::{Pos2, Rect, Shape, vec2};
+use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_preview::*;
+use rspice_app_state::state::{
     DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry,
     DrawingSheetFrameLayer, DrawingSheetFrameMark, Junction, NetLabel, Point, SchematicProbe,
     SchematicSheetFormat,
 };
-use crate::workbench::app_state::AppState;
-use egui::{Pos2, Rect, Shape, vec2};
-use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_preview::*;
 use rspice_schematic_editor::view::drawing_sheet::DrawingSheetPrintablePreviewKind;
 
 #[test]
@@ -15,8 +15,8 @@ fn the_preview_letters_the_zones_the_sheet_model_letters() {
     // The preview keeps no alphabet of its own: it letters the
     // references the canvas and the plot letter, from the sheet model.
     let format = SchematicSheetFormat::from_standard(
-        crate::state::DrawingSheetStandard::IsoA0,
-        crate::state::SchematicPageOrientation::Landscape,
+        rspice_app_state::state::DrawingSheetStandard::IsoA0,
+        rspice_app_state::state::SchematicPageOrientation::Landscape,
     );
     let geometry = format.geometry().unwrap();
     let expected = format

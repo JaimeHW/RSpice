@@ -19,7 +19,7 @@ fn unified_mixed_project_compilation_preserves_profile_and_backend_requirements(
         .defines
         .insert("PROFILE_SCALE".to_owned(), "2".to_owned());
     let bundle = project_bundle(&profile);
-    let project_id = crate::product::ProjectId::new();
+    let project_id = rspice_app_state::product::ProjectId::new();
     let receipt =
         compile_project_bundle_receipt(project_id, &bundle, Some("project_controlled")).unwrap();
     assert!(

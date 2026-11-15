@@ -42,7 +42,7 @@ fn schematic_first_app() -> RSpiceApp {
 fn toolbar_layout(build: fn() -> RSpiceApp, width: f32) -> CodeToolbarLayout {
     let mut app = build();
     let mut captured = None;
-    crate::ui::raster::render(vec2(width, 120.0), |ui, background| {
+    rspice_app_workbench::ui::raster::render(vec2(width, 120.0), |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
             .show(ui, |ui| {

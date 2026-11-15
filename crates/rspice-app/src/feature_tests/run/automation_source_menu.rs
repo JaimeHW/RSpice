@@ -9,13 +9,13 @@ use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 
 use crate::feature_tests::replay::{Replay, controls};
-use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::workbench::documents::code_workspace::{self, CodeWorkspacePage};
 use crate::workbench::features;
 use crate::workbench::framework::feature::{Cx, Feature};
 use crate::workbench::state::Workspace;
 use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_code::workbench::documents::virtual_text_editor::context_menu_may_show;
+use rspice_app_state::state::{ProjectSourceLanguage, ProjectSourceOwner};
 
 /// The id of the editor the Automation page shows the workspace's entry
 /// script in.

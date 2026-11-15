@@ -139,7 +139,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
     for command in [
         CodeCommand::ImportNetlist,
         CodeCommand::ImportVerilogA,
-        CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice),
+        CodeCommand::ExportNetlist(rspice_app_services::io::NetlistFormat::Spice),
         CodeCommand::GenerateNetlist,
         CodeCommand::CompileVerilogA,
         CodeCommand::AutomationConsole,

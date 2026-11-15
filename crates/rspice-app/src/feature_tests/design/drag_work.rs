@@ -16,8 +16,8 @@ use rspice_design_model::work_tally::{self, WorkTally};
 
 use super::app_state_of;
 use crate::schematic::view::frame_cost::{COLUMNS, ROWS, scale_fixture_of};
-use crate::state::{Point, SchematicAnnotationVisibility};
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{Point, SchematicAnnotationVisibility};
 
 const SCREEN: egui::Vec2 = egui::vec2(1600.0, 1000.0);
 /// Move frames per drag; each one moves the part a grid step further.
@@ -96,7 +96,7 @@ fn drag_work(columns: usize, rows: usize) -> DragWork {
         f64::from(SCREEN.y) * 0.5 - f64::from(at.y),
     );
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let symbols = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
     let mut clock = 0.0;
     let mut frame = |state: &mut AppState, event: egui::Event| {

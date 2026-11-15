@@ -2,12 +2,12 @@
 
 use egui::os::OperatingSystem;
 
-use crate::state::command_catalog::CommandPlatform;
-use crate::state::shortcuts::ShortcutPreferences;
 use rspice_app_settings::workbench::shortcuts::artifacts::markdown::*;
 use rspice_app_settings::workbench::shortcuts::artifacts::projection::{
     ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
 };
+use rspice_app_state::state::command_catalog::CommandPlatform;
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
 
 #[test]
 fn markdown_is_deterministic_and_uses_the_shared_reference_rows() {

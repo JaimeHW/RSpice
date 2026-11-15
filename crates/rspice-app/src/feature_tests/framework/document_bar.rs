@@ -2,21 +2,21 @@
 //! what activating, cycling and closing a tab does to them, and how the tabs
 //! share the strip's width, elide their labels and scroll into view.
 
-use crate::product::ObjectRevision;
-use crate::state::ViewType;
-use crate::state::{
-    DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput, NetlistDocument,
-    NetlistDocumentId, SimulationRun, SourceLocator,
-};
-use crate::ui::panels::{WorkbenchIcon, elide_text};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens;
 use crate::workbench::chrome::document_bar::design::icon_for_view;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_app_code::workbench::chrome::document_bar::code::netlist_workspace_documents;
+use rspice_app_state::product::ObjectRevision;
+use rspice_app_state::state::ViewType;
+use rspice_app_state::state::{
+    DependencyMetadata, GeneratedArtifact, GeneratedProvenance, GenerationInput, NetlistDocument,
+    NetlistDocumentId, SimulationRun, SourceLocator,
+};
+use rspice_app_workbench::ui::panels::{WorkbenchIcon, elide_text};
+use rspice_app_workbench::ui::theme::{self, FontWeight};
+use rspice_app_workbench::ui::tokens;
 use rspice_app_workbench::workbench::chrome::document_bar::*;
 
 fn multi_document_netlist_state() -> AppState {
@@ -31,7 +31,7 @@ fn multi_document_netlist_state() -> AppState {
         "document-bar-test",
         GenerationInput::new(
             ObjectRevision::INITIAL,
-            crate::state::content_digest("document-bar-input"),
+            rspice_app_state::state::content_digest("document-bar-input"),
         ),
     )
     .unwrap();
@@ -188,7 +188,7 @@ fn netlist_roots_and_dependencies_are_independent_stable_tabs() {
 #[test]
 fn registry_scopes_active_documents_by_workspace() {
     let mut registry = crate::workbench::state::WorkspaceDocumentRegistry::default();
-    let dataset = crate::product::DatasetId::new();
+    let dataset = rspice_app_state::product::DatasetId::new();
 
     registry.activate(WorkspaceDocumentId::SimulationPlan);
     registry.activate(WorkspaceDocumentId::ResultDataset(dataset));
@@ -230,14 +230,14 @@ fn reactivating_the_active_dataset_disturbs_no_result_state() {
     let mut state = AppState::default();
     state.workbench.workspace = Workspace::Results;
     let mut first = SimulationRun::new(1);
-    first.add_analysis(crate::state::AnalysisResult::new(
+    first.add_analysis(rspice_app_state::state::AnalysisResult::new(
         1,
-        crate::state::AnalysisType::Transient,
+        rspice_app_state::state::AnalysisType::Transient,
         "TRAN",
     ));
-    first.add_analysis(crate::state::AnalysisResult::new(
+    first.add_analysis(rspice_app_state::state::AnalysisResult::new(
         2,
-        crate::state::AnalysisType::Ac,
+        rspice_app_state::state::AnalysisType::Ac,
         "AC",
     ));
     let dataset = first.dataset_id;
@@ -361,7 +361,7 @@ fn dirty_and_close_suffixes_never_overlap() {
 #[test]
 fn long_document_labels_are_measured_and_ellipsized() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut fitted = String::new();
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -389,7 +389,7 @@ fn long_document_labels_are_measured_and_ellipsized() {
 /// lone non-Design document.
 #[test]
 fn the_simulate_workspace_is_one_document_whatever_the_plan_holds() {
-    use crate::simulation::plan::AnalysisKind;
+    use rspice_app_state::simulation::plan::AnalysisKind;
 
     let mut state = AppState::default();
     state.workbench.workspace = Workspace::Simulate;
@@ -428,7 +428,7 @@ fn the_simulate_workspace_is_one_document_whatever_the_plan_holds() {
 /// open, then a Verilog-A module, which is the active document.
 #[cfg(not(target_arch = "wasm32"))]
 fn design_session(extra: usize) -> RSpiceApp {
-    use crate::state::CellViewRef;
+    use rspice_app_state::state::CellViewRef;
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
@@ -482,7 +482,7 @@ fn strip_frame(
 #[test]
 fn a_pressed_tab_activates_without_taking_keyboard_focus() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = design_session(0);
     let top = app.state.model.workspace.content.open_views[0]
         .reference
@@ -528,7 +528,7 @@ fn a_pressed_tab_activates_without_taking_keyboard_focus() {
 #[test]
 fn an_active_tab_past_the_strips_edge_is_scrolled_into_view() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = design_session(14);
 
@@ -607,7 +607,7 @@ fn a_squeezed_cell_view_tab_shows_its_cell_before_cutting_the_name() {
     );
 
     let document = WorkspaceDocument {
-        id: WorkspaceDocumentId::CellView(crate::state::CellViewRef::new(
+        id: WorkspaceDocumentId::CellView(rspice_app_state::state::CellViewRef::new(
             "lib",
             "stage_10",
             "schematic",
@@ -658,7 +658,7 @@ fn tabs_never_shrink_past_the_floor_and_the_strip_scrolls_instead() {
 #[test]
 fn tabs_shrink_to_stay_in_view_before_the_strip_scrolls() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = design_session(8);
 
@@ -693,7 +693,7 @@ fn tabs_shrink_to_stay_in_view_before_the_strip_scrolls() {
 #[test]
 fn the_hidden_tabs_button_lists_the_tabs_out_of_view_and_opens_one() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = design_session(14);
     let top = app.state.model.workspace.content.open_views[0]

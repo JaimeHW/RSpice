@@ -4,13 +4,13 @@ use std::cell::RefCell;
 
 use egui::os::OperatingSystem;
 
-use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
-use crate::state::shortcuts::ShortcutPreferences;
 use rspice_app_settings::workbench::shortcuts::artifacts::io::*;
 use rspice_app_settings::workbench::shortcuts::artifacts::projection::{
     ShortcutExportRequest, ShortcutExportScope, ShortcutReferenceModel,
     build_shortcut_reference_model, serialize_shortcut_reference_json,
 };
+use rspice_app_state::state::command_catalog::{CommandPlatform, ShortcutContext};
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
 use std::path::{Path, PathBuf};
 
 fn reference_model() -> ShortcutReferenceModel {

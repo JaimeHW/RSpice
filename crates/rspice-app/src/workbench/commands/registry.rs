@@ -8,12 +8,12 @@
 use egui::Key;
 
 use super::vocabulary::Command;
-use crate::state::command_catalog::{
-    CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::command_catalog::{
+    CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
+};
 
 const ALL: &[CommandPlatform] = &CommandPlatform::ALL;
 const DESKTOP: &[CommandPlatform] = &[CommandPlatform::Desktop];
@@ -377,14 +377,14 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::VerificationPage;
-    use crate::state::command_catalog::{CommandCatalog, CommandKey};
     use crate::workbench::ResultViewer;
     use crate::workbench::design::commands::DesignCommand;
     use crate::workbench::framework::command_registry::CommandFlags;
     use crate::workbench::results::commands::ResultsCommand;
     use crate::workbench::simulate::commands::SimulateCommand;
     use rspice_app_code::workbench::code::commands::CodeCommand;
+    use rspice_app_state::state::VerificationPage;
+    use rspice_app_state::state::command_catalog::{CommandCatalog, CommandKey};
 
     fn binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<Command> {
         crate::workbench::commands::vocabulary::COMMAND_REGISTRY
@@ -498,10 +498,12 @@ mod tests {
                 ordered_binding_owners(rename.bindings[0].chord, platform),
                 vec![rename.key, rename_symbol.key]
             );
-            assert!(!crate::state::shortcuts::shortcut_contexts_overlap(
-                rename.context,
-                rename_symbol.context,
-            ));
+            assert!(
+                !rspice_app_state::state::shortcuts::shortcut_contexts_overlap(
+                    rename.context,
+                    rename_symbol.context,
+                )
+            );
             assert_eq!(label(rename_symbol.bindings, platform), "F2");
             assert_eq!(label(rename.bindings, platform), "F2");
         }
@@ -733,13 +735,13 @@ mod tests {
         app.execute_command_key(DesignCommand::PlaceOffSheetConnector.key());
         assert_eq!(
             app.state.model.schematic.session.editor.tool,
-            crate::state::Tool::OffSheetConnector
+            rspice_app_state::state::Tool::OffSheetConnector
         );
 
         app.execute_command_key(DesignCommand::PlaceLabel.key());
         assert_eq!(
             app.state.model.schematic.session.editor.tool,
-            crate::state::Tool::Label
+            rspice_app_state::state::Tool::Label
         );
     }
 
@@ -748,7 +750,7 @@ mod tests {
 
     /// An open design whose retained generated deck states `R1` and not `C9`.
     fn app_with_generated_deck() -> (RSpiceApp, u64, u64) {
-        use crate::state::{
+        use rspice_app_state::state::{
             ComponentType, GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry,
             GenerationInput, NetlistDocument, NetlistDocumentId, Point,
         };
@@ -794,11 +796,11 @@ mod tests {
             app.state.model.workspace.content.active_view.library,
             app.state.model.workspace.content.active_view.cell
         );
-        let digest = crate::state::content_digest("instance-locator-input");
+        let digest = rspice_app_state::state::content_digest("instance-locator-input");
         let artifact = GeneratedArtifact::try_from_utf8(
             GeneratedProvenance::try_new(
                 "rspice-instance-locator-test",
-                GenerationInput::new(crate::product::ObjectRevision::INITIAL, digest),
+                GenerationInput::new(rspice_app_state::product::ObjectRevision::INITIAL, digest),
             )
             .expect("provenance"),
             SHOW_IN_NETLIST_DECK.as_bytes().to_vec(),

@@ -46,8 +46,8 @@ const CONTEXT_LONG_PRESS_MOVE_TOLERANCE_POINTS: f32 = 9.0;
 pub(crate) struct FrameSimulationInput {
     topology_version: u64,
     analysis_plan: Option<(
-        crate::product::SimulationPlanId,
-        crate::product::ObjectRevision,
+        rspice_app_state::product::SimulationPlanId,
+        rspice_app_state::product::ObjectRevision,
     )>,
 }
 
@@ -217,13 +217,13 @@ pub struct RSpiceApp {
     pub(crate) autosave_last: Option<std::time::Instant>,
     /// Theme last applied to the egui context (re-applied when the user
     /// changes the workbench theme).
-    pub(crate) applied_theme: Option<crate::ui::Theme>,
+    pub(crate) applied_theme: Option<rspice_app_workbench::ui::Theme>,
     /// Window title last pushed to the OS (avoids a viewport command per frame).
     pub(crate) last_window_title: String,
     /// SVG symbol library for component rendering
     pub(crate) symbol_library: Option<crate::schematic::symbols::SymbolLibrary>,
     /// Simulation controller for running analyses
-    pub(crate) simulation_controller: crate::simulation::SimulationController,
+    pub(crate) simulation_controller: rspice_app_runs::simulation::controller::SimulationController,
     /// What the code feature runs: the automation runtime and the project it
     /// is authorized to serve.
     pub(crate) code: crate::workbench::documents::code_workspace::CodeHandles,
@@ -233,12 +233,13 @@ pub struct RSpiceApp {
     /// Distributed model packs: the verified catalog, what is installed, and
     /// the store a background install writes through. It is outside persisted
     /// state because it describes this machine, not this project.
-    pub(crate) model_hub: crate::services::model_hub::ModelHubService,
+    pub(crate) model_hub: rspice_app_services::services::model_hub::ModelHubService,
     /// File workflow IO backend (native in production, injectable in tests).
-    pub(crate) file_workflow_io: Box<dyn crate::io::FileWorkflowIo>,
+    pub(crate) file_workflow_io: Box<dyn rspice_app_services::io::FileWorkflowIo>,
     /// Export workflow IO backend (native in production, injectable in tests).
     /// Asks the operating system for its contrast theme, once a frame.
-    pub(crate) read_system_contrast: fn() -> Option<crate::ui::palette::ContrastInks>,
+    pub(crate) read_system_contrast:
+        fn() -> Option<rspice_app_workbench::ui::palette::ContrastInks>,
     pub(crate) export_workflow_io:
         Box<dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo>,
 }
@@ -262,7 +263,7 @@ impl RSpiceApp {
     /// it prepared.
     pub(crate) fn save_open_model_candidate(
         &mut self,
-    ) -> Result<crate::product::ObjectRevision, String> {
+    ) -> Result<rspice_app_state::product::ObjectRevision, String> {
         let state = &mut self.state;
         rspice_app_models::workbench::documents::model_editor::save_open_candidate(
             &mut state.models.model_editor_parts(
@@ -358,12 +359,15 @@ impl RSpiceApp {
             applied_theme: None,
             last_window_title: String::new(),
             symbol_library: None,
-            simulation_controller: crate::simulation::SimulationController::new(),
+            simulation_controller:
+                rspice_app_runs::simulation::controller::SimulationController::new(),
             code: crate::workbench::documents::code_workspace::CodeHandles {
                 #[cfg(not(target_arch = "wasm32"))]
-                automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+                automation_runtime:
+                    rspice_app_services::automation_runtime::NativeAutomationRuntime::discover(),
                 #[cfg(target_arch = "wasm32")]
-                automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
+                automation_runtime:
+                    rspice_app_services::automation_runtime::BrowserAutomationRuntime::discover(),
                 automation_runtime_project_id,
             },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
@@ -374,10 +378,10 @@ impl RSpiceApp {
             },
             // A test opens no real pack store: doing so would make every test
             // read and write this developer's application-data directory.
-            model_hub: crate::services::model_hub::ModelHubService::unavailable(
+            model_hub: rspice_app_services::services::model_hub::ModelHubService::unavailable(
                 "This test instance runs without a model-pack store.",
             ),
-            file_workflow_io: Box::new(crate::io::NativeFileWorkflowIo),
+            file_workflow_io: Box::new(rspice_app_services::io::NativeFileWorkflowIo),
             read_system_contrast: crate::workbench::system_contrast::read,
             export_workflow_io: Box::new(
                 crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
@@ -428,7 +432,7 @@ impl RSpiceApp {
         state.take_shortcut_resolver_reset();
         state
             .workbench
-            .set_number_locale(crate::quantity::platform_number_locale());
+            .set_number_locale(rspice_app_state::quantity::platform_number_locale());
 
         // Apply the design-system theme (canvas painters read the active
         // palette directly).
@@ -468,8 +472,8 @@ impl RSpiceApp {
         ];
         for fault in startup_faults.into_iter().flatten() {
             state.record(
-                crate::diagnostics::LogSeverity::Error,
-                crate::diagnostics::LogSource::Studio,
+                rspice_app_state::diagnostics::LogSeverity::Error,
+                rspice_app_state::diagnostics::LogSource::Studio,
                 fault,
             );
         }
@@ -501,8 +505,8 @@ impl RSpiceApp {
             }
             Err(e) => {
                 state.record(
-                    crate::diagnostics::LogSeverity::Error,
-                    crate::diagnostics::LogSource::Studio,
+                    rspice_app_state::diagnostics::LogSeverity::Error,
+                    rspice_app_state::diagnostics::LogSource::Studio,
                     format!(
                         "The built-in symbol library could not be loaded; schematic components \
                          show as unresolved: {e}"
@@ -515,7 +519,8 @@ impl RSpiceApp {
         // Log startup
         log::info!("RSpice egui application initialized");
 
-        let simulation_controller = crate::simulation::SimulationController::new();
+        let simulation_controller =
+            rspice_app_runs::simulation::controller::SimulationController::new();
         #[cfg(target_arch = "wasm32")]
         let simulation_controller = {
             let mut controller = simulation_controller;
@@ -535,9 +540,9 @@ impl RSpiceApp {
             simulation_controller,
             code: crate::workbench::documents::code_workspace::CodeHandles {
                 #[cfg(not(target_arch = "wasm32"))]
-                automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+                automation_runtime: rspice_app_services::automation_runtime::NativeAutomationRuntime::discover(),
                 #[cfg(target_arch = "wasm32")]
-                automation_runtime: crate::automation_runtime::BrowserAutomationRuntime::discover(),
+                automation_runtime: rspice_app_services::automation_runtime::BrowserAutomationRuntime::discover(),
                 automation_runtime_project_id,
             },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
@@ -551,11 +556,11 @@ impl RSpiceApp {
             // cannot store packs still edits, simulates, and saves. The hub
             // fetches through the cloud's transports, the only network a
             // running application has.
-            model_hub: crate::services::model_hub::ModelHubService::open(
+            model_hub: rspice_app_services::services::model_hub::ModelHubService::open(
                 &rspice_app_cloud::services::cloud_account::model_hub_transport::CloudModelHubTransportProvider,
             ),
             file_workflow_io: Box::new(
-                crate::io::NativeFileWorkflowIo,
+                rspice_app_services::io::NativeFileWorkflowIo,
             ),
             read_system_contrast: crate::workbench::system_contrast::read,
             export_workflow_io: Box::new(
@@ -592,10 +597,10 @@ impl RSpiceApp {
         // (Re)apply the theme when it changes — this maps the design tokens
         // onto the egui style and republishes the active palette.
         let system_contrast = (self.read_system_contrast)();
-        crate::ui::Theme::report_system_contrast(ctx, system_contrast);
+        rspice_app_workbench::ui::Theme::report_system_contrast(ctx, system_contrast);
         let system_mode_changed = system_contrast.is_none()
-            && self.state.workbench.theme.mode == crate::ui::Mode::System
-            && crate::ui::tokens::Tokens::get(ctx).mode
+            && self.state.workbench.theme.mode == rspice_app_workbench::ui::Mode::System
+            && rspice_app_workbench::ui::tokens::Tokens::get(ctx).mode
                 != self.state.workbench.theme.mode.effective(ctx);
         if self.first_frame
             || self.applied_theme != Some(self.state.workbench.theme)
@@ -709,7 +714,10 @@ impl RSpiceApp {
         }
         if matches!(
             self.state.model.workspace.content.active_view_type(),
-            Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
+            Some(
+                rspice_app_state::state::ViewType::Schematic
+                    | rspice_app_state::state::ViewType::Testbench
+            )
         ) {
             self.state
                 .model
@@ -954,7 +962,7 @@ impl eframe::App for RSpiceApp {
         self.state.assert_project_open_fact();
         let ctx = ui.ctx().clone();
         let simulation_input_before_frame = FrameSimulationInput::capture(&self.state);
-        crate::ui::viewport::capture_root_viewport(&ctx, ui.max_rect());
+        rspice_app_workbench::ui::viewport::capture_root_viewport(&ctx, ui.max_rect());
         #[cfg(target_arch = "wasm32")]
         {
             if let Some(enabled) =
@@ -1064,8 +1072,8 @@ impl eframe::App for RSpiceApp {
             &self.state.model.workspace,
         ) {
             self.state.record(
-                crate::diagnostics::LogSeverity::Error,
-                crate::diagnostics::LogSource::Studio,
+                rspice_app_state::diagnostics::LogSeverity::Error,
+                rspice_app_state::diagnostics::LogSource::Studio,
                 format!("The Verilog-A library could not be saved: {error}"),
             );
         }
@@ -1167,8 +1175,8 @@ pub(crate) mod veriloga_flow_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::product::ProcessCorner;
-    use crate::state::{
+    use rspice_app_state::product::ProcessCorner;
+    use rspice_app_state::state::{
         CellViewRef, ComponentType, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
         ConfigurationSetCatalog, ConfigurationSetDefinition, Point, SchematicState,
         UnresolvedBindingPolicy,
@@ -1243,8 +1251,8 @@ mod tests {
 
     #[test]
     fn portrait_toolbar_shelf_search_and_canvas_placement_work_across_frames() {
-        use crate::state::Tool;
         use crate::workbench::{commands::vocabulary::Command, state::Drawer};
+        use rspice_app_state::state::Tool;
 
         struct Fixture {
             ctx: Context,
@@ -1320,7 +1328,7 @@ mod tests {
 
         for via_keyboard in [true, false] {
             let ctx = Context::default();
-            crate::ui::Theme::default().apply(&ctx);
+            rspice_app_workbench::ui::Theme::default().apply(&ctx);
             ctx.enable_accesskit();
             let mut fixture = Fixture {
                 ctx,
@@ -1545,9 +1553,10 @@ mod tests {
     #[test]
     fn frame_topology_edits_drop_preflight_authority_at_one_central_boundary() {
         let mut app = RSpiceApp::test_instance();
-        app.state.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
-            app.state.model.workspace.content.project.revision().get(),
-        ));
+        app.state.runs.preflight.report =
+            Some(rspice_app_state::state::PreflightReport::retained_for_test(
+                app.state.model.workspace.content.project.revision().get(),
+            ));
         let before = FrameSimulationInput::capture(&app.state);
 
         app.state.model.schematic.bump_topology_version();
@@ -1651,13 +1660,13 @@ mod tests {
             .content
             .project_sources
             .insert_bundle(
-                crate::state::ProjectSourceBundle::try_new(
-                    crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+                rspice_app_state::state::ProjectSourceBundle::try_new(
+                    rspice_app_state::state::ProjectSourceOwner::cell_view(CellViewRef::new(
                         "behavioral",
                         "unreferenced",
                         "veriloga",
                     )),
-                    crate::state::ProjectSourceLanguage::VerilogA,
+                    rspice_app_state::state::ProjectSourceLanguage::VerilogA,
                     "unreferenced.va",
                     "module unreferenced; endmodule\n",
                     [],
@@ -1673,7 +1682,8 @@ mod tests {
                 .content
                 .project_sources
                 .iter_bundles()
-                .any(|bundle| bundle.language() == crate::state::ProjectSourceLanguage::VerilogA)
+                .any(|bundle| bundle.language()
+                    == rspice_app_state::state::ProjectSourceLanguage::VerilogA)
         );
         state.code.code_workspace.veriloga.receipt = None;
 
@@ -1802,7 +1812,7 @@ mod tests {
 
         assert_eq!(
             state.model.simulation.execution.run_intent,
-            crate::state::SimulationRunIntent::ManualDeck
+            rspice_app_state::state::SimulationRunIntent::ManualDeck
         );
         assert!(!state.model.simulation.execution.trigger_simulation);
         assert!(state.runs.manual_run.rerun_queued);
@@ -2068,7 +2078,7 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0].severity,
-            crate::diagnostics::LogSeverity::Warning
+            rspice_app_state::diagnostics::LogSeverity::Warning
         );
         assert_eq!(
             entries[0].message,

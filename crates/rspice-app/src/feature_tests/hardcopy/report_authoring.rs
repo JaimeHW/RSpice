@@ -1,8 +1,6 @@
 //! Report authoring in a whole application: its commands, read through the
 //! product's own registry, and the document transactions they commit.
 
-use crate::services::model_hub::ModelHubService;
-use crate::simulation::SimulationController;
 use crate::workbench::SurfaceId;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::feature::Cx;
@@ -14,6 +12,8 @@ use rspice_app_hardcopy::workbench::hardcopy::report as report_editor;
 use rspice_app_hardcopy::workbench::hardcopy::report_authoring::result_insert::commit_insert_result_document;
 use rspice_app_hardcopy::workbench::hardcopy::report_authoring::result_insert::open_insert_result_document;
 use rspice_app_hardcopy::workbench::hardcopy::report_authoring::*;
+use rspice_app_runs::simulation::controller::SimulationController;
+use rspice_app_services::services::model_hub::ModelHubService;
 use rspice_app_state::results::report_document::ReportBlockKind;
 use rspice_app_state::results::report_document::ReportDocument;
 use rspice_app_state::results::report_document::ReportEntityRef;
@@ -115,9 +115,9 @@ fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
     assert!(enabled(&app, HardcopyCommand::ReportPageProperties));
 
     app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
+        rspice_app_state::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
-            ..crate::state::write_policy::LocalSafeModeOptions::default()
+            ..rspice_app_state::state::write_policy::LocalSafeModeOptions::default()
         },
         "report command authority test".to_owned(),
     );
@@ -208,14 +208,16 @@ fn explicit_report_plan_creates_the_exact_mockup_outline_once() {
 #[test]
 fn report_plan_binds_initial_pages_to_the_active_immutable_dataset() {
     let mut app = RSpiceApp::test_instance();
-    let mut run = crate::state::SimulationRun::new(41);
-    run.add_analysis(crate::state::AnalysisResult::new(
+    let mut run = rspice_app_state::state::SimulationRun::new(41);
+    run.add_analysis(rspice_app_state::state::AnalysisResult::new(
         1,
-        crate::state::AnalysisType::Transient,
+        rspice_app_state::state::AnalysisType::Transient,
         "retained transient",
     ));
-    let expected_binding =
-        crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
+    let expected_binding = rspice_app_state::product::DatasetBinding::new(
+        run.dataset_id,
+        run.dataset_content_digest(),
+    );
     app.state.model.simulation.retained.runs = vec![run].into();
     app.state.model.simulation.view.active_run_idx = Some(0);
     app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
@@ -455,10 +457,10 @@ fn report_page_order_controls_fail_closed_at_document_boundaries() {
 #[test]
 fn report_element_catalog_commits_every_non_plot_block_kind() {
     let mut app = RSpiceApp::test_instance();
-    let mut run = crate::state::SimulationRun::new(83);
-    run.add_analysis(crate::state::AnalysisResult::new(
+    let mut run = rspice_app_state::state::SimulationRun::new(83);
+    run.add_analysis(rspice_app_state::state::AnalysisResult::new(
         1,
-        crate::state::AnalysisType::Transient,
+        rspice_app_state::state::AnalysisType::Transient,
         "retained transient",
     ));
     app.state.model.simulation.retained.runs = vec![run].into();
@@ -653,9 +655,9 @@ fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
         &mut app.simulation_controller,
         &mut app.model_hub,
     ));
-    let binding = crate::product::DatasetBinding::new(
-        crate::product::DatasetId::new(),
-        crate::product::ContentDigest::from_bytes([0x83; 32]),
+    let binding = rspice_app_state::product::DatasetBinding::new(
+        rspice_app_state::product::DatasetId::new(),
+        rspice_app_state::product::ContentDigest::from_bytes([0x83; 32]),
     );
     let dataset = SourceDataset::new(
         binding,
@@ -744,7 +746,7 @@ fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
 
     fn rendered_binding_states(app: &mut RSpiceApp) -> Vec<String> {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let output = ctx.run_ui(
             egui::RawInput {
@@ -835,9 +837,9 @@ fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
 fn direct_report_creation_fails_closed_in_read_only_safe_mode() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
+        rspice_app_state::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
-            ..crate::state::write_policy::LocalSafeModeOptions::default()
+            ..rspice_app_state::state::write_policy::LocalSafeModeOptions::default()
         },
         "report authoring test".to_owned(),
     );
@@ -878,8 +880,8 @@ fn changing_active_run_does_not_mutate_the_project_report_document() {
         &mut app.model_hub,
     ));
     app.state.model.simulation.retained.runs = vec![
-        crate::state::SimulationRun::new(2),
-        crate::state::SimulationRun::new(1),
+        rspice_app_state::state::SimulationRun::new(2),
+        rspice_app_state::state::SimulationRun::new(1),
     ]
     .into();
     let document = active_report(&app.state).expect("report document").clone();
@@ -916,11 +918,11 @@ fn invalid_report_page_selection_chooses_a_retained_page() {
 
 #[test]
 fn report_summary_uses_verified_spec_and_exact_corner_evidence() {
-    fn provenance(seed: u8) -> crate::state::AnalysisResultProvenance {
-        crate::state::AnalysisResultProvenance::new(
-            crate::product::AnalysisInstanceId::new(),
-            crate::product::ObjectRevision::INITIAL,
-            crate::product::ContentDigest::from_bytes([seed; 32]),
+    fn provenance(seed: u8) -> rspice_app_state::state::AnalysisResultProvenance {
+        rspice_app_state::state::AnalysisResultProvenance::new(
+            rspice_app_state::product::AnalysisInstanceId::new(),
+            rspice_app_state::product::ObjectRevision::INITIAL,
+            rspice_app_state::product::ContentDigest::from_bytes([seed; 32]),
             Vec::new(),
         )
         .expect("test provenance is valid")
@@ -928,31 +930,40 @@ fn report_summary_uses_verified_spec_and_exact_corner_evidence() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.model.workspace.content.specs = vec![
-        crate::state::SpecEntry {
+        rspice_app_state::state::SpecEntry {
             measurement: "gain".to_owned(),
             expression: String::new(),
             min: Some(10.0),
             max: None,
             unit: "V/V".to_owned(),
-            scope: crate::state::SpecPointScope::AllPoints,
+            scope: rspice_app_state::state::SpecPointScope::AllPoints,
         },
-        crate::state::SpecEntry {
+        rspice_app_state::state::SpecEntry {
             measurement: "bandwidth".to_owned(),
             expression: String::new(),
             min: Some(1_000.0),
             max: None,
             unit: "Hz".to_owned(),
-            scope: crate::state::SpecPointScope::AllPoints,
+            scope: rspice_app_state::state::SpecPointScope::AllPoints,
         },
     ];
-    let checks = crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC")
-        .with_measurements(vec![
-            rspice_core::MeasureResult::success("gain", 12.0),
-            rspice_core::MeasureResult::success("bandwidth", 900.0),
-        ])
-        .with_provenance(provenance(0x31));
-    let corners = crate::state::AnalysisResult::new(2, crate::state::AnalysisType::Corner, "PVT")
-        .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Corner {
+    let checks = rspice_app_state::state::AnalysisResult::new(
+        1,
+        rspice_app_state::state::AnalysisType::Ac,
+        "AC",
+    )
+    .with_measurements(vec![
+        rspice_core::MeasureResult::success("gain", 12.0),
+        rspice_core::MeasureResult::success("bandwidth", 900.0),
+    ])
+    .with_provenance(provenance(0x31));
+    let corners = rspice_app_state::state::AnalysisResult::new(
+        2,
+        rspice_app_state::state::AnalysisType::Corner,
+        "PVT",
+    )
+    .with_family_metadata(
+        rspice_app_state::state::AnalysisResultFamilyMetadata::Corner {
             member_measurements: Vec::new(),
             x_values: vec![0.0, 1.0, 2.0],
             x_label: "corner".to_owned(),
@@ -960,9 +971,10 @@ fn report_summary_uses_verified_spec_and_exact_corner_evidence() {
             temperatures_c: vec![-40.0, 27.0, 125.0],
             corner_labels: vec!["ss".to_owned(), "tt".to_owned(), "ff".to_owned()],
             failed_corners: 1,
-        })
-        .with_provenance(provenance(0x32));
-    let mut run = crate::state::SimulationRun::new(1);
+        },
+    )
+    .with_provenance(provenance(0x32));
+    let mut run = rspice_app_state::state::SimulationRun::new(1);
     run.add_analysis(checks);
     run.add_analysis(corners);
     app.state.model.simulation.retained.runs = vec![run].into();

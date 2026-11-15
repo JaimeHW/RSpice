@@ -2,9 +2,6 @@
 //! lists, discloses, filters, selects, plots and copies, and how dense its rows
 //! are on desktop and touch.
 
-use crate::state::{
-    AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace, SimulationRun,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::AnalysisPresentationKey;
 use crate::workbench::state::Workspace;
@@ -16,6 +13,9 @@ use rspice_app_results::workbench::docks::navigator::results_rows::{
     responsive_result_control_height,
 };
 use rspice_app_results::workbench::docks::navigator::{results, results_actions, results_rows};
+use rspice_app_state::state::{
+    AnalysisResult, AnalysisResultPayload, AnalysisType, RetainedTrace, SimulationRun,
+};
 use rspice_app_workbench::workbench::docks::navigator;
 use rspice_results::result_presentation::{
     ResultArtifactPresentationKey, SourceWaveformPresentationKey,
@@ -30,7 +30,7 @@ use rspice_results_ui::selection::ResultBrowserSelectionKey;
 #[test]
 fn the_data_browser_puts_its_query_under_the_tab_it_filters() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Results);
@@ -733,8 +733,8 @@ fn analysis_data_state_merges_one_reading_worst_first() {
 #[test]
 fn dataset_disclosure_is_bound_to_immutable_dataset_identity() {
     let ctx = egui::Context::default();
-    let first = crate::product::DatasetId::new();
-    let second = crate::product::DatasetId::new();
+    let first = rspice_app_state::product::DatasetId::new();
+    let second = rspice_app_state::product::DatasetId::new();
 
     assert!(results::result_browser_dataset_expanded(&ctx, first, true));
     assert!(!results::result_browser_dataset_expanded(
@@ -789,7 +789,7 @@ fn typed_scalar_payload_is_a_stable_exact_browser_artifact() {
 
 /// A zero-order periodic result: no dynamic modes, so nothing can be unstable.
 fn zero_mode_periodic(analysis_type: AnalysisType) -> Option<AnalysisResultPayload> {
-    use crate::state::{
+    use rspice_app_state::state::{
         FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
         PstbStabilityClassificationEvidence,
     };
@@ -952,7 +952,7 @@ fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
     assert!(select_result_dataset(&mut app.state.results_parts(), 0));
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     // A closure over the app rather than a helper handed it, so the frame
     // harness costs the whole-application-access ratchet nothing.
@@ -1066,7 +1066,7 @@ fn navigator_painted_lines(width: f32, mut app: RSpiceApp) -> Vec<(String, egui:
     }
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,

@@ -21,7 +21,7 @@ fn render(app: &mut RSpiceApp, ctx: &Context) {
 fn accessibility_tree_exposes_only_the_mockup_bulk_edit_surface_actions() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state.model.schematic.document_mut_for_test().components =
         vec![component(1, "X1", Some("tt"))];
@@ -72,10 +72,10 @@ fn the_filter_fields_match_the_selects_and_say_their_names() {
     for coarse in [false, true] {
         let ctx = Context::default();
         ctx.enable_accesskit();
-        crate::ui::Theme::default().apply(&ctx);
-        crate::ui::Theme::default().apply_responsive_metrics_with_target(
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply_responsive_metrics_with_target(
             &ctx,
-            coarse.then_some(crate::ui::tokens::TOUCH_TARGET),
+            coarse.then_some(rspice_app_workbench::ui::tokens::TOUCH_TARGET),
         );
         let mut app = RSpiceApp::test_instance();
         app.state.model.schematic.document_mut_for_test().components =
@@ -130,7 +130,7 @@ fn the_filter_fields_match_the_selects_and_say_their_names() {
 fn the_body_stays_inside_the_dialog_when_no_section_is_defined() {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     app.state.model.schematic.document_mut_for_test().components =
         vec![component(1, "X1", Some("tt"))];

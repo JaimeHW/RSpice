@@ -6,7 +6,7 @@
 #[test]
 fn the_report_is_a_kit_dialog_that_escape_closes() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = crate::workbench::RSpiceApp::test_instance();
     app.state.results.expression_diagnostics_dialog = true;
     let input = |events: Vec<egui::Event>| egui::RawInput {

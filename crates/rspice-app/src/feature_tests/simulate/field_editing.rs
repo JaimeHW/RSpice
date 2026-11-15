@@ -6,10 +6,10 @@
 //! which is the same name the accessibility sweep next door asserts they have.
 
 use super::stage::show_on_stage;
-use crate::simulation::plan::{AnalysisDraft, AnalysisInstance, AnalysisKind};
-use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
 use egui::{Pos2, Rect, pos2, vec2};
+use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisInstance, AnalysisKind};
+use rspice_app_state::state::SimulationPage;
 
 const SURFACE: (f32, f32) = (1280.0, 1400.0);
 
@@ -23,7 +23,7 @@ struct Route {
 impl Route {
     fn analyses(kind: AnalysisKind) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.simulate.simulation_page = SimulationPage::Analyses;
@@ -229,7 +229,7 @@ fn a_spelling_the_deck_cannot_read_is_rewritten_in_engineering_notation() {
     let rewritten = route.transient_stop();
     assert_eq!(
         rewritten,
-        crate::state::format_engineering(5.0e-3),
+        rspice_app_state::state::format_engineering(5.0e-3),
         "the rewrite goes through the deck's own formatter"
     );
     assert!(
@@ -237,7 +237,7 @@ fn a_spelling_the_deck_cannot_read_is_rewritten_in_engineering_notation() {
         "a 17-digit exponent is not engineering notation: {rewritten}"
     );
     assert!(
-        crate::quantity::spice_value::parse_spice_value_checked(&rewritten).is_ok(),
+        rspice_app_state::quantity::spice_value::parse_spice_value_checked(&rewritten).is_ok(),
         "whatever is left behind has to be a value the deck can read: {rewritten}"
     );
 }

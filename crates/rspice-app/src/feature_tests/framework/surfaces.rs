@@ -3,10 +3,10 @@
 //! the editor as the bundle holds the source, and the Results split stage
 //! stays equal, bounded at narrow widths and named for assistive technology.
 
-use crate::state::ProjectSourceLanguage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::code_workspace::{self, CodeWorkspacePage};
 use egui::Context;
+use rspice_app_state::state::ProjectSourceLanguage;
 use rspice_app_workbench::workbench::surfaces::{register_results_split_region, split_stage_rects};
 
 #[test]
@@ -117,9 +117,13 @@ fn source_editor_handoff(language: ProjectSourceLanguage, preceding: &str) {
 /// of the bundle it edits.
 fn source_editor_page(
     language: ProjectSourceLanguage,
-) -> (Context, RSpiceApp, crate::state::ProjectSourceOwner) {
+) -> (
+    Context,
+    RSpiceApp,
+    rspice_app_state::state::ProjectSourceOwner,
+) {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let mut app = RSpiceApp::test_instance();
     // Automation is edited on its Netlist-workspace page; a Verilog-A
@@ -130,25 +134,29 @@ fn source_editor_page(
                 .workbench
                 .activate(crate::workbench::state::Workspace::Netlist);
             app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
-            crate::state::ProjectSourceOwner::code_workspace(language)
+            rspice_app_state::state::ProjectSourceOwner::code_workspace(language)
         }
         ProjectSourceLanguage::VerilogA => {
-            let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
-            let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
+            let reference =
+                rspice_app_state::state::CellViewRef::new("behavioral", "gain", "veriloga");
+            let mut view = rspice_app_state::state::View::new(
+                "veriloga",
+                rspice_app_state::state::ViewType::VerilogA,
+            );
             view.metadata
                 .insert("veriloga.module".to_owned(), "gain".to_owned());
-            let mut cell = crate::state::Cell::new("gain");
+            let mut cell = rspice_app_state::state::Cell::new("gain");
             cell.add_view(view);
-            let mut library = crate::state::Library::new("behavioral");
+            let mut library = rspice_app_state::state::Library::new("behavioral");
             library.add_cell(cell);
             app.state.model.library_manager.add_library(library);
-            let owner = crate::state::ProjectSourceOwner::cell_view(reference.clone());
+            let owner = rspice_app_state::state::ProjectSourceOwner::cell_view(reference.clone());
             app.state
                 .model.workspace
                 .content
                 .project_sources
                 .insert_bundle(
-                    crate::state::ProjectSourceBundle::try_new(
+                    rspice_app_state::state::ProjectSourceBundle::try_new(
                         owner.clone(),
                         language,
                         "gain.va",

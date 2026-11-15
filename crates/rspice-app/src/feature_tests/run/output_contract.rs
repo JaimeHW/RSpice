@@ -3,14 +3,14 @@
 
 use rspice_simulation::output_contract::PreparedSavedOutput;
 
-use crate::product::AnalysisInstanceId;
-use crate::state::{
-    AnalysisResult, ComplexExpressionPolicy, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace,
-    SavedOutputKind, SavedOutputStreaming,
-};
 use rspice_app_results::analysis::calculator;
 use rspice_app_runs::simulation::output_contract::fixtures::{ac, output};
 use rspice_app_runs::simulation::output_contract::materialize_live_saved_outputs;
+use rspice_app_state::product::AnalysisInstanceId;
+use rspice_app_state::state::{
+    AnalysisResult, ComplexExpressionPolicy, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, RetainedTrace,
+    SavedOutputKind, SavedOutputStreaming,
+};
 
 #[test]
 fn complex_live_outputs_keep_aligned_components_and_full_precision_source_knots() {
@@ -29,14 +29,17 @@ fn complex_live_outputs_keep_aligned_components_and_full_precision_source_knots(
     let y = (0..x.len())
         .map(|index| 1e-120 * (index as f64 / 17.0).sin())
         .collect::<Vec<_>>();
-    let source =
-        AnalysisResult::live_transient_partial(1, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![RetainedTrace::new(
-                "out",
-                x.clone(),
-                y.clone(),
-                "#fff",
-            )]);
+    let source = AnalysisResult::live_transient_partial(
+        1,
+        rspice_app_state::state::AnalysisType::Transient,
+        "TRAN",
+    )
+    .with_waveforms(vec![RetainedTrace::new(
+        "out",
+        x.clone(),
+        y.clone(),
+        "#fff",
+    )]);
     let previews = materialize_live_saved_outputs(&source, &[contract]);
     assert_eq!(previews.len(), 1);
     let preview = &previews[0];

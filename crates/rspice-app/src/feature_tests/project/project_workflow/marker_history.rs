@@ -1,7 +1,6 @@
 //! Published marker identities must survive deletion, scoped save, and reload.
 
 use super::*;
-use crate::state::{ComponentType, Point};
 use crate::workbench::app_state::services_access::confirm_revert_active_document;
 use crate::workbench::documents::result_document::{AnalysisPresentationKey, marker_anchor_for};
 use crate::workbench::lifecycle::project_lifecycle::{
@@ -9,6 +8,7 @@ use crate::workbench::lifecycle::project_lifecycle::{
     generated_netlist_input_digest, has_unsaved_changes, prepare_revert_active_document,
     save_native, saved_snapshot_authorizes_continuation,
 };
+use rspice_app_state::state::{ComponentType, Point};
 
 fn retained_results() -> (AppState, AnalysisPresentationKey) {
     let mut state = AppState::default();
@@ -17,19 +17,23 @@ fn retained_results() -> (AppState, AnalysisPresentationKey) {
 }
 
 fn install_retained_results(state: &mut AppState) -> AnalysisPresentationKey {
-    let mut run = crate::state::SimulationRun::new(1);
+    let mut run = rspice_app_state::state::SimulationRun::new(1);
     run.add_analysis(
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "Tran")
-            .with_waveforms(vec![crate::state::RetainedTrace::new(
-                "V(out)",
-                vec![0.0, 1.0],
-                vec![1.0, 2.0],
-                "#ffffff",
-            )]),
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Transient,
+            "Tran",
+        )
+        .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
+            "V(out)",
+            vec![0.0, 1.0],
+            vec![1.0, 2.0],
+            "#ffffff",
+        )]),
     );
     seal_legacy_unattributed(&mut run);
     run.mark_running().unwrap();
-    run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
+    run.finish_lifecycle(rspice_app_state::state::SimulationRunLifecycle::Completed)
         .unwrap();
     let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
     state.model.simulation.retained.runs.push(run);
@@ -102,7 +106,7 @@ fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
                 scope == SaveScope::ActiveDocument
             );
 
-            let written = crate::io::load_project_file(&path).unwrap();
+            let written = rspice_app_services::io::load_project_file(&path).unwrap();
             let expected_components = usize::from(scope == SaveScope::AllDocuments);
             assert_eq!(
                 written.file.workspace.schematic_buffers
@@ -210,7 +214,7 @@ fn saving_another_document_does_not_publish_results_allocation_history() {
     .unwrap();
     assert!(!active_document_is_dirty(&state));
     assert!(has_unsaved_changes(&state));
-    let written = crate::io::load_project_file(&path).unwrap();
+    let written = rspice_app_services::io::load_project_file(&path).unwrap();
     assert_eq!(
         written.file.result_presentation.marker_id_high_water,
         Some(published)
@@ -226,7 +230,7 @@ fn saving_another_document_does_not_publish_results_allocation_history() {
         DestinationAuthority::Canonical,
     )
     .unwrap();
-    let written = crate::io::load_project_file(&path).unwrap();
+    let written = rspice_app_services::io::load_project_file(&path).unwrap();
     assert_eq!(
         written.file.result_presentation.marker_id_high_water,
         Some(pending)
@@ -311,7 +315,7 @@ fn legacy_marker_history_is_adopted_without_dirtying_an_unchanged_project() {
             .is_some()
     );
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
-    let written = crate::io::load_project_file(&path).unwrap();
+    let written = rspice_app_services::io::load_project_file(&path).unwrap();
     assert_eq!(written.file.result_presentation.marker_id_high_water, None);
     let mut reopened = AppState::default();
     assert!(reopened.load_project_from_path(&path));

@@ -2,12 +2,12 @@
 
 use rspice_formats::monte_carlo_checkpoint as checkpoint_file;
 
-use crate::io::file_exchange;
-use crate::state::MonteCarloCheckpointEvidence;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_services::io::file_exchange;
 use rspice_app_simulate::workbench::surfaces::simulate::checkpoint_exchange::{
     begin_export, begin_import, import_id, poll,
 };
+use rspice_app_state::state::MonteCarloCheckpointEvidence;
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
@@ -66,8 +66,8 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
             .get(checkpoint.digest()),
         Some(&checkpoint)
     );
-    let json = crate::io::project_io::serialize_project_file(&after).unwrap();
-    let restored = crate::io::project_io::load_project_text(&json, None).unwrap();
+    let json = rspice_app_services::io::project_io::serialize_project_file(&after).unwrap();
+    let restored = rspice_app_services::io::project_io::load_project_text(&json, None).unwrap();
     assert!(restored.file.simulation_results_warning.is_none());
     assert_eq!(
         restored

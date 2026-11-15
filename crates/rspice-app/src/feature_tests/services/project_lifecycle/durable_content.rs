@@ -42,10 +42,11 @@ fn cleared_run_sequence_is_dirty_and_survives_scoped_and_all_saves() {
             has_unsaved_changes(&state),
             scope == SaveScope::ActiveDocument
         );
-        let saved = crate::io::load_project_file(&path).unwrap();
+        let saved = rspice_app_services::io::load_project_file(&path).unwrap();
         assert_eq!(saved.file.simulation_results.next_run_id, 1);
         let mut restored =
-            crate::io::simulation_state_from_results(saved.file.simulation_results).unwrap();
+            rspice_app_services::io::simulation_state_from_results(saved.file.simulation_results)
+                .unwrap();
         assert!(restored.retained.runs.is_empty());
         assert_eq!(restored.start_run().id, 2);
         remove_project_artifacts(&path);
@@ -54,20 +55,24 @@ fn cleared_run_sequence_is_dirty_and_survives_scoped_and_all_saves() {
 
 pub(super) fn retained_results() -> (AppState, AnalysisPresentationKey) {
     let mut state = AppState::default();
-    let mut run = crate::state::SimulationRun::new(1);
+    let mut run = rspice_app_state::state::SimulationRun::new(1);
     run.add_analysis(
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "Tran")
-            .with_waveforms(vec![crate::state::RetainedTrace::new(
-                "V(out)",
-                vec![0.0, 1.0],
-                vec![1.0, 2.0],
-                "#ffffff",
-            )]),
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Transient,
+            "Tran",
+        )
+        .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
+            "V(out)",
+            vec![0.0, 1.0],
+            vec![1.0, 2.0],
+            "#ffffff",
+        )]),
     );
-    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+    run.restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
         .unwrap();
     run.mark_running().unwrap();
-    run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
+    run.finish_lifecycle(rspice_app_state::state::SimulationRunLifecycle::Completed)
         .unwrap();
     let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
     state.model.simulation.retained.runs.push(run);
@@ -91,7 +96,7 @@ impl Annotation {
     fn add(
         self,
         results: &mut ResultsState,
-        simulation: &crate::state::SimulationState,
+        simulation: &rspice_app_state::state::SimulationState,
         key: AnalysisPresentationKey,
     ) {
         match self {
@@ -152,8 +157,8 @@ fn result_presentation_retains_flat_project_wire_format_and_legacy_defaults() {
         restored.file.validate().unwrap();
         assert_eq!(serde_json::to_value(restored).unwrap(), legacy);
     }
-    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
-    let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
+    let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
+    let restored = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert_eq!(annotations(&restored), annotations(&project));
     assert_eq!(serde_json::to_value(restored).unwrap(), wire);
 }
@@ -279,7 +284,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
             DestinationAuthority::Canonical,
         )
         .unwrap();
-        let saved = crate::io::load_project_file(&path).unwrap();
+        let saved = rspice_app_services::io::load_project_file(&path).unwrap();
         assert_eq!(annotations(&saved), annotations(&edited), "{annotation:?}");
         assert!(
             saved.file.workspace.schematic_buffers
@@ -325,7 +330,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
             DestinationAuthority::Canonical,
         )
         .unwrap();
-        let all_saved = crate::io::load_project_file(&path).unwrap();
+        let all_saved = rspice_app_services::io::load_project_file(&path).unwrap();
         assert_eq!(
             annotations(&all_saved),
             annotations(&snapshot(&state).unwrap())
@@ -352,10 +357,10 @@ fn unbound_probe_edits_participate_in_dirty_undo_redo_and_revert() {
         .project_lifecycle
         .accept_project(baseline, None);
     state.model.schematic.with_undo("Place probe", |schematic| {
-        schematic
-            .document_mut_for_test()
-            .probes
-            .push(crate::state::SchematicProbe::new(99, Point::new(0, 0), "P99", None).unwrap());
+        schematic.document_mut_for_test().probes.push(
+            rspice_app_state::state::SchematicProbe::new(99, Point::new(0, 0), "P99", None)
+                .unwrap(),
+        );
     });
     assert!(has_unsaved_changes(&state));
     assert!(active_document_is_dirty(&state));
@@ -388,7 +393,7 @@ fn grid_and_document_policy_are_owned_by_the_schematic_document() {
                 .schematic
                 .document_mut_for_test()
                 .document_policy
-                .net_naming = crate::state::NetNamingPolicy::SpiceCompatibleRelaxed;
+                .net_naming = rspice_app_state::state::NetNamingPolicy::SpiceCompatibleRelaxed;
         } else {
             state.model.schematic.document_mut_for_test().grid_size += 1;
         }

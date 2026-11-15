@@ -1,14 +1,14 @@
 //! The schematic canvas drawn by a whole application's frame.
 
 use crate::schematic::view::*;
-use crate::state::{Component, ComponentType, Point};
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{Component, ComponentType, Point};
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn canvas_accessibility_uses_a_stable_node_and_concise_live_selection_status() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut state = AppState::default();
     let mut component = Component::new(17, ComponentType::Resistor, Point::new(40, 20));
@@ -130,9 +130,9 @@ fn rest_mouse(
 #[test]
 fn the_full_screen_crosshair_follows_a_mouse_when_chosen() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut state = AppState::default();
-    state.design.grid = crate::state::GridStyle::Off;
+    state.design.grid = rspice_app_state::state::GridStyle::Off;
     let editor = &mut state.model.schematic.session.editor;
     (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
     (editor.pan, editor.zoom) = ((0.0, 0.0), 1.0);
@@ -155,7 +155,10 @@ fn the_full_screen_crosshair_follows_a_mouse_when_chosen() {
         "through the pointer"
     );
 
-    state.model.schematic.arm_tool(crate::state::Tool::Wire);
+    state
+        .model
+        .schematic
+        .arm_tool(rspice_app_state::state::Tool::Wire);
     let (cursor, rows, columns) = rest_mouse(&ctx, &mut state, at, &[]);
     assert_eq!(cursor, egui::CursorIcon::None);
     assert_eq!(
@@ -176,7 +179,7 @@ fn the_full_screen_crosshair_follows_a_mouse_when_chosen() {
 /// event per frame over a bare canvas at unit zoom.
 fn right_drag(state: &mut AppState, from: egui::Pos2, to: egui::Pos2) {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let editor = &mut state.model.schematic.session.editor;
     (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
     (editor.pan, editor.zoom) = ((0.0, 0.0), 1.0);

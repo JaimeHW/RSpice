@@ -68,7 +68,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
 
         fn write_waveform_csv(
             &self,
-            _dataset: &crate::io::WaveformDataset,
+            _dataset: &rspice_app_services::io::WaveformDataset,
             _path: &Path,
         ) -> Result<(), String> {
             Ok(())
@@ -92,7 +92,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
         .netlist_descriptor
         .as_mut()
         .unwrap()
-        .source_encoding = crate::state::NetlistTextEncoding::Latin1;
+        .source_encoding = rspice_app_state::state::NetlistTextEncoding::Latin1;
     let utf8_source = "* caf\u{00e9} and \u{03a9}\nV1 out 0 1\n.op\n.end\n";
     assert!(
         crate::workbench::documents::netlist_document::replace_owned_source(
@@ -116,7 +116,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
         &mut app.state.workbench,
         &io,
         true,
-        crate::state::NetlistTextEncoding::Utf8,
+        rspice_app_state::state::NetlistTextEncoding::Utf8,
         "",
     ));
 
@@ -131,7 +131,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
             .as_ref()
             .unwrap()
             .source_encoding,
-        crate::state::NetlistTextEncoding::Latin1,
+        rspice_app_state::state::NetlistTextEncoding::Latin1,
     );
     assert_eq!(
         app.state.code.netlist.externally_saved_content_digest, imported_digest,
@@ -146,11 +146,11 @@ fn authenticated_generated_bundle_stages_and_commits_retained_closure() {
     assert_eq!(parsed.dependencies.len(), 2);
     assert_eq!(
         parsed.dependencies[0].authority(),
-        crate::state::DependencySourceAuthority::Vendor
+        rspice_app_state::state::DependencySourceAuthority::Vendor
     );
     assert_eq!(
         parsed.dependencies[1].authority(),
-        crate::state::DependencySourceAuthority::TechnologyPackage
+        rspice_app_state::state::DependencySourceAuthority::TechnologyPackage
     );
     assert!(parsed.expanded_source.contains(".model base nmos level=1"));
     assert!(
@@ -243,7 +243,7 @@ fn staged_import_is_cancel_safe_and_commits_only_the_reviewed_snapshot() {
             .netlist_descriptor
             .as_ref()
             .and_then(|descriptor| descriptor.imported_dialect),
-        Some(crate::state::NetlistSourceDialect::RSpice)
+        Some(rspice_app_state::state::NetlistSourceDialect::RSpice)
     );
 }
 
@@ -342,7 +342,7 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
         .expect("restored workspace validates");
 
     let persisted = serde_json::to_vec(&state.model.workspace).expect("serialize workspace");
-    let restored: crate::state::ProjectWorkspace =
+    let restored: rspice_app_state::state::ProjectWorkspace =
         serde_json::from_slice(&persisted).expect("deserialize workspace");
     restored
         .content
@@ -366,11 +366,11 @@ fn a_deck_naming_no_dialect_starts_from_the_preferred_one() {
     for (source, expected) in [
         (
             &b"* plain\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n"[..],
-            crate::state::NetlistSourceDialect::Spice3Ngspice,
+            rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice,
         ),
         (
             &b"* hspice deck\n.option post=2\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n"[..],
-            crate::state::NetlistSourceDialect::Hspice,
+            rspice_app_state::state::NetlistSourceDialect::Hspice,
         ),
     ] {
         let mut state = AppState::default();
@@ -416,7 +416,7 @@ fn detected_foreign_dialect_requires_explicit_acceptance() {
     let review = state.code.netlist.import_review.as_ref().unwrap();
     assert_eq!(
         review.detected_dialect,
-        crate::state::NetlistSourceDialect::Hspice
+        rspice_app_state::state::NetlistSourceDialect::Hspice
     );
     assert!(!review.can_commit());
     assert_eq!(review.blocking_issue_count(), 0);
@@ -425,10 +425,10 @@ fn detected_foreign_dialect_requires_explicit_acceptance() {
     review.compatibility_accepted = true;
     assert!(review.dialect_qualification().is_ok());
     assert!(review.can_commit());
-    review.selected_dialect = crate::state::NetlistSourceDialect::RSpice;
+    review.selected_dialect = rspice_app_state::state::NetlistSourceDialect::RSpice;
     assert!(review.dialect_qualification().is_err());
     assert!(!review.can_commit());
-    review.selected_dialect = crate::state::NetlistSourceDialect::Hspice;
+    review.selected_dialect = rspice_app_state::state::NetlistSourceDialect::Hspice;
     assert!(state.commit_staged_netlist_import());
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
@@ -443,17 +443,17 @@ fn detected_foreign_dialect_requires_explicit_acceptance() {
         .unwrap();
     assert_eq!(
         descriptor.imported_dialect,
-        Some(crate::state::NetlistSourceDialect::Hspice)
+        Some(rspice_app_state::state::NetlistSourceDialect::Hspice)
     );
     assert_eq!(
         descriptor.execution_profile,
-        Some(crate::state::NetlistExecutionProfile::HspiceDeclarativeV1)
+        Some(rspice_app_state::state::NetlistExecutionProfile::HspiceDeclarativeV1)
     );
 }
 
 #[test]
 fn only_source_authenticated_import_dialects_can_commit_after_acceptance() {
-    use crate::state::NetlistSourceDialect;
+    use rspice_app_state::state::NetlistSourceDialect;
 
     let mut state = AppState::default();
     let transaction =
@@ -534,7 +534,7 @@ fn spectre_spice_interoperability_import_preserves_source_and_profile() {
     let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
         review.detected_dialect,
-        crate::state::NetlistSourceDialect::Spectre
+        rspice_app_state::state::NetlistSourceDialect::Spectre
     );
     assert_eq!(review.blocking_issue_count(), 0);
     review.compatibility_accepted = true;
@@ -553,11 +553,11 @@ fn spectre_spice_interoperability_import_preserves_source_and_profile() {
         .unwrap();
     assert_eq!(
         descriptor.imported_dialect,
-        Some(crate::state::NetlistSourceDialect::Spectre)
+        Some(rspice_app_state::state::NetlistSourceDialect::Spectre)
     );
     assert_eq!(
         descriptor.execution_profile,
-        Some(crate::state::NetlistExecutionProfile::SpectreSpiceV1)
+        Some(rspice_app_state::state::NetlistExecutionProfile::SpectreSpiceV1)
     );
 }
 
@@ -580,7 +580,7 @@ fn ads_spice_export_import_preserves_source_and_profile() {
     let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
         review.detected_dialect,
-        crate::state::NetlistSourceDialect::Ads
+        rspice_app_state::state::NetlistSourceDialect::Ads
     );
     assert_eq!(review.blocking_issue_count(), 0);
     review.compatibility_accepted = true;
@@ -599,11 +599,11 @@ fn ads_spice_export_import_preserves_source_and_profile() {
         .unwrap();
     assert_eq!(
         descriptor.imported_dialect,
-        Some(crate::state::NetlistSourceDialect::Ads)
+        Some(rspice_app_state::state::NetlistSourceDialect::Ads)
     );
     assert_eq!(
         descriptor.execution_profile,
-        Some(crate::state::NetlistExecutionProfile::AdsSpiceExportV1)
+        Some(rspice_app_state::state::NetlistExecutionProfile::AdsSpiceExportV1)
     );
 }
 
@@ -624,10 +624,10 @@ fn qualified_spice3_ngspice_import_persists_exact_versioned_profile() {
     let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
         review.detected_dialect,
-        crate::state::NetlistSourceDialect::Spice3Ngspice
+        rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice
     );
     assert_eq!(review.blocking_issue_count(), 0);
-    review.selected_dialect = crate::state::NetlistSourceDialect::Spice3Ngspice;
+    review.selected_dialect = rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice;
     review.compatibility_accepted = true;
     assert!(review.can_commit());
     assert!(state.commit_staged_netlist_import());
@@ -641,22 +641,23 @@ fn qualified_spice3_ngspice_import_persists_exact_versioned_profile() {
         .unwrap();
     assert_eq!(
         descriptor.imported_dialect,
-        Some(crate::state::NetlistSourceDialect::Spice3Ngspice)
+        Some(rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice)
     );
     assert!(descriptor.compatibility_reviewed);
     assert_eq!(
         descriptor.execution_profile,
-        Some(crate::state::NetlistExecutionProfile::Spice3NgspiceV2)
+        Some(rspice_app_state::state::NetlistExecutionProfile::Spice3NgspiceV2)
     );
     let persisted = serde_json::to_vec(&state.model.workspace).unwrap();
-    let restored: crate::state::ProjectWorkspace = serde_json::from_slice(&persisted).unwrap();
+    let restored: rspice_app_state::state::ProjectWorkspace =
+        serde_json::from_slice(&persisted).unwrap();
     assert_eq!(
         restored
             .content
             .netlist_descriptor
             .as_ref()
             .and_then(|descriptor| descriptor.execution_profile),
-        Some(crate::state::NetlistExecutionProfile::Spice3NgspiceV2)
+        Some(rspice_app_state::state::NetlistExecutionProfile::Spice3NgspiceV2)
     );
 }
 
@@ -678,7 +679,7 @@ fn qualified_pspice_import_persists_exact_versioned_profile() {
     let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
         review.detected_dialect,
-        crate::state::NetlistSourceDialect::Pspice
+        rspice_app_state::state::NetlistSourceDialect::Pspice
     );
     assert!(
         review
@@ -704,22 +705,23 @@ fn qualified_pspice_import_persists_exact_versioned_profile() {
         .unwrap();
     assert_eq!(
         descriptor.imported_dialect,
-        Some(crate::state::NetlistSourceDialect::Pspice)
+        Some(rspice_app_state::state::NetlistSourceDialect::Pspice)
     );
     assert!(descriptor.compatibility_reviewed);
     assert_eq!(
         descriptor.execution_profile,
-        Some(crate::state::NetlistExecutionProfile::PspiceDeclarativeV2)
+        Some(rspice_app_state::state::NetlistExecutionProfile::PspiceDeclarativeV2)
     );
     let persisted = serde_json::to_vec(&state.model.workspace).unwrap();
-    let restored: crate::state::ProjectWorkspace = serde_json::from_slice(&persisted).unwrap();
+    let restored: rspice_app_state::state::ProjectWorkspace =
+        serde_json::from_slice(&persisted).unwrap();
     assert_eq!(
         restored
             .content
             .netlist_descriptor
             .as_ref()
             .and_then(|descriptor| descriptor.execution_profile),
-        Some(crate::state::NetlistExecutionProfile::PspiceDeclarativeV2)
+        Some(rspice_app_state::state::NetlistExecutionProfile::PspiceDeclarativeV2)
     );
 }
 
@@ -735,7 +737,8 @@ fn quarantined_owned_ngspice_state() -> AppState {
         .netlist_descriptor
         .as_mut()
         .unwrap();
-    descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spice3Ngspice);
+    descriptor.imported_dialect =
+        Some(rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice);
     descriptor.compatibility_reviewed = false;
     descriptor.execution_profile = None;
     state.model.workspace.content.netlist_source_dirty = false;
@@ -784,7 +787,7 @@ fn quarantined_owned_source_requalifies_without_external_file_or_source_replacem
         .unwrap();
     assert_eq!(
         descriptor.execution_profile,
-        Some(crate::state::NetlistExecutionProfile::Spice3NgspiceV2)
+        Some(rspice_app_state::state::NetlistExecutionProfile::Spice3NgspiceV2)
     );
     assert!(descriptor.compatibility_reviewed);
     assert!(!descriptor.execution_profile_review_required());
@@ -853,7 +856,7 @@ fn imperative_ngspice_control_command_cannot_use_declarative_profile() {
         "imperative-ngspice.cir".to_owned()
     ));
     let review = state.code.netlist.import_review.as_mut().unwrap();
-    review.selected_dialect = crate::state::NetlistSourceDialect::Spice3Ngspice;
+    review.selected_dialect = rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice;
     review.compatibility_accepted = true;
     let error = review.dialect_qualification().unwrap_err();
     assert!(error.contains("spice3-ngspice/2"));
@@ -948,9 +951,9 @@ fn opening_a_netlist_commits_an_independent_netlist_first_project() {
         Some(std::path::PathBuf::from("bias.cir")),
         "bias.cir",
         NetlistImportMetadata {
-            encoding: crate::state::NetlistTextEncoding::Utf8,
-            line_ending: crate::state::NetlistLineEnding::Lf,
-            dialect: crate::state::NetlistSourceDialect::RSpice,
+            encoding: rspice_app_state::state::NetlistTextEncoding::Utf8,
+            line_ending: rspice_app_state::state::NetlistLineEnding::Lf,
+            dialect: rspice_app_state::state::NetlistSourceDialect::RSpice,
             compatibility_reviewed: false,
             raw_sha256: sha256(b"new\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n"),
         },
@@ -986,9 +989,9 @@ fn a_netlist_project_that_cannot_open_states_why() {
         Some(std::path::PathBuf::new()),
         "bias.cir",
         NetlistImportMetadata {
-            encoding: crate::state::NetlistTextEncoding::Utf8,
-            line_ending: crate::state::NetlistLineEnding::Lf,
-            dialect: crate::state::NetlistSourceDialect::RSpice,
+            encoding: rspice_app_state::state::NetlistTextEncoding::Utf8,
+            line_ending: rspice_app_state::state::NetlistLineEnding::Lf,
+            dialect: rspice_app_state::state::NetlistSourceDialect::RSpice,
             compatibility_reviewed: false,
             raw_sha256: sha256(source.as_bytes()),
         },
@@ -1005,7 +1008,10 @@ fn a_netlist_project_that_cannot_open_states_why() {
         .entries()
         .last()
         .expect("the failure is recorded");
-    assert_eq!(line.severity, crate::diagnostics::LogSeverity::Error);
+    assert_eq!(
+        line.severity,
+        rspice_app_state::diagnostics::LogSeverity::Error
+    );
     let reason = line
         .message
         .strip_prefix("Netlist project open failed: ")
@@ -1022,7 +1028,7 @@ fn a_netlist_project_that_cannot_open_states_why() {
 fn importing_a_deck_refuses_read_only_projects_without_mutation() {
     let mut state = AppState::default();
     state.model.safe_mode.active = true;
-    state.model.safe_mode.applied = crate::state::write_policy::LocalSafeModeOptions {
+    state.model.safe_mode.applied = rspice_app_state::state::write_policy::LocalSafeModeOptions {
         open_project_read_only: true,
         ..Default::default()
     };

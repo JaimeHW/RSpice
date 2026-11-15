@@ -3,9 +3,9 @@
 //! again.
 
 use super::*;
-use crate::state::Point;
 use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
 use crate::workbench::app_state::waivers::{WaiverAction, WaiverTarget};
+use rspice_app_state::state::Point;
 use rspice_simulation::execution::PreparationStage;
 
 const REASON: &str = "sense is tied to SENSE on purpose";
@@ -143,7 +143,7 @@ fn the_run_gate_follows_the_waiver_both_ways() {
 /// What the run gate does with the design: `None` where it prepares, the
 /// stage it refused at otherwise.
 fn gate(
-    controller: &mut crate::simulation::SimulationController,
+    controller: &mut rspice_app_runs::simulation::controller::SimulationController,
     state: &AppState,
 ) -> Option<PreparationStage> {
     controller

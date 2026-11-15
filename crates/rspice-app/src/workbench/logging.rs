@@ -2,7 +2,7 @@
 //!
 //! Which filter a desktop launch starts from, and the environment variable that
 //! overrides it. The logger those build is
-//! [`crate::diagnostics::engine_log::StudioLogger`], which sends every record
+//! [`rspice_app_state::diagnostics::engine_log::StudioLogger`], which sends every record
 //! to this filter exactly as before and additionally offers the engine's own
 //! lines to the run that produced them.
 
@@ -31,13 +31,13 @@ pub fn native_log_env() -> env_logger::Env<'static> {
 ///
 /// Replaces the bare `env_logger::Builder::init()` this entry point used to
 /// call. The logger itself is
-/// [`crate::diagnostics::engine_log::StudioLogger`]: what the application
+/// [`rspice_app_state::diagnostics::engine_log::StudioLogger`]: what the application
 /// reports about itself is that module's subject, and the run sink it feeds
 /// has to be reachable from the layers that execute a run. What stays here is
 /// what this file has always owned — which filter a desktop launch starts from.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn install_studio_logger() {
-    crate::diagnostics::engine_log::install_studio_logger(
+    rspice_app_state::diagnostics::engine_log::install_studio_logger(
         env_logger::Builder::from_env(native_log_env()).build(),
     );
 }

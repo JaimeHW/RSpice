@@ -18,12 +18,6 @@ mod status_order;
 use egui::Ui;
 use egui::os::OperatingSystem;
 
-use crate::diagnostics::LogAnchor;
-use crate::state::VerificationPage;
-use crate::state::command_catalog::{CommandKey, CommandPlatform};
-use crate::state::{CellViewRef, ViewType};
-use crate::ui::icons::Icon;
-use crate::ui::widgets::NotificationAction;
 use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::commands::vocabulary::{
@@ -54,6 +48,12 @@ use rspice_app_cloud::workbench::cloud::CloudFeature;
 use rspice_app_code::workbench::code::{CodeFeature, SOURCE_EDITOR_MENU};
 use rspice_app_hardcopy::workbench::hardcopy::HardcopyFeature;
 use rspice_app_sheets::workbench::sheets::SheetsFeature;
+use rspice_app_state::diagnostics::LogAnchor;
+use rspice_app_state::state::VerificationPage;
+use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
+use rspice_app_state::state::{CellViewRef, ViewType};
+use rspice_app_workbench::ui::icons::Icon;
+use rspice_app_workbench::ui::widgets::NotificationAction;
 use rspice_app_workbench::workbench::app::dialogs::confirmation::ConfirmationHost;
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationResponse;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
@@ -138,7 +138,9 @@ impl Host for RSpiceApp {
                         #[cfg(target_arch = "wasm32")]
                         project::poll_browser_completions(&ctx, &mut features::cx(app));
                         if app.state.platform.project_lifecycle.is_open() {
-                            let fill = crate::ui::tokens::Tokens::get(&ctx).color.bg_app;
+                            let fill = rspice_app_workbench::ui::tokens::Tokens::get(&ctx)
+                                .color
+                                .bg_app;
                             egui::Frame::new().fill(fill).show(ui, |ui| {
                                 // The application's central panel zeroes item
                                 // spacing before handing a surface the frame; a
@@ -1011,7 +1013,7 @@ impl WorkbenchHost for RSpiceApp {
         state.model.model_library_manager.filter_text = model.clone();
         state.model.model_library_manager.filter_type = None;
         state.models.selected_model = Some(model);
-        state.models.models_page = crate::state::ModelsPage::Models;
+        state.models.models_page = rspice_app_state::state::ModelsPage::Models;
         state
             .workbench
             .activate(crate::workbench::state::Workspace::Models);
@@ -1358,8 +1360,8 @@ mod tests {
     /// registry leaves out.
     #[test]
     fn each_simulate_id_names_its_command() {
-        use crate::state::{SimulationPage, VerificationPage};
         use crate::workbench::simulate::commands::SimulateCommand;
+        use rspice_app_state::state::{SimulationPage, VerificationPage};
         for (id, command) in [
             (ids::RUN_SIMULATION, SimulateCommand::Run),
             (ids::STOP_SIMULATION, SimulateCommand::Stop),

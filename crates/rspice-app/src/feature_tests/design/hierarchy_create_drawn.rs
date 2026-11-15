@@ -38,7 +38,7 @@ fn create_hierarchy_is_a_command_form_without_explainers() {
     );
     assert!(app.state.design.create_hierarchy.open);
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut nodes = Vec::new();
     for _ in 0..2 {

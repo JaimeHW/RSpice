@@ -1,16 +1,16 @@
 //! Canvas gestures driven through a whole application's frame.
 
 use crate::feature_tests::design::gestures_drawn::Fixture;
-use crate::state::{Point, SchematicState, Tool};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::DragType;
+use rspice_app_state::state::{Point, SchematicState, Tool};
 
 #[test]
 fn symbol_draft_survives_passive_window_projection() {
-    use crate::state::{
+    use crate::workbench::{SymbolTool, state::WorkspaceDocumentId};
+    use rspice_app_state::state::{
         Cell, CellViewRef, SymbolDocument, SymbolEditorMetadata, SymbolShape, View, ViewType,
     };
-    use crate::workbench::{SymbolTool, state::WorkspaceDocumentId};
 
     let mut failures = Vec::new();
     for other_is_symbol in [false, true] {

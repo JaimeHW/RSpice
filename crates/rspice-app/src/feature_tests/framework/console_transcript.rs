@@ -3,14 +3,14 @@
 
 use egui::{Key, Modifiers, Rect, pos2};
 
-use crate::diagnostics::{LogAnchor, LogBuffer, LogSeverity, LogSource};
-use crate::state::SimulationRun;
-use crate::ui::widgets::NotificationAction;
-use crate::ui::widgets::PROBLEM_MARK_ADVANCE as CONSOLE_MARK_GUTTER;
 use crate::workbench::state::{
     ConsoleChannel, ConsolePage, ConsoleReveal, ConsoleSelection, ConsoleView,
 };
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_state::diagnostics::{LogAnchor, LogBuffer, LogSeverity, LogSource};
+use rspice_app_state::state::SimulationRun;
+use rspice_app_workbench::ui::widgets::NotificationAction;
+use rspice_app_workbench::ui::widgets::PROBLEM_MARK_ADVANCE as CONSOLE_MARK_GUTTER;
 use rspice_app_workbench::workbench::docks::console::transcript::lines::{Rows, Source};
 use rspice_app_workbench::workbench::docks::console::transcript::*;
 use rspice_app_workbench::workbench::docks::console::{CONSOLE_COLUMN_GAP, CONSOLE_ROW_MIN_HEIGHT};
@@ -20,7 +20,7 @@ const SIZE: egui::Vec2 = egui::vec2(900.0, 600.0);
 
 fn context() -> egui::Context {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx
 }
 

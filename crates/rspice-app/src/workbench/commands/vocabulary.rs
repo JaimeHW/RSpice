@@ -13,13 +13,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::io::NetlistFormat;
 use crate::schematic::view::sheet_visibility::SchematicObjectKind;
-use crate::state::ModelsPage;
-use crate::state::command_catalog::{
-    CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
-};
-use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
 use crate::workbench::models::commands::ModelsCommand;
@@ -31,8 +25,14 @@ use crate::workbench::state::Workspace;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
+use rspice_app_services::io::NetlistFormat;
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
+use rspice_app_state::state::ModelsPage;
+use rspice_app_state::state::command_catalog::{
+    CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
+};
+use rspice_app_state::state::{SimulationPage, VerificationPage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 // `CommandPalette` is the feature's name, the same one the shortcut

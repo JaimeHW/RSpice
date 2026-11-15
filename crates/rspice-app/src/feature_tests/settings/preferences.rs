@@ -14,7 +14,7 @@ use rspice_app_settings::workbench::app::dialogs::preferences::*;
 #[test]
 fn restored_waveform_defaults_reach_the_open_view_in_the_same_frame() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = test_app();
     app.state
         .workbench

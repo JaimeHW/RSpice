@@ -2,7 +2,7 @@
 //! through the whole application.
 
 use super::{state_with_populated_user_library, state_with_work_cell};
-use crate::state::{
+use rspice_app_state::state::{
     Cell, CellViewRef, LayoutEdit, LayoutInstance, LayoutObjectId, LayoutOrientation, LayoutPoint,
     LayoutTransform, View, ViewType,
 };

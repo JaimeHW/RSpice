@@ -1,7 +1,7 @@
 //! What the measurement table admits as a measurement.
 
-use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
 use crate::workbench::RSpiceApp;
+use rspice_app_state::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
 use rspice_app_workbench::workbench::docks::console::active_measurement_rows;
 
 /// A frequency response whose margins the Bode extraction can read.

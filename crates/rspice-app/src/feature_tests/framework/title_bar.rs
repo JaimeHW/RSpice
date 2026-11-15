@@ -6,12 +6,6 @@
 
 use egui::{Context, Frame, Id, Key, Modifiers, Popup, Rect, Ui};
 
-use crate::state::ModelsPage;
-use crate::state::VerificationPage;
-use crate::state::command_catalog::CommandKey;
-use crate::ui::panels::WorkbenchIcon;
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens;
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::{Command, command_registry};
 use crate::workbench::design::commands::DesignCommand;
@@ -26,6 +20,12 @@ use crate::workbench::state::Workspace;
 use rspice_app_cloud::workbench::cloud::commands::CloudCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
+use rspice_app_state::state::ModelsPage;
+use rspice_app_state::state::VerificationPage;
+use rspice_app_state::state::command_catalog::CommandKey;
+use rspice_app_workbench::ui::panels::WorkbenchIcon;
+use rspice_app_workbench::ui::theme::{self, FontWeight};
+use rspice_app_workbench::ui::tokens;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
     ALL_MENUS, ApplicationMenu, file_menu_shows_exit, menu_popup_height_for_viewport,
     shortcut_for_occurrence,
@@ -98,7 +98,7 @@ fn closed_project_title_context_does_not_leak_the_previous_document_identity() {
 fn the_painted_desktop_title_names_no_project_when_none_is_open() {
     fn painted(project_open: bool) -> String {
         let ctx = title_test_ctx();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = title_test_app();
         app.state.workbench.workspace = Workspace::Design;
         if !project_open {
@@ -135,7 +135,7 @@ fn the_painted_desktop_title_names_no_project_when_none_is_open() {
 fn unsaved_project_changes_put_a_star_after_the_painted_title() {
     fn painted(app: &RSpiceApp, width: f32) -> String {
         let ctx = title_test_ctx();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let bounds = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 32.0));
         let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default()
@@ -246,7 +246,7 @@ fn assert_menu_lists(menu: ApplicationMenu, run: &[CommandKey]) {
 #[cfg(not(target_arch = "wasm32"))]
 fn rendered_results_menu_labels() -> Vec<String> {
     let ctx = title_test_ctx();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let app = title_test_app();
     let output = ctx.run_ui(
@@ -310,7 +310,7 @@ fn rendered_simulate_menu_rows(
     stable_analysis_plan: bool,
 ) -> (CommandAvailability, Vec<(String, Option<String>)>) {
     let ctx = title_test_ctx();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
     app.state.open_project_session();
@@ -492,7 +492,7 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
 #[test]
 fn desktop_menu_triggers_fill_the_title_track_without_vertical_clipping() {
     let ctx = title_test_ctx();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
     let output = ctx.run_ui(
@@ -531,7 +531,7 @@ fn desktop_menu_triggers_fill_the_title_track_without_vertical_clipping() {
 #[test]
 fn command_keycap_uses_canonical_intrinsic_border_box_width() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut width = 0.0;
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -582,7 +582,7 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
     assert_eq!(
         shortcut_for_occurrence(
             &app,
-            crate::state::command_catalog::CommandPlatform::Desktop,
+            rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
             Command::KeyboardShortcuts.key(),
             Some("")
@@ -592,7 +592,7 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
     assert_eq!(
         shortcut_for_occurrence(
             &app,
-            crate::state::command_catalog::CommandPlatform::Desktop,
+            rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
             Command::KeyboardShortcuts.key(),
             Some("Ctrl+Alt+R")
@@ -607,7 +607,7 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
 
 #[test]
 fn exit_is_a_desktop_lifecycle_action_not_a_browser_menu_item() {
-    use crate::state::command_catalog::CommandPlatform;
+    use rspice_app_state::state::command_catalog::CommandPlatform;
 
     assert!(file_menu_shows_exit(CommandPlatform::Desktop));
     for platform in [
@@ -628,7 +628,7 @@ fn application_menu_height_is_viewport_bounded() {
 
 #[test]
 fn menu_shortcuts_are_projected_from_the_typed_registry() {
-    let platform = crate::state::command_catalog::CommandPlatform::Desktop;
+    let platform = rspice_app_state::state::command_catalog::CommandPlatform::Desktop;
     let app = RSpiceApp::test_instance();
     for command in [
         ProjectCommand::OpenProject.declared_spec(),
@@ -815,8 +815,8 @@ fn the_panels_are_switched_from_view_and_not_from_window() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_grid_rows_choose_the_drawn_style() {
-    use crate::state::GridStyle;
     use egui::accesskit::{Role, Toggled};
+    use rspice_app_state::state::GridStyle;
 
     let grid = application_menu_entries(ApplicationMenu::View)
         .iter()
@@ -832,7 +832,7 @@ fn the_grid_rows_choose_the_drawn_style() {
     let mut app = title_test_app();
     app.state.workbench.workspace = Workspace::Design;
     let ctx = title_test_ctx();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let output = ctx.run_ui(
         egui::RawInput {
@@ -905,8 +905,8 @@ fn undo_redo_and_repeat_name_what_they_act_on() {
             .schematic
             .with_undo("Place resistor", |schematic| {
                 schematic.add_component(
-                    crate::state::ComponentType::Resistor,
-                    crate::state::Point::origin(),
+                    rspice_app_state::state::ComponentType::Resistor,
+                    rspice_app_state::state::Point::origin(),
                 );
             })
     );
@@ -1056,10 +1056,10 @@ fn menu_items_after_frame(
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
-    use crate::state::{Component, ComponentType, Point};
+    use rspice_app_state::state::{Component, ComponentType, Point};
 
     let ctx = title_test_ctx();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
     app.state.workbench.activate(Workspace::Design);
@@ -1244,7 +1244,7 @@ fn offered_rows_and_empty_submenus_are_left_out() {
     let rows = menu_entries::resolve_menu_rows(
         application_menu_entries(ApplicationMenu::Results),
         &app,
-        crate::state::command_catalog::CommandPlatform::Desktop,
+        rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
     );
     let view_as = rows
@@ -1489,8 +1489,8 @@ fn design_follows_the_view_in_front() {
         .expect("the symbol loads");
     assert_eq!(
         turned.body,
-        [crate::state::SymbolShape::Dot {
-            center: crate::state::Point::new(0, -20),
+        [rspice_app_state::state::SymbolShape::Dot {
+            center: rspice_app_state::state::Point::new(0, -20),
             radius: 2,
         }],
         "a quarter counter-clockwise about the origin"
@@ -1502,7 +1502,7 @@ fn design_follows_the_view_in_front() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn annotate_dc_operating_point_switches_the_schematic_annotation() {
-    use crate::state::SchematicAnnotationVisibility;
+    use rspice_app_state::state::SchematicAnnotationVisibility;
     let mut app = title_test_app();
     app.state.workbench.activate(Workspace::Design);
     let key = DesignCommand::AnnotateOperatingPoint.key();
@@ -1528,7 +1528,7 @@ fn annotate_dc_operating_point_switches_the_schematic_annotation() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn window_gathers_windows_only_on_the_desktop_and_reaches_every_workspace() {
-    use crate::state::command_catalog::CommandPlatform;
+    use rspice_app_state::state::command_catalog::CommandPlatform;
     let app = title_test_app();
     let window = application_menu_entries(ApplicationMenu::Window);
     let gathers = |rows: &[String]| {
@@ -1666,7 +1666,7 @@ fn a_build_without_cloud_endpoints_leaves_out_live_session_and_publish() {
     let rows = menu_entries::resolve_menu_rows(
         application_menu_entries(ApplicationMenu::File),
         &app,
-        crate::state::command_catalog::CommandPlatform::Desktop,
+        rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
     );
     let shown = visible_row_names(&rows);
@@ -1750,7 +1750,7 @@ fn switching_rows_read_as_checkable_menu_items_with_their_state() {
     use egui::accesskit::{Role, Toggled};
 
     let ctx = title_test_ctx();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
     app.state.workbench.navigator_visible = true;
@@ -1806,7 +1806,7 @@ fn switching_rows_read_as_checkable_menu_items_with_their_state() {
 fn the_account_button_shows_a_person_until_an_identity_names_someone() {
     fn painted(initials: Option<&str>) -> (Vec<String>, usize) {
         let ctx = title_test_ctx();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
@@ -1833,7 +1833,7 @@ fn the_account_button_shows_a_person_until_an_identity_names_someone() {
         "no initials without an identity: {texts:?}"
     );
 
-    app.state.cloud.license = Some(crate::services::license::LicenseInfo {
+    app.state.cloud.license = Some(rspice_app_cloud::services::license::LicenseInfo {
         licensed_to: "Ada Lovelace".to_owned(),
         tier: String::new(),
         updates_until: String::new(),
@@ -1857,7 +1857,7 @@ fn shown_rows(menu: ApplicationMenu, app: &RSpiceApp) -> Vec<(String, bool)> {
     let rows = menu_entries::resolve_menu_rows(
         application_menu_entries(menu),
         app,
-        crate::state::command_catalog::CommandPlatform::Desktop,
+        rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
     );
     menu_entries::visible_rows(&rows)
@@ -1879,7 +1879,7 @@ fn shown_rows(menu: ApplicationMenu, app: &RSpiceApp) -> Vec<(String, bool)> {
 #[test]
 fn the_keyboard_walks_greyed_rows_and_enter_on_one_does_nothing() {
     let ctx = title_test_ctx();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
     let results_menu = Id::new((
@@ -1938,7 +1938,7 @@ fn the_keyboard_walks_greyed_rows_and_enter_on_one_does_nothing() {
 #[test]
 fn a_menu_of_greyed_rows_still_answers_its_keys() {
     let ctx = title_test_ctx();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
     app.state.close_project_session();
@@ -2008,7 +2008,7 @@ struct TitleBarWindow {
 impl TitleBarWindow {
     fn new(size: egui::Vec2) -> Self {
         let ctx = title_test_ctx();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         Self {
             ctx,
@@ -2244,7 +2244,7 @@ fn every_menu_is_wide_enough_for_its_longest_row() {
         }
     }
     let ctx = title_test_ctx();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut needed = Vec::new();
     for app in [title_test_app(), source_editor_app()] {
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
@@ -2274,7 +2274,7 @@ fn every_menu_is_wide_enough_for_its_longest_row() {
             MENU_ROW_HEIGHT
         };
         let ctx = title_test_ctx();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = title_test_app();
         for menu in ALL_MENUS {
@@ -2400,7 +2400,7 @@ fn no_menu_draws_a_rule_at_its_edge_or_two_rules_together() {
             let rows = menu_entries::resolve_menu_rows(
                 application_menu_entries(menu),
                 &app,
-                crate::state::command_catalog::CommandPlatform::Desktop,
+                rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
                 egui::os::OperatingSystem::Windows,
             );
             let shown = visible_row_names(&rows);
@@ -2421,7 +2421,7 @@ fn no_menu_draws_a_rule_at_its_edge_or_two_rules_together() {
 #[test]
 fn title_context_ellipsis_is_measured_instead_of_character_estimated() {
     let ctx = title_test_ctx();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut fitted = String::new();
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {

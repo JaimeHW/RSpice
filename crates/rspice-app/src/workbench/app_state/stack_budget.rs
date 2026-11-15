@@ -82,8 +82,14 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
 fn model_field_sizes() -> Vec<(&'static str, usize)> {
     use crate::workbench::app_state as a;
     vec![
-        ("schematic", size_of::<crate::state::SchematicState>()),
-        ("simulation", size_of::<crate::state::SimulationState>()),
+        (
+            "schematic",
+            size_of::<rspice_app_state::state::SchematicState>(),
+        ),
+        (
+            "simulation",
+            size_of::<rspice_app_state::state::SimulationState>(),
+        ),
         (
             "project_design_history",
             size_of::<a::design_history::ProjectDesignHistory>(),
@@ -93,28 +99,37 @@ fn model_field_sizes() -> Vec<(&'static str, usize)> {
             size_of::<a::design_checks::DesignCheckRuntime>(),
         ),
         ("sim_setup", size_of::<a::SimSetupState>()),
-        ("log_buffer", size_of::<crate::diagnostics::LogBuffer>()),
-        ("library_manager", size_of::<crate::state::LibraryManager>()),
+        (
+            "log_buffer",
+            size_of::<rspice_app_state::diagnostics::LogBuffer>(),
+        ),
+        (
+            "library_manager",
+            size_of::<rspice_app_state::state::LibraryManager>(),
+        ),
         (
             "library_edit_locks",
-            size_of::<crate::state::ProjectLibraryLockAuthority>(),
+            size_of::<rspice_app_state::state::ProjectLibraryLockAuthority>(),
         ),
-        ("workspace", size_of::<crate::state::ProjectWorkspace>()),
+        (
+            "workspace",
+            size_of::<rspice_app_state::state::ProjectWorkspace>(),
+        ),
         (
             "pdk_config",
-            size_of::<crate::state::pdk_config::PdkConfig>(),
+            size_of::<rspice_app_state::state::pdk_config::PdkConfig>(),
         ),
         (
             "model_library_manager",
-            size_of::<crate::state::model_library::ModelLibraryManager>(),
+            size_of::<rspice_app_state::state::model_library::ModelLibraryManager>(),
         ),
         (
             "safe_mode",
-            size_of::<crate::state::write_policy::LocalSafeModeState>(),
+            size_of::<rspice_app_state::state::write_policy::LocalSafeModeState>(),
         ),
         (
             "live_write_locks",
-            size_of::<crate::state::write_policy::LiveWriteLocks>(),
+            size_of::<rspice_app_state::state::write_policy::LiveWriteLocks>(),
         ),
     ]
 }

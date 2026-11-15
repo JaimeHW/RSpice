@@ -4,13 +4,13 @@
 //! report carries.
 
 use super::stage::show_on_stage;
-use crate::state::SimulationPage;
-use crate::state::{
-    PreflightIssue, PreflightRemediation, PreflightReport, PreparedPreflightContract,
-};
 use crate::workbench::RSpiceApp;
 use rspice_app_runs::workbench::app_state::run_preflight::PreflightCurrency;
 use rspice_app_simulate::workbench::surfaces::simulate::pages::preflight_currency;
+use rspice_app_state::state::SimulationPage;
+use rspice_app_state::state::{
+    PreflightIssue, PreflightRemediation, PreflightReport, PreparedPreflightContract,
+};
 
 fn current_report(
     state: &crate::workbench::AppState,
@@ -35,11 +35,13 @@ fn current_report(
 
 fn prepared_contract(task_count: usize) -> PreparedPreflightContract {
     PreparedPreflightContract {
-        snapshot_digest: crate::product::ContentDigest::from_bytes([1; 32]),
-        source_digest: crate::product::ContentDigest::from_bytes([2; 32]),
-        receipt_digest: crate::product::ContentDigest::from_bytes([3; 32]),
+        snapshot_digest: rspice_app_state::product::ContentDigest::from_bytes([1; 32]),
+        source_digest: rspice_app_state::product::ContentDigest::from_bytes([2; 32]),
+        receipt_digest: rspice_app_state::product::ContentDigest::from_bytes([3; 32]),
         receipt_label: "receipt",
-        analysis_ids: vec![crate::product::ContentDigest::from_bytes([4; 32])],
+        analysis_ids: vec![rspice_app_state::product::ContentDigest::from_bytes(
+            [4; 32],
+        )],
         task_count,
         saved_output_contract_count: 0,
         pvt_point_count: 1,
@@ -113,7 +115,7 @@ fn route_announcements(
     seed: impl FnOnce(&mut crate::workbench::AppState),
 ) -> Vec<String> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.simulate.simulation_page = page;
@@ -185,7 +187,7 @@ fn a_route_states_nothing_when_no_preflight_has_been_run() {
 /// widget's text is its AccessKit value, not its name.
 fn analyses_text(seed: impl FnOnce(&mut crate::workbench::AppState)) -> Vec<String> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.simulate.simulation_page = SimulationPage::Analyses;

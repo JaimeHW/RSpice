@@ -41,8 +41,6 @@ mod technology_demand_tests;
 mod transaction;
 pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
-use crate::state::notices::NoticeKind;
-use crate::state::{RunEvent, RunEventSink};
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::slots::{
     CloudState, CodeState, DesignState, HardcopyState, ModelsState, ProjectState, ResultsState,
@@ -58,6 +56,8 @@ use rspice_app_services::workbench::slots::platform::remember_recent_file;
 use rspice_app_services::workbench::slots::platform::trim_recent_files;
 use rspice_app_settings::workbench::app_state::session::preferences_file::PreferencesFileParts;
 use rspice_app_settings::workbench::app_state::session::shortcut_library::ShortcutLibraryParts;
+use rspice_app_state::state::notices::NoticeKind;
+use rspice_app_state::state::{RunEvent, RunEventSink};
 
 #[cfg(test)]
 pub(crate) use design_checks::DesignCheckStatus;
@@ -286,7 +286,7 @@ impl AppState {
 
     /// Whether a viewer is currently available for activation.
     #[cfg(test)]
-    pub fn viewer_is_available(&self, viewer: crate::state::ActiveViewer) -> bool {
+    pub fn viewer_is_available(&self, viewer: rspice_app_state::state::ActiveViewer) -> bool {
         self.results_reads().viewer_capability(viewer).available
     }
 
@@ -298,8 +298,8 @@ impl AppState {
     /// [`Self::prompt`].
     pub fn record(
         &mut self,
-        severity: crate::diagnostics::LogSeverity,
-        source: crate::diagnostics::LogSource,
+        severity: rspice_app_state::diagnostics::LogSeverity,
+        source: rspice_app_state::diagnostics::LogSource,
         text: impl Into<String>,
     ) -> u64 {
         self.model.record(severity, source, text)
@@ -363,7 +363,9 @@ impl AppState {
     /// report calls it the same way. Anything drawn earlier in the frame that
     /// counts the toasts, the bell's unread count, catches up on the next.
     pub(crate) fn drain_notices(&mut self, ctx: &egui::Context) {
-        use crate::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
+        use rspice_app_workbench::ui::widgets::{
+            NotificationAction, NotificationCategory, ToastKind,
+        };
 
         let notices = self.model.notices.take();
         if !notices.is_empty() {
@@ -493,16 +495,16 @@ mod tests {
     fn physical_layout_initialization_uses_exact_project_dbu_and_persists() {
         let mut state = AppState::default();
         state.provision_test_project_technology_contract();
-        let owner = crate::state::CellViewRef::new("user", "top", "layout");
+        let owner = rspice_app_state::state::CellViewRef::new("user", "top", "layout");
         state
             .model
             .library_manager
             .get_library_mut("user")
             .expect("default project library")
             .get_or_create_cell("top")
-            .add_view(crate::state::View::new(
+            .add_view(rspice_app_state::state::View::new(
                 "layout",
-                crate::state::ViewType::Layout,
+                rspice_app_state::state::ViewType::Layout,
             ));
 
         let revision = state
@@ -522,7 +524,7 @@ mod tests {
         let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
             .expect("layout project snapshot validates");
         let encoded = serde_json::to_vec(&snapshot).expect("serialize layout project");
-        let restored: crate::io::ProjectSnapshot =
+        let restored: rspice_app_services::io::ProjectSnapshot =
             serde_json::from_slice(&encoded).expect("deserialize layout project");
         restored
             .file
@@ -533,7 +535,7 @@ mod tests {
             serde_json::from_slice(&encoded).expect("decode layout project");
         tampered["workspace"]["physical_layout_documents"][owner.key()]["technology"]["archive_digest"] =
             serde_json::Value::String("00".repeat(32));
-        let tampered: crate::io::ProjectSnapshot =
+        let tampered: rspice_app_services::io::ProjectSnapshot =
             serde_json::from_value(tampered).expect("deserialize structurally valid tamper");
         assert!(tampered.file.validate().is_err());
     }
@@ -542,21 +544,21 @@ mod tests {
     fn physical_layout_edits_commit_atomically_and_reject_unsigned_layer_purposes() {
         let mut state = AppState::default();
         state.provision_test_project_technology_contract();
-        let owner = crate::state::CellViewRef::new("user", "top", "layout");
+        let owner = rspice_app_state::state::CellViewRef::new("user", "top", "layout");
         state
             .model
             .library_manager
             .get_library_mut("user")
             .expect("default project library")
             .get_or_create_cell("top")
-            .add_view(crate::state::View::new(
+            .add_view(rspice_app_state::state::View::new(
                 "layout",
-                crate::state::ViewType::Layout,
+                rspice_app_state::state::ViewType::Layout,
             ));
         state
             .model
             .workspace
-            .open_view(owner.clone(), crate::state::ViewType::Layout);
+            .open_view(owner.clone(), rspice_app_state::state::ViewType::Layout);
         let start = state
             .model
             .initialize_physical_layout_document(owner.clone())
@@ -581,22 +583,22 @@ mod tests {
             .unwrap()
             .dirty = false;
 
-        let valid_shape = crate::state::LayoutObjectId::new();
+        let valid_shape = rspice_app_state::state::LayoutObjectId::new();
         let committed = state
             .model
             .apply_physical_layout_transaction(
                 &owner,
                 start,
-                &[crate::state::LayoutEdit::InsertShape {
+                &[rspice_app_state::state::LayoutEdit::InsertShape {
                     id: valid_shape,
-                    value: crate::state::LayoutShape {
-                        layer_purpose: crate::state::LayoutLayerPurpose::try_new(
+                    value: rspice_app_state::state::LayoutShape {
+                        layer_purpose: rspice_app_state::state::LayoutLayerPurpose::try_new(
                             "metal1", "drawing",
                         )
                         .unwrap(),
-                        geometry: crate::state::LayoutGeometry::Rectangle {
-                            lower_left: crate::state::LayoutPoint::new(0, 0),
-                            upper_right: crate::state::LayoutPoint::new(100, 200),
+                        geometry: rspice_app_state::state::LayoutGeometry::Rectangle {
+                            lower_left: rspice_app_state::state::LayoutPoint::new(0, 0),
+                            upper_right: rspice_app_state::state::LayoutPoint::new(100, 200),
                         },
                         net: None,
                         properties: std::collections::BTreeMap::new(),
@@ -639,22 +641,22 @@ mod tests {
                 .dirty
         );
 
-        let invalid_shape = crate::state::LayoutObjectId::new();
+        let invalid_shape = rspice_app_state::state::LayoutObjectId::new();
         let error = state
             .model
             .apply_physical_layout_transaction(
                 &owner,
                 committed,
-                &[crate::state::LayoutEdit::InsertShape {
+                &[rspice_app_state::state::LayoutEdit::InsertShape {
                     id: invalid_shape,
-                    value: crate::state::LayoutShape {
-                        layer_purpose: crate::state::LayoutLayerPurpose::try_new(
+                    value: rspice_app_state::state::LayoutShape {
+                        layer_purpose: rspice_app_state::state::LayoutLayerPurpose::try_new(
                             "invented", "drawing",
                         )
                         .unwrap(),
-                        geometry: crate::state::LayoutGeometry::Rectangle {
-                            lower_left: crate::state::LayoutPoint::new(0, 0),
-                            upper_right: crate::state::LayoutPoint::new(10, 10),
+                        geometry: rspice_app_state::state::LayoutGeometry::Rectangle {
+                            lower_left: rspice_app_state::state::LayoutPoint::new(0, 0),
+                            upper_right: rspice_app_state::state::LayoutPoint::new(10, 10),
                         },
                         net: None,
                         properties: std::collections::BTreeMap::new(),
@@ -680,16 +682,16 @@ mod tests {
         imported
             .apply_transaction(
                 committed,
-                &[crate::state::LayoutEdit::InsertShape {
+                &[rspice_app_state::state::LayoutEdit::InsertShape {
                     id: invalid_shape,
-                    value: crate::state::LayoutShape {
-                        layer_purpose: crate::state::LayoutLayerPurpose::try_new(
+                    value: rspice_app_state::state::LayoutShape {
+                        layer_purpose: rspice_app_state::state::LayoutLayerPurpose::try_new(
                             "invented", "drawing",
                         )
                         .unwrap(),
-                        geometry: crate::state::LayoutGeometry::Rectangle {
-                            lower_left: crate::state::LayoutPoint::new(0, 0),
-                            upper_right: crate::state::LayoutPoint::new(10, 10),
+                        geometry: rspice_app_state::state::LayoutGeometry::Rectangle {
+                            lower_left: rspice_app_state::state::LayoutPoint::new(0, 0),
+                            upper_right: rspice_app_state::state::LayoutPoint::new(10, 10),
                         },
                         net: None,
                         properties: std::collections::BTreeMap::new(),

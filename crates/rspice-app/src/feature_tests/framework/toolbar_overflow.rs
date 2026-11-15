@@ -1,14 +1,14 @@
 //! The toolbar's More tools rows take the keyboard and show a focus ring only
 //! when the keyboard reached them.
 
-use crate::state::Tool;
-use crate::ui::panels::WorkbenchIcon;
-use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
 use crate::workbench::chrome::toolbar::overflow::*;
 use crate::workbench::layout::LayoutSpec;
 use egui::{Event, Key, Pos2, Stroke};
 use egui::{Rect, Vec2};
+use rspice_app_state::state::Tool;
+use rspice_app_workbench::ui::panels::WorkbenchIcon;
+use rspice_app_workbench::ui::tokens::Tokens;
 
 /// A row of More tools that arms a schematic tool.
 struct Arm(Tool);
@@ -61,7 +61,7 @@ impl Frame {
 impl Strip {
     fn new() -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let app = RSpiceApp::test_instance();
         let layout = LayoutSpec::resolve(390.0, 844.0, &app.state.workbench);

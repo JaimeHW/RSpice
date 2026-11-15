@@ -4,14 +4,14 @@
 //! and the import waits for it rather than refusing. Add files on the Files
 //! rail adds files from disk to a source that already exists.
 
-use crate::state::workspace::ImportedInclude;
-use crate::state::{CellViewRef, ProjectSourceOwner};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
 };
 use crate::workbench::documents::code_workspace;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_state::state::workspace::ImportedInclude;
+use rspice_app_state::state::{CellViewRef, ProjectSourceOwner};
 
 /// A root whose parameter and body live in files of their own, as the model
 /// authors' sources keep them.

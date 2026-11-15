@@ -5,23 +5,26 @@ use crate::workbench::results::calculator::*;
 #[test]
 fn plotting_keeps_the_tool_open_and_never_duplicates_a_trace() {
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    let analysis =
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![
-                crate::state::RetainedTrace::new(
-                    "V(out)",
-                    vec![0.0, 1.0],
-                    vec![1.0, 2.0],
-                    "#00aaff",
-                ),
-                crate::state::RetainedTrace::new(
-                    "V(in)",
-                    vec![0.0, 1.0],
-                    vec![1.0, 1.0],
-                    "#ffaa00",
-                ),
-            ]);
-    let mut run = crate::state::SimulationRun::new(1);
+    let analysis = rspice_app_state::state::AnalysisResult::new(
+        1,
+        rspice_app_state::state::AnalysisType::Transient,
+        "TRAN",
+    )
+    .with_waveforms(vec![
+        rspice_app_state::state::RetainedTrace::new(
+            "V(out)",
+            vec![0.0, 1.0],
+            vec![1.0, 2.0],
+            "#00aaff",
+        ),
+        rspice_app_state::state::RetainedTrace::new(
+            "V(in)",
+            vec![0.0, 1.0],
+            vec![1.0, 1.0],
+            "#ffaa00",
+        ),
+    ]);
+    let mut run = rspice_app_state::state::SimulationRun::new(1);
     run.add_analysis(analysis);
     app.state.model.simulation.retained.runs = vec![run].into();
     assert!(app.state.model.simulation.select_run(0));
@@ -93,7 +96,7 @@ fn an_empty_expression_plots_nothing() {
 #[test]
 fn the_tool_opens_whole_in_the_lower_right_of_the_workspace() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = crate::workbench::RSpiceApp::test_instance();
     app.state.results.waveform_calculator_dialog = true;
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1440.0, 900.0));

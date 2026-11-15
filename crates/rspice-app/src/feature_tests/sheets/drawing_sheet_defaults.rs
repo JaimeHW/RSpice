@@ -1,19 +1,21 @@
 //! The drawing-sheet defaults dialog over a whole application.
 
-use crate::state::{
+use crate::workbench::app::RSpiceApp;
+use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_defaults::*;
+use rspice_app_state::state::{
     AuthoredDrawingSheetSize, DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
     DrawingSheetInheritance, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
     SchematicPageOrientation, SchematicSheetFormat,
 };
-use crate::workbench::app::RSpiceApp;
-use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_defaults::*;
 
 /// A format reaches several sheets through the project default: a new
 /// default is the new format of every sheet that follows it, a sheet with
 /// a format of its own keeps it, and the dialog names both.
 #[test]
 fn a_new_project_default_redraws_the_sheets_that_follow_it() {
-    use crate::state::{DrawingSheetTitleFieldId, SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{
+        DrawingSheetTitleFieldId, SheetDefinition, SheetPortPolicy, SheetTemplate,
+    };
 
     let mut app = RSpiceApp::test_instance();
     assert_eq!(DefaultReach::of(&app.state.model), None);
@@ -191,7 +193,7 @@ fn project_default_is_one_history_transaction_and_personal_uses_preferences() {
         SchematicPageOrientation::Landscape,
     )
     .try_update(|draft| {
-        draft.inheritance = crate::state::DrawingSheetInheritance::ProjectDefault;
+        draft.inheritance = rspice_app_state::state::DrawingSheetInheritance::ProjectDefault;
     })
     .unwrap();
     app.state
@@ -203,7 +205,7 @@ fn project_default_is_one_history_transaction_and_personal_uses_preferences() {
         SchematicPageOrientation::Portrait,
     )
     .try_update(|draft| {
-        draft.inheritance = crate::state::DrawingSheetInheritance::UserDefault;
+        draft.inheritance = rspice_app_state::state::DrawingSheetInheritance::UserDefault;
     })
     .unwrap();
 
@@ -428,7 +430,7 @@ fn the_defaults_speak_in_sentence_case_through_named_selects() {
         &app.state.model,
     );
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut frame = eframe::Frame::_new_kittest();
     let mut output = None;
@@ -538,7 +540,7 @@ fn the_new_sheets_card_holds_its_checkbox_at_every_control_height() {
             &app.state.model,
         );
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut frame = eframe::Frame::_new_kittest();
         let mut output = None;

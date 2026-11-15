@@ -18,11 +18,11 @@
 //! frame loop, and widening it so this file could call it would be a worse
 //! trade than stating the claim where the code is.
 
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::product::AnalysisInstanceId;
 use crate::workbench::RSpiceApp;
 use rspice_app_simulate::workbench::surfaces::simulate::AnalysisAction;
 use rspice_app_simulate::workbench::surfaces::simulate::lifecycle::apply_analysis_action;
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_state::product::AnalysisInstanceId;
 
 /// Every `PLAN` entry the Console holds, oldest first.
 fn plan_entries(app: &RSpiceApp) -> Vec<(LogSeverity, String)> {

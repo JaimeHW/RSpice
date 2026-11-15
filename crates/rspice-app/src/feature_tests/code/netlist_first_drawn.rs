@@ -17,8 +17,8 @@ fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {
     assert!(app.state.is_netlist_first_without_schematic());
 
     app.state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(0, 0),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(0, 0),
     );
     assert!(!app.state.is_netlist_first_without_schematic());
 }

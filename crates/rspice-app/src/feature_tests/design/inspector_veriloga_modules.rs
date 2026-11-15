@@ -3,7 +3,6 @@
 use crate::feature_tests::design::inspector_veriloga_modules_drawn::{
     app_with_compiled_veriloga_instance, app_with_owned_veriloga_instance, module_parameter,
 };
-use crate::state::{CellViewRef, Component, ComponentType, Point};
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::inspector::component::{
     MODEL_CARD_PARAMETER_NOTE, REMOVE_UNDECLARED_PARAMETER, UNDECLARED_PARAMETER_NOTE,
@@ -14,6 +13,7 @@ use crate::workbench::design::inspector::model_evidence::component_model_evidenc
 use crate::workbench::design::inspector::tests::*;
 use crate::workbench::design_system::Problem;
 use crate::workbench::state::InlineEditField;
+use rspice_app_state::state::{CellViewRef, Component, ComponentType, Point};
 use std::collections::HashMap;
 
 /// The unit a parameter is in sits beside its field and what it is sits on
@@ -212,11 +212,11 @@ fn a_module_instance_binds_a_model_card_and_then_sets_only_instance_parameters()
         "no card for this module, no row"
     );
 
-    let mut library = crate::state::model_library::ModelLibrary::new("cards");
+    let mut library = rspice_app_state::state::model_library::ModelLibrary::new("cards");
     let card = |name: &str, spice_type: &str| {
-        let mut card = crate::state::model_library::DeviceModel::new(
+        let mut card = rspice_app_state::state::model_library::DeviceModel::new(
             name,
-            crate::state::model_library::ModelType::Other,
+            rspice_app_state::state::model_library::ModelType::Other,
         );
         card.spice_type = Some(spice_type.to_owned());
         card
@@ -244,14 +244,14 @@ fn a_module_instance_binds_a_model_card_and_then_sets_only_instance_parameters()
     );
     let bound = app.state.model.schematic.document().components[0].clone();
     assert_eq!(
-        crate::state::explicit_component_model(&bound).as_deref(),
+        rspice_app_state::state::explicit_component_model(&bound).as_deref(),
         Some("fastamp")
     );
     let rows = inline_parameter_contract(
         &app.state.design,
         &app.state.model,
         &bound,
-        &crate::state::parse_params_string(&bound.params),
+        &rspice_app_state::state::parse_params_string(&bound.params),
     );
     let row = |key: &str| rows.iter().find(|row| row.key == key);
     assert!(!row("w").expect("an instance parameter").undeclared);
@@ -329,11 +329,11 @@ fn m_on_a_module_instance_is_its_typed_multiplicity() {
     assert_eq!(
         edited
             .multiplicity
-            .map(crate::state::InstanceMultiplicity::value),
+            .map(rspice_app_state::state::InstanceMultiplicity::value),
         Some(2.0)
     );
     assert!(
-        crate::state::parse_params_string(&edited.params).is_empty(),
+        rspice_app_state::state::parse_params_string(&edited.params).is_empty(),
         "m is never written as parameter text: {}",
         edited.params
     );
@@ -350,7 +350,7 @@ fn an_undeclared_parameter_value_is_flagged_and_removable() {
         &[module_parameter("gain", Some("2.5"), None, None)],
         "gain=3 offset=1m",
     );
-    let declared = crate::state::parse_params_string(&component.params);
+    let declared = rspice_app_state::state::parse_params_string(&component.params);
     let rows =
         inline_parameter_contract(&app.state.design, &app.state.model, &component, &declared);
     let offset = rows
@@ -437,7 +437,7 @@ fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
         .workspace
         .content
         .project_sources
-        .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
+        .bundle_for_owner(&rspice_app_state::state::ProjectSourceOwner::cell_view(
             CellViewRef::new("behavioral", "amp", "veriloga"),
         ))
         .expect("the bundle")

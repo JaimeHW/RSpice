@@ -9,11 +9,11 @@
 
 use super::DesignPanel;
 use super::*;
-use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::project::workspace_state::{
     LibraryCellviewPage, ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
     ProjectPage,
 };
+use rspice_app_state::state::{SimulationPage, VerificationPage};
 
 #[test]
 fn moved_workbench_fields_keep_the_defaults_the_workbench_gave_them() {
@@ -39,7 +39,7 @@ fn moved_workbench_fields_keep_the_defaults_the_workbench_gave_them() {
     assert_eq!(DesignState::default().design_panel, DesignPanel::Navigator);
     assert_eq!(
         ModelsState::default().models_page,
-        crate::state::ModelsPage::Models
+        rspice_app_state::state::ModelsPage::Models
     );
 }
 

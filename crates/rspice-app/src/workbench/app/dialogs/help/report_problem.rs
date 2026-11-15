@@ -11,8 +11,8 @@ use std::sync::OnceLock;
 use egui::Context;
 
 use super::{VERSION_LINE, export_support_bundle, fact_grid};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
+use rspice_app_workbench::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
 
 /// Where a problem report goes.
 pub(crate) const SUPPORT_ADDRESS: &str = "hello@rspice.app";

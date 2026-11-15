@@ -10,9 +10,9 @@
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::{Model, PlatformState};
 use rspice_app_services::services::session::SessionKept;
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 
 /// What the store did with one encoding of the session.
 pub(crate) enum Offer {
@@ -124,15 +124,21 @@ mod tests {
         let mut state = AppState::default();
         let time: Vec<f64> = (0..20_000_u32).map(|step| f64::from(step) * 1e-9).collect();
         let volts: Vec<f64> = time.iter().map(|t| (t * 1e7).sin()).collect();
-        let mut run = crate::state::SimulationRun::new(7);
+        let mut run = rspice_app_state::state::SimulationRun::new(7);
         run.add_analysis(
-            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-                .with_waveforms(vec![crate::state::RetainedTrace::new(
-                    "V(out)", time, volts, "#00aaff",
-                )]),
+            rspice_app_state::state::AnalysisResult::new(
+                1,
+                rspice_app_state::state::AnalysisType::Transient,
+                "TRAN",
+            )
+            .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
+                "V(out)", time, volts, "#00aaff",
+            )]),
         );
-        run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
-            .expect("legacy fixture provenance seals");
+        run.restore_provenance(
+            rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed,
+        )
+        .expect("legacy fixture provenance seals");
         state.model.simulation.retained.runs = vec![run].into();
         state.model.simulation.retained.next_run_id = 7;
         state

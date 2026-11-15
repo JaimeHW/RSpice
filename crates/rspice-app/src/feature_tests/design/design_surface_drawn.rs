@@ -1,13 +1,13 @@
 //! The design surface drawn through a whole application: breadcrumbs and the occurrence
 //! watermark.
 
-use crate::state::ViewType;
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::surface::tests::descended;
 use crate::workbench::design::surface::{
     breadcrumb, hierarchy_breadcrumb_segments, master_occurrence_paths, occurrence_scope_banner,
 };
 use egui::{Rect, Vec2};
+use rspice_app_state::state::ViewType;
 
 /// The canvas every render in this module uses. Wide enough that the crumb
 /// row is measured rather than elided.
@@ -76,10 +76,10 @@ fn a_breadcrumb_level_opens_the_occurrence_it_names() {
 /// would do.
 #[test]
 fn breadcrumb_segments_render_instance_and_master() {
-    fn render(instance: &str, master: &str) -> crate::ui::raster::Canvas {
+    fn render(instance: &str, master: &str) -> rspice_app_workbench::ui::raster::Canvas {
         let mut app = RSpiceApp::test_instance();
         descended(&mut app.state.model, instance, master);
-        crate::ui::raster::render(RASTER_VIEWPORT, |ui, _| {
+        rspice_app_workbench::ui::raster::render(RASTER_VIEWPORT, |ui, _| {
             breadcrumb(
                 ui.ctx(),
                 &mut app.state.canvas_frame(),
@@ -89,7 +89,7 @@ fn breadcrumb_segments_render_instance_and_master() {
     }
 
     let band = Rect::from_min_size(egui::Pos2::ZERO, RASTER_VIEWPORT);
-    let ink = |canvas: &crate::ui::raster::Canvas| -> Vec<egui::Color32> {
+    let ink = |canvas: &rspice_app_workbench::ui::raster::Canvas| -> Vec<egui::Color32> {
         canvas.pixels_in(band).collect()
     };
 
@@ -116,8 +116,8 @@ fn breadcrumb_segments_render_instance_and_master() {
 /// A project whose root sheet instantiates one cell twice, with the design
 /// root open. Descending into the shared cell is what puts a document with
 /// two occurrences in front.
-fn app_with_a_twice_instantiated_cell() -> (RSpiceApp, crate::state::CellViewRef) {
-    use crate::state::{
+fn app_with_a_twice_instantiated_cell() -> (RSpiceApp, rspice_app_state::state::CellViewRef) {
+    use rspice_app_state::state::{
         CellViewRef, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
     };
 
@@ -173,8 +173,8 @@ fn app_with_a_twice_instantiated_cell() -> (RSpiceApp, crate::state::CellViewRef
 /// master placed once, always on one placed more than once.
 #[test]
 fn occurrence_watermark_appears_only_above_one_instance() {
-    fn render(app: &RSpiceApp) -> crate::ui::raster::Canvas {
-        crate::ui::raster::render(RASTER_VIEWPORT, |ui, background| {
+    fn render(app: &RSpiceApp) -> rspice_app_workbench::ui::raster::Canvas {
+        rspice_app_workbench::ui::raster::render(RASTER_VIEWPORT, |ui, background| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(background))
                 .show(ui, |ui| occurrence_scope_banner(ui, &app.state.model));

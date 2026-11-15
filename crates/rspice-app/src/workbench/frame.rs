@@ -10,8 +10,6 @@ use std::time::Duration;
 
 use egui::{CentralPanel, Context, Frame};
 
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::ui::tokens::Tokens;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::results::ResultsFeature;
@@ -20,6 +18,8 @@ use crate::workbench::session::project_transactions::{open_confirmed, request_ex
 use rspice_app_cloud::workbench::cloud::CloudFeature;
 use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_runs::workbench::preflight;
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::workbench::state::pane_focus::Pane;
 use rspice_app_workbench::workbench::tools;
 use rspice_app_workbench::workbench::{docks, surfaces};
@@ -229,7 +229,7 @@ fn show_toasts(
     state: &mut AppState,
     layout: LayoutSpec,
     document: egui::Rect,
-) -> Option<crate::ui::widgets::NotificationAction> {
+) -> Option<rspice_app_workbench::ui::widgets::NotificationAction> {
     state.drain_notices(ctx);
     if tools::notification_center::focused_window(ctx) != ctx.viewport_id()
         || tools::notification_center::showing_here(ctx, &state.workbench)
@@ -381,9 +381,9 @@ fn note_run_press(app: &mut RSpiceApp) {
 /// waits one click away on the status bar if they have moved on. One that
 /// failed brings its own account up in the Console. Only the first of these
 /// changes the page, and only for a reader who stayed.
-fn follow_pressed_run(app: &mut RSpiceApp, ended: &[crate::product::RunId]) {
-    use crate::state::SimulationRunLifecycle as Lifecycle;
-    use crate::ui::widgets::NotificationAction;
+fn follow_pressed_run(app: &mut RSpiceApp, ended: &[rspice_app_state::product::RunId]) {
+    use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
+    use rspice_app_workbench::ui::widgets::NotificationAction;
 
     let Some(route) = app.state.workbench.run_press_route else {
         return;
@@ -443,7 +443,8 @@ fn run_end_line(state: &AppState, run_sequence: u64) -> Option<u64> {
         .log_buffer
         .entries()
         .filter(|entry| {
-            entry.anchor == Some(crate::diagnostics::LogAnchor::ResultRun { run_sequence })
+            entry.anchor
+                == Some(rspice_app_state::diagnostics::LogAnchor::ResultRun { run_sequence })
         })
         .last()
         .map(|entry| entry.id)
@@ -501,7 +502,7 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
             }
             (request, wanted) => request.or(wanted),
         };
-        let category = crate::ui::widgets::NotificationCategory::Job;
+        let category = rspice_app_workbench::ui::widgets::NotificationCategory::Job;
         let toasts = &mut app.state.workbench.toasts;
         if !attention.retains(notice.is_failure()) {
             toasts.record_quietly(
@@ -549,11 +550,11 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
 fn attention_request(
     window_focused: Option<bool>,
     elapsed_seconds: f64,
-    kind: crate::ui::widgets::ToastKind,
+    kind: rspice_app_workbench::ui::widgets::ToastKind,
     attention: BackgroundTaskAttention,
 ) -> Option<egui::UserAttentionType> {
-    use crate::ui::widgets::ToastKind;
     use rspice_app_services::workbench::browser::background_alerts::AWAY_AFTER_SECONDS;
+    use rspice_app_workbench::ui::widgets::ToastKind;
 
     if window_focused != Some(false)
         || elapsed_seconds.is_nan()
@@ -571,10 +572,10 @@ fn attention_request(
 
 /// One run or campaign outcome, in the words the shell announces it with.
 struct RunNotice {
-    kind: crate::ui::widgets::ToastKind,
+    kind: rspice_app_workbench::ui::widgets::ToastKind,
     title: String,
     detail: String,
-    action: Option<crate::ui::widgets::NotificationAction>,
+    action: Option<rspice_app_workbench::ui::widgets::NotificationAction>,
     /// How long the work took, in seconds.
     elapsed_seconds: f64,
 }
@@ -583,7 +584,7 @@ impl RunNotice {
     /// Anything short of a clean finish, for the Task attention setting
     /// that notifies on failure only: a warning is something to look at.
     fn is_failure(&self) -> bool {
-        self.kind != crate::ui::widgets::ToastKind::Success
+        self.kind != rspice_app_workbench::ui::widgets::ToastKind::Success
     }
 }
 
@@ -596,9 +597,9 @@ const NOTHING_RETAINED: &str =
 /// The words agree with the run's end line in the Console: a run that
 /// finished some analyses and failed others "completed with errors", and the
 /// warning count is the run log's own.
-fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNotice> {
-    use crate::state::SimulationRunLifecycle as Lifecycle;
-    use crate::ui::widgets::{NotificationAction, ToastKind};
+fn run_notice(state: &AppState, run_id: rspice_app_state::product::RunId) -> Option<RunNotice> {
+    use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
+    use rspice_app_workbench::ui::widgets::{NotificationAction, ToastKind};
 
     let run = state.model.simulation.retained.run_by_stable_id(run_id)?;
     let sequence = run.id;
@@ -646,7 +647,10 @@ fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNoti
         Lifecycle::Failed => (
             ToastKind::Error,
             format!("Run {sequence} failed"),
-            crate::simulation::SimulationController::run_failure(sequence, &run.log).map_or_else(
+            rspice_app_runs::simulation::controller::SimulationController::run_failure(
+                sequence, &run.log,
+            )
+            .map_or_else(
                 || {
                     if retained == 0 {
                         NOTHING_RETAINED.to_owned()
@@ -712,8 +716,8 @@ fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNoti
 fn campaign_notice(
     outcome: rspice_app_runs::simulation::controller::prepared_run::CampaignOutcome,
 ) -> RunNotice {
-    use crate::ui::widgets::{NotificationAction, ToastKind};
     use rspice_app_runs::simulation::controller::prepared_run::CampaignOutcome;
+    use rspice_app_workbench::ui::widgets::{NotificationAction, ToastKind};
 
     match outcome {
         CampaignOutcome::MemberRefused {
@@ -744,7 +748,7 @@ fn campaign_notice(
             title: format!("Campaign '{name}' finished"),
             detail: format!(
                 "{completed} completed, {failed} failed \u{b7} {}",
-                crate::quantity::format_elapsed(elapsed_seconds)
+                rspice_app_state::quantity::format_elapsed(elapsed_seconds)
             ),
             action: Some(NotificationAction::ShowInConsole { log_id }),
             elapsed_seconds,
@@ -763,14 +767,20 @@ fn saved_detail(plan: Option<&str>, retained: usize, elapsed_seconds: f64) -> St
     };
     plan.map(str::to_owned)
         .into_iter()
-        .chain([saved, crate::quantity::format_elapsed(elapsed_seconds)])
+        .chain([
+            saved,
+            rspice_app_state::quantity::format_elapsed(elapsed_seconds),
+        ])
         .collect::<Vec<_>>()
         .join(" \u{b7} ")
 }
 
 /// The name a plan goes by in the plan manager, active or not. `None` once
 /// the plan is gone.
-fn plan_name(state: &AppState, plan_id: crate::product::SimulationPlanId) -> Option<String> {
+fn plan_name(
+    state: &AppState,
+    plan_id: rspice_app_state::product::SimulationPlanId,
+) -> Option<String> {
     if state
         .model
         .sim_setup
@@ -954,7 +964,7 @@ pub(crate) fn show_embedded_secondary(ui: &mut egui::Ui, app: &mut RSpiceApp, ti
 }
 
 fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
-    use crate::ui::widgets::{MirroredEntry, NotificationCategory, ToastKind};
+    use rspice_app_workbench::ui::widgets::{MirroredEntry, NotificationCategory, ToastKind};
 
     let revision = app.state.model.log_buffer.revision();
     let observed = app.state.workbench.toasts.observed_log_revision();
@@ -964,7 +974,7 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
     // Not subject to the Task attention setting: a studio or netlist failure
     // is not a background run, and is always kept in the bell.
     let now = ctx.input(|input| input.time);
-    let wall_now = crate::time_compat::unix_epoch();
+    let wall_now = rspice_app_state::time_compat::unix_epoch();
     let entries = app
         .state
         .model
@@ -1136,7 +1146,7 @@ mod tests {
     /// and the mirror then meets that same line: one failure, one record.
     #[test]
     fn a_reported_failure_leaves_one_activity_record() {
-        use crate::ui::widgets::{NotificationAction, ToastKind};
+        use rspice_app_workbench::ui::widgets::{NotificationAction, ToastKind};
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
@@ -1173,7 +1183,7 @@ mod tests {
     #[test]
     fn a_failure_reported_before_the_frame_is_toasted_in_it_and_filed_once() {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state
@@ -1226,9 +1236,11 @@ mod tests {
     /// announced at all: the Console and the status bar already say it.
     #[test]
     fn run_outcome_notices_distinguish_failure_and_interruption_and_leave_a_stop_unannounced() {
-        use crate::diagnostics::LogAnchor;
-        use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle as Lifecycle};
-        use crate::ui::widgets::{NotificationAction, ToastKind};
+        use rspice_app_state::diagnostics::LogAnchor;
+        use rspice_app_state::state::{
+            AnalysisResult, AnalysisType, SimulationRunLifecycle as Lifecycle,
+        };
+        use rspice_app_workbench::ui::widgets::{NotificationAction, ToastKind};
 
         for retained in [false, true] {
             let ctx = Context::default();
@@ -1308,8 +1320,8 @@ mod tests {
 
     #[test]
     fn a_run_is_announced_when_it_finishes_and_offers_the_dataset_it_made() {
-        use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle};
-        use crate::ui::widgets::{NotificationAction, ToastKind};
+        use rspice_app_state::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle};
+        use rspice_app_workbench::ui::widgets::{NotificationAction, ToastKind};
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
@@ -1368,9 +1380,9 @@ mod tests {
     /// order the frame runs them.
     #[test]
     fn one_finished_run_leaves_one_activity_record() {
-        use crate::diagnostics::{LogAnchor, LogSeverity};
-        use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle};
-        use crate::ui::widgets::NotificationAction;
+        use rspice_app_state::diagnostics::{LogAnchor, LogSeverity};
+        use rspice_app_state::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle};
+        use rspice_app_workbench::ui::widgets::NotificationAction;
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
@@ -1429,8 +1441,8 @@ mod tests {
     /// Problems row.
     #[test]
     fn a_run_that_retained_nothing_is_announced_once_and_never_offers_its_dataset() {
-        use crate::diagnostics::{LogAnchor, LogSeverity};
-        use crate::state::SimulationRunLifecycle;
+        use rspice_app_state::diagnostics::{LogAnchor, LogSeverity};
+        use rspice_app_state::state::SimulationRunLifecycle;
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
@@ -1464,7 +1476,11 @@ mod tests {
         assert_eq!(activity[0].title(), "Run 1 failed");
         assert_eq!(
             activity[0].action(),
-            Some(crate::ui::widgets::NotificationAction::ShowInConsole { log_id: end_line }),
+            Some(
+                rspice_app_workbench::ui::widgets::NotificationAction::ShowInConsole {
+                    log_id: end_line
+                }
+            ),
             "nothing was retained, so Results is not offered; the failure's account starts at \
              the run's line in the Console, so that line is"
         );
@@ -1472,33 +1488,38 @@ mod tests {
     }
 
     /// A receipt naming `plan_id`, as a run prepared from that plan carries.
-    fn plan_receipt(plan_id: crate::product::SimulationPlanId) -> crate::state::PreparedRunReceipt {
-        use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-        use crate::state::{PreparedRunTaskReceipt, PreparedSourceCheckReceipt};
+    fn plan_receipt(
+        plan_id: rspice_app_state::product::SimulationPlanId,
+    ) -> rspice_app_state::state::PreparedRunReceipt {
+        use rspice_app_state::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+        use rspice_app_state::state::{PreparedRunTaskReceipt, PreparedSourceCheckReceipt};
 
-        crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
-            source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
-            simulation_plan_id: Some(plan_id),
-            project_revision: ObjectRevision::INITIAL,
-            prepared_snapshot_digest: ContentDigest::from_bytes([1; 32]),
-            source_content_digest: ContentDigest::from_bytes([2; 32]),
-            source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(
-                ContentDigest::from_bytes([3; 32]),
-            ),
-            project_model_sources: Vec::new(),
-            specifications: Vec::new(),
-            specification_policy: crate::state::PreparedSpecificationPolicy::default(),
-            tasks: vec![
-                PreparedRunTaskReceipt::new(
-                    AnalysisInstanceId::new(),
-                    ObjectRevision::INITIAL,
-                    Vec::new(),
-                    0,
-                    ContentDigest::from_bytes([4; 32]),
-                )
-                .expect("task receipt"),
-            ],
-        })
+        rspice_app_state::state::PreparedRunReceipt::new(
+            rspice_app_state::state::PreparedRunReceiptInput {
+                source_domain: rspice_app_state::state::AnalysisResultSourceDomain::SimulationPlan,
+                simulation_plan_id: Some(plan_id),
+                project_revision: ObjectRevision::INITIAL,
+                prepared_snapshot_digest: ContentDigest::from_bytes([1; 32]),
+                source_content_digest: ContentDigest::from_bytes([2; 32]),
+                source_check_receipt: PreparedSourceCheckReceipt::SchematicDrc(
+                    ContentDigest::from_bytes([3; 32]),
+                ),
+                project_model_sources: Vec::new(),
+                specifications: Vec::new(),
+                specification_policy: rspice_app_state::state::PreparedSpecificationPolicy::default(
+                ),
+                tasks: vec![
+                    PreparedRunTaskReceipt::new(
+                        AnalysisInstanceId::new(),
+                        ObjectRevision::INITIAL,
+                        Vec::new(),
+                        0,
+                        ContentDigest::from_bytes([4; 32]),
+                    )
+                    .expect("task receipt"),
+                ],
+            },
+        )
         .expect("plan receipt")
     }
 
@@ -1521,7 +1542,7 @@ mod tests {
     /// looked, and only the final run of a sequence was ever announced.
     #[test]
     fn every_run_seen_running_is_announced_not_only_the_newest() {
-        use crate::state::SimulationRunLifecycle as Lifecycle;
+        use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
@@ -1562,7 +1583,7 @@ mod tests {
     /// by the frame, but it was seen by the controller that opened it.
     #[test]
     fn a_run_that_ends_before_any_frame_sees_it_is_still_announced() {
-        use crate::state::SimulationRunLifecycle as Lifecycle;
+        use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
@@ -1582,8 +1603,10 @@ mod tests {
     /// log's, so the notice and the run's end line in the Console agree.
     #[test]
     fn a_run_that_completed_with_warnings_says_so() {
-        use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle as Lifecycle};
-        use crate::ui::widgets::ToastKind;
+        use rspice_app_state::state::{
+            AnalysisResult, AnalysisType, SimulationRunLifecycle as Lifecycle,
+        };
+        use rspice_app_workbench::ui::widgets::ToastKind;
 
         for (warnings, title) in [
             (1, "Run 1 complete with 1 warning"),
@@ -1619,8 +1642,10 @@ mod tests {
     /// line in the Console says, and still offers what it saved.
     #[test]
     fn a_partly_failed_run_names_its_plan_and_what_it_saved() {
-        use crate::state::{AnalysisResult, AnalysisType, SimulationRunLifecycle as Lifecycle};
-        use crate::ui::widgets::{NotificationAction, ToastKind};
+        use rspice_app_state::state::{
+            AnalysisResult, AnalysisType, SimulationRunLifecycle as Lifecycle,
+        };
+        use rspice_app_workbench::ui::widgets::{NotificationAction, ToastKind};
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
@@ -1669,7 +1694,7 @@ mod tests {
     /// the first error it wrote about itself, not the end line.
     #[test]
     fn a_failed_run_quotes_its_first_failure() {
-        use crate::state::SimulationRunLifecycle as Lifecycle;
+        use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
@@ -1721,14 +1746,16 @@ mod tests {
     /// own, so the failure is not buried among a column of successes.
     #[test]
     fn a_two_member_campaign_announces_its_failed_member_and_its_end() {
-        use crate::diagnostics::LogAnchor;
-        use crate::state::{SimulationCampaignMembership, SimulationRunLifecycle as Lifecycle};
-        use crate::ui::widgets::{NotificationAction, ToastKind};
         use rspice_app_runs::simulation::controller::prepared_run::CampaignOutcome;
+        use rspice_app_state::diagnostics::LogAnchor;
+        use rspice_app_state::state::{
+            SimulationCampaignMembership, SimulationRunLifecycle as Lifecycle,
+        };
+        use rspice_app_workbench::ui::widgets::{NotificationAction, ToastKind};
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
-        let campaign = crate::product::SimulationCampaignId::new();
+        let campaign = rspice_app_state::product::SimulationCampaignId::new();
         let bias = app
             .state
             .model
@@ -1741,8 +1768,8 @@ mod tests {
             .sim_setup
             .create_plan("Sweep")
             .expect("a plan");
-        let start_member = |simulation: &mut crate::state::SimulationState,
-                            plan: crate::product::SimulationPlanId,
+        let start_member = |simulation: &mut rspice_app_state::state::SimulationState,
+                            plan: rspice_app_state::product::SimulationPlanId,
                             index: u32|
          -> u64 {
             let run = simulation
@@ -1925,7 +1952,7 @@ mod tests {
         use crate::workbench::simulate::commands::SimulateCommand;
 
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
@@ -1983,7 +2010,10 @@ mod tests {
 
     /// Every accessibility label the toast stack draws this frame.
     #[cfg(not(target_arch = "wasm32"))]
-    fn toasts_on_screen(ctx: &Context, toasts: &mut crate::ui::widgets::Toasts) -> Vec<String> {
+    fn toasts_on_screen(
+        ctx: &Context,
+        toasts: &mut rspice_app_workbench::ui::widgets::Toasts,
+    ) -> Vec<String> {
         let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -2020,7 +2050,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn background_attention_governs_run_toasts_and_never_the_studio_stream() {
-        use crate::state::SimulationRunLifecycle as Lifecycle;
+        use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
 
         for (attention, clean_toasts, failure_toasts) in [
             (BackgroundTaskAttention::BadgeAndNotify, true, true),
@@ -2028,7 +2058,7 @@ mod tests {
             (BackgroundTaskAttention::Silent, false, false),
         ] {
             let ctx = Context::default();
-            crate::ui::Theme::default().apply(&ctx);
+            rspice_app_workbench::ui::Theme::default().apply(&ctx);
             ctx.enable_accesskit();
             let mut app = RSpiceApp::test_instance();
             app.state
@@ -2088,9 +2118,9 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn only_long_work_that_ends_behind_the_readers_back_asks_for_attention() {
-        use crate::ui::widgets::ToastKind::{Error, Success, Warn};
         use BackgroundTaskAttention::{BadgeAndNotify, NotifyOnFailureOnly, Silent};
         use egui::UserAttentionType::{Critical, Informational};
+        use rspice_app_workbench::ui::widgets::ToastKind::{Error, Success, Warn};
 
         let cases = [
             (
@@ -2134,8 +2164,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn a_long_failure_behind_the_readers_back_marks_the_main_window() {
-        use crate::state::SimulationRunLifecycle as Lifecycle;
         use egui::{UserAttentionType, ViewportCommand, ViewportId, ViewportInfo};
+        use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
@@ -2343,12 +2373,12 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_run_history_primary_runs_the_netlist_deck_on_the_netlist_workspace() {
-        use crate::state::SimulationRunIntent;
         use crate::workbench::features::cx;
         use rspice_app_code::workbench::code::netlist_validation::validate_visible_netlist_source;
+        use rspice_app_state::state::SimulationRunIntent;
 
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state

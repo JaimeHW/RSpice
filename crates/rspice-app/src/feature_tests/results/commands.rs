@@ -208,15 +208,13 @@ fn split_results_is_truthfully_gated_by_context_and_materialized_evidence() {
         app.command_availability(command),
         CommandAvailability::Disabled("no retained result dataset is available")
     );
-    app.state
-        .model
-        .simulation
-        .start_run()
-        .add_analysis(crate::state::AnalysisResult::new(
+    app.state.model.simulation.start_run().add_analysis(
+        rspice_app_state::state::AnalysisResult::new(
             1,
-            crate::state::AnalysisType::Transient,
+            rspice_app_state::state::AnalysisType::Transient,
             "retained TRAN",
-        ));
+        ),
+    );
     assert_eq!(
         app.command_availability(command),
         CommandAvailability::Available
@@ -235,9 +233,9 @@ fn enabling_split_selects_latest_materialized_run_without_copying_results() {
     app.state.workbench.activate(Workspace::Design);
     let retained_dataset = {
         let run = app.state.model.simulation.start_run();
-        run.add_analysis(crate::state::AnalysisResult::new(
+        run.add_analysis(rspice_app_state::state::AnalysisResult::new(
             1,
-            crate::state::AnalysisType::Transient,
+            rspice_app_state::state::AnalysisType::Transient,
             "retained TRAN",
         ));
         run.dataset_id
@@ -285,8 +283,8 @@ fn result_dataset_import_waits_for_an_idle_open_project() {
 /// a console warning instead of a file.
 #[test]
 fn exporting_the_dataset_requires_an_open_result_document() {
-    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
     use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_app_state::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();

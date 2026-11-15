@@ -21,8 +21,8 @@ impl AppState {
         self.clear_design_execution_context();
         self.results.clear_project_scoped(&self.model.preferences);
         self.record(
-            crate::diagnostics::LogSeverity::Info,
-            crate::diagnostics::LogSource::Studio,
+            rspice_app_state::diagnostics::LogSeverity::Info,
+            rspice_app_state::diagnostics::LogSource::Studio,
             announcement,
         );
     }
@@ -40,7 +40,7 @@ impl AppState {
         self.model.workspace.content.retained_netlist_decks.clear();
         self.model.workspace.content.netlist_source_path = None;
         self.model.workspace.content.netlist_source_dirty = false;
-        self.model.simulation = crate::state::SimulationState::default();
+        self.model.simulation = rspice_app_state::state::SimulationState::default();
         // A notice's "Open in Results" names its run by number, and the new
         // history numbers its runs from one again: kept, the offer would
         // open this design's run of the same number. The notices stay, as
@@ -48,7 +48,7 @@ impl AppState {
         self.workbench.toasts.retire_offers(|action| {
             matches!(
                 action,
-                crate::ui::widgets::NotificationAction::OpenRunInResults { .. }
+                rspice_app_workbench::ui::widgets::NotificationAction::OpenRunInResults { .. }
             )
         });
         self.code.netlist = Default::default();
@@ -88,7 +88,7 @@ impl AppState {
     /// analysis still is.
     pub(crate) fn restore_result_presentation(
         &mut self,
-        presentation: crate::state::result_presentation::ResultPresentation,
+        presentation: rspice_app_state::state::result_presentation::ResultPresentation,
     ) {
         crate::workbench::documents::result_document::restore_presentation(
             &mut self.results_parts(),

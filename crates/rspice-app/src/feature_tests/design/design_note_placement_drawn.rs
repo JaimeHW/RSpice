@@ -13,7 +13,7 @@ fn render(app: &mut RSpiceApp, ctx: &Context) {
 #[test]
 fn opening_input_reaches_design_note_text() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let mut app = RSpiceApp::test_instance();
     let source = schematic_editor_request_source(&app.state);

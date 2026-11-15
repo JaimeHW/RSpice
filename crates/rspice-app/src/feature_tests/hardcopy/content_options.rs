@@ -38,7 +38,7 @@ impl crate::workbench::workflows::export_workflow::ExportWorkflowIo for RefusedD
 
     fn write_waveform_csv(
         &self,
-        _dataset: &crate::io::WaveformDataset,
+        _dataset: &rspice_app_services::io::WaveformDataset,
         _path: &Path,
     ) -> Result<(), String> {
         Ok(())
@@ -59,7 +59,7 @@ impl Studio {
     fn raster(viewport: Vec2) -> Self {
         let ctx = Context::default();
         ctx.enable_accesskit();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let exports = Arc::new(AtomicUsize::new(0));
         let mut app = RSpiceApp::test_instance();
         app.export_workflow_io = Box::new(RefusedDestination(exports.clone()));

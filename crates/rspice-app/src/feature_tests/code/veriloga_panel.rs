@@ -4,15 +4,15 @@
 //! it announces and pressed where it was drawn, and what a press did is read
 //! back from the editor and the schematic it was meant to move.
 
-use crate::state::{
-    Cell, CellViewRef, Library, LibraryCellInstance, Point, ProjectSourceDependency,
-    ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage, ProjectSourceOwner,
-    ProjectSourceRole, ProjectSourceRoleBinding, View, ViewType,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, open_in_design, open_project_app};
 use crate::workbench::app_state::AppState;
 use crate::workbench::{MessageCatalog, MessageId, UiTextLocale};
+use rspice_app_state::state::{
+    Cell, CellViewRef, Library, LibraryCellInstance, Point, ProjectSourceDependency,
+    ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage, ProjectSourceOwner,
+    ProjectSourceRole, ProjectSourceRoleBinding, View, ViewType,
+};
 
 const LIBRARY: &str = "behavioral";
 const ROOT: &str = "gain.va";
@@ -65,7 +65,7 @@ pub(super) fn placed_veriloga_cell(
         .map(|file| ProjectSourceDependency::try_new(root, file.logical_path()).unwrap())
         .collect::<Vec<_>>();
     let bundle =
-        crate::state::ProjectSourceBundle::try_new_with_roles(
+        rspice_app_state::state::ProjectSourceBundle::try_new_with_roles(
             ProjectSourceOwner::cell_view(reference.clone()),
             ProjectSourceLanguage::VerilogA,
             root,
@@ -123,7 +123,7 @@ impl Reader {
             placed_veriloga_cell(&mut app.state, "gain", ROOT, SOURCE, &[]);
         open_in_design(&mut app.state, &reference);
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut reader = Self {
             ctx,

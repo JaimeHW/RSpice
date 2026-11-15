@@ -240,7 +240,7 @@ fn platform_labels_map_only_windows_macos_and_linux() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn detection_is_deterministic_and_does_not_mutate_live_shortcuts() {
-    let live = crate::state::shortcuts::ShortcutProfileLibrary::default();
+    let live = rspice_app_state::state::shortcuts::ShortcutProfileLibrary::default();
     let before = serde_json::to_value(&live).expect("live library serializes");
     let first = import_shortcut_artifact_source_with_io(
         &FakeIo::ready(NATIVE_JSONC.to_vec()),

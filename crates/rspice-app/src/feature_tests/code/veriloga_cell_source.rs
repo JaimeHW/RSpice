@@ -6,12 +6,6 @@
 //! deck that named it keeps resolving, File > Import makes cell views of its
 //! own, and a deck's reference to a module opens that module's tab.
 
-use crate::io::ProjectSnapshot;
-use crate::state::{
-    Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
-    ProjectSourceDocument, ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
-    SymbolDocument, View, ViewType,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, open_in_design, open_project_app, themed_context,
@@ -19,6 +13,12 @@ use crate::workbench::app::veriloga_design_tests::{
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace;
 use crate::workbench::state::Workspace;
+use rspice_app_services::io::ProjectSnapshot;
+use rspice_app_state::state::{
+    Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
+    ProjectSourceDocument, ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
+    SymbolDocument, View, ViewType,
+};
 
 /// The demonstration module every project used to be created with, exactly.
 const RETIRED_DEMO: &str = "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule";
@@ -40,7 +40,7 @@ fn legacy_project_text(source: &str, prepare: impl FnOnce(&mut AppState)) -> Str
 fn legacy_project(
     source: &str,
     prepare: impl FnOnce(&mut AppState),
-) -> (String, crate::state::ProjectSourceId) {
+) -> (String, rspice_app_state::state::ProjectSourceId) {
     legacy_project_at("sensor_bridge.va", source, prepare)
 }
 
@@ -49,7 +49,7 @@ fn legacy_project_at(
     root: &str,
     source: &str,
     prepare: impl FnOnce(&mut AppState),
-) -> (String, crate::state::ProjectSourceId) {
+) -> (String, rspice_app_state::state::ProjectSourceId) {
     let mut state = AppState::default();
     state
         .model
@@ -80,13 +80,14 @@ fn legacy_project_at(
     let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("the legacy project snapshots");
     (
-        crate::io::project_io::serialize_project_file(&snapshot).expect("the legacy project saves"),
+        rspice_app_services::io::project_io::serialize_project_file(&snapshot)
+            .expect("the legacy project saves"),
         id,
     )
 }
 
 fn load(text: &str) -> ProjectSnapshot {
-    crate::io::project_io::load_project_text(text, None).expect("the project loads")
+    rspice_app_services::io::project_io::load_project_text(text, None).expect("the project loads")
 }
 
 /// A project's persisted content as a value, so two loads compare by what
@@ -106,7 +107,7 @@ fn veriloga_bundles(sources: &ProjectSourceRegistry) -> Vec<&ProjectSourceBundle
 fn install(project: ProjectSnapshot) -> RSpiceApp {
     let mut app = open_project_app();
     app.state.model.library_manager = project.file.libraries;
-    app.state.model.workspace = crate::state::ProjectWorkspace::from_parts(
+    app.state.model.workspace = rspice_app_state::state::ProjectWorkspace::from_parts(
         project.file.workspace,
         project.workspace_session,
     );
@@ -214,7 +215,7 @@ fn an_edited_project_wide_source_becomes_a_cell_view_once() {
         "loading the same file twice migrates it the same way"
     );
 
-    let saved = crate::io::project_io::serialize_project_file(&loaded).unwrap();
+    let saved = rspice_app_services::io::project_io::serialize_project_file(&loaded).unwrap();
     let reloaded = load(&saved);
     assert!(
         reloaded
@@ -233,7 +234,7 @@ fn an_edited_project_wide_source_becomes_a_cell_view_once() {
     // The migrated view is a Verilog-A cell view like any other: its module
     // binding resolves, and it opens in Design over the bundle it owns.
     let mut app = install(loaded);
-    let binding = crate::state::workspace::project_veriloga_binding_for_view(
+    let binding = rspice_app_state::state::workspace::project_veriloga_binding_for_view(
         &app.state.model.workspace,
         &app.state.model.library_manager,
         &reference,
@@ -258,7 +259,7 @@ fn a_deck_written_against_the_project_wide_source_still_prepares_after_migration
             .project_sources
             .bundle_for_owner(&code_workspace_owner())
             .expect("the legacy bundle");
-        let key = crate::state::project_sources::project_veriloga_bundle_source_key(
+        let key = rspice_app_state::state::project_sources::project_veriloga_bundle_source_key(
             state.model.workspace.content.project.id(),
             bundle,
             "sensor_bridge",
@@ -283,7 +284,7 @@ fn a_deck_written_against_the_project_wide_source_still_prepares_after_migration
     );
 
     let app = install(load(&text));
-    let mut controller = crate::simulation::SimulationController::new();
+    let mut controller = rspice_app_runs::simulation::controller::SimulationController::new();
     controller
         .validate_manual_deck_document(&app.state)
         .expect("the deck prepares against the migrated cell view's bundle");
@@ -295,7 +296,7 @@ fn a_deck_written_against_the_project_wide_source_still_prepares_after_migration
 /// that declares the module's interface and has no Verilog-A view takes it.
 #[test]
 fn a_module_takes_its_own_cell_name_or_the_first_free_suffixed_one() {
-    let mut libraries = crate::state::LibraryManager::default();
+    let mut libraries = rspice_app_state::state::LibraryManager::default();
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
     amp.add_view(View::new("veriloga", ViewType::VerilogA));
@@ -321,14 +322,19 @@ fn a_module_takes_its_own_cell_name_or_the_first_free_suffixed_one() {
     libraries.add_library(library);
     let no_schematics = |_: &CellViewRef| None;
     let interface_of = |cell: &Cell, reference: &CellViewRef| {
-        crate::state::workspace::declared_cell_interface(&no_schematics, cell, &reference.library)
+        rspice_app_state::state::workspace::declared_cell_interface(
+            &no_schematics,
+            cell,
+            &reference.library,
+        )
     };
-    let module = |name: &str, ports: [&str; 2]| crate::state::workspace::DeclaredModule {
-        name: name.to_owned(),
-        ports: ports.iter().map(|port| (*port).to_owned()).collect(),
-    };
+    let module =
+        |name: &str, ports: [&str; 2]| rspice_app_state::state::workspace::DeclaredModule {
+            name: name.to_owned(),
+            ports: ports.iter().map(|port| (*port).to_owned()).collect(),
+        };
     let place = |name: &str, ports: [&str; 2], reserved: &[String]| {
-        crate::state::workspace::veriloga_cell_for_module(
+        rspice_app_state::state::workspace::veriloga_cell_for_module(
             &libraries,
             &interface_of,
             "work",
@@ -378,7 +384,7 @@ fn a_module_takes_its_own_cell_name_or_the_first_free_suffixed_one() {
 /// migration alike, so neither creates a cell beside one it aliases.
 #[test]
 fn a_module_never_lands_beside_a_cell_its_name_aliases() {
-    let mut libraries = crate::state::LibraryManager::default();
+    let mut libraries = rspice_app_state::state::LibraryManager::default();
     let mut library = Library::new("work");
     let mut upper = Cell::new("ÉTAGE");
     upper.add_view(View::new("veriloga", ViewType::VerilogA));
@@ -390,11 +396,11 @@ fn a_module_never_lands_beside_a_cell_its_name_aliases() {
     libraries.add_library(library);
     let no_interface = |_: &Cell, _: &CellViewRef| Vec::new();
     let place = |name: &str| {
-        crate::state::workspace::veriloga_cell_for_module(
+        rspice_app_state::state::workspace::veriloga_cell_for_module(
             &libraries,
             &no_interface,
             "work",
-            &crate::state::workspace::DeclaredModule {
+            &rspice_app_state::state::workspace::DeclaredModule {
                 name: name.to_owned(),
                 ports: Vec::new(),
             },
@@ -512,7 +518,7 @@ fn a_legacy_source_holding_unicode_case_alias_paths_is_refused_at_load() {
                 .add_project_source_bundle_file(
                     id,
                     "sensor_bridge.va",
-                    crate::state::ProjectSourceFile::try_new(path, "// stage\n")
+                    rspice_app_state::state::ProjectSourceFile::try_new(path, "// stage\n")
                         .expect("a valid dependency"),
                 )
                 .expect("the dependency is added");
@@ -526,7 +532,7 @@ fn a_legacy_source_holding_unicode_case_alias_paths_is_refused_at_load() {
         1
     );
     let aliased = serde_json::to_string_pretty(&value).expect("the project encodes");
-    let Err(error) = crate::io::project_io::load_project_text(&aliased, None) else {
+    let Err(error) = rspice_app_services::io::project_io::load_project_text(&aliased, None) else {
         panic!("a source holding two spellings of one path loaded");
     };
     let error = format!("{error:?}");
@@ -660,7 +666,7 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
         "the file is held once"
     );
     let binds = |app: &RSpiceApp, reference: &CellViewRef| {
-        crate::state::workspace::project_veriloga_binding_for_view(
+        rspice_app_state::state::workspace::project_veriloga_binding_for_view(
             &app.state.model.workspace,
             &app.state.model.library_manager,
             reference,
@@ -1067,7 +1073,7 @@ fn deck_naming(app: &RSpiceApp, reference: &CellViewRef, module: &str) -> String
         .project_sources
         .bundle_for_owner(&ProjectSourceOwner::cell_view(reference.clone()))
         .expect("the view owns a bundle");
-    let key = crate::state::project_sources::project_veriloga_bundle_source_key(
+    let key = rspice_app_state::state::project_sources::project_veriloga_bundle_source_key(
         app.state.model.workspace.content.project.id(),
         bundle,
         module,

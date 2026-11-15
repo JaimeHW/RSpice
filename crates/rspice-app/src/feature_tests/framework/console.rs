@@ -2,11 +2,6 @@
 
 use egui::Vec2;
 
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::{AnalysisResult, AnalysisType, Point, SimulationRun, SimulationState};
-use crate::ui::theme::FontWeight;
-use crate::ui::tokens::Tokens;
-use crate::ui::widgets::Problem;
 use crate::workbench::AppState;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticOwner;
@@ -16,6 +11,13 @@ use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::{ConsolePage, WorkbenchSession};
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_state::state::{
+    AnalysisResult, AnalysisType, Point, SimulationRun, SimulationState,
+};
+use rspice_app_workbench::ui::theme::FontWeight;
+use rspice_app_workbench::ui::tokens::Tokens;
+use rspice_app_workbench::ui::widgets::Problem;
 use rspice_app_workbench::workbench::docks::console::problems::active_problem_count;
 use rspice_app_workbench::workbench::docks::console::*;
 use rspice_design::drc::DrcResult;
@@ -40,11 +42,10 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
             DiagnosticOwner::DesignRules => {
                 // A finding about an object the drawing carries, so the row's
                 // route is the real one the canvas resolves.
-                let resistor = app
-                    .state
-                    .model
-                    .schematic
-                    .add_component(crate::state::ComponentType::Resistor, Point::new(40, 40));
+                let resistor = app.state.model.schematic.add_component(
+                    rspice_app_state::state::ComponentType::Resistor,
+                    Point::new(40, 40),
+                );
                 app.state.sync_active_schematic_to_workspace();
                 let mut result = DrcResult::new();
                 result.add_violation(DrcViolation::new(
@@ -62,11 +63,11 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                     .expect("the checks publish against the live design");
             }
             DiagnosticOwner::SymbolPins => {
-                use crate::state::{
+                use crate::workbench::state::Workspace;
+                use rspice_app_state::state::{
                     Cell, CellViewRef, ComponentType, Library, PortDirection, SchematicState,
                     SymbolDocument, SymbolPin, View, ViewType,
                 };
-                use crate::workbench::state::Workspace;
 
                 // A symbol whose pin contract genuinely fails: its cell's
                 // schematic declares a port that the symbol never places.
@@ -107,7 +108,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
             DiagnosticOwner::Dispatch => {
                 // The real command, on an empty design: a schematic with no
                 // components cannot be dispatched, so the pass blocks.
-                app.state.model.schematic = crate::state::SchematicState::default();
+                app.state.model.schematic = rspice_app_state::state::SchematicState::default();
                 app.execute_command_key(SimulateCommand::Preflight.key());
             }
             DiagnosticOwner::Run => {
@@ -144,11 +145,10 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 // faces are known not to have it; the frame's refresh reads
                 // the drawing.
                 let unassigned = settled_missing('\u{38b}');
-                let resistor = app
-                    .state
-                    .model
-                    .schematic
-                    .add_component(crate::state::ComponentType::Resistor, Point::new(40, 40));
+                let resistor = app.state.model.schematic.add_component(
+                    rspice_app_state::state::ComponentType::Resistor,
+                    Point::new(40, 40),
+                );
                 if let Some(part) = app
                     .state
                     .model
@@ -162,7 +162,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 }
                 let _ = app
                     .state
-                    .refresh_live_checks(crate::time_compat::Instant::now());
+                    .refresh_live_checks(rspice_app_state::time_compat::Instant::now());
             }
         }
 
@@ -238,7 +238,7 @@ fn settled_missing(character: char) -> char {
         use rspice_ui_kit::fonts::system::{self, HanVariant, Source, SystemFonts};
 
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         system::attach_with(
             &ctx,
             SystemFonts::spawn(Source::files(Vec::new()), HanVariant::Simplified.order()),
@@ -343,7 +343,7 @@ fn a_completed_runs_engine_warnings_reach_the_page_as_canonical_records() {
 fn a_clamp_opens_its_runs_log_on_the_line_the_engine_reported_it_on() {
     use crate::workbench::state::{ConsoleChannel, ConsoleReveal, ConsoleSelection};
 
-    crate::diagnostics::engine_log::studio_logger_for_tests();
+    rspice_app_state::diagnostics::engine_log::studio_logger_for_tests();
     let mut app = RSpiceApp::test_instance();
     app.state = rspice_app_runs::simulation::controller::test_execution::run_manual_batch_session(
         "BSIM4 clamp\nVD d 0 1\nVG g 0 1\nM1 d g 0 0 nch L=1u W=10u\n\
@@ -442,7 +442,7 @@ fn an_empty_page_starts_where_its_first_row_would() {
         app.state.workbench.console_visible = true;
         app.state.workbench.console_page = page;
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let size = egui::Vec2::new(900.0, 240.0);
         let mut run = || {
             ctx.run_ui(
@@ -556,7 +556,7 @@ fn console_rows_paint_no_coloured_text() {
         .log(LogSeverity::Info, LogSource::Run, "run complete");
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| transcript::console(ui, &mut state));
     });
@@ -596,10 +596,10 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
         .log_buffer
         .warning(LogSource::Run, "unrelated retained log warning");
     app.state.code.netlist.diagnostics = std::sync::Arc::new(
-        crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
-            vec![crate::state::netlist_diagnostics::Diagnostic::error(
-                "bad netlist card",
-            )],
+        rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
+            vec![
+                rspice_app_state::state::netlist_diagnostics::Diagnostic::error("bad netlist card"),
+            ],
             "",
         )
         .unwrap(),
@@ -737,13 +737,13 @@ fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
 #[test]
 fn measurement_table_uses_project_specification_for_verdict_and_margin() {
     let measurement = rspice_core::MeasureResult::success("gain", 9.5);
-    let spec = crate::state::SpecEntry {
+    let spec = rspice_app_state::state::SpecEntry {
         measurement: "GAIN".to_owned(),
         expression: String::new(),
         min: Some(9.0),
         max: Some(10.0),
         unit: "dB".to_owned(),
-        scope: crate::state::SpecPointScope::AllPoints,
+        scope: rspice_app_state::state::SpecPointScope::AllPoints,
     };
     let row = measurement_table_row(&measurement, "AC", Some(&spec));
     assert_eq!(row.status, "PASS");
@@ -804,13 +804,13 @@ fn measurement_table_presents_failvalue_against_the_raw_value() {
 
 #[test]
 fn measurement_table_combines_every_contract_and_reports_the_limiting_margin() {
-    let spec = crate::state::SpecEntry {
+    let spec = rspice_app_state::state::SpecEntry {
         measurement: "gain".to_owned(),
         expression: String::new(),
         min: Some(9.0),
         max: Some(11.0),
         unit: "dB".to_owned(),
-        scope: crate::state::SpecPointScope::AllPoints,
+        scope: rspice_app_state::state::SpecPointScope::AllPoints,
     };
     let passing = rspice_core::MeasureResult {
         name: "gain".to_owned(),
@@ -864,19 +864,19 @@ fn measurement_table_combines_every_contract_and_reports_the_limiting_margin() {
 #[test]
 fn task_lifecycle_copy_distinguishes_cancelled_failed_and_interrupted() {
     assert_eq!(
-        run_lifecycle_presentation(crate::state::SimulationRunLifecycle::Aborted),
+        run_lifecycle_presentation(rspice_app_state::state::SimulationRunLifecycle::Aborted),
         ("CANCELLED", None)
     );
     assert_eq!(
-        run_lifecycle_presentation(crate::state::SimulationRunLifecycle::Failed),
+        run_lifecycle_presentation(rspice_app_state::state::SimulationRunLifecycle::Failed),
         ("FAIL", Some(Problem::Failure))
     );
     assert_eq!(
-        run_lifecycle_presentation(crate::state::SimulationRunLifecycle::Interrupted),
+        run_lifecycle_presentation(rspice_app_state::state::SimulationRunLifecycle::Interrupted),
         ("INTERRUPTED", None)
     );
     assert_eq!(
-        run_lifecycle_presentation(crate::state::SimulationRunLifecycle::Completed),
+        run_lifecycle_presentation(rspice_app_state::state::SimulationRunLifecycle::Completed),
         ("DONE", None)
     );
 }
@@ -907,7 +907,7 @@ fn measurement_badge_counts_only_the_active_immutable_dataset() {
 #[test]
 fn the_task_status_column_fits_every_status() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let column = widest_status_width(ui);
@@ -959,7 +959,7 @@ fn a_pressed_console_tab_opens_its_page_without_taking_keyboard_focus() {
     }
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     let mut frame = |events: Vec<egui::Event>| {
         let output = ctx.run_ui(
@@ -1008,7 +1008,7 @@ fn a_pressed_console_tab_opens_its_page_without_taking_keyboard_focus() {
 #[test]
 fn a_console_tab_press_survives_widgets_coming_and_going_before_the_strip() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     let mut frame = |before: usize, events: Vec<egui::Event>| {
         let output = ctx.run_ui(
@@ -1067,7 +1067,7 @@ fn a_press_on_a_collapsed_docks_tab_opens_it_on_that_page() {
     app.state.workbench.console_visible = false;
     app.state.workbench.console_page = ConsolePage::Console;
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     // Each frame answers with what it drew, the page the dock is on and
     // whether it shows that page.
@@ -1138,7 +1138,7 @@ fn the_open_tabs_underline_spans_its_tab_on_the_strips_foot() {
         .map(|(_, _, bounds)| bounds)
         .expect("the Problems tab");
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let accent = Tokens::get(&ctx).color.accent;
     let underline = output
         .shapes
@@ -1168,10 +1168,10 @@ fn a_pages_toolbar_stands_on_the_panel_fill_above_the_well() {
     let mut app = busy_console();
     app.state.open_project_session();
     app.state.code.netlist.diagnostics = std::sync::Arc::new(
-        crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
-            vec![crate::state::netlist_diagnostics::Diagnostic::error(
-                "bad netlist card",
-            )],
+        rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
+            vec![
+                rspice_app_state::state::netlist_diagnostics::Diagnostic::error("bad netlist card"),
+            ],
             "",
         )
         .unwrap(),
@@ -1185,7 +1185,7 @@ fn a_pages_toolbar_stands_on_the_panel_fill_above_the_well() {
         app.state.workbench.console_page = page;
         let layout = LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench);
         let mut palette = None;
-        let canvas = crate::ui::raster::render(size, |ui, _| {
+        let canvas = rspice_app_workbench::ui::raster::render(size, |ui, _| {
             palette = Some(Tokens::get(ui.ctx()).color);
             rspice_app_workbench::workbench::docks::console::show(ui, &mut app, layout);
         });
@@ -1219,7 +1219,7 @@ fn painted_console_body(mut render: impl FnMut(&mut egui::Ui)) -> String {
     }
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -1279,7 +1279,7 @@ fn each_channel_says_why_it_shows_no_rows() {
 /// after enough passes for sizing to settle, with the accessibility tree.
 fn console_dock_output(app: &mut RSpiceApp, width: f32) -> egui::FullOutput {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let layout = LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench);
     let mut output = None;
@@ -1407,7 +1407,7 @@ fn the_console_toolbar_fits_one_row_under_the_tabs_of_a_900_px_dock() {
 #[test]
 fn a_session_that_dropped_entries_says_so_first() {
     let mut state = AppState::default();
-    state.model.log_buffer = crate::diagnostics::LogBuffer::new(3);
+    state.model.log_buffer = rspice_app_state::diagnostics::LogBuffer::new(3);
     for index in 0..5 {
         state.model.log_buffer.log(
             LogSeverity::Info,
@@ -1437,13 +1437,13 @@ fn measurement_units_keep_console_project_and_authored_contracts_distinct() {
     measured.expected = Some(0.25);
     measured.tolerance = Some(0.01);
     measured.failure_limit = Some(0.5);
-    let mut spec = crate::state::SpecEntry {
+    let mut spec = rspice_app_state::state::SpecEntry {
         measurement: "level".into(),
         expression: String::new(),
         min: Some(200.0),
         max: Some(300.0),
         unit: "mV".into(),
-        scope: crate::state::SpecPointScope::AllPoints,
+        scope: rspice_app_state::state::SpecPointScope::AllPoints,
     };
     let row = measurement_table_row(&measured, "TRAN", Some(&spec));
     assert_eq!(row.status, "PASS");

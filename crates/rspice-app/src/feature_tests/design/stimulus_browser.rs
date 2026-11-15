@@ -2,16 +2,16 @@
 //! whole application lends: the rows, the scope strip, the footer and the
 //! adopter cards.
 
-use crate::state::stimulus_library::definition::StimulusFamily;
-use crate::state::stimulus_library::draft::DefinitionDraft;
-use crate::state::stimulus_library::fixtures;
-use crate::state::{Component, Point};
 use crate::workbench::design::inspector::stimulus as inspector_dock;
 use crate::workbench::design::navigator::stimulus::tests::NAVIGATOR;
 use crate::workbench::design::navigator::stimulus::*;
 use crate::workbench::docks::navigator::stimulus_browser_state::StimulusScope;
 use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_state::state::stimulus_library::definition::StimulusFamily;
+use rspice_app_state::state::stimulus_library::draft::DefinitionDraft;
+use rspice_app_state::state::stimulus_library::fixtures;
+use rspice_app_state::state::{Component, Point};
 
 /// The mockup's fourteen definitions, with nothing adopted, in the workspace
 /// whose navigator lists them.
@@ -27,7 +27,7 @@ const INSPECTOR: egui::Vec2 = egui::vec2(300.0, 640.0);
 /// Lay one dock out and read back everything it announced.
 fn announced(size: egui::Vec2, mut pass: impl FnMut(&mut egui::Ui)) -> Vec<String> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     // Two passes: the first builds the font set and the caches the rows read,
     // the second lays out against both.
@@ -331,12 +331,10 @@ fn the_footer_states_only_what_the_library_needs_acting_on() {
             .expect("held"),
     );
     draft.edit(|working| working.params = "v2=20m per=1m".to_owned());
-    app.state
-        .model
-        .workspace
-        .content
-        .stimulus_library
-        .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
+    app.state.model.workspace.content.stimulus_library.apply(
+        &mut draft,
+        rspice_app_state::state::stimulus_library::now_unix_ms,
+    );
     let published = browser(&mut app);
     assert!(
         published
@@ -383,12 +381,10 @@ fn the_minis_are_evaluated_once_across_two_frames() {
             .expect("held"),
     );
     draft.edit(|working| working.params = "va=9m freq=1k".to_owned());
-    app.state
-        .model
-        .workspace
-        .content
-        .stimulus_library
-        .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
+    app.state.model.workspace.content.stimulus_library.apply(
+        &mut draft,
+        rspice_app_state::state::stimulus_library::now_unix_ms,
+    );
     let _ = browser(&mut app);
     assert_eq!(
         app.state.design.stimulus_browser.evaluations(),
@@ -401,7 +397,7 @@ fn the_minis_are_evaluated_once_across_two_frames() {
 /// the refusal, which is what the row paints a mark for instead of a line.
 #[test]
 fn a_family_with_no_waveform_at_this_boundary_holds_its_refusal_rather_than_a_curve() {
-    use crate::simulation::stimulus_realize::WaveformTrace;
+    use rspice_app_state::simulation::stimulus_realize::WaveformTrace;
 
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);

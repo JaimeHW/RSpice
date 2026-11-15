@@ -5,10 +5,10 @@
 //! primary pointer the platform drives from the first finger.
 
 use crate::feature_tests::design::symbol_actions_drawn::open_symbol;
-use crate::state::{Point, SymbolDocument, SymbolEditorMetadata, SymbolShape};
 use crate::workbench::app::*;
 use crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes;
 use egui::{Event, Pos2, Rect, TouchId, TouchPhase, Vec2};
+use rspice_app_state::state::{Point, SymbolDocument, SymbolEditorMetadata, SymbolShape};
 use rspice_schematic_editor::symbol_editor::SymbolViewport;
 use rspice_schematic_editor::symbol_editor::session::{SymbolSelection, SymbolTool};
 
@@ -31,7 +31,7 @@ impl Finger {
 
     fn sized(size: Vec2) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = open_symbol();
         app.state.open_project_session();

@@ -40,11 +40,12 @@ fn empty_project_scope_reports_the_builder_refusal() {
 #[test]
 fn retained_import_disclosure_only_applies_when_the_netlist_is_included() {
     let mut state = AppState::default();
-    let mut library = crate::state::model_library::ModelLibrary::new("uploaded");
-    library.source_authority = crate::state::model_library::ModelSourceAuthority::RetainedImport {
-        source_id: crate::product::ModelSourceId::new(),
-        digest: crate::product::ContentDigest::from_bytes([7; 32]),
-    };
+    let mut library = rspice_app_state::state::model_library::ModelLibrary::new("uploaded");
+    library.source_authority =
+        rspice_app_state::state::model_library::ModelSourceAuthority::RetainedImport {
+            source_id: rspice_app_state::product::ModelSourceId::new(),
+            digest: rspice_app_state::product::ContentDigest::from_bytes([7; 32]),
+        };
     state.model.model_library_manager.add_library(library);
 
     assert_eq!(imported_model_source_count(&state.model, true), 1);
@@ -93,8 +94,8 @@ fn publish_to_web_opens_its_dialog_over_a_review_build_of_the_project() {
 /// the open dialog already showed is not said again.
 #[test]
 fn a_publish_that_fails_after_its_dialog_closed_is_reported_once() {
-    use crate::ui::widgets::ToastKind;
     use rspice_app_cloud::services::cloud_account::{CloudAccountService, CloudSessionSnapshot};
+    use rspice_app_workbench::ui::widgets::ToastKind;
 
     let failed = |message: &str| {
         CloudAccountService::with_snapshot(

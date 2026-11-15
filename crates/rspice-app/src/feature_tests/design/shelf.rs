@@ -1,8 +1,8 @@
 //! The parts shelf drawn and armed through a whole application.
 
-use crate::state::{ComponentType, Tool};
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::navigator::shelf::*;
+use rspice_app_state::state::{ComponentType, Tool};
 
 #[test]
 fn palette_placement_cancels_every_unfinished_conductor_route() {
@@ -10,11 +10,11 @@ fn palette_placement_cancels_every_unfinished_conductor_route() {
     app.state
         .model
         .schematic
-        .start_wire(crate::state::Point::origin());
+        .start_wire(rspice_app_state::state::Point::origin());
     app.state
         .model
         .schematic
-        .start_bus(crate::state::Point::new(2, 3), None)
+        .start_bus(rspice_app_state::state::Point::new(2, 3), None)
         .unwrap();
 
     arm_primitive(

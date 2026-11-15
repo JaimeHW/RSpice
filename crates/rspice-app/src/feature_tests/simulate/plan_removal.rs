@@ -5,19 +5,19 @@
 //! is refused rather than reviewed.
 
 use super::stage::show_on_stage;
-use crate::product::SimulationPlanId;
-use crate::state::SimulationPage;
-use crate::state::{
-    CaptureGroup, CaptureGroupRule, DesignVariable, DesignVariableOverridePolicy,
-    DesignVariableQuantity, DesignVariableScope, DesignVariableSweepEligibility, InstancePath,
-    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming, SpecEntry,
-};
 use crate::workbench::{AppState, RSpiceApp};
 use egui::vec2;
 use rspice_app_simulate::workbench::surfaces::simulate::AnalysisAction;
 use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
 use rspice_app_simulate::workbench::surfaces::simulate::lifecycle;
+use rspice_app_state::product::SimulationPlanId;
+use rspice_app_state::state::SimulationPage;
+use rspice_app_state::state::{
+    CaptureGroup, CaptureGroupRule, DesignVariable, DesignVariableOverridePolicy,
+    DesignVariableQuantity, DesignVariableScope, DesignVariableSweepEligibility, InstancePath,
+    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+    SavedOutputPrecision, SavedOutputStreaming, SpecEntry,
+};
 
 /// One setup page, rendered with its controls announced so a test can press
 /// the same button an engineer presses.
@@ -30,7 +30,7 @@ struct Registry {
 impl Registry {
     fn open(page: SimulationPage, seed: impl FnOnce(&mut AppState)) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.simulate.simulation_page = page;
@@ -393,7 +393,7 @@ fn removing_an_output_a_specification_reads_opens_the_review() {
             min: None,
             max: Some(3.3),
             unit: "V".to_owned(),
-            scope: crate::state::SpecPointScope::AllPoints,
+            scope: rspice_app_state::state::SpecPointScope::AllPoints,
         });
     });
     registry.click("Remove");
@@ -572,10 +572,10 @@ fn removing_an_empty_capture_group_needs_no_review() {
 /// receipt already carry.
 fn bound_pair() -> (
     RSpiceApp,
-    crate::product::AnalysisInstanceId,
-    crate::product::AnalysisInstanceId,
+    rspice_app_state::product::AnalysisInstanceId,
+    rspice_app_state::product::AnalysisInstanceId,
 ) {
-    use crate::simulation::plan::AnalysisKind;
+    use rspice_app_state::simulation::plan::AnalysisKind;
 
     let mut app = RSpiceApp::test_instance();
     let dependent = app
@@ -783,7 +783,7 @@ fn the_plan_transaction_refuses_a_blocked_removal_and_names_the_analyses() {
 fn a_registry_only_takes_the_answer_it_staged() {
     let mut app = RSpiceApp::test_instance();
     let plan = plan_id(&app.state.model);
-    let variable = crate::product::DesignVariableId::new();
+    let variable = rspice_app_state::product::DesignVariableId::new();
     app.state.simulate.plan_removal_review.open(
         rspice_app_simulate::workbench::app::dialogs::plan_removal::PlanRemovalTarget::Variable {
             plan,

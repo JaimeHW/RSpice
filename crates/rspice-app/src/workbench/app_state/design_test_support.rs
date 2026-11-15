@@ -8,7 +8,6 @@ use rspice_design::drc::DrcResult;
 
 use super::AppState;
 use super::waivers::StoredWaivers;
-use crate::state::{CellViewRef, SymbolDocument, SymbolEditorMetadata};
 use crate::workbench::app::actions::hierarchy_net_highlight::light_net_named;
 use crate::workbench::app::actions::workspace::design_checks::check_active_cellview;
 use crate::workbench::app::actions::workspace::history::{
@@ -21,6 +20,7 @@ use crate::workbench::app::actions::workspace::symbol_document::{
 };
 use crate::workbench::app::actions::workspace::waivers::restate_waived_findings;
 use crate::workbench::state::InlineEditAuthority;
+use rspice_app_state::state::{CellViewRef, SymbolDocument, SymbolEditorMetadata};
 
 impl AppState {
     /// [`check_active_cellview`] for the session.

@@ -16,13 +16,13 @@ use rspice_app_settings::workbench::app::dialogs::preferences::preferences_shell
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn restoring_shortcuts_saves_the_shipped_profile_before_it_goes_live() {
-    use crate::state::command_catalog::CommandPlatform;
-    use crate::state::shortcuts::{
+    use crate::workbench::commands::vocabulary::CommandRegistry;
+    use crate::workbench::framework::command_registry::ids;
+    use rspice_app_state::state::command_catalog::CommandPlatform;
+    use rspice_app_state::state::shortcuts::{
         ChordTimeoutPolicy, ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence,
         ShortcutStroke,
     };
-    use crate::workbench::commands::vocabulary::CommandRegistry;
-    use crate::workbench::framework::command_registry::ids;
 
     let ctx = egui::Context::default();
     let mut app = RSpiceApp::test_instance();

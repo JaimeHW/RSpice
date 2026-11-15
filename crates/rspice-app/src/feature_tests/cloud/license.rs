@@ -1,8 +1,8 @@
 //! The license dialog drawn over a whole application's state: where a
 //! verified key is kept, and the plain words it speaks in.
 
-use crate::services::license;
 use crate::workbench::app::RSpiceApp;
+use rspice_app_cloud::services::license;
 use rspice_app_cloud::workbench::app::dialogs::license::*;
 
 /// Every text the dialog published for a reader to hear. Generic over the
@@ -10,7 +10,7 @@ use rspice_app_cloud::workbench::app::dialogs::license::*;
 /// whole application.
 fn shown_texts<App: LicenseDialogHost>(app: &mut App) -> Vec<String> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut update = None;
     for _ in 0..3 {

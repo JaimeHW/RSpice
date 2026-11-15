@@ -14,7 +14,7 @@ use rspice_app_simulate::workbench::surfaces::simulate::page_models::{
     ModelBindingAction, ModelGate, apply_model_binding_action, gate_reading, gate_status,
 };
 
-fn active_plan_revision(app: &RSpiceApp) -> crate::product::ObjectRevision {
+fn active_plan_revision(app: &RSpiceApp) -> rspice_app_state::product::ObjectRevision {
     app.state
         .model
         .sim_setup
@@ -43,13 +43,15 @@ fn add_sectioned_library(app: &mut RSpiceApp, source_name: &str, model: &str) ->
 #[test]
 fn model_binding_actions_commit_exact_order_corner_and_removal() {
     let mut app = RSpiceApp::test_instance();
-    app.state.model.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+    app.state.model.model_library_manager =
+        rspice_app_state::state::model_library::ModelLibraryManager::new();
     let first = add_sectioned_library(&mut app, "models-first.lib", "first_nch");
     let second = add_sectioned_library(&mut app, "models-second.lib", "second_nch");
     let initial_revision = active_plan_revision(&app);
-    app.state.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
-        app.state.model.workspace.content.project.revision().get(),
-    ));
+    app.state.runs.preflight.report =
+        Some(rspice_app_state::state::PreflightReport::retained_for_test(
+            app.state.model.workspace.content.project.revision().get(),
+        ));
 
     apply_model_binding_action(
         &mut crate::workbench::features::cx(&mut app),
@@ -121,7 +123,8 @@ fn model_binding_actions_commit_exact_order_corner_and_removal() {
 #[test]
 fn refused_model_binding_actions_preserve_plan_state_and_revision() {
     let mut app = RSpiceApp::test_instance();
-    app.state.model.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+    app.state.model.model_library_manager =
+        rspice_app_state::state::model_library::ModelLibraryManager::new();
     let library = add_sectioned_library(&mut app, "models-valid.lib", "valid_nch");
     apply_model_binding_action(
         &mut crate::workbench::features::cx(&mut app),
@@ -325,8 +328,9 @@ fn findings_are_ordered_worst_first() {
 #[test]
 fn gate_totals_equal_the_sum_over_the_workspace_summaries() {
     let mut app = RSpiceApp::test_instance();
-    app.state.model.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
-    let definition = crate::state::model_library::ProjectModelDefinition {
+    app.state.model.model_library_manager =
+        rspice_app_state::state::model_library::ModelLibraryManager::new();
+    let definition = rspice_app_state::state::model_library::ProjectModelDefinition {
         name: "nch_gated".to_owned(),
         spice_type: "NMOS".to_owned(),
         description: "Plan-page qualification gate fixture".to_owned(),

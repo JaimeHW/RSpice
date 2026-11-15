@@ -14,7 +14,7 @@ fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
     app.state.workbench.workspace = Workspace::Design;
     app.state
         .design
-        .set_grid_style(crate::state::GridStyle::Dots);
+        .set_grid_style(rspice_app_state::state::GridStyle::Dots);
     app.state.model.schematic.session.editor.snap_engine.enabled = true;
     app.state
         .model
@@ -32,7 +32,10 @@ fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
     );
 
     app.execute_command_key(DesignCommand::CycleGrid.key());
-    assert_eq!(app.state.design.grid, crate::state::GridStyle::Lines);
+    assert_eq!(
+        app.state.design.grid,
+        rspice_app_state::state::GridStyle::Lines
+    );
     assert!(app.state.model.schematic.session.editor.snap_engine.enabled);
     assert!(app.state.design.schematic_snap.enabled);
     assert!(
@@ -47,11 +50,17 @@ fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
     );
 
     app.execute_command_key(DesignCommand::CycleGrid.key());
-    assert_eq!(app.state.design.grid, crate::state::GridStyle::Off);
+    assert_eq!(
+        app.state.design.grid,
+        rspice_app_state::state::GridStyle::Off
+    );
     assert!(app.state.model.schematic.session.editor.snap_engine.enabled);
 
     app.execute_command_key(DesignCommand::CycleGrid.key());
-    assert_eq!(app.state.design.grid, crate::state::GridStyle::Dots);
+    assert_eq!(
+        app.state.design.grid,
+        rspice_app_state::state::GridStyle::Dots
+    );
 }
 
 /// The grid button paints, on the frame that takes its click, the style the
@@ -62,9 +71,9 @@ fn the_grid_buttons_predicted_style_is_what_cycling_sets() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     for style in [
-        crate::state::GridStyle::Dots,
-        crate::state::GridStyle::Lines,
-        crate::state::GridStyle::Off,
+        rspice_app_state::state::GridStyle::Dots,
+        rspice_app_state::state::GridStyle::Lines,
+        rspice_app_state::state::GridStyle::Off,
     ] {
         app.state.design.set_grid_style(style);
         let predicted = app.state.design.next_grid_style();
@@ -77,7 +86,7 @@ fn the_grid_buttons_predicted_style_is_what_cycling_sets() {
 fn canvas_grid_command_does_not_reinterpret_symbol_snap_policy() {
     let mut app = app_with_selected_authored_symbol();
     app.state
-        .open_workspace_view(crate::state::CellViewRef::new(
+        .open_workspace_view(rspice_app_state::state::CellViewRef::new(
             "command_test",
             "amp",
             "symbol",
@@ -167,7 +176,7 @@ fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
 /// requests the commands leave for the canvas are carried out with its rect.
 fn draw_schematic_canvas(state: &mut AppState, width: f32, height: f32) {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -315,10 +324,10 @@ fn zoom_to_selection_frames_what_is_selected() {
         .session
         .editor
         .needs_drawing_sheet_fit = false;
-    let resistor = crate::state::Component::new(
+    let resistor = rspice_app_state::state::Component::new(
         41,
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(3000, 2000),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(3000, 2000),
     );
     app.state
         .model
@@ -398,7 +407,7 @@ fn zoom_box_frames_the_dragged_rectangle_and_lets_go() {
     app.state.model.schematic.session.editor.zoom = 1.0;
     app.state.model.schematic.session.editor.pan = (0.0, 0.0);
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     drive_schematic_canvas(&mut app.state, &ctx, Vec::new());
 
     app.execute_shortcut_command(Command::ZoomBox);

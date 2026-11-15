@@ -1,8 +1,8 @@
 //! The File menu's schematic open and save actions, over an injectable
 //! `FileWorkflowIo` so the tests run them without a disk or a file picker.
 
-use crate::io::FileWorkflowIo;
 use crate::workbench::app_state::AppState;
+use rspice_app_services::io::FileWorkflowIo;
 
 pub(in crate::workbench) fn action_file_open_with_io(
     state: &mut AppState,

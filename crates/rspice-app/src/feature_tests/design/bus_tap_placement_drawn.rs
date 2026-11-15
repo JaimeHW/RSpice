@@ -1,12 +1,12 @@
 //! Placing a bus tap, drawn through a whole application.
 
-use crate::state::Tool;
-use crate::state::{Bus, BusDeclaration, Point};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::placement::bus_tap::tests::{self as form, key_event};
 use crate::workbench::app::dialogs::placement::bus_tap::*;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_state::state::Tool;
+use rspice_app_state::state::{Bus, BusDeclaration, Point};
 
 /// Draw the form as its dialog step does.
 fn render(app: &mut RSpiceApp, ctx: &Context) {
@@ -50,7 +50,7 @@ fn declare_bus(state: &mut AppState, declaration: &str) {
 #[test]
 fn opening_input_reaches_the_bus_field() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_bus_tap(&mut app.state.design.bus_tap, &app.state.model);
 
@@ -106,7 +106,7 @@ fn an_untouched_form_taps_nothing_and_prefills_only_the_one_declared_bus() {
 #[test]
 fn escape_closes_the_form_at_once_and_places_nothing() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_bus_tap(&mut app.state.design.bus_tap, &app.state.model);
     fill(&mut app.state, "DATA[15:0]", "DATA[7:0]");
@@ -132,7 +132,7 @@ fn escape_closes_the_form_at_once_and_places_nothing() {
 #[test]
 fn rendered_primary_revalidates_publishes_and_arms_the_bus_tap_tool() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     open_bus_tap(&mut app.state.design.bus_tap, &app.state.model);
     fill(&mut app.state, "DATA[15:0]", "DATA[7:0]");
@@ -180,13 +180,13 @@ fn retained_dialog_cannot_arm_after_its_context_or_permission_changes() {
         "missing",
     ] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        let master = crate::state::CellViewRef::new("work", "tap_parent", "schematic");
+        let master = rspice_app_state::state::CellViewRef::new("work", "tap_parent", "schematic");
         app.state.model.workspace.descend_into(
             "X1".to_owned(),
             master.clone(),
-            crate::state::ViewType::Schematic,
+            rspice_app_state::state::ViewType::Schematic,
         );
         let first = app
             .state
@@ -207,7 +207,7 @@ fn retained_dialog_cannot_arm_after_its_context_or_permission_changes() {
                 app.state.model.workspace.descend_into(
                     "X2".to_owned(),
                     master.clone(),
-                    crate::state::ViewType::Schematic,
+                    rspice_app_state::state::ViewType::Schematic,
                 );
             }
             "sheet" => {
@@ -221,10 +221,11 @@ fn retained_dialog_cannot_arm_after_its_context_or_permission_changes() {
                     .unwrap();
                 let second = catalog
                     .create_sheet(
-                        crate::state::SheetDefinition {
+                        rspice_app_state::state::SheetDefinition {
                             name: "Sheet 2".to_owned(),
-                            template: crate::state::SheetTemplate::AnalogSchematic,
-                            port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                            template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
+                            port_policy:
+                                rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(2),
                         },
                         Some(first),
@@ -234,13 +235,13 @@ fn retained_dialog_cannot_arm_after_its_context_or_permission_changes() {
             }
             "content" => {
                 app.state.model.schematic.add_component(
-                    crate::state::ComponentType::Resistor,
-                    crate::state::Point::new(40, 20),
+                    rspice_app_state::state::ComponentType::Resistor,
+                    rspice_app_state::state::Point::new(40, 20),
                 );
             }
             "read-only" => app.state.model.schematic.session.read_only = true,
             "safe-mode" => app.state.model.safe_mode.activate(
-                crate::state::write_policy::LocalSafeModeOptions {
+                rspice_app_state::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()
                 },

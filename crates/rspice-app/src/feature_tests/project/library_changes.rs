@@ -3,8 +3,6 @@
 //! change carried out in place did: renaming a cell, a view or a library,
 //! and deleting a library.
 
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::{Cell, CellViewRef, Library, OpenCellView, SchematicState, View, ViewType};
 use crate::workbench::app_state::model::LibraryRemoval;
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
 use crate::workbench::project::library_dialogs::cell_ops::commit_rename_cell_dialog;
@@ -13,6 +11,10 @@ use crate::workbench::project::library_dialogs::library_ops::{
 };
 use crate::workbench::project::library_dialogs::rename_view::commit_rename_view_dialog;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_state::state::{
+    Cell, CellViewRef, Library, OpenCellView, SchematicState, View, ViewType,
+};
 
 use super::{published, shown, with_cx};
 

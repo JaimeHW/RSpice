@@ -1,9 +1,9 @@
 //! Project and plan integration for PDK technology demand and preflight messages.
 
-use crate::product::AnalysisInstanceId;
-use crate::product::ProcessCorner;
-use crate::simulation::plan::AnalysisDraft;
 use crate::workbench::app_state::AppState;
+use rspice_app_state::product::AnalysisInstanceId;
+use rspice_app_state::product::ProcessCorner;
+use rspice_app_state::simulation::plan::AnalysisDraft;
 use rspice_simulation::preparation::{TechnologyDemand, TechnologyDemandReason};
 use rspice_simulation_contract::corner_draft::CornerDialogState;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;

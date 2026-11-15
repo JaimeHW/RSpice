@@ -1,7 +1,10 @@
 //! Opening and saving a placed instance's property editor through the whole application:
 //! open_property_editor and the validated save answer over AppState.
 
-use crate::state::{
+use crate::workbench::app::project_transactions::WholeStateValidation;
+use crate::workbench::app::selected_object_properties_available_in;
+use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{
     Component, GeneratedSymbolViews, Library, LibraryCellInstance, ModelBoundSymbolDefinition,
     ParameterInheritance, Point, PortDirection, PropertyType, SymbolElectricalType,
     SymbolGraphicTemplate, SymbolIdentity, SymbolModelReference, SymbolNetlistBinding,
@@ -9,10 +12,7 @@ use crate::state::{
     SymbolParameterSection, SymbolParameterVisibility, SymbolPinDefinition, SymbolPinSide,
     SymbolSourceContract,
 };
-use crate::state::{ComponentType, MODEL_BOUND_SYMBOL_METADATA_KEY, PropertyValue};
-use crate::workbench::app::project_transactions::WholeStateValidation;
-use crate::workbench::app::selected_object_properties_available_in;
-use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{ComponentType, MODEL_BOUND_SYMBOL_METADATA_KEY, PropertyValue};
 
 fn model_bound_definition() -> ModelBoundSymbolDefinition {
     let model = SymbolModelReference::new("vendor_cmos", "nmos_core").with_source_path(
@@ -95,7 +95,7 @@ fn install_definition(
     definition: &ModelBoundSymbolDefinition,
 ) -> LibraryCellInstance {
     let mut library = Library::new(&definition.identity.library);
-    crate::state::prepare_symbol_construction(definition, &library)
+    rspice_app_state::state::prepare_symbol_construction(definition, &library)
         .expect("construction plan")
         .commit(&mut library)
         .expect("definition publication");
@@ -271,15 +271,15 @@ fn placed_model_bound_instance_opens_its_authoritative_typed_form() {
 #[test]
 fn a_plain_schematic_cell_gets_its_declared_parameters_and_a_typed_multiplicity() {
     let mut state = AppState::default();
-    let mut cell = crate::state::Cell::new("amp");
+    let mut cell = rspice_app_state::state::Cell::new("amp");
     cell.metadata.insert(
         "cdf.parameter_contract".to_owned(),
         r#"[{"name":"r","default":"1k"},{"name":"c","required":true,"aliases":["cap"]}]"#
             .to_owned(),
     );
-    cell.add_view(crate::state::View::new(
+    cell.add_view(rspice_app_state::state::View::new(
         "schematic",
-        crate::state::ViewType::Schematic,
+        rspice_app_state::state::ViewType::Schematic,
     ));
     let mut library = Library::new("work");
     library.add_cell(cell);
@@ -407,7 +407,7 @@ fn legacy_and_review_only_cells_get_isolated_identity_forms() {
     );
 
     let mut legacy_library = Library::new("legacy");
-    legacy_library.add_cell(crate::state::Cell::new("opaque"));
+    legacy_library.add_cell(rspice_app_state::state::Cell::new("opaque"));
     state.model.library_manager.add_library(legacy_library);
     state
         .model

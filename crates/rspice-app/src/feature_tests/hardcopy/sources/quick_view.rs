@@ -850,8 +850,8 @@ fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
 /// moment a limit is authored.
 #[test]
 fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
-    use crate::product::{AnalysisInstanceId, SimulationPlanId};
-    use crate::state::{
+    use rspice_app_state::product::{AnalysisInstanceId, SimulationPlanId};
+    use rspice_app_state::state::{
         AnalysisResultSourceDomain, PreparedRunReceipt, PreparedRunTaskReceipt,
         PreparedSourceCheckReceipt, PreparedSpecification, SpecEntry, SpecPointScope,
         SpecificationDefinition,
@@ -884,7 +884,7 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
                 .expect("prepared requirement")
             })
             .collect();
-        let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        let receipt = PreparedRunReceipt::new(rspice_app_state::state::PreparedRunReceiptInput {
             source_domain: AnalysisResultSourceDomain::SimulationPlan,
             simulation_plan_id: Some(SimulationPlanId::new()),
             project_revision: ObjectRevision::INITIAL,
@@ -996,7 +996,7 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
         .results
         .session
         .plot_view_mut(ResultViewer::Waves, 0)
-        .apply(&crate::ui::plot::ViewChange {
+        .apply(&rspice_app_workbench::ui::plot::ViewChange {
             x: Some((0.4, 0.6)),
             y: None,
             reset: false,
@@ -1029,7 +1029,7 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
         .results
         .session
         .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis_key, 0)
-        .apply(&crate::ui::plot::ViewChange {
+        .apply(&rspice_app_workbench::ui::plot::ViewChange {
             x: Some((0.4, 0.6)),
             y: None,
             reset: false,
@@ -1113,7 +1113,7 @@ fn a_pane_ordinate_does_not_bound_a_page_that_merges_every_pane() {
         .results
         .session
         .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis_key, 0)
-        .apply(&crate::ui::plot::ViewChange {
+        .apply(&rspice_app_workbench::ui::plot::ViewChange {
             x: None,
             y: Some((4.0, 5.0)),
             reset: false,

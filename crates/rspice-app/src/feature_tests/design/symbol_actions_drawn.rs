@@ -1,12 +1,12 @@
 //! The symbol actions drawn through a whole application.
 
-use crate::state::Point;
-use crate::state::{
+use crate::workbench::RSpiceApp;
+use crate::workbench::app::actions::symbol::*;
+use rspice_app_state::state::Point;
+use rspice_app_state::state::{
     Cell, CellViewRef, Library, PortDirection, SymbolDocument, SymbolPin, SymbolShape, View,
     ViewType,
 };
-use crate::workbench::RSpiceApp;
-use crate::workbench::app::actions::symbol::*;
 use rspice_schematic_editor::symbol_editor::commands::SymbolEditAction;
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 

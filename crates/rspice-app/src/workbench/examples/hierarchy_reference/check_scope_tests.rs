@@ -2,10 +2,10 @@
 //! on the one list: a finding is listed once, by the newest check that looked
 //! at the cellview it is drawn in.
 
-use crate::state::{Cell, CellViewRef, ComponentType, Library, Point, View, ViewType};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::diagnostic_store::listing;
 use crate::workbench::examples::hierarchy_reference::{self, USER_LIBRARY};
+use rspice_app_state::state::{Cell, CellViewRef, ComponentType, Library, Point, View, ViewType};
 
 const UNUSED: &str = "DRC-UNUSED-CELLVIEW";
 
@@ -489,7 +489,7 @@ fn an_edit_settling_as_its_view_is_left_is_checked_without_a_warning() {
     state.open_project_session();
     let amp = reference.amp_schematic;
     state.open_workspace_view(amp.clone());
-    let start = crate::time_compat::Instant::now();
+    let start = rspice_app_state::time_compat::Instant::now();
     let _ = state.refresh_live_checks(start);
     let live = DiagnosticInputs::LiveCheck {
         subject: amp.clone(),

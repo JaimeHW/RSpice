@@ -1,10 +1,6 @@
 //! The library publication dialogs' composition over the whole
 //! application, and the publication transactions they run.
 
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::product::ContentDigest;
-use crate::state::workspace::ProjectLibraryPublicationReceipt;
-use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::{property_card, property_row};
@@ -24,6 +20,10 @@ use rspice_app_project::workbench::surfaces::project::library_publication::{
     publication_fields, rollback_fields, rollback_receipt_selector, safe_file_stem,
     selected_receipt, transaction_status,
 };
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_state::product::ContentDigest;
+use rspice_app_state::state::workspace::ProjectLibraryPublicationReceipt;
+use rspice_app_workbench::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]
@@ -343,7 +343,10 @@ pub(crate) fn publish_native(
     else {
         return Ok(PublicationAction::Cancelled);
     };
-    crate::io::file_exchange::ensure_file_extension(&mut path, PROJECT_ARTIFACT_EXTENSION);
+    rspice_app_services::io::file_exchange::ensure_file_extension(
+        &mut path,
+        PROJECT_ARTIFACT_EXTENSION,
+    );
     let destination = app.export_workflow_io.observe_destination(&path)?;
     let candidate = prepare_project_library_publication(
         &app.state,
@@ -511,11 +514,11 @@ fn pick_native_rollback_artifact(
             path.display()
         )
     })?;
-    if metadata.len() > crate::io::project_io::MAX_PROJECT_FILE_BYTES {
+    if metadata.len() > rspice_app_services::io::project_io::MAX_PROJECT_FILE_BYTES {
         return Err(format!(
             "Publication artifact '{}' exceeds the supported {}-byte project limit",
             path.display(),
-            crate::io::project_io::MAX_PROJECT_FILE_BYTES
+            rspice_app_services::io::project_io::MAX_PROJECT_FILE_BYTES
         ));
     }
     let bytes = std::fs::read(&path).map_err(|error| {
@@ -686,24 +689,24 @@ pub(crate) fn prepare_project_library_publication(
     }
     let snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
         .map_err(|error| format!("project library publication snapshot failed: {error}"))?;
-    let serialized = crate::io::project_io::serialize_project_file(&snapshot)
+    let serialized = rspice_app_services::io::project_io::serialize_project_file(&snapshot)
         .map_err(|error| format!("project library publication serialization failed: {error}"))?;
     let bytes = serialized.into_bytes();
     let snapshot_byte_len = u64::try_from(bytes.len())
         .map_err(|_| "project library publication artifact is too large".to_owned())?;
-    let draft = crate::state::workspace::ProjectLibraryPublicationDraft {
+    let draft = rspice_app_state::state::workspace::ProjectLibraryPublicationDraft {
         publication_id: uuid::Uuid::new_v4(),
         label: label.into(),
         actor_id: actor_id.into(),
         authority_id: authority_id.into(),
         reason: reason.into(),
-        created_unix_ms: crate::time_compat::unix_epoch()
+        created_unix_ms: rspice_app_state::time_compat::unix_epoch()
             .as_millis()
             .try_into()
             .unwrap_or(u64::MAX)
             .max(1),
         library_revision: state.model.library_manager.revision(),
-        snapshot_digest: crate::product::ContentDigest::from_bytes(
+        snapshot_digest: rspice_app_state::product::ContentDigest::from_bytes(
             sha2::Sha256::digest(&bytes).into(),
         ),
         snapshot_byte_len,
@@ -749,14 +752,15 @@ pub(crate) fn commit_project_library_publication(
     }
     let current_snapshot = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
         .map_err(|error| format!("project library publication recheck failed: {error}"))?;
-    let current_serialized = crate::io::project_io::serialize_project_file(&current_snapshot)
-        .map_err(|error| {
-            format!("project library publication recheck serialization failed: {error}")
-        })?;
+    let current_serialized =
+        rspice_app_services::io::project_io::serialize_project_file(&current_snapshot).map_err(
+            |error| format!("project library publication recheck serialization failed: {error}"),
+        )?;
     let current_bytes = current_serialized.as_bytes();
     if current_bytes.len() as u64 != candidate.draft.snapshot_byte_len
-        || crate::product::ContentDigest::from_bytes(sha2::Sha256::digest(current_bytes).into())
-            != candidate.draft.snapshot_digest
+        || rspice_app_state::product::ContentDigest::from_bytes(
+            sha2::Sha256::digest(current_bytes).into(),
+        ) != candidate.draft.snapshot_digest
     {
         return Err(
             "project library publication content changed after the artifact was prepared"
@@ -817,8 +821,9 @@ pub(crate) fn rollback_project_library_publication(
         .cloned()
         .ok_or_else(|| format!("project library publication {publication_id} is not retained"))?;
     if artifact_bytes.len() as u64 != receipt.snapshot_byte_len()
-        || crate::product::ContentDigest::from_bytes(sha2::Sha256::digest(artifact_bytes).into())
-            != receipt.snapshot_digest()
+        || rspice_app_state::product::ContentDigest::from_bytes(
+            sha2::Sha256::digest(artifact_bytes).into(),
+        ) != receipt.snapshot_digest()
     {
         return Err(
             "project library rollback artifact does not match its publication receipt".to_owned(),
@@ -826,7 +831,7 @@ pub(crate) fn rollback_project_library_publication(
     }
     let artifact_text = std::str::from_utf8(artifact_bytes)
         .map_err(|error| format!("project library rollback artifact is not UTF-8: {error}"))?;
-    let mut artifact = crate::io::project_io::load_project_text(artifact_text, None)
+    let mut artifact = rspice_app_services::io::project_io::load_project_text(artifact_text, None)
         .map_err(|error| format!("project library rollback artifact is invalid: {error}"))?;
     if artifact.file.workspace.project.id() != receipt.project_id()
         || artifact.file.workspace.project.revision() != receipt.source_project_revision()
@@ -863,7 +868,7 @@ pub(crate) fn rollback_project_library_publication(
         );
     }
 
-    let mutation = crate::state::ProjectLibraryMutation::RollbackPublication {
+    let mutation = rspice_app_state::state::ProjectLibraryMutation::RollbackPublication {
         publication_id,
         publication_label: receipt.label().to_owned(),
         snapshot_digest: receipt.snapshot_digest(),
@@ -875,7 +880,7 @@ pub(crate) fn rollback_project_library_publication(
 
     let (simulation_plan, model_library_manager, execution_warnings) =
         match artifact.file.execution_context.take() {
-            Some(context) => crate::io::restore_execution_context(context).map_err(|error| {
+            Some(context) => rspice_app_services::io::restore_execution_context(context).map_err(|error| {
                 format!("project library rollback execution context is invalid: {error}")
             })?,
             None => (
@@ -900,16 +905,17 @@ pub(crate) fn rollback_project_library_publication(
         .model
         .library_manager
         .replace_catalog_from_snapshot(&artifact.file.libraries)?;
-    candidate.model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
-    candidate.model.workspace = crate::state::ProjectWorkspace::from_parts(
+    candidate.model.library_edit_locks =
+        rspice_app_state::state::ProjectLibraryLockAuthority::default();
+    candidate.model.workspace = rspice_app_state::state::ProjectWorkspace::from_parts(
         artifact.file.workspace,
         artifact.workspace_session,
     );
     candidate.model.sim_setup = simulation_plan;
     candidate.model.model_library_manager = model_library_manager;
     candidate.restore_active_schematic_from_workspace();
-    candidate.model.simulation = crate::state::SimulationState::default();
-    crate::io::restore_simulation_results(
+    candidate.model.simulation = rspice_app_state::state::SimulationState::default();
+    rspice_app_services::io::restore_simulation_results(
         artifact.file.simulation_results,
         &mut candidate.model.simulation,
     )
@@ -925,8 +931,8 @@ pub(crate) fn rollback_project_library_publication(
     state.commit_candidate(candidate);
     for warning in execution_warnings {
         state.record(
-            crate::diagnostics::LogSeverity::Warning,
-            crate::diagnostics::LogSource::Studio,
+            rspice_app_state::diagnostics::LogSeverity::Warning,
+            rspice_app_state::diagnostics::LogSource::Studio,
             warning,
         );
     }

@@ -7,14 +7,16 @@
 //! netlist record, and a source document in whichever editor owns its bundle.
 
 use super::*;
-use crate::state::{Cell, CellViewRef, ComponentType, Library, NetLabel, Point, View, ViewType};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
+use rspice_app_state::state::{
+    Cell, CellViewRef, ComponentType, Library, NetLabel, Point, View, ViewType,
+};
 use rspice_design::drc::DrcViolationType;
 
 fn context() -> Context {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx
 }
 
@@ -66,7 +68,7 @@ fn a_source_route_to_a_departed_bundle_states_its_refusal() {
         .model
         .diagnostics
         .request_route(DiagnosticRoute::CodeDocument {
-            bundle: crate::state::ProjectSourceId::new(),
+            bundle: rspice_app_state::state::ProjectSourceId::new(),
             logical_path: std::sync::Arc::from("amp.va"),
             line: Some(3),
             column: Some(1),
@@ -93,8 +95,8 @@ fn a_source_route_opens_its_document_in_the_editor_that_owns_it() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Results);
-    let owner = crate::state::ProjectSourceOwner::code_workspace(
-        crate::state::ProjectSourceLanguage::RSpiceAutomation,
+    let owner = rspice_app_state::state::ProjectSourceOwner::code_workspace(
+        rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation,
     );
     let bundle = app
         .state
@@ -106,7 +108,7 @@ fn a_source_route_opens_its_document_in_the_editor_that_owns_it() {
         .expect("a project holds its automation bundle");
     let bundle_id = bundle.id();
     let logical_path = bundle
-        .paths_for_role(crate::state::ProjectSourceRole::AutomationPermissionManifest)
+        .paths_for_role(rspice_app_state::state::ProjectSourceRole::AutomationPermissionManifest)
         .next()
         .expect("the automation bundle has a permission manifest")
         .to_owned();
@@ -163,7 +165,9 @@ fn a_netlist_route_to_a_retired_record_states_its_refusal() {
 /// on whatever object there happened to carry the same id.
 #[test]
 fn following_a_rule_finding_opens_its_cell_view_before_selecting() {
-    use crate::state::{Cell, CellViewRef, ComponentType, Library, Point, View, ViewType};
+    use rspice_app_state::state::{
+        Cell, CellViewRef, ComponentType, Library, Point, View, ViewType,
+    };
     use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     let mut app = RSpiceApp::test_instance();
@@ -436,7 +440,9 @@ fn every_source_in_a_loop_is_named_and_followed_into_its_view() {
 /// stopped at the sheet in view.
 #[test]
 fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
-    use crate::state::{ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{
+        ComponentType, Point, SheetDefinition, SheetPortPolicy, SheetTemplate,
+    };
     use rspice_design::drc::DrcViolationType;
 
     let mut app = RSpiceApp::test_instance();
@@ -562,7 +568,7 @@ fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
 /// route is resolved in that view's own drawing rather than left out.
 #[test]
 fn a_rule_finding_about_a_view_that_is_not_open_keeps_its_route() {
-    use crate::state::{CellViewRef, ComponentType, Point, SchematicState};
+    use rspice_app_state::state::{CellViewRef, ComponentType, Point, SchematicState};
     use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     let mut app = RSpiceApp::test_instance();
@@ -610,7 +616,7 @@ fn a_rule_finding_about_a_view_that_is_not_open_keeps_its_route() {
     assert!(
         matches!(
             route,
-            Some(DiagnosticRoute::Anchor(crate::diagnostics::LogAnchor::Schematic {
+            Some(DiagnosticRoute::Anchor(rspice_app_state::diagnostics::LogAnchor::Schematic {
                 ref cell_view,
                 component: Some(component),
                 ..

@@ -5,10 +5,10 @@
 //! primary pointer the platform drives from it. Nothing is set up by hand once
 //! the sheet exists.
 
-use crate::state::{ComponentType, Point, SchematicState, Tool};
 use crate::workbench::app::*;
 use crate::workbench::state::Workspace;
 use egui::{Event, Pos2, Rect, TouchPhase, Vec2};
+use rspice_app_state::state::{ComponentType, Point, SchematicState, Tool};
 
 /// Someone at the application with nothing but a finger.
 struct Finger {
@@ -23,7 +23,7 @@ struct Finger {
 impl Finger {
     fn new(size: Vec2) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.symbol_library = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
@@ -282,7 +282,7 @@ impl Finger {
     /// A cell `amp` in the top schematic's library, with a schematic to
     /// descend into and a one-pin symbol, placed once at `at`.
     fn place_subcircuit(&mut self, at: Point) {
-        use crate::state::{
+        use rspice_app_state::state::{
             Cell, CellViewRef, LibraryCellInstance, OpenCellView, PortDirection, PortSpec,
             SymbolDocument, SymbolPin, View, ViewType,
         };

@@ -67,7 +67,7 @@ fn click(ctx: &egui::Context, state: &mut AppState, label: &str) {
 
 fn context() -> egui::Context {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     ctx
 }

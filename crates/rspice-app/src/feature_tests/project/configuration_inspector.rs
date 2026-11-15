@@ -60,7 +60,7 @@ fn frame(ctx: &egui::Context, app: &mut RSpiceApp, events: Vec<egui::Event>) -> 
 
 fn context() -> egui::Context {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx
 }
 

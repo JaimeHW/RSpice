@@ -26,7 +26,7 @@ fn seed_recovery_catalog(state: &mut crate::workbench::app_state::AppState) {
         ProjectCheckpointReason, fixture_summary,
     };
 
-    let now = crate::time_compat::checked_unix_time_ms().expect("clock");
+    let now = rspice_app_state::time_compat::checked_unix_time_ms().expect("clock");
     let name = state.model.workspace.content.project.name().to_owned();
     state.project.project_checkpoint_recovery.project_id =
         Some(state.model.workspace.content.project.id().to_string());
@@ -52,7 +52,7 @@ fn seed_recovery_catalog(state: &mut crate::workbench::app_state::AppState) {
 fn painted(page: ProjectPage) -> String {
     let mut app = project_app(page);
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(

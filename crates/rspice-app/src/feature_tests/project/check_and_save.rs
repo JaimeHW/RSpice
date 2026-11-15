@@ -34,7 +34,7 @@ fn a_landed_save_closes_the_form_and_records_what_it_missed() {
 #[test]
 fn check_and_save_is_a_command_form_without_the_wizard() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();

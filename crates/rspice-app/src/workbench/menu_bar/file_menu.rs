@@ -1,9 +1,9 @@
 //! File action layer: dirty-state confirmations, project/file IO dispatch,
 //! exports and application exit. Rendering lives in the workbench title bar.
 
-use crate::io::FileWorkflowIo;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::feature::ModelsPort;
+use rspice_app_services::io::FileWorkflowIo;
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
 /// Every action reachable from the File menu.
@@ -285,29 +285,34 @@ mod tests {
     }
     struct NoIo;
 
-    impl crate::io::FileWorkflowIo for NoIo {
+    impl rspice_app_services::io::FileWorkflowIo for NoIo {
         #[cfg(not(target_arch = "wasm32"))]
-        fn show_open_dialog(&self) -> Result<std::path::PathBuf, crate::io::SchematicIoError> {
+        fn show_open_dialog(
+            &self,
+        ) -> Result<std::path::PathBuf, rspice_app_services::io::SchematicIoError> {
             panic!("unexpected file I/O")
         }
         fn show_save_dialog(
             &self,
             _: Option<&str>,
-        ) -> Result<std::path::PathBuf, crate::io::SchematicIoError> {
+        ) -> Result<std::path::PathBuf, rspice_app_services::io::SchematicIoError> {
             panic!("unexpected file I/O")
         }
         fn load_schematic(
             &self,
             _: &std::path::Path,
-        ) -> Result<crate::state::SchematicState, crate::io::SchematicIoError> {
+        ) -> Result<
+            rspice_app_state::state::SchematicState,
+            rspice_app_services::io::SchematicIoError,
+        > {
             panic!("unexpected file I/O")
         }
         fn save_schematic(
             &self,
-            _: &crate::state::SchematicState,
+            _: &rspice_app_state::state::SchematicState,
             _: &std::path::Path,
             _: bool,
-        ) -> Result<(), crate::io::SchematicIoError> {
+        ) -> Result<(), rspice_app_services::io::SchematicIoError> {
             panic!("unexpected file I/O")
         }
     }
@@ -323,8 +328,8 @@ mod tests {
             .components
             .clear();
         state.model.schematic.add_component(
-            crate::state::ComponentType::VoltageSource,
-            crate::state::Point::origin(),
+            rspice_app_state::state::ComponentType::VoltageSource,
+            rspice_app_state::state::Point::origin(),
         );
         state.model.schematic.clear_undo_history();
         state.model.schematic.session.is_dirty = false;

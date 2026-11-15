@@ -1,15 +1,15 @@
 //! What one sheet edit lands, as one undo entry, and what it refuses.
 
 use super::apply_drawing_sheet_edit;
-use crate::state::{
+use crate::workbench::app::RSpiceApp;
+use rspice_app_sheets::workbench::app::drawing_sheet_edit::transaction::*;
+use rspice_app_state::state::{
     AuthoredDrawingSheetSize, DRAWING_SHEET_MIXED_SIZES_ADVISORY, DrawingSheetInheritance,
     DrawingSheetPreset, DrawingSheetPresetScope, DrawingSheetStandard,
     DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTransactionKind,
     DrawingSheetZoneMode, SchematicPageOrientation, SchematicSheetFormat, SheetDefinition, SheetId,
     SheetPortPolicy, SheetTemplate,
 };
-use crate::workbench::app::RSpiceApp;
-use rspice_app_sheets::workbench::app::drawing_sheet_edit::transaction::*;
 
 fn governed_app_with_sheets(count: usize) -> (RSpiceApp, String, Vec<SheetId>) {
     let mut app = RSpiceApp::test_instance();
@@ -94,7 +94,7 @@ fn a_sheet_is_edited_only_on_a_writable_schematic() {
     ));
 
     app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
+        rspice_app_state::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
         },

@@ -125,7 +125,7 @@ impl Replay {
     /// `app` with a project open, as the browser workbench starts.
     pub(super) fn of(mut app: RSpiceApp) -> Self {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         app.state.open_project_session();
         Self {

@@ -2,9 +2,6 @@
 //! checks count and marks, the result, zoom, page and coordinate segments,
 //! the engine's lifecycle mark, and what gives way on a narrow bar.
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::Problem;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::listing::DiagnosticCounts;
 use crate::workbench::chrome::status_bar::design::{
@@ -21,6 +18,9 @@ use rspice_app_runs::simulation::status::{
     preflight_status, simulation_engine_status, simulation_progress_percent,
 };
 use rspice_app_sheets::workbench::chrome::status_bar::sheets::sheet_position_summary;
+use rspice_app_workbench::ui::theme::{self, FontWeight};
+use rspice_app_workbench::ui::tokens::{self, Tokens};
+use rspice_app_workbench::ui::widgets::Problem;
 use rspice_app_workbench::workbench::chrome::status_bar::*;
 
 /// The counts the bar states, read as the page reads them.
@@ -38,12 +38,12 @@ fn every_status_rule_stands_between_two_items() {
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Design);
     let size = egui::vec2(1440.0, 900.0);
-    let canvas = crate::ui::raster::render(size, |ui, _| {
+    let canvas = rspice_app_workbench::ui::raster::render(size, |ui, _| {
         let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
         show(ui, &mut app, layout);
     });
     let themed = egui::Context::default();
-    crate::ui::Theme::default().apply(&themed);
+    rspice_app_workbench::ui::Theme::default().apply(&themed);
     let border = Tokens::get(&themed).color.border;
     let y = size.y - 11.0;
     let row = (0..size.x as usize)
@@ -92,12 +92,12 @@ fn the_bar_draws_the_prompt_and_drops_it_once_it_expires() {
                 .prompt
                 .as_mut()
                 .expect("the prompt is still held")
-                .issued = crate::time_compat::Instant::now()
+                .issued = rspice_app_state::time_compat::Instant::now()
                 .checked_sub(crate::workbench::state::StatusPrompt::LIFETIME)
                 .expect("the session clock reaches back one prompt lifetime");
         }
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let output = ctx.run_ui(
             egui::RawInput {
@@ -145,8 +145,8 @@ fn the_checks_segment_counts_every_producer_from_one_list() {
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Netlist);
     let diagnostics = vec![
-        crate::state::netlist_diagnostics::Diagnostic::error("bad card"),
-        crate::state::netlist_diagnostics::Diagnostic::current(
+        rspice_app_state::state::netlist_diagnostics::Diagnostic::error("bad card"),
+        rspice_app_state::state::netlist_diagnostics::Diagnostic::current(
             "rspice.test",
             "TEST-WARNING",
             crate::workbench::documents::netlist_document::DiagnosticSeverity::Warning,
@@ -154,8 +154,11 @@ fn the_checks_segment_counts_every_producer_from_one_list() {
         ),
     ];
     app.state.code.netlist.diagnostics = std::sync::Arc::new(
-        crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(diagnostics, "")
-            .unwrap(),
+        rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
+            diagnostics,
+            "",
+        )
+        .unwrap(),
     );
 
     assert_eq!(
@@ -250,7 +253,7 @@ fn the_checks_segment_marks_only_a_problem_and_is_absent_until_checks_run() {
         .content
         .connectivity
         .policy
-        .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        .width_mismatch = rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
     assert_eq!(
         check_summary(counts(&app)).as_deref(),
         Some("Problems · 0 errors · 0 advisories · 1 stale")
@@ -323,7 +326,7 @@ fn adjacent_result_segments_never_print_the_same_sentence() {
 /// and the grid it snaps to, never the schematic's.
 #[test]
 fn a_symbol_view_reads_its_own_selection_and_grid() {
-    use crate::state::SymbolAttributeKind;
+    use rspice_app_state::state::SymbolAttributeKind;
     use rspice_schematic_editor::symbol_editor::session::SymbolGridSpacing;
     let mut app = crate::feature_tests::design::symbol_actions_drawn::open_symbol();
     let read = |app: &RSpiceApp| {
@@ -428,7 +431,7 @@ fn fractional_engine_progress_is_rendered_as_a_percentage() {
 
 #[test]
 fn engine_status_follows_execution_lifecycle_not_worker_activity() {
-    let mut simulation = crate::state::SimulationState::default();
+    let mut simulation = rspice_app_state::state::SimulationState::default();
     let identity = simulation
         .start_run()
         .execution_identity()
@@ -453,7 +456,7 @@ fn engine_status_follows_execution_lifecycle_not_worker_activity() {
 /// engine segment at all; every other idle state still names itself.
 #[test]
 fn idle_engine_status_says_nothing_while_the_engine_is_ready() {
-    let simulation = crate::state::SimulationState::default();
+    let simulation = rspice_app_state::state::SimulationState::default();
     for (availability, expected) in [
         (EngineAvailability::Ready, None),
         (EngineAvailability::Starting, Some("Engine starting")),
@@ -498,7 +501,7 @@ fn the_engine_mark_is_a_live_dot_only_while_a_run_is_in_progress() {
 
 #[test]
 fn backend_startup_and_failure_do_not_advertise_running_progress() {
-    let mut simulation = crate::state::SimulationState::default();
+    let mut simulation = rspice_app_state::state::SimulationState::default();
     let identity = simulation.start_run().execution_identity().unwrap();
     simulation.execution.active_execution = Some(identity);
     simulation.execution.progress = 0.375;
@@ -522,7 +525,7 @@ fn backend_startup_and_failure_do_not_advertise_running_progress() {
 /// position.
 #[test]
 fn the_page_segment_appears_only_above_one_sheet_and_follows_activation() {
-    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();

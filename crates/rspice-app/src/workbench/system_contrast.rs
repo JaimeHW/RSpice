@@ -3,7 +3,7 @@
 //! The system's own question and answer: `SPI_GETHIGHCONTRAST` is the supported
 //! way to ask, and the theme's colors are the system colors.
 
-use crate::ui::palette::ContrastInks;
+use rspice_app_workbench::ui::palette::ContrastInks;
 
 #[cfg(windows)]
 pub(crate) fn read() -> Option<ContrastInks> {

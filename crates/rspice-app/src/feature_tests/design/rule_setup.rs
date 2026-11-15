@@ -32,7 +32,7 @@ fn the_rule_table_stays_inside_its_dialog() {
         &app.state.platform,
     );
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut shapes = Vec::new();
     for _ in 0..4 {
         shapes = ctx

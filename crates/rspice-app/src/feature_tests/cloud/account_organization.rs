@@ -2,7 +2,6 @@
 //! and closes back from, the actions it offers, and what a signed-in
 //! console paints.
 
-use crate::services::license::LicenseInfo;
 use crate::workbench::{
     AppState, BrowserHistoryEffect, RSpiceApp, RouteTransitionSource, SurfaceId, SurfaceRoute,
 };
@@ -10,6 +9,7 @@ use rspice_app_cloud::services::cloud_account::{
     CloudAccountAvailability, CloudSessionPhase, CloudSessionSnapshot, EntitlementSummary,
     LeaseSummary, NativeLicenseSummary, PrincipalSummary,
 };
+use rspice_app_cloud::services::license::LicenseInfo;
 use rspice_app_cloud::workbench::account_organization::*;
 
 /// The console's parts in `app`.
@@ -103,8 +103,10 @@ fn active_cloud_snapshot() -> CloudSessionSnapshot {
 }
 
 fn sample_license() -> LicenseInfo {
-    crate::services::license::parse_and_verify(crate::services::license::SAMPLE_KEY)
-        .expect("signed sample license")
+    rspice_app_cloud::services::license::parse_and_verify(
+        rspice_app_cloud::services::license::SAMPLE_KEY,
+    )
+    .expect("signed sample license")
 }
 
 #[test]
@@ -203,7 +205,7 @@ fn painted_console(app: &mut RSpiceApp, size: egui::Vec2) -> String {
         }
     }
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut rendered = String::new();
     // A content-height dialog settles its size over its first passes.
@@ -341,7 +343,7 @@ fn device_rows_follow_one_another_without_overlapping() {
     for size in [egui::vec2(1_440.0, 1_400.0), egui::vec2(390.0, 2_400.0)] {
         let mut app = signed_in_app_with(snapshot.clone());
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut rows = Vec::new();
         for _ in 0..4 {
@@ -389,7 +391,7 @@ fn typed_command_and_rendered_surface_disclose_the_same_offline_boundary() {
     let key = CloudCommand::AccountOrganization.key();
     assert!(command_registry().order().contains(&key));
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.execute_command_key(key);
@@ -459,7 +461,7 @@ fn the_console_fits_a_desktop_frame_without_about_or_dashes() {
         .navigate(account_route(), RouteTransitionSource::User)
         .expect("account manager route is executable");
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut nodes = std::collections::HashMap::new();
     for _ in 0..4 {

@@ -5,9 +5,9 @@
 //! selects the variable it names; a value no typed quantity represents is
 //! refused and stages nothing.
 
-use crate::state::{ComponentType, Point};
 use crate::workbench::RSpiceApp;
 use rspice_app_simulate::workbench::app::actions::tuning_staging::stage_component_tuning;
+use rspice_app_state::state::{ComponentType, Point};
 
 #[test]
 fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
@@ -74,7 +74,7 @@ fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
     assert_eq!(binding.variable.name, "RLOAD_VALUE");
     assert_eq!(
         binding.variable.quantity,
-        crate::state::DesignVariableQuantity::Resistance
+        rspice_app_state::state::DesignVariableQuantity::Resistance
     );
     assert!(binding.variable.allowed_range.is_none());
     assert_eq!(binding.binding_expression, "{RLOAD_VALUE}");
@@ -104,15 +104,15 @@ fn parameter_bound_value_tuning_selects_the_existing_typed_variable() {
         .stable_analysis_plan()
         .unwrap()
         .id();
-    let variable = crate::state::DesignVariable::new(
+    let variable = rspice_app_state::state::DesignVariable::new(
         "RGAIN",
         "499 ohm",
-        crate::state::DesignVariableQuantity::Resistance,
-        crate::state::DesignVariableScope::Project,
+        rspice_app_state::state::DesignVariableQuantity::Resistance,
+        rspice_app_state::state::DesignVariableScope::Project,
         "Gain resistor",
         None,
-        crate::state::DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        crate::state::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
+        rspice_app_state::state::DesignVariableSweepEligibility::NestedSweepAndOptimization,
+        rspice_app_state::state::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
     )
     .unwrap();
     let variable_id = variable.id;

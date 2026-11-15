@@ -52,7 +52,7 @@ fn elided_text_at(screen: egui::Vec2) -> Vec<String> {
     draft.mode = SimulationPlanManagerMode::Create;
     draft.name = "New simulation plan".to_owned();
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     // The dialog owns the draft for a frame and the shell re-arms it, so each
     // pass is handed its own copy and the three passes render one state
     // rather than accumulating it.

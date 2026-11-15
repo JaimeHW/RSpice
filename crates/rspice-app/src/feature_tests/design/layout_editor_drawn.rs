@@ -1,15 +1,15 @@
 //! The layout editor drawn through a whole application.
 
-use crate::state::CellViewRef;
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::surface::layout_editor::*;
 use egui::{Pos2, Rect, Vec2};
+use rspice_app_state::state::CellViewRef;
 
 /// One frame of the layout editor over a whole application's canvas, at
 /// `size`.
 fn render(app: &mut RSpiceApp, size: Vec2) -> egui::FullOutput {
     let context = egui::Context::default();
-    crate::ui::Theme::default().apply(&context);
+    rspice_app_workbench::ui::Theme::default().apply(&context);
     context.enable_accesskit();
     context.run_ui(
         egui::RawInput {
@@ -34,14 +34,14 @@ fn app_with_layout() -> RSpiceApp {
         .get_library_mut("user")
         .expect("default project library")
         .get_or_create_cell("top")
-        .add_view(crate::state::View::new(
+        .add_view(rspice_app_state::state::View::new(
             "layout",
-            crate::state::ViewType::Layout,
+            rspice_app_state::state::ViewType::Layout,
         ));
     app.state
         .model
         .workspace
-        .open_view(owner.clone(), crate::state::ViewType::Layout);
+        .open_view(owner.clone(), rspice_app_state::state::ViewType::Layout);
     app.state
         .model
         .initialize_physical_layout_document(owner)
@@ -55,7 +55,7 @@ fn app_with_layout() -> RSpiceApp {
 fn the_cursor_over_the_canvas_reaches_the_status_bar() {
     let mut app = app_with_layout();
     let context = egui::Context::default();
-    crate::ui::Theme::default().apply(&context);
+    rspice_app_workbench::ui::Theme::default().apply(&context);
     // Hover is resolved against the previous frame's widgets, so the
     // pointer rests over the canvas for a few frames before it leaves.
     let over = egui::Event::PointerMoved(Pos2::new(400.0, 450.0));

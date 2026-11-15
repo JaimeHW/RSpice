@@ -4,8 +4,8 @@ use super::*;
 
 #[test]
 fn monte_carlo_checkpoint_retention_project_round_trip_and_integrity() {
-    use crate::state::MonteCarloCheckpointEvidence;
     use rspice_app_runs::simulation::controller::test_execution::monte_carlo::completed_checkpoint_fixture;
+    use rspice_app_state::state::MonteCarloCheckpointEvidence;
 
     let (_, bytes, _) = completed_checkpoint_fixture();
     let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes.clone()).unwrap();
@@ -13,7 +13,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_and_integrity() {
         AnalysisResultSourceDomain::ManualDeck,
         rspice_vocabulary::product::manual_deck_analysis_instance_id_from_tag(
             ContentDigest::from_bytes([82; 32]),
-            crate::state::CanonicalAnalysisKind::MonteCarlo.tag(),
+            rspice_app_state::state::CanonicalAnalysisKind::MonteCarlo.tag(),
             0,
         ),
         ObjectRevision::INITIAL,
@@ -33,7 +33,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_and_integrity() {
         ObjectRevision::INITIAL,
         ContentDigest::from_bytes([82; 32]),
         PreparedSourceCheckReceipt::ManualSourceCheck(ContentDigest::from_bytes([83; 32])),
-        &[crate::state::CanonicalAnalysisKind::MonteCarlo.tag()],
+        &[rspice_app_state::state::CanonicalAnalysisKind::MonteCarlo.tag()],
     );
     run.mark_running().unwrap();
     run.finish_lifecycle(SimulationRunLifecycle::Aborted)
@@ -48,7 +48,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_and_integrity() {
     let mut project = ProjectSnapshot::new_with_simulation_results(
         workspace,
         libraries,
-        crate::io::capture_simulation_results(&state),
+        rspice_app_services::io::capture_simulation_results(&state),
     );
     let json = serialize_project_file(&project).unwrap();
     let loaded = load_project_text(&json, None).unwrap();
@@ -58,7 +58,8 @@ fn monte_carlo_checkpoint_retention_project_round_trip_and_integrity() {
         loaded.file.simulation_results_warning
     );
     let restored =
-        crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
+        rspice_app_services::io::simulation_state_from_results(loaded.file.simulation_results)
+            .unwrap();
     let analysis = restored.active_analysis().unwrap();
     assert!(!analysis.success);
     assert_eq!(analysis.monte_carlo_checkpoint.as_ref(), Some(&checkpoint));
@@ -122,7 +123,7 @@ fn monte_carlo_checkpoint_retention_project_round_trip_and_integrity() {
                 .clone()
                 .unwrap(),
         );
-    project.file.simulation_results = crate::io::capture_simulation_results(&active);
+    project.file.simulation_results = rspice_app_services::io::capture_simulation_results(&active);
     let live_json = serialize_project_file(&project).unwrap();
     let loaded = load_project_text(&live_json, None).unwrap();
     assert!(
@@ -131,7 +132,8 @@ fn monte_carlo_checkpoint_retention_project_round_trip_and_integrity() {
         loaded.file.simulation_results_warning
     );
     let restored =
-        crate::io::simulation_state_from_results(loaded.file.simulation_results).unwrap();
+        rspice_app_services::io::simulation_state_from_results(loaded.file.simulation_results)
+            .unwrap();
     assert_eq!(
         restored.retained.runs[0].lifecycle,
         SimulationRunLifecycle::Interrupted
@@ -207,13 +209,13 @@ fn monte_carlo_checkpoint_file_round_trip_rejects_corruption_and_bounds() {
     assert_eq!(frozen.get(checkpoint.digest()), Some(&checkpoint));
 
     // Imported inputs survive project result persistence without native runs.
-    let mut simulation = crate::state::SimulationState::default();
+    let mut simulation = rspice_app_state::state::SimulationState::default();
     simulation.retained.imported_monte_carlo_checkpoints = frozen;
-    let results = crate::io::capture_simulation_results(&simulation);
+    let results = rspice_app_services::io::capture_simulation_results(&simulation);
     assert!(!results.is_empty());
-    let restored: crate::io::ProjectSimulationResults =
+    let restored: rspice_app_services::io::ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&results).unwrap()).unwrap();
-    let restored = crate::io::simulation_state_from_results(restored).unwrap();
+    let restored = rspice_app_services::io::simulation_state_from_results(restored).unwrap();
     assert!(restored.retained.runs.is_empty());
     assert_eq!(
         restored

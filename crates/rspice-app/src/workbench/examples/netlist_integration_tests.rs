@@ -3,8 +3,8 @@
 //! The workbench owns the authored example; its netlist assertions belong here
 //! rather than making the lower simulation module depend on the workbench.
 
-use crate::simulation::table_route::generate_netlist;
-use crate::state::{
+use rspice_app_state::simulation::table_route::generate_netlist;
+use rspice_app_state::state::{
     DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry, Point,
     SchematicState,
 };

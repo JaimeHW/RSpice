@@ -1,7 +1,6 @@
 //! The result inspector's cross-probe into Design, and its route to the
 //! run's details, observed through a whole application.
 
-use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
 use crate::workbench::ResultViewer;
 use crate::workbench::docks::inspector::show;
@@ -12,6 +11,7 @@ use egui::Rect;
 use egui::Vec2;
 use rspice_app_results::workbench::docks::inspector::results::*;
 use rspice_app_results::workbench::docks::inspector::run_details;
+use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_results_ui::session::PaneAxis;
 
 #[test]
@@ -36,48 +36,53 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
         .provenance()
         .expect("prepared analysis provenance")
         .source_instance_id();
-    let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
-        source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
-        simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
-        project_revision: stale_revision,
-        prepared_snapshot_digest: crate::product::ContentDigest::from_bytes([0x51; 32]),
-        source_content_digest: crate::product::ContentDigest::from_bytes([0x52; 32]),
-        source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(
-            crate::product::ContentDigest::from_bytes([0x53; 32]),
-        ),
-        project_model_sources: Vec::new(),
-        specifications: Vec::new(),
-        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
-        tasks: vec![
-            crate::state::PreparedRunTaskReceipt::new(
-                analysis_id,
-                stale_revision,
-                Vec::new(),
-                1,
-                crate::product::ContentDigest::from_bytes([0x54; 32]),
-            )
-            .expect("valid prepared task"),
-        ],
-    })
+    let receipt = rspice_app_state::state::PreparedRunReceipt::new(
+        rspice_app_state::state::PreparedRunReceiptInput {
+            source_domain: rspice_app_state::state::AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(rspice_app_state::product::SimulationPlanId::new()),
+            project_revision: stale_revision,
+            prepared_snapshot_digest: rspice_app_state::product::ContentDigest::from_bytes(
+                [0x51; 32],
+            ),
+            source_content_digest: rspice_app_state::product::ContentDigest::from_bytes([0x52; 32]),
+            source_check_receipt: rspice_app_state::state::PreparedSourceCheckReceipt::SchematicDrc(
+                rspice_app_state::product::ContentDigest::from_bytes([0x53; 32]),
+            ),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
+                rspice_app_state::state::PreparedRunTaskReceipt::new(
+                    analysis_id,
+                    stale_revision,
+                    Vec::new(),
+                    1,
+                    rspice_app_state::product::ContentDigest::from_bytes([0x54; 32]),
+                )
+                .expect("valid prepared task"),
+            ],
+        },
+    )
     .expect("valid stale receipt");
-    let mut stale_run = crate::state::SimulationRun::new_prepared(1, receipt);
+    let mut stale_run = rspice_app_state::state::SimulationRun::new_prepared(1, receipt);
     stale_run.add_analysis(
-        crate::state::AnalysisResult::new(
+        rspice_app_state::state::AnalysisResult::new(
             1,
-            crate::state::AnalysisType::Transient,
+            rspice_app_state::state::AnalysisType::Transient,
             "historical TRAN",
         )
         .with_provenance(
-            crate::state::AnalysisResultProvenance::new_with_source_domain(
-                crate::state::AnalysisResultSourceDomain::SimulationPlan,
+            rspice_app_state::state::AnalysisResultProvenance::new_with_source_domain(
+                rspice_app_state::state::AnalysisResultSourceDomain::SimulationPlan,
                 analysis_id,
                 stale_revision,
-                crate::product::ContentDigest::from_bytes([0x54; 32]),
+                rspice_app_state::product::ContentDigest::from_bytes([0x54; 32]),
                 Vec::new(),
             )
             .expect("valid historical analysis provenance"),
         )
-        .with_waveforms(vec![crate::state::RetainedTrace::new(
+        .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0],
             vec![0.0, 1.0],
@@ -148,7 +153,7 @@ fn run_provenance_lives_in_run_details_not_on_the_panel() {
         run_id,
     );
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut nodes = Vec::new();
     for _ in 0..2 {
@@ -191,30 +196,35 @@ pub(crate) fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     app.state.workbench.split_with_results = split;
     app.state.workbench.activate(Workspace::Results);
     let project_revision = app.state.model.workspace.content.project.revision();
-    let analysis_id = crate::product::AnalysisInstanceId::new();
-    let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
-        source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
-        simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
-        project_revision,
-        prepared_snapshot_digest: crate::product::ContentDigest::from_bytes([0x11; 32]),
-        source_content_digest: crate::product::ContentDigest::from_bytes([0x22; 32]),
-        source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(
-            crate::product::ContentDigest::from_bytes([0x33; 32]),
-        ),
-        project_model_sources: Vec::new(),
-        specifications: Vec::new(),
-        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
-        tasks: vec![
-            crate::state::PreparedRunTaskReceipt::new(
-                analysis_id,
-                project_revision,
-                Vec::new(),
-                1,
-                crate::product::ContentDigest::from_bytes([0x44; 32]),
-            )
-            .expect("valid prepared task"),
-        ],
-    })
+    let analysis_id = rspice_app_state::product::AnalysisInstanceId::new();
+    let receipt = rspice_app_state::state::PreparedRunReceipt::new(
+        rspice_app_state::state::PreparedRunReceiptInput {
+            source_domain: rspice_app_state::state::AnalysisResultSourceDomain::SimulationPlan,
+            simulation_plan_id: Some(rspice_app_state::product::SimulationPlanId::new()),
+            project_revision,
+            prepared_snapshot_digest: rspice_app_state::product::ContentDigest::from_bytes(
+                [0x11; 32],
+            ),
+            source_content_digest: rspice_app_state::product::ContentDigest::from_bytes([0x22; 32]),
+            source_check_receipt: rspice_app_state::state::PreparedSourceCheckReceipt::SchematicDrc(
+                rspice_app_state::product::ContentDigest::from_bytes([0x33; 32]),
+            ),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy:
+                rspice_results::specification::PreparedSpecificationPolicy::default(),
+            tasks: vec![
+                rspice_app_state::state::PreparedRunTaskReceipt::new(
+                    analysis_id,
+                    project_revision,
+                    Vec::new(),
+                    1,
+                    rspice_app_state::product::ContentDigest::from_bytes([0x44; 32]),
+                )
+                .expect("valid prepared task"),
+            ],
+        },
+    )
     .expect("valid prepared run receipt");
     app.state
         .model
@@ -222,22 +232,22 @@ pub(crate) fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
         .start_prepared_run(receipt)
         .unwrap()
         .add_analysis(
-            crate::state::AnalysisResult::new(
+            rspice_app_state::state::AnalysisResult::new(
                 1,
-                crate::state::AnalysisType::Transient,
+                rspice_app_state::state::AnalysisType::Transient,
                 "retained TRAN",
             )
             .with_provenance(
-                crate::state::AnalysisResultProvenance::new_with_source_domain(
-                    crate::state::AnalysisResultSourceDomain::SimulationPlan,
+                rspice_app_state::state::AnalysisResultProvenance::new_with_source_domain(
+                    rspice_app_state::state::AnalysisResultSourceDomain::SimulationPlan,
                     analysis_id,
                     project_revision,
-                    crate::product::ContentDigest::from_bytes([0x44; 32]),
+                    rspice_app_state::product::ContentDigest::from_bytes([0x44; 32]),
                     Vec::new(),
                 )
                 .expect("valid prepared analysis provenance"),
             )
-            .with_waveforms(vec![crate::state::RetainedTrace::new(
+            .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 1.0],
                 vec![0.0, 1.0],
@@ -256,14 +266,14 @@ pub(crate) fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
         )
         .expect("selected retained trace"),
     );
-    let a = crate::state::Point::new(0, 0);
-    let b = crate::state::Point::new(40, 0);
+    let a = rspice_app_state::state::Point::new(0, 0);
+    let b = rspice_app_state::state::Point::new(40, 0);
     app.state
         .model
         .schematic
         .document_mut_for_test()
         .wires
-        .push(crate::state::Wire::new(91, vec![a, b]));
+        .push(rspice_app_state::state::Wire::new(91, vec![a, b]));
     app.state.model.simulation.source.cross_probe.update(
         app.state.model.workspace.content.active_view.clone(),
         std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
@@ -287,7 +297,9 @@ pub(crate) fn cross_probe(app: &mut RSpiceApp, signal: &str) -> Result<String, S
 /// `V(out)` swinging inside 4…6 V with its pane active, the trace selected,
 /// and the solver's convergence evidence retained with no forced points.
 pub(crate) fn waves_details_app() -> RSpiceApp {
-    use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, TransientConvergenceEvidence};
+    use rspice_app_state::state::{
+        AnalysisResult, AnalysisType, RetainedTrace, TransientConvergenceEvidence,
+    };
     let quality = rspice_core::diagnostics::ConvergenceQuality::default();
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
@@ -353,7 +365,7 @@ pub(crate) fn run_inspector(
 ) {
     let ctx = egui::Context::default();
     ctx.set_os(egui::os::OperatingSystem::Nix);
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let input = || egui::RawInput {
         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(width, height))),
@@ -469,8 +481,8 @@ fn split_cross_probe_keeps_the_canonical_result_document_beside_design() {
 fn stale_cross_probe_map_fails_without_leaving_results() {
     let mut app = result_app_with_current_out_map(true);
     app.state.model.schematic.add_wire(vec![
-        crate::state::Point::new(80, 0),
-        crate::state::Point::new(120, 0),
+        rspice_app_state::state::Point::new(80, 0),
+        rspice_app_state::state::Point::new(120, 0),
     ]);
 
     let error = cross_probe(&mut app, "V(out)").expect_err("topology mismatch must fail closed");
@@ -522,7 +534,7 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
 
     // One level down, the root-scoped trace is the one out of scope — even
     // though the open sheet happens to carry a conductor of that name.
-    let parent = crate::state::CellViewRef::new(&view.library, "tb", &view.view);
+    let parent = rspice_app_state::state::CellViewRef::new(&view.library, "tb", &view.view);
     app.state.model.workspace.open_as_root(parent, view_type);
     app.state
         .model
@@ -559,7 +571,7 @@ fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
         .content
         .active_view_type()
         .expect("the result app has its testbench open");
-    let parent = crate::state::CellViewRef::new(&view.library, "tb", &view.view);
+    let parent = rspice_app_state::state::CellViewRef::new(&view.library, "tb", &view.view);
     app.state.model.workspace.open_as_root(parent, view_type);
     app.state
         .model
@@ -672,7 +684,7 @@ fn materialize_in_the_run_section_evaluates_a_deferred_output_on_the_manifest_sh
     let mut app = deferred_output_app();
     let ctx = egui::Context::default();
     ctx.set_os(egui::os::OperatingSystem::Nix);
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let pass = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
         let output = ctx.run_ui(
@@ -734,7 +746,7 @@ fn materialize_in_the_run_section_evaluates_a_deferred_output_on_the_manifest_sh
     assert!(
         matches!(
             &analysis.saved_output_receipts[0].status,
-            crate::state::SavedOutputMaterializationStatus::Materialized {
+            rspice_app_state::state::SavedOutputMaterializationStatus::Materialized {
                 waveform_name,
                 sample_count: 2,
             } if waveform_name == "output_voltage"
@@ -761,7 +773,7 @@ fn materialize_in_the_run_section_evaluates_a_deferred_output_on_the_manifest_sh
 /// A finished transient on the manifest sheet whose analysis saved one output
 /// on demand: `output_voltage`, the recipe `V(out)` over the retained `out`.
 fn deferred_output_app() -> RSpiceApp {
-    use crate::state::{
+    use rspice_app_state::state::{
         AnalysisResult, AnalysisType, RetainedTrace, SavedOutputMaterializationStatus,
         SavedOutputReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
     };
@@ -770,30 +782,30 @@ fn deferred_output_app() -> RSpiceApp {
             RetainedTrace::new("out", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
         ]);
     analysis.saved_output_receipts.push(SavedOutputReceipt {
-        source_bindings: Some(crate::state::SavedOutputSourceBindings {
-            axis: crate::state::SavedOutputAxis::Waveform {
+        source_bindings: Some(rspice_app_state::state::SavedOutputSourceBindings {
+            axis: rspice_app_state::state::SavedOutputAxis::Waveform {
                 name: "out".to_owned(),
             },
             references: [(
                 "v(out)".to_owned(),
-                crate::state::SavedOutputBoundSource::Waveform {
+                rspice_app_state::state::SavedOutputBoundSource::Waveform {
                     name: "out".to_owned(),
                 },
             )]
             .into(),
         }),
-        output_id: crate::product::SavedOutputId::new(),
-        output_revision: crate::product::ObjectRevision::INITIAL,
-        analysis_id: crate::product::AnalysisInstanceId::new(),
-        contract_digest: crate::product::ContentDigest::from_bytes([0x7a; 32]),
+        output_id: rspice_app_state::product::SavedOutputId::new(),
+        output_revision: rspice_app_state::product::ObjectRevision::INITIAL,
+        analysis_id: rspice_app_state::product::AnalysisInstanceId::new(),
+        contract_digest: rspice_app_state::product::ContentDigest::from_bytes([0x7a; 32]),
         name: "output_voltage".to_owned(),
         source_expression: "V(out)".to_owned(),
-        complex_policy: crate::state::ComplexExpressionPolicy::LegacyMagnitude,
-        output_kind: crate::state::SavedOutputKind::RawVoltageOrCurrent,
-        save_policy: crate::state::SavedOutputPolicy::OnDemandFromRetainedState,
-        stored_precision: crate::state::SavedOutputPrecision::FullSourcePrecision,
-        streaming: crate::state::SavedOutputStreaming::StoreOnly,
-        display_intent: crate::state::SavedOutputDisplayIntent::Plot,
+        complex_policy: rspice_app_state::state::ComplexExpressionPolicy::LegacyMagnitude,
+        output_kind: rspice_app_state::state::SavedOutputKind::RawVoltageOrCurrent,
+        save_policy: rspice_app_state::state::SavedOutputPolicy::OnDemandFromRetainedState,
+        stored_precision: rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
+        streaming: rspice_app_state::state::SavedOutputStreaming::StoreOnly,
+        display_intent: rspice_app_state::state::SavedOutputDisplayIntent::Plot,
         status: SavedOutputMaterializationStatus::Deferred,
     });
     let mut run = SimulationRun::new(1);

@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use crate::state::{AnalysisType, SimulationRunLifecycle, SimulationRunProvenance};
 use crate::workbench::documents::result_document::test_fixtures::analysis;
 use crate::workbench::documents::result_document::{create_document, view_context};
 use crate::workbench::state::WorkspaceDocumentId;
 use crate::workbench::{AppState, RSpiceApp, ResultViewer};
+use rspice_app_state::state::{AnalysisType, SimulationRunLifecycle, SimulationRunProvenance};
 
 fn retained_state(kind: AnalysisType, samples: usize) -> AppState {
     let mut state = AppState::default();
@@ -18,8 +18,8 @@ fn retained_state(kind: AnalysisType, samples: usize) -> AppState {
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .unwrap();
     state.model.simulation.complete_run();
-    state.model.simulation = crate::io::simulation_state_from_results(
-        crate::io::capture_simulation_results(&state.model.simulation),
+    state.model.simulation = rspice_app_services::io::simulation_state_from_results(
+        rspice_app_services::io::capture_simulation_results(&state.model.simulation),
     )
     .unwrap();
     state.results.results.session.viewer = ResultViewer::Waves;

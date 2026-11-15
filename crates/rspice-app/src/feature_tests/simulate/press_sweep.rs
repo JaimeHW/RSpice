@@ -206,7 +206,7 @@ struct Sweep {
 impl Sweep {
     fn open(app: RSpiceApp) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         Self { ctx, app }
     }
@@ -394,7 +394,7 @@ fn studio_state(app: &RSpiceApp) -> String {
 /// it its ledger, and each row that hops to the placed instance is a control
 /// like any other.
 fn place_a_source(state: &mut AppState) {
-    use crate::state::{Component, ComponentType, Point};
+    use rspice_app_state::state::{Component, ComponentType, Point};
     state
         .model
         .schematic
@@ -1207,10 +1207,10 @@ fn the_sweep_press_that_starts_a_picker_answers_without_a_dialog() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn spec_sheet_import_answers_without_a_dialog() {
-    use crate::io::file_exchange::{
+    use crate::workbench::state::SimulationWorkflowDialog;
+    use rspice_app_services::io::file_exchange::{
         ScriptedChoice, script_next_choice, scripted_choices_remaining, take_pickers_opened,
     };
-    use crate::workbench::state::SimulationWorkflowDialog;
 
     let index = (0..surface_count())
         .find(|&index| sweep_surface(index).0 == "Variables")
@@ -1294,7 +1294,7 @@ fn the_transient_checkpoint_import_press_answers_without_a_dialog() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn transient_checkpoint_import_answers_without_a_dialog() {
-    use crate::io::file_exchange::{
+    use rspice_app_services::io::file_exchange::{
         ScriptedChoice, script_next_choice, scripted_choices_remaining, take_pickers_opened,
     };
     use rspice_core::engine::{TransientCheckpointEncoding, TransientStartupMode};
@@ -1615,7 +1615,7 @@ impl Sweep {
             .model
             .log_buffer
             .entries()
-            .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
+            .filter(|entry| entry.source == rspice_app_state::diagnostics::LogSource::Plan)
             .count();
         let status = &self.app.state.model.analysis_lifecycle_status;
         (recorded, status.message().to_owned())

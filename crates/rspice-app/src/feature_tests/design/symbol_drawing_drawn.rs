@@ -6,11 +6,11 @@
 use std::collections::HashMap;
 
 use crate::feature_tests::design::symbol_actions_drawn::open_symbol;
-use crate::state::{Point, SymbolEditorMetadata, SymbolShape};
 use crate::workbench::RSpiceApp;
 use crate::workbench::chrome::status_bar::design::symbol_tool_hint;
 use crate::workbench::design::commands::DesignCommand;
 use egui::epaint::ColorMode;
+use rspice_app_state::state::{Point, SymbolEditorMetadata, SymbolShape};
 use rspice_schematic_editor::symbol_editor::SymbolViewport;
 use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 
@@ -27,7 +27,7 @@ struct Canvas {
 impl Canvas {
     fn new() -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = open_symbol();
         let editor = &mut app.state.design.symbol.editor;
@@ -244,7 +244,7 @@ impl Canvas {
 
     /// The draft's two tones: the points placed, and what follows the pointer.
     fn draft_colours(&self) -> (egui::Color32, egui::Color32) {
-        let placed = crate::ui::tokens::Tokens::get(&self.ctx)
+        let placed = rspice_app_workbench::ui::tokens::Tokens::get(&self.ctx)
             .color
             .canvas_select
             .gamma_multiply(0.85);

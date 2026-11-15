@@ -3,7 +3,6 @@
 use egui::{Context, Popup};
 use std::path::Path;
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::services_access::open_comparison;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::project::commands::ProjectCommand;
@@ -18,6 +17,7 @@ use rspice_app_project::workbench::tools::project_launcher::{
 use rspice_app_services::workbench::lifecycle::recovery::{
     open_diagnostics_folder, refresh_catalog_if_requested,
 };
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 
 fn handle_launcher_netlist_drop(ctx: &Context, app: &mut RSpiceApp) -> bool {
     let dropped = ctx.input(|input| input.raw.dropped_files.clone());

@@ -5,8 +5,8 @@
 //! through the saved session unchanged is tested with the session wire.
 
 use super::*;
-use crate::state::VerificationPage;
 use crate::workbench::framework::requests::FullScreen;
+use rspice_app_state::state::VerificationPage;
 
 #[test]
 fn canonical_workspace_order_is_stable() {

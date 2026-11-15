@@ -136,7 +136,7 @@ fn route_loss_releases_idle_preferences_child_modals() {
 #[test]
 fn every_category_renders_a_control_the_reader_can_operate() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     for category in PreferenceCategory::ALL {
         let mut state = AppState::default();
@@ -289,7 +289,9 @@ fn every_shortcut_preferences_action_has_a_retained_executor() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn settings_file_actions_move_settings_between_installations() {
-    use crate::io::file_exchange::{ScriptedChoice, script_next_choice, take_pickers_opened};
+    use rspice_app_services::io::file_exchange::{
+        ScriptedChoice, script_next_choice, take_pickers_opened,
+    };
 
     let ctx = Context::default();
     let folder =
@@ -344,7 +346,7 @@ fn settings_file_actions_move_settings_between_installations() {
 fn shortcut_import_and_export_actions_map_to_their_exact_dialogs() {
     fn rendered_dialog_title(actions: PreferencePageActions) -> String {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = test_app();
         preferences_dialogs(&mut app.state).execute_preference_page_actions(&ctx, actions);
@@ -400,7 +402,7 @@ fn shortcut_policy_action_publishes_before_the_candidate_becomes_live() {
     let mut candidate = before.clone();
     candidate
         .policies_mut()
-        .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
+        .set_chord_timeout(rspice_app_state::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
 
     preferences_dialogs(&mut app.state).execute_preference_page_actions(
         &ctx,
@@ -434,7 +436,7 @@ fn shortcut_policy_persistence_failure_keeps_live_state_unchanged_and_recovers_c
     let mut candidate = before.clone();
     candidate
         .policies_mut()
-        .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
+        .set_chord_timeout(rspice_app_state::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
     app.state.settings.shortcut_library_persistence =
         rspice_app_settings::workbench::app_state::session::shortcut_library::ShortcutLibraryPersistenceRuntime::Unavailable(
             "simulated canonical storage failure".to_owned(),
@@ -464,7 +466,7 @@ fn shortcut_policy_persistence_failure_keeps_live_state_unchanged_and_recovers_c
 #[test]
 fn restore_defaults_asks_before_it_resets_the_page() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = test_app();
     app.state
@@ -472,14 +474,17 @@ fn restore_defaults_asks_before_it_resets_the_page() {
         .navigate(preferences_route(), RouteTransitionSource::User)
         .unwrap();
     app.state.settings.preferences_open = true;
-    app.state.workbench.theme.mode = crate::ui::Mode::Light;
+    app.state.workbench.theme.mode = rspice_app_workbench::ui::Mode::Light;
     set_pending_restore(&ctx, Some(PreferenceCategory::Appearance));
 
     let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
         preferences_dialogs(&mut app.state).render(ctx);
         app.after_contribution();
     });
-    assert_eq!(app.state.workbench.theme.mode, crate::ui::Mode::Light);
+    assert_eq!(
+        app.state.workbench.theme.mode,
+        rspice_app_workbench::ui::Mode::Light
+    );
     assert!(
         output
             .platform_output
@@ -509,7 +514,10 @@ fn restore_defaults_asks_before_it_resets_the_page() {
         },
     );
     assert!(pending_restore(&ctx).is_none());
-    assert_eq!(app.state.workbench.theme.mode, crate::ui::Mode::Light);
+    assert_eq!(
+        app.state.workbench.theme.mode,
+        rspice_app_workbench::ui::Mode::Light
+    );
     assert!(
         app.state.settings.preferences_open,
         "Escape answers the question; it does not also close Preferences"
@@ -527,7 +535,7 @@ fn the_layout_form_closes_without_applying() {
 
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = test_app();
     Host::execute(&mut app, ids::WORKSPACE_LAYOUTS);
     assert!(app.state.settings.workspace_layout_manager.open);

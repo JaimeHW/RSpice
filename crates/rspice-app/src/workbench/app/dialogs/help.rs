@@ -3,16 +3,18 @@
 
 use egui::{Context, RichText};
 
-use crate::services::license::LicenseInfo;
-use crate::state::command_catalog::{CommandKey, CommandPlatform};
-use crate::state::shortcuts::ShortcutPreferences;
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, name_control, text_field};
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
+use rspice_app_cloud::services::license::LicenseInfo;
+use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
+use rspice_app_workbench::ui::theme::{self, FontWeight};
+use rspice_app_workbench::ui::tokens::{self, Tokens};
+use rspice_app_workbench::ui::widgets::{
+    Dialog, DialogChoice, DialogSize, name_control, text_field,
+};
 use rspice_app_workbench::workbench::app::dialogs::fact_grid;
 use rspice_app_workbench::workbench::app_state::session::shortcuts::ShortcutCategory;
 
@@ -519,7 +521,10 @@ fn export_support_bundle(app: &mut RSpiceApp, include_session_log: bool) {
     let documents =
         rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(&app.state);
     let logs = if include_session_log {
-        support_bundle_log(&app.state, crate::diagnostics::home_directory().as_deref())
+        support_bundle_log(
+            &app.state,
+            rspice_app_state::diagnostics::home_directory().as_deref(),
+        )
     } else {
         Vec::new()
     };
@@ -546,11 +551,11 @@ fn export_support_bundle(app: &mut RSpiceApp, include_session_log: bool) {
             "autosave_minutes": app.state.platform.autosave_minutes,
         },
         "schemas": {
-            "project_descriptor": crate::state::PROJECT_DESCRIPTOR_SCHEMA_VERSION,
-            "technology_binding": crate::state::PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
-            "execution_context": crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
-            "model_bound_symbol": crate::state::MODEL_BOUND_SYMBOL_SCHEMA_VERSION,
-            "project_source_registry": crate::state::PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION,
+            "project_descriptor": rspice_app_state::state::PROJECT_DESCRIPTOR_SCHEMA_VERSION,
+            "technology_binding": rspice_app_state::state::PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION,
+            "execution_context": rspice_app_services::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
+            "model_bound_symbol": rspice_app_state::state::MODEL_BOUND_SYMBOL_SCHEMA_VERSION,
+            "project_source_registry": rspice_app_state::state::PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION,
         },
         "session_log": logs,
     });
@@ -582,7 +587,7 @@ fn export_support_bundle(app: &mut RSpiceApp, include_session_log: bool) {
     }) else {
         return;
     };
-    crate::io::file_exchange::ensure_file_extension(&mut path, "json");
+    rspice_app_services::io::file_exchange::ensure_file_extension(&mut path, "json");
     let result = app
         .export_workflow_io
         .observe_destination(&path)
@@ -622,7 +627,7 @@ fn support_bundle_log(
                 "timestamp": entry.format_timestamp(),
                 "severity": format!("{:?}", entry.severity),
                 "source": format!("{:?}", entry.source),
-                "message": crate::diagnostics::redact_log_message(&entry.message, home),
+                "message": rspice_app_state::diagnostics::redact_log_message(&entry.message, home),
             })
         })
         .collect()
@@ -710,8 +715,8 @@ mod tests {
     fn the_support_bundle_log_carries_no_home_directory() {
         let mut state = crate::workbench::app_state::AppState::default();
         state.record(
-            crate::diagnostics::LogSeverity::Info,
-            crate::diagnostics::LogSource::Studio,
+            rspice_app_state::diagnostics::LogSeverity::Info,
+            rspice_app_state::diagnostics::LogSource::Studio,
             r"Opened project amp (C:\Users\James\designs\amp.rspiceproj).",
         );
 
@@ -740,7 +745,7 @@ mod tests {
     /// takes the whole application.
     fn shown_nodes<App>(app: &mut App, render: fn(&mut App, &Context)) -> Vec<Shown> {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut update = None;
         for _ in 0..3 {
@@ -1004,7 +1009,7 @@ mod tests {
 
         fn write_waveform_csv(
             &self,
-            _dataset: &crate::io::WaveformDataset,
+            _dataset: &rspice_app_services::io::WaveformDataset,
             _path: &std::path::Path,
         ) -> Result<(), String> {
             Ok(())

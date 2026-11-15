@@ -9,7 +9,7 @@
 /// it is about in the spelling the reader can find.
 #[test]
 fn a_refusal_names_dropped_points_the_way_the_table_does() {
-    use crate::simulation::plan::AnalysisKind;
+    use rspice_app_state::simulation::plan::AnalysisKind;
     use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
     use super::page_runset_parity::{app_with, scope_to_points};

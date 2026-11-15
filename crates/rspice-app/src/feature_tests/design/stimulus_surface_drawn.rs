@@ -1,9 +1,9 @@
 //! The stimulus surface drawn through a whole application.
 
 use super::stimulus_surface::seeded;
-use crate::state::ComponentType;
-use crate::state::stimulus_library::definition::StimulusFamily;
 use crate::workbench::surfaces::stimulus::tests::adopter;
+use rspice_app_state::state::ComponentType;
+use rspice_app_state::state::stimulus_library::definition::StimulusFamily;
 
 #[test]
 fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {

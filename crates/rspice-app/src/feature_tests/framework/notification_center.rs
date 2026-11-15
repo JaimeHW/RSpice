@@ -7,14 +7,14 @@
 
 use egui::{Pos2, Rect, Vec2, ViewportId, pos2, vec2};
 
-use crate::ui::tokens;
-use crate::ui::widgets::{
-    MirroredEntry, NotificationAction, NotificationCategory, ToastKind, Toasts,
-};
 use crate::workbench::state::{ConsolePage, NotificationFilter};
 use crate::workbench::{AppState, RSpiceApp};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use rspice_app_services::workbench::browser::background_alerts::BackgroundAlerts;
+use rspice_app_workbench::ui::tokens;
+use rspice_app_workbench::ui::widgets::{
+    MirroredEntry, NotificationAction, NotificationCategory, ToastKind, Toasts,
+};
 use rspice_app_workbench::workbench::chrome::title_bar;
 use rspice_app_workbench::workbench::tools::notification_center::*;
 
@@ -40,7 +40,7 @@ pub(super) fn with_pinned_clock<R>(pass: impl FnOnce() -> R) -> R {
         }
     }
     let _restore = Restore(PINNED_ZONE.with(|zone| zone.replace(Some(time::UtcOffset::UTC))));
-    crate::time_compat::with_unix_epoch(Ok(PINNED_WALL), pass)
+    rspice_app_state::time_compat::with_unix_epoch(Ok(PINNED_WALL), pass)
 }
 
 /// A press and a release at one point, which is what egui reads as a click.
@@ -141,7 +141,7 @@ impl Panel {
     /// fixture for this panel has any business writing to.
     fn open(size: (f32, f32), seed: impl FnOnce(&egui::Context, &mut Toasts)) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         seed(&ctx, &mut app.state.workbench.toasts);
@@ -633,7 +633,7 @@ fn the_browser_alert_switch_flips_the_choice_and_says_when_it_cannot() {
         ),
     ] {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let draw = |events: Vec<egui::Event>| {
             let mut intents = Vec::new();
@@ -724,7 +724,7 @@ struct Windows {
 impl Windows {
     fn new() -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         seed_session(&ctx, &mut app.state.workbench.toasts);
         Self { ctx, app }
@@ -834,7 +834,7 @@ fn a_panel_whose_window_closed_comes_back_in_the_main_window() {
 #[test]
 fn each_window_has_its_own_bell_to_hang_the_panel_from() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
     let both = [ViewportId::ROOT, detached()];
     let layout =

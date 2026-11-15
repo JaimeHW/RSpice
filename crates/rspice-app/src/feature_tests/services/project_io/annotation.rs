@@ -1,7 +1,7 @@
 //! Restore pending annotation as one project-wide reference transition.
 
 use super::*;
-use crate::state::{
+use rspice_app_state::state::{
     AnnotationObject, AnnotationPosition, ComponentType, ConfigurationBlackBoxPolicy,
     ConfigurationModelProfile, ConfigurationSetDefinition, LibraryCellInstance, Point,
     ProtectedReferencePolicy, RenumberOrder, RenumberRequest, RenumberScope, SavedOutput,
@@ -20,8 +20,8 @@ struct PendingAnnotation {
     voltage: u64,
     dependent: u64,
     outputs: [(
-        crate::product::SimulationPlanId,
-        crate::product::SavedOutputId,
+        rspice_app_state::product::SimulationPlanId,
+        rspice_app_state::product::SavedOutputId,
     ); 2],
 }
 
@@ -254,7 +254,7 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
         .find(|component| component.id == fixture.dependent)
         .unwrap();
     assert_eq!(
-        crate::state::parse_params_string(&dependent.params)["vref"],
+        rspice_app_state::state::parse_params_string(&dependent.params)["vref"],
         "V1"
     );
     for ((plan, id), expression) in fixture.outputs.into_iter().zip(["I(/X1/V1)", "I(/X7/V1)"]) {
@@ -328,7 +328,7 @@ fn damage_pending_annotation(fixture: &mut PendingAnnotation, failure: &str) {
                 .plan_data_mut(fixture.outputs[0].0)
                 .unwrap()
                 .saved_outputs[0]
-                .revision = crate::product::ObjectRevision::new(u64::MAX).unwrap()
+                .revision = rspice_app_state::product::ObjectRevision::new(u64::MAX).unwrap()
         }
         _ => unreachable!(),
     }
@@ -355,7 +355,7 @@ fn annotation_restoration_refuses_before_publishing_any_project_owner() {
             .map(|(key, source)| {
                 (
                     key.clone(),
-                    crate::state::SchematicSnapshot::capture(source.document()),
+                    rspice_app_state::state::SchematicSnapshot::capture(source.document()),
                 )
             })
             .collect();
@@ -416,7 +416,7 @@ fn restoration_follows_the_complete_recorded_name_lineage() {
         .find(|component| component.id == fixture.dependent)
         .unwrap();
     assert_eq!(
-        crate::state::parse_params_string(&dependent.params)["vref"],
+        rspice_app_state::state::parse_params_string(&dependent.params)["vref"],
         "V9"
     );
     for ((plan, id), expression) in fixture.outputs.into_iter().zip(["I(/X1/V9)", "I(/X7/V9)"]) {
@@ -442,9 +442,10 @@ fn restoration_follows_the_complete_recorded_name_lineage() {
 }
 
 fn annotation_session(project: &ProjectSnapshot) -> AppState {
-    let (sim_setup, model_library_manager, _) =
-        crate::io::restore_execution_context(project.file.execution_context.clone().unwrap())
-            .unwrap();
+    let (sim_setup, model_library_manager, _) = rspice_app_services::io::restore_execution_context(
+        project.file.execution_context.clone().unwrap(),
+    )
+    .unwrap();
     let workspace = ProjectWorkspace::from_parts(
         project.file.workspace.clone(),
         project.workspace_session.clone(),

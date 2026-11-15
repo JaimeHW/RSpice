@@ -5,18 +5,19 @@
 
 use egui::{Modifiers, Rect, vec2};
 
-use crate::state::{Cell, CellViewRef, Library, View, ViewType};
 use crate::workbench::framework::requests::OpenSymbolAuthoring;
 use crate::workbench::project::workspace_state::LibraryCellviewPage;
 use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, RouteTransitionSource, SurfaceId, SurfaceRoute};
 use rspice_app_project::workbench::surfaces::library_cellview_manager::tests::typed_symbol;
+use rspice_app_state::state::{Cell, CellViewRef, Library, View, ViewType};
 
 fn app_with_typed_symbol() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     let definition = typed_symbol();
     let mut view = View::new("symbol", ViewType::Symbol);
-    crate::state::store_model_bound_symbol(&definition, &mut view).expect("typed symbol stores");
+    rspice_app_state::state::store_model_bound_symbol(&definition, &mut view)
+        .expect("typed symbol stores");
     let mut cell = Cell::new("amp");
     cell.add_view(view);
     let mut library = Library::new("authoring");
@@ -79,7 +80,7 @@ fn press_in_the_manager(button: &str) -> (RSpiceApp, FrameNodes) {
         )
         .expect("the manager's route is executable");
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut frame = eframe::Frame::_new_kittest();
     let mut run = |app: &mut RSpiceApp, pass: u32, events: Vec<egui::Event>| {

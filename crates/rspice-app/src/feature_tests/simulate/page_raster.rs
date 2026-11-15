@@ -2,7 +2,7 @@
 //!
 //! The contract tests next door read the text a page paints; nothing in them
 //! sees where it lands. This composes one page into a full-width panel and
-//! hands it to [`crate::ui::raster`], which runs it headless and rasterizes in
+//! hands it to [`rspice_app_workbench::ui::raster`], which runs it headless and rasterizes in
 //! software — no GPU, no window, and no dependence on the wasm build, which is
 //! where every other way of looking at these pages currently goes through.
 //!
@@ -12,11 +12,11 @@
 //! The tests compare reviewed fingerprints and never write files.
 
 use super::stage::show_on_stage;
-use crate::state::SimulationPage;
-use crate::ui::raster::Canvas;
 use crate::workbench::RSpiceApp;
 use egui::vec2;
 use rspice_app_simulate::workbench::surfaces::simulate::page_raster::STUDIO_BASELINES;
+use rspice_app_state::state::SimulationPage;
+use rspice_app_workbench::ui::raster::Canvas;
 
 const APPROVED_PAGE_WIDTH: f32 = 1100.0;
 
@@ -30,7 +30,7 @@ fn raster(page: SimulationPage, width: f32, seed: impl FnOnce(&mut RSpiceApp)) -
     app.state.simulate.simulation_page = page;
     seed(&mut app);
 
-    crate::ui::raster::render(vec2(width, PAGE_HEIGHT), |ui, background| {
+    rspice_app_workbench::ui::raster::render(vec2(width, PAGE_HEIGHT), |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
             .show(ui, |ui| show_on_stage(ui, &mut app));

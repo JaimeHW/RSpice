@@ -4,11 +4,6 @@
 //! identity, and a plan edit answers on the status bar. The omission register
 //! below holds every authored fact the port refused over every route.
 
-use crate::product::ProcessCorner;
-use crate::product::SimulationPlanId;
-use crate::quantity::QuantityPresentationPolicy;
-use crate::ui::widgets::Dialog;
-use crate::ui::widgets::DialogSize;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::SimulationPlanManagerDraft;
 use crate::workbench::state::SimulationPlanManagerMode;
@@ -41,6 +36,11 @@ use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::records::P
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::records::plan_catalog_records;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::reference_pvt_label;
 use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::selected_plan_properties;
+use rspice_app_state::product::ProcessCorner;
+use rspice_app_state::product::SimulationPlanId;
+use rspice_app_state::quantity::QuantityPresentationPolicy;
+use rspice_app_workbench::ui::widgets::Dialog;
+use rspice_app_workbench::ui::widgets::DialogSize;
 
 /// The size the real dialog hands its body at one viewport.
 ///
@@ -53,7 +53,7 @@ use rspice_app_simulate::workbench::surfaces::simulate::plan_manager::selected_p
 #[cfg(not(target_arch = "wasm32"))]
 fn measured_dialog_body_size(screen: Vec2) -> Vec2 {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut size = Vec2::ZERO;
     let mut run = || {
         ctx.run_ui(
@@ -131,7 +131,7 @@ fn rendered_body(
     let records = plan_catalog_records(&app.state.model);
     let body = measured_dialog_body_size(screen);
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut used = Vec2::ZERO;
     let mut run = |draft: &mut SimulationPlanManagerDraft| {
@@ -336,7 +336,7 @@ fn dialog_visible_text(
     }
     let draft = route_draft(&app, mode, active, available);
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     // The dialog owns the draft for a frame and re-arms it in
     // `simulation_workflow`, so each pass is handed its own copy and the three
     // passes render the same state rather than accumulating it.
@@ -389,7 +389,7 @@ fn the_selected_plans_operations_are_one_row_with_the_rare_ones_under_more() {
     let (mut app, active, available, _) = app_with_every_lifecycle_state();
     let draft = route_draft(&app, SimulationPlanManagerMode::Browse, active, available);
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut frame = |events: Vec<egui::Event>| {
         ctx.run_ui(
             egui::RawInput {
@@ -1163,7 +1163,7 @@ fn rendered_aside(app: &RSpiceApp, plan_id: SimulationPlanId) -> RenderedAside {
         .find(|record| record.id == plan_id)
         .expect("the requested plan is projected");
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let output = ctx.run_ui(
         egui::RawInput {
@@ -1352,7 +1352,7 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
 
     // The baseline is the payload's, not a fixed string: pinning a run has
     // to change what the row says.
-    let run = crate::product::RunId::new();
+    let run = rspice_app_state::product::RunId::new();
     app.state
         .model
         .workspace
@@ -1514,7 +1514,7 @@ fn route_speech(screen: Vec2, mode: SimulationPlanManagerMode) -> RouteSpeech {
     let (mut app, active, available, _) = app_with_every_lifecycle_state();
     let draft = route_draft(&app, mode, active, available);
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     // The dialog owns the draft for a frame and the shell re-arms it, so each
     // pass is handed its own copy and the three passes render one state rather
@@ -1766,7 +1766,7 @@ fn only_a_table_whose_rows_select_announces_a_selectable_row() {
         let (mut app, active, available, _) = app_with_every_lifecycle_state();
         let draft = route_draft(&app, mode, active, available);
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         // The pointer is held at the same place for every pass. egui decides
         // whether a widget is hovered against the layout of the frame before,

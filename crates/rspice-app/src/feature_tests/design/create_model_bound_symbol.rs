@@ -1,14 +1,14 @@
 //! Creating a model-bound symbol through the whole application: the dialog reads the
 //! models slot's library, and its commit publishes into an open project session.
 
-use crate::state::{
-    CellViewRef, ComponentType, Library, Point, SymbolSourceContract, ViewType,
-    model_library::DeviceModel, model_library::ModelType,
-};
 use crate::workbench::app::dialogs::create_model_bound_symbol::controller::open_create_subcircuit_bound_symbol_dialog;
 use crate::workbench::app::dialogs::create_model_bound_symbol::state::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::requests::OpenInDesign;
+use rspice_app_state::state::{
+    CellViewRef, ComponentType, Library, Point, SymbolSourceContract, ViewType,
+    model_library::{DeviceModel, ModelType},
+};
 use std::path::PathBuf;
 
 /// Draw the dialog as the frame's step does, over the application's parts.
@@ -34,7 +34,7 @@ fn validate_create_symbol_draft(state: &AppState) -> Result<(), String> {
 /// The definition the draft describes, over the whole state.
 fn build_create_symbol_definition(
     state: &AppState,
-) -> Result<crate::state::ModelBoundSymbolDefinition, String> {
+) -> Result<rspice_app_state::state::ModelBoundSymbolDefinition, String> {
     crate::workbench::app::dialogs::create_model_bound_symbol::controller::build_symbol_definition(
         &state.model,
         &state.design.create_model_bound_symbol,
@@ -69,8 +69,9 @@ pub(crate) fn state_with_bound_mos_model() -> AppState {
         .model
         .library_manager
         .add_library(Library::new("analog_blocks"));
-    let mut models = crate::state::model_library::ModelLibraryManager::new();
-    let mut model_library = crate::state::model_library::ModelLibrary::new("vendor_cmos");
+    let mut models = rspice_app_state::state::model_library::ModelLibraryManager::new();
+    let mut model_library =
+        rspice_app_state::state::model_library::ModelLibrary::new("vendor_cmos");
     let mut model =
         DeviceModel::new("nmos_core", ModelType::Nmos).with_geometry(45e-9, 20e-6, 90e-9, 100e-6);
     // Deliberately a Windows identity, whatever host is running: a project
@@ -94,8 +95,9 @@ fn opening_uses_real_writable_library_and_selected_model() {
         .model
         .library_manager
         .add_library(Library::new("analog_blocks"));
-    let mut models = crate::state::model_library::ModelLibraryManager::new();
-    let mut model_library = crate::state::model_library::ModelLibrary::new("vendor_analog");
+    let mut models = rspice_app_state::state::model_library::ModelLibraryManager::new();
+    let mut model_library =
+        rspice_app_state::state::model_library::ModelLibrary::new("vendor_analog");
     model_library.models.insert(
         "OPA189_A".to_owned(),
         DeviceModel::new("OPA189_A", ModelType::Other),
@@ -152,10 +154,11 @@ fn commit_publishes_one_typed_revision_and_opens_the_symbol_editor() {
             Some(view_type)
         );
     }
-    let definition =
-        crate::state::load_model_bound_symbol(cell.get_view("symbol").expect("symbol view"))
-            .expect("valid definition")
-            .expect("definition metadata");
+    let definition = rspice_app_state::state::load_model_bound_symbol(
+        cell.get_view("symbol").expect("symbol view"),
+    )
+    .expect("valid definition")
+    .expect("definition metadata");
     assert_eq!(definition.identity.revision, 1);
     assert_eq!(definition.netlist.device_prefix, "M");
     assert_eq!(
@@ -244,7 +247,7 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
         binding
             .source_path
             .as_deref()
-            .is_some_and(crate::state::model_library::is_portable_absolute_path)
+            .is_some_and(rspice_app_state::state::model_library::is_portable_absolute_path)
     );
 }
 
@@ -400,14 +403,14 @@ fn shipped_subcircuit_opens_an_exact_x_device_pin_contract() {
             .map(|field| (field.key.as_str(), field.property_type))
             .collect::<Vec<_>>(),
         [
-            ("GAIN", crate::state::PropertyType::Number),
-            ("MODE", crate::state::PropertyType::String),
-            ("SCALE", crate::state::PropertyType::Expression),
+            ("GAIN", rspice_app_state::state::PropertyType::Number),
+            ("MODE", rspice_app_state::state::PropertyType::String),
+            ("SCALE", rspice_app_state::state::PropertyType::Expression),
         ]
     );
     assert!(matches!(
         fields[2].default,
-        crate::state::SymbolParameterDefault::Expression { ref value }
+        rspice_app_state::state::SymbolParameterDefault::Expression { ref value }
             if value == "GAIN * 2"
     ));
 }

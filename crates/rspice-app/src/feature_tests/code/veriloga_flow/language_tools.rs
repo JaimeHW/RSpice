@@ -51,7 +51,7 @@ fn caret_at(user: &mut User, index: usize) {
     let selected =
         code_workspace::selected_veriloga_source_in(&user.app.state.model).expect("the open view");
     let id = code_workspace::source_editor_id(
-        crate::state::ProjectSourceLanguage::VerilogA,
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         selected.bundle().id(),
         selected.document().logical_path(),
     );
@@ -280,7 +280,7 @@ fn find_references_is_a_list_the_keyboard_walks_and_enter_opens_at_the_column() 
 
     rspice_app_code::workbench::app::dialogs::source_language_tools::navigate_source_bundle(
         &mut user.app.code_workspace_parts(),
-        crate::state::ProjectSourceLanguage::VerilogA,
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         CodeCommand::FindReferences,
     )
     .expect("the caret is on a name");

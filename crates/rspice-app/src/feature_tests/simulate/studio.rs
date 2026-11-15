@@ -4,13 +4,13 @@
 
 use super::stage::show_on_stage;
 use super::workflow_dialogs::show_workflow_dialogs_on_stage;
-use crate::ui::widgets::DialogChoice;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::ClonePlanDraft;
 use egui::Rect;
 use egui::vec2;
 use rspice_app_simulate::workbench::surfaces::simulate::workflows::commit_clone_plan;
 use rspice_app_simulate::workbench::surfaces::simulate::workflows::finish_workflow_choice;
+use rspice_app_workbench::ui::widgets::DialogChoice;
 
 /// A committed plan edit is answered on the status bar: the reader made the
 /// gesture and is looking at its result, so nothing is toasted.
@@ -43,9 +43,9 @@ fn a_committed_simulation_workflow_answers_on_the_status_bar() {
 
 /// Run one frame: the studio on `page`, or the overlay host alone when there
 /// is no page because the reader is not on this workspace at all.
-fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::state::SimulationPage>) {
+fn simulate_frame(app: &mut RSpiceApp, page: Option<rspice_app_state::state::SimulationPage>) {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     if let Some(page) = page {
         app.state.simulate.simulation_page = page;
     }
@@ -105,7 +105,7 @@ fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
 /// and that must stay one event.
 #[test]
 fn a_render_path_refusal_restated_every_frame_is_one_event() {
-    use crate::state::SimulationPage;
+    use rspice_app_state::state::SimulationPage;
 
     let mut app = RSpiceApp::test_instance();
     app.state.model.sim_setup.analysis_plan = None;
@@ -125,7 +125,7 @@ fn a_render_path_refusal_restated_every_frame_is_one_event() {
             .model
             .log_buffer
             .entries()
-            .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
+            .filter(|entry| entry.source == rspice_app_state::diagnostics::LogSource::Plan)
             .count(),
         1,
         "and one Console record, not one per frame"

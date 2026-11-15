@@ -3,13 +3,16 @@
 //! model (the code slot's Verilog-A evidence among it).
 
 use super::{state_with_populated_user_library, state_with_work_cell};
-use crate::state::{
+use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{
     Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
     ViewType,
 };
-use crate::workbench::app_state::AppState;
 
-fn add_cell_veriloga_source(state: &mut AppState, cell: &str) -> crate::state::ProjectSourceId {
+fn add_cell_veriloga_source(
+    state: &mut AppState,
+    cell: &str,
+) -> rspice_app_state::state::ProjectSourceId {
     state
         .model
         .library_manager
@@ -17,9 +20,11 @@ fn add_cell_veriloga_source(state: &mut AppState, cell: &str) -> crate::state::P
         .and_then(|library| library.get_cell_mut(cell))
         .expect("fixture cell")
         .add_view(View::new("behavior", ViewType::VerilogA));
-    let bundle = crate::state::ProjectSourceBundle::try_new(
-        crate::state::ProjectSourceOwner::cell_view(CellViewRef::new("work", cell, "behavior")),
-        crate::state::ProjectSourceLanguage::VerilogA,
+    let bundle = rspice_app_state::state::ProjectSourceBundle::try_new(
+        rspice_app_state::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+            "work", cell, "behavior",
+        )),
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         "behavior.va",
         "module behavior(p, n); inout p, n; endmodule",
         std::iter::empty(),
@@ -84,18 +89,18 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: "Release".to_owned(),
             root: CellViewRef::new("work", "amp", "schematic"),
             dut_path: "/".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Lifecycle test".to_owned(),
         })
         .expect("configuration root");
@@ -121,7 +126,7 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
-        Some(crate::state::ProjectLibraryMutation::CopyCell {
+        Some(rspice_app_state::state::ProjectLibraryMutation::CopyCell {
             source_library,
             source_cell,
             target_library,
@@ -131,7 +136,7 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
             && target_library == "work"
             && target_cell == "amp_copy"
     ));
-    let copied_owner = crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+    let copied_owner = rspice_app_state::state::ProjectSourceOwner::cell_view(CellViewRef::new(
         "work", "amp_copy", "behavior",
     ));
     let copied = project
@@ -169,13 +174,13 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
-        Some(crate::state::ProjectLibraryMutation::RenameCell {
+        Some(rspice_app_state::state::ProjectLibraryMutation::RenameCell {
             library,
             from_cell,
             to_cell,
         }) if library == "work" && from_cell == "amp" && to_cell == "amp_renamed"
     ));
-    let renamed_owner = crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+    let renamed_owner = rspice_app_state::state::ProjectSourceOwner::cell_view(CellViewRef::new(
         "work",
         "amp_renamed",
         "behavior",
@@ -189,7 +194,7 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
     assert!(
         project
             .project_sources
-            .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
+            .bundle_for_owner(&rspice_app_state::state::ProjectSourceOwner::cell_view(
                 CellViewRef::new("work", "amp", "behavior")
             ))
             .is_none()
@@ -329,40 +334,40 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         .expect("source catalog");
     let auxiliary_sheet = source_catalog
         .create_sheet(
-            crate::state::SheetDefinition {
+            rspice_app_state::state::SheetDefinition {
                 name: "Auxiliary".to_owned(),
-                template: crate::state::SheetTemplate::AnalogSchematic,
-                port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
+                port_policy: rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },
             Some(main_sheet),
         )
         .expect("auxiliary sheet");
     source_catalog
-        .move_selection(crate::state::MoveSelectionRequest {
+        .move_selection(rspice_app_state::state::MoveSelectionRequest {
             expected_catalog_revision: source_catalog.revision(),
             object_ids: vec![moved_component],
             destination_sheet_id: auxiliary_sheet,
-            boundary_resolution: crate::state::MoveBoundaryResolution::ExplicitPorts {
-                ports: vec![crate::state::CrossSheetPortDefinition {
+            boundary_resolution: rspice_app_state::state::MoveBoundaryResolution::ExplicitPorts {
+                ports: vec![rspice_app_state::state::CrossSheetPortDefinition {
                     net_name: "BIAS".to_owned(),
-                    first: crate::state::CrossSheetPortEndpoint {
+                    first: rspice_app_state::state::CrossSheetPortEndpoint {
                         sheet_id: main_sheet,
-                        anchor: crate::state::CrossSheetPortAnchor::ComponentTerminal {
+                        anchor: rspice_app_state::state::CrossSheetPortAnchor::ComponentTerminal {
                             component_id: boundary_component,
                             terminal_name: "BIAS_OUT".to_owned(),
                         },
                     },
-                    second: crate::state::CrossSheetPortEndpoint {
+                    second: rspice_app_state::state::CrossSheetPortEndpoint {
                         sheet_id: auxiliary_sheet,
-                        anchor: crate::state::CrossSheetPortAnchor::ComponentTerminal {
+                        anchor: rspice_app_state::state::CrossSheetPortAnchor::ComponentTerminal {
                             component_id: moved_component,
                             terminal_name: "BIAS_IN".to_owned(),
                         },
                     },
-                    direction: crate::state::CrossSheetPortDirection::Output,
-                    signal_type: crate::state::CrossSheetSignalType::Analog,
-                    discipline: crate::state::CrossSheetDiscipline::Electrical,
+                    direction: rspice_app_state::state::CrossSheetPortDirection::Output,
+                    signal_type: rspice_app_state::state::CrossSheetSignalType::Analog,
+                    discipline: rspice_app_state::state::CrossSheetDiscipline::Electrical,
                 }],
             },
         })
@@ -373,15 +378,16 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         .content
         .design_management
         .variants_mut()
-        .create(crate::state::AssemblyVariantDraft {
+        .create(rspice_app_state::state::AssemblyVariantDraft {
             name: "Industrial".to_owned(),
             parent_id: None,
-            inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
-            qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+            inheritance: rspice_app_state::state::VariantInheritance::OverrideChangedObjectsOnly,
+            qualification_plan:
+                rspice_app_state::state::VariantQualificationPlan::InvalidateAffectedTests,
             overrides: std::collections::BTreeMap::from([(
-                crate::state::SchematicObjectKey::new(&owner, main_component)
+                rspice_app_state::state::SchematicObjectKey::new(&owner, main_component)
                     .expect("scoped source object"),
-                crate::state::VariantObjectOverride::DoNotPopulate {
+                rspice_app_state::state::VariantObjectOverride::DoNotPopulate {
                     approval_reference: "ECO-42".to_owned(),
                 },
             )]),
@@ -397,7 +403,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         .expect("source catalog")
         .sheets()
         .iter()
-        .map(crate::state::DesignSheet::id)
+        .map(rspice_app_state::state::DesignSheet::id)
         .collect::<std::collections::BTreeSet<_>>();
     let source_port_ids = state
         .model
@@ -408,7 +414,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         .expect("source catalog")
         .cross_sheet_ports()
         .iter()
-        .map(crate::state::CrossSheetPortContract::id)
+        .map(rspice_app_state::state::CrossSheetPortContract::id)
         .collect::<std::collections::BTreeSet<_>>();
 
     state
@@ -426,12 +432,12 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
     let copied_sheet_ids = copied_catalog
         .sheets()
         .iter()
-        .map(crate::state::DesignSheet::id)
+        .map(rspice_app_state::state::DesignSheet::id)
         .collect::<std::collections::BTreeSet<_>>();
     let copied_port_ids = copied_catalog
         .cross_sheet_ports()
         .iter()
-        .map(crate::state::CrossSheetPortContract::id)
+        .map(rspice_app_state::state::CrossSheetPortContract::id)
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(copied_sheet_ids.len(), source_sheet_ids.len());
     assert!(copied_sheet_ids.is_disjoint(&source_sheet_ids));
@@ -476,39 +482,41 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
         .design_management
         .bootstrap_for_cell_view(&old_owner, "Main", [object_id])
         .expect("source sheet catalog");
-    let old_object =
-        crate::state::SchematicObjectKey::new(&old_owner, object_id).expect("source scoped object");
+    let old_object = rspice_app_state::state::SchematicObjectKey::new(&old_owner, object_id)
+        .expect("source scoped object");
     let variant_id = state
         .model
         .workspace
         .content
         .design_management
         .variants_mut()
-        .create(crate::state::AssemblyVariantDraft {
+        .create(rspice_app_state::state::AssemblyVariantDraft {
             name: "Industrial".to_owned(),
             parent_id: None,
-            inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
-            qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+            inheritance: rspice_app_state::state::VariantInheritance::OverrideChangedObjectsOnly,
+            qualification_plan:
+                rspice_app_state::state::VariantQualificationPlan::InvalidateAffectedTests,
             overrides: std::collections::BTreeMap::from([(
                 old_object.clone(),
-                crate::state::VariantObjectOverride::DoNotPopulate {
+                rspice_app_state::state::VariantObjectOverride::DoNotPopulate {
                     approval_reference: "ECO-17".to_owned(),
                 },
             )]),
         })
         .expect("source variant");
-    let renumber_request = crate::state::RenumberRequest {
-        scope: crate::state::RenumberScope::WholeProject,
-        order: crate::state::RenumberOrder::HierarchyThenCoordinates,
-        protected_references: crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+    let renumber_request = rspice_app_state::state::RenumberRequest {
+        scope: rspice_app_state::state::RenumberScope::WholeProject,
+        order: rspice_app_state::state::RenumberOrder::HierarchyThenCoordinates,
+        protected_references:
+            rspice_app_state::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
-        objects: vec![crate::state::AnnotationObject {
+        objects: vec![rspice_app_state::state::AnnotationObject {
             object: old_object.clone(),
             current_reference: "R9".to_owned(),
             device_family: "R".to_owned(),
             sheet_id: Some(sheet_id),
             hierarchy_path: "/top".to_owned(),
-            position: crate::state::AnnotationPosition::default(),
+            position: rspice_app_state::state::AnnotationPosition::default(),
             connectivity_order: Some(1),
             locked: false,
             external: false,
@@ -610,36 +618,38 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
         .schematic
         .add_component(ComponentType::Resistor, Point::new(20, 20));
     let old_owner = CellViewRef::new("work", "amp", "schematic").key();
-    let old_object =
-        crate::state::SchematicObjectKey::new(&old_owner, object_id).expect("source scoped object");
+    let old_object = rspice_app_state::state::SchematicObjectKey::new(&old_owner, object_id)
+        .expect("source scoped object");
     let designs = &mut state.model.workspace.content.design_management;
     let variant_id = designs
         .variants_mut()
-        .create(crate::state::AssemblyVariantDraft {
+        .create(rspice_app_state::state::AssemblyVariantDraft {
             name: "Industrial".to_owned(),
             parent_id: None,
-            inheritance: crate::state::VariantInheritance::OverrideChangedObjectsOnly,
-            qualification_plan: crate::state::VariantQualificationPlan::InvalidateAffectedTests,
+            inheritance: rspice_app_state::state::VariantInheritance::OverrideChangedObjectsOnly,
+            qualification_plan:
+                rspice_app_state::state::VariantQualificationPlan::InvalidateAffectedTests,
             overrides: std::collections::BTreeMap::from([(
                 old_object.clone(),
-                crate::state::VariantObjectOverride::DoNotPopulate {
+                rspice_app_state::state::VariantObjectOverride::DoNotPopulate {
                     approval_reference: "ECO-18".to_owned(),
                 },
             )]),
         })
         .expect("source variant");
-    let renumber_request = crate::state::RenumberRequest {
-        scope: crate::state::RenumberScope::WholeProject,
-        order: crate::state::RenumberOrder::HierarchyThenCoordinates,
-        protected_references: crate::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
+    let renumber_request = rspice_app_state::state::RenumberRequest {
+        scope: rspice_app_state::state::RenumberScope::WholeProject,
+        order: rspice_app_state::state::RenumberOrder::HierarchyThenCoordinates,
+        protected_references:
+            rspice_app_state::state::ProtectedReferencePolicy::RetainLockedAndExternalIds,
         protected_reviewed: false,
-        objects: vec![crate::state::AnnotationObject {
+        objects: vec![rspice_app_state::state::AnnotationObject {
             object: old_object,
             current_reference: "R19".to_owned(),
             device_family: "R".to_owned(),
             sheet_id: None,
             hierarchy_path: "/top".to_owned(),
-            position: crate::state::AnnotationPosition::default(),
+            position: rspice_app_state::state::AnnotationPosition::default(),
             connectivity_order: Some(1),
             locked: false,
             external: false,
@@ -750,7 +760,7 @@ fn rename_library_propagation_matrix() {
         .find(|bundle| {
             matches!(
                 bundle.owner(),
-                crate::state::ProjectSourceOwner::CellView { .. }
+                rspice_app_state::state::ProjectSourceOwner::CellView { .. }
             )
         })
         .expect("fixture cell-view source bundle")
@@ -804,7 +814,7 @@ fn rename_library_propagation_matrix() {
             .get_bundle(source_id)
             .expect("bundle identity is stable across a rename")
             .owner(),
-        &crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+        &rspice_app_state::state::ProjectSourceOwner::cell_view(CellViewRef::new(
             "project_lib",
             "amp",
             "behavior"
@@ -836,7 +846,7 @@ fn rename_library_propagation_matrix() {
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
-        Some(crate::state::ProjectLibraryMutation::RenameLibrary {
+        Some(rspice_app_state::state::ProjectLibraryMutation::RenameLibrary {
             from_library,
             to_library,
         }) if from_library == "user" && to_library == "project_lib"
@@ -910,7 +920,7 @@ fn delete_library_removes_its_cells_and_restores_valid_focus() {
         .workspace
         .content
         .open_views
-        .push(crate::state::OpenCellView::new(
+        .push(rspice_app_state::state::OpenCellView::new(
             survivor.clone(),
             ViewType::Schematic,
         ));
@@ -949,7 +959,7 @@ fn delete_library_removes_its_cells_and_restores_valid_focus() {
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
-        Some(crate::state::ProjectLibraryMutation::DeleteLibrary { library }) if library == "user"
+        Some(rspice_app_state::state::ProjectLibraryMutation::DeleteLibrary { library }) if library == "user"
     ));
 }
 
@@ -1021,7 +1031,7 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
-        Some(crate::state::ProjectLibraryMutation::RenameView {
+        Some(rspice_app_state::state::ProjectLibraryMutation::RenameView {
             library,
             cell,
             from_view,

@@ -4,9 +4,6 @@
 //! Split from `preflight.rs`: the workflow and the evidence that it holds are
 //! separate concerns, and the file was at its line budget.
 
-use crate::state::{
-    ModelsPage, PreflightIssue, PreflightRemediation, PreflightReport, PreparedPreflightContract,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::diagnostic_routes::apply_remediation;
@@ -15,6 +12,9 @@ use crate::workbench::state::{ConsolePage, Workspace};
 use rspice_app_runs::workbench::preflight::{
     collect_report, poll, preparation_remediation, queue_retained_run, start,
     temperature_validity_advisories,
+};
+use rspice_app_state::state::{
+    ModelsPage, PreflightIssue, PreflightRemediation, PreflightReport, PreparedPreflightContract,
 };
 
 mod engine;
@@ -41,11 +41,13 @@ impl RSpiceApp {
 
 fn prepared_contract() -> PreparedPreflightContract {
     PreparedPreflightContract {
-        snapshot_digest: crate::product::ContentDigest::from_bytes([1; 32]),
-        source_digest: crate::product::ContentDigest::from_bytes([2; 32]),
-        receipt_digest: crate::product::ContentDigest::from_bytes([3; 32]),
+        snapshot_digest: rspice_app_state::product::ContentDigest::from_bytes([1; 32]),
+        source_digest: rspice_app_state::product::ContentDigest::from_bytes([2; 32]),
+        receipt_digest: rspice_app_state::product::ContentDigest::from_bytes([3; 32]),
         receipt_label: "receipt",
-        analysis_ids: vec![crate::product::ContentDigest::from_bytes([4; 32])],
+        analysis_ids: vec![rspice_app_state::product::ContentDigest::from_bytes(
+            [4; 32],
+        )],
         task_count: 1,
         saved_output_contract_count: 0,
         pvt_point_count: 1,
@@ -68,7 +70,7 @@ fn disable_global_process_axis(state: &mut AppState) {
 #[test]
 fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
     let mut app = RSpiceApp::test_instance();
-    app.state.model.schematic = crate::state::SchematicState::default();
+    app.state.model.schematic = rspice_app_state::state::SchematicState::default();
     // A filter left from earlier reading, narrowing the page to nothing the
     // pass will file.
     app.state.workbench.problems_view.text = "no blocker says this".to_owned();
@@ -108,8 +110,14 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
         .filter(|entry| entry.message.starts_with("Preflight blocked"))
         .last()
         .expect("a blocked pass states its outcome");
-    assert_eq!(outcome.source, crate::diagnostics::LogSource::Studio);
-    assert_eq!(outcome.severity, crate::diagnostics::LogSeverity::Warning);
+    assert_eq!(
+        outcome.source,
+        rspice_app_state::diagnostics::LogSource::Studio
+    );
+    assert_eq!(
+        outcome.severity,
+        rspice_app_state::diagnostics::LogSeverity::Warning
+    );
     assert!(
         outcome.message.contains("design revision"),
         "preflight must distinguish the input-design revision from the simulation-plan revision: {}",
@@ -164,7 +172,10 @@ fn a_pass_states_its_outcome_where_the_notice_centre_lifts_it() {
         .filter(|entry| entry.message.starts_with("Preflight"))
         .last()
         .expect("every pass states its outcome");
-    assert_eq!(outcome.source, crate::diagnostics::LogSource::Studio);
+    assert_eq!(
+        outcome.source,
+        rspice_app_state::diagnostics::LogSource::Studio
+    );
     let blocked = app
         .state
         .runs
@@ -175,9 +186,9 @@ fn a_pass_states_its_outcome_where_the_notice_centre_lifts_it() {
     assert_eq!(
         outcome.severity,
         if blocked {
-            crate::diagnostics::LogSeverity::Warning
+            rspice_app_state::diagnostics::LogSeverity::Warning
         } else {
-            crate::diagnostics::LogSeverity::Info
+            rspice_app_state::diagnostics::LogSeverity::Info
         },
         "{}",
         outcome.message
@@ -212,7 +223,7 @@ fn a_current_retained_report_queues_without_reauthoring_preflight() {
 fn report_collects_all_independent_blocker_classes() {
     let mut state = AppState::default();
     disable_global_process_axis(&mut state);
-    state.model.schematic = crate::state::SchematicState::default();
+    state.model.schematic = rspice_app_state::state::SchematicState::default();
     let plan = state
         .model
         .sim_setup
@@ -271,7 +282,7 @@ fn a_non_typical_reference_process_is_the_only_row_that_owns_the_missing_section
     state
         .model
         .sim_setup
-        .set_reference_pvt(crate::product::ProcessCorner::SS, 27.0)
+        .set_reference_pvt(rspice_app_state::product::ProcessCorner::SS, 27.0)
         .expect("the reference point is valid");
 
     let report = collect_report(&state);
@@ -306,8 +317,8 @@ fn a_non_typical_reference_process_is_the_only_row_that_owns_the_missing_section
 fn a_run_outside_a_corner_s_qualified_range_advises_rather_than_blocks() {
     let mut state = AppState::default();
     state.model.model_library_manager.clear();
-    let mut library = crate::state::model_library::ModelLibrary::new("pdk");
-    let mut corner = crate::state::model_library::ProcessCorner::new("hot");
+    let mut library = rspice_app_state::state::model_library::ModelLibrary::new("pdk");
+    let mut corner = rspice_app_state::state::model_library::ProcessCorner::new("hot");
     corner.minimum_temperature_c = Some(-40.0);
     corner.maximum_temperature_c = Some(125.0);
     library.corners.clear();
@@ -391,8 +402,8 @@ fn an_enabled_corner_analysis_demands_the_plans_non_typical_sections() {
         .expect("a default state owns a stable plan");
     let position = plan.instances().len();
     plan.insert_draft_with_id(
-        crate::product::AnalysisInstanceId::new(),
-        crate::simulation::plan::AnalysisDraft::Corner(
+        rspice_app_state::product::AnalysisInstanceId::new(),
+        rspice_app_state::simulation::plan::AnalysisDraft::Corner(
             rspice_simulation_contract::corner_draft::CornerDialogState::default(),
         ),
         true,
@@ -561,18 +572,18 @@ fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor(
         .expect("default configured root buffer");
     let configured_schematic = &mut stored_configured_schematic.editor;
     configured_schematic.add_component(
-        crate::state::ComponentType::Ground,
-        crate::state::Point::new(40, 40),
+        rspice_app_state::state::ComponentType::Ground,
+        rspice_app_state::state::Point::new(40, 40),
     );
     let configured_revision = configured_schematic.topology_version();
     drop(stored_configured_schematic);
 
     state.model.workspace.content.active_view =
-        crate::state::CellViewRef::new("user", "unrelated_editor", "schematic");
-    state.model.schematic = crate::state::SchematicState::default();
+        rspice_app_state::state::CellViewRef::new("user", "unrelated_editor", "schematic");
+    state.model.schematic = rspice_app_state::state::SchematicState::default();
     state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(80, 80),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(80, 80),
     );
 
     let report = collect_report(&state);
@@ -580,8 +591,8 @@ fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor(
     assert_eq!(report.topology_revision, configured_revision);
 
     state.model.schematic.add_component(
-        crate::state::ComponentType::Capacitor,
-        crate::state::Point::new(120, 80),
+        rspice_app_state::state::ComponentType::Capacitor,
+        rspice_app_state::state::Point::new(120, 80),
     );
     let (live_root, live_revision, live_closure) = state.model.configured_topology_revision();
     assert!(report.is_current_for(
@@ -596,15 +607,15 @@ fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor(
 #[test]
 fn report_currentness_expires_when_a_referenced_child_topology_changes() {
     let mut state = AppState::default();
-    let child = crate::state::CellViewRef::new("user", "child", "schematic");
+    let child = rspice_app_state::state::CellViewRef::new("user", "child", "schematic");
     state.model.schematic.add_library_cell_component(
-        crate::state::Point::new(40, 40),
-        crate::state::LibraryCellInstance::new("user", "child", "schematic"),
+        rspice_app_state::state::Point::new(40, 40),
+        rspice_app_state::state::LibraryCellInstance::new("user", "child", "schematic"),
     );
-    let mut child_schematic = crate::state::SchematicState::default();
+    let mut child_schematic = rspice_app_state::state::SchematicState::default();
     child_schematic.add_component(
-        crate::state::ComponentType::Ground,
-        crate::state::Point::new(20, 20),
+        rspice_app_state::state::ComponentType::Ground,
+        rspice_app_state::state::Point::new(20, 20),
     );
     state
         .model
@@ -625,14 +636,14 @@ fn report_currentness_expires_when_a_referenced_child_topology_changes() {
     // otherwise this synthetic state would replace the edited root with
     // the stale default buffer and test a transition the UI cannot make.
     state.model.workspace.insert_schematic_editor(
-        crate::state::CellViewRef::default_top().key(),
+        rspice_app_state::state::CellViewRef::default_top().key(),
         state.model.schematic.clone(),
     );
     state.model.workspace.content.active_view = child;
     state.model.schematic = child_schematic;
     state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(80, 20),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(80, 20),
     );
     let (live_root, live_revision, live_closure) = state.model.configured_topology_revision();
     assert_eq!(live_revision, root_revision);
@@ -649,8 +660,12 @@ fn report_currentness_expires_when_a_referenced_child_topology_changes() {
 fn unresolved_hierarchy_is_an_ordered_preflight_blocker() {
     let mut state = AppState::default();
     state.model.schematic.add_library_cell_component(
-        crate::state::Point::new(20, 20),
-        crate::state::LibraryCellInstance::new("missing_library", "missing_master", "schematic"),
+        rspice_app_state::state::Point::new(20, 20),
+        rspice_app_state::state::LibraryCellInstance::new(
+            "missing_library",
+            "missing_master",
+            "schematic",
+        ),
     );
     assert!(
         state
@@ -658,7 +673,7 @@ fn unresolved_hierarchy_is_an_ordered_preflight_blocker() {
             .workspace
             .content
             .schematic_buffers
-            .get(&crate::state::CellViewRef::default_top().key())
+            .get(&rspice_app_state::state::CellViewRef::default_top().key())
             .expect("persisted root schematic")
             .document()
             .components
@@ -686,12 +701,18 @@ fn unresolved_hierarchy_is_an_ordered_preflight_blocker() {
 /// `wires`, with `OUT` labelling the net at (0, -10). The plan keeps its
 /// transient, and an enabled operating point joins it when asked for.
 fn app_with_an_open_root(
-    components: &[(crate::state::ComponentType, crate::state::Point)],
-    wires: &[(crate::state::Point, crate::state::Point)],
+    components: &[(
+        rspice_app_state::state::ComponentType,
+        rspice_app_state::state::Point,
+    )],
+    wires: &[(
+        rspice_app_state::state::Point,
+        rspice_app_state::state::Point,
+    )],
     operating_point: bool,
-) -> (RSpiceApp, crate::state::CellViewRef) {
-    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
-    use crate::state::{NetLabel, Point, Wire};
+) -> (RSpiceApp, rspice_app_state::state::CellViewRef) {
+    use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
+    use rspice_app_state::state::{NetLabel, Point, Wire};
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
@@ -730,7 +751,7 @@ fn app_with_an_open_root(
             .expect("a default state owns a stable plan");
         let position = plan.instances().len();
         plan.insert_draft_with_id(
-            crate::product::AnalysisInstanceId::new(),
+            rspice_app_state::product::AnalysisInstanceId::new(),
             AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
             true,
             position,
@@ -744,8 +765,8 @@ fn app_with_an_open_root(
 /// conducts from `OUT` to ground at DC, and the source forces current in.
 fn app_with_a_forced_capacitor_island(
     operating_point: bool,
-) -> (RSpiceApp, crate::state::CellViewRef) {
-    use crate::state::{ComponentType, Point};
+) -> (RSpiceApp, rspice_app_state::state::CellViewRef) {
+    use rspice_app_state::state::{ComponentType, Point};
     app_with_an_open_root(
         &[
             (ComponentType::Ground, Point::new(0, 40)),
@@ -797,7 +818,7 @@ fn a_forced_node_without_a_dc_path_is_the_engines_refusal_on_the_drawn_net() {
         panic!("the finding is located on the drawing: {island:?}");
     };
     assert_eq!(cell_view, &root);
-    let crate::state::DrawnObject::Net { name, wire, .. } = object else {
+    let rspice_app_state::state::DrawnObject::Net { name, wire, .. } = object else {
         panic!("the finding names a net: {island:?}");
     };
     assert_eq!(name, "OUT");
@@ -933,7 +954,7 @@ fn stop_during_the_engine_pass_authorizes_and_queues_nothing() {
 /// refused it; the run is now authorized.
 #[test]
 fn an_unforced_coupling_node_is_not_refused() {
-    use crate::state::{ComponentType, Point};
+    use rspice_app_state::state::{ComponentType, Point};
 
     let (mut app, _) = app_with_an_open_root(
         &[
@@ -967,8 +988,8 @@ fn an_unforced_coupling_node_is_not_refused() {
 
 /// A voltage source driven straight across a winding, with an operating
 /// point, in the open root.
-fn app_with_a_source_across_a_winding() -> (RSpiceApp, crate::state::CellViewRef) {
-    use crate::state::{ComponentType, Point};
+fn app_with_a_source_across_a_winding() -> (RSpiceApp, rspice_app_state::state::CellViewRef) {
+    use rspice_app_state::state::{ComponentType, Point};
 
     app_with_an_open_root(
         &[
@@ -1012,13 +1033,13 @@ fn winding_loop_warning(
 /// Whether `route` leads to component `id` drawn in `cell_view`.
 fn routes_to_component(
     route: Option<&crate::workbench::app_state::diagnostic_store::DiagnosticRoute>,
-    cell_view: &crate::state::CellViewRef,
+    cell_view: &rspice_app_state::state::CellViewRef,
     id: u64,
 ) -> bool {
     matches!(
         route,
         Some(crate::workbench::app_state::diagnostic_store::DiagnosticRoute::Anchor(
-            crate::diagnostics::LogAnchor::Schematic {
+            rspice_app_state::diagnostics::LogAnchor::Schematic {
                 cell_view: drawn,
                 component: Some(component),
                 ..
@@ -1041,7 +1062,7 @@ fn a_source_across_a_winding_runs_and_is_warned_of_on_the_winding() {
         .document()
         .components
         .iter()
-        .find(|component| component.kind == crate::state::ComponentType::Inductor)
+        .find(|component| component.kind == rspice_app_state::state::ComponentType::Inductor)
         .map(|component| (component.id, component.name.clone()))
         .expect("the fixture draws the winding");
 
@@ -1097,7 +1118,7 @@ fn under_ngspice_a_source_across_a_winding_is_refused_on_the_winding() {
         panic!("the finding is located on the drawing: {closed:?}");
     };
     assert_eq!(cell_view, &root);
-    let crate::state::DrawnObject::Component { name, .. } = object else {
+    let rspice_app_state::state::DrawnObject::Component { name, .. } = object else {
         panic!("the finding names the winding: {closed:?}");
     };
     assert!(name.starts_with('L'), "{closed:?}");
@@ -1109,7 +1130,7 @@ fn under_ngspice_a_source_across_a_winding_is_refused_on_the_winding() {
 /// which it used to, so the page listed the loop twice.
 #[test]
 fn a_voltage_source_loop_is_stated_once_by_the_rule_that_owns_it() {
-    use crate::state::{ComponentType, Point};
+    use rspice_app_state::state::{ComponentType, Point};
 
     let (mut app, _) = app_with_an_open_root(
         &[
@@ -1160,7 +1181,7 @@ fn a_voltage_source_loop_is_stated_once_by_the_rule_that_owns_it() {
 /// refusal is the one row that states it, and the run is not authorized.
 #[test]
 fn a_source_loop_the_design_rule_does_not_see_is_the_engines_refusal() {
-    use crate::state::{ComponentType, Point};
+    use rspice_app_state::state::{ComponentType, Point};
 
     let (mut app, root) = app_with_an_open_root(
         &[
@@ -1258,30 +1279,30 @@ fn a_preparation_failure_names_the_destination_that_repairs_it() {
 /// configuration is honoured differently than it reads.
 fn state_with_a_stop_view_warning() -> AppState {
     let mut state = AppState::default();
-    let mut work = crate::state::Library::new("work");
-    let mut amp = crate::state::Cell::new("amp");
-    amp.add_view(crate::state::View::new(
+    let mut work = rspice_app_state::state::Library::new("work");
+    let mut amp = rspice_app_state::state::Cell::new("amp");
+    amp.add_view(rspice_app_state::state::View::new(
         "schematic",
-        crate::state::ViewType::Schematic,
+        rspice_app_state::state::ViewType::Schematic,
     ));
     work.add_cell(amp);
     state.model.library_manager.add_library(work);
 
-    let mut master = crate::state::SchematicState::default();
+    let mut master = rspice_app_state::state::SchematicState::default();
     master.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(30, 0),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(30, 0),
     );
     state
         .model
         .workspace
         .insert_schematic_editor("work/amp/schematic".to_owned(), master);
 
-    let binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
+    let binding = rspice_app_state::state::LibraryCellInstance::new("work", "amp", "schematic");
     let instance = state
         .model
         .schematic
-        .add_library_cell_component(crate::state::Point::new(100, 0), binding);
+        .add_library_cell_component(rspice_app_state::state::Point::new(100, 0), binding);
     state
         .model
         .schematic
@@ -1299,18 +1320,18 @@ fn state_with_a_stop_view_warning() -> AppState {
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: "Stop at a schematic".to_owned(),
             root,
             dut_path: "/X1".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: vec!["schematic".to_owned()],
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "projection consumer test".to_owned(),
         })
         .expect("the fixture configuration is well formed");
@@ -1411,7 +1432,7 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
         state
             .model
             .model_library_manager
-            .libraries_declaring_process(crate::product::ProcessCorner::TT)
+            .libraries_declaring_process(rspice_app_state::product::ProcessCorner::TT)
             .len()
             > 1,
         "the ambiguity is what this case is about; the fixture library is {name}"
@@ -1551,10 +1572,9 @@ fn a_models_route_to_a_departed_library_states_its_refusal() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state.model.model_library_manager.clear();
-    app.state
-        .model
-        .model_library_manager
-        .add_library(crate::state::model_library::ModelLibrary::new("still here"));
+    app.state.model.model_library_manager.add_library(
+        rspice_app_state::state::model_library::ModelLibrary::new("still here"),
+    );
     app.state
         .select_model_library("still here")
         .then_some(())
@@ -1598,18 +1618,17 @@ fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state.model.model_library_manager.clear();
-    let mut library = crate::state::model_library::ModelLibrary::new("pdk");
-    let mut corner = crate::state::model_library::ProcessCorner::new("hot");
+    let mut library = rspice_app_state::state::model_library::ModelLibrary::new("pdk");
+    let mut corner = rspice_app_state::state::model_library::ProcessCorner::new("hot");
     corner.minimum_temperature_c = Some(-40.0);
     corner.maximum_temperature_c = Some(125.0);
     library.corners.clear();
     library.corners.insert("hot".to_owned(), corner);
     library.selected_corner = Some("hot".to_owned());
     app.state.model.model_library_manager.add_library(library);
-    app.state
-        .model
-        .model_library_manager
-        .add_library(crate::state::model_library::ModelLibrary::new("other"));
+    app.state.model.model_library_manager.add_library(
+        rspice_app_state::state::model_library::ModelLibrary::new("other"),
+    );
     app.state
         .model
         .model_library_manager
@@ -1699,10 +1718,10 @@ fn a_named_line_survives_the_parser_to_buffer_conversion() {
 /// one selected: the failing one and the one in front of the reader.
 fn app_with_an_unfinished_transient_beside_a_selected_operating_point() -> (
     RSpiceApp,
-    crate::product::AnalysisInstanceId,
-    crate::product::AnalysisInstanceId,
+    rspice_app_state::product::AnalysisInstanceId,
+    rspice_app_state::product::AnalysisInstanceId,
 ) {
-    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+    use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
@@ -1716,7 +1735,7 @@ fn app_with_an_unfinished_transient_beside_a_selected_operating_point() -> (
     let position = plan.instances().len();
     let (operating_point, _) = plan
         .insert_draft_with_id(
-            crate::product::AnalysisInstanceId::new(),
+            rspice_app_state::product::AnalysisInstanceId::new(),
             AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
             true,
             position,
@@ -1762,7 +1781,7 @@ fn an_analysis_configuration_finding_opens_the_analysis_it_is_about() {
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
         app.state.simulate.simulation_page,
-        crate::state::SimulationPage::Analyses
+        rspice_app_state::state::SimulationPage::Analyses
     );
     assert_eq!(
         app.state.simulate.active_analysis_instance,
@@ -1781,7 +1800,7 @@ fn a_plan_route_to_a_departed_analysis_states_its_refusal() {
     apply_remediation(
         &mut app,
         PreflightRemediation::SimulationPlan {
-            analysis: Some(crate::product::AnalysisInstanceId::new()),
+            analysis: Some(rspice_app_state::product::AnalysisInstanceId::new()),
         },
     );
 
@@ -1803,8 +1822,9 @@ fn a_plan_route_to_a_departed_analysis_states_its_refusal() {
 ///
 /// The root holds a resistor and no ground, so its checks find an error and
 /// warnings. The reader is looking at another schematic.
-fn app_with_a_failing_root_and_an_unrelated_open_view() -> (RSpiceApp, crate::state::CellViewRef) {
-    use crate::state::{CellViewRef, ComponentType, Point, SchematicState};
+fn app_with_a_failing_root_and_an_unrelated_open_view()
+-> (RSpiceApp, rspice_app_state::state::CellViewRef) {
+    use rspice_app_state::state::{CellViewRef, ComponentType, Point, SchematicState};
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();

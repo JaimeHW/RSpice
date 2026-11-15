@@ -1,8 +1,6 @@
 //! The Shortcuts page and editor over a whole application.
 
 use crate::feature_tests::settings::preferences_dialogs;
-use crate::state::shortcuts::ChordTimeoutPolicy;
-use crate::state::shortcuts::ShortcutPreferences;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
@@ -10,6 +8,8 @@ use egui::Context;
 use egui::Modifiers;
 use rspice_app_settings::workbench::app::dialogs::preferences::PreferencePageActions;
 use rspice_app_settings::workbench::app::dialogs::preferences::shortcut_preferences::*;
+use rspice_app_state::state::shortcuts::ChordTimeoutPolicy;
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
 
 pub(crate) fn input(width: f32, height: f32) -> egui::RawInput {
     egui::RawInput {
@@ -35,7 +35,7 @@ fn node_bounds(
 
 fn click_page_button(label: &str) -> PreferencePageActions {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut state = AppState::default();
     let mut actions = PreferencePageActions::default();
@@ -165,7 +165,7 @@ fn shortcuts_category_is_exposed_after_review_workflows_land() {
 #[test]
 fn desktop_page_publishes_its_rows_its_actions_and_its_policy_heading() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut state = AppState::default();
     let mut actions = PreferencePageActions::default();
@@ -255,7 +255,7 @@ fn portable_profile_buttons_emit_distinct_workflow_actions() {
 #[test]
 fn phone_page_keeps_the_portable_actions_on_one_reachable_row() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut state = AppState::default();
     let mut actions = PreferencePageActions::default();
@@ -285,7 +285,7 @@ fn phone_page_keeps_the_portable_actions_on_one_reachable_row() {
 #[test]
 fn editor_exposes_modal_search_table_and_44_point_phone_targets() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut state = AppState::default();
     let profile = state.model.preferences.shortcuts().clone();

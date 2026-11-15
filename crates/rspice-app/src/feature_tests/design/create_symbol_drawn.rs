@@ -3,7 +3,6 @@
 
 use egui::accesskit::Role;
 
-use crate::state::{CellViewRef, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::project_transactions::open_new_project_dialog;
 use crate::workbench::project::commands::ProjectCommand;
@@ -11,6 +10,7 @@ use crate::workbench::project::library_dialogs::new_view::{
     CREATABLE_VIEW_TYPES, CREATE_SYMBOL_TITLE, view_type_label,
 };
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::{CellViewRef, ViewType};
 
 use super::super::replay::{Control, Replay};
 

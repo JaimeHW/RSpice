@@ -1,11 +1,11 @@
 //! Pointer transactions through real egui frames, navigation and persistence, drawn through a
 //! whole application.
 
-use crate::state::{ComponentType, Point, SchematicState, Tool, Wire};
 use crate::workbench::app::*;
 use crate::workbench::app_state::{AppState, DragType};
 use crate::workbench::state::Workspace;
 use egui::Context;
+use rspice_app_state::state::{ComponentType, Point, SchematicState, Tool, Wire};
 
 #[test]
 fn gesture_release_commits_selection_and_wire_vertex_moves_once() {
@@ -311,7 +311,7 @@ fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
                 DestinationAuthority::UserSelected,
             )
             .unwrap();
-            let saved = crate::io::load_project_file(&path).unwrap();
+            let saved = rspice_app_services::io::load_project_file(&path).unwrap();
             let key = fixture.app.state.model.workspace.content.active_key();
             assert_eq!(
                 saved.file.workspace.schematic_buffers[&key]
@@ -407,7 +407,7 @@ fn gesture_document_navigation_rolls_back_before_buffering_the_original() {
 
 #[test]
 fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
-    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType};
     for occurrence_change in [false, true] {
         let mut fixture = Fixture::new(false);
         let master = fixture.enter_reused_master();
@@ -479,7 +479,7 @@ fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
 /// before the press, and nothing is left to undo.
 #[test]
 fn switching_sheets_mid_drag_leaves_the_first_sheets_buffer_as_before_the_drag() {
-    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
     let mut fixture = Fixture::new(false);
     let key = fixture
         .app
@@ -554,8 +554,8 @@ fn float_a_pasted_resistor(fixture: &mut Fixture, x: f32) {
 /// it as one undo step where the pointer put it (audit G-1).
 #[test]
 fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
-    use crate::state::Rotation;
     use crate::workbench::commands::vocabulary::Command;
+    use rspice_app_state::state::Rotation;
 
     let mut fixture = Fixture::new(false);
     float_a_pasted_resistor(&mut fixture, 300.0);
@@ -695,8 +695,9 @@ fn a_copy_carried_to_the_canvas_edge_pans_the_view() {
 #[test]
 fn escape_lets_a_floating_paste_go() {
     let mut fixture = Fixture::new(false);
-    let before =
-        crate::state::SchematicSnapshot::capture(fixture.app.state.model.schematic.document());
+    let before = rspice_app_state::state::SchematicSnapshot::capture(
+        fixture.app.state.model.schematic.document(),
+    );
     float_a_pasted_resistor(&mut fixture, 300.0);
     assert!(fixture.app.state.design.floating_paste.is_some());
 
@@ -764,7 +765,7 @@ pub(crate) struct Fixture {
 impl Fixture {
     pub(crate) fn new(wires: bool) -> Self {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
         app.state.workbench.activate(Workspace::Design);
@@ -825,7 +826,7 @@ impl Fixture {
                 app.handle_shortcuts(ui.ctx());
                 *origin = ui.available_rect_before_wrap().min;
                 if app.state.model.workspace.content.active_view_type()
-                    == Some(crate::state::ViewType::Symbol)
+                    == Some(rspice_app_state::state::ViewType::Symbol)
                 {
                     crate::schematic::symbol_editor::show(ui, &mut app.state.canvas_frame(), None);
                 } else {
@@ -873,8 +874,8 @@ impl Fixture {
         assert!(self.app.state.schematic_drag_in_progress());
     }
 
-    pub(crate) fn second_document(&mut self) -> crate::state::CellViewRef {
-        use crate::state::{Cell, CellViewRef, OpenCellView, View, ViewType};
+    pub(crate) fn second_document(&mut self) -> rspice_app_state::state::CellViewRef {
+        use rspice_app_state::state::{Cell, CellViewRef, OpenCellView, View, ViewType};
         let original = self
             .app
             .state
@@ -906,8 +907,8 @@ impl Fixture {
             .insert_schematic_editor(reference.key(), SchematicState::default());
         reference
     }
-    pub(crate) fn enter_reused_master(&mut self) -> crate::state::CellViewRef {
-        use crate::state::LibraryCellInstance;
+    pub(crate) fn enter_reused_master(&mut self) -> rspice_app_state::state::CellViewRef {
+        use rspice_app_state::state::LibraryCellInstance;
         let master = self.second_document();
         let child = self.app.state.model.schematic.clone();
         self.app.state.model.schematic = SchematicState::default();

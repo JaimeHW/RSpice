@@ -1,7 +1,7 @@
 //! `workbench/app_state/cell_usage` observed through a whole session.
 
-use crate::state::{CellViewRef, LibraryCellInstance, Point, SchematicState};
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{CellViewRef, LibraryCellInstance, Point, SchematicState};
 
 /// The open schematic is read from the editor, never twice, and every
 /// other schematic from its buffer; a view filter keeps only that view.

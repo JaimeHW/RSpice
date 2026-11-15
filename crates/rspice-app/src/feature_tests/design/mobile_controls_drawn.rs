@@ -2,11 +2,11 @@
 
 use super::mobile_controls::strip_cx;
 use crate::schematic::view::mobile_controls::{operation_live, show};
-use crate::state::{ComponentType, Point, SchematicState};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::duplicate_schematic_selection_at;
 use crate::workbench::state::Workspace;
 use egui::{Context, Event, Pos2, RawInput, Rect, TouchPhase, Vec2};
+use rspice_app_state::state::{ComponentType, Point, SchematicState};
 
 /// A Design workspace under a finger: the canvas and the strip, drawn as the
 /// design surface draws them.
@@ -23,7 +23,7 @@ struct Finger {
 impl Finger {
     fn new(size: Vec2) -> Self {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
@@ -345,7 +345,7 @@ fn cancel_is_live_only_while_an_operation_is() {
         .state
         .model
         .schematic
-        .arm_tool(crate::state::Tool::Wire);
+        .arm_tool(rspice_app_state::state::Tool::Wire);
     assert!(
         operation_live(&finger.app.state.canvas_facts()),
         "an armed drawing tool is live"
@@ -354,7 +354,7 @@ fn cancel_is_live_only_while_an_operation_is() {
     finger.press("Cancel");
     assert_eq!(
         finger.app.state.model.schematic.session.editor.tool,
-        crate::state::Tool::Select,
+        rspice_app_state::state::Tool::Select,
         "Cancel puts the wire tool down, as Esc does"
     );
     assert!(!operation_live(&finger.app.state.canvas_facts()));
@@ -571,7 +571,9 @@ fn the_strip_turns_the_part_being_placed() {
         .state
         .model
         .schematic
-        .arm_tool(crate::state::Tool::Place(ComponentType::Resistor));
+        .arm_tool(rspice_app_state::state::Tool::Place(
+            ComponentType::Resistor,
+        ));
     finger.frame(Vec::new());
     finger.press("Rotate clockwise");
     finger.press("Mirror");

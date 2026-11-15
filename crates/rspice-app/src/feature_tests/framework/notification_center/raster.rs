@@ -2,7 +2,7 @@
 //!
 //! The contract tests next door read what the panel paints and press what it
 //! announces; nothing in them sees the result. This runs the real panel under
-//! the real title bar through [`crate::ui::raster`] — headless, software
+//! the real title bar through [`rspice_app_workbench::ui::raster`] — headless, software
 //! filled, no GPU, no window — so the bell it hangs from, the caret that
 //! points at it and the corner the toasts land in are the product's own.
 //!
@@ -15,10 +15,10 @@
 
 use egui::{Pos2, Vec2, pos2, vec2};
 
-use crate::ui::raster::Canvas;
-use crate::ui::tokens::Mode;
 use crate::workbench::RSpiceApp;
 use crate::workbench::layout::LayoutSpec;
+use rspice_app_workbench::ui::raster::Canvas;
+use rspice_app_workbench::ui::tokens::Mode;
 
 /// What is on screen when the render is taken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,17 +134,17 @@ fn raster(case: &Case) -> Canvas {
             );
         }
     };
-    let theme = crate::ui::Theme {
+    let theme = rspice_app_workbench::ui::Theme {
         mode: case.mode,
-        ..crate::ui::Theme::default()
+        ..rspice_app_workbench::ui::Theme::default()
     };
     // The earlier rows tell the time of day, so the clock and its zone are
     // pinned: a render reviewed in one zone is the render every machine draws.
     super::with_pinned_clock(|| {
         if scene == Scene::PanelHover {
-            crate::ui::raster::render_with_pointer(size, FIRST_ROW, pass)
+            rspice_app_workbench::ui::raster::render_with_pointer(size, FIRST_ROW, pass)
         } else {
-            crate::ui::raster::render_themed(theme, size, pass)
+            rspice_app_workbench::ui::raster::render_themed(theme, size, pass)
         }
     })
 }

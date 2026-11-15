@@ -5,16 +5,19 @@
 //! controller resolves it.
 
 use super::page_contracts::render_with;
-use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
 use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
 use rspice_app_simulate::workbench::surfaces::simulate::fixtures::seed_capture_group;
 use rspice_app_simulate::workbench::surfaces::simulate::page_outputs;
 use rspice_app_simulate::workbench::surfaces::simulate::page_save;
 use rspice_app_simulate::workbench::surfaces::simulate::workflows;
+use rspice_app_state::state::SimulationPage;
 
 /// The group as the plan currently stores it.
-fn stored_group(app: &RSpiceApp, id: crate::product::CaptureGroupId) -> crate::state::CaptureGroup {
+fn stored_group(
+    app: &RSpiceApp,
+    id: rspice_app_state::product::CaptureGroupId,
+) -> rspice_app_state::state::CaptureGroup {
     app.state
         .model
         .workspace
@@ -38,7 +41,7 @@ fn stored_group(app: &RSpiceApp, id: crate::product::CaptureGroupId) -> crate::s
 /// surface whose whole job is to say what each group holds.
 #[test]
 fn the_group_editor_edits_every_rule_of_a_disjunction() {
-    use crate::state::{CaptureGroupRule, SavedOutputKind};
+    use rspice_app_state::state::{CaptureGroupRule, SavedOutputKind};
     use workflows::{commit_capture_group, group_draft};
 
     let mut app = RSpiceApp::test_instance();
@@ -204,7 +207,7 @@ fn the_capture_ledger_total_is_the_sum_of_its_rows_and_counts_each_output_once()
             .last()
             .expect("the fallback row is always drawn")
             .name,
-        crate::state::UNGROUPED_NAME,
+        rspice_app_state::state::UNGROUPED_NAME,
         "the fallback group is listed last, after every group that can claim first"
     );
 }
@@ -215,7 +218,7 @@ fn the_capture_ledger_total_is_the_sum_of_its_rows_and_counts_each_output_once()
 /// asserting what the dispatched contracts carry.
 #[test]
 fn a_capture_group_override_reaches_the_effective_output_the_run_will_use() {
-    use crate::state::SavedOutputPolicy;
+    use rspice_app_state::state::SavedOutputPolicy;
 
     let mut app = RSpiceApp::test_instance();
     seed_capture_group(&mut app.state.model);
@@ -273,7 +276,7 @@ fn the_save_page_lists_every_capture_group_and_the_fallback() {
         "the authored group has a row: {rendered}"
     );
     assert!(
-        rendered.contains(crate::state::UNGROUPED_NAME),
+        rendered.contains(rspice_app_state::state::UNGROUPED_NAME),
         "and so does the group holding everything unclaimed: {rendered}"
     );
     assert!(
@@ -319,7 +322,7 @@ fn the_outputs_page_states_which_capture_group_holds_the_selected_output() {
 /// point policy, and the run set narrows one analysis to the nominal point.
 #[test]
 fn the_registry_size_and_the_ledger_row_price_one_output_once() {
-    use crate::simulation::plan::{AnalysisInstance, AnalysisKind};
+    use rspice_app_state::simulation::plan::{AnalysisInstance, AnalysisKind};
     use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
     use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
@@ -402,7 +405,7 @@ fn the_registry_size_and_the_ledger_row_price_one_output_once() {
 
     // Every group row is the sum of the registry cells of the outputs it owns,
     // so no output is priced twice and none is priced two ways.
-    let membership = crate::state::CaptureGroupMembership::resolve(
+    let membership = rspice_app_state::state::CaptureGroupMembership::resolve(
         &payload.capture_groups,
         &payload.saved_outputs,
     );

@@ -2,9 +2,9 @@
 //! offers and what committing them does.
 
 use crate::feature_tests::design::inline_instance_drawn::{Editor, key};
-use crate::state::CellViewRef;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{InlineEditField, Workspace};
+use rspice_app_state::state::CellViewRef;
 
 #[test]
 fn switching_fields_in_either_render_order_commits_each_edit_once() {
@@ -102,10 +102,10 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
             .content
             .active_schematic_reference();
         let other = CellViewRef::new(&original.library, "other", "schematic");
-        let mut other_cell = crate::state::Cell::new("other");
-        other_cell.add_view(crate::state::View::new(
+        let mut other_cell = rspice_app_state::state::Cell::new("other");
+        other_cell.add_view(rspice_app_state::state::View::new(
             "schematic",
-            crate::state::ViewType::Schematic,
+            rspice_app_state::state::ViewType::Schematic,
         ));
         editor
             .app
@@ -115,7 +115,7 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
             .edit_library(&original.library)
             .expect("the project library")
             .add_cell(other_cell);
-        let mut other_schematic = crate::state::SchematicState::default();
+        let mut other_schematic = rspice_app_state::state::SchematicState::default();
         other_schematic
             .document_mut_for_test()
             .components
@@ -206,14 +206,14 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
         .stable_analysis_plan()
         .unwrap()
         .id();
-    let output = crate::state::SavedOutput::new(
-        crate::state::SavedOutputKind::RawVoltageOrCurrent,
+    let output = rspice_app_state::state::SavedOutput::new(
+        rspice_app_state::state::SavedOutputKind::RawVoltageOrCurrent,
         "current",
         "I(V1)",
-        crate::state::SavedOutputCompatibility::OpTranAc,
-        crate::state::SavedOutputPolicy::EveryAcceptedPoint,
-        crate::state::SavedOutputPrecision::FullSourcePrecision,
-        crate::state::SavedOutputStreaming::StoreOnly,
+        rspice_app_state::state::SavedOutputCompatibility::OpTranAc,
+        rspice_app_state::state::SavedOutputPolicy::EveryAcceptedPoint,
+        rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
+        rspice_app_state::state::SavedOutputStreaming::StoreOnly,
     )
     .unwrap();
     editor

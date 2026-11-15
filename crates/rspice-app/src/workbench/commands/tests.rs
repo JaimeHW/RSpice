@@ -23,22 +23,22 @@ mod view_state;
 
 use super::vocabulary::{CommandSpec, command_catalog};
 use super::*;
-use crate::product::{AnalysisInstanceId, ContentDigest, SimulationPlanId};
-use crate::state::Wire;
-use crate::state::{
-    AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
-    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
-};
-use crate::state::{ComponentType, ModelsPage, Tool};
-use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::commands::ResultsCommand;
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
+use rspice_app_state::product::{AnalysisInstanceId, ContentDigest, SimulationPlanId};
+use rspice_app_state::state::Wire;
+use rspice_app_state::state::{
+    AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
+    PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
+};
+use rspice_app_state::state::{ComponentType, ModelsPage, Tool};
+use rspice_app_state::state::{SimulationPage, VerificationPage};
 
 fn app_with_selected_authored_symbol() -> RSpiceApp {
-    use crate::state::{
+    use rspice_app_state::state::{
         Cell, Component, Library, LibraryCellInstance, Point, PortDirection, PortSpec,
         SymbolDocument, SymbolPin, View, ViewType, Wire,
     };
@@ -153,7 +153,7 @@ pub(crate) fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
             PreparedSourceCheckReceipt::ManualSourceCheck(ContentDigest::from_bytes([0x33; 32])),
         ),
     };
-    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+    let receipt = PreparedRunReceipt::new(rspice_app_state::state::PreparedRunReceiptInput {
         source_domain: domain,
         simulation_plan_id: plan_id,
         project_revision,

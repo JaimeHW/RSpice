@@ -1,18 +1,18 @@
 //! Placing a stimulus drawn through a whole application.
 
-use crate::state::Tool;
-use crate::state::stimulus_library::definition::StimulusDefinition;
-use crate::state::stimulus_library::provenance::ProvenanceState;
-use crate::state::{ComponentType, Point};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::arm_placement_from_definition;
+use rspice_app_state::state::Tool;
+use rspice_app_state::state::stimulus_library::definition::StimulusDefinition;
+use rspice_app_state::state::stimulus_library::provenance::ProvenanceState;
+use rspice_app_state::state::{ComponentType, Point};
 
 fn app_with_definition() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     let mut definition = StimulusDefinition::new(
         "sensor_drive",
         ComponentType::VoltageSourceSin,
-        crate::state::stimulus_library::now_unix_ms,
+        rspice_app_state::state::stimulus_library::now_unix_ms,
     )
     .expect("definition");
     definition.value = "0".to_owned();

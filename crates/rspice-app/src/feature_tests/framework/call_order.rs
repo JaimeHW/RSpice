@@ -965,7 +965,7 @@ const CODE_CONTRIBUTIONS: &[Step] = &[
     (
         "workspace inspector",
         &[
-            "== Some(crate::state::ViewType::VerilogA) =>\
+            "== Some(rspice_app_state::state::ViewType::VerilogA) =>\
          {\
          features::show_inspector::<CodeFeature>(app, ui);\
          }",

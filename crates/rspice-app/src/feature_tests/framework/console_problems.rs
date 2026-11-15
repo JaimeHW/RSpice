@@ -10,14 +10,16 @@ use std::sync::Arc;
 
 use egui::accesskit::Role;
 
-use crate::state::netlist_diagnostics::{Diagnostic, DiagnosticFix, NetlistDiagnosticCollection};
-use crate::state::{ComponentType, Point};
-use crate::ui::widgets::PROBLEM_MARK_ADVANCE as CONSOLE_MARK_GUTTER;
 use crate::workbench::AppState;
 use crate::workbench::app_state::diagnostic_store::listing::{DiagnosticRow, RowStanding, listing};
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
 };
+use rspice_app_state::state::netlist_diagnostics::{
+    Diagnostic, DiagnosticFix, NetlistDiagnosticCollection,
+};
+use rspice_app_state::state::{ComponentType, Point};
+use rspice_app_workbench::ui::widgets::PROBLEM_MARK_ADVANCE as CONSOLE_MARK_GUTTER;
 use rspice_app_workbench::workbench::docks::console::problems::arrange::{Arrangement, Line};
 use rspice_app_workbench::workbench::docks::console::problems::*;
 use rspice_app_workbench::workbench::docks::console::{CONSOLE_CELL_INSET, CONSOLE_ROW_MIN_HEIGHT};
@@ -282,7 +284,7 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         Self {
             ctx,
@@ -613,7 +615,7 @@ fn every_cell_is_painted_under_its_own_heading_and_fits_its_column() {
 /// the page is drawn in.
 fn harness_scrollbar() -> f32 {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let style = ctx.global_style();
     style.spacing.scroll.bar_width + style.spacing.scroll.bar_inner_margin
 }
@@ -777,7 +779,7 @@ fn a_page_opens_with_the_worst_finding_first() {
 /// whichever way the severity is read.
 #[test]
 fn findings_of_one_severity_are_listed_by_rule_subject_and_location() {
-    use crate::state::CellViewRef;
+    use rspice_app_state::state::CellViewRef;
 
     let mut state = open_state();
     let finding = |state: &AppState, code: &str, subject: &str, cell: &str, message: &str| {
@@ -982,7 +984,7 @@ fn a_waived_error_is_marked_without_the_failure_colour() {
     let mut waived = record(&state, "T-WAIVED", DiagnosticLevel::Error, "a waived error");
     waived.canonical.suppression = Some(waiver("T-WAIVED"));
     publish(&mut state, vec![waived]);
-    let palette = crate::ui::tokens::Tokens::default().color;
+    let palette = rspice_app_workbench::ui::tokens::Tokens::default().color;
 
     let render = render(&mut state, sized(egui::RawInput::default()));
     let cell = render.cell("a waived error").expect("listed");
@@ -1022,7 +1024,7 @@ fn a_note_and_a_hint_are_marked_like_every_other_severity() {
     let note = record(&state, "T-NOTE", DiagnosticLevel::Info, "a note");
     let hint = record(&state, "T-HINT", DiagnosticLevel::Hint, "a hint");
     publish(&mut state, vec![note, hint]);
-    let palette = crate::ui::tokens::Tokens::default().color;
+    let palette = rspice_app_workbench::ui::tokens::Tokens::default().color;
 
     let render = render(&mut state, sized(egui::RawInput::default()));
     // Strokes inside the row and left of its severity cell: the gutter.
@@ -1212,7 +1214,7 @@ fn the_canvas_tour_and_the_grid_stand_on_one_finding() {
     );
 
     // And the selection is painted, not merely announced.
-    let accent = crate::ui::tokens::Tokens::default()
+    let accent = rspice_app_workbench::ui::tokens::Tokens::default()
         .color
         .accent
         .linear_multiply(0.14);
@@ -1268,7 +1270,7 @@ fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
                     runtime_command_platform(&ctx),
                     ShortcutEnvironment {
                         workspace: crate::workbench::state::Workspace::Design,
-                        active_view: Some(crate::state::ViewType::Schematic),
+                        active_view: Some(rspice_app_state::state::ViewType::Schematic),
                         canvas_focus: false,
                         source_editor_focus: false,
                     },
@@ -1301,7 +1303,7 @@ fn design_app() -> crate::workbench::RSpiceApp {
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Design);
-    app.state.model.schematic = crate::state::SchematicState::default();
+    app.state.model.schematic = rspice_app_state::state::SchematicState::default();
     app.state.model.schematic.session.editor.needs_fit = false;
     app.state
         .model
@@ -1366,7 +1368,7 @@ fn following_a_finding_to_the_drawing_gives_the_canvas_the_keyboard() {
         engineering_canvas_has_focus(
             &harness.ctx,
             crate::workbench::state::Workspace::Design,
-            Some(crate::state::ViewType::Schematic),
+            Some(rspice_app_state::state::ViewType::Schematic),
         ),
         "the canvas the finding led to holds the keyboard",
     );
@@ -1738,7 +1740,9 @@ fn the_focus_ring_shows_after_tab_and_not_after_a_press() {
     let mut state = state_with_findings(5);
     let order = reported(&state);
     state.model.diagnostics.set_current_finding(Some(order[2]));
-    let accent = crate::ui::tokens::Tokens::default().color.accent;
+    let accent = rspice_app_workbench::ui::tokens::Tokens::default()
+        .color
+        .accent;
     let ring = |render: &Render| {
         render
             .outlines
@@ -2080,7 +2084,7 @@ fn a_wrapped_note_takes_its_wrapped_height_from_the_body() {
         .content
         .connectivity
         .policy
-        .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        .width_mismatch = rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
     let _ = harness.frame(&mut state, narrow());
     let render = harness.frame(&mut state, narrow());
     let note = render
@@ -2206,8 +2210,8 @@ fn closing_or_replacing_the_project_forgets_the_reading_position() {
 fn a_logged_failure_is_not_a_problem() {
     let mut state = open_state();
     state.model.log_buffer.log(
-        crate::diagnostics::LogSeverity::Error,
-        crate::diagnostics::LogSource::Engine,
+        rspice_app_state::diagnostics::LogSeverity::Error,
+        rspice_app_state::diagnostics::LogSource::Engine,
         "the engine printed a failure",
     );
 
@@ -2427,7 +2431,7 @@ fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
         .content
         .connectivity
         .policy
-        .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        .width_mismatch = rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
     assert_eq!(listing(&design).len(), rows, "precondition: no row left");
     assert!(
         !Arc::ptr_eq(&current, &arranged(&design)),

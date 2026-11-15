@@ -2,8 +2,6 @@
 
 use egui::{Context, Id, Key, Modifiers, Order, Rect, pos2, vec2};
 
-use crate::state::command_catalog::{CommandKey, CommandPlatform};
-use crate::ui::icons::Icon;
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::framework::command_registry::CommandSpec;
@@ -11,6 +9,8 @@ use crate::workbench::framework::command_registry::ids;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use rspice_app_code::workbench::code::commands::CodeCommand;
+use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
+use rspice_app_workbench::ui::icons::Icon;
 use rspice_app_workbench::workbench::app::command_palette::*;
 
 #[test]
@@ -342,19 +342,20 @@ fn test_app() -> RSpiceApp {
         applied_theme: None,
         last_window_title: String::new(),
         symbol_library: None,
-        simulation_controller: crate::simulation::SimulationController::new(),
+        simulation_controller: rspice_app_runs::simulation::controller::SimulationController::new(),
         code: crate::workbench::documents::code_workspace::CodeHandles {
-            automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+            automation_runtime:
+                rspice_app_services::automation_runtime::NativeAutomationRuntime::discover(),
             automation_runtime_project_id,
         },
         cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
             account: rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),
             live_session: rspice_app_cloud::workbench::live_session::LiveSessionEngine::default(),
         },
-        model_hub: crate::services::model_hub::ModelHubService::unavailable(
+        model_hub: rspice_app_services::services::model_hub::ModelHubService::unavailable(
             "This test instance runs without a model-pack store.",
         ),
-        file_workflow_io: Box::new(crate::io::NativeFileWorkflowIo),
+        file_workflow_io: Box::new(rspice_app_services::io::NativeFileWorkflowIo),
         read_system_contrast: crate::workbench::system_contrast::read,
         export_workflow_io: Box::new(
             crate::workbench::workflows::export_workflow::NativeExportWorkflowIo,
@@ -386,7 +387,7 @@ fn key_event(key: Key) -> egui::Event {
 #[test]
 fn opening_shortcut_and_repeated_letters_in_one_frame_preserve_the_search() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let mut app = test_app();
     let query = "Review comments";
@@ -450,7 +451,7 @@ fn typing_straight_after_new_configuration_lands_in_its_name() {
     use egui::accesskit::{Node, Role, TreeUpdate};
 
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
@@ -544,7 +545,7 @@ fn primary_key_event(key: Key) -> egui::Event {
 #[test]
 fn opening_input_keeps_palette_editing_keys() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     let mut app = test_app();
     let _ = ctx.run_ui(
@@ -565,11 +566,13 @@ fn opening_input_keeps_palette_editing_keys() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn opening_input_respects_custom_palette_bindings() {
-    use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
+    use rspice_app_state::state::shortcuts::{
+        ShortcutBindingSlot, ShortcutSequence, ShortcutStroke,
+    };
 
     for chord in [false, true] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let mut app = test_app();
         let strokes = if chord {
@@ -624,7 +627,7 @@ fn opening_input_respects_custom_palette_bindings() {
 fn opening_input_is_owned_before_background_text_edits() {
     for before in ["", " before"] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let underlying_id = Id::new("palette-opening-background-editor");
         let mut underlying = "unchanged".to_owned();
@@ -697,12 +700,12 @@ fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete()
 #[test]
 fn real_cellview_records_are_searchable_and_open_the_workspace_document() {
     let mut app = test_app();
-    let mut library = crate::state::Library::new("precision_analog");
-    let mut cell = crate::state::Cell::new("gain_stage");
+    let mut library = rspice_app_state::state::Library::new("precision_analog");
+    let mut cell = rspice_app_state::state::Cell::new("gain_stage");
     cell.description = "Precision front-end amplifier".to_owned();
-    cell.add_view(crate::state::View::new(
+    cell.add_view(rspice_app_state::state::View::new(
         "schematic",
-        crate::state::ViewType::Schematic,
+        rspice_app_state::state::ViewType::Schematic,
     ));
     library.add_cell(cell);
     app.state.model.library_manager.add_library(library);
@@ -722,7 +725,7 @@ fn real_cellview_records_are_searchable_and_open_the_workspace_document() {
 
     assert_eq!(
         app.state.model.workspace.content.active_view,
-        crate::state::CellViewRef::new("precision_analog", "gain_stage", "schematic")
+        rspice_app_state::state::CellViewRef::new("precision_analog", "gain_stage", "schematic")
     );
     assert_eq!(
         app.state
@@ -747,11 +750,11 @@ fn real_cellview_records_are_searchable_and_open_the_workspace_document() {
 fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs() {
     let mut app = test_app();
     app.state.open_project_session();
-    let mut library = crate::state::Library::new("behavioral");
-    let mut cell = crate::state::Cell::new("gain");
-    cell.add_view(crate::state::View::new(
+    let mut library = rspice_app_state::state::Library::new("behavioral");
+    let mut cell = rspice_app_state::state::Cell::new("gain");
+    cell.add_view(rspice_app_state::state::View::new(
         "schematic",
-        crate::state::ViewType::Schematic,
+        rspice_app_state::state::ViewType::Schematic,
     ));
     library.add_cell(cell);
     app.state.model.library_manager.add_library(library);
@@ -846,16 +849,16 @@ fn veriloga_build_settings_is_a_palette_command_that_opens_its_form() {
 #[test]
 fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
     let mut app = test_app();
-    let mut library = crate::state::model_library::ModelLibrary::new("foundry_65lp");
-    let mut model = crate::state::model_library::DeviceModel::new(
+    let mut library = rspice_app_state::state::model_library::ModelLibrary::new("foundry_65lp");
+    let mut model = rspice_app_state::state::model_library::DeviceModel::new(
         "nmos_ulvt_precision",
-        crate::state::model_library::ModelType::Nmos,
+        rspice_app_state::state::model_library::ModelType::Nmos,
     );
     model.description = "Low-noise qualified input device".to_owned();
     library.add_model(model);
     app.state.model.model_library_manager.add_library(library);
     app.state.model.model_library_manager.filter_type =
-        Some(crate::state::model_library::ModelType::Pmos);
+        Some(rspice_app_state::state::model_library::ModelType::Pmos);
 
     let mut rows = palette_rows(
         &app,
@@ -893,7 +896,7 @@ fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
     assert_eq!(app.state.model.model_library_manager.filter_type, None);
     assert_eq!(
         app.state.models.models_page,
-        crate::state::ModelsPage::Models
+        rspice_app_state::state::ModelsPage::Models
     );
     assert_eq!(
         app.state.workbench.workspace,
@@ -905,12 +908,12 @@ fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
 #[test]
 fn enter_executes_a_dynamic_row_without_polluting_command_recents() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = test_app();
-    let mut library = crate::state::model_library::ModelLibrary::new("vendor_models");
-    library.add_model(crate::state::model_library::DeviceModel::new(
+    let mut library = rspice_app_state::state::model_library::ModelLibrary::new("vendor_models");
+    library.add_model(rspice_app_state::state::model_library::DeviceModel::new(
         "opa189_a",
-        crate::state::model_library::ModelType::Other,
+        rspice_app_state::state::model_library::ModelType::Other,
     ));
     app.state.model.model_library_manager.add_library(library);
     app.state.workbench.command_palette.open();
@@ -940,30 +943,47 @@ fn enter_executes_a_dynamic_row_without_polluting_command_recents() {
 #[test]
 fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
     let mut app = test_app();
-    let stale_waveform =
-        crate::state::RetainedTrace::new("V(stale)", vec![0.0, 1.0], vec![0.0, 0.1], "#777777");
-    let mut stale_run = crate::state::SimulationRun::new(40);
+    let stale_waveform = rspice_app_state::state::RetainedTrace::new(
+        "V(stale)",
+        vec![0.0, 1.0],
+        vec![0.0, 0.1],
+        "#777777",
+    );
+    let mut stale_run = rspice_app_state::state::SimulationRun::new(40);
     stale_run.add_analysis(
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "tran")
-            .with_waveforms(vec![stale_waveform]),
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Transient,
+            "tran",
+        )
+        .with_waveforms(vec![stale_waveform]),
     );
 
-    let op_waveform = crate::state::RetainedTrace::new("I(VDD)", vec![0.0], vec![0.012], "#55aa99");
-    let mut target_waveform = crate::state::RetainedTrace::new(
+    let op_waveform =
+        rspice_app_state::state::RetainedTrace::new("I(VDD)", vec![0.0], vec![0.012], "#55aa99");
+    let mut target_waveform = rspice_app_state::state::RetainedTrace::new(
         "V(precision_out)",
         vec![0.0, 1.0],
         vec![0.0, 2.5],
         "#cc8844",
     );
     target_waveform.visible = false;
-    let mut active_run = crate::state::SimulationRun::new(41);
+    let mut active_run = rspice_app_state::state::SimulationRun::new(41);
     active_run.add_analysis(
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::DcOp, "op")
-            .with_waveforms(vec![op_waveform]),
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::DcOp,
+            "op",
+        )
+        .with_waveforms(vec![op_waveform]),
     );
     active_run.add_analysis(
-        crate::state::AnalysisResult::new(2, crate::state::AnalysisType::Transient, "tran")
-            .with_waveforms(vec![target_waveform]),
+        rspice_app_state::state::AnalysisResult::new(
+            2,
+            rspice_app_state::state::AnalysisType::Transient,
+            "tran",
+        )
+        .with_waveforms(vec![target_waveform]),
     );
     let active_dataset_id = active_run.dataset_id;
 
@@ -1051,7 +1071,7 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
 #[test]
 fn accesskit_exposes_modal_combobox_scopes_listbox_and_options() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = test_app();
     app.state.workbench.command_palette.open();
@@ -1123,7 +1143,7 @@ fn the_search_text_stands_clear_of_the_fields_focus_ring() {
         }
     }
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = test_app();
     app.state.workbench.command_palette.open();
     let mut shapes = Vec::new();
@@ -1154,7 +1174,7 @@ fn the_search_text_stands_clear_of_the_fields_focus_ring() {
 #[test]
 fn keyboard_navigation_wraps_and_enter_runs_only_available_commands() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = test_app();
     app.state.workbench.command_palette.open();
     let row_count = palette_rows(
@@ -1211,7 +1231,7 @@ fn keyboard_navigation_wraps_and_enter_runs_only_available_commands() {
 #[test]
 fn tab_moves_to_an_action_without_leaving_the_modal_layer() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut app = test_app();
     app.state.workbench.command_palette.open();
     let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
@@ -1235,7 +1255,7 @@ fn tab_moves_to_an_action_without_leaving_the_modal_layer() {
 #[test]
 fn modal_claims_and_restores_prior_focus_on_escape() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let underlying_id = Id::new("command-palette-test-underlying");
     let mut underlying = String::from("baseline");
     let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
@@ -1309,14 +1329,14 @@ fn a_notice_reported_from_the_palette_is_toasted_by_the_next_frame() {
     let missing = std::env::temp_dir().join(format!(
         "rspice-palette-rescan-missing-{}-{}",
         std::process::id(),
-        crate::time_compat::unix_epoch().as_nanos()
+        rspice_app_state::time_compat::unix_epoch().as_nanos()
     ));
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state.model.pdk_config = rspice_app_state::state::pdk_config::PdkConfig::default();
     app.state
         .model
         .pdk_config

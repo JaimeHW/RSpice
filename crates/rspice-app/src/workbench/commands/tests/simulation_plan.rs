@@ -11,10 +11,10 @@
 //! one level up.
 
 use super::*;
-use crate::state::command_catalog::ShortcutContext;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::CommandFlags;
 use crate::workbench::simulate::commands::SimulateCommand;
+use rspice_app_state::state::command_catalog::ShortcutContext;
 
 /// Every Simulation Studio setup route is addressable, the way the Project,
 /// Verify and Models pages are. A route reachable only by clicking the

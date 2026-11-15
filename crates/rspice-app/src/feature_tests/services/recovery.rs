@@ -18,9 +18,13 @@ fn replacement_guard_compares_initial_plan_draft_to_the_documented_default() {
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan restored");
-    assert_eq!(plan.revision(), crate::product::ObjectRevision::INITIAL);
+    assert_eq!(
+        plan.revision(),
+        rspice_app_state::product::ObjectRevision::INITIAL
+    );
     assert!(plan.receipts().is_empty());
-    let crate::simulation::plan::AnalysisDraft::Transient(draft) = plan.instances()[0].draft()
+    let rspice_app_state::simulation::plan::AnalysisDraft::Transient(draft) =
+        plan.instances()[0].draft()
     else {
         panic!("default instance remains transient");
     };
@@ -54,7 +58,7 @@ fn replacement_guard_compares_project_owned_state_to_saved_snapshot() {
         .stable_analysis_plan_mut()
         .expect("saved stable plan")
         .edit(transient, |draft| {
-            let crate::simulation::plan::AnalysisDraft::Transient(draft) = draft else {
+            let rspice_app_state::simulation::plan::AnalysisDraft::Transient(draft) = draft else {
                 panic!("default instance is transient");
             };
             draft.stop = "17u".to_owned();

@@ -5,9 +5,9 @@
 use super::app_state_of;
 use crate::schematic::symbol_editor::interaction::tests::viewport;
 use crate::schematic::symbol_editor::interaction::*;
-use crate::state::{CellViewRef, Point};
 use crate::workbench::AppState;
 use crate::workbench::SymbolTool;
+use rspice_app_state::state::{CellViewRef, Point};
 use rspice_schematic_editor::symbol_editor::interaction::SymbolCanvasInput;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolCanvasRequest;
 

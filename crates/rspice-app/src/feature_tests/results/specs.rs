@@ -3,11 +3,11 @@
 //! workspace, and the table the results workspace draws marks it and
 //! scrolls it into view.
 
-use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::state::{SimulationRunLifecycle, SpecPointScope};
 use crate::workbench::AppState;
 use crate::workbench::documents::result_document::specs::show;
+use rspice_app_state::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_state::state::{SimulationRunLifecycle, SpecPointScope};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_results_ui::specs::test_support::painted_spans;
 
@@ -33,7 +33,7 @@ fn the_table_marks_the_limit_a_hop_carried_into_it() {
             min: Some(40.0),
             max: None,
             unit: "dB".to_owned(),
-            scope: crate::state::SpecPointScope::AllPoints,
+            scope: rspice_app_state::state::SpecPointScope::AllPoints,
         },
         SpecEntry {
             measurement: "bandwidth_3db".to_owned(),
@@ -41,7 +41,7 @@ fn the_table_marks_the_limit_a_hop_carried_into_it() {
             min: Some(1.0),
             max: None,
             unit: "Hz".to_owned(),
-            scope: crate::state::SpecPointScope::AllPoints,
+            scope: rspice_app_state::state::SpecPointScope::AllPoints,
         },
     ];
     // Matched the way the studio matches: a measurement name is one
@@ -51,7 +51,7 @@ fn the_table_marks_the_limit_a_hop_carried_into_it() {
     let selected_specification = state.simulate.selected_specification.clone();
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let nodes = ctx
         .run_ui(
             egui::RawInput {
@@ -184,7 +184,7 @@ fn carried_row_position(
 fn the_carried_limit_is_scrolled_to_again_in_the_next_run() {
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 420.0));
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut state = two_runs_over_a_long_contract();
 
     let first = carried_row_position(&ctx, &mut state, screen);

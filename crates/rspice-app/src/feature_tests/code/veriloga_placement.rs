@@ -5,8 +5,6 @@
 //! worker's answer is published, and press what the compile result offers.
 
 use super::veriloga_interface::{compile_and_publish, press_strip_button};
-use crate::state::VerilogAPlacementHandoff;
-use crate::state::{Cell, CellViewRef, ComponentType, Library, Tool, View, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{
     open_in_design, open_project_app, themed_context,
@@ -20,6 +18,8 @@ use rspice_app_code::workbench::app::actions::veriloga_placement::{
 };
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
 use rspice_app_code::workbench::surfaces::veriloga;
+use rspice_app_state::state::VerilogAPlacementHandoff;
+use rspice_app_state::state::{Cell, CellViewRef, ComponentType, Library, Tool, View, ViewType};
 
 const LIBRARY: &str = "behavioral";
 
@@ -38,10 +38,10 @@ fn device_created_from_a_schematic() -> (RSpiceApp, CellViewRef, CellViewRef) {
     library.add_cell(bench);
     app.state.model.library_manager.add_library(library);
     let origin = CellViewRef::new(LIBRARY, "bench", "schematic");
-    app.state
-        .model
-        .workspace
-        .insert_schematic_editor(origin.key(), crate::state::SchematicState::default());
+    app.state.model.workspace.insert_schematic_editor(
+        origin.key(),
+        rspice_app_state::state::SchematicState::default(),
+    );
     app.state.open_workspace_view(origin.clone());
     app.state.workbench.activate(Workspace::Design);
     assert_eq!(

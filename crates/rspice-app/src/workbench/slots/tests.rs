@@ -85,7 +85,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     assert_blocks_shortcuts(|dialogs| {
         dialogs.design.pin_port.open(
             "EN".to_owned(),
-            crate::state::PlacementAuthority::new(
+            rspice_app_state::state::PlacementAuthority::new(
                 crate::workbench::app::schematic_editor_request_source(
                     &crate::workbench::app_state::AppState::default(),
                 ),
@@ -119,15 +119,14 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
         dialogs.design.replace_instance.open(ReplaceInstanceOpen {
             authority: edit_authority(),
             replacement_authority: {
-                let mut schematic = crate::state::SchematicState::default();
-                schematic
-                    .document_mut_for_test()
-                    .components
-                    .push(crate::state::Component::new(
+                let mut schematic = rspice_app_state::state::SchematicState::default();
+                schematic.document_mut_for_test().components.push(
+                    rspice_app_state::state::Component::new(
                         1,
-                        crate::state::ComponentType::VoltageSource,
-                        crate::state::Point::origin(),
-                    ));
+                        rspice_app_state::state::ComponentType::VoltageSource,
+                        rspice_app_state::state::Point::origin(),
+                    ),
+                );
                 schematic.session.editor.selection.select_only_component(1);
                 schematic
                     .replacement_authority()
@@ -137,17 +136,17 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
             current: "U1 \u{00b7} OPA189".to_owned(),
             replacement: "OPA188 \u{00b7} 5 pin".to_owned(),
             initial_target_identity: "work/OPA188/schematic".to_owned(),
-            initial_target_spec: crate::state::SchematicReplacementTargetSpec::primitive(
-                crate::state::ComponentType::Resistor,
+            initial_target_spec: rspice_app_state::state::SchematicReplacementTargetSpec::primitive(
+                rspice_app_state::state::ComponentType::Resistor,
             ),
             candidates: vec!["OPA188 \u{00b7} 5 pin".to_owned()],
         });
     });
     assert_blocks_shortcuts(|dialogs| {
-        let bus = crate::state::Bus::segment(
+        let bus = rspice_app_state::state::Bus::segment(
             1,
-            crate::state::Point::new(0, 0),
-            crate::state::Point::new(10, 0),
+            rspice_app_state::state::Point::new(0, 0),
+            rspice_app_state::state::Point::new(10, 0),
             None,
         )
         .unwrap();
@@ -258,12 +257,12 @@ const DIALOG_GATE: &[DialogRow] = &[
     }),
     ("plan_removal_review", |dialogs| {
         dialogs.simulate.plan_removal_review.target = Some(PlanRemovalTarget::Analysis(
-            crate::product::AnalysisInstanceId::new(),
+            rspice_app_state::product::AnalysisInstanceId::new(),
         ));
     }),
     ("plan_removal_refusal", |dialogs| {
         dialogs.simulate.plan_removal_refusal.analysis =
-            Some(crate::product::AnalysisInstanceId::new());
+            Some(rspice_app_state::product::AnalysisInstanceId::new());
     }),
     ("dataset_export", |dialogs| {
         dialogs.results.dataset_export = Some(DatasetExportPicker {
@@ -313,7 +312,7 @@ const DIALOG_GATE: &[DialogRow] = &[
         dialogs.cloud.unpublish_web.open = true
     }),
     ("run_details", |dialogs| {
-        let run = crate::state::SimulationRun::new(1);
+        let run = rspice_app_state::state::SimulationRun::new(1);
         dialogs.results.run_details = Some(Box::new(RunDetailsDialogState {
             run_id: run.id,
             manifest: crate::workbench::documents::result_document::manifest::manifest_for_run(
@@ -353,7 +352,7 @@ const DIALOG_GATE: &[DialogRow] = &[
     ("pin_port", |dialogs| {
         dialogs.design.pin_port.open(
             "EN".to_owned(),
-            crate::state::PlacementAuthority::new(
+            rspice_app_state::state::PlacementAuthority::new(
                 crate::workbench::app::schematic_editor_request_source(
                     &crate::workbench::app_state::AppState::default(),
                 ),
@@ -384,14 +383,14 @@ const DIALOG_GATE: &[DialogRow] = &[
         );
     }),
     ("replace_instance", |dialogs| {
-        let mut schematic = crate::state::SchematicState::default();
+        let mut schematic = rspice_app_state::state::SchematicState::default();
         schematic
             .document_mut_for_test()
             .components
-            .push(crate::state::Component::new(
+            .push(rspice_app_state::state::Component::new(
                 1,
-                crate::state::ComponentType::VoltageSource,
-                crate::state::Point::origin(),
+                rspice_app_state::state::ComponentType::VoltageSource,
+                rspice_app_state::state::Point::origin(),
             ));
         schematic.session.editor.selection.select_only_component(1);
         dialogs.design.replace_instance.open(ReplaceInstanceOpen {
@@ -403,8 +402,8 @@ const DIALOG_GATE: &[DialogRow] = &[
             current: "U1".to_owned(),
             replacement: "OPA188".to_owned(),
             initial_target_identity: "work/OPA188/schematic".to_owned(),
-            initial_target_spec: crate::state::SchematicReplacementTargetSpec::primitive(
-                crate::state::ComponentType::Resistor,
+            initial_target_spec: rspice_app_state::state::SchematicReplacementTargetSpec::primitive(
+                rspice_app_state::state::ComponentType::Resistor,
             ),
             candidates: vec!["OPA188".to_owned()],
         });
@@ -424,10 +423,10 @@ const DIALOG_GATE: &[DialogRow] = &[
     ("delete_sheet", |dialogs| {
         dialogs.sheets.delete_sheet = Some(
             rspice_app_sheets::workbench::app::dialogs::delete_sheet::PendingSheetDelete {
-                sheet: crate::state::SheetId::new(),
+                sheet: rspice_app_state::state::SheetId::new(),
                 name: "Sheet 2".to_owned(),
                 objects: 3,
-                destination: crate::state::SheetId::new(),
+                destination: rspice_app_state::state::SheetId::new(),
                 destination_name: "Sheet 1".to_owned(),
             },
         );
@@ -464,10 +463,10 @@ const DIALOG_GATE: &[DialogRow] = &[
         dialogs.design.rule_setup.open = true
     }),
     ("object_properties", |dialogs| {
-        let bus = crate::state::Bus::segment(
+        let bus = rspice_app_state::state::Bus::segment(
             1,
-            crate::state::Point::new(0, 0),
-            crate::state::Point::new(10, 0),
+            rspice_app_state::state::Point::new(0, 0),
+            rspice_app_state::state::Point::new(10, 0),
             None,
         )
         .expect("a valid bus fixture");
@@ -511,7 +510,7 @@ const NATIVE_DIALOG_GATE: &[DialogRow] = &[("pending_autosave_restore", |dialogs
         checkpoint: std::path::PathBuf::from("afe.rspiceproj.autosave"),
         binding: CheckpointBinding {
             identity: CheckpointIdentity {
-                content_digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
+                content_digest: rspice_app_state::product::ContentDigest::from_bytes([0x5a; 32]),
                 byte_len: 1,
                 modified_unix_ms: 1,
             },
@@ -570,9 +569,9 @@ const OUTSIDE_THE_DIALOG_GATE: &[DialogRow] = &[
     ("floating_paste", |dialogs| {
         dialogs.design.floating_paste = Some(FloatingPaste {
             objects: rspice_design::schematic::clipboard::ClipboardData::default(),
-            start: crate::state::Point::origin(),
+            start: rspice_app_state::state::Point::origin(),
             grab: None,
-            delta: crate::state::Point::origin(),
+            delta: rspice_app_state::state::Point::origin(),
             view_path: String::new(),
             sheet: None,
             origin: FloatingPasteOrigin::Paste,
@@ -605,11 +604,11 @@ fn modeless_waveform_calculator_does_not_block_workspace_shortcuts() {
 
 #[test]
 fn generic_property_dirty_state_clears_after_semantic_revert() {
-    let bus = crate::state::Bus::segment(
+    let bus = rspice_app_state::state::Bus::segment(
         7,
-        crate::state::Point::new(0, 0),
-        crate::state::Point::new(10, 0),
-        Some(crate::state::BusDeclaration::parse("DATA[7:0]").unwrap()),
+        rspice_app_state::state::Point::new(0, 0),
+        rspice_app_state::state::Point::new(10, 0),
+        Some(rspice_app_state::state::BusDeclaration::parse("DATA[7:0]").unwrap()),
     )
     .unwrap();
     let mut dialog = ObjectPropertiesDialogState::default();

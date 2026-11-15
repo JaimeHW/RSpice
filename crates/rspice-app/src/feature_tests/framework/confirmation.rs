@@ -10,7 +10,7 @@ use rspice_app_workbench::workbench::app::dialogs::confirmation_state::Confirmat
 
 fn render_close_review(app: &mut RSpiceApp, size: egui::Vec2) -> egui::FullOutput {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut output = None;
     for _ in 0..3 {
         output = Some(ctx.run_ui(

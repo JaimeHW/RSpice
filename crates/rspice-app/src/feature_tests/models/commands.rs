@@ -4,17 +4,19 @@
 //! what one published, and the notices the frame drains into the activity
 //! feed. The models feature's own answers are its own tests'.
 
-use crate::state::ModelsPage;
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags, ids};
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::models::model_editor_workflow::selected_project_model_for_editor;
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::ModelsPage;
 
 #[test]
 fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
-    use crate::state::model_library::{DeviceModel, ModelLibrary, ModelSourceAuthority, ModelType};
+    use rspice_app_state::state::model_library::{
+        DeviceModel, ModelLibrary, ModelSourceAuthority, ModelType,
+    };
 
     let copy = ModelsCommand::ModelCreateProjectCopy;
     assert_eq!(copy.key().as_str(), "model-create-project-copy");
@@ -142,7 +144,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
 #[test]
 fn undoing_the_selected_models_project_copy_clears_the_selection_in_its_frame() {
     use crate::feature_tests::replay::{PRIMARY, Replay};
-    use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+    use rspice_app_state::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 
     let mut replay = Replay::new();
     let app = &mut replay.app;
@@ -202,7 +204,7 @@ fn undoing_the_selected_models_project_copy_clears_the_selection_in_its_frame() 
 fn model_editor_command_requires_an_open_project_even_with_a_retained_selection() {
     use std::collections::BTreeMap;
 
-    use crate::state::model_library::ProjectModelDefinition;
+    use rspice_app_state::state::model_library::ProjectModelDefinition;
 
     let mut app = RSpiceApp::test_instance();
     let commit = app
@@ -245,7 +247,7 @@ fn model_editor_command_requires_an_open_project_even_with_a_retained_selection(
 
 #[test]
 fn model_library_rescan_discovers_files_and_reports_path_errors() {
-    let nonce = crate::time_compat::unix_epoch().as_nanos();
+    let nonce = rspice_app_state::time_compat::unix_epoch().as_nanos();
     let root = std::env::temp_dir().join(format!(
         "rspice-command-rescan-{}-{nonce}",
         std::process::id()
@@ -256,7 +258,7 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state.model.pdk_config = rspice_app_state::state::pdk_config::PdkConfig::default();
     app.state
         .model
         .pdk_config
@@ -277,7 +279,10 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
         .entries()
         .last()
         .expect("rescan receipt");
-    assert_eq!(success.severity, crate::diagnostics::LogSeverity::Info);
+    assert_eq!(
+        success.severity,
+        rspice_app_state::diagnostics::LogSeverity::Info
+    );
     assert!(success.message.contains("Found 1 configured model file(s)"));
     assert!(
         app.state
@@ -303,17 +308,27 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
         .entries()
         .last()
         .expect("warning receipt");
-    assert_eq!(warning.severity, crate::diagnostics::LogSeverity::Warning);
+    assert_eq!(
+        warning.severity,
+        rspice_app_state::diagnostics::LogSeverity::Warning
+    );
     assert!(warning.message.contains("1 configured path error(s)"));
     assert!(warning.message.contains("Path does not exist"));
     let warning = warning.id;
     let activity = app.state.workbench.toasts.activity();
     assert_eq!(activity.len(), 1);
-    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Warn);
+    assert_eq!(
+        activity[0].kind(),
+        rspice_app_workbench::ui::widgets::ToastKind::Warn
+    );
     assert!(activity[0].message().contains("1 configured path error(s)"));
     assert_eq!(
         activity[0].action(),
-        Some(crate::ui::widgets::NotificationAction::ShowInConsole { log_id: warning })
+        Some(
+            rspice_app_workbench::ui::widgets::NotificationAction::ShowInConsole {
+                log_id: warning
+            }
+        )
     );
 
     std::fs::remove_dir_all(&root).expect("remove model-library fixture");

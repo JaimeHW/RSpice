@@ -94,7 +94,7 @@ impl RSpiceApp {
         }
         let palette_input = if resolution.command == Some(ShortcutCommand::CommandPalette.key()) {
             ctx.input(|input| {
-                crate::ui::input::InputTransition::after_keys(
+                rspice_app_workbench::ui::input::InputTransition::after_keys(
                     input,
                     &resolution.consume[..resolution.deferred_start],
                 )
@@ -189,7 +189,10 @@ impl RSpiceApp {
 mod shortcut_ownership_tests {
     use super::*;
 
-    fn assert_grid_pitch_contract(app: &RSpiceApp, pitch: crate::state::SchematicGridPitch) {
+    fn assert_grid_pitch_contract(
+        app: &RSpiceApp,
+        pitch: rspice_app_state::state::SchematicGridPitch,
+    ) {
         let expected = pitch.canvas_grid_size();
         assert_eq!(
             app.state
@@ -216,7 +219,7 @@ mod shortcut_ownership_tests {
 
     #[test]
     fn document_undo_and_redo_reconcile_all_grid_pitch_authorities() {
-        use crate::state::SchematicGridPitch;
+        use rspice_app_state::state::SchematicGridPitch;
 
         let mut app = RSpiceApp::test_instance();
         assert_grid_pitch_contract(&app, SchematicGridPitch::Mil50);
@@ -249,7 +252,7 @@ mod shortcut_ownership_tests {
     /// as ascending out of a child publishes.
     fn publish_sheet_assignment(
         state: &mut crate::workbench::app_state::AppState,
-    ) -> crate::state::CellViewRef {
+    ) -> rspice_app_state::state::CellViewRef {
         use crate::workbench::app_state::DesignManagementHistoryEntry;
 
         state.open_project_session();
@@ -295,7 +298,7 @@ mod shortcut_ownership_tests {
     /// the ascent back.
     #[test]
     fn undo_after_ascend_reverts_the_extraction_not_the_prior_edit() {
-        use crate::state::{ComponentType, Point};
+        use rspice_app_state::state::{ComponentType, Point};
 
         let mut app = RSpiceApp::test_instance();
         assert!(
@@ -341,7 +344,7 @@ mod shortcut_ownership_tests {
 
     #[test]
     fn interleaved_project_and_document_edits_undo_in_global_sequence_order() {
-        use crate::state::{ComponentType, Point};
+        use rspice_app_state::state::{ComponentType, Point};
 
         let mut app = RSpiceApp::test_instance();
         assert!(
@@ -397,7 +400,7 @@ mod shortcut_ownership_tests {
     }
 
     fn app_on_a_symbol_view() -> RSpiceApp {
-        use crate::state::{Cell, CellViewRef, Library, SymbolDocument, View, ViewType};
+        use rspice_app_state::state::{Cell, CellViewRef, Library, SymbolDocument, View, ViewType};
 
         let mut app = RSpiceApp::test_instance();
         let mut library = Library::new("dispatch");
@@ -483,15 +486,18 @@ mod shortcut_ownership_tests {
     #[test]
     fn copy_shortcut_in_results_copies_cursor_readout_not_schematic_selection() {
         let mut app = RSpiceApp::test_instance();
-        let analysis =
-            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-                .with_waveforms(vec![crate::state::RetainedTrace::new(
-                    "V(out)",
-                    vec![0.0, 1.0],
-                    vec![0.0, 2.0],
-                    "#ffbd2e",
-                )]);
-        let mut run = crate::state::SimulationRun::new(1);
+        let analysis = rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Transient,
+            "TRAN",
+        )
+        .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
+            "V(out)",
+            vec![0.0, 1.0],
+            vec![0.0, 2.0],
+            "#ffbd2e",
+        )]);
+        let mut run = rspice_app_state::state::SimulationRun::new(1);
         run.add_analysis(analysis);
         app.state.model.simulation.retained.runs = vec![run].into();
         assert!(app.state.model.simulation.select_run(0));
@@ -516,7 +522,7 @@ mod shortcut_ownership_tests {
 
     #[test]
     fn object_properties_shortcut_dispatches_a_bus_and_escape_leaves_it_alone() {
-        use crate::state::{Bus, BusDeclaration, Point};
+        use rspice_app_state::state::{Bus, BusDeclaration, Point};
 
         let mut app = RSpiceApp::test_instance();
         app.state
@@ -568,7 +574,7 @@ mod shortcut_ownership_tests {
 
     #[test]
     fn next_marker_resolves_again_after_first_jump_activates_design() {
-        use crate::state::command_catalog::CommandPlatform;
+        use rspice_app_state::state::command_catalog::CommandPlatform;
         use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
         let mut app = RSpiceApp::test_instance();
@@ -661,10 +667,10 @@ mod shortcut_ownership_tests {
 #[cfg(test)]
 mod symbol_action_tests {
     use super::*;
-    use crate::state::{
+    use crate::workbench::design::commands::DesignCommand;
+    use rspice_app_state::state::{
         Cell, CellViewRef, Library, Point, PortDirection, SymbolDocument, SymbolPin, View, ViewType,
     };
-    use crate::workbench::design::commands::DesignCommand;
 
     #[test]
     fn registered_symbol_tools_are_available_and_execute_complete_state_transitions() {

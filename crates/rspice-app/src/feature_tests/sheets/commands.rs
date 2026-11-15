@@ -3,7 +3,6 @@
 //! prologue adds, and how the commands are listed and bound, is tested with
 //! the shell's commands.
 
-use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 use crate::workbench::app::select_all_schematic_objects;
 use crate::workbench::app_state::AppState;
 use crate::workbench::framework::command_registry::CommandAvailability;
@@ -11,6 +10,7 @@ use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::state::Workspace;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 use rspice_app_sheets::workbench::sheets::*;
+use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
 const SHEET_COMMANDS: [SheetsCommand; 4] = [
     SheetsCommand::NextSheet,

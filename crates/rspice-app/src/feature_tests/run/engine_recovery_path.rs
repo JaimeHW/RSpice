@@ -14,8 +14,8 @@ use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 
 use crate::feature_tests::replay::{PRIMARY, Replay, only};
-use crate::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
 use crate::workbench::state::Workspace;
+use rspice_app_workbench::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
 
 /// The deck the script types into its new source document.
 const DECK: &str = "* Engine recovery analytic check\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n";

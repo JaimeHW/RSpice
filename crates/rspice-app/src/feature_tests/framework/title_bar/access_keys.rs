@@ -3,9 +3,9 @@
 //! and every row a menu shows has a letter of its own.
 
 use super::*;
-use crate::state::GridStyle;
-use crate::state::command_catalog::CommandPlatform;
 use egui::os::OperatingSystem;
+use rspice_app_state::state::GridStyle;
+use rspice_app_state::state::command_catalog::CommandPlatform;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
     access_key_index, access_keys_apply,
 };
@@ -42,7 +42,7 @@ impl Bar {
     fn new(os: OperatingSystem) -> Self {
         let ctx = Context::default();
         ctx.set_os(os);
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         Self {
             ctx,
             app: title_test_app(),

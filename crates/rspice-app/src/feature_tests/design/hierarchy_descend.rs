@@ -1,13 +1,13 @@
 //! Descending into a placed instance through the whole application: the descent dialog's
 //! transaction is answered as the shell answers it.
 
-use crate::state::{
-    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point, View,
-    ViewType,
-};
 use crate::workbench::TogglePreference;
 use crate::workbench::app::dialogs::hierarchy::descend::*;
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{
+    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point, View,
+    ViewType,
+};
 
 /// Apply the choice as the dialog's step and the shell's answer do,
 /// straight after one another.

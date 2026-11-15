@@ -63,7 +63,7 @@ impl ExportWorkflowIo for PublicationIo {
 
     fn write_waveform_csv(
         &self,
-        _dataset: &crate::io::WaveformDataset,
+        _dataset: &rspice_app_services::io::WaveformDataset,
         _path: &Path,
     ) -> Result<(), String> {
         Err("waveform export is outside this test".to_owned())
@@ -208,7 +208,7 @@ fn governance_dialogs_render_accessible_fields_at_phone_width() {
     .expect("candidate prepares");
     commit_project_library_publication(&mut app.state, candidate).expect("fixture receipt commits");
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     open_publication(&ctx, &app.state.model);
     let output = ctx.run_ui(

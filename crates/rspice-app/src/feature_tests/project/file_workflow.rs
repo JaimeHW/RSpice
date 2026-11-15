@@ -6,10 +6,10 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use crate::io::{FileWorkflowIo, NativeFileWorkflowIo, SchematicIoError};
-use crate::state::{CellViewRef, SchematicState, View, ViewType};
 use crate::workbench::app_state::AppState;
 use rspice_app_project::workbench::workflows::file_workflow::SchematicLoadOrigin;
+use rspice_app_services::io::{FileWorkflowIo, NativeFileWorkflowIo, SchematicIoError};
+use rspice_app_state::state::{CellViewRef, SchematicState, View, ViewType};
 
 #[derive(Debug, Clone)]
 struct TestFileWorkflowIo {
@@ -141,7 +141,7 @@ fn seed_stale_design_execution_context(state: &mut AppState) {
         .simulation
         .retained
         .runs
-        .push(crate::state::SimulationRun::new(1));
+        .push(rspice_app_state::state::SimulationRun::new(1));
     state.model.simulation.view.active_run_idx = Some(0);
     state.runs.manual_run.last_run_buffer = Some("last manual run\n.end\n".to_owned());
     state.runs.manual_run.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
@@ -264,7 +264,7 @@ fn apply_loaded_schematic_resets_stale_netlist_and_result_context() {
 /// the file, and the cell view that was open keeps its drawing.
 #[test]
 fn opening_a_schematic_inside_a_project_imports_it_as_a_new_cell_view() {
-    use crate::state::{ComponentType, Point};
+    use rspice_app_state::state::{ComponentType, Point};
 
     let mut state = AppState::default();
     state.open_project_session();

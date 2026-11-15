@@ -1,11 +1,6 @@
 //! Latest tracking of a project-owned Results document, against the
 //! project's authored source and the runs it authorizes.
 
-use crate::product::{
-    AnalysisInstanceId, ContentDigest, ObjectRevision, ResultDocumentId, SimulationPlanId,
-};
-use crate::state::SimulationRunLifecycle;
-use crate::state::{AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun};
 use crate::workbench::AppState;
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::ResultViewer;
@@ -16,12 +11,19 @@ use crate::workbench::documents::result_document::persistent_document::{
 };
 use crate::workbench::documents::result_document::test_fixtures::{completed_prepared_run, digest};
 use egui::Ui;
+use rspice_app_state::product::{
+    AnalysisInstanceId, ContentDigest, ObjectRevision, ResultDocumentId, SimulationPlanId,
+};
 use rspice_app_state::results::visualization_document::AxisOrientation;
 use rspice_app_state::results::visualization_document::AxisRange;
 use rspice_app_state::results::visualization_document::DocumentEdit;
 use rspice_app_state::results::visualization_document::Marker;
 use rspice_app_state::results::visualization_document::PaneId;
 use rspice_app_state::results::visualization_document::TypedValue;
+use rspice_app_state::state::SimulationRunLifecycle;
+use rspice_app_state::state::{
+    AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun,
+};
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 
 /// A document that follows the newest run of one authored analysis, plus
@@ -46,7 +48,7 @@ fn authored_run(
     run.id = run_sequence;
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient")
-            .with_waveforms(vec![crate::state::RetainedTrace::new(
+            .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
                 trace_name,
                 vec![0.0, 0.5, 1.0],
                 vec![0.0, 1.0, 0.0],
@@ -295,7 +297,7 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
         app.state
             .results
             .results
-            .latest_retarget_failure(document_id, crate::product::DatasetId::new()),
+            .latest_retarget_failure(document_id, rspice_app_state::product::DatasetId::new()),
         None
     );
 }
@@ -405,7 +407,7 @@ fn transient_fixture_with_layout(layout_id: &str) -> (RSpiceApp, ResultDocumentI
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
-            crate::state::RetainedTrace::new(
+            rspice_app_state::state::RetainedTrace::new(
                 "V(out)",
                 vec![0.0, 0.5, 1.0],
                 vec![0.0, 1.0, 0.0],
@@ -449,7 +451,7 @@ fn retained_markers(app: &RSpiceApp, document_id: ResultDocumentId) -> Vec<Marke
 /// token lookups and font metrics resolve exactly as they do on screen.
 pub(crate) fn drive_frame(body: impl FnMut(&mut Ui)) {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut body = body;
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| body(ui));
 }
@@ -1047,7 +1049,7 @@ fn a_saved_projection_of_a_retained_marker_is_dropped_on_load() {
     // and coordinates no longer identify a legacy document projection.
     crate::workbench::documents::result_document::restore_presentation(
         &mut app.state.results_parts(),
-        crate::state::result_presentation::ResultPresentation {
+        rspice_app_state::state::result_presentation::ResultPresentation {
             markers: vec![duplicate, genuine],
             marker_id_high_water: Some(5),
             ..Default::default()
@@ -1551,7 +1553,7 @@ fn zooming_one_pane_of_a_saved_x_link_zooms_the_other() {
 /// into the session.
 fn document_frame(app: &mut RSpiceApp, document_id: ResultDocumentId, time: f64) {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let input = egui::RawInput {
         time: Some(time),
         ..Default::default()

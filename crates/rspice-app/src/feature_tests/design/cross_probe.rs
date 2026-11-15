@@ -2,15 +2,15 @@
 //! projects the selection into the results' traces and the netlist's lines, which only the
 //! whole application holds.
 
-use crate::product::ContentDigest;
-use crate::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};
-use crate::state::{
-    AnalysisResult, AnalysisResultSourceDomain, AnalysisType, PreparedRunReceipt,
-    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, RetainedTrace, SimulationRun,
-};
 use crate::workbench::AppState;
 use crate::workbench::TogglePreference;
 use crate::workbench::framework::feature::CodePort as _;
+use rspice_app_state::product::ContentDigest;
+use rspice_app_state::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};
+use rspice_app_state::state::{
+    AnalysisResult, AnalysisResultSourceDomain, AnalysisType, PreparedRunReceipt,
+    PreparedRunTaskReceipt, PreparedSourceCheckReceipt, RetainedTrace, SimulationRun,
+};
 
 /// The end-frame step as the shell runs it: the projection, applied
 /// through the results' and the netlist's own fns.
@@ -38,10 +38,10 @@ fn prepared_run(revision: ObjectRevision, waveform_name: &str) -> SimulationRun 
 fn prepared_run_in(
     revision: ObjectRevision,
     waveform_name: &str,
-    hierarchy: Vec<crate::state::HierarchyMapRow>,
+    hierarchy: Vec<rspice_app_state::state::HierarchyMapRow>,
 ) -> SimulationRun {
     let instance = AnalysisInstanceId::new();
-    let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+    let receipt = PreparedRunReceipt::new(rspice_app_state::state::PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
         simulation_plan_id: Some(SimulationPlanId::new()),
         project_revision: revision,
@@ -69,7 +69,7 @@ fn prepared_run_in(
 }
 
 fn install_current_map(state: &mut AppState, net: &str) {
-    let point = crate::state::Point::new(0, 0);
+    let point = rspice_app_state::state::Point::new(0, 0);
     state.model.simulation.source.cross_probe.update(
         state.model.workspace.content.active_view.clone(),
         std::collections::HashMap::from([(point, net.to_owned())]),
@@ -87,9 +87,9 @@ fn selected_net_highlights_only_a_current_exact_retained_trace() {
         .schematic
         .document_mut_for_test()
         .net_labels
-        .push(crate::state::NetLabel::new(
+        .push(rspice_app_state::state::NetLabel::new(
             7,
-            crate::state::Point::new(0, 0),
+            rspice_app_state::state::Point::new(0, 0),
             "OUT",
         ));
     state
@@ -131,20 +131,20 @@ fn selected_net_highlights_only_a_current_exact_retained_trace() {
 #[test]
 fn a_descended_tab_selects_the_trace_named_for_its_occurrence() {
     let mut state = AppState::default();
-    let child = crate::state::CellViewRef::new("user", "amp", "schematic");
+    let child = rspice_app_state::state::CellViewRef::new("user", "amp", "schematic");
     state.model.workspace.descend_into(
         "X1".to_owned(),
         child.clone(),
-        crate::state::ViewType::Schematic,
+        rspice_app_state::state::ViewType::Schematic,
     );
     state
         .model
         .schematic
         .document_mut_for_test()
         .net_labels
-        .push(crate::state::NetLabel::new(
+        .push(rspice_app_state::state::NetLabel::new(
             7,
-            crate::state::Point::new(0, 0),
+            rspice_app_state::state::Point::new(0, 0),
             "n1",
         ));
     state
@@ -160,7 +160,7 @@ fn a_descended_tab_selects_the_trace_named_for_its_occurrence() {
         revision,
         "V(x1.n1)",
         vec![
-            crate::state::HierarchyMapRow::new("/X1", "amp_1", "X1", child)
+            rspice_app_state::state::HierarchyMapRow::new("/X1", "amp_1", "X1", child)
                 .expect("one occurrence row"),
         ],
     ));
@@ -194,9 +194,9 @@ fn disabled_preference_never_projects_the_schematic_selection() {
         .schematic
         .document_mut_for_test()
         .net_labels
-        .push(crate::state::NetLabel::new(
+        .push(rspice_app_state::state::NetLabel::new(
             7,
-            crate::state::Point::new(0, 0),
+            rspice_app_state::state::Point::new(0, 0),
             "OUT",
         ));
     state
@@ -226,8 +226,8 @@ fn disabled_preference_never_projects_the_schematic_selection() {
 fn selected_component_uses_its_emitted_device_identity() {
     let mut state = AppState::default();
     let component_id = state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(20, 20),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(20, 20),
     );
     let emitted = state
         .model
@@ -236,7 +236,7 @@ fn selected_component_uses_its_emitted_device_identity() {
         .components
         .iter()
         .find(|component| component.id == component_id)
-        .map(crate::state::Component::written_element_name)
+        .map(rspice_app_state::state::Component::written_element_name)
         .expect("component exists");
     state
         .model
@@ -276,8 +276,8 @@ fn selected_component_uses_its_emitted_device_identity() {
 fn a_selected_memristor_selects_the_trace_the_engine_names_it_by() {
     let mut state = AppState::default();
     let component_id = state.model.schematic.add_component(
-        crate::state::ComponentType::Memristor,
-        crate::state::Point::new(20, 20),
+        rspice_app_state::state::ComponentType::Memristor,
+        rspice_app_state::state::Point::new(20, 20),
     );
     let written = state
         .model
@@ -286,7 +286,7 @@ fn a_selected_memristor_selects_the_trace_the_engine_names_it_by() {
         .components
         .iter()
         .find(|component| component.id == component_id)
-        .map(crate::state::Component::written_element_name)
+        .map(rspice_app_state::state::Component::written_element_name)
         .expect("component exists");
     state
         .model

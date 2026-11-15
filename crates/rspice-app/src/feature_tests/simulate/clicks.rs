@@ -23,8 +23,8 @@ use super::workflow_dialogs;
 use egui::vec2;
 use rspice_app_simulate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALOG_SEARCH_LABEL;
 
-use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
+use rspice_app_state::state::SimulationPage;
 
 /// A control as its accessibility tree published it: what it announces, and
 /// where it is.
@@ -88,7 +88,7 @@ impl Studio {
 
     fn opened(mut app: RSpiceApp, page: SimulationPage, size: (f32, f32), shell: bool) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         if shell {
             // The navigator draws the tree of whichever workspace is active, so
@@ -245,7 +245,7 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
         // second transient needs no prerequisite of its own, which keeps this
         // fixture about the stack rather than about dependency binding.
         while plan.instances().len() < 2 {
-            plan.insert(crate::simulation::plan::AnalysisKind::Transient)
+            plan.insert(rspice_app_state::simulation::plan::AnalysisKind::Transient)
                 .expect("a transient inserts");
         }
         let rows = plan
@@ -285,7 +285,7 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
             .model
             .log_buffer
             .entries()
-            .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
+            .filter(|entry| entry.source == rspice_app_state::diagnostics::LogSource::Plan)
             .count()
     };
     let receipts_before = plan_records(&studio.app);
@@ -393,11 +393,11 @@ fn the_run_set_toolbar_undoes_redoes_and_previews_the_declaration() {
 /// workspace method works and says nothing about the button above it.
 #[test]
 fn every_capture_group_command_is_reachable_from_the_card() {
-    use crate::state::{
+    use crate::workbench::state::SimulationWorkflowDialog;
+    use rspice_app_state::state::{
         CaptureGroup, CaptureGroupRule, InstancePath, SavedOutput, SavedOutputCompatibility,
         SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
     };
-    use crate::workbench::state::SimulationWorkflowDialog;
 
     let mut app = RSpiceApp::test_instance();
     let plan = app
@@ -554,7 +554,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
 /// the lifecycle strip, confidently.
 #[test]
 fn the_editor_clones_reorders_and_removes_the_instance_it_is_open_on() {
-    use crate::simulation::plan::AnalysisKind;
+    use rspice_app_state::simulation::plan::AnalysisKind;
 
     let mut app = RSpiceApp::test_instance();
     let names = |app: &RSpiceApp| {
@@ -736,7 +736,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
 /// candidates here and the match stays unambiguous.
 #[test]
 fn a_departed_row_on_the_solver_ledger_opens_its_analysis_advanced_options() {
-    use crate::simulation::plan::{
+    use rspice_app_state::simulation::plan::{
         AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption,
         SolverOwnership,
     };
@@ -824,7 +824,7 @@ fn a_departed_row_on_the_solver_ledger_opens_its_analysis_advanced_options() {
 /// switch beside it would be that chooser said twice.
 #[test]
 fn a_click_on_an_option_switch_authors_the_override_it_states() {
-    use crate::simulation::plan::{AnalysisKind, NumericOverrideOption};
+    use rspice_app_state::simulation::plan::{AnalysisKind, NumericOverrideOption};
 
     let mut app = RSpiceApp::test_instance();
     let sweep = app
@@ -879,10 +879,10 @@ fn a_click_on_an_option_switch_authors_the_override_it_states() {
 /// reveal that comes with the re-adoption takes the reader to the design.
 #[test]
 fn a_readoption_is_drawn_by_the_frame_after_the_press() {
-    use crate::state::stimulus_library::definition::StimulusDefinition;
-    use crate::state::stimulus_library::draft::DefinitionDraft;
-    use crate::state::stimulus_library::now_unix_ms;
-    use crate::state::{ComponentType, Point};
+    use rspice_app_state::state::stimulus_library::definition::StimulusDefinition;
+    use rspice_app_state::state::stimulus_library::draft::DefinitionDraft;
+    use rspice_app_state::state::stimulus_library::now_unix_ms;
+    use rspice_app_state::state::{ComponentType, Point};
 
     let mut app = RSpiceApp::test_instance();
     let model = &mut app.state.model;

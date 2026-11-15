@@ -5,13 +5,13 @@
 use crate::workbench::app::project_transactions::WholeStateValidation;
 use rspice_design::drc::{DrcLocation, DrcSeverity};
 
-use crate::state::{ComponentType, Point};
 use crate::workbench::app::dialogs::check_and_save_validation::{
     CheckAndSaveFindingLevel, CheckAndSaveValidationReport,
 };
 use crate::workbench::app::project_transactions::run_design_checks_in;
 use crate::workbench::app_state::AppState;
 use crate::workbench::lifecycle::project_lifecycle::SaveScope;
+use rspice_app_state::state::{ComponentType, Point};
 
 #[test]
 fn hierarchical_instances_validate_without_an_open_property_dialog() {
@@ -234,29 +234,30 @@ fn a_located_finding_names_the_object_it_is_about() {
 #[test]
 fn a_first_save_states_each_cellviews_findings_once() {
     let mut state = AppState::default();
-    let mut work = crate::state::Library::new("work");
+    let mut work = rspice_app_state::state::Library::new("work");
     for name in ["leaf", "mid"] {
-        let mut cell = crate::state::Cell::new(name);
-        cell.add_view(crate::state::View::new(
+        let mut cell = rspice_app_state::state::Cell::new(name);
+        cell.add_view(rspice_app_state::state::View::new(
             "schematic",
-            crate::state::ViewType::Schematic,
+            rspice_app_state::state::ViewType::Schematic,
         ));
         work.add_cell(cell);
     }
     state.model.library_manager.add_library(work);
     let placed = |cell: &str| {
-        let mut binding = crate::state::LibraryCellInstance::new("work", cell, "schematic");
+        let mut binding =
+            rspice_app_state::state::LibraryCellInstance::new("work", cell, "schematic");
         binding.bind_interface(&[]);
         binding
     };
 
-    let mut leaf = crate::state::SchematicState::default();
+    let mut leaf = rspice_app_state::state::SchematicState::default();
     leaf.add_component(ComponentType::Resistor, Point::new(30, 0));
     state
         .model
         .workspace
         .insert_schematic_editor("work/leaf/schematic".to_owned(), leaf);
-    let mut mid = crate::state::SchematicState::default();
+    let mut mid = rspice_app_state::state::SchematicState::default();
     mid.add_library_cell_component(Point::new(100, 0), placed("leaf"));
     mid.add_library_cell_component(Point::new(300, 0), placed("leaf"));
     state
@@ -304,7 +305,7 @@ fn a_first_save_states_each_cellviews_findings_once() {
 }
 
 /// A port named `name` declaring `direction`.
-fn add_port(schematic: &mut crate::state::SchematicState, name: &str, direction: &str) {
+fn add_port(schematic: &mut rspice_app_state::state::SchematicState, name: &str, direction: &str) {
     let port = schematic.add_component(ComponentType::Port, Point::new(20, 0));
     let placed = schematic
         .document_mut_for_test()
@@ -318,13 +319,13 @@ fn add_port(schematic: &mut crate::state::SchematicState, name: &str, direction:
 
 /// Place `cell`'s schematic in `schematic` as `name`, presenting `ports`.
 fn place(
-    schematic: &mut crate::state::SchematicState,
+    schematic: &mut rspice_app_state::state::SchematicState,
     cell: &str,
     name: &str,
-    ports: &[crate::state::PortSpec],
+    ports: &[rspice_app_state::state::PortSpec],
     at: Point,
 ) {
-    let mut binding = crate::state::LibraryCellInstance::new("work", cell, "schematic");
+    let mut binding = rspice_app_state::state::LibraryCellInstance::new("work", cell, "schematic");
     binding.bind_interface(ports);
     let instance = schematic.add_library_cell_component(at, binding);
     schematic
@@ -338,13 +339,13 @@ fn place(
 
 /// A library `work` holding `cells`, each with the listed schematic views.
 fn add_cells(state: &mut AppState, cells: &[(&str, &[&str])]) {
-    let mut work = crate::state::Library::new("work");
+    let mut work = rspice_app_state::state::Library::new("work");
     for &(name, views) in cells {
-        let mut cell = crate::state::Cell::new(name);
+        let mut cell = rspice_app_state::state::Cell::new(name);
         for &view in views {
-            cell.add_view(crate::state::View::new(
+            cell.add_view(rspice_app_state::state::View::new(
                 view,
-                crate::state::ViewType::Schematic,
+                rspice_app_state::state::ViewType::Schematic,
             ));
         }
         work.add_cell(cell);
@@ -368,21 +369,21 @@ fn a_finding_only_the_configuration_makes_is_stated_beside_the_cells_own() {
         ],
     );
     for (view, direction) in [("schematic", "inout"), ("schematic_v2", "in")] {
-        let mut leaf = crate::state::SchematicState::default();
+        let mut leaf = rspice_app_state::state::SchematicState::default();
         add_port(&mut leaf, "a", direction);
         state
             .model
             .workspace
             .insert_schematic_editor(format!("work/leaf/{view}"), leaf);
     }
-    let mut mid = crate::state::SchematicState::default();
+    let mut mid = rspice_app_state::state::SchematicState::default();
     place(
         &mut mid,
         "leaf",
         "XA",
-        &[crate::state::PortSpec {
+        &[rspice_app_state::state::PortSpec {
             name: "a".to_owned(),
-            direction: crate::state::PortDirection::InOut,
+            direction: rspice_app_state::state::PortDirection::InOut,
         }],
         Point::new(100, 0),
     );
@@ -404,18 +405,18 @@ fn a_finding_only_the_configuration_makes_is_stated_beside_the_cells_own() {
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: "Second leaf".to_owned(),
             root,
             dut_path: "/XM".to_owned(),
             executable_view_policy: vec!["schematic_v2".to_owned(), "schematic".to_owned()],
             stop_views: Vec::new(),
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "check and save test".to_owned(),
         })
         .expect("the fixture configuration is well formed");
@@ -457,7 +458,7 @@ fn an_unplaced_document_is_checked_through_its_hierarchy() {
     );
     // One source holds vdd! against ground. Placed twice, the two copies
     // are a loop, which neither copy's cell can see.
-    let mut supply = crate::state::SchematicState::default();
+    let mut supply = rspice_app_state::state::SchematicState::default();
     let source = supply.add_component(ComponentType::VoltageSource, Point::new(30, 0));
     let terminals = supply
         .document()
@@ -474,13 +475,13 @@ fn an_unplaced_document_is_checked_through_its_hierarchy() {
         supply
             .document_mut_for_test()
             .net_labels
-            .push(crate::state::NetLabel::new(id, point, node));
+            .push(rspice_app_state::state::NetLabel::new(id, point, node));
     }
     state
         .model
         .workspace
         .insert_schematic_editor("work/supply/schematic".to_owned(), supply);
-    let mut bench = crate::state::SchematicState::default();
+    let mut bench = rspice_app_state::state::SchematicState::default();
     place(&mut bench, "supply", "X1", &[], Point::new(100, 0));
     place(&mut bench, "supply", "X2", &[], Point::new(300, 0));
     state
@@ -491,7 +492,7 @@ fn an_unplaced_document_is_checked_through_its_hierarchy() {
     // A resistor on its own, with no ground anywhere: a design that cannot
     // solve. The same resistor behind a port is a cell, which takes its
     // reference from whatever places it.
-    let mut stray = crate::state::SchematicState::default();
+    let mut stray = rspice_app_state::state::SchematicState::default();
     stray.add_component(ComponentType::Resistor, Point::new(30, 0));
     let mut buffer = stray.clone();
     add_port(&mut buffer, "a", "inout");
@@ -555,16 +556,16 @@ fn first_save_discloses_all_document_scope() {
 #[test]
 fn a_stale_instance_interface_is_a_blocker_that_names_its_repair() {
     let mut state = AppState::default();
-    let mut work = crate::state::Library::new("work");
-    let mut div = crate::state::Cell::new("div");
-    div.add_view(crate::state::View::new(
+    let mut work = rspice_app_state::state::Library::new("work");
+    let mut div = rspice_app_state::state::Cell::new("div");
+    div.add_view(rspice_app_state::state::View::new(
         "schematic",
-        crate::state::ViewType::Schematic,
+        rspice_app_state::state::ViewType::Schematic,
     ));
     work.add_cell(div);
     state.model.library_manager.add_library(work);
 
-    let mut master = crate::state::SchematicState::default();
+    let mut master = rspice_app_state::state::SchematicState::default();
     let port = master.add_component(ComponentType::Port, Point::new(20, 0));
     master
         .document_mut_for_test()
@@ -578,10 +579,10 @@ fn a_stale_instance_interface_is_a_blocker_that_names_its_repair() {
         .workspace
         .insert_schematic_editor("work/div/schematic".to_owned(), master);
 
-    let mut binding = crate::state::LibraryCellInstance::new("work", "div", "schematic");
-    binding.bind_interface(&[crate::state::PortSpec {
+    let mut binding = rspice_app_state::state::LibraryCellInstance::new("work", "div", "schematic");
+    binding.bind_interface(&[rspice_app_state::state::PortSpec {
         name: "old".to_owned(),
-        direction: crate::state::PortDirection::InOut,
+        direction: rspice_app_state::state::PortDirection::InOut,
     }]);
     let instance = state
         .model
@@ -617,23 +618,23 @@ fn a_stale_instance_interface_is_a_blocker_that_names_its_repair() {
 /// configuration is honoured differently than it reads.
 fn state_with_a_stop_view_warning() -> AppState {
     let mut state = AppState::default();
-    let mut work = crate::state::Library::new("work");
-    let mut amp = crate::state::Cell::new("amp");
-    amp.add_view(crate::state::View::new(
+    let mut work = rspice_app_state::state::Library::new("work");
+    let mut amp = rspice_app_state::state::Cell::new("amp");
+    amp.add_view(rspice_app_state::state::View::new(
         "schematic",
-        crate::state::ViewType::Schematic,
+        rspice_app_state::state::ViewType::Schematic,
     ));
     work.add_cell(amp);
     state.model.library_manager.add_library(work);
 
-    let mut master = crate::state::SchematicState::default();
+    let mut master = rspice_app_state::state::SchematicState::default();
     master.add_component(ComponentType::Resistor, Point::new(30, 0));
     state
         .model
         .workspace
         .insert_schematic_editor("work/amp/schematic".to_owned(), master);
 
-    let binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
+    let binding = rspice_app_state::state::LibraryCellInstance::new("work", "amp", "schematic");
     let instance = state
         .model
         .schematic
@@ -655,18 +656,18 @@ fn state_with_a_stop_view_warning() -> AppState {
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: "Stop at a schematic".to_owned(),
             root,
             dut_path: "/X1".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: vec!["schematic".to_owned()],
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "projection consumer test".to_owned(),
         })
         .expect("the fixture configuration is well formed");
@@ -702,18 +703,18 @@ fn an_unresolved_configuration_is_stated_rather_than_checked_from_editor_buffers
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: "Unresolvable DUT".to_owned(),
             root,
             dut_path: "/XABSENT".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "projection consumer test".to_owned(),
         })
         .expect("the fixture configuration is well formed");

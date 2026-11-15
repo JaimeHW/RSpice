@@ -1,8 +1,6 @@
 //! Check and save's transactions over the whole application: the save it
 //! validates and commits, its rollbacks, and the report it reads.
 
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::{AdvisoryDisposition, ValidatedRevisionJournal, ValidatedRevisionRequest};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
 use crate::workbench::app::project_transactions::{WholeStateValidation, run_design_checks_in};
@@ -12,6 +10,10 @@ use rspice_app_project::workbench::app::dialogs::check_and_save::{
     NEWER_CHANGES, revision_note_error, rollback_exact_journal,
 };
 use rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome;
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_state::state::{
+    AdvisoryDisposition, ValidatedRevisionJournal, ValidatedRevisionRequest,
+};
 
 impl RSpiceApp {
     /// Save the validated revision the open dialog reviewed, once its report
@@ -276,7 +278,7 @@ fn rollback_validated_save(
     target_view_key: &str,
     original_journal: ValidatedRevisionJournal,
     expected_journal: ValidatedRevisionJournal,
-    expected_design_digest: crate::product::ContentDigest,
+    expected_design_digest: rspice_app_state::product::ContentDigest,
     original_dirty: bool,
     message: &str,
 ) {

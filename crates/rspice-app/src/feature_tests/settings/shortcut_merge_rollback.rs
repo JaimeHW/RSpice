@@ -4,14 +4,6 @@
 //! refuses to erase a later edit, and a failed persistence leaves the applied
 //! state exactly as it was.
 
-use crate::state::command_catalog::CommandKey;
-use crate::state::command_catalog::CommandPlatform;
-use crate::state::shortcuts::ShortcutBindingSlot;
-use crate::state::shortcuts::ShortcutPreferences;
-use crate::state::shortcuts::ShortcutProfileLibrary;
-use crate::state::shortcuts::ShortcutProfileLibraryError;
-use crate::state::shortcuts::ShortcutSequence;
-use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
@@ -23,6 +15,14 @@ use rspice_app_settings::workbench::shortcuts::artifacts::{
     ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     decode_shortcut_artifact_json, serialize_shortcut_reference_json,
 };
+use rspice_app_state::state::command_catalog::CommandKey;
+use rspice_app_state::state::command_catalog::CommandPlatform;
+use rspice_app_state::state::shortcuts::ShortcutBindingSlot;
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
+use rspice_app_state::state::shortcuts::ShortcutProfileLibrary;
+use rspice_app_state::state::shortcuts::ShortcutProfileLibraryError;
+use rspice_app_state::state::shortcuts::ShortcutSequence;
+use rspice_app_state::state::shortcuts::ShortcutStroke;
 use serde_json::Value;
 
 pub(crate) fn artifact_from(profile: &ShortcutPreferences) -> DecodedShortcutArtifact {

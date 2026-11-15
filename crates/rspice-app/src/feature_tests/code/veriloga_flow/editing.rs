@@ -5,11 +5,11 @@ use egui::Key;
 
 use super::language_tools::{CTRL, EDITOR, caret_after, op_amp, source, type_text};
 use super::*;
-use crate::state::ProjectSourceRole;
 use crate::workbench::documents::code_workspace;
 use crate::workbench::lifecycle::project_lifecycle::{
     DestinationAuthority, SaveScope, active_document_is_dirty, save_native,
 };
+use rspice_app_state::state::ProjectSourceRole;
 
 fn undo(user: &mut User) {
     user.key(Key::Z, CTRL);
@@ -68,7 +68,7 @@ fn rename_is_one_undo_across_the_module() {
     let caret = original.find("vslew").expect("the name");
     code_workspace::open_language_tools_in_bundle(
         &mut user.app.code_workspace_parts(),
-        crate::state::ProjectSourceLanguage::VerilogA,
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         selected.bundle().id(),
         &path,
         original[..caret].chars().count(),
@@ -105,7 +105,7 @@ fn replace_in_files_is_one_undo_across_the_module() {
     let path = selected.document().logical_path().to_owned();
     code_workspace::open_source_search_in_bundle(
         &mut user.app.code_workspace_parts(),
-        crate::state::ProjectSourceLanguage::VerilogA,
+        rspice_app_state::state::ProjectSourceLanguage::VerilogA,
         selected.bundle().id(),
         &path,
     )

@@ -8,7 +8,7 @@
 use rspice_simulation_contract::run_set::{RunSetAction, RunSetDimensionKind, dispatch};
 
 use super::page_contracts::{render, render_with};
-use crate::state::SimulationPage;
+use rspice_app_state::state::SimulationPage;
 
 /// The run-space page states its declaration, its cost and its composition.
 ///

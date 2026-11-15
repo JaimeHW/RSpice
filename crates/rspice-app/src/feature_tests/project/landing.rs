@@ -9,7 +9,7 @@ use crate::workbench::shell_host::project::landing::show;
 fn landing_renders_without_project_state_at_all_supported_widths() {
     for size in [vec2(1440.0, 900.0), vec2(820.0, 1180.0), vec2(390.0, 844.0)] {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         app.state.close_project_session();
         app.state.platform.recovery_catalog = Default::default();

@@ -8,7 +8,6 @@
 
 use std::borrow::Cow;
 
-use crate::ui::tokens::Tokens;
 use crate::workbench::app::in_place_session;
 use crate::workbench::app_state::diagnostic_store::listing::listing_in_pass;
 use crate::workbench::chrome::status_bar::design::{
@@ -31,6 +30,7 @@ use rspice_app_runs::simulation::status::{
     EngineAvailability, preflight_status, simulation_engine_status,
 };
 use rspice_app_sheets::workbench::chrome::status_bar::sheets::sheet_position_summary;
+use rspice_app_workbench::ui::tokens::Tokens;
 use rspice_app_workbench::workbench::chrome::status_bar::{
     check_problem, check_summary, current_prompt, engine_status_mark,
 };
@@ -174,8 +174,8 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
             if can_retry {
                 if let Err(error) = app.simulation_controller.retry_engine_startup() {
                     app.state.record(
-                        crate::diagnostics::LogSeverity::Error,
-                        crate::diagnostics::LogSource::Studio,
+                        rspice_app_state::diagnostics::LogSeverity::Error,
+                        rspice_app_state::diagnostics::LogSource::Studio,
                         format!("Engine startup could not be retried: {error}"),
                     );
                 }
@@ -391,7 +391,7 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
 
 /// The finished run the status bar offers: one that ended while the reader
 /// was on another page, until they have reached it by any path.
-fn finished_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> {
+fn finished_run(app: &RSpiceApp) -> Option<&rspice_app_state::state::SimulationRun> {
     let run_id = app.state.runs.run_watch.finished_run?;
     let simulation = &app.state.model.simulation;
     let run = simulation.retained.run_by_stable_id(run_id)?;
@@ -502,23 +502,25 @@ mod tests {
     fn a_source_view_reports_no_revision() {
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
-        let mut cell = crate::state::Cell::new("amp");
-        cell.add_view(crate::state::View::new(
+        let mut cell = rspice_app_state::state::Cell::new("amp");
+        cell.add_view(rspice_app_state::state::View::new(
             "veriloga",
-            crate::state::ViewType::VerilogA,
+            rspice_app_state::state::ViewType::VerilogA,
         ));
-        let mut library = crate::state::Library::new("analog");
+        let mut library = rspice_app_state::state::Library::new("analog");
         library.add_cell(cell);
         app.state.model.library_manager.add_library(library);
         app.state
-            .open_workspace_view(crate::state::CellViewRef::new("analog", "amp", "veriloga"));
+            .open_workspace_view(rspice_app_state::state::CellViewRef::new(
+                "analog", "amp", "veriloga",
+            ));
         app.state.workbench.activate(Workspace::Design);
         assert_eq!(
             app.state.model.workspace.content.active_view_type(),
-            Some(crate::state::ViewType::VerilogA)
+            Some(rspice_app_state::state::ViewType::VerilogA)
         );
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
 
         let readings = status_readings(&mut app.state, EngineAvailability::Ready, &ctx);
 

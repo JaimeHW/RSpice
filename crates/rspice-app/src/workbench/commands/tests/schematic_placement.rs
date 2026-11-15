@@ -13,7 +13,7 @@ fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_avai
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state.model.safe_mode.activate(
-        crate::state::write_policy::LocalSafeModeOptions {
+        rspice_app_state::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
             ..Default::default()
         },
@@ -84,11 +84,11 @@ fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document
     assert_eq!(app.state.design.pin_port.fields.names, "");
     assert_eq!(
         app.state.design.pin_port.fields.direction,
-        crate::state::PortDirection::In
+        rspice_app_state::state::PortDirection::In
     );
     assert_eq!(
         app.state.design.pin_port.fields.signal_type,
-        crate::state::PortSignalType::Analog
+        rspice_app_state::state::PortSignalType::Analog
     );
     assert_eq!(app.state.model.schematic.document().components, components);
     assert_eq!(app.state.model.schematic.topology_version(), topology);
@@ -157,7 +157,7 @@ fn place_shape_opens_the_isolated_mockup_transaction_without_mutating_the_docume
     assert!(app.state.design.documentation_shape.open);
     assert_eq!(
         app.state.design.documentation_shape.kind,
-        crate::state::DocumentationShapeKind::Rectangle
+        rspice_app_state::state::DocumentationShapeKind::Rectangle
     );
     assert_eq!(
         app.state.model.schematic.document().documentation_shapes,
@@ -204,17 +204,17 @@ fn port_undo_and_redo_resynchronize_the_generated_symbol_contract() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     let reference = app.state.model.workspace.content.active_view.clone();
-    let pending = crate::state::PendingPortPlacement::new(
+    let pending = rspice_app_state::state::PendingPortPlacement::new(
         "BIAS_EN",
-        crate::state::PortDirectionType::InputLogic,
-        crate::state::PortDiscipline::Logic,
+        rspice_app_state::state::PortDirectionType::InputLogic,
+        rspice_app_state::state::PortDiscipline::Logic,
         app.state.model.schematic.topology_version(),
         app.state.model.schematic.next_interface_order(),
     );
     app.state
         .model
         .schematic
-        .place_pending_port(crate::state::Point::origin(), pending)
+        .place_pending_port(rspice_app_state::state::Point::origin(), pending)
         .expect("port places");
     app.state.sync_active_schematic_to_workspace();
     let symbol_ports = |app: &RSpiceApp| {
@@ -264,9 +264,9 @@ fn bus_authoring_commands_are_unavailable_on_read_only_schematics() {
 
 #[test]
 fn escape_walks_transaction_route_tool_and_selection_without_collapsing_stages() {
-    use crate::state::{ComponentType, Point};
+    use rspice_app_state::state::{ComponentType, Point};
 
-    let mut schematic = crate::state::SchematicState::default();
+    let mut schematic = rspice_app_state::state::SchematicState::default();
     let selected = schematic.add_component(ComponentType::Resistor, Point::origin());
     schematic
         .session
@@ -317,13 +317,13 @@ fn repeat_last_command_rearms_a_feature_placement() {
     app.execute_command_key(DesignCommand::SelectTool.key());
     assert_eq!(
         app.state.model.schematic.session.editor.tool,
-        crate::state::Tool::Select
+        rspice_app_state::state::Tool::Select
     );
 
     assert!(app.command_key_enabled(Command::RepeatLastCommand.key()));
     Command::RepeatLastCommand.execute(&mut app);
     assert_eq!(
         app.state.model.schematic.session.editor.tool,
-        crate::state::Tool::Wire
+        rspice_app_state::state::Tool::Wire
     );
 }

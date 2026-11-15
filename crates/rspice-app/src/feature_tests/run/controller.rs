@@ -1,9 +1,6 @@
 //! The run controller observed through a whole session.
 
 use super::session_of;
-use crate::state::{
-    AnalysisResult, AnalysisResultSourceDomain, AnalysisType, SimulationRunLifecycle,
-};
 use crate::workbench::app_state::AppState;
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_runs::simulation::controller::test_execution::state_with_current_clean_drc;
@@ -11,6 +8,9 @@ use rspice_app_runs::simulation::controller::test_execution::{
     MockExportWorkflowIo, bind_test_run_running,
 };
 use rspice_app_runs::simulation::multi_run::AnalysisSpec;
+use rspice_app_state::state::{
+    AnalysisResult, AnalysisResultSourceDomain, AnalysisType, SimulationRunLifecycle,
+};
 
 #[test]
 fn controller_plan_run_receipt_survives_production_project_round_trip() {
@@ -39,10 +39,10 @@ fn controller_plan_run_receipt_survives_production_project_round_trip() {
 
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("production snapshot accepts controller run");
-    let json = crate::io::project_io::serialize_project_file(&project)
+    let json = rspice_app_services::io::project_io::serialize_project_file(&project)
         .expect("controller plan run serializes");
-    let loaded =
-        crate::io::project_io::load_project_text(&json, None).expect("controller plan run reloads");
+    let loaded = rspice_app_services::io::project_io::load_project_text(&json, None)
+        .expect("controller plan run reloads");
     let loaded_plan_id = loaded
         .file
         .execution_context
@@ -52,8 +52,9 @@ fn controller_plan_run_receipt_survives_production_project_round_trip() {
         .stable_analysis_plan()
         .expect("stable plan retained")
         .id();
-    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
-        .expect("controller plan history restores");
+    let restored =
+        rspice_app_services::io::simulation_state_from_results(loaded.file.simulation_results)
+            .expect("controller plan history restores");
     let run = &restored.retained.runs[0];
     let receipt = run.prepared_receipt().expect("prepared receipt retained");
     let result_provenance = run.analyses[0]

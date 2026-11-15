@@ -1,9 +1,9 @@
 //! A profile projected for export over the product's own commands.
 
-use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
-use crate::state::shortcuts::ShortcutPreferences;
 use egui::os::OperatingSystem;
 use rspice_app_settings::workbench::shortcuts::artifacts::projection::*;
+use rspice_app_state::state::command_catalog::{CommandPlatform, ShortcutContext};
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
 
 #[test]
 fn resolved_export_materializes_defaults_and_current_workspace_filters_contexts() {

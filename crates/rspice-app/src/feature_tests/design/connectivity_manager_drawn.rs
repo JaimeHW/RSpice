@@ -10,7 +10,7 @@ use std::collections::HashMap;
 fn rendered_nodes(mut app: RSpiceApp) -> HashMap<egui::accesskit::NodeId, egui::accesskit::Node> {
     let ctx = Context::default();
     ctx.enable_accesskit();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut nodes = HashMap::new();
     for _ in 0..4 {
         let output = ctx.run_ui(

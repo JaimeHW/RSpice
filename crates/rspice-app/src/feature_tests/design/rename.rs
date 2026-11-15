@@ -1,10 +1,10 @@
 //! The rename dialog drawn and committed through a whole application.
 
-use crate::state::{ComponentType, Point};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::selection::rename::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
+use rspice_app_state::state::{ComponentType, Point};
 
 #[test]
 fn successful_component_rename_retains_id_and_is_exactly_one_undo_step() {
@@ -46,15 +46,15 @@ fn successful_component_rename_retains_id_and_is_exactly_one_undo_step() {
     );
 }
 
-fn saved_output(name: &str, expression: &str) -> crate::state::SavedOutput {
-    crate::state::SavedOutput::new(
-        crate::state::SavedOutputKind::RawVoltageOrCurrent,
+fn saved_output(name: &str, expression: &str) -> rspice_app_state::state::SavedOutput {
+    rspice_app_state::state::SavedOutput::new(
+        rspice_app_state::state::SavedOutputKind::RawVoltageOrCurrent,
         name,
         expression,
-        crate::state::SavedOutputCompatibility::OpTranAc,
-        crate::state::SavedOutputPolicy::EveryAcceptedPoint,
-        crate::state::SavedOutputPrecision::FullSourcePrecision,
-        crate::state::SavedOutputStreaming::StoreOnly,
+        rspice_app_state::state::SavedOutputCompatibility::OpTranAc,
+        rspice_app_state::state::SavedOutputPolicy::EveryAcceptedPoint,
+        rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
+        rspice_app_state::state::SavedOutputStreaming::StoreOnly,
     )
     .expect("a raw probe is a valid saved output")
 }
@@ -68,30 +68,30 @@ fn instance_rename_remaps_configuration_paths_and_saved_outputs() {
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: "Release".to_owned(),
             root: app.state.model.workspace.content.active_view.clone(),
             dut_path: "/R1".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Rename test".to_owned(),
         })
         .expect("valid configuration root");
-    let plan_id = crate::product::SimulationPlanId::new();
+    let plan_id = rspice_app_state::product::SimulationPlanId::new();
     app.state
         .model
         .workspace
         .content
         .simulation_plan_payloads
-        .push(crate::state::SimulationPlanPayloadRecord {
+        .push(rspice_app_state::state::SimulationPlanPayloadRecord {
             plan_id,
-            payload: crate::state::SimulationPlanPayload {
+            payload: rspice_app_state::state::SimulationPlanPayload {
                 saved_outputs: vec![
                     saved_output("device current", "I(R1)"),
                     saved_output("internal node", "V(/R1/mid)"),

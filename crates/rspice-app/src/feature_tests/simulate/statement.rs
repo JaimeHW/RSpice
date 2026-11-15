@@ -7,18 +7,18 @@
 //! says so. That is worse than showing nothing at all.
 //!
 //! So the page does not spell anything. It calls
-//! [`crate::simulation::SimulationController::analysis_draft_directive`], which
+//! [`rspice_app_runs::simulation::controller::SimulationController::analysis_draft_directive`], which
 //! is also what `simulation::controller::directive_parse_ratchet` calls before
 //! feeding the result to the real engine parser. These tests pin that the
 //! page's own accessor returns exactly that string, and that the string still
 //! parses when it arrives from the page's path rather than the ratchet's.
 
-use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::workbench::RSpiceApp;
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_simulate::workbench::surfaces::simulate::{
     engineering_statement, plan_statement_for,
 };
+use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
 
 #[test]
 fn the_displayed_statement_is_the_directive_the_controller_emits() {
@@ -192,7 +192,7 @@ fn reading_a_statement_leaves_the_plan_exactly_as_it_found_it() {
 /// A NOISE instance's frequency axis, beside an AC sibling that disagrees.
 ///
 /// Noise is the one analysis on this surface whose axis has two owners in the
-/// code. [`crate::simulation::plan::NoiseDraft`] carries its own band, count
+/// code. [`rspice_app_state::simulation::plan::NoiseDraft`] carries its own band, count
 /// and mode; the retired singleton view carries a *second* copy, and its noise
 /// projection reads the count and the mode out of the **AC** slots rather than
 /// the noise ones — `SimSetupState::legacy_analysis_draft` builds
@@ -210,7 +210,7 @@ fn reading_a_statement_leaves_the_plan_exactly_as_it_found_it() {
 /// `SimSetupState::refresh_legacy_analysis_projections`.
 #[test]
 fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
-    use crate::product::AnalysisInstanceId;
+    use rspice_app_state::product::AnalysisInstanceId;
     use rspice_simulation_contract::config::NoiseSweepType;
 
     let mut app = RSpiceApp::test_instance();

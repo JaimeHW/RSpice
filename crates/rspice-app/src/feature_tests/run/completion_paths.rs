@@ -1,9 +1,9 @@
 //! Completed runs observed through a whole session: a manual run saved with
 //! its project, and failures filed in an open project's Problems.
 
-use crate::state::{AnalysisResult, AnalysisResultSourceDomain, AnalysisType};
 use crate::workbench::app_state::AppState;
 use rspice_app_runs::simulation::controller::SimulationController;
+use rspice_app_state::state::{AnalysisResult, AnalysisResultSourceDomain, AnalysisType};
 
 #[test]
 fn controller_manual_run_receipt_survives_production_project_round_trip() {
@@ -33,16 +33,17 @@ fn controller_manual_run_receipt_survives_production_project_round_trip() {
 
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("production snapshot accepts controller manual run");
-    let json = crate::io::project_io::serialize_project_file(&project)
+    let json = rspice_app_services::io::project_io::serialize_project_file(&project)
         .expect("controller manual run serializes");
-    let loaded = crate::io::project_io::load_project_text(&json, None)
+    let loaded = rspice_app_services::io::project_io::load_project_text(&json, None)
         .expect("controller manual run reloads");
     assert!(
         loaded.file.execution_context.is_some(),
         "manual receipt must remain independent of the unrelated retained plan"
     );
-    let restored = crate::io::simulation_state_from_results(loaded.file.simulation_results)
-        .expect("controller manual history restores");
+    let restored =
+        rspice_app_services::io::simulation_state_from_results(loaded.file.simulation_results)
+            .expect("controller manual history restores");
     let run = &restored.retained.runs[0];
     let receipt = run.prepared_receipt().expect("manual receipt retained");
     let result_provenance = run.analyses[0]
@@ -57,7 +58,7 @@ fn controller_manual_run_receipt_survives_production_project_round_trip() {
     assert_eq!(receipt.simulation_plan_id(), None);
     assert!(matches!(
         receipt.source_check_receipt(),
-        crate::state::PreparedSourceCheckReceipt::ManualSourceCheck(_)
+        rspice_app_state::state::PreparedSourceCheckReceipt::ManualSourceCheck(_)
     ));
     assert_eq!(receipt.tasks()[0].instance_id(), expected_source_id);
     assert_eq!(result_provenance.source_instance_id(), expected_source_id);
@@ -103,7 +104,7 @@ fn a_failed_analysis_is_written_once_in_its_runs_log_and_filed_in_problems() {
     assert_eq!(
         run_log_messages(&state, run_sequence),
         vec![(
-            crate::diagnostics::LogSeverity::Error,
+            rspice_app_state::diagnostics::LogSeverity::Error,
             "Transient failed: Convergence failed after 100 iterations".to_owned()
         )],
         "the run's log records the event once, in the engine's own prose"
@@ -128,7 +129,7 @@ fn a_failed_analysis_is_written_once_in_its_runs_log_and_filed_in_problems() {
 fn run_log_messages(
     state: &AppState,
     run_sequence: u64,
-) -> Vec<(crate::diagnostics::LogSeverity, String)> {
+) -> Vec<(rspice_app_state::diagnostics::LogSeverity, String)> {
     state
         .model
         .simulation
@@ -181,7 +182,7 @@ fn a_real_operating_point_refusal_is_filed_with_the_conductor_the_engine_named()
 
     assert_eq!(
         run_log_messages(&state, run_sequence),
-        vec![(crate::diagnostics::LogSeverity::Error, message)],
+        vec![(rspice_app_state::diagnostics::LogSeverity::Error, message)],
         "an attributed failure writes the engine's prose once; the attribution is the record's"
     );
     assert_eq!(

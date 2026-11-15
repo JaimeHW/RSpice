@@ -2,10 +2,6 @@
 //! lends, or through the whole frame: the component, net, sheet and selection
 //! cards and what their edits do.
 
-use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
-use crate::state::{
-    CellViewRef, Component, ComponentType, LibraryCellInstance, Point, SchematicProbe, ViewType,
-};
 use crate::workbench::app::actions::workspace::inline_edit_authority;
 use crate::workbench::design::inspector::component::{
     TEMPERATURE_PARAM, apply_bound_model_choice, apply_bound_model_section, bound_model_choices,
@@ -23,6 +19,10 @@ use crate::workbench::design::inspector::*;
 use crate::workbench::framework::feature::SimulatePort as _;
 use crate::workbench::state::{InlineEditField, InlineEditSession, Workspace};
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_state::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+use rspice_app_state::state::{
+    CellViewRef, Component, ComponentType, LibraryCellInstance, Point, SchematicProbe, ViewType,
+};
 use std::collections::HashMap;
 
 /// A whole application whose sheet holds one instance bound to a vendor model
@@ -92,7 +92,7 @@ fn the_net_panel_states_scope_and_pins_only() {
         .schematic
         .document_mut_for_test()
         .wires
-        .push(crate::state::Wire::segment(
+        .push(rspice_app_state::state::Wire::segment(
             1,
             Point::new(0, 0),
             Point::new(40, 0),
@@ -181,7 +181,7 @@ fn an_instance_has_a_checks_section_only_for_its_own_findings() {
             component_id: id,
             component_name: "XU1".to_owned(),
             pin_name: "1".to_owned(),
-            point: crate::state::Point::new(10, 20),
+            point: rspice_app_state::state::Point::new(10, 20),
         },
     ));
     app.state.model.design_checks.drc_results = Some(result);
@@ -211,7 +211,7 @@ fn inherited_temperature_materializes_one_undoable_instance_override() {
     assert!(app.state.commit_inline_component_edit().unwrap());
 
     assert_eq!(
-        crate::state::parse_params_string(
+        rspice_app_state::state::parse_params_string(
             &app.state.model.schematic.document().components[0].params
         )
         .get(TEMPERATURE_PARAM)
@@ -220,7 +220,7 @@ fn inherited_temperature_materializes_one_undoable_instance_override() {
     );
     assert!(app.state.model.schematic.undo());
     assert!(
-        !crate::state::parse_params_string(
+        !rspice_app_state::state::parse_params_string(
             &app.state.model.schematic.document().components[0].params
         )
         .contains_key(TEMPERATURE_PARAM)

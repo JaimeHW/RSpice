@@ -2,14 +2,14 @@
 //! the feature's context lent from RSpiceApp, and the cell it creates there,
 //! with what the creation raised answered as the dialog step answers it.
 
-use crate::state::{
-    CellViewRef, ComponentType, Library, NetNamingPolicy, Point, SchematicGridPitch, SymbolDocument,
-};
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::library_dialogs::new_cell::create_new_cell;
 use crate::workbench::{ChoicePreference, RSpiceApp};
 use rspice_app_project::workbench::app::dialogs::library::LIBRARY_CATALOG_STALE_MESSAGE;
+use rspice_app_state::state::{
+    CellViewRef, ComponentType, Library, NetNamingPolicy, Point, SchematicGridPitch, SymbolDocument,
+};
 
 use super::{in_front, published, shown, with_cx};
 
@@ -31,9 +31,9 @@ fn the_new_cell_form_puts_its_views_on_the_grid() {
     let mut app = RSpiceApp::test_instance();
     app.state.project.new_cell_dialog = true;
     app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
-    let painted = crate::ui::widgets::painted_runs::painted_runs(
+    let painted = rspice_app_workbench::ui::widgets::painted_runs::painted_runs(
         egui::vec2(1440.0, 900.0),
-        crate::ui::tokens::Mode::Light,
+        rspice_app_workbench::ui::tokens::Mode::Light,
         3,
         |ctx| {
             with_cx(&mut app, |cx| {
@@ -57,7 +57,7 @@ fn the_new_cell_form_puts_its_views_on_the_grid() {
     assert!(painted.rect_of("Enter a name for the cell.").is_some());
 }
 
-fn cell_symbol_view(app: &RSpiceApp, library: &str, cell: &str) -> crate::state::View {
+fn cell_symbol_view(app: &RSpiceApp, library: &str, cell: &str) -> rspice_app_state::state::View {
     app.state
         .model
         .library_manager
@@ -106,12 +106,12 @@ fn creating_cell_seeds_every_schematic_like_view_at_creation_time() {
             .library_mutation_audit()
             .last()
             .map(|receipt| receipt.mutation()),
-        Some(crate::state::ProjectLibraryMutation::CreateCell { library, cell })
+        Some(rspice_app_state::state::ProjectLibraryMutation::CreateCell { library, cell })
             if library == "policy_test" && cell == "amp"
     ));
     assert!(app.state.model.workspace.content.project_metadata_dirty);
     for view in ["schematic", "testbench"] {
-        let key = crate::state::CellViewRef::new("policy_test", "amp", view).key();
+        let key = rspice_app_state::state::CellViewRef::new("policy_test", "amp", view).key();
         let document = app
             .state
             .model
@@ -251,7 +251,7 @@ fn new_cell_verilog_a_switch_creates_the_module_view_and_its_generated_symbol() 
             .workspace
             .content
             .project_sources
-            .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
+            .bundle_for_owner(&rspice_app_state::state::ProjectSourceOwner::cell_view(
                 reference.clone()
             ))
             .is_some_and(|bundle| bundle.root().logical_path() == "comparator.va"
@@ -269,7 +269,7 @@ fn new_cell_verilog_a_switch_creates_the_module_view_and_its_generated_symbol() 
 fn new_cell_rejects_accented_canonical_collision_without_mutation() {
     let mut app = RSpiceApp::test_instance();
     let mut library = Library::new("identity_test");
-    library.add_cell(crate::state::Cell::new("\u{c9}tage"));
+    library.add_cell(rspice_app_state::state::Cell::new("\u{c9}tage"));
     app.state.model.library_manager.add_library(library);
     app.state.project.new_cell_library = "identity_test".to_owned();
     app.state.project.new_cell_name = "\u{e9}TAGE".to_owned();
@@ -393,7 +393,7 @@ fn creating(veriloga_only: bool) -> RSpiceApp {
 /// Carry out what the creation handed over in the order the creation
 /// once did it in place, with the new document it read before it
 /// changed the catalog.
-fn carry_out_in_place(app: &mut RSpiceApp, seeded: crate::state::SchematicState) {
+fn carry_out_in_place(app: &mut RSpiceApp, seeded: rspice_app_state::state::SchematicState) {
     let Some(ProjectRequest::CellViewsCreated {
         schematics,
         mutation,
@@ -422,8 +422,8 @@ fn carry_out_in_place(app: &mut RSpiceApp, seeded: crate::state::SchematicState)
             .expect("the reserved revision is published once"),
     );
     state.record(
-        crate::diagnostics::LogSeverity::Info,
-        crate::diagnostics::LogSource::Studio,
+        rspice_app_state::diagnostics::LogSeverity::Info,
+        rspice_app_state::diagnostics::LogSource::Studio,
         notice,
     );
     if let Some(view) = open {

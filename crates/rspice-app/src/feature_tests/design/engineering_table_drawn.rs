@@ -1,12 +1,12 @@
 //! The engineering table drawn through a whole application.
 
-use crate::state::EngineeringTableView;
-use crate::state::EngineeringViewScope;
-use crate::state::engineering_table::active_schematic_dataset;
-use crate::state::{ComponentType, Point};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::engineering_table::tests as dialog;
 use crate::workbench::app::dialogs::engineering_table::*;
+use rspice_app_state::state::EngineeringTableView;
+use rspice_app_state::state::EngineeringViewScope;
+use rspice_app_state::state::engineering_table::active_schematic_dataset;
+use rspice_app_state::state::{ComponentType, Point};
 
 /// The engineering table over a whole application's parts, as its dialog
 /// step lends them.
@@ -61,9 +61,9 @@ fn the_pages_that_ask_first_are_command_forms() {
         dialog.page = page;
         dialog.save_name = "Review".to_owned();
         dialog.row_details_id = Some(dataset.rows[0].stable_id.clone());
-        let painted = crate::ui::widgets::painted_runs::painted_runs(
+        let painted = rspice_app_workbench::ui::widgets::painted_runs::painted_runs(
             egui::vec2(1440.0, 900.0),
-            crate::ui::tokens::Mode::Light,
+            rspice_app_workbench::ui::tokens::Mode::Light,
             3,
             |ctx| table(&mut app).render_engineering_table_dialog(ctx),
         );
@@ -125,7 +125,7 @@ fn the_manager_offers_what_a_reader_configures_and_its_table_fits() {
         &app.state.model
     ));
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut shapes = Vec::new();
     for _ in 0..4 {
         shapes = ctx

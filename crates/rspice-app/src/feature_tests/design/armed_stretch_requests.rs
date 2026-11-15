@@ -6,10 +6,10 @@ use super::app_state_of;
 use crate::schematic::view::requests::editor_request_source;
 use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::stretch_interaction::*;
-use crate::state::Point;
-use crate::state::Tool;
 use crate::workbench::app::cancel_armed_stretch_selection_in;
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::Point;
+use rspice_app_state::state::Tool;
 use rspice_schematic_editor::view::transform_input::TransformInputTransition;
 
 /// [`selected_stretch_wire`](crate::schematic::view::stretch_interaction::tests::selected_stretch_wire) made a whole application.
@@ -62,7 +62,7 @@ fn stretch_requests_recheck_source_target_and_policy_without_cancelling_a_replac
             "target" => state.design.stretch_selection.canvas.target = None,
             "policy" => {
                 state.design.stretch_selection.policy =
-                    crate::state::StretchOrthogonalPolicy::AllowDiagonal
+                    rspice_app_state::state::StretchOrthogonalPolicy::AllowDiagonal
             }
             "draft" => {
                 state.design.stretch_selection.canvas.gesture.anchor = Some(Point::new(10, 0))

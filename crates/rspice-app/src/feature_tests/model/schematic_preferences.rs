@@ -1,9 +1,9 @@
 //! Personal schematic editing behaviour applied to a whole session's open
 //! schematic and to the schematics it creates.
 
-use crate::state::{Point, WireRoutingMode};
 use crate::workbench::ChoicePreference;
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{Point, WireRoutingMode};
 use rspice_app_state::workbench::app_state::schematic_preferences::{
     ANY_ANGLE_ROUTING, MANUAL_JUNCTION_DOTS, SELECTION_CROSSING,
 };
@@ -37,7 +37,7 @@ fn junction_dots_follow_the_preference_on_the_open_schematic() {
 /// document that permits it.
 #[test]
 fn new_schematic_routing_comes_from_the_preference() {
-    use crate::state::WireJunctionPolicy;
+    use rspice_app_state::state::WireJunctionPolicy;
 
     let mut state = AppState::default();
     state.design.schematic_routing_mode = WireRoutingMode::Diagonal;

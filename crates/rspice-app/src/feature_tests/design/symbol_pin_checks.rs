@@ -2,9 +2,9 @@
 //! on the Problems page, each routed to the pin that fails.
 
 use super::app_state_of;
-use crate::diagnostics::LogAnchor;
-use crate::state::{CellViewRef, Point};
 use crate::workbench::app_state::AppState;
+use rspice_app_state::diagnostics::LogAnchor;
+use rspice_app_state::state::{CellViewRef, Point};
 
 /// [`state_with_amp_symbol_pin`](crate::workbench::app::actions::workspace::tests::state_with_amp_symbol_pin) made a whole application.
 fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppState {

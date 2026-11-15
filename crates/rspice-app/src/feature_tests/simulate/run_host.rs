@@ -1,7 +1,6 @@
 //! The run tier's host frozen for a campaign: what the frozen host records
 //! stays off the live results and runs it was frozen from.
 
-use crate::state::{RunEvent, RunEventSink};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::model::compile_project_bundle_receipt;
 use crate::workbench::commands::vocabulary::command_registry;
@@ -10,6 +9,7 @@ use crate::workbench::framework::feature::LowerHandles;
 use crate::workbench::framework::feature::{Cx, Peers};
 use crate::workbench::simulate::run_host::{FrozenRun, run_host};
 use rspice_app_runs::simulation::{RunHost, ViewerHost};
+use rspice_app_state::state::{RunEvent, RunEventSink};
 use std::sync::Arc;
 
 /// What the run tier's host over simulate's context over `app` freezes,
@@ -75,19 +75,17 @@ fn a_campaigns_frozen_host_leaves_the_live_results_and_runs_untouched() {
 #[test]
 fn a_frozen_host_keeps_the_compilation_and_the_netlist_code_shows() {
     let mut app = RSpiceApp::test_instance();
-    let owner = crate::state::ProjectSourceOwner::cell_view(crate::state::CellViewRef::new(
-        "behavioral",
-        "owned",
-        "veriloga",
-    ));
+    let owner = rspice_app_state::state::ProjectSourceOwner::cell_view(
+        rspice_app_state::state::CellViewRef::new("behavioral", "owned", "veriloga"),
+    );
     app.state
         .model
         .workspace
         .content
         .insert_project_source_bundle(
-            crate::state::ProjectSourceBundle::try_new(
+            rspice_app_state::state::ProjectSourceBundle::try_new(
                 owner.clone(),
-                crate::state::ProjectSourceLanguage::VerilogA,
+                rspice_app_state::state::ProjectSourceLanguage::VerilogA,
                 "model.va",
                 "module owned(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
                 [],

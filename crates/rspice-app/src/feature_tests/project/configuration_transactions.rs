@@ -2,12 +2,12 @@
 //! refuse, delete, clone and rename against the runs the simulation
 //! controller would start.
 
-use crate::state::{ConfigurationSetDefinition, ConfigurationSetId};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::project::configuration_state::ConfigurationSelection;
 use rspice_app_project::workbench::app::dialogs::project::configuration::{
     ConfigurationTransaction, commit_configuration, delete_refusal,
 };
+use rspice_app_state::state::{ConfigurationSetDefinition, ConfigurationSetId};
 
 fn commit_configuration_transaction(
     app: &mut RSpiceApp,
@@ -196,7 +196,7 @@ fn default_returns_runs_to_the_built_in_order_and_back() {
             .workspace
             .content
             .simulation_root_reference(),
-        crate::state::CellViewRef::new(
+        rspice_app_state::state::CellViewRef::new(
             &app.state.model.workspace.content.project.root_library,
             &app.state.model.workspace.content.project.top_cell,
             "schematic",

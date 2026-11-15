@@ -6,24 +6,24 @@
 //! that "fixes up" any of these silently discards work the operator can still
 //! see on screen.
 
-use crate::product::ObjectRevision;
-use crate::state::CellViewRef;
-use crate::state::DesignManagementCatalog;
-use crate::state::OpenCellView;
-use crate::state::SchematicSnapshot;
-use crate::state::SchematicState;
-use crate::state::model_library::CorrelationDatasetClass;
-use crate::state::model_library::CorrelationDatasetRevision;
-use crate::state::model_library::CorrelationSuite;
-use crate::state::model_library::ModelCorrelationState;
-use crate::state::model_library::ModelSourceAuthority;
-use crate::state::model_library::ModelSourceEvidenceBinding;
-use crate::state::model_library::ProjectModelDefinition;
-use crate::state::model_library::ProjectModelRevisionDefinition;
-use crate::state::write_policy::LocalSafeModeOptions;
-use crate::state::{Cell, ComponentType, LibraryCellInstance, Point, View, ViewType};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_history::*;
+use rspice_app_state::product::ObjectRevision;
+use rspice_app_state::state::CellViewRef;
+use rspice_app_state::state::DesignManagementCatalog;
+use rspice_app_state::state::OpenCellView;
+use rspice_app_state::state::SchematicSnapshot;
+use rspice_app_state::state::SchematicState;
+use rspice_app_state::state::model_library::CorrelationDatasetClass;
+use rspice_app_state::state::model_library::CorrelationDatasetRevision;
+use rspice_app_state::state::model_library::CorrelationSuite;
+use rspice_app_state::state::model_library::ModelCorrelationState;
+use rspice_app_state::state::model_library::ModelSourceAuthority;
+use rspice_app_state::state::model_library::ModelSourceEvidenceBinding;
+use rspice_app_state::state::model_library::ProjectModelDefinition;
+use rspice_app_state::state::model_library::ProjectModelRevisionDefinition;
+use rspice_app_state::state::write_policy::LocalSafeModeOptions;
+use rspice_app_state::state::{Cell, ComponentType, LibraryCellInstance, Point, View, ViewType};
 use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 use std::collections::BTreeMap;
 
@@ -53,7 +53,7 @@ fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
         .model
         .model_library_manager
         .resolve_definition_provider(
-            crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+            rspice_app_state::state::model_library::ModelConsumerScope::PrimitiveModel,
             "shared",
             &approved,
             "Test setup selects the approved provider.",
@@ -62,7 +62,7 @@ fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
 
     let mut candidate = state.model.model_library_manager.clone();
     assert!(candidate.clear_definition_provider(
-        crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+        rspice_app_state::state::model_library::ModelConsumerScope::PrimitiveModel,
         "shared"
     ));
     candidate
@@ -71,7 +71,7 @@ fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
         .corners
         .insert(
             "draft".to_owned(),
-            crate::state::model_library::ProcessCorner::new("draft"),
+            rspice_app_state::state::model_library::ProcessCorner::new("draft"),
         );
 
     let error = publish_model_library_candidate(
@@ -90,7 +90,7 @@ fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
             .model
             .model_library_manager
             .model_resolution_record(
-                crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+                rspice_app_state::state::model_library::ModelConsumerScope::PrimitiveModel,
                 "shared"
             )
             .is_some()
@@ -534,7 +534,7 @@ fn project_records_are_stamped_and_restamped_as_they_cross_the_stacks() {
 /// on whichever sheet happens to be active would redraw the design.
 #[test]
 fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
-    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
     let mut state = AppState::default();
     state.open_project_session();

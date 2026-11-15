@@ -3,12 +3,6 @@
 use crate::schematic::view::SchematicSymbolContext;
 use crate::schematic::view::context_menu::{ARRANGE_ENTRIES, ContextEntry};
 use crate::schematic::view::schematic_symbol_context;
-use crate::state::Point;
-use crate::state::Tool;
-use crate::state::{
-    Component, ComponentType, DesignNote, DesignNoteKind, DocumentationShape,
-    DocumentationShapeGeometry, Junction, LibraryCellInstance, NetLabel, Wire,
-};
 use crate::workbench::ResultViewer;
 use crate::workbench::app::duplicate_schematic_selection_at;
 use crate::workbench::app::replace_instance_available;
@@ -18,6 +12,12 @@ use crate::workbench::commands::answer_surface_requests;
 use crate::workbench::design::commands::DesignCommand;
 use crate::workbench::state::Workspace;
 use egui::{Context, Key, Modifiers, Rect, Ui, pos2, vec2};
+use rspice_app_state::state::Point;
+use rspice_app_state::state::Tool;
+use rspice_app_state::state::{
+    Component, ComponentType, DesignNote, DesignNoteKind, DocumentationShape,
+    DocumentationShapeGeometry, Junction, LibraryCellInstance, NetLabel, Wire,
+};
 use rspice_schematic_editor::view::context_menu::ContextMenuBinding;
 use rspice_schematic_editor::view::context_menu::ContextMenuRequest;
 use rspice_schematic_editor::view::context_menu::ContextMenuView;
@@ -123,7 +123,8 @@ fn context_key_input(key: Key) -> egui::RawInput {
 
 /// One Verilog-A instance of `behavioral/gain/veriloga`, whose view owns its
 /// module's source, selected.
-fn state_with_selected_veriloga_instance() -> (AppState, u64, crate::state::CellViewRef) {
+fn state_with_selected_veriloga_instance() -> (AppState, u64, rspice_app_state::state::CellViewRef)
+{
     let mut state = AppState::default();
     let (id, reference) = select_a_veriloga_instance(&mut state);
     (state, id, reference)
@@ -131,8 +132,10 @@ fn state_with_selected_veriloga_instance() -> (AppState, u64, crate::state::Cell
 
 /// Place one Verilog-A instance of `behavioral/gain/veriloga` on `state`'s
 /// otherwise empty schematic and select it.
-pub(crate) fn select_a_veriloga_instance(state: &mut AppState) -> (u64, crate::state::CellViewRef) {
-    use crate::state::{
+pub(crate) fn select_a_veriloga_instance(
+    state: &mut AppState,
+) -> (u64, rspice_app_state::state::CellViewRef) {
+    use rspice_app_state::state::{
         Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
         ProjectSourceLanguage, ProjectSourceOwner, View, ViewType,
     };
@@ -298,7 +301,7 @@ fn a_dialog_the_menu_asked_for_holds_the_canvas_modal_until_it_opens() {
 fn focused_keyboard_context_row_activates_with_enter_or_space() {
     for key in [Key::Enter, Key::Space] {
         let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut state = AppState::default();
         state
             .model
@@ -495,7 +498,7 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
     const MASTER: &str = "work/div/schematic";
 
     let mut state = AppState::default();
-    let mut master = crate::state::SchematicState::default();
+    let mut master = rspice_app_state::state::SchematicState::default();
     let port = master.add_component(ComponentType::Port, Point::new(20, 0));
     master
         .document_mut_for_test()
@@ -627,7 +630,7 @@ fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instanc
 
 /// One reported device, selected on the canvas.
 fn state_with_reported_device_op(device: &str) -> AppState {
-    use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+    use rspice_app_state::state::{AnalysisResult, AnalysisType, SimulationRun};
 
     let mut state = AppState::default();
     let mut component = Component::new(1, ComponentType::Nmos, Point::new(40, 30));
@@ -721,7 +724,7 @@ fn operating_point_hop_leaves_the_report_unfiltered_when_the_device_is_unreporte
 /// show was left wherever it had been.
 #[test]
 fn operating_point_hop_selects_the_operating_point_analysis() {
-    use crate::state::{AnalysisResult, AnalysisType};
+    use rspice_app_state::state::{AnalysisResult, AnalysisType};
 
     let mut state = state_with_reported_device_op("M1");
     let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
@@ -1170,8 +1173,8 @@ fn the_arrange_page_snaps_the_selection_to_the_grid() {
 /// instance now leaves it lit; picking an ordinary part still clears it.
 #[test]
 fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
-    use crate::state::SchematicNetHighlighting;
     use crate::workbench::examples::hierarchy_reference::{self, AMP_INSTANCES};
+    use rspice_app_state::state::SchematicNetHighlighting;
     use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
 
     fn lit(state: &AppState) -> Option<String> {

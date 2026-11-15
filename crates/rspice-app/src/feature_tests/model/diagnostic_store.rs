@@ -1,14 +1,14 @@
 //! `workbench/app_state/diagnostic_store` observed through a whole session.
 
-use crate::state::CampaignMemberRefusal;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::diagnostic_store::*;
+use rspice_app_state::state::CampaignMemberRefusal;
 use rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata;
 
 /// A symbol view whose pins the checks can read: `work/amp/symbol`, with
 /// one pin, beside a schematic that declares the matching port.
-fn open_symbol_view(state: &mut AppState) -> crate::state::CellViewRef {
-    use crate::state::{
+fn open_symbol_view(state: &mut AppState) -> rspice_app_state::state::CellViewRef {
+    use rspice_app_state::state::{
         Cell, CellViewRef, ComponentType, Library, Point, PortDirection, SchematicState,
         SymbolDocument, SymbolPin, View, ViewType,
     };
@@ -61,7 +61,7 @@ fn an_input_change_stales_a_published_batch_for_every_owner() {
             DiagnosticOwner::Dispatch => DiagnosticInputs::Dispatch,
             DiagnosticOwner::Run => {
                 state.model.simulation.retained.runs =
-                    vec![crate::state::SimulationRun::new(3)].into();
+                    vec![rspice_app_state::state::SimulationRun::new(3)].into();
                 DiagnosticInputs::Run { run_sequence: 3 }
             }
             DiagnosticOwner::RuleDeck => DiagnosticInputs::RuleDeck,
@@ -91,7 +91,7 @@ fn an_input_change_stales_a_published_batch_for_every_owner() {
                     .connectivity
                     .policy
                     .width_mismatch =
-                    crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+                    rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
             }
             DiagnosticOwner::SymbolPins => {
                 // The artwork the pins are drawn on.
@@ -99,9 +99,9 @@ fn an_input_change_stales_a_published_batch_for_every_owner() {
                     .model
                     .load_active_symbol_document()
                     .expect("the fixture symbol loads");
-                symbol.pins.push(crate::state::SymbolPin::new(
+                symbol.pins.push(rspice_app_state::state::SymbolPin::new(
                     "OUT",
-                    crate::state::PortDirection::Out,
+                    rspice_app_state::state::PortDirection::Out,
                     None,
                 ));
                 state
@@ -121,8 +121,8 @@ fn an_input_change_stales_a_published_batch_for_every_owner() {
             DiagnosticOwner::Run => {
                 // The configured design the failure's names were read off.
                 state.model.schematic.add_component(
-                    crate::state::ComponentType::Resistor,
-                    crate::state::Point::new(0, 0),
+                    rspice_app_state::state::ComponentType::Resistor,
+                    rspice_app_state::state::Point::new(0, 0),
                 );
             }
             DiagnosticOwner::RuleDeck => {
@@ -134,8 +134,8 @@ fn an_input_change_stales_a_published_batch_for_every_owner() {
             DiagnosticOwner::Lettering => {
                 // A part's value in a code point no embedded face has.
                 let part = state.model.schematic.add_component(
-                    crate::state::ComponentType::Resistor,
-                    crate::state::Point::new(0, 0),
+                    rspice_app_state::state::ComponentType::Resistor,
+                    rspice_app_state::state::Point::new(0, 0),
                 );
                 if let Some(part) = state
                     .model
@@ -216,8 +216,8 @@ fn run_batches(state: &AppState) -> Vec<u64> {
 fn a_dispatched_run_supersedes_the_failures_earlier_runs_reported() {
     let mut state = AppState::default();
     state.model.simulation.retained.runs = vec![
-        crate::state::SimulationRun::new(1),
-        crate::state::SimulationRun::new(2),
+        rspice_app_state::state::SimulationRun::new(1),
+        rspice_app_state::state::SimulationRun::new(2),
     ]
     .into();
     state.publish_run_failure("Transient", "Analysis failed: tran", None, 1);
@@ -257,7 +257,8 @@ fn a_dispatched_run_supersedes_the_failures_earlier_runs_reported() {
 #[test]
 fn a_retired_run_takes_its_failure_with_it() {
     let mut state = AppState::default();
-    state.model.simulation.retained.runs = vec![crate::state::SimulationRun::new(4)].into();
+    state.model.simulation.retained.runs =
+        vec![rspice_app_state::state::SimulationRun::new(4)].into();
     state.publish_run_failure("Transient", "Analysis failed: tran", None, 4);
     state.model.withdraw_retired_run_diagnostics();
     assert_eq!(run_batches(&state), [4], "a retained run's failure stands");
@@ -275,18 +276,18 @@ fn a_retired_run_takes_its_failure_with_it() {
 #[test]
 fn a_member_refused_at_authorization_stands_until_a_later_run_supersedes_it() {
     let mut state = AppState::default();
-    let campaign = crate::product::SimulationCampaignId::new();
-    let mut sibling = crate::state::SimulationRun::new(5);
+    let campaign = rspice_app_state::product::SimulationCampaignId::new();
+    let mut sibling = rspice_app_state::state::SimulationRun::new(5);
     sibling
         .set_campaign_membership(
-            crate::state::SimulationCampaignMembership::new(campaign, "Nightly", 2, 2)
+            rspice_app_state::state::SimulationCampaignMembership::new(campaign, "Nightly", 2, 2)
                 .expect("the fixture membership is valid"),
         )
         .expect("a fresh run joins its campaign");
     state.model.simulation.retained.runs = vec![
-        crate::state::SimulationRun::new(4),
+        rspice_app_state::state::SimulationRun::new(4),
         sibling,
-        crate::state::SimulationRun::new(6),
+        rspice_app_state::state::SimulationRun::new(6),
     ]
     .into();
     state.publish_run_failure("Transient", "Analysis failed: tran", None, 4);
@@ -333,8 +334,8 @@ fn a_member_refused_at_authorization_stands_until_a_later_run_supersedes_it() {
 
     // An edit to the configured design stales it, as it stales a run.
     state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(0, 0),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(0, 0),
     );
     assert_eq!(
         state.diagnostic_batch_standing(&refusal),
@@ -367,7 +368,10 @@ fn a_rerun_campaign_replaces_the_refusal_of_the_same_member() {
             "run sequence is exhausted",
         );
     };
-    refuse(&mut state, crate::product::SimulationCampaignId::new());
+    refuse(
+        &mut state,
+        rspice_app_state::product::SimulationCampaignId::new(),
+    );
     let first = state
         .model
         .diagnostics
@@ -379,7 +383,10 @@ fn a_rerun_campaign_replaces_the_refusal_of_the_same_member() {
     state.model.diagnostics.set_current_finding(Some(first));
     let entries_before = state.model.log_buffer.entries().count();
 
-    refuse(&mut state, crate::product::SimulationCampaignId::new());
+    refuse(
+        &mut state,
+        rspice_app_state::product::SimulationCampaignId::new(),
+    );
 
     assert_eq!(state.model.diagnostics.batches().count(), 1);
     assert_eq!(state.model.diagnostics.current_finding(), Some(first));
@@ -395,7 +402,8 @@ fn a_rerun_campaign_replaces_the_refusal_of_the_same_member() {
 #[test]
 fn a_run_failure_stays_current_while_another_view_is_open() {
     let mut state = AppState::default();
-    state.model.simulation.retained.runs = vec![crate::state::SimulationRun::new(5)].into();
+    state.model.simulation.retained.runs =
+        vec![rspice_app_state::state::SimulationRun::new(5)].into();
     state.publish_run_failure("Transient", "Analysis failed: tran", None, 5);
     let batch = state
         .model
@@ -412,11 +420,11 @@ fn a_run_failure_stays_current_while_another_view_is_open() {
         .workspace
         .insert_schematic_editor(root.key(), state.model.schematic.clone());
     state.model.workspace.content.active_view =
-        crate::state::CellViewRef::new(&root.library, "elsewhere", &root.view);
-    state.model.schematic = crate::state::SchematicState::default();
+        rspice_app_state::state::CellViewRef::new(&root.library, "elsewhere", &root.view);
+    state.model.schematic = rspice_app_state::state::SchematicState::default();
     state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(0, 0),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(0, 0),
     );
 
     assert!(
@@ -439,10 +447,11 @@ fn run_batch(state: &AppState, run_sequence: u64) -> DiagnosticBatch {
 #[test]
 fn a_value_edit_stales_a_run_failure() {
     let mut state = AppState::default();
-    state.model.simulation.retained.runs = vec![crate::state::SimulationRun::new(6)].into();
+    state.model.simulation.retained.runs =
+        vec![rspice_app_state::state::SimulationRun::new(6)].into();
     state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(0, 0),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(0, 0),
     );
     state.publish_run_failure("Transient", "Analysis failed: tran", None, 6);
     assert!(
@@ -465,10 +474,11 @@ fn a_value_edit_stales_a_run_failure() {
 #[test]
 fn a_failure_is_decided_against_the_design_that_was_dispatched() {
     let mut state = AppState::default();
-    state.model.simulation.retained.runs = vec![crate::state::SimulationRun::new(7)].into();
+    state.model.simulation.retained.runs =
+        vec![rspice_app_state::state::SimulationRun::new(7)].into();
     state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(0, 0),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(0, 0),
     );
     state.open_run_outcome(7);
     assert!(
@@ -502,8 +512,8 @@ fn a_failure_is_decided_against_the_design_that_was_dispatched() {
 fn run_ten_is_filed_after_run_nine() {
     let mut state = AppState::default();
     state.model.simulation.retained.runs = vec![
-        crate::state::SimulationRun::new(9),
-        crate::state::SimulationRun::new(10),
+        rspice_app_state::state::SimulationRun::new(9),
+        rspice_app_state::state::SimulationRun::new(10),
     ]
     .into();
     state.publish_run_failure("Transient", "Analysis failed: tran", None, 10);
@@ -519,8 +529,8 @@ fn run_ten_is_filed_after_run_nine() {
 fn one_analysis_failing_in_two_plain_runs_is_one_condition() {
     let mut state = AppState::default();
     state.model.simulation.retained.runs = vec![
-        crate::state::SimulationRun::new(9),
-        crate::state::SimulationRun::new(10),
+        rspice_app_state::state::SimulationRun::new(9),
+        rspice_app_state::state::SimulationRun::new(10),
     ]
     .into();
     state.publish_run_failure("Transient", "Analysis failed: tran", None, 9);
@@ -537,7 +547,7 @@ fn one_analysis_failing_in_two_plain_runs_is_one_condition() {
 fn two_spellings_of_one_cell_view_are_one_batch() {
     let mut state = AppState::default();
     let subject = state.model.workspace.content.active_schematic_reference();
-    let respelled = crate::state::CellViewRef::new(
+    let respelled = rspice_app_state::state::CellViewRef::new(
         subject.library.to_uppercase(),
         subject.cell.to_uppercase(),
         &subject.view,

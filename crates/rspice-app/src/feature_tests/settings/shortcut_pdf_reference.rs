@@ -3,13 +3,13 @@
 use egui::os::OperatingSystem;
 use lopdf::{Document as ParsedPdf, Object};
 
-use crate::state::command_catalog::CommandPlatform;
-use crate::state::shortcuts::ShortcutPreferences;
 use rspice_app_settings::workbench::shortcuts::artifacts::pdf::*;
 use rspice_app_settings::workbench::shortcuts::artifacts::projection::{
     ShortcutExportRequest, ShortcutExportScope, ShortcutReferenceModel,
     build_shortcut_reference_model,
 };
+use rspice_app_state::state::command_catalog::CommandPlatform;
+use rspice_app_state::state::shortcuts::ShortcutPreferences;
 
 fn complete_model() -> ShortcutReferenceModel {
     build_shortcut_reference_model(

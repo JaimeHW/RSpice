@@ -4,13 +4,13 @@
 
 use rspice_formats::vcd::encode_result_vcd;
 
-use crate::state::{
-    AnalysisResult, AnalysisResultPayload, AnalysisType, DigitalEventPointEvidence,
-    DigitalEventTraceEvidence, SimulationRun,
-};
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::test_fixtures::{MockExportWorkflowIo, waveform};
 use crate::workbench::menu_bar::{DatasetExportChoice, action_export_dataset_with_io};
+use rspice_app_state::state::{
+    AnalysisResult, AnalysisResultPayload, AnalysisType, DigitalEventPointEvidence,
+    DigitalEventTraceEvidence, SimulationRun,
+};
 
 fn last_log_message(state: &AppState) -> String {
     state
@@ -118,15 +118,18 @@ fn a_result_export_that_fails_is_toasted() {
     let activity = state.workbench.toasts.activity();
     assert_eq!(activity.len(), 1);
     assert_eq!(activity[0].title(), "CSV export failed");
-    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
+    assert_eq!(
+        activity[0].kind(),
+        rspice_app_workbench::ui::widgets::ToastKind::Error
+    );
 }
 
 #[test]
 fn event_source_vcd_export_reimport_keeps_levels_and_marks_canonical_strengths() {
-    use crate::state::{ResultImportFormat, SimulationRunLifecycle};
     use rspice_app_results::workbench::workflows::result_import_workflow::{
         commit_result_import_draft, stage_imported_result_dataset,
     };
+    use rspice_app_state::state::{ResultImportFormat, SimulationRunLifecycle};
     let points = [0_u8, 3, 6, 9, 1, 4, 7, 10, 2, 5, 8, 11, 12]
         .into_iter()
         .enumerate()
@@ -158,11 +161,12 @@ fn event_source_vcd_export_reimport_keeps_levels_and_marks_canonical_strengths()
         .unwrap();
     commit_result_import_draft(&mut state.results_parts()).unwrap();
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    let text = crate::io::project_io::serialize_project_file(&project).unwrap();
-    let restored = crate::io::project_io::load_project_text(&text, None).unwrap();
+    let text = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
+    let restored = rspice_app_services::io::project_io::load_project_text(&text, None).unwrap();
     assert!(restored.file.simulation_results_warning.is_none());
     let restored =
-        crate::io::simulation_state_from_results(restored.file.simulation_results).unwrap();
+        rspice_app_services::io::simulation_state_from_results(restored.file.simulation_results)
+            .unwrap();
     let run = restored.active_run().unwrap();
     assert_eq!(run.lifecycle, SimulationRunLifecycle::LegacyUnknown);
     assert!(run.prepared_receipt().is_none());

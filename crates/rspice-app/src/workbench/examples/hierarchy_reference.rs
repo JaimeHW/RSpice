@@ -23,8 +23,9 @@
 //!   exactly what a `.subckt` port list has to carry, so the reference states
 //!   that case rather than avoiding it.
 
-use crate::product::SimulationPlanId;
-use crate::state::{
+use crate::workbench::app_state::AppState;
+use rspice_app_state::product::SimulationPlanId;
+use rspice_app_state::state::{
     BusDeclaration, BusNotation, BusSlice, BusTapOrientation, Cell, CellViewRef, ComponentType,
     ConfigurationBlackBoxPolicy, ConfigurationModelProfile, ConfigurationPlatform,
     ConfigurationSetDefinition, ConfigurationSetId, ConfigurationSetOverride, CrossSheetDiscipline,
@@ -36,7 +37,6 @@ use crate::state::{
     SheetId, SheetPortPolicy, SheetTemplate, SymbolDocument, SymbolEditorMetadata, SymbolShape,
     UnresolvedBindingPolicy, View, ViewType,
 };
-use crate::workbench::app_state::AppState;
 use rspice_design::symbol::{SymbolTextAlign, SymbolTextSize};
 
 /// The project library the bootstrapped workspace already owns.
@@ -162,12 +162,12 @@ pub(crate) fn omit_missing_instance(state: &mut AppState) -> u64 {
     );
     activate_variant_override(
         state,
-        crate::state::SchematicObjectKey::new(
+        rspice_app_state::state::SchematicObjectKey::new(
             &state.model.workspace.content.active_view.key(),
             component,
         )
         .unwrap(),
-        crate::state::VariantObjectOverride::DoNotPopulate {
+        rspice_app_state::state::VariantObjectOverride::DoNotPopulate {
             approval_reference: "reviewed omission".to_owned(),
         },
     );
@@ -177,10 +177,12 @@ pub(crate) fn omit_missing_instance(state: &mut AppState) -> u64 {
 #[cfg(test)]
 pub(crate) fn activate_variant_override(
     state: &mut AppState,
-    object: crate::state::SchematicObjectKey,
-    change: crate::state::VariantObjectOverride,
+    object: rspice_app_state::state::SchematicObjectKey,
+    change: rspice_app_state::state::VariantObjectOverride,
 ) {
-    use crate::state::{AssemblyVariantDraft, VariantInheritance, VariantQualificationPlan};
+    use rspice_app_state::state::{
+        AssemblyVariantDraft, VariantInheritance, VariantQualificationPlan,
+    };
 
     let variant = state
         .model

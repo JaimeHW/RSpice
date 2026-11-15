@@ -1,12 +1,12 @@
 //! Opening a symbol definition through the whole application: the import and form actions
 //! open a project session and read the platform's file access.
 
-use crate::state::CellViewRef;
-use crate::state::{ModelBoundSymbolDefinition, SymbolDefinitionImport};
 use crate::workbench::app::dialogs::symbol_definition::{
     open_symbol_import_dialog, open_symbol_parameter_form_dialog,
 };
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::CellViewRef;
+use rspice_app_state::state::{ModelBoundSymbolDefinition, SymbolDefinitionImport};
 
 #[test]
 fn import_action_opens_an_isolated_draft_in_the_writable_project_library() {
@@ -83,7 +83,7 @@ fn form_action_loads_the_selected_typed_definition_as_the_next_revision() {
         .library_manager
         .get_library_mut(&library_name)
         .expect("project library");
-    crate::state::prepare_symbol_construction(&imported.definition, library)
+    rspice_app_state::state::prepare_symbol_construction(&imported.definition, library)
         .expect("construction plan")
         .commit(library)
         .expect("commit definition");

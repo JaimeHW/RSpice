@@ -20,18 +20,16 @@ use rspice_simulation::execution::PreparationStage;
 #[test]
 fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     let mut state = AppState::default();
-    let owner = crate::state::ProjectSourceOwner::cell_view(crate::state::CellViewRef::new(
-        "behavioral",
-        "owned",
-        "veriloga",
-    ));
+    let owner = rspice_app_state::state::ProjectSourceOwner::cell_view(
+        rspice_app_state::state::CellViewRef::new("behavioral", "owned", "veriloga"),
+    );
     state
         .model.workspace
         .content
         .insert_project_source_bundle(
-            crate::state::ProjectSourceBundle::try_new(
+            rspice_app_state::state::ProjectSourceBundle::try_new(
                 owner.clone(),
-                crate::state::ProjectSourceLanguage::VerilogA,
+                rspice_app_state::state::ProjectSourceLanguage::VerilogA,
                 "model.va",
                 "module owned(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
                 [],
@@ -130,8 +128,9 @@ fn reviewed_foreign_profile_is_applied_when_the_owned_deck_is_prepared() {
         .netlist_descriptor
         .as_mut()
         .unwrap();
-    descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spectre);
-    descriptor.execution_profile = Some(crate::state::NetlistExecutionProfile::SpectreSpiceV1);
+    descriptor.imported_dialect = Some(rspice_app_state::state::NetlistSourceDialect::Spectre);
+    descriptor.execution_profile =
+        Some(rspice_app_state::state::NetlistExecutionProfile::SpectreSpiceV1);
     descriptor.compatibility_reviewed = true;
     let mut controller = SimulationController::new();
     controller
@@ -164,7 +163,8 @@ fn an_unreviewed_owned_profile_cannot_acquire_a_manual_execution_permit() {
         .netlist_descriptor
         .as_mut()
         .unwrap();
-    descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spice3Ngspice);
+    descriptor.imported_dialect =
+        Some(rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice);
     descriptor.execution_profile = None;
     descriptor.compatibility_reviewed = false;
     let mut controller = SimulationController::new();
@@ -184,8 +184,10 @@ fn reviewed_ngspice_profile_binds_engine_defaults_and_revalidates_edits() {
         .netlist_descriptor
         .as_mut()
         .unwrap();
-    descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spice3Ngspice);
-    descriptor.execution_profile = Some(crate::state::NetlistExecutionProfile::Spice3NgspiceV2);
+    descriptor.imported_dialect =
+        Some(rspice_app_state::state::NetlistSourceDialect::Spice3Ngspice);
+    descriptor.execution_profile =
+        Some(rspice_app_state::state::NetlistExecutionProfile::Spice3NgspiceV2);
     descriptor.compatibility_reviewed = true;
     let mut controller = SimulationController::new();
     controller.validate_manual_deck_document(&state).unwrap();
@@ -223,7 +225,7 @@ fn reviewed_ngspice_profile_binds_engine_defaults_and_revalidates_edits() {
 fn reviewed_spectre_header_survives_path_based_dependency_expansion() {
     let directory = fixture_dir("reviewed-spectre-header");
     let source = "simulator lang=spice\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
-    let profile = crate::state::NetlistExecutionProfile::SpectreSpiceV1;
+    let profile = rspice_app_state::state::NetlistExecutionProfile::SpectreSpiceV1;
     for extension in ["cir", "scs"] {
         let path = directory.join(format!("export.{extension}"));
         fs::write(&path, source).unwrap();
@@ -239,7 +241,7 @@ fn reviewed_spectre_header_survives_path_based_dependency_expansion() {
             .netlist_descriptor
             .as_mut()
             .unwrap();
-        descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spectre);
+        descriptor.imported_dialect = Some(rspice_app_state::state::NetlistSourceDialect::Spectre);
         descriptor.execution_profile = Some(profile);
         descriptor.compatibility_reviewed = true;
         let mut controller = SimulationController::new();

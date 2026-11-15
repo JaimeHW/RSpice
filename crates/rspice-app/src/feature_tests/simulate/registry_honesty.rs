@@ -16,10 +16,10 @@ use egui::{Pos2, Rect, pos2, vec2};
 
 use super::page_contracts::render_with;
 use super::stage::show_on_stage;
-use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
 use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
 use rspice_app_simulate::workbench::surfaces::simulate::page_specs;
+use rspice_app_state::state::SimulationPage;
 
 /// The routes that resolve a plan payload before drawing a registry, each with
 /// a phrase from its own refusal card and column headings that exist only when
@@ -107,7 +107,7 @@ fn an_empty_registry_over_a_resolvable_plan_still_paints_its_table() {
 /// edited row, not a ledger of digests under it.
 #[test]
 fn a_specification_commit_lands_in_the_plan_log_without_a_receipts_card() {
-    use crate::state::{SpecEntry, SpecPointScope};
+    use rspice_app_state::state::{SpecEntry, SpecPointScope};
 
     let mut last_receipt = None;
     let rendered = render_with(SimulationPage::Specifications, 1200.0, |app| {
@@ -169,7 +169,7 @@ impl Registry {
     /// handler does.
     fn open(page: SimulationPage, mut app: RSpiceApp) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         app.state.simulate.simulation_page = page;
         let mut registry = Self {
@@ -287,8 +287,8 @@ impl Registry {
 /// refused by the workspace's own validation rather than by anything this test
 /// arranges — the exact refusal the page's "Out of bounds · the edit is
 /// refused" rule promises.
-fn bounded_variable() -> crate::state::DesignVariable {
-    use crate::state::{
+fn bounded_variable() -> rspice_app_state::state::DesignVariable {
+    use rspice_app_state::state::{
         DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
         DesignVariableScope, DesignVariableSweepEligibility,
     };
@@ -434,7 +434,7 @@ fn an_accepted_variable_expression_clears_the_draft_it_committed() {
 /// one transaction and so share one outcome.
 #[test]
 fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
-    use crate::state::{
+    use rspice_app_state::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
         SavedOutputPrecision, SavedOutputStreaming,
     };

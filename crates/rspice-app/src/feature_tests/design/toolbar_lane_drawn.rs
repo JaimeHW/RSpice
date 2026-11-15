@@ -8,7 +8,7 @@ use egui::accesskit::{Affine, NodeId, Point as AxPoint, Role, TreeUpdate};
 use egui::{Rect, pos2, vec2};
 
 use crate::feature_tests::replay::{Replay, only};
-use crate::state::{Point, Rotation};
+use rspice_app_state::state::{Point, Rotation};
 
 use super::symbol_in_place::amp_project;
 
@@ -93,13 +93,13 @@ fn assert_no_tool_under_another_in(replay: &mut Replay, window: egui::Vec2) -> V
 
 /// A session with the `amp` symbol placed once on the sheet in front, in a
 /// window 1024 points wide.
-fn amp_at_1024() -> (Replay, crate::state::CellViewRef) {
+fn amp_at_1024() -> (Replay, rspice_app_state::state::CellViewRef) {
     amp_in(WINDOW)
 }
 
 /// A session with the `amp` symbol placed once on the sheet in front, in a
 /// window of the size `window`.
-fn amp_in(window: egui::Vec2) -> (Replay, crate::state::CellViewRef) {
+fn amp_in(window: egui::Vec2) -> (Replay, rspice_app_state::state::CellViewRef) {
     let mut replay = Replay::new().sized(window);
     let (_, symbol, _) = amp_project(
         &mut replay.app,

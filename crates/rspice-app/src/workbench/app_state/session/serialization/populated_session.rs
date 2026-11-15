@@ -12,10 +12,10 @@
 use super::tests::{MemoryStorage, relaunch};
 use super::*;
 
-use crate::state::ModelsPage;
-use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
 use crate::workbench::state::{ConsolePage, Workspace, WorkspaceDocumentId};
+use rspice_app_state::state::ModelsPage;
+use rspice_app_state::state::{SimulationPage, VerificationPage};
 
 /// A session in mid-work with every persisted field moved off its default:
 /// a closed project that left its documents, a run and an unsaved model edit
@@ -40,8 +40,8 @@ pub(super) fn populated_session() -> AppState {
         .rename("Precision AFE")
         .expect("valid project name");
     state.model.schematic.add_component(
-        crate::state::ComponentType::Resistor,
-        crate::state::Point::new(17, 29),
+        rspice_app_state::state::ComponentType::Resistor,
+        rspice_app_state::state::Point::new(17, 29),
     );
     state
         .model
@@ -57,7 +57,10 @@ pub(super) fn populated_session() -> AppState {
         .analysis_plan
         .as_mut()
         .expect("a new session owns a stable plan")
-        .insert_at(crate::simulation::plan::AnalysisKind::OperatingPoint, 0)
+        .insert_at(
+            rspice_app_state::simulation::plan::AnalysisKind::OperatingPoint,
+            0,
+        )
         .expect("an operating point inserts ahead of the transient")
         .0;
     state
@@ -65,7 +68,7 @@ pub(super) fn populated_session() -> AppState {
         .model_library_manager
         .create_project_model(
             "owned-models",
-            &crate::state::model_library::ProjectModelDefinition {
+            &rspice_app_state::state::model_library::ProjectModelDefinition {
                 name: "nch_owned".to_owned(),
                 spice_type: "NMOS".to_owned(),
                 description: "Project model".to_owned(),
@@ -97,21 +100,25 @@ pub(super) fn populated_session() -> AppState {
 
     // One retained run, finished: a run still in flight when the session is
     // saved restores as interrupted.
-    let mut run = crate::state::SimulationRun::new(3);
+    let mut run = rspice_app_state::state::SimulationRun::new(3);
     run.mark_running().expect("a new run starts");
-    run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
+    run.finish_lifecycle(rspice_app_state::state::SimulationRunLifecycle::Completed)
         .expect("a running run completes");
     run.label = "Run 3 (bias sweep)".to_owned();
     run.add_analysis(
-        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![crate::state::RetainedTrace::new(
-                "V(out)",
-                vec![0.0, 1.0, 2.0],
-                vec![0.0, 0.75, 1.5],
-                "#00aaff",
-            )]),
+        rspice_app_state::state::AnalysisResult::new(
+            1,
+            rspice_app_state::state::AnalysisType::Transient,
+            "TRAN",
+        )
+        .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
+            "V(out)",
+            vec![0.0, 1.0, 2.0],
+            vec![0.0, 0.75, 1.5],
+            "#00aaff",
+        )]),
     );
-    run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
+    run.restore_provenance(rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("legacy fixture provenance seals");
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.retained.next_run_id = 3;
@@ -124,7 +131,7 @@ pub(super) fn populated_session() -> AppState {
         crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt {
             canonical_path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
             project_id: project_id.clone(),
-            accepted_digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
+            accepted_digest: rspice_app_state::product::ContentDigest::from_bytes([0x5a; 32]),
         },
     );
     state.platform.browser_project_binding_receipt = Some(
@@ -159,27 +166,33 @@ pub(super) fn populated_session() -> AppState {
 
 /// Every field `UiSessionWire` writes.
 fn populate_ui_session(state: &mut AppState) {
-    state.workbench.theme.density = crate::ui::Density::Relaxed;
+    state.workbench.theme.density = rspice_app_workbench::ui::Density::Relaxed;
     // Grid off, with lines the style a toggle brings back.
-    state.design.set_grid_style(crate::state::GridStyle::Lines);
-    state.design.set_grid_style(crate::state::GridStyle::Off);
+    state
+        .design
+        .set_grid_style(rspice_app_state::state::GridStyle::Lines);
+    state
+        .design
+        .set_grid_style(rspice_app_state::state::GridStyle::Off);
     state.design.schematic_selection_filter.instances = false;
     state.design.schematic_bulk_edit_filters.active.query = "OPA*".to_owned();
     state.design.schematic_visibility.review_markers =
-        crate::state::SchematicReviewMarkerVisibility::All;
+        rspice_app_state::state::SchematicReviewMarkerVisibility::All;
     state.design.drawing_sheet_layers.zones = false;
     state.design.schematic_snap.enabled = false;
-    state.design.schematic_routing_mode = crate::state::WireRoutingMode::FortyFiveDegree;
+    state.design.schematic_routing_mode = rspice_app_state::state::WireRoutingMode::FortyFiveDegree;
     state.design.duplicate_external_nets =
-        crate::state::DuplicateExternalNets::PreserveNamedNetAttachment;
-    let dataset = crate::state::engineering_table::active_schematic_dataset(&Default::default());
-    let view = crate::state::engineering_table::EngineeringTableView::for_dataset(&dataset);
+        rspice_app_state::state::DuplicateExternalNets::PreserveNamedNetAttachment;
+    let dataset =
+        rspice_app_state::state::engineering_table::active_schematic_dataset(&Default::default());
+    let view =
+        rspice_app_state::state::engineering_table::EngineeringTableView::for_dataset(&dataset);
     state
         .design
         .engineering_table_views
         .save(
             "My device view",
-            crate::state::engineering_table::EngineeringViewScope::Personal,
+            rspice_app_state::state::engineering_table::EngineeringViewScope::Personal,
             view,
             true,
             &dataset,
@@ -210,7 +223,7 @@ fn populate_ui_session(state: &mut AppState) {
     state.results.results.session.viewer = rspice_results::result_presentation::ResultViewer::Bode;
     state.results.results.session.eye_timebase.insert(
         rspice_results_ui::eye_diagram::EyeTimebaseKey::Prepared(
-            crate::product::AnalysisInstanceId::new(),
+            rspice_app_state::product::AnalysisInstanceId::new(),
         ),
         rspice_results_ui::eye_diagram::EyeTimebase::Explicit {
             unit_interval: 1e-9,
@@ -223,8 +236,8 @@ fn populate_ui_session(state: &mut AppState) {
 ///
 /// The profile reads through an untyped value, so a value the session
 /// writes in a form that value cannot hold is lost on the way back.
-fn customized_shortcuts() -> crate::state::shortcuts::ShortcutPreferences {
-    use crate::state::shortcuts::{
+fn customized_shortcuts() -> rspice_app_state::state::shortcuts::ShortcutPreferences {
+    use rspice_app_state::state::shortcuts::{
         ChordTimeoutPolicy, CommandShortcutOverride, ContextPrecedencePolicy,
         ProfileShortcutBinding, ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutPreferences,
         ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
@@ -268,7 +281,10 @@ fn customized_shortcuts() -> crate::state::shortcuts::ShortcutPreferences {
 /// Every field the workbench wire persists, on the workbench and on the slots
 /// that own the rest. The model-editor recovery is set by
 /// [`populated_session`], which owns the model it recovers.
-fn populate_workbench(state: &mut AppState, operating_point: crate::product::AnalysisInstanceId) {
+fn populate_workbench(
+    state: &mut AppState,
+    operating_point: rspice_app_state::product::AnalysisInstanceId,
+) {
     let workbench = &mut state.workbench;
     // Navigating records the route, the workspace and the layout left behind,
     // and applies the destination's, so the layout below comes after it.
@@ -304,7 +320,8 @@ fn populate_workbench(state: &mut AppState, operating_point: crate::product::Ana
     state.simulate.verification_page = VerificationPage::Corners;
     state.simulate.simulation_page = SimulationPage::Outputs;
     state.simulate.verification.corner_compare_nominal = true;
-    state.simulate.verification.regression_baseline_run = Some(crate::product::RunId::new());
+    state.simulate.verification.regression_baseline_run =
+        Some(rspice_app_state::product::RunId::new());
     state.models.models_page = ModelsPage::Bins;
     state.models.models_view.catalog_query = "nch".to_owned();
     state.simulate.active_analysis = 3;
@@ -312,16 +329,16 @@ fn populate_workbench(state: &mut AppState, operating_point: crate::product::Ana
     state.simulate.selected_specification = Some("gain".to_owned());
     state.simulate.selected_design_variable = Some("rload".to_owned());
     state.simulate.selected_saved_output = Some("vout".to_owned());
-    state.simulate.selected_capture_group = Some(crate::product::CaptureGroupId::new());
+    state.simulate.selected_capture_group = Some(rspice_app_state::product::CaptureGroupId::new());
     state.simulate.selected_run_set_dimension = Some("temperature".to_owned());
     state.models.selected_model = Some("nch".to_owned());
     state
         .code
         .netlist_outline_collapsed
-        .insert(crate::state::OutlineSectionKind::Parameters);
+        .insert(rspice_app_state::state::OutlineSectionKind::Parameters);
     workbench.command_query = "probe".to_owned();
     state.hardcopy.report_authoring.selected_document =
-        Some(crate::product::ResultDocumentId::new());
+        Some(rspice_app_state::product::ResultDocumentId::new());
 }
 
 /// `state` as a restore leaves it before anything else is read back.

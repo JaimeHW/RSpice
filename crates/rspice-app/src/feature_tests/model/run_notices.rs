@@ -1,11 +1,5 @@
 //! `workbench/app_state/diagnostic_store/run_notices` observed through a whole session.
 
-use crate::diagnostics::LogAnchor;
-use crate::state::CellViewRef;
-use crate::state::{
-    Cell, Component, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
-    ViewType,
-};
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
 use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
@@ -13,6 +7,12 @@ use crate::workbench::app_state::diagnostic_store::DiagnosticRecord;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::app_state::diagnostic_store::run_notices::*;
 use crate::workbench::app_state::diagnostic_store::{BatchStanding, listing};
+use rspice_app_state::diagnostics::LogAnchor;
+use rspice_app_state::state::CellViewRef;
+use rspice_app_state::state::{
+    Cell, Component, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
+    ViewType,
+};
 use rspice_core::ContinuationAid;
 use rspice_core::notice::BoundarySupplyKind;
 use rspice_core::notice::EngineNotice;
@@ -27,7 +27,7 @@ fn open_state(runs: &[u64]) -> AppState {
     state.open_project_session();
     state.model.simulation.retained.runs = runs
         .iter()
-        .map(|run| crate::state::SimulationRun::new(*run))
+        .map(|run| rspice_app_state::state::SimulationRun::new(*run))
         .collect::<Vec<_>>()
         .into();
     state

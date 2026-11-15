@@ -5,17 +5,19 @@
 //! session, a session restored from its own serialization, or a Monte Carlo
 //! checkpoint a run completed.
 
-use crate::io::project_io::fixtures::{project_with_execution_context, seal_prepared_run};
-use crate::io::project_io::*;
-use crate::product::ObjectRevision;
-use crate::state::{
+use crate::workbench::app_state::AppState;
+use rspice_app_services::io::project_io::fixtures::{
+    project_with_execution_context, seal_prepared_run,
+};
+use rspice_app_services::io::project_io::*;
+use rspice_app_state::product::ObjectRevision;
+use rspice_app_state::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, Cell, CellViewRef, LayoutEdit,
     LayoutInstance, LayoutObjectId, LayoutOrientation, LayoutPoint, LayoutTransform,
     PreparedSourceCheckReceipt, SimulationRun, SimulationRunLifecycle, SimulationState, View,
     ViewType,
 };
-use crate::state::{LibraryManager, ProjectWorkspace};
-use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{LibraryManager, ProjectWorkspace};
 use rspice_results::provenance::AnalysisResultSourceDomain;
 use rspice_vocabulary::hierarchy_path::InstancePath;
 use rspice_vocabulary::product::ContentDigest;

@@ -4,8 +4,8 @@
 //! resolved user defaults only at the runtime boundaries that can safely
 //! consume them without mutating stored project data.
 
-use crate::time_compat::Instant;
 use crate::workbench::app::RSpiceApp;
+use rspice_app_state::time_compat::Instant;
 
 impl RSpiceApp {
     /// Check the drawing in front of the reader against the live rules once
@@ -40,7 +40,7 @@ impl RSpiceApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{ComponentType, Point};
+    use rspice_app_state::state::{ComponentType, Point};
     use std::time::Duration;
 
     /// How long the frame that ran at `now` asks the next one to wait.

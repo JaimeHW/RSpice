@@ -17,7 +17,6 @@
 //! shortcut profile or Repeat reaches one of those.
 
 use crate::schematic::view::{DesignSurfaceRequest, SelectProbedTrace};
-use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::actions::workspace::HistoryDirection;
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app_state::PlatformState;
@@ -56,6 +55,7 @@ use rspice_app_code::workbench::code::commands::{
 use rspice_app_code::workbench::code::requests as code_requests;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use rspice_app_hardcopy::workbench::hardcopy;
+use rspice_app_state::state::command_catalog::CommandKey;
 
 /// The dispatcher by key: where a key becomes the command it names, a
 /// feature's first and the shell's legacy table's otherwise.
@@ -621,7 +621,7 @@ pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u
     }
     state.prompt(format!(
         "The source Run {sequence} executed cannot be opened: {}.",
-        crate::state::absent_deck_reason()
+        rspice_app_state::state::absent_deck_reason()
     ));
     false
 }
@@ -730,9 +730,9 @@ impl Command {
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::state::command_catalog::CommandCatalog;
     use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
     use crate::workbench::design::commands::DesignCommand;
+    use rspice_app_state::state::command_catalog::CommandCatalog;
 
     fn variant(command: Command) -> String {
         let name = format!("{command:?}");
@@ -815,12 +815,12 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn run_on_the_netlist_workspace_runs_the_deck_and_not_the_plan() {
-        use crate::state::SimulationRunIntent;
         use crate::workbench::RSpiceApp;
         use crate::workbench::features::cx;
         use crate::workbench::framework::command_registry::{CommandAvailability, ids};
         use crate::workbench::state::Workspace;
         use rspice_app_code::workbench::code::netlist_validation::validate_visible_netlist_source;
+        use rspice_app_state::state::SimulationRunIntent;
 
         let mut app = RSpiceApp::test_instance();
         app.state

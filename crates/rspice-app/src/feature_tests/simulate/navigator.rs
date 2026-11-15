@@ -30,7 +30,7 @@ fn navigator_painted_lines(width: f32, mut app: RSpiceApp) -> Vec<(String, egui:
     }
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -172,7 +172,7 @@ fn run_set_card_states_the_unit_of_a_quantity_axis() {
 /// Built and returned rather than seeded into an app handed in, so the fixture
 /// costs the whole-application-access ratchet nothing.
 fn hierarchical_design() -> RSpiceApp {
-    use crate::state::{
+    use rspice_app_state::state::{
         CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point, SchematicState,
         View, ViewType,
     };
@@ -248,7 +248,7 @@ fn hierarchical_design() -> RSpiceApp {
 /// design was offered `1` on the way into a heading reading `DESIGN · 3
 /// sources` — two answers to one question, a click apart, with nothing to tell
 /// a reader which one the run has. Both are now
-/// [`whole_design_source_count`](crate::simulation::placed_sources::whole_design_source_count),
+/// [`whole_design_source_count`](rspice_app_state::simulation::placed_sources::whole_design_source_count),
 /// and the page lists exactly what that count is the length of
 /// (`workbench/surfaces/simulate/pages.rs`, whose own pin asserts the heading
 /// text against this design shape).
@@ -259,11 +259,13 @@ fn the_excitations_rail_counts_the_design_that_the_page_it_opens_lists() {
     app.state.workbench.activate(Workspace::Simulate);
 
     assert_eq!(
-        crate::simulation::placed_sources::placed_source_count(&app.state.model.schematic),
+        rspice_app_state::simulation::placed_sources::placed_source_count(
+            &app.state.model.schematic
+        ),
         1,
         "the sheet in front of the reader places one supply and two instances"
     );
-    let listed = crate::simulation::placed_sources::whole_design_excitations(
+    let listed = rspice_app_state::simulation::placed_sources::whole_design_excitations(
         &app.state.model.library_manager,
         &app.state.model.workspace,
         &app.state.model.schematic,

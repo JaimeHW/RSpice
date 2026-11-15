@@ -1,7 +1,6 @@
 //! The source editor's menu through the whole application: the commands the
 //! code feature reads, and the rows a page's context reads once it has drawn.
 
-use crate::state::command_catalog::CommandPlatform;
 use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 use crate::workbench::documents::netlist_document::{
     ActiveNetlistDocument, open_run_deck_snapshot_in,
@@ -16,6 +15,7 @@ use rspice_app_code::workbench::code::CodeFeature;
 use rspice_app_code::workbench::surfaces::netlist::fixtures::seal_manual_run;
 use rspice_app_code::workbench::surfaces::netlist::source_menu::SourceMenuLookup;
 use rspice_app_code::workbench::surfaces::netlist::{prepare_workspace, show_prepared};
+use rspice_app_state::state::command_catalog::CommandPlatform;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{
     menu_keys, resolve_menu_rows,
 };
@@ -85,7 +85,7 @@ fn deck_page(page: DeckPage, project_open: bool) -> RSpiceApp {
 /// its menu is closed.
 fn draw(app: &mut RSpiceApp) {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let _ = ctx.run_ui(Default::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             show_prepared(ui, &mut features::cx_with_menu_answers(app, |_| false));
@@ -165,9 +165,9 @@ fn automation_page(path: Option<&str>, read_only: bool) -> RSpiceApp {
     app.state.code.code_workspace.automation.selected_file = path.map(str::to_owned);
     if read_only {
         app.state.model.safe_mode.activate(
-            crate::state::write_policy::LocalSafeModeOptions {
+            rspice_app_state::state::write_policy::LocalSafeModeOptions {
                 open_project_read_only: true,
-                ..crate::state::write_policy::LocalSafeModeOptions::default()
+                ..rspice_app_state::state::write_policy::LocalSafeModeOptions::default()
             },
             String::new(),
         );
@@ -179,7 +179,7 @@ fn automation_page(path: Option<&str>, read_only: bool) -> RSpiceApp {
 /// while its menu is closed.
 fn draw_automation(app: &mut RSpiceApp) {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let _ = ctx.run_ui(Default::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             rspice_app_code::workbench::surfaces::automation::show(

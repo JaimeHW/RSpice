@@ -63,7 +63,7 @@ fn dock_app() -> RSpiceApp {
 /// A retained AC run with three measurements, made the active result, and
 /// a line in the session log: what the dock's other pages list.
 fn measured_run(state: &mut AppState) {
-    use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+    use rspice_app_state::state::{AnalysisResult, AnalysisType, SimulationRun};
     let analysis = AnalysisResult::new(1, AnalysisType::Ac, "AC").with_measurements(vec![
         rspice_core::MeasureResult::success("gain", 42.0),
         rspice_core::MeasureResult::success("phase_margin", 61.5),
@@ -73,10 +73,10 @@ fn measured_run(state: &mut AppState) {
     run.add_analysis(analysis);
     state.model.simulation.retained.runs.push(run);
     state.model.simulation.view.active_run_idx = Some(0);
-    state
-        .model
-        .log_buffer
-        .warning(crate::diagnostics::LogSource::Run, "a session warning");
+    state.model.log_buffer.warning(
+        rspice_app_state::diagnostics::LogSource::Run,
+        "a session warning",
+    );
 }
 
 /// At every dock height from the least a reader can drag it to, nothing the
@@ -138,20 +138,21 @@ fn nothing_in_the_dock_is_cut_at_any_height() {
         app.state.workbench.console_height = height;
         let layout = LayoutSpec::resolve(width, 900.0, &app.state.workbench);
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let size = egui::vec2(width, height);
         let mut output = None;
         for _ in 0..3 {
-            output = Some(
-                ctx.run_ui(crate::ui::raster::display_input(size, 1.0), |ui| {
+            output = Some(ctx.run_ui(
+                rspice_app_workbench::ui::raster::display_input(size, 1.0),
+                |ui| {
                     rspice_app_workbench::workbench::docks::synchronize_panel_memory(
                         ui.ctx(),
                         &app,
                         layout,
                     );
                     rspice_app_workbench::workbench::docks::show_console(ui, &mut app, layout);
-                }),
-            );
+                },
+            ));
         }
         let mut drawn = Vec::new();
         for clipped in &output.expect("the dock was drawn").shapes {

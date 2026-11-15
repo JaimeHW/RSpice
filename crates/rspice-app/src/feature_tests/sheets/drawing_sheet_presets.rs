@@ -6,11 +6,6 @@ use rspice_design_model::sheet_package::{
     encode_package_with_format,
 };
 
-use crate::state::{
-    AuthoredDrawingSheetSize, DesignManagementCatalog, DrawingSheetPreset,
-    DrawingSheetPresetImportMappingKind, DrawingSheetPresetImportSkipReason,
-    DrawingSheetPresetScope,
-};
 use crate::workbench::DrawingSheetPersonalPreferences;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -21,6 +16,11 @@ use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_presets::render::{
     LibraryBodyAction, PresetKey,
 };
 use rspice_app_sheets::workbench::app::dialogs::drawing_sheet_presets::*;
+use rspice_app_state::state::{
+    AuthoredDrawingSheetSize, DesignManagementCatalog, DrawingSheetPreset,
+    DrawingSheetPresetImportMappingKind, DrawingSheetPresetImportSkipReason,
+    DrawingSheetPresetScope,
+};
 
 /// The custom sheet size dialogs over the parts of `state`.
 fn preset_dialogs(state: &mut AppState) -> PresetDialogs<'_> {
@@ -130,7 +130,7 @@ fn personal_default_counts_as_a_preset_reference() {
     let mut personal = DrawingSheetPersonalPreferences {
         default_format: format
             .try_update(|draft| {
-                draft.inheritance = crate::state::DrawingSheetInheritance::UserDefault;
+                draft.inheritance = rspice_app_state::state::DrawingSheetInheritance::UserDefault;
             })
             .unwrap(),
         presets: vec![preset],
@@ -311,14 +311,14 @@ fn an_empty_library_is_light_on_the_light_theme() {
         .preferences
         .set_toggle(TogglePreference::ReducedMotion, true);
     app.state.open_project_session();
-    app.state.workbench.theme.mode = crate::ui::Mode::Light;
+    app.state.workbench.theme.mode = rspice_app_workbench::ui::Mode::Light;
     assert!(open_custom_sheet_size_library(
         &mut app.state.sheets.drawing_sheet_presets,
         &app.state.model
     ));
     let size = egui::vec2(1440.0, 900.0);
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut frame = eframe::Frame::_new_kittest();
     let mut output = None;
     for index in 0..4u32 {
@@ -343,7 +343,7 @@ fn an_empty_library_is_light_on_the_light_theme() {
             _ => None,
         })
         .expect("the empty library says it is empty");
-    let canvas = crate::ui::raster::rasterize(&ctx, size, &output);
+    let canvas = rspice_app_workbench::ui::raster::rasterize(&ctx, size, &output);
     // Either side of the message, on the band it sits on.
     let y = message.center().y as usize;
     for x in [message.left() - 120.0, message.right() + 120.0] {

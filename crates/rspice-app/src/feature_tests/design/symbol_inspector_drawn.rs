@@ -1,13 +1,13 @@
 //! The symbol inspector's fields drawn through a whole application: undo grouping and
 //! stale document or selection targets.
 
-use crate::state::{
-    Cell, CellViewRef, Library, Point, SymbolDocument, SymbolEditorMetadata, SymbolShape, View,
-    ViewType,
-};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::actions::workspace::symbol_document::active_symbol_label_parameters;
 use crate::workbench::design::inspector::symbol::*;
+use rspice_app_state::state::{
+    Cell, CellViewRef, Library, Point, SymbolDocument, SymbolEditorMetadata, SymbolShape, View,
+    ViewType,
+};
 use rspice_design::symbol::{
     SymbolDash, SymbolFill, SymbolStroke, SymbolStyle, SymbolTextAlign, SymbolTextRotation,
     SymbolTextSize,
@@ -300,7 +300,7 @@ fn unfinished_symbol_field_does_not_follow_a_different_selection_or_view() {
 /// side.
 #[test]
 fn each_pin_row_changes_only_its_own_field() {
-    use crate::state::{PortDirection, SymbolPin, SymbolPinSide};
+    use rspice_app_state::state::{PortDirection, SymbolPin, SymbolPinSide};
     use rspice_design_model::symbol_pin::SymbolPinStyle;
     let mut editor = Editor::new();
     let mut document = editor
@@ -708,7 +708,7 @@ pub(crate) struct Editor {
 impl Editor {
     pub(crate) fn new() -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         let state = &mut app.state;

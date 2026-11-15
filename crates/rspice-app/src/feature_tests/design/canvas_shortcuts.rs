@@ -4,17 +4,17 @@
 
 use crate::schematic::symbol_editor::symbol_canvas_accessibility_label;
 use crate::schematic::view::{canvas_accessibility_view, schematic_accessibility_shortcuts};
-use crate::state::{
-    Component, ComponentType, Point, PortDirection, SymbolDocument, SymbolPin, SymbolShape,
-};
 use crate::workbench::SymbolTool;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::command_registry;
+use rspice_app_state::state::{
+    Component, ComponentType, Point, PortDirection, SymbolDocument, SymbolPin, SymbolShape,
+};
 use rspice_schematic_editor::view::canvas;
 
 #[test]
 fn accessibility_description_summarizes_scene_and_tool_without_selection_churn() {
-    use crate::state::{Junction, NetLabel, Wire};
+    use rspice_app_state::state::{Junction, NetLabel, Wire};
 
     let mut state = AppState::default();
     state
@@ -47,10 +47,10 @@ fn accessibility_description_summarizes_scene_and_tool_without_selection_churn()
         .document_mut_for_test()
         .design_notes
         .push(
-            crate::state::DesignNote::new(
+            rspice_app_state::state::DesignNote::new(
                 5,
                 Point::new(20, 10),
-                crate::state::DesignNoteKind::PlainText,
+                rspice_app_state::state::DesignNoteKind::PlainText,
                 "Bias network",
             )
             .unwrap(),
@@ -62,14 +62,14 @@ fn accessibility_description_summarizes_scene_and_tool_without_selection_churn()
         .editor
         .selection
         .select_component(1);
-    state.model.schematic.session.editor.tool = crate::state::Tool::Wire;
+    state.model.schematic.session.editor.tool = rspice_app_state::state::Tool::Wire;
 
     let description = canvas::accessibility_description(
         &canvas_accessibility_view(&state.canvas_facts()),
         &schematic_accessibility_shortcuts(
             &state.model,
             command_registry(),
-            crate::state::command_catalog::CommandPlatform::Desktop,
+            rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
         ),
     );
@@ -100,7 +100,7 @@ fn accessibility_description_summarizes_scene_and_tool_without_selection_churn()
             &schematic_accessibility_shortcuts(
                 &state.model,
                 command_registry(),
-                crate::state::command_catalog::CommandPlatform::Desktop,
+                rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
                 egui::os::OperatingSystem::Windows,
             )
         ),
@@ -135,7 +135,7 @@ fn symbol_canvas_accessibility_label_reports_editing_contract() {
         &document,
         &state.canvas_facts(),
         false,
-        crate::state::command_catalog::CommandPlatform::Desktop,
+        rspice_app_state::state::command_catalog::CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
     );
 

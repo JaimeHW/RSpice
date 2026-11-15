@@ -19,8 +19,8 @@ use super::diagnostic_store::{BatchStanding, DiagnosticBatch};
 #[cfg(test)]
 use super::diagnostic_store::{DiagnosticInputs, DiagnosticRecord};
 use super::{AppState, Model, SlotFacts};
-use crate::state::CellViewRef;
-use crate::time_compat::Instant;
+use rspice_app_state::state::CellViewRef;
+use rspice_app_state::time_compat::Instant;
 
 /// The model a session holds, for the operations that read nothing else and
 /// take any holder of it.
@@ -64,7 +64,7 @@ impl AppState {
         &mut self,
         analysis: &str,
         message: &str,
-        attribution: Option<&crate::state::ConvergenceAttribution>,
+        attribution: Option<&rspice_app_state::state::ConvergenceAttribution>,
         run_sequence: u64,
     ) {
         let facts = self.slot_facts();
@@ -75,10 +75,10 @@ impl AppState {
     #[cfg(test)]
     pub(crate) fn publish_campaign_member_refusal(
         &mut self,
-        campaign: crate::product::SimulationCampaignId,
+        campaign: rspice_app_state::product::SimulationCampaignId,
         member_index: u32,
         member: &str,
-        refusal: crate::state::CampaignMemberRefusal,
+        refusal: rspice_app_state::state::CampaignMemberRefusal,
         error: &str,
     ) {
         let facts = self.slot_facts();
@@ -99,7 +99,10 @@ impl AppState {
     }
 
     #[cfg(test)]
-    pub(crate) fn publish_dispatch_diagnostics(&mut self, report: &crate::state::PreflightReport) {
+    pub(crate) fn publish_dispatch_diagnostics(
+        &mut self,
+        report: &rspice_app_state::state::PreflightReport,
+    ) {
         let facts = self.slot_facts();
         self.model.publish_dispatch_diagnostics(report, facts);
     }

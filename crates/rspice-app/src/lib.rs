@@ -46,71 +46,12 @@
 /// Application binding for schematic and symbol editors.
 pub(crate) use rspice_app_design::schematic;
 
-pub(crate) mod simulation {
-    //! The state tier's simulation modules and the run tier's controller, at
-    //! the paths the shell's not-yet-moved readers still name. Every other
-    //! reader names the owning crate's module.
-
-    #[cfg(test)]
-    pub(crate) use rspice_app_state::simulation::placed_sources;
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) use rspice_app_state::simulation::plan;
-    #[cfg(test)]
-    pub(crate) use rspice_app_state::simulation::stimulus_realize;
-    #[cfg(test)]
-    pub(crate) use rspice_app_state::simulation::table_route;
-
-    pub use rspice_app_runs::simulation::controller::SimulationController;
-}
-
 /// Project-bound property editing workflows.
 pub(crate) use rspice_app_design::properties;
-
-/// Shared UI kit exports used by application presentation.
-pub(crate) use rspice_app_workbench::ui;
 
 /// The contract-driven application workbench. This is the only owner of
 /// application chrome, responsive composition, and top-level navigation.
 pub(crate) mod workbench;
-
-/// Shared product identity and outcome vocabulary.
-pub(crate) use rspice_app_state::product;
-
-/// Strict project-scoped Automation/CI workflow language and deterministic
-/// evidence artifact rendering. This domain is UI-framework independent.
-use rspice_app_services::automation_runtime;
-
-// =============================================================================
-// Core Infrastructure
-// =============================================================================
-
-pub(crate) mod services {
-    //! The service modules at the paths the shell's not-yet-moved readers
-    //! still name, and the design rule checks' tests. Every other reader names
-    //! the owning crate's module.
-
-    pub(crate) use rspice_app_cloud::services::license;
-    pub(crate) use rspice_app_services::services::model_hub;
-}
-
-/// Application file workflows and platform I/O adapters.
-pub(crate) use rspice_app_services::io;
-
-/// Application-held domain owners and session adapters.
-pub(crate) use rspice_app_state::state;
-
-/// Unit-safe user presentation and UI quantity-input policy. Values entering
-/// or leaving this module are always expressed in their documented SI base
-/// units; deck dialect and PDK database-unit semantics live elsewhere.
-pub(crate) use rspice_app_state::quantity;
-
-/// Diagnostics the application reports about itself: the console message
-/// model and the structured, filterable application log.
-pub(crate) use rspice_app_state::diagnostics;
-
-/// Clock shims for the browser build. `std::time::{Instant, SystemTime}` trap
-/// at runtime on wasm32-unknown-unknown, so every layer uses these instead.
-pub(crate) use rspice_app_state::time_compat;
 
 /// Locating the production half of a source file that inspects itself, for the
 /// guards that assert their own shipped code takes no panic shortcuts.
@@ -139,10 +80,10 @@ pub use workbench::RSpiceApp;
 pub use workbench::logging::install_studio_logger;
 
 /// Typed identities, for `tests/simulation_configuration_contract.rs`.
-pub use product::{AnalysisInstanceId, SimulationPlanId};
+pub use rspice_app_state::product::{AnalysisInstanceId, SimulationPlanId};
 
 /// The persisted project model the configuration contract exercises.
-pub use state::{
+pub use rspice_app_state::state::{
     CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
     DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility, ProjectWorkspace,
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,

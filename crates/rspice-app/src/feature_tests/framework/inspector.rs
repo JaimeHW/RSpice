@@ -4,14 +4,14 @@
 //! `documents/result_document/axis_range.rs`. Scroll memory is per subject and
 //! bounded, so two schematic subjects cannot inherit each other's offset.
 
-use crate::state::{Component, ComponentType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::inspector::bind_component_model_from_catalog;
 use crate::workbench::docks::inspector::*;
 use crate::workbench::state::Workspace;
+use rspice_app_state::state::{Component, ComponentType};
 
 fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
-    use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+    use rspice_app_state::state::model_library::{DeviceModel, ModelLibrary, ModelType};
     let mut app = RSpiceApp::test_instance();
     app.state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("models");
@@ -23,11 +23,10 @@ fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
         .document_mut_for_test()
         .components
         .clear();
-    let id = app
-        .state
-        .model
-        .schematic
-        .add_component(ComponentType::Diode, crate::state::Point::origin());
+    let id = app.state.model.schematic.add_component(
+        ComponentType::Diode,
+        rspice_app_state::state::Point::origin(),
+    );
     app.state.model.schematic.document_mut_for_test().components[0].params = params.to_owned();
     app.state.model.schematic.clear_undo_history();
     app.state.model.schematic.session.is_dirty = false;
@@ -38,7 +37,7 @@ fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
 /// every bin suits the instance: any of them may be the one its size selects.
 #[test]
 fn catalog_binding_binds_a_binned_family_whose_every_bin_suits_the_instance() {
-    use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+    use rspice_app_state::state::model_library::{DeviceModel, ModelLibrary, ModelType};
     let mut app = RSpiceApp::test_instance();
     app.state.model.model_library_manager.clear();
     let mut kit = ModelLibrary::new("kit");
@@ -54,16 +53,14 @@ fn catalog_binding_binds_a_binned_family_whose_every_bin_suits_the_instance() {
         .document_mut_for_test()
         .components
         .clear();
-    let nmos = app
-        .state
-        .model
-        .schematic
-        .add_component(ComponentType::Nmos, crate::state::Point::origin());
-    let pmos = app
-        .state
-        .model
-        .schematic
-        .add_component(ComponentType::Pmos, crate::state::Point::new(200, 0));
+    let nmos = app.state.model.schematic.add_component(
+        ComponentType::Nmos,
+        rspice_app_state::state::Point::origin(),
+    );
+    let pmos = app.state.model.schematic.add_component(
+        ComponentType::Pmos,
+        rspice_app_state::state::Point::new(200, 0),
+    );
 
     let refusal = validate_component_model_catalog_binding(&app.state.model, pmos, "kit", "nch")
         .expect_err("an NMOS family does not suit a PMOS instance");
@@ -152,7 +149,9 @@ fn catalog_binding_resolves_the_pending_inspector_draft_before_model_publication
 
 #[test]
 fn catalog_binding_uses_the_resolved_project_global_provider() {
-    use crate::state::model_library::{DeviceModel, ModelConsumerScope, ModelLibrary, ModelType};
+    use rspice_app_state::state::model_library::{
+        DeviceModel, ModelConsumerScope, ModelLibrary, ModelType,
+    };
 
     let mut app = RSpiceApp::test_instance();
     app.state.model.model_library_manager.clear();
@@ -181,14 +180,14 @@ fn catalog_binding_uses_the_resolved_project_global_provider() {
             Component::new(
                 component_id,
                 ComponentType::Diode,
-                crate::state::Point::origin(),
+                rspice_app_state::state::Point::origin(),
             )
             .with_name_value("D9001", ""),
         );
 
     bind_component_model_from_catalog(&mut app.design_cx(), component_id, "beta", "shared_diode")
         .expect("resolved provider binds");
-    let params = crate::state::parse_params_string(
+    let params = rspice_app_state::state::parse_params_string(
         &app.state
             .model
             .schematic
@@ -220,7 +219,7 @@ fn catalog_binding_uses_the_resolved_project_global_provider() {
 
 #[test]
 fn catalog_binding_rejects_an_incompatible_primitive_without_mutation() {
-    use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+    use rspice_app_state::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 
     let mut app = RSpiceApp::test_instance();
     app.state.model.model_library_manager.clear();
@@ -237,7 +236,7 @@ fn catalog_binding_rejects_an_incompatible_primitive_without_mutation() {
             Component::new(
                 component_id,
                 ComponentType::Resistor,
-                crate::state::Point::origin(),
+                rspice_app_state::state::Point::origin(),
             )
             .with_name_value("R9002", "1k"),
         );
@@ -281,7 +280,7 @@ fn catalog_binding_rejects_an_incompatible_primitive_without_mutation() {
 #[test]
 fn inspector_header_exposes_its_workspace_heading() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
@@ -309,11 +308,10 @@ fn inspector_header_exposes_its_workspace_heading() {
 fn schematic_subjects_do_not_share_inspector_scroll_state() {
     let mut app = RSpiceApp::test_instance();
     let sheet = inspector_scroll_identity(&app);
-    let component_id = app
-        .state
-        .model
-        .schematic
-        .add_component(ComponentType::Resistor, crate::state::Point::new(10, 10));
+    let component_id = app.state.model.schematic.add_component(
+        ComponentType::Resistor,
+        rspice_app_state::state::Point::new(10, 10),
+    );
     app.state
         .model
         .schematic

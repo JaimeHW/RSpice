@@ -1,12 +1,12 @@
 //! Replacing an instance, drawn through a whole application.
 
-use crate::state::ComponentType;
-use crate::state::Point;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::replace_instance::*;
 use crate::workbench::app::open_replace_instance_dialog;
 use crate::workbench::app_state::AppState;
 use egui::Context;
+use rspice_app_state::state::ComponentType;
+use rspice_app_state::state::Point;
 
 /// Replace instance is a wide command form: Current, a pick list of the
 /// masters that can stand in (not a free-text field), and the mapping
@@ -35,7 +35,7 @@ fn replace_instance_is_a_command_form_with_a_pick_list_and_a_mapping_table() {
     );
 
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut nodes = Vec::new();
     for _ in 0..2 {

@@ -3,16 +3,16 @@
 use std::collections::HashMap;
 
 use super::session_of;
-use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
-use crate::state::{SimulationRunIntent, SpecificationDefinition};
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_runs::simulation::controller::prepared_run::fixtures::{definition, runnable_state};
 use rspice_app_runs::simulation::controller::test_execution::run_resolved_task;
+use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
+use rspice_app_state::state::{SimulationRunIntent, SpecificationDefinition};
 use rspice_simulation_contract::config::AnalysisConfig;
 
 #[test]
 fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
-    use crate::state::workspace::MeasurementReferenceSource;
+    use rspice_app_state::state::workspace::MeasurementReferenceSource;
     use rspice_simulation::execution::PreparedRunAuthorization;
     let mut state = session_of(runnable_state());
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
@@ -55,8 +55,8 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
             .unwrap();
     let source = snapshot.executable_netlist().to_owned();
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    let loaded = crate::io::project_io::load_project_text(
-        &crate::io::project_io::serialize_project_file(&project).unwrap(),
+    let loaded = rspice_app_services::io::project_io::load_project_text(
+        &rspice_app_services::io::project_io::serialize_project_file(&project).unwrap(),
         None,
     )
     .unwrap();
@@ -236,8 +236,8 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         assert_eq!(observed.passed, name != "average");
     }
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
-    let json = crate::io::project_io::serialize_project_file(&project).unwrap();
-    let loaded = crate::io::project_io::load_project_text(&json, None).unwrap();
+    let json = rspice_app_services::io::project_io::serialize_project_file(&project).unwrap();
+    let loaded = rspice_app_services::io::project_io::load_project_text(&json, None).unwrap();
     assert_eq!(
         loaded
             .file

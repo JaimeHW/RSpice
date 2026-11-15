@@ -10,7 +10,7 @@ use rspice_app_project::workbench::surfaces::project::library::builtin_models::{
 /// The band's text for `state` on a page `width` wide.
 fn band_text(state: &AppState, width: f32) -> Vec<String> {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let input = || egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,

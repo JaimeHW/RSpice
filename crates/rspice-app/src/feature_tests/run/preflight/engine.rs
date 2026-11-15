@@ -48,7 +48,7 @@ pub(super) fn enable_only(state: &mut AppState, kinds: &[RunSetDimensionKind]) {
 }
 
 pub(super) fn add_operating_point(state: &mut AppState) {
-    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+    use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
     let plan = state
         .model
         .sim_setup
@@ -56,7 +56,7 @@ pub(super) fn add_operating_point(state: &mut AppState) {
         .expect("a default state owns a stable plan");
     let position = plan.instances().len();
     plan.insert_draft_with_id(
-        crate::product::AnalysisInstanceId::new(),
+        rspice_app_state::product::AnalysisInstanceId::new(),
         AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
         true,
         position,
@@ -79,8 +79,8 @@ pub(super) fn inverter_on_binned_pdk(models: Vec<u8>) -> RSpiceApp {
         .provision_test_project_technology_with_models(models);
     for component in &mut app.state.model.schematic.document_mut_for_test().components {
         match component.kind {
-            crate::state::ComponentType::Nmos => component.value = "nch".to_owned(),
-            crate::state::ComponentType::Pmos => component.value = "pch".to_owned(),
+            rspice_app_state::state::ComponentType::Nmos => component.value = "nch".to_owned(),
+            rspice_app_state::state::ComponentType::Pmos => component.value = "pch".to_owned(),
             _ => {}
         }
     }
@@ -139,7 +139,7 @@ fn a_transistor_outside_its_bins_at_one_corner_is_refused_there_on_the_drawn_dev
         issue.remediation,
         PreflightRemediation::Drawing {
             cell_view: root.clone(),
-            object: crate::state::DrawnObject::Component {
+            object: rspice_app_state::state::DrawnObject::Component {
                 id: pull_down,
                 name: "MN".to_owned(),
             },
@@ -173,8 +173,10 @@ fn a_transistor_outside_its_bins_at_one_corner_is_refused_there_on_the_drawn_dev
 /// executes Verilog-A views. The design's connect rules are a model library
 /// bound to the plan: the shipped connect modules, and `rule_blocks`.
 /// Returns the app, the root and the device's id.
-fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellViewRef, u64) {
-    use crate::state::{
+fn app_with_a_moded_device(
+    rule_blocks: &str,
+) -> (RSpiceApp, rspice_app_state::state::CellViewRef, u64) {
+    use rspice_app_state::state::{
         Cell, CellViewRef, ComponentType, Library, LibraryCellInstance, Point, ProjectSourceBundle,
         ProjectSourceLanguage, ProjectSourceOwner, View, ViewType,
     };
@@ -316,18 +318,18 @@ fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellV
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: "Behavioral".to_owned(),
             root: top.clone(),
             dut_path: "/XS".to_owned(),
             executable_view_policy: vec!["veriloga".to_owned()],
             stop_views: vec!["veriloga".to_owned()],
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "Behavioral design".to_owned(),
         })
         .expect("the executable configuration");
@@ -366,7 +368,7 @@ fn a_crossing_the_connect_rules_cannot_bridge_is_shown_on_the_device() {
         panic!("the finding is located on the drawing: {crossing:?}");
     };
     assert_eq!(cell_view, &top);
-    let crate::state::DrawnObject::Component { id, .. } = object else {
+    let rspice_app_state::state::DrawnObject::Component { id, .. } = object else {
         panic!("the finding names the device: {crossing:?}");
     };
     assert_eq!(*id, placed);
@@ -431,7 +433,7 @@ fn two_connect_rule_blocks_are_refused_until_the_plan_names_one() {
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
         app.state.simulate.simulation_page,
-        crate::state::SimulationPage::Solver,
+        rspice_app_state::state::SimulationPage::Solver,
         "the finding opens the page where the block is named"
     );
 }
@@ -442,7 +444,7 @@ fn two_connect_rule_blocks_are_refused_until_the_plan_names_one() {
 fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusal() {
     let (mut app, _, _) = app_with_a_moded_device(TWO_RULE_BLOCKS);
     let unnamed_deck =
-        crate::simulation::SimulationController::prepare_design_netlist_for_inspection(
+        rspice_app_runs::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
             &app.state.model,
         )
         .expect("the design netlists");
@@ -458,7 +460,7 @@ fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusa
         .sim_setup
         .commit_active_plan_configuration_change("Updated simulation solver options.")
         .expect("the plan takes the block");
-    let deck = crate::simulation::SimulationController::prepare_design_netlist_for_inspection(
+    let deck = rspice_app_runs::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
         &app.state.model,
     )
     .expect("the design netlists");
@@ -486,9 +488,9 @@ fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusa
 /// (0, 30), placed once as `XAMP` in the configured root with `VSS` on
 /// ground. The root is left open, with an operating point in its plan.
 fn app_with_an_amp_instance(
-    draw: impl FnOnce(&mut crate::state::SchematicState),
-) -> (RSpiceApp, crate::state::CellViewRef) {
-    use crate::state::{
+    draw: impl FnOnce(&mut rspice_app_state::state::SchematicState),
+) -> (RSpiceApp, rspice_app_state::state::CellViewRef) {
+    use rspice_app_state::state::{
         Cell, CellViewRef, ComponentType, LibraryCellInstance, PendingPortPlacement, Point,
         PortDirectionType, PortDiscipline, View, ViewType,
     };
@@ -568,10 +570,10 @@ fn app_with_an_amp_instance(
 
 /// Where a placed component's `index`th terminal is.
 fn terminal(
-    schematic: &crate::state::SchematicState,
+    schematic: &rspice_app_state::state::SchematicState,
     component: u64,
     index: usize,
-) -> crate::state::Point {
+) -> rspice_app_state::state::Point {
     schematic
         .document()
         .components
@@ -587,7 +589,7 @@ fn terminal(
 /// not the root, which draws no such net.
 #[test]
 fn a_forced_node_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
-    use crate::state::{ComponentType, Point};
+    use rspice_app_state::state::{ComponentType, Point};
 
     let (mut app, amp) = app_with_an_amp_instance(|schematic| {
         // + at (0, -10) onto `isl`, − at (0, 30) onto the return.
@@ -619,7 +621,7 @@ fn a_forced_node_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
         panic!("the finding is located on the drawing: {island:?}");
     };
     assert_eq!(cell_view, &amp, "shown in the cell that draws it");
-    let crate::state::DrawnObject::Net { name, wire, .. } = object else {
+    let rspice_app_state::state::DrawnObject::Net { name, wire, .. } = object else {
         panic!("the finding names a net: {island:?}");
     };
     assert_eq!(name, "isl");
@@ -649,8 +651,8 @@ fn a_forced_node_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
 
 /// `amp` drives a source straight across a winding, and the root places it
 /// as `XAMP`. Returns the winding's id in `amp` with the application.
-fn app_with_a_winding_loop_in_amp() -> (RSpiceApp, crate::state::CellViewRef, u64) {
-    use crate::state::{ComponentType, Point};
+fn app_with_a_winding_loop_in_amp() -> (RSpiceApp, rspice_app_state::state::CellViewRef, u64) {
+    use rspice_app_state::state::{ComponentType, Point};
 
     let mut winding = 0;
     let (app, amp) = app_with_an_amp_instance(|schematic| {
@@ -772,7 +774,7 @@ fn under_xyce_a_winding_loop_inside_an_instance_is_refused_in_the_cell_that_draw
         panic!("the finding is located on the drawing: {closed:?}");
     };
     assert_eq!(cell_view, &amp, "shown in the cell that draws it");
-    let crate::state::DrawnObject::Component { id, .. } = object else {
+    let rspice_app_state::state::DrawnObject::Component { id, .. } = object else {
         panic!("the finding names the winding: {closed:?}");
     };
     assert_eq!(*id, winding);

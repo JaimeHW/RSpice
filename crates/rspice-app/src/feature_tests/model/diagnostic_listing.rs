@@ -1,7 +1,5 @@
 //! `workbench/app_state/diagnostic_store/listing` observed through a whole session.
 
-use crate::state::code_diagnostics::CodeDiagnosticCollection;
-use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::diagnostic_store::BatchStanding;
 use crate::workbench::app_state::diagnostic_store::DiagnosticBatch;
@@ -10,6 +8,8 @@ use crate::workbench::app_state::diagnostic_store::listing::*;
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticSubject,
 };
+use rspice_app_state::state::code_diagnostics::CodeDiagnosticCollection;
+use rspice_app_state::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata;
 use std::sync::Arc;
 
@@ -83,7 +83,7 @@ fn an_empty_batch_whose_inputs_moved_reads_as_out_of_date() {
         .content
         .connectivity
         .policy
-        .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        .width_mismatch = rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
 
     let listed = listing(&state);
     assert_eq!(listed.len(), 0);
@@ -111,7 +111,7 @@ fn an_empty_list_states_the_weakest_evidence_behind_it() {
     let state = open_state();
     let empty = |inputs| DiagnosticBatch {
         inputs,
-        input_digest: crate::product::ContentDigest::from_bytes([0; 32]),
+        input_digest: rspice_app_state::product::ContentDigest::from_bytes([0; 32]),
         records: Vec::new(),
         fingerprint: 0,
     };
@@ -214,7 +214,7 @@ fn a_stale_batch_offers_no_route() {
     let mut state = open_state();
     let subject = state.model.workspace.content.active_schematic_reference();
     let anchored = record(&state, "T-ERROR", DiagnosticLevel::Error).with_route(Some(
-        DiagnosticRoute::Anchor(crate::diagnostics::LogAnchor::Schematic {
+        DiagnosticRoute::Anchor(rspice_app_state::diagnostics::LogAnchor::Schematic {
             cell_view: subject.clone(),
             x: 0,
             y: 0,
@@ -237,7 +237,7 @@ fn a_stale_batch_offers_no_route() {
         .content
         .connectivity
         .policy
-        .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        .width_mismatch = rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
 
     let listing = listing(&state);
     assert_eq!(listing.len(), 1);
@@ -298,7 +298,7 @@ fn waiver() -> rspice_vocabulary::diagnostics::DiagnosticSuppression {
 /// findings the rows did not.
 #[test]
 fn source_collections_count_what_their_rows_say() {
-    use crate::state::netlist_diagnostics::Diagnostic;
+    use rspice_app_state::state::netlist_diagnostics::Diagnostic;
     use rspice_vocabulary::diagnostics::DiagnosticSeverity as NetlistSeverity;
     use rspice_vocabulary::diagnostics::{
         DiagnosticCurrentness, DiagnosticSeverity, SourceDiagnostic,
@@ -391,7 +391,7 @@ fn a_stale_code_finding_offers_no_route() {
     let collection = CodeDiagnosticCollection::try_new(vec![finding("T-CURRENT"), moved])
         .expect("the fixture collection is well formed");
     let segment = Segment::Code {
-        bundle: Some(crate::state::ProjectSourceId::new()),
+        bundle: Some(rspice_app_state::state::ProjectSourceId::new()),
         collection: &collection,
         source_current: true,
     };
@@ -410,7 +410,7 @@ fn a_stale_code_finding_offers_no_route() {
 /// stale on the page whether or not the editor has been drawn since.
 #[test]
 fn a_netlist_finding_older_than_the_buffer_reads_stale() {
-    use crate::state::netlist_diagnostics::Diagnostic;
+    use rspice_app_state::state::netlist_diagnostics::Diagnostic;
 
     let mut state = open_state();
     let finding = Diagnostic::error("unknown model nchh").with_line(Some(0));
@@ -442,7 +442,7 @@ fn an_unreadable_batch_counts_as_unavailable_rather_than_stale() {
     let state = open_state();
     let batch = DiagnosticBatch {
         inputs: DiagnosticInputs::Dispatch,
-        input_digest: crate::product::ContentDigest::from_bytes([0; 32]),
+        input_digest: rspice_app_state::product::ContentDigest::from_bytes([0; 32]),
         records: vec![record(&state, "T-ERROR", DiagnosticLevel::Error)],
         fingerprint: 0,
     };
@@ -471,7 +471,7 @@ fn a_clean_validation_reads_as_no_findings() {
     let bundle = state
         .model
         .workspace
-        .active_source_bundle(crate::state::ProjectSourceLanguage::RSpiceAutomation)
+        .active_source_bundle(rspice_app_state::state::ProjectSourceLanguage::RSpiceAutomation)
         .expect("a project holds its automation bundle");
     let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
     let root_content = bundle.root().content().to_owned();
@@ -548,7 +548,7 @@ fn one_pass_decides_each_standing_once_and_a_publication_invalidates_it() {
         .content
         .connectivity
         .policy
-        .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        .width_mismatch = rspice_app_state::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
     assert_eq!(listing_in_pass(&state, 7).counts().errors, 1);
     assert_eq!(listing_in_pass(&state, 8).counts().stale, 1);
     assert_eq!(

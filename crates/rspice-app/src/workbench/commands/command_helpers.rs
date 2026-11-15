@@ -1,8 +1,6 @@
 //! Command-dispatch helpers that apply concrete workbench state transitions.
 
 use super::*;
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::ViewType;
 use crate::workbench::app::actions::workspace::{
     HistoryStepParts, project_step_comes_first, take_history_step,
 };
@@ -19,6 +17,8 @@ use crate::workbench::session::project_transactions::{
 use rspice_app_code::workbench::code::commands::CodeHandOff;
 use rspice_app_project::workbench::app::dialogs::project::configuration_dialogs::Leaving;
 use rspice_app_project::workbench::app::dialogs::project::new_project::NewProjectDialogState;
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+use rspice_app_state::state::ViewType;
 
 pub(super) fn open_command_palette(state: &mut AppState) {
     let route = super::super::SurfaceRoute::surface(super::super::SurfaceId::CommandPalette);
@@ -153,14 +153,17 @@ pub(super) fn active_symbol_editor(app: &RSpiceApp) -> bool {
         app.state.workbench.workspace,
         Workspace::Design | Workspace::Models
     ) && app.state.model.workspace.content.active_view_type()
-        == Some(crate::state::ViewType::Symbol)
+        == Some(rspice_app_state::state::ViewType::Symbol)
 }
 
 pub(in crate::workbench) fn active_schematic_editor(app: &RSpiceApp) -> bool {
     app.state.workbench.workspace == Workspace::Design
         && matches!(
             app.state.model.workspace.content.active_view_type(),
-            Some(crate::state::ViewType::Schematic | crate::state::ViewType::Testbench)
+            Some(
+                rspice_app_state::state::ViewType::Schematic
+                    | rspice_app_state::state::ViewType::Testbench
+            )
         )
 }
 

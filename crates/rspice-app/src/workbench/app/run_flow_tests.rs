@@ -167,8 +167,14 @@ fn a_refused_run_shows_its_problem_and_changes_no_page() {
     let mut user = example_project();
     // Two labels the deck folds into one node: an error the checks refuse.
     let schematic = &mut user.app.state.model.schematic;
-    schematic.add_net_label(crate::state::Point::new(600, 600), "sense".to_owned());
-    schematic.add_net_label(crate::state::Point::new(600, 700), "SENSE".to_owned());
+    schematic.add_net_label(
+        rspice_app_state::state::Point::new(600, 600),
+        "sense".to_owned(),
+    );
+    schematic.add_net_label(
+        rspice_app_state::state::Point::new(600, 700),
+        "SENSE".to_owned(),
+    );
     user.app.state.sync_active_schematic_to_workspace();
     user.settle();
     let workspace = user.app.state.workbench.workspace;
@@ -195,8 +201,8 @@ fn a_refused_run_shows_its_problem_and_changes_no_page() {
 /// reader on their page, with nothing offered to open.
 #[test]
 fn a_failed_run_shows_its_problem_and_changes_no_page() {
-    use crate::diagnostics::{LogAnchor, LogSeverity, LogSource};
-    use crate::state::SimulationRunLifecycle as Lifecycle;
+    use rspice_app_state::diagnostics::{LogAnchor, LogSeverity, LogSource};
+    use rspice_app_state::state::SimulationRunLifecycle as Lifecycle;
 
     let mut user = example_project();
     let workspace = user.app.state.workbench.workspace;
@@ -250,7 +256,7 @@ fn an_operating_point_run_opens_on_its_operating_point() {
     for id in ids {
         plan.set_enabled(id, false).expect("the analysis exists");
     }
-    plan.insert(crate::simulation::plan::AnalysisKind::OperatingPoint)
+    plan.insert(rspice_app_state::simulation::plan::AnalysisKind::OperatingPoint)
         .expect("an operating point can be planned");
     user.app
         .state

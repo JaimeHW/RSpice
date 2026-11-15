@@ -1,11 +1,11 @@
 //! Moving a selection through the whole application: arming the move asks the application
 //! whether a dialog holds the canvas.
 
-use crate::state::Tool;
-use crate::state::{ComponentType, Point, SchematicSnapshot};
 use crate::workbench::app::arm_move_selection_in;
 use crate::workbench::app::armed_move_selection_authority;
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::Tool;
+use rspice_app_state::state::{ComponentType, Point, SchematicSnapshot};
 
 fn selected_resistor() -> AppState {
     let mut state = AppState::default();

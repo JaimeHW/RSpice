@@ -3,9 +3,9 @@
 use egui::accesskit::Role;
 
 use crate::feature_tests::replay::{Control, Replay};
-use crate::state::{CellViewRef, Point, Rotation};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::commands::DesignCommand;
+use rspice_app_state::state::{CellViewRef, Point, Rotation};
 
 use super::symbol_in_place::amp_project;
 
@@ -314,8 +314,13 @@ fn the_placed_preview_is_not_offered_in_place() {
         "{buttons:?}"
     );
     // The key is lettered as the host writes it: Enter, or ↩ on a Mac.
-    let enter = crate::state::shortcuts::ShortcutStroke::new(egui::Key::Enter, false, false, false)
-        .display_label_for(egui::os::OperatingSystem::default());
+    let enter = rspice_app_state::state::shortcuts::ShortcutStroke::new(
+        egui::Key::Enter,
+        false,
+        false,
+        false,
+    )
+    .display_label_for(egui::os::OperatingSystem::default());
     let back = format!("Return to parent ({enter})");
     assert!(buttons.contains(&back.as_str()), "{buttons:?}");
     assert_eq!(
@@ -516,7 +521,7 @@ impl InPlace {
     /// (100, 80) puts at (60, 70), running left to (0, 70).
     fn wire_pin_a(&mut self) {
         let schematic = &mut self.replay.app.state.model.schematic;
-        schematic.document_mut_for_test().wires = vec![crate::state::Wire::new(
+        schematic.document_mut_for_test().wires = vec![rspice_app_state::state::Wire::new(
             5,
             vec![Point::new(60, 70), Point::new(0, 70)],
         )];
@@ -998,7 +1003,7 @@ fn a_shape_drawn_in_place_lands_where_it_was_drawn_and_its_menu_works() {
             .unwrap()
             .body
     };
-    let drawn = crate::state::SymbolShape::Rectangle {
+    let drawn = rspice_app_state::state::SymbolShape::Rectangle {
         min: Point::new(60, 40),
         max: Point::new(100, 60),
         style: Default::default(),
@@ -1034,7 +1039,7 @@ fn a_shape_drawn_in_place_lands_where_it_was_drawn_and_its_menu_works() {
     click_at(&mut fixture.replay, rotate);
     assert_eq!(
         body(&fixture).last(),
-        Some(&crate::state::SymbolShape::Rectangle {
+        Some(&rspice_app_state::state::SymbolShape::Rectangle {
             min: Point::new(70, 30),
             max: Point::new(90, 70),
             style: Default::default(),
@@ -1098,7 +1103,7 @@ fn the_instance_menu_edits_its_symbol_in_place() {
 /// instance: a circle, an arc, a closed polygon, typed text and a pin.
 #[test]
 fn every_drawing_tool_draws_in_place_in_the_symbols_coordinates() {
-    use crate::state::SymbolShape;
+    use rspice_app_state::state::SymbolShape;
 
     let mut fixture = InPlace::new();
     let entered = fixture.enter();
@@ -1209,7 +1214,7 @@ fn every_drawing_tool_draws_in_place_in_the_symbols_coordinates() {
 /// edit sets its stroke.
 #[test]
 fn a_shape_is_reshaped_and_restyled_in_place() {
-    use crate::state::SymbolShape;
+    use rspice_app_state::state::SymbolShape;
     use rspice_design::symbol::SymbolStroke;
     use rspice_schematic_editor::symbol_editor::session::SymbolTool;
 

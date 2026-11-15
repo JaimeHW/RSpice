@@ -3,9 +3,9 @@
 //! New, open, save, and the recent-files list, including the confirmation
 //! flow that runs first when the current document has unsaved changes.
 
-use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::framework::feature::ModelsPort;
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 use rspice_app_workbench::workbench::app::dialogs::confirmation_state::{
     ConfirmationAction, ConfirmationResponse,
 };
@@ -438,10 +438,10 @@ impl RSpiceApp {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::io::{FileWorkflowIo, SchematicIoError, WaveformDataset};
-    use crate::simulation::plan::AnalysisKind;
-    use crate::state::{Component, ComponentType, Point, SchematicState};
     use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+    use rspice_app_services::io::{FileWorkflowIo, SchematicIoError, WaveformDataset};
+    use rspice_app_state::simulation::plan::AnalysisKind;
+    use rspice_app_state::state::{Component, ComponentType, Point, SchematicState};
     use std::cell::RefCell;
     use std::path::{Path, PathBuf};
     use std::rc::Rc;
@@ -521,9 +521,11 @@ mod tests {
             applied_theme: None,
             last_window_title: String::new(),
             symbol_library: None,
-            simulation_controller: crate::simulation::SimulationController::new(),
+            simulation_controller:
+                rspice_app_runs::simulation::controller::SimulationController::new(),
             code: crate::workbench::documents::code_workspace::CodeHandles {
-                automation_runtime: crate::automation_runtime::NativeAutomationRuntime::discover(),
+                automation_runtime:
+                    rspice_app_services::automation_runtime::NativeAutomationRuntime::discover(),
                 automation_runtime_project_id,
             },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
@@ -532,7 +534,7 @@ mod tests {
                 live_session: rspice_app_cloud::workbench::live_session::LiveSessionEngine::default(
                 ),
             },
-            model_hub: crate::services::model_hub::ModelHubService::unavailable(
+            model_hub: rspice_app_services::services::model_hub::ModelHubService::unavailable(
                 "This test instance runs without a model-pack store.",
             ),
             file_workflow_io: Box::new(file_io),
@@ -543,7 +545,7 @@ mod tests {
 
     fn insert_ac_analysis(
         state: &mut crate::workbench::app_state::AppState,
-    ) -> crate::product::AnalysisInstanceId {
+    ) -> rspice_app_state::product::AnalysisInstanceId {
         state
             .model
             .sim_setup
@@ -756,7 +758,8 @@ mod tests {
         );
         project_app.handle_confirmation_response(ConfirmationResponse::Yes);
 
-        let saved_source = crate::io::load_project_file(&source).expect("reload Save All source");
+        let saved_source =
+            rspice_app_services::io::load_project_file(&source).expect("reload Save All source");
         assert_eq!(
             saved_source
                 .file
@@ -836,7 +839,8 @@ mod tests {
         );
         schematic_app.handle_confirmation_response(ConfirmationResponse::Yes);
 
-        let active_only = crate::io::load_project_file(&source).expect("reload active save");
+        let active_only =
+            rspice_app_services::io::load_project_file(&source).expect("reload active save");
         assert_eq!(
             active_only
                 .file
@@ -1009,7 +1013,8 @@ mod tests {
         );
         assert!(app.state.workbench.project_review_dialog.request.is_none());
         assert!(saved_paths.borrow().is_empty());
-        let persisted = crate::io::load_project_file(&path).expect("reload closed project");
+        let persisted =
+            rspice_app_services::io::load_project_file(&path).expect("reload closed project");
         assert_eq!(
             persisted
                 .file

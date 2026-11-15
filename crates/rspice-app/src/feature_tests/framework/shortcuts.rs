@@ -3,12 +3,12 @@
 
 use egui::Key;
 
-use crate::state::command_catalog::CommandPlatform;
-use crate::state::shortcuts::{
-    ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence, ShortcutStroke,
-};
 use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
 use crate::workbench::design::commands::DesignCommand;
+use rspice_app_state::state::command_catalog::CommandPlatform;
+use rspice_app_state::state::shortcuts::{
+    ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence, ShortcutStroke,
+};
 use rspice_app_workbench::workbench::app_state::session::shortcuts::*;
 
 #[test]

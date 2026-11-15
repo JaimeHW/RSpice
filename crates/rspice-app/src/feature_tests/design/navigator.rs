@@ -3,7 +3,6 @@
 //! what their gestures open.
 
 use crate::schematic::view::sheet_visibility::{self, SheetScope};
-use crate::state::{CellViewRef, ComponentType, InstancePath, PortDirection, SchematicState};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design::navigator::tests::{
@@ -13,6 +12,9 @@ use crate::workbench::design::navigator::tests::{
 use crate::workbench::design::navigator::*;
 use crate::workbench::framework::requests::FocusNavigatorSearch;
 use crate::workbench::state::{NavigatorTreeNode, Workspace};
+use rspice_app_state::state::{
+    CellViewRef, ComponentType, InstancePath, PortDirection, SchematicState,
+};
 
 /// A design that recurses. The root places `XA` of `work/child`, and
 /// `work/child` places a leaf beside a second instance of the root cell — so
@@ -46,16 +48,16 @@ pub(super) fn recursive_design() -> RSpiceApp {
 /// on the sheet the session is on, `VBIAS` on the one it is not.
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn two_sheet_named_signals() -> RSpiceApp {
-    use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
+    use rspice_app_state::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     let components = &mut app.state.model.schematic.document_mut_for_test().components;
     for (id, name) in [(301, "VIN"), (302, "VBIAS")] {
-        let mut source = crate::state::Component::new(
+        let mut source = rspice_app_state::state::Component::new(
             id,
             ComponentType::VoltageSource,
-            crate::state::Point::new(20, 20),
+            rspice_app_state::state::Point::new(20, 20),
         );
         source.name = name.to_owned();
         components.push(source);
@@ -162,7 +164,7 @@ impl NavigatorPanel {
     /// The panel in a dock of `height`, for the cases that are.
     pub(super) fn open_within(app: RSpiceApp, height: f32) -> Self {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut panel = Self {
             ctx,
@@ -427,7 +429,7 @@ impl NavigatorPanel {
 fn the_sheet_scope_narrows_the_object_rails_to_the_active_sheet() {
     let mut app = two_sheet_named_signals();
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
 
     sheet_visibility::set_sheet_scope(&ctx, SheetScope::AllSheets);
     let every_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app.design_cx()));
@@ -455,7 +457,7 @@ fn the_sheet_scope_narrows_the_object_rails_to_the_active_sheet() {
 fn moving_the_sheet_scope_never_touches_the_project() {
     let mut app = two_sheet_named_signals();
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let revision = app.state.model.workspace.content.project.revision().get();
     let catalog = app.state.model.workspace.content.design_management.clone();
 
@@ -494,7 +496,7 @@ fn navigator_tree_expansion_survives_a_re_render_and_is_per_workspace() {
     }
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut frame = || {
         painted_text(&ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default()
@@ -606,18 +608,18 @@ fn unresolve_configuration(state: &mut crate::workbench::app_state::AppState) {
         .workspace
         .content
         .configuration_sets
-        .create(crate::state::ConfigurationSetDefinition {
+        .create(rspice_app_state::state::ConfigurationSetDefinition {
             name: "Unresolvable DUT".to_owned(),
             root,
             dut_path: "/XABSENT".to_owned(),
             executable_view_policy: vec!["schematic".to_owned()],
             stop_views: Vec::new(),
-            unresolved_policy: crate::state::UnresolvedBindingPolicy::BlockNetlist,
+            unresolved_policy: rspice_app_state::state::UnresolvedBindingPolicy::BlockNetlist,
             black_box_policy:
-                crate::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+                rspice_app_state::state::ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
             overrides: Vec::new(),
             cell_bindings: Vec::new(),
-            model_profile: crate::state::ConfigurationModelProfile::ProjectRunSetSections,
+            model_profile: rspice_app_state::state::ConfigurationModelProfile::ProjectRunSetSections,
             owner: "projection consumer test".to_owned(),
         })
         .expect("the fixture configuration is well formed");
@@ -632,25 +634,25 @@ fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() 
         .schematic
         .document_mut_for_test()
         .wires
-        .push(crate::state::Wire::segment(
+        .push(rspice_app_state::state::Wire::segment(
             1,
-            crate::state::Point::new(0, 0),
-            crate::state::Point::new(40, 0),
+            rspice_app_state::state::Point::new(0, 0),
+            rspice_app_state::state::Point::new(40, 0),
         ));
     app.state
         .model
         .schematic
         .document_mut_for_test()
         .net_labels
-        .push(crate::state::NetLabel::new(
+        .push(rspice_app_state::state::NetLabel::new(
             2,
-            crate::state::Point::new(0, 0),
+            rspice_app_state::state::Point::new(0, 0),
             "VOUT",
         ));
     app.state.sync_active_schematic_to_workspace();
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
 
     let resolved = painted_text(&ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default()
@@ -702,25 +704,25 @@ fn a_net_row_announces_the_meta_column_it_paints() {
         .schematic
         .document_mut_for_test()
         .wires
-        .push(crate::state::Wire::segment(
+        .push(rspice_app_state::state::Wire::segment(
             1,
-            crate::state::Point::new(0, 0),
-            crate::state::Point::new(40, 0),
+            rspice_app_state::state::Point::new(0, 0),
+            rspice_app_state::state::Point::new(40, 0),
         ));
     app.state
         .model
         .schematic
         .document_mut_for_test()
         .net_labels
-        .push(crate::state::NetLabel::new(
+        .push(rspice_app_state::state::NetLabel::new(
             2,
-            crate::state::Point::new(0, 0),
+            rspice_app_state::state::Point::new(0, 0),
             "VOUT",
         ));
     app.state.sync_active_schematic_to_workspace();
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let output = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default()
@@ -768,7 +770,7 @@ fn the_object_menu_opens_from_the_keyboard_on_the_focused_row() {
 
     let mut app = interface_design();
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     // A closure over the app rather than a helper handed it, so the frame
     // harness costs the whole-application-access ratchet nothing.
@@ -880,7 +882,7 @@ fn the_parent_a_path_click_ascends_to_draws_on_the_frame_the_click_repaints() {
         &instance,
     );
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     // As the shell draws it: the navigator in the design feature's context,
     // then what it raised answered.
     let frame = |app: &mut RSpiceApp, events| {
@@ -930,7 +932,7 @@ fn the_parent_a_path_click_ascends_to_draws_on_the_frame_the_click_repaints() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_pins_a_contract_update_places_are_listed_on_the_frame_the_click_repaints() {
-    use crate::state::{Cell, Library, Point, View, ViewType};
+    use rspice_app_state::state::{Cell, Library, Point, View, ViewType};
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
@@ -956,7 +958,7 @@ fn the_pins_a_contract_update_places_are_listed_on_the_frame_the_click_repaints(
         schematic,
     );
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     // As the shell draws it: the navigator in the design feature's context,
     // then what it raised answered.
     let frame = |app: &mut RSpiceApp, events| {

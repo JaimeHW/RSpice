@@ -1,14 +1,14 @@
 //! Find and replace drawn and applied through a whole application.
 
-use crate::state::CellViewRef;
-use crate::state::Point;
-use crate::state::{LibraryCellInstance, NetLabel, SchematicState};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::find_replace::tests::part;
 use crate::workbench::app::dialogs::find_replace::*;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 use egui::Context;
+use rspice_app_state::state::CellViewRef;
+use rspice_app_state::state::Point;
+use rspice_app_state::state::{LibraryCellInstance, NetLabel, SchematicState};
 
 /// Each option row is one line, its checks in the columns the scope's
 /// segments stand in, and every row of the form is one pitch from the
@@ -16,7 +16,7 @@ use egui::Context;
 #[test]
 fn the_options_stand_on_one_grid() {
     let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
@@ -110,13 +110,13 @@ fn the_options_stand_on_one_grid() {
 /// Undo takes the whole change back.
 #[test]
 fn replace_all_renames_an_instance_as_the_rename_form_does() {
-    fn fixture() -> (RSpiceApp, crate::product::SimulationPlanId) {
+    fn fixture() -> (RSpiceApp, rspice_app_state::product::SimulationPlanId) {
         let mut app = RSpiceApp::test_instance();
         let document = app.state.model.schematic.document_mut_for_test();
         document.components = vec![part(1, "R1", "1k"), part(2, "R2", "1k")];
         document.wires.clear();
         document.probes = vec![
-            crate::state::SchematicProbe::new(
+            rspice_app_state::state::SchematicProbe::new(
                 30,
                 Point::new(100, 40),
                 "I(R1)",
@@ -125,24 +125,24 @@ fn replace_all_renames_an_instance_as_the_rename_form_does() {
             .expect("a current probe"),
         ];
         app.state.model.schematic.init_undo_history();
-        let plan_id = crate::product::SimulationPlanId::new();
+        let plan_id = rspice_app_state::product::SimulationPlanId::new();
         app.state
             .model
             .workspace
             .content
             .simulation_plan_payloads
-            .push(crate::state::SimulationPlanPayloadRecord {
+            .push(rspice_app_state::state::SimulationPlanPayloadRecord {
                 plan_id,
-                payload: crate::state::SimulationPlanPayload {
+                payload: rspice_app_state::state::SimulationPlanPayload {
                     saved_outputs: vec![
-                        crate::state::SavedOutput::new(
-                            crate::state::SavedOutputKind::RawVoltageOrCurrent,
+                        rspice_app_state::state::SavedOutput::new(
+                            rspice_app_state::state::SavedOutputKind::RawVoltageOrCurrent,
                             "load current",
                             "I(R1)",
-                            crate::state::SavedOutputCompatibility::OpTranAc,
-                            crate::state::SavedOutputPolicy::EveryAcceptedPoint,
-                            crate::state::SavedOutputPrecision::FullSourcePrecision,
-                            crate::state::SavedOutputStreaming::StoreOnly,
+                            rspice_app_state::state::SavedOutputCompatibility::OpTranAc,
+                            rspice_app_state::state::SavedOutputPolicy::EveryAcceptedPoint,
+                            rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
+                            rspice_app_state::state::SavedOutputStreaming::StoreOnly,
                         )
                         .expect("a raw current is a saved output"),
                     ],
@@ -153,7 +153,7 @@ fn replace_all_renames_an_instance_as_the_rename_form_does() {
     }
     fn outcome(
         app: &RSpiceApp,
-        plan_id: crate::product::SimulationPlanId,
+        plan_id: rspice_app_state::product::SimulationPlanId,
     ) -> (Vec<String>, Vec<Option<String>>, String) {
         let document = app.state.model.schematic.document();
         (

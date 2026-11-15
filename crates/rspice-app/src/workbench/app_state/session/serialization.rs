@@ -5,9 +5,9 @@
 //! deliberately excluded, so a restored session cannot resume authority it
 //! no longer holds.
 
-use crate::diagnostics::{LogSeverity, LogSource};
-use crate::io::{ProjectExecutionContext, ProjectSimulationResults};
 use crate::workbench::app_state::AppState;
+use rspice_app_services::io::{ProjectExecutionContext, ProjectSimulationResults};
+use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 
 use super::wire::{UiSessionWire, WorkbenchWire, WorkbenchWireRef};
 
@@ -83,14 +83,14 @@ impl AppState {
         // persisted through the project-file DTO.
         use serde::ser::SerializeStruct;
         let mut simulation_results = if with_runs {
-            crate::io::capture_simulation_results(&self.model.simulation)
+            rspice_app_services::io::capture_simulation_results(&self.model.simulation)
         } else {
-            crate::io::capture_simulation_results_without_runs(&self.model.simulation)
+            rspice_app_services::io::capture_simulation_results_without_runs(&self.model.simulation)
         };
         if simulation_results.validate().is_err() {
             simulation_results = ProjectSimulationResults::default();
         }
-        let execution_context = crate::io::capture_execution_context(
+        let execution_context = rspice_app_services::io::capture_execution_context(
             &self.model.sim_setup,
             &self.model.model_library_manager,
         )
@@ -183,9 +183,9 @@ impl<'de> serde::Deserialize<'de> for AppState {
         #[derive(serde::Deserialize)]
         struct AppStateDe {
             #[serde(default, deserialize_with = "deserialize_session_project_workspace")]
-            project_workspace: Option<Box<crate::state::ProjectWorkspace>>,
+            project_workspace: Option<Box<rspice_app_state::state::ProjectWorkspace>>,
             #[serde(default = "default_boxed_library_manager")]
-            library_manager: Box<crate::state::LibraryManager>,
+            library_manager: Box<rspice_app_state::state::LibraryManager>,
             #[serde(default, rename = "ui_session")]
             ui: Box<UiSessionWire>,
             #[serde(default)]
@@ -216,11 +216,10 @@ impl<'de> serde::Deserialize<'de> for AppState {
 
         // Deserialize minimal persisted data and use defaults for the rest.
         let mut library_manager = *de.library_manager;
-        let mut project_workspace = de
-            .project_workspace
-            .map_or_else(crate::state::ProjectWorkspace::default, |workspace| {
-                *workspace
-            });
+        let mut project_workspace = de.project_workspace.map_or_else(
+            rspice_app_state::state::ProjectWorkspace::default,
+            |workspace| *workspace,
+        );
         project_workspace.ensure_library_model(&mut library_manager);
         // Documents skip their runtime dirty flag. The session's open tabs
         // retain it, including inactive schematics that will be reopened later.
@@ -251,7 +250,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         let license = de
             .license_key
             .as_deref()
-            .and_then(|key| crate::services::license::parse_and_verify(key).ok());
+            .and_then(|key| rspice_app_cloud::services::license::parse_and_verify(key).ok());
         let (native_project_binding_receipt, native_receipt_warning) = decode_session_authority(
             de.native_project_binding_receipt,
             "native project binding receipt",
@@ -321,7 +320,9 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .routing_mode = state.design.schematic_routing_mode;
         state.workbench.reconcile_restored_navigation();
         let navigation_warning = state.workbench.take_route_diagnostic();
-        let execution_warnings = match crate::io::restore_execution_context(*de.execution_context) {
+        let execution_warnings = match rspice_app_services::io::restore_execution_context(
+            *de.execution_context,
+        ) {
             Ok((simulation_plan, model_library_manager, warnings)) => {
                 state.model.sim_setup = simulation_plan;
                 state.model.model_library_manager = model_library_manager;
@@ -341,7 +342,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
                     state.model.workspace.content.project.revision(),
                 )
             })
-            .and_then(|()| crate::io::restore_simulation_results(simulation_results, &mut state.model.simulation))
+            .and_then(|()| rspice_app_services::io::restore_simulation_results(simulation_results, &mut state.model.simulation))
             .err()
             .map(|error| {
                 format!(
@@ -387,17 +388,20 @@ where
     }
 }
 
-fn default_boxed_library_manager() -> Box<crate::state::LibraryManager> {
-    Box::new(crate::state::LibraryManager::with_primitives())
+fn default_boxed_library_manager() -> Box<rspice_app_state::state::LibraryManager> {
+    Box::new(rspice_app_state::state::LibraryManager::with_primitives())
 }
 
 fn deserialize_session_project_workspace<'de, D>(
     deserializer: D,
-) -> Result<Option<Box<crate::state::ProjectWorkspace>>, D::Error>
+) -> Result<Option<Box<rspice_app_state::state::ProjectWorkspace>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    <Box<crate::state::ProjectWorkspace> as serde::Deserialize>::deserialize(deserializer).map(Some)
+    <Box<rspice_app_state::state::ProjectWorkspace> as serde::Deserialize>::deserialize(
+        deserializer,
+    )
+    .map(Some)
 }
 
 #[cfg(test)]
@@ -419,9 +423,11 @@ mod tests {
         assert_eq!(restored.model.simulation.start_run().id, 43);
     }
 
-    fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
-        run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
-            .expect("legacy fixture provenance seals");
+    fn seal_legacy_unattributed(run: &mut rspice_app_state::state::SimulationRun) {
+        run.restore_provenance(
+            rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed,
+        )
+        .expect("legacy fixture provenance seals");
     }
 
     #[test]
@@ -429,7 +435,8 @@ mod tests {
         let mut state = AppState::default();
         state.design.schematic_snap.enabled = false;
         state.design.schematic_snap.snap_to_wire_segments = false;
-        state.design.schematic_routing_mode = crate::state::WireRoutingMode::FortyFiveDegree;
+        state.design.schematic_routing_mode =
+            rspice_app_state::state::WireRoutingMode::FortyFiveDegree;
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
@@ -452,7 +459,7 @@ mod tests {
                 .editor
                 .wire_drawing
                 .routing_mode,
-            crate::state::WireRoutingMode::FortyFiveDegree
+            rspice_app_state::state::WireRoutingMode::FortyFiveDegree
         );
         assert_eq!(
             restored
@@ -462,24 +469,28 @@ mod tests {
                 .editor
                 .bus_drawing
                 .routing_mode,
-            crate::state::WireRoutingMode::FortyFiveDegree
+            rspice_app_state::state::WireRoutingMode::FortyFiveDegree
         );
     }
 
     #[test]
     fn app_state_session_round_trip_restores_results_but_not_runtime_flags() {
         let mut state = AppState::default();
-        let waveform = crate::state::RetainedTrace::new(
+        let waveform = rspice_app_state::state::RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0, 2.0],
             vec![0.0, 0.75, 1.5],
             "#00aaff",
         );
-        let mut run = crate::state::SimulationRun::new(3);
+        let mut run = rspice_app_state::state::SimulationRun::new(3);
         run.label = "Run 3 (session fixture)".to_string();
         run.add_analysis(
-            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-                .with_waveforms(vec![waveform]),
+            rspice_app_state::state::AnalysisResult::new(
+                1,
+                rspice_app_state::state::AnalysisType::Transient,
+                "TRAN",
+            )
+            .with_waveforms(vec![waveform]),
         );
         seal_legacy_unattributed(&mut run);
         state.model.simulation.retained.runs = vec![run].into();
@@ -544,7 +555,7 @@ mod tests {
         let receipt = crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt {
             canonical_path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
             project_id: state.model.workspace.content.project.id().to_string(),
-            accepted_digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
+            accepted_digest: rspice_app_state::product::ContentDigest::from_bytes([0x5a; 32]),
         };
         state.platform.native_project_binding_receipt = Some(receipt.clone());
 
@@ -566,8 +577,8 @@ mod tests {
             .rename("Recovered receipt-corruption fixture")
             .expect("valid fixture name");
         state.model.schematic.add_component(
-            crate::state::ComponentType::Resistor,
-            crate::state::Point::new(17, 29),
+            rspice_app_state::state::ComponentType::Resistor,
+            rspice_app_state::state::Point::new(17, 29),
         );
         state
             .model
@@ -723,28 +734,32 @@ mod tests {
             .rename("Precision AFE")
             .expect("valid project name");
         state.model.schematic.add_component(
-            crate::state::ComponentType::Resistor,
-            crate::state::Point::new(17, 29),
+            rspice_app_state::state::ComponentType::Resistor,
+            rspice_app_state::state::Point::new(17, 29),
         );
         state.model.schematic.add_component(
-            crate::state::ComponentType::Resistor,
-            crate::state::Point::new(60, 29),
+            rspice_app_state::state::ComponentType::Resistor,
+            rspice_app_state::state::Point::new(60, 29),
         );
         state
             .model
             .workspace
             .save_active_schematic(&state.model.schematic);
 
-        let mut run = crate::state::SimulationRun::new(3);
+        let mut run = rspice_app_state::state::SimulationRun::new(3);
         run.label = "Run 3 (bias sweep)".to_owned();
         run.add_analysis(
-            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-                .with_waveforms(vec![crate::state::RetainedTrace::new(
-                    "V(out)",
-                    vec![0.0, 1.0, 2.0],
-                    vec![0.0, 0.75, 1.5],
-                    "#00aaff",
-                )]),
+            rspice_app_state::state::AnalysisResult::new(
+                1,
+                rspice_app_state::state::AnalysisType::Transient,
+                "TRAN",
+            )
+            .with_waveforms(vec![rspice_app_state::state::RetainedTrace::new(
+                "V(out)",
+                vec![0.0, 1.0, 2.0],
+                vec![0.0, 0.75, 1.5],
+                "#00aaff",
+            )]),
         );
         seal_legacy_unattributed(&mut run);
         state.model.simulation.retained.runs = vec![run].into();
@@ -777,8 +792,9 @@ mod tests {
             .ok()
             .map(|plan| plan.instances()[0].id());
         state.design.schematic_snap.enabled = false;
-        state.design.schematic_routing_mode = crate::state::WireRoutingMode::FortyFiveDegree;
-        state.workbench.theme.density = crate::ui::Density::Relaxed;
+        state.design.schematic_routing_mode =
+            rspice_app_state::state::WireRoutingMode::FortyFiveDegree;
+        state.workbench.theme.density = rspice_app_workbench::ui::Density::Relaxed;
         state
             .platform
             .recent_files
@@ -819,18 +835,18 @@ mod tests {
         assert!(!restored.design.schematic_snap.enabled);
         assert_eq!(
             restored.design.schematic_routing_mode,
-            crate::state::WireRoutingMode::FortyFiveDegree
+            rspice_app_state::state::WireRoutingMode::FortyFiveDegree
         );
         assert_eq!(
             restored.workbench.theme.density,
-            crate::ui::Density::Relaxed
+            rspice_app_workbench::ui::Density::Relaxed
         );
     }
 
     #[test]
     fn session_round_trip_preserves_unsaved_plan_drafts_and_model_catalog() {
-        use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
-        use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+        use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
+        use rspice_app_state::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 
         let mut state = AppState::default();
         let plan = state
@@ -948,25 +964,29 @@ mod tests {
     #[test]
     fn appearance_preferences_round_trip_through_the_application_session() {
         let mut state = AppState::default();
-        state.workbench.theme.mode = crate::ui::Mode::System;
-        state.workbench.theme.density = crate::ui::Density::Relaxed;
+        state.workbench.theme.mode = rspice_app_workbench::ui::Mode::System;
+        state.workbench.theme.density = rspice_app_workbench::ui::Density::Relaxed;
         state.workbench.theme.colorblind_traces = true;
         state.workbench.theme.canvas_contrast = 84;
-        state.workbench.theme.canvas_theme = crate::ui::EngineeringCanvasTheme::Light;
+        state.workbench.theme.canvas_theme =
+            rspice_app_workbench::ui::EngineeringCanvasTheme::Light;
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
-        assert_eq!(restored.workbench.theme.mode, crate::ui::Mode::System);
+        assert_eq!(
+            restored.workbench.theme.mode,
+            rspice_app_workbench::ui::Mode::System
+        );
         assert_eq!(
             restored.workbench.theme.density,
-            crate::ui::Density::Relaxed
+            rspice_app_workbench::ui::Density::Relaxed
         );
         assert!(restored.workbench.theme.colorblind_traces);
         assert_eq!(restored.workbench.theme.canvas_contrast, 84);
         assert_eq!(
             restored.workbench.theme.canvas_theme,
-            crate::ui::EngineeringCanvasTheme::Light
+            rspice_app_workbench::ui::EngineeringCanvasTheme::Light
         );
     }
 
@@ -1039,7 +1059,7 @@ mod tests {
             .rename("Isolated session")
             .unwrap();
         state.model.safe_mode.activate(
-            crate::state::write_policy::LocalSafeModeOptions::default(),
+            rspice_app_state::state::write_policy::LocalSafeModeOptions::default(),
             before.clone(),
         );
         let persisted = serde_json::to_string(&state).expect("safe-mode session serializes");
@@ -1057,7 +1077,7 @@ mod tests {
 
     #[test]
     fn app_state_session_round_trips_exact_result_family_metadata() {
-        let metadata = crate::state::AnalysisResultFamilyMetadata::Corner {
+        let metadata = rspice_app_state::state::AnalysisResultFamilyMetadata::Corner {
             member_measurements: Vec::new(),
             x_values: vec![0.0, 1.0],
             x_label: "Corner Index".to_owned(),
@@ -1067,10 +1087,14 @@ mod tests {
             failed_corners: 0,
         };
         let mut state = AppState::default();
-        let mut run = crate::state::SimulationRun::new(1);
+        let mut run = rspice_app_state::state::SimulationRun::new(1);
         run.add_analysis(
-            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Corner, "Corner")
-                .with_family_metadata(metadata.clone()),
+            rspice_app_state::state::AnalysisResult::new(
+                1,
+                rspice_app_state::state::AnalysisType::Corner,
+                "Corner",
+            )
+            .with_family_metadata(metadata.clone()),
         );
         seal_legacy_unattributed(&mut run);
         state.model.simulation.retained.runs = vec![run].into();
@@ -1103,16 +1127,20 @@ mod tests {
     #[test]
     fn app_state_session_omits_invalid_result_history() {
         let mut state = AppState::default();
-        let waveform = crate::state::RetainedTrace::new(
+        let waveform = rspice_app_state::state::RetainedTrace::new(
             "V(out)",
             vec![0.0, 1.0],
             vec![0.0, f64::NAN],
             "#00aaff",
         );
-        let mut run = crate::state::SimulationRun::new(3);
+        let mut run = rspice_app_state::state::SimulationRun::new(3);
         run.add_analysis(
-            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
-                .with_waveforms(vec![waveform]),
+            rspice_app_state::state::AnalysisResult::new(
+                1,
+                rspice_app_state::state::AnalysisType::Transient,
+                "TRAN",
+            )
+            .with_waveforms(vec![waveform]),
         );
         state.model.simulation.retained.runs = vec![run].into();
         state.model.simulation.retained.next_run_id = 3;
@@ -1133,7 +1161,7 @@ mod tests {
             0,
             vec![crate::workbench::documents::result_document::ExprTrace {
                 text: "V(out)/V(in)".to_string(),
-                complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
+                complex_policy: rspice_app_state::state::ComplexExpressionPolicy::Rectangular,
                 visible: true,
             }],
         );
@@ -1153,10 +1181,10 @@ mod tests {
     #[test]
     fn app_state_session_drops_invalid_result_history_on_load() {
         let mut state = AppState::default();
-        let mut run = crate::state::SimulationRun::new(3);
-        run.add_analysis(crate::state::AnalysisResult::new(
+        let mut run = rspice_app_state::state::SimulationRun::new(3);
+        run.add_analysis(rspice_app_state::state::AnalysisResult::new(
             1,
-            crate::state::AnalysisType::Transient,
+            rspice_app_state::state::AnalysisType::Transient,
             "TRAN",
         ));
         state.model.simulation.retained.runs = vec![run].into();
@@ -1191,16 +1219,17 @@ mod tests {
         let source_instance_id = transient.id();
         let source_revision = plan.revision();
         let project_revision = state.model.workspace.content.project.revision();
-        let prepared_snapshot_digest = crate::product::ContentDigest::from_bytes([0x73; 32]);
-        let mut run = crate::state::SimulationRun::new(4);
+        let prepared_snapshot_digest =
+            rspice_app_state::product::ContentDigest::from_bytes([0x73; 32]);
+        let mut run = rspice_app_state::state::SimulationRun::new(4);
         run.add_analysis(
-            crate::state::AnalysisResult::new(
+            rspice_app_state::state::AnalysisResult::new(
                 1,
-                crate::state::AnalysisType::Transient,
+                rspice_app_state::state::AnalysisType::Transient,
                 "Prepared TRAN",
             )
             .with_provenance(
-                crate::state::AnalysisResultProvenance::new(
+                rspice_app_state::state::AnalysisResultProvenance::new(
                     source_instance_id,
                     source_revision,
                     prepared_snapshot_digest,
@@ -1209,41 +1238,45 @@ mod tests {
                 .expect("prepared provenance"),
             ),
         );
-        let task_receipt = crate::state::PreparedRunTaskReceipt::new(
+        let task_receipt = rspice_app_state::state::PreparedRunTaskReceipt::new(
             source_instance_id,
             source_revision,
             Vec::new(),
             5,
-            crate::product::ContentDigest::from_bytes([0x74; 32]),
+            rspice_app_state::product::ContentDigest::from_bytes([0x74; 32]),
         )
         .expect("prepared transient task receipt");
-        let run_receipt =
-            crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
-                source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
+        let run_receipt = rspice_app_state::state::PreparedRunReceipt::new(
+            rspice_app_state::state::PreparedRunReceiptInput {
+                source_domain: rspice_app_state::state::AnalysisResultSourceDomain::SimulationPlan,
                 simulation_plan_id: Some(plan_id),
                 project_revision,
                 prepared_snapshot_digest,
-                source_content_digest: crate::product::ContentDigest::from_bytes([0x75; 32]),
-                source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(
-                    crate::product::ContentDigest::from_bytes([0x76; 32]),
+                source_content_digest: rspice_app_state::product::ContentDigest::from_bytes(
+                    [0x75; 32],
                 ),
+                source_check_receipt:
+                    rspice_app_state::state::PreparedSourceCheckReceipt::SchematicDrc(
+                        rspice_app_state::product::ContentDigest::from_bytes([0x76; 32]),
+                    ),
                 project_model_sources: Vec::new(),
                 specifications: Vec::new(),
                 specification_policy:
                     rspice_results::specification::PreparedSpecificationPolicy::default(),
                 tasks: vec![task_receipt],
-            })
-            .expect("prepared plan run receipt");
-        run.restore_provenance(crate::state::SimulationRunProvenance::Prepared(Box::new(
-            run_receipt,
-        )))
+            },
+        )
+        .expect("prepared plan run receipt");
+        run.restore_provenance(rspice_app_state::state::SimulationRunProvenance::Prepared(
+            Box::new(run_receipt),
+        ))
         .expect("prepared run fixture seals");
         state.model.simulation.retained.runs = vec![run].into();
         state.model.simulation.retained.next_run_id = 4;
         state.model.simulation.view.active_run_idx = Some(0);
         state.model.simulation.view.active_analysis_idx = Some(0);
         let mut session = serde_json::to_value(&state).expect("session serializes");
-        let orphaned_identity = crate::product::AnalysisInstanceId::new();
+        let orphaned_identity = rspice_app_state::product::AnalysisInstanceId::new();
         session["simulation_results"]["runs"][0]["analyses"][0]["provenance"]["source_instance_id"] =
             serde_json::to_value(orphaned_identity).expect("orphan identity serializes");
         session["simulation_results"]["runs"][0]["prepared_receipt"]["tasks"][0]["source_instance_id"] =

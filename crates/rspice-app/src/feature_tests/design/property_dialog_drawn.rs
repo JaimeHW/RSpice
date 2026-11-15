@@ -2,12 +2,12 @@
 //! open_property_editor takes the whole application, and a commit is undone as a step of the
 //! project's design history.
 
-use crate::state::{CellViewRef, Component, ComponentType, Point, PropertyValue};
 use crate::workbench::app::dialogs::design_request::DesignRequest;
 use crate::workbench::app::dialogs::property_dialog::{
     PropertyDialog, component_property_session_error,
 };
 use crate::workbench::app_state::AppState;
+use rspice_app_state::state::{CellViewRef, Component, ComponentType, Point, PropertyValue};
 use rspice_design::schematic::document_policy::PropertyCommitPolicy;
 use rspice_schematic_editor::component_properties::ComponentPropertyDialogResult;
 
@@ -80,16 +80,16 @@ fn state_with_resistor() -> AppState {
     state
 }
 
-fn add_current_output(state: &mut AppState) -> crate::product::SimulationPlanId {
+fn add_current_output(state: &mut AppState) -> rspice_app_state::product::SimulationPlanId {
     let plan = state.model.sim_setup.stable_analysis_plan().unwrap().id();
-    let output = crate::state::SavedOutput::new(
-        crate::state::SavedOutputKind::RawVoltageOrCurrent,
+    let output = rspice_app_state::state::SavedOutput::new(
+        rspice_app_state::state::SavedOutputKind::RawVoltageOrCurrent,
         "resistor current",
         "I(R1)",
-        crate::state::SavedOutputCompatibility::OpTranAc,
-        crate::state::SavedOutputPolicy::EveryAcceptedPoint,
-        crate::state::SavedOutputPrecision::FullSourcePrecision,
-        crate::state::SavedOutputStreaming::StoreOnly,
+        rspice_app_state::state::SavedOutputCompatibility::OpTranAc,
+        rspice_app_state::state::SavedOutputPolicy::EveryAcceptedPoint,
+        rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
+        rspice_app_state::state::SavedOutputStreaming::StoreOnly,
     )
     .unwrap();
     state
@@ -121,13 +121,13 @@ fn retained_component_properties_reject_changed_context_without_committing() {
         "object",
     ] {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut state = state_with_resistor();
         let master = CellViewRef::new("work", "property_parent", "schematic");
         state.model.workspace.descend_into(
             "X1".to_owned(),
             master.clone(),
-            crate::state::ViewType::Schematic,
+            rspice_app_state::state::ViewType::Schematic,
         );
         let first = state
             .model
@@ -136,10 +136,10 @@ fn retained_component_properties_reject_changed_context_without_committing() {
             .design_management
             .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
             .unwrap();
-        let note = crate::state::DesignNote::new(
+        let note = rspice_app_state::state::DesignNote::new(
             99,
             Point::new(0, 20),
-            crate::state::DesignNoteKind::PlainText,
+            rspice_app_state::state::DesignNoteKind::PlainText,
             "Original note",
         )
         .unwrap();
@@ -187,7 +187,7 @@ fn retained_component_properties_reject_changed_context_without_committing() {
                 state.model.workspace.descend_into(
                     "X2".to_owned(),
                     master.clone(),
-                    crate::state::ViewType::Schematic,
+                    rspice_app_state::state::ViewType::Schematic,
                 );
             }
             "sheet" | "sheet-revision" => {
@@ -200,10 +200,11 @@ fn retained_component_properties_reject_changed_context_without_committing() {
                     .unwrap();
                 let second = catalog
                     .create_sheet(
-                        crate::state::SheetDefinition {
+                        rspice_app_state::state::SheetDefinition {
                             name: "Sheet 2".to_owned(),
-                            template: crate::state::SheetTemplate::AnalogSchematic,
-                            port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                            template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
+                            port_policy:
+                                rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                             explicit_page_number: Some(2),
                         },
                         Some(first),
@@ -221,7 +222,7 @@ fn retained_component_properties_reject_changed_context_without_committing() {
                         .schematic
                         .edit_design_note_properties(
                             note,
-                            crate::state::DesignNoteKind::PlainText,
+                            rspice_app_state::state::DesignNoteKind::PlainText,
                             "Changed note".to_owned(),
                             None,
                         )
@@ -240,7 +241,7 @@ fn retained_component_properties_reject_changed_context_without_committing() {
             }
             "read-only" => state.model.schematic.session.read_only = true,
             "safe-mode" => state.model.safe_mode.activate(
-                crate::state::write_policy::LocalSafeModeOptions {
+                rspice_app_state::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
                     ..Default::default()
                 },
@@ -258,7 +259,8 @@ fn retained_component_properties_reject_changed_context_without_committing() {
             "{change}"
         );
         let source = state.design.tabbed_property_dialog.source.clone();
-        let before = crate::state::SchematicSnapshot::capture(state.model.schematic.document());
+        let before =
+            rspice_app_state::state::SchematicSnapshot::capture(state.model.schematic.document());
         let versions = (
             state.model.schematic.content_version(),
             state.model.schematic.topology_version(),
@@ -314,7 +316,7 @@ fn retained_component_properties_reject_changed_context_without_committing() {
 #[test]
 fn rendered_component_primary_commits_name_with_one_real_undo_record() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut state = state_with_resistor();
     let plan = add_current_output(&mut state);
     state.open_property_editor(44);
@@ -389,7 +391,7 @@ fn rendered_component_primary_commits_name_with_one_real_undo_record() {
 #[test]
 fn rendered_property_commit_refusal_keeps_the_design_and_draft_intact() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut state = state_with_resistor();
     let plan = add_current_output(&mut state);
     state
@@ -399,8 +401,9 @@ fn rendered_property_commit_refusal_keeps_the_design_and_draft_intact() {
         .plan_data_mut(plan)
         .unwrap()
         .saved_outputs[0]
-        .revision = crate::product::ObjectRevision::new(u64::MAX).unwrap();
-    let before = crate::state::SchematicSnapshot::capture(state.model.schematic.document());
+        .revision = rspice_app_state::product::ObjectRevision::new(u64::MAX).unwrap();
+    let before =
+        rspice_app_state::state::SchematicSnapshot::capture(state.model.schematic.document());
     let payloads = state
         .model
         .workspace
@@ -460,11 +463,12 @@ fn rendered_property_commit_refusal_keeps_the_design_and_draft_intact() {
 fn malformed_parameter_refusal_keeps_rendered_property_edits_and_references_isolated() {
     for source in ["note='unterminated", "temp=27 TEMP=85"] {
         let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
         let mut state = state_with_resistor();
         state.model.schematic.document_mut_for_test().components[0].params = source.to_owned();
         add_current_output(&mut state);
-        let before = crate::state::SchematicSnapshot::capture(state.model.schematic.document());
+        let before =
+            rspice_app_state::state::SchematicSnapshot::capture(state.model.schematic.document());
         let payloads = state
             .model
             .workspace
@@ -521,7 +525,7 @@ fn malformed_parameter_refusal_keeps_rendered_property_edits_and_references_isol
 #[test]
 fn component_dirty_escape_discards_the_isolated_draft() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut state = state_with_resistor();
     state.open_property_editor(44);
     state
@@ -553,10 +557,10 @@ fn returning_to_the_same_view_cannot_reauthorize_an_old_dialog() {
         .unwrap()
         .document_epoch;
     let original_view = state.model.workspace.content.active_view.clone();
-    let mut detour = crate::state::Cell::new("detour");
-    detour.add_view(crate::state::View::new(
+    let mut detour = rspice_app_state::state::Cell::new("detour");
+    detour.add_view(rspice_app_state::state::View::new(
         "schematic",
-        crate::state::ViewType::Schematic,
+        rspice_app_state::state::ViewType::Schematic,
     ));
     state
         .model
@@ -583,7 +587,7 @@ fn returning_to_the_same_view_cannot_reauthorize_an_old_dialog() {
 #[test]
 fn escape_closes_nested_model_browser_before_dirty_parent_dialog() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut state = state_with_resistor();
     state.open_property_editor(44);
     state
@@ -608,7 +612,7 @@ fn escape_closes_nested_model_browser_before_dirty_parent_dialog() {
 #[test]
 fn first_parameter_editor_retains_invalid_source_across_repaints() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut state = state_with_resistor();
     state.open_property_editor(44);
     let original = state
@@ -673,7 +677,7 @@ fn first_parameter_editor_retains_invalid_source_across_repaints() {
 #[test]
 fn a_stored_partial_commit_setting_applies_edits_whole() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut state = state_with_resistor();
     state
         .model

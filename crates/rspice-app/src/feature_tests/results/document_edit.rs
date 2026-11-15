@@ -1,20 +1,20 @@
 //! Pins for the edits the result viewer makes to a project result document.
 
-use crate::product::DatasetBinding;
-use crate::product::ResultDocumentId;
-use crate::state::AnalysisResult;
-use crate::state::{AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle};
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::ResultViewer;
 use crate::workbench::documents::result_document::document_edit::*;
 use crate::workbench::state::Workspace;
 use crate::workbench::state::WorkspaceDocumentId;
+use rspice_app_state::product::DatasetBinding;
+use rspice_app_state::product::ResultDocumentId;
 use rspice_app_state::results::visualization_document::DocumentEdit;
 use rspice_app_state::results::visualization_document::EntityRef;
 use rspice_app_state::results::visualization_document::PageLayout;
 use rspice_app_state::results::visualization_document::PaneDataBinding;
 use rspice_app_state::results::visualization_document::VisualizationDocument;
 use rspice_app_state::results::visualization_document::{LinkKind, Pane};
+use rspice_app_state::state::AnalysisResult;
+use rspice_app_state::state::{AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle};
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 use rspice_results_ui::document_dialogs::ResultDocumentDialog;
 
@@ -80,7 +80,7 @@ fn ordered_panes(app: &RSpiceApp, document_id: ResultDocumentId) -> Vec<Pane> {
 /// Drive one whole frame with the product theme applied.
 fn drive_frame(body: impl FnMut(&mut egui::Ui)) {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let mut body = body;
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| body(ui));
 }
@@ -673,7 +673,7 @@ fn soa_run(id: u64) -> SimulationRun {
                 vec![0.0, 1.0, 2.0, 1.0, 0.0],
                 "#fff",
             )])
-            .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Soa {
+            .with_family_metadata(rspice_app_state::state::AnalysisResultFamilyMetadata::Soa {
                 time: SOA_TIMES.to_vec(),
             }),
     );

@@ -5,13 +5,13 @@ use super::navigator::{
     NavigatorPanel, interface_design, recursive_design, two_sheet_named_signals,
 };
 use crate::schematic::view::sheet_visibility::SheetScope;
-use crate::state::{CellViewRef, ComponentType, InstancePath, SchematicState};
 use crate::workbench::RSpiceApp;
 use crate::workbench::design::navigator::hierarchy_tree::{DesignTreeRow, OccurrenceState};
 use crate::workbench::design::navigator::tests::{add_master, click_events, painted_panel, placed};
 use crate::workbench::design::navigator::*;
 use crate::workbench::framework::requests::FocusNavigatorSearch;
 use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState, Workspace};
+use rspice_app_state::state::{CellViewRef, ComponentType, InstancePath, SchematicState};
 use rspice_design::connectivity::summary::DesignNet;
 use std::collections::HashSet;
 
@@ -21,7 +21,7 @@ use std::collections::HashSet;
 #[test]
 fn the_sheet_scope_control_is_offered_only_above_one_sheet() {
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
 
     let mut single = RSpiceApp::test_instance();
     let one_sheet = painted_panel(&ctx, |ui| navigator(ui, &mut single.design_cx()));
@@ -64,7 +64,9 @@ fn occurrence_rows(app: &RSpiceApp, tree: &NavigatorTreeState) -> Vec<DesignTree
 }
 
 /// One app's design projection, which every hierarchy rail reads.
-fn projection_of(app: &RSpiceApp) -> std::sync::Arc<crate::state::workspace::DesignProjection> {
+fn projection_of(
+    app: &RSpiceApp,
+) -> std::sync::Arc<rspice_app_state::state::workspace::DesignProjection> {
     app.state
         .model
         .workspace
@@ -301,7 +303,7 @@ fn the_occurrences_band_counts_the_design_and_not_the_rows_on_screen() {
 /// A design that places one built-in XSPICE code model: the PWM oscillator,
 /// bound into the engine's own `rspice` namespace rather than into a library.
 fn design_placing_a_builtin_xspice_device() -> (RSpiceApp, InstancePath) {
-    use crate::state::{builtin_xspice_library_binding, engine_only_xspice_devices};
+    use rspice_app_state::state::{builtin_xspice_library_binding, engine_only_xspice_devices};
 
     let descriptor = engine_only_xspice_devices()
         .iter()
@@ -311,10 +313,10 @@ fn design_placing_a_builtin_xspice_device() -> (RSpiceApp, InstancePath) {
         builtin_xspice_library_binding(descriptor).expect("the PWM oscillator places a binding");
 
     let mut app = RSpiceApp::test_instance();
-    let mut component = crate::state::Component::new(
+    let mut component = rspice_app_state::state::Component::new(
         401,
         ComponentType::CellInstance,
-        crate::state::Point::new(40, 40),
+        rspice_app_state::state::Point::new(40, 40),
     )
     .with_library_cell(binding);
     component.name = "A1".to_owned();
@@ -417,10 +419,10 @@ fn sheet_nodes_appear_only_above_one_sheet() {
         .expect("the catalog was just bootstrapped");
     catalog
         .create_sheet(
-            crate::state::SheetDefinition {
+            rspice_app_state::state::SheetDefinition {
                 name: "Sheet 2".to_owned(),
-                template: crate::state::SheetTemplate::AnalogSchematic,
-                port_policy: crate::state::SheetPortPolicy::TypedOffSheetPorts,
+                template: rspice_app_state::state::SheetTemplate::AnalogSchematic,
+                port_policy: rspice_app_state::state::SheetPortPolicy::TypedOffSheetPorts,
                 explicit_page_number: Some(2),
             },
             None,
@@ -490,7 +492,7 @@ fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
             reference: "X1".to_owned(),
             pin: "OUT".to_owned(),
         }],
-        port: Some(crate::state::PortDirection::Out),
+        port: Some(rspice_app_state::state::PortDirection::Out),
         wire_ids: Vec::new(),
         domain: Default::default(),
     };

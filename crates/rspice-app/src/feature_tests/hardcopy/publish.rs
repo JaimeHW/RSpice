@@ -2,13 +2,13 @@
 //! the Results workspace has selected.
 
 use crate::feature_tests::hardcopy::{hardcopy_parts, resolve_retained_hardcopy_source};
-use crate::product::ContentDigest;
 use crate::workbench::app::RSpiceApp;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::publish::active_retained_source_selection;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::publish::*;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::render_hardcopy_dialog;
 use rspice_app_hardcopy::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
+use rspice_app_state::product::ContentDigest;
 use rspice_hardcopy::render::HardcopyRenderer;
 use rspice_hardcopy::render::HardcopySceneMetadata;
 use rspice_hardcopy_contract::DuplexMode;
@@ -21,8 +21,8 @@ use rspice_hardcopy_contract::PrinterMediaSource;
 
 #[test]
 fn results_export_selects_the_active_project_document_pane_authority() {
-    use crate::product::{AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId};
     use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+    use rspice_app_state::product::{AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId};
     use rspice_app_state::results::visualization_document::{
         ColumnRole, DocumentEdit, PaneDataBinding, SourceColumn, SourceDataset, SourceRow,
         TypedValue, ValueType, VisualizationDocument,
@@ -124,8 +124,8 @@ fn governed_design_print_selects_the_active_sheet_identity() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn publication_reuses_only_the_exact_sealed_preview_plan() {
-    use crate::state::{Point, Wire};
     use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_app_state::state::{Point, Wire};
 
     let mut app = RSpiceApp::test_instance();
     app.state
@@ -168,8 +168,8 @@ fn publication_reuses_only_the_exact_sealed_preview_plan() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
-    use crate::state::{Point, Wire};
     use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_app_state::state::{Point, Wire};
     use rspice_hardcopy_contract::{HardcopyOutcome, PrinterRasterGeometry};
 
     let mut app = RSpiceApp::test_instance();
@@ -336,11 +336,11 @@ const EDITED_DECK: &str = "* owned deck\nV1 out 0 2\nR1 out 0 1k\n.op\n.end\n";
 /// with a sealed preview plan and no publication started.
 #[cfg(not(target_arch = "wasm32"))]
 fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
-    use crate::state::{Point, Wire};
     use crate::workbench::documents::netlist_document::{
         begin_netlist_lifecycle_action_in, commit_netlist_lifecycle_action,
     };
     use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+    use rspice_app_state::state::{Point, Wire};
     use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
 
     let mut app = RSpiceApp::test_instance();
@@ -445,13 +445,13 @@ fn netlist_transactions_keep_an_export_in_flight() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn reverting_a_document_keeps_an_export_in_flight() {
-    use crate::state::{Point, Wire};
     use crate::workbench::app_state::services_access::{
         accept_loaded_project, confirm_revert_active_document,
     };
     use crate::workbench::lifecycle::project_lifecycle::{
         prepare_revert_active_document, snapshot,
     };
+    use rspice_app_state::state::{Point, Wire};
 
     let mut app = export_open_on_a_netlist_owned_project();
     let baseline = snapshot(&app.state).expect("the project snapshots");
@@ -545,7 +545,7 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
     ));
 
     let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let input = || egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
