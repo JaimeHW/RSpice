@@ -189,7 +189,10 @@ fn global_document_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout
     if response.clicked() {
         app.execute(ids::SAVE);
     }
-    context_separator(ui, layout);
+    // Outside the lane: its rule is drawn whatever the lane has room for.
+    if layout.toolbar_tool_limit.is_none() {
+        separator(ui);
+    }
 }
 
 pub fn toolbar_horizontal_padding(viewport_width: f32) -> f32 {
@@ -352,7 +355,7 @@ pub fn trailing_controls_width(
 fn workspace_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let workspace = app.workbench().workspace;
     ui.data_mut(|data| {
-        data.insert_temp(projected_tool_count_id(), 0_usize);
+        data.insert_temp(row_slots_id(), RowSlots::default());
     });
     let scope = app.toolbar_scope(workspace);
     app.contribute(Point::Toolbar(ToolbarSlot::Tools(scope), layout), ui);
@@ -510,8 +513,10 @@ pub fn feature_toolbar<H: WorkbenchHost + LendsToolbarRun<F>, F: Feature>(
             }
             ToolbarEntry::Separator => context_separator(ui, layout),
             ToolbarEntry::Control(drawn) => {
-                if take_projected_tool_slot(ui, layout) {
+                let measure = DrawnWidth::of(ui, drawn, layout);
+                if take_tool_slot(ui, layout, measure.predicted) {
                     control(app, ui, drawn.show, layout);
+                    measure.remember(ui);
                 } else if let Some(icon) = &drawn.overflow {
                     let presentation = icon_presentation(app, icon, ask);
                     overflow::set_aside(
@@ -521,8 +526,10 @@ pub fn feature_toolbar<H: WorkbenchHost + LendsToolbarRun<F>, F: Feature>(
                 }
             }
             ToolbarEntry::Action(action) => {
-                if take_projected_tool_slot(ui, layout) {
+                let measure = DrawnWidth::of(ui, action, layout);
+                if take_tool_slot(ui, layout, measure.predicted) {
                     control(app, ui, action.show, layout);
+                    measure.remember(ui);
                 } else {
                     let label = app.workbench().messages().text(action.label);
                     overflow::set_aside(ui, action_overflow::<H, F>(action, label));
@@ -589,16 +596,8 @@ fn toolbar_command(
     layout: LayoutSpec,
     presentation: ToolbarCommandPresentation,
 ) {
-    let has_slot = take_projected_tool_slot(ui, layout);
     let availability = app.availability(command);
     if availability == CommandAvailability::Hidden {
-        return;
-    }
-    if !has_slot {
-        overflow::set_aside(
-            ui,
-            overflow::OverflowTool::command(&*app, command, presentation),
-        );
         return;
     }
     let (icon, base_label, show_label, selected) = match presentation {
@@ -623,7 +622,21 @@ fn toolbar_command(
     };
     let enabled = availability == CommandAvailability::Available;
     let label_width = explicit_label_width(&label);
-    let show_label = show_label && label_fits_the_context_lane(ui, label_width);
+    // A labelled tool with no room for its label shows its icon, which
+    // carries the same command and the same tooltip.
+    let show_label = show_label && fits_the_lane(ui, layout, label_width);
+    let width = if show_label {
+        label_width
+    } else {
+        toolbar_icon_button_size(layout).x
+    };
+    if !take_tool_slot(ui, layout, width) {
+        overflow::set_aside(
+            ui,
+            overflow::OverflowTool::command(&*app, command, presentation),
+        );
+        return;
+    }
     let response = ui.add_enabled_ui(enabled, |ui| {
         if show_label {
             labeled_icon_button_sized(
@@ -655,43 +668,135 @@ fn toolbar_command(
     }
 }
 
-fn projected_tool_count_id() -> egui::Id {
-    egui::Id::new("workbench.context_toolbar.projected_tool_count")
+fn row_slots_id() -> egui::Id {
+    egui::Id::new("workbench.context_toolbar.row_slots")
 }
 
 fn context_lane_width_id() -> egui::Id {
     egui::Id::new("workbench.context_toolbar.lane_width")
 }
 
-/// Can a labelled tool still show its label inside the context lane?
+/// What the row's tools have taken of the context lane this frame.
+#[derive(Clone, Copy, Debug, Default)]
+struct RowSlots {
+    /// Slots taken, which a narrow row counts.
+    taken: usize,
+    /// A tool was set aside behind More tools. Every tool after it goes
+    /// with it, so More tools lists them in the row's order.
+    set_aside: bool,
+    /// More tools is handing the room kept for it to the one tool set aside.
+    handing_back: bool,
+}
+
+fn row_slots(ui: &egui::Ui) -> RowSlots {
+    ui.data(|data| data.get_temp::<RowSlots>(row_slots_id()))
+        .unwrap_or_default()
+}
+
+fn store_row_slots(ui: &egui::Ui, slots: RowSlots) {
+    ui.data_mut(|data| data.insert_temp(row_slots_id(), slots));
+}
+
+/// Hand the room kept for More tools to the one tool set aside, which then
+/// takes it in More tools' place.
+fn hand_back_the_last_slot(ui: &egui::Ui) {
+    let mut slots = row_slots(ui);
+    slots.set_aside = false;
+    slots.handing_back = true;
+    store_row_slots(ui, slots);
+}
+
+/// Does a tool `width` wide fit in what is left of the context lane, with
+/// room kept after it for More tools?
 ///
-/// The lane scrolls horizontally with its bar hidden, so a label that runs
-/// past the lane's right edge is painted as half a word with nothing on
-/// screen to say it continues — at 1440 px with a live run, "Run schematic
-/// checks" was painted as "Ru". A tool that cannot show its label shows its
-/// icon, which carries the same command and the same tooltip.
-fn label_fits_the_context_lane(ui: &egui::Ui, label_width: f32) -> bool {
+/// The lane ends where the run controls begin. A tool laid past that edge
+/// is drawn under them, or cut off: at 1024 px the symbol row laid its grid
+/// spacing, its placed preview and Focus workspace there, out of reach.
+fn fits_the_lane(ui: &egui::Ui, layout: LayoutSpec, width: f32) -> bool {
     let Some(lane) = ui.data(|data| data.get_temp::<f32>(context_lane_width_id())) else {
         return true;
     };
-    ui.min_rect().width() + ui.spacing().item_spacing.x + label_width <= lane
-}
-
-/// Take one of a narrow row's slots. The last is kept for More tools, so a
-/// tool that gets none sets itself aside there to stay reachable (U-11).
-pub fn take_projected_tool_slot(ui: &mut egui::Ui, layout: LayoutSpec) -> bool {
-    let Some(limit) = layout.toolbar_tool_limit else {
-        return true;
+    let more_tools = if row_slots(ui).handing_back {
+        0.0
+    } else {
+        ui.spacing().item_spacing.x + toolbar_icon_button_size(layout).x
     };
-    let id = projected_tool_count_id();
-    let count = ui.data(|data| data.get_temp::<usize>(id).unwrap_or_default());
-    ui.data_mut(|data| data.insert_temp(id, count + 1));
-    count + 1 < limit
+    let used = ui.cursor().min.x - ui.min_rect().min.x;
+    used + width + more_tools <= lane
 }
 
+/// Take room in the row for a tool `width` wide, at any window width. A
+/// tool that gets none sets itself aside behind More tools, which keeps the
+/// last room in the row, so every tool stays reachable; once one has, every
+/// tool after it goes with it. A narrow row also counts its slots.
+pub fn take_tool_slot(ui: &mut egui::Ui, layout: LayoutSpec, width: f32) -> bool {
+    let mut slots = row_slots(ui);
+    let granted = if slots.handing_back {
+        true
+    } else {
+        !slots.set_aside
+            && layout
+                .toolbar_tool_limit
+                .is_none_or(|limit| slots.taken + 1 < limit)
+            && fits_the_lane(ui, layout, width)
+    };
+    slots.taken += 1;
+    slots.set_aside |= !granted;
+    store_row_slots(ui, slots);
+    granted
+}
+
+/// The rule between two groups of the row's tools, where the row still
+/// has room for it and for a tool after it. A narrow row draws none.
 pub fn context_separator(ui: &mut egui::Ui, layout: LayoutSpec) {
-    if layout.toolbar_tool_limit.is_none() {
+    if layout.toolbar_tool_limit.is_some() {
+        return;
+    }
+    let mut slots = row_slots(ui);
+    if slots.set_aside {
+        return;
+    }
+    if fits_the_lane(ui, layout, SEPARATOR_WIDTH) {
         separator(ui);
+    } else {
+        slots.set_aside = true;
+        store_row_slots(ui, slots);
+    }
+}
+
+/// The width a control or an action a feature draws itself takes in the
+/// row: as wide as it was drawn last, an icon's width before it has been.
+struct DrawnWidth {
+    id: egui::Id,
+    start: f32,
+    predicted: f32,
+}
+
+impl DrawnWidth {
+    fn of<T>(ui: &egui::Ui, entry: &'static T, layout: LayoutSpec) -> Self {
+        let id = egui::Id::new((
+            "workbench.context_toolbar.drawn_width",
+            std::ptr::from_ref(entry) as usize,
+        ));
+        let predicted = ui
+            .data(|data| data.get_temp::<f32>(id))
+            .unwrap_or(toolbar_icon_button_size(layout).x);
+        Self {
+            id,
+            start: ui.cursor().min.x,
+            predicted,
+        }
+    }
+
+    /// Remember how wide the entry was drawn. One drawn wider than it was
+    /// taken for asks for another frame, which sets it aside if it does not
+    /// fit.
+    fn remember(self, ui: &egui::Ui) {
+        let drawn = (ui.min_rect().max.x - self.start).max(0.0);
+        ui.data_mut(|data| data.insert_temp(self.id, drawn));
+        if drawn > self.predicted + 0.5 {
+            ui.ctx().request_repaint();
+        }
     }
 }
 
@@ -705,9 +810,12 @@ pub fn pvt_temperature_label(
         .replace('-', "−")
 }
 
+/// How wide the rule between two groups of tools is.
+const SEPARATOR_WIDTH: f32 = 11.0;
+
 fn separator(ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(11.0, 23.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(SEPARATOR_WIDTH, 23.0), egui::Sense::hover());
     ui.painter().vline(
         rect.center().x,
         rect.y_range(),

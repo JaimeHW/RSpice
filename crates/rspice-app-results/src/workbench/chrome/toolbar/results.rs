@@ -11,9 +11,7 @@ use crate::workbench::layout::LayoutSpec;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 
-use rspice_app_workbench::workbench::chrome::toolbar::{
-    explicit_label_width, take_projected_tool_slot,
-};
+use rspice_app_workbench::workbench::chrome::toolbar::{explicit_label_width, take_tool_slot};
 
 /// A group of the Results toolbar's commands, drawn as icons and named by
 /// the host, with a rule between one group and the next.
@@ -92,12 +90,12 @@ fn archive_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: Layo
     else {
         return false;
     };
-    if !take_projected_tool_slot(ui, layout) {
-        return true;
-    }
     let availability = archive_availability(state.results_reads(), document_id);
     let archived = availability == ArchiveAvailability::Archived;
     let label = if archived { "Archived" } else { "Archive" };
+    if !take_tool_slot(ui, layout, explicit_label_width(label)) {
+        return true;
+    }
     let enabled = !matches!(availability, ArchiveAvailability::Unavailable(_));
     let response = ui
         .add_enabled_ui(enabled, |ui| {
@@ -144,7 +142,7 @@ fn tracking_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: Lay
         return false;
     };
     if results_document_is_historical(state.results_reads()) {
-        if take_projected_tool_slot(ui, layout) {
+        if take_tool_slot(ui, layout, explicit_label_width("Historical")) {
             labeled_icon_button_sized(
                 ui,
                 WorkbenchIcon::History,
@@ -176,12 +174,11 @@ fn tracking_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: Lay
         // authority exists.
         return false;
     };
-    if !take_projected_tool_slot(ui, layout) {
-        return true;
-    }
-
     let pinned = tracking.mode == ResultDocumentTrackingMode::Pinned;
     let label = if pinned { "Pinned" } else { "Latest" };
+    if !take_tool_slot(ui, layout, explicit_label_width(label)) {
+        return true;
+    }
     let tooltip = if pinned {
         "Pinned to this run's results; a rerun does not replace them."
     } else {

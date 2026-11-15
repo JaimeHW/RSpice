@@ -260,8 +260,8 @@ impl LayoutSpec {
 }
 
 /// How many context tools the toolbar keeps at this viewport, or `None` when
-/// it shows them all. A surface whose actions live in the toolbar reads this
-/// to know when it has to carry them itself.
+/// it counts none: the width of the toolbar's lane still sets the rest aside
+/// behind More tools at every viewport.
 pub(crate) fn toolbar_tool_limit(viewport_width: f32, viewport_height: f32) -> Option<usize> {
     let short_landscape = viewport_width <= 900.0 && viewport_height <= 500.0;
     if viewport_width <= 560.0 {

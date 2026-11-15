@@ -217,6 +217,11 @@ pub(crate) enum DesignCommand {
     SymbolCreateSchematicPins,
     /// Show or hide the placed preview beside the symbol canvas.
     SymbolPlacedPreview,
+    /// Turn snapping to the symbol grid on or off.
+    SymbolSnapToGrid,
+    /// Step the symbol grid to its next spacing, from 10 down to 1 and
+    /// round again.
+    SymbolCycleGridSpacing,
     /// Edit the selected instance's symbol master where the instance stands
     /// on its parent schematic.
     EditSymbolInPlace,
@@ -410,7 +415,7 @@ const EXIT_SYMBOL_IN_PLACE: &[ShortcutBinding] = &[primary(
 
 impl DesignCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 99] = [
+    pub(crate) const ALL: [Self; 101] = [
         Self::NewStimulusDefinition,
         Self::DuplicateStimulusDefinition,
         Self::DeleteStimulusDefinition,
@@ -508,6 +513,8 @@ impl DesignCommand {
         Self::SymbolUpdatePinsFromContract,
         Self::SymbolCreateSchematicPins,
         Self::SymbolPlacedPreview,
+        Self::SymbolSnapToGrid,
+        Self::SymbolCycleGridSpacing,
         Self::EditSymbolInPlace,
         Self::ExitSymbolInPlace,
     ];
@@ -618,6 +625,8 @@ impl DesignCommand {
             Self::SymbolUpdatePinsFromContract => CommandKey::new("update-pins-from-contract"),
             Self::SymbolCreateSchematicPins => CommandKey::new("create-schematic-pins-from-symbol"),
             Self::SymbolPlacedPreview => CommandKey::new("symbol-placed-preview"),
+            Self::SymbolSnapToGrid => CommandKey::new("symbol-snap-to-grid"),
+            Self::SymbolCycleGridSpacing => CommandKey::new("symbol-cycle-grid-spacing"),
             Self::EditSymbolInPlace => CommandKey::new("edit-symbol-in-place"),
             Self::ExitSymbolInPlace => CommandKey::new("exit-symbol-in-place"),
         }
@@ -1052,6 +1061,10 @@ impl DesignCommand {
             ),
             Self::SymbolPlacedPreview => {
                 ("Preview as placed", "View", palette, symbol_canvas, NONE)
+            }
+            Self::SymbolSnapToGrid => ("Snap to grid", "View", palette, symbol_canvas, NONE),
+            Self::SymbolCycleGridSpacing => {
+                ("Cycle grid spacing", "View", palette, symbol_canvas, NONE)
             }
             Self::EditSymbolInPlace => (
                 "Edit symbol in place",

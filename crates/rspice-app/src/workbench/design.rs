@@ -546,6 +546,9 @@ impl CommandSet for DesignCommand {
             {
                 Some("open a symbol")
             }
+            Self::SymbolSnapToGrid | Self::SymbolCycleGridSpacing => {
+                (!routed::symbol_editor(reads.wb.workspace, reads.model)).then_some("open a symbol")
+            }
             // Edited in place, the symbol already stands placed on its sheet.
             Self::SymbolPlacedPreview => {
                 in_place_session(&reads.state.symbol.in_place, reads.model)
@@ -641,6 +644,7 @@ impl CommandSet for DesignCommand {
             Self::SymbolPlacedPreview => {
                 return Some(reads.state.symbol.editor.preview_as_placed);
             }
+            Self::SymbolSnapToGrid => return Some(reads.state.symbol.editor.snap_to_grid),
             _ => return None,
         };
         Some(reads.state.grid == style)
@@ -1076,6 +1080,14 @@ impl CommandSet for DesignCommand {
             Self::SymbolPlacedPreview => {
                 let preview = &mut cx.state.symbol.editor.preview_as_placed;
                 *preview = !*preview;
+            }
+            Self::SymbolSnapToGrid => {
+                let snap = &mut cx.state.symbol.editor.snap_to_grid;
+                *snap = !*snap;
+            }
+            Self::SymbolCycleGridSpacing => {
+                let editor = &mut cx.state.symbol.editor;
+                editor.grid_spacing = editor.grid_spacing.next();
             }
             Self::EditSymbolInPlace => {
                 navigation(cx).edit_selected_symbol_in_place();

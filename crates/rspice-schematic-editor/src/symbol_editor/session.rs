@@ -134,6 +134,16 @@ impl SymbolGridSpacing {
         }
     }
 
+    /// The spacing after this one, from 10 down to 1 and round again.
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Ten => Self::Five,
+            Self::Five => Self::Two,
+            Self::Two => Self::One,
+            Self::One => Self::Ten,
+        }
+    }
+
     /// The pitch in symbol units.
     pub const fn model_step(self) -> i32 {
         match self {

@@ -9,7 +9,7 @@ use crate::workbench::layout::LayoutSpec;
 use crate::workbench::models::commands::ModelsCommand;
 
 use super::{
-    context_separator, explicit_label_width, take_projected_tool_slot, toolbar_icon_command,
+    context_separator, explicit_label_width, take_tool_slot, toolbar_icon_command,
     toolbar_text_command,
 };
 
@@ -27,7 +27,7 @@ const MODELS_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, Option<&str>); 4] = 
 pub fn model_editor_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     if let Some(origin) = app.workbench().previous_route() {
         let label = format!("Source: {}", origin.surface_id().label());
-        if take_projected_tool_slot(ui, layout)
+        if take_tool_slot(ui, layout, explicit_label_width(&label))
             && labeled_icon_button_sized(
                 ui,
                 WorkbenchIcon::ArrowLeft,

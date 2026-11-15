@@ -363,17 +363,34 @@ const SYMBOL: &[ToolbarEntry<DesignFeature>] = &[
     icon(ids::ZOOM_OUT, WorkbenchIcon::ZoomOut),
     icon(ids::ZOOM_IN, WorkbenchIcon::ZoomIn),
     named(ids::ZOOM_FIT, WorkbenchIcon::ZoomFit, "Fit"),
+    // Each control a row with no room for it sets aside behind More tools
+    // as the command it stands for, under the name its tooltip gives it.
     ToolbarEntry::Control(ToolbarControl {
         show: show_grid_toggle,
-        overflow: None,
+        overflow: Some(ToolbarIcon {
+            key: DesignCommand::CycleGrid.key(),
+            icon: WorkbenchIcon::Grid,
+            label: Some(SYMBOL_TOGGLES[0].1),
+            pressed: Some(symbol_grid_shown),
+        }),
     }),
     ToolbarEntry::Control(ToolbarControl {
         show: snap_to_grid_toggle,
-        overflow: None,
+        overflow: Some(ToolbarIcon {
+            key: DesignCommand::SymbolSnapToGrid.key(),
+            icon: WorkbenchIcon::Snap,
+            label: Some(SYMBOL_TOGGLES[1].1),
+            pressed: None,
+        }),
     }),
     ToolbarEntry::Control(ToolbarControl {
         show: symbol_grid_spacing,
-        overflow: None,
+        overflow: Some(ToolbarIcon {
+            key: DesignCommand::SymbolCycleGridSpacing.key(),
+            icon: WorkbenchIcon::Sliders,
+            label: Some(SYMBOL_GRID_SPACING),
+            pressed: None,
+        }),
     }),
     ToolbarEntry::Separator,
     // Edited in place, the symbol already stands placed on its sheet, so the
@@ -382,7 +399,12 @@ const SYMBOL: &[ToolbarEntry<DesignFeature>] = &[
         symbol_in_own_view,
         &[ToolbarEntry::Control(ToolbarControl {
             show: preview_as_placed_toggle,
-            overflow: None,
+            overflow: Some(ToolbarIcon {
+                key: DesignCommand::SymbolPlacedPreview.key(),
+                icon: WorkbenchIcon::Preview,
+                label: Some(SYMBOL_TOGGLES[2].1),
+                pressed: None,
+            }),
         })],
     ),
     ToolbarEntry::Only(
@@ -402,6 +424,14 @@ fn symbol_in_place(reads: &Reads<'_, DesignFeature>) -> bool {
 fn symbol_in_own_view(reads: &Reads<'_, DesignFeature>) -> bool {
     !symbol_in_place(reads)
 }
+
+fn symbol_grid_shown(reads: &Reads<'_, DesignFeature>) -> bool {
+    reads.state.symbol.editor.show_grid
+}
+
+/// The grid spacing control's name, which its tooltip and its row in More
+/// tools give it.
+const SYMBOL_GRID_SPACING: &str = "Grid spacing";
 
 /// The symbol row's toggles, each drawn as its icon under its name: show
 /// grid, snap to grid, and preview as placed.
@@ -435,7 +465,7 @@ fn symbol_toggle(ui: &mut egui::Ui, value: &mut bool, index: usize, layout: Layo
 
 fn symbol_grid_spacing(cx: &mut Cx<'_, DesignFeature>, ui: &mut egui::Ui, _layout: LayoutSpec) {
     let editor = &mut cx.state.symbol.editor;
-    crate::ui::widgets::Combo::from_id_salt("symbol-editor.grid-spacing")
+    let response = crate::ui::widgets::Combo::from_id_salt("symbol-editor.grid-spacing")
         .selected_text(editor.grid_spacing.label())
         .width(72.0)
         .show_ui(ui, |ui| {
@@ -447,7 +477,12 @@ fn symbol_grid_spacing(cx: &mut Cx<'_, DesignFeature>, ui: &mut egui::Ui, _layou
                     crate::workbench::app_state::return_engineering_canvas_focus(ui.ctx());
                 }
             }
-        });
+        })
+        .response;
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(SYMBOL_GRID_SPACING);
+    });
+    response.on_hover_text(SYMBOL_GRID_SPACING);
 }
 
 /// The Stimulus Library's own verbs.

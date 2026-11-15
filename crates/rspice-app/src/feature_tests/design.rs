@@ -95,6 +95,7 @@ mod symbol_schematic_pins_drawn;
 mod symbol_surface_drawn;
 mod symbol_surface_requests;
 mod symbol_touch;
+mod toolbar_lane_drawn;
 mod touch_flow;
 mod transient_annotations;
 mod visibility_options_drawn;

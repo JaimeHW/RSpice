@@ -1,11 +1,12 @@
-//! The tools a narrow toolbar has no room for, behind one More tools button.
+//! The tools the toolbar's row has no room for, behind one More tools button.
 //!
-//! At 560 px and less the tool row has room for two buttons. It used to keep
-//! the first two tools and drop the rest, so a phone had no button for Draw
-//! wire, Undo or Redo and reached them only by typing in the search palette
-//! (audit U-11). Now the last slot is kept for More tools, which lists every
-//! tool the row could not show, in toolbar order, each two taps away. When
-//! only one tool is left over, it takes that slot itself.
+//! The row ends where the run controls begin, at every window width. A row
+//! used to keep the tools it had slots for and drop the rest, so a phone had
+//! no button for Draw wire, Undo or Redo, and at 1024 px the symbol row laid
+//! its last tools under the run controls. Now the last room in the row is
+//! kept for More tools, which lists every tool the row could not show, in
+//! toolbar order, each two clicks away. When only one tool is left over, it
+//! takes that room itself.
 
 use egui::{Popup, Rect, Sense, Vec2};
 
@@ -119,8 +120,8 @@ pub fn more_tools<H: WorkbenchHost>(ui: &mut egui::Ui, app: &mut H, layout: Layo
     if let [tool] = &tools[..] {
         match tool.action {
             OverflowAction::Command(command, presentation) => {
-                // Hand the slot kept for More tools back to the row.
-                ui.data_mut(|data| data.insert_temp(super::projected_tool_count_id(), 0_usize));
+                // Hand the room kept for More tools back to the row.
+                super::hand_back_the_last_slot(ui);
                 super::toolbar_command(ui, app, command, layout, presentation);
             }
             OverflowAction::Run(run) => {
