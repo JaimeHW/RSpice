@@ -49,7 +49,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: quality-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -186,7 +186,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: test-linux-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -227,7 +227,7 @@ jobs:
       # Every suite here builds the Verilog-A engine dependency set that
       # test-linux-native builds (cargo tree: the same crates and
       # features), so it reads that job's cache and stores none.
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: test-linux-native-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -316,7 +316,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: test-libraries-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -354,7 +354,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: test-ui-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -385,7 +385,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: generated-veriloga-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -466,7 +466,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: test-linux-native-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -553,7 +553,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: test-windows-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -611,7 +611,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: test-macos-x64-native-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -683,7 +683,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: test-aarch64-native-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -754,7 +754,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: check-macos-desktop-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -893,7 +893,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: wasm-tests-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
@@ -957,7 +957,7 @@ jobs:
           awk '/^\[/ { p = /^\[profile\./ } p' Cargo.toml;
           cat .cargo/config.toml rust-toolchain.toml; } | git hash-object --stdin)"
           >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           shared-key: wasm-ui-size-${{ steps.deps.outputs.digest }}
           add-rust-environment-hash-key: false
