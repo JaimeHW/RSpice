@@ -9,7 +9,9 @@ use egui::Context;
 use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 
 use crate::workbench::app::SchematicEditAuthority;
-use crate::workbench::app::actions::workspace::symbol_in_place::selected_symbol_in_place_target;
+use crate::workbench::app::actions::workspace::symbol_in_place::{
+    SymbolInPlaceRefusal, selected_symbol_in_place_target,
+};
 use crate::workbench::app::actions::workspace::{
     NavigationParts, hierarchical_edit_in_place_enabled, selected_hierarchy_master,
 };
@@ -116,10 +118,19 @@ pub(crate) fn render_descend_hierarchy_dialog(
         return;
     }
 
-    let target = dialog
-        .reference
-        .as_ref()
-        .map(|reference| format!("{} \u{00b7} {}", reference.cell, reference.view));
+    // The view the chosen mode opens: the master descended into, or, edited
+    // in place, the instance's symbol, or why it cannot be.
+    let target = if dialog.edit_mode == HierarchyDescendEditMode::EditSymbolInPlace {
+        selected_symbol_in_place_target(model)
+            .map(|(_, symbol)| format!("{} \u{00b7} {}", symbol.cell, symbol.view))
+            .map_err(SymbolInPlaceRefusal::sentence)
+    } else {
+        dialog
+            .reference
+            .as_ref()
+            .map(|reference| format!("{} \u{00b7} {}", reference.cell, reference.view))
+            .ok_or("The selection no longer resolves")
+    };
     let instance = dialog.instance_name.clone();
     let occurrence_path = descend_target_path(&model.workspace, &instance);
     let error = dialog.validation_error.clone();
@@ -134,7 +145,7 @@ pub(crate) fn render_descend_hierarchy_dialog(
                 rows,
                 draft,
                 &occurrence_path,
-                target.as_deref(),
+                target.as_deref().map_err(|reason| *reason),
             ))
         });
 
@@ -267,12 +278,12 @@ fn descend_rows(
     rows: &mut FormRows<'_>,
     draft: &mut DescendHierarchyDialogState,
     occurrence_path: &str,
-    target: Option<&str>,
+    target: Result<&str, &str>,
 ) -> egui::Id {
     rows.value_mono("Instance", occurrence_path);
     match target {
-        Some(target) => rows.value_mono("Cell view", target),
-        None => rows.value("Cell view", "The selection no longer resolves"),
+        Ok(target) => rows.value_mono("Cell view", target),
+        Err(reason) => rows.value("Cell view", reason),
     }
     let options = [
         "Edit in place",
