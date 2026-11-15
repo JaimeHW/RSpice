@@ -31,8 +31,8 @@ use crate::state::{
 use crate::workbench::{
     app::{
         SymbolInPlace, SymbolInPlaceRefusal, deny_read_only_edit, finish_symbol_parent_edit,
-        hierarchy_master_for_component, in_place_placement, in_place_session, in_place_session_mut,
-        place_floating_paste, reconcile_conductor_route, record_symbol_edit,
+        hierarchy_master_for_component, in_place_bounds, in_place_placement, in_place_session,
+        in_place_session_mut, place_floating_paste, reconcile_conductor_route, record_symbol_edit,
         selected_hierarchy_master, selected_instance_veriloga_source,
         selected_symbol_in_place_target, start_canvas_bus, start_canvas_wire,
         store_symbol_canvas_frame, symbol_editor_request_source, sync_active_schematic,
@@ -552,6 +552,11 @@ impl CanvasParts<'_> {
     /// Where the edited instance puts its symbol on the parent.
     pub(crate) fn symbol_in_place_placement(&self) -> Option<SymbolPlacement> {
         in_place_placement(self.symbol_in_place()?, self.model)
+    }
+
+    /// The parent-sheet rectangle the symbol edited in place covers.
+    pub(crate) fn symbol_in_place_bounds(&self) -> Option<(f64, f64, f64, f64)> {
+        in_place_bounds(self.symbol_in_place()?, self.model)
     }
 
     /// Land the floating copy where it sits now.

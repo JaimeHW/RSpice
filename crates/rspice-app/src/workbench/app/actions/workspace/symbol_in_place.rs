@@ -40,6 +40,10 @@ pub struct SymbolInPlace {
     pub sheet_view: (f64, (f64, f64)),
     /// A zoom a command asked for, carried out on the canvas's next frame.
     pub zoom_request: Option<rspice_schematic_editor::view::navigation::ZoomRequest>,
+    /// Whether the canvas has yet to draw the session: its first frame
+    /// brings the instance into view when the sheet's camera leaves any of
+    /// it out, and otherwise keeps the sheet exactly where it was.
+    pub entering: bool,
     /// The views the session showed before this one, for Zoom previous.
     pub view_history: rspice_schematic_editor::view::navigation::ViewHistory<(f64, (f64, f64))>,
     /// Whether the symbol had a tab of its own before the session opened it.
@@ -348,6 +352,7 @@ impl NavigationParts<'_> {
             zoom,
             sheet_view: (zoom, pan),
             zoom_request: None,
+            entering: true,
             view_history: Default::default(),
             symbol_was_open,
             parent_editor: Default::default(),

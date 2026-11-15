@@ -172,7 +172,7 @@ pub(crate) use actions::workspace::{
         symbol_editor_copy_available, symbol_editor_lock_message, symbol_editor_request_source,
     },
     symbol_in_place::{
-        SymbolInPlace, SymbolInPlaceRefusal, in_place_placement, in_place_session,
+        SymbolInPlace, SymbolInPlaceRefusal, in_place_bounds, in_place_placement, in_place_session,
         in_place_session_mut, selected_symbol_in_place_target,
     },
     sync_active_schematic, veriloga_master_of_component, veriloga_source_for_component,

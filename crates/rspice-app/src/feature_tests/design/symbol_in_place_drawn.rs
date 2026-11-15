@@ -212,6 +212,27 @@ fn painted(output: &egui::FullOutput) -> Vec<String> {
     texts
 }
 
+/// The canvas's bounds as the frame announces them.
+fn canvas_rect(output: &egui::FullOutput) -> egui::Rect {
+    let bounds = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("AccessKit is on")
+        .nodes
+        .iter()
+        .find_map(|(_, node)| {
+            (node.role() == Role::Canvas)
+                .then(|| node.bounds())
+                .flatten()
+        })
+        .expect("the canvas is announced");
+    egui::Rect::from_min_max(
+        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+    )
+}
+
 /// While the symbol is edited in place, every place that names the document
 /// says so and names the instance: the status bar, the window title, the
 /// inspector's header and the canvas's announced name. Leaving takes it all
@@ -336,6 +357,58 @@ fn return_to_parent_leaves_the_in_place_edit() {
             .selection
             .single_component(),
         Some(fixture.instance)
+    );
+}
+
+/// Entering brings the instance into view: a sheet whose camera shows the
+/// whole instance keeps it exactly, and one that leaves the instance out is
+/// framed on it.
+#[test]
+fn entering_frames_the_instance_only_when_the_sheet_leaves_it_out() {
+    let mut fixture = InPlace::new();
+    fixture.enter();
+    let session = crate::workbench::app::in_place_session(
+        &fixture.replay.app.state.design.symbol.in_place,
+        &fixture.replay.app.state.model,
+    )
+    .unwrap();
+    assert_eq!(
+        (session.zoom, session.pan),
+        (2.0, (60.0, 40.0)),
+        "a shown instance keeps the sheet's view"
+    );
+    fixture.replay.key(egui::Key::Escape, egui::Modifiers::NONE);
+
+    fixture.replay.app.state.model.schematic.session.editor.pan = (-4000.0, -4000.0);
+    fixture.replay.frames(vec![]);
+    fixture.enter();
+    let output = fixture.replay.frame(vec![]);
+    let canvas = canvas_rect(&output);
+    let model = &fixture.replay.app.state.model;
+    let session = crate::workbench::app::in_place_session(
+        &fixture.replay.app.state.design.symbol.in_place,
+        model,
+    )
+    .unwrap();
+    let (min_x, min_y, max_x, max_y) =
+        crate::workbench::app::in_place_bounds(session, model).unwrap();
+    let screen = |x: f64, y: f64| {
+        egui::pos2(
+            canvas.min.x + (session.pan.0 + x * session.zoom) as f32,
+            canvas.min.y + (session.pan.1 + y * session.zoom) as f32,
+        )
+    };
+    for corner in [screen(min_x, min_y), screen(max_x, max_y)] {
+        assert!(
+            canvas.expand(1.0).contains(corner),
+            "{corner:?} lies on the canvas {canvas:?}"
+        );
+    }
+    fixture.replay.key(egui::Key::Escape, egui::Modifiers::NONE);
+    assert_eq!(
+        fixture.replay.app.state.model.schematic.session.editor.pan,
+        (-4000.0, -4000.0),
+        "leaving gives the sheet its own view back"
     );
 }
 

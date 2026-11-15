@@ -61,7 +61,14 @@ pub(super) fn frame(
     };
     let navigation = state.model.preferences.canvas_navigation();
     let mut zoom_box = state.design.symbol.editor.zoom_box;
+    let instance = state.symbol_in_place_bounds();
     let session = state.symbol_in_place_mut()?;
+    if std::mem::take(&mut session.entering)
+        && let Some(bounds) = instance
+        && !shows(session.zoom, session.pan, rect, bounds)
+    {
+        session.zoom_request = Some(ZoomRequest::Frame(bounds));
+    }
     match session.zoom_request.take() {
         Some(ZoomRequest::Frame(bounds)) => {
             frame_world_rect(&mut session.zoom, &mut session.pan, rect, bounds);
@@ -106,6 +113,22 @@ pub(super) fn frame(
         symbol: SymbolViewport::on_sheet(&parent, placement),
         parent,
     })
+}
+
+/// Whether the canvas `rect`, at `zoom` and `pan`, shows the whole of the
+/// sheet rectangle `bounds`.
+fn shows(
+    zoom: f64,
+    pan: (f64, f64),
+    rect: Rect,
+    (min_x, min_y, max_x, max_y): (f64, f64, f64, f64),
+) -> bool {
+    let (width, height) = (f64::from(rect.width()), f64::from(rect.height()));
+    let inside = |at: f64, span: f64| (0.0..=span).contains(&at);
+    inside(pan.0 + min_x * zoom, width)
+        && inside(pan.0 + max_x * zoom, width)
+        && inside(pan.1 + min_y * zoom, height)
+        && inside(pan.1 + max_y * zoom, height)
 }
 
 /// The parent, dimmed, and the symbol over it at full strength.
