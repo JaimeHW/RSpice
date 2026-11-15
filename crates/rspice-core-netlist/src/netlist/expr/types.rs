@@ -71,12 +71,7 @@ impl Expr {
     pub fn ensure_stack_safe_depth(&self) -> Result<(), ExprError> {
         let mut pending = vec![(self, 1)];
         while let Some((node, depth)) = pending.pop() {
-            if depth > crate::resource::MAX_EXPRESSION_TREE_DEPTH {
-                return Err(ExprError::InvalidArgument(format!(
-                    "Expression tree exceeds the stack safety limit of {}",
-                    crate::resource::MAX_EXPRESSION_TREE_DEPTH
-                )));
-            }
+            ensure_stack_safe_level(depth)?;
             match node {
                 Expr::BinOp { left, right, .. } => {
                     pending.push((right, depth + 1));
@@ -91,6 +86,19 @@ impl Expr {
         }
         Ok(())
     }
+}
+
+/// Refuse a node `depth` levels down its tree, the root being level 1: the
+/// bound [`Expr::ensure_stack_safe_depth`] holds every node to. A builder that
+/// knows its children's depths checks each new node here in constant time.
+pub(crate) fn ensure_stack_safe_level(depth: usize) -> Result<(), ExprError> {
+    if depth > crate::resource::MAX_EXPRESSION_TREE_DEPTH {
+        return Err(ExprError::InvalidArgument(format!(
+            "Expression tree exceeds the stack safety limit of {}",
+            crate::resource::MAX_EXPRESSION_TREE_DEPTH
+        )));
+    }
+    Ok(())
 }
 
 /// Binary operators

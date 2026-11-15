@@ -1190,7 +1190,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
         expr.ensure_stack_safe_depth()
             .map_err(|error| error.to_string())?;
         let mut tasks = vec![Task::Expand(expr.clone(), named_depth)];
-        let mut values = Vec::new();
+        let mut values = ExpandedValues::default();
         let mut expanded_nodes = 0usize;
 
         while let Some(task) = tasks.pop() {
@@ -1215,18 +1215,18 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                         .into());
                     }
                     match expr {
-                        NetExpr::Number(value) => values.push(NetExpr::Number(value)),
+                        NetExpr::Number(value) => values.push_leaf(NetExpr::Number(value))?,
                         NetExpr::ComplexNumber(value) => {
-                            values.push(NetExpr::Number(value.re));
+                            values.push_leaf(NetExpr::Number(value.re))?;
                         }
                         NetExpr::StringLiteral(value) => {
-                            values.push(NetExpr::StringLiteral(value));
+                            values.push_leaf(NetExpr::StringLiteral(value))?;
                         }
                         NetExpr::Param(name)
                             if is_behavioral_runtime_symbol(&name)
                                 && !self.params.has_parameter_binding(&name) =>
                         {
-                            values.push(NetExpr::Param(name));
+                            values.push_leaf(NetExpr::Param(name))?;
                         }
                         NetExpr::Param(name)
                             if !self.expand_parameter_bindings
@@ -1234,7 +1234,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                                     parameters.contains(&name.to_ascii_uppercase())
                                 }) =>
                         {
-                            values.push(NetExpr::Param(name));
+                            values.push_leaf(NetExpr::Param(name))?;
                         }
                         NetExpr::Param(name) => {
                             let parameter_expression = if self.params.has_parameter_binding(&name) {
@@ -1252,7 +1252,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                                 if let Some(value) = self.params.get_complex(&name)
                                     && captures_static_statistical_value(expression, self.params)
                                 {
-                                    values.push(NetExpr::Number(value.re));
+                                    values.push_leaf(NetExpr::Number(value.re))?;
                                     continue;
                                 }
                                 let key = name.to_ascii_uppercase();
@@ -1316,9 +1316,9 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                                 tasks.push(Task::ExitParameter(key, expression_kind));
                                 tasks.push(Task::Expand(parsed, depth + 1));
                             } else if let Some(value) = self.params.get(&name) {
-                                values.push(NetExpr::Number(value));
+                                values.push_leaf(NetExpr::Number(value))?;
                             } else {
-                                values.push(NetExpr::Param(name));
+                                values.push_leaf(NetExpr::Param(name))?;
                             }
                         }
                         NetExpr::UnaryOp { op, operand } => {
@@ -1331,7 +1331,9 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                             tasks.push(Task::Expand(*left, depth));
                         }
                         NetExpr::FnCall { name, args } if is_circuit_probe(&name) => {
-                            values.push(NetExpr::FnCall { name, args });
+                            let probe = NetExpr::FnCall { name, args };
+                            let probe_depth = net_expr_depth(&probe);
+                            values.push(probe, probe_depth)?;
                         }
                         NetExpr::FnCall { name, args } => {
                             let arg_count = args.len();
@@ -1343,7 +1345,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                     }
                 }
                 Task::FinishUnary(op, depth) => {
-                    let operand = values.pop().ok_or_else(|| {
+                    let (operand, operand_depth) = values.pop().ok_or_else(|| {
                         "Internal behavioral expansion stack underflow".to_string()
                     })?;
                     if let NetExpr::Number(value) = &operand
@@ -1351,22 +1353,25 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                             || depth >= STACK_SAFE_CONSTANT_FOLD_DEPTH
                             || matches!(op, UnaryOpKind::Not))
                     {
-                        values.push(NetExpr::Number(match op {
+                        values.push_leaf(NetExpr::Number(match op {
                             UnaryOpKind::Neg => -*value,
                             UnaryOpKind::Not => f64::from(*value == 0.0),
-                        }));
+                        }))?;
                     } else {
-                        values.push(NetExpr::UnaryOp {
-                            op,
-                            operand: Box::new(operand),
-                        });
+                        values.push(
+                            NetExpr::UnaryOp {
+                                op,
+                                operand: Box::new(operand),
+                            },
+                            operand_depth + 1,
+                        )?;
                     }
                 }
                 Task::FinishBinary(op, depth) => {
-                    let right = values.pop().ok_or_else(|| {
+                    let (right, right_depth) = values.pop().ok_or_else(|| {
                         "Internal behavioral expansion stack underflow".to_string()
                     })?;
-                    let left = values.pop().ok_or_else(|| {
+                    let (left, left_depth) = values.pop().ok_or_else(|| {
                         "Internal behavioral expansion stack underflow".to_string()
                     })?;
                     if let (NetExpr::Number(left_value), NetExpr::Number(right_value)) =
@@ -1379,13 +1384,16 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                                 || depth >= STACK_SAFE_CONSTANT_FOLD_DEPTH,
                         )
                     {
-                        values.push(NetExpr::Number(value));
+                        values.push_leaf(NetExpr::Number(value))?;
                     } else {
-                        values.push(NetExpr::BinOp {
-                            op,
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        });
+                        values.push(
+                            NetExpr::BinOp {
+                                op,
+                                left: Box::new(left),
+                                right: Box::new(right),
+                            },
+                            left_depth.max(right_depth) + 1,
+                        )?;
                     }
                 }
                 Task::ApplyFunction(name, arg_count, depth) => {
@@ -1394,21 +1402,21 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                             .to_string()
                             .into());
                     }
-                    let expanded_args = values.split_off(values.len() - arg_count);
+                    let (mut expanded_args, arg_depths) =
+                        values.split_off(values.len() - arg_count);
                     let Some(func_def) = self.params.get_function(&name) else {
-                        if let Some(value) = fold_condition_function(&name, &expanded_args) {
-                            values.push(value);
+                        if let Some(index) = fold_condition_branch(&name, &expanded_args) {
+                            values.push(expanded_args.swap_remove(index), arg_depths[index])?;
                             continue;
                         }
-                        values.push(NetExpr::FnCall {
-                            name,
-                            args: expanded_args,
-                        });
-                        values
-                            .last()
-                            .expect("function was pushed")
-                            .ensure_stack_safe_depth()
-                            .map_err(|error| error.to_string())?;
+                        let call_depth = arg_depths.iter().max().map_or(1, |depth| depth + 1);
+                        values.push(
+                            NetExpr::FnCall {
+                                name,
+                                args: expanded_args,
+                            },
+                            call_depth,
+                        )?;
                         continue;
                     };
                     if expanded_args.len() != func_def.args.len() {
@@ -1488,11 +1496,6 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                     self.parameter_stack.pop();
                 }
             }
-            if let Some(value) = values.last() {
-                value
-                    .ensure_stack_safe_depth()
-                    .map_err(|error| error.to_string())?;
-            }
         }
 
         if values.len() != 1 {
@@ -1502,12 +1505,68 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
             )
             .into());
         }
-        values.pop().ok_or_else(|| {
+        values.pop().map(|(value, _)| value).ok_or_else(|| {
             BehavioralPreparationError::Semantic(
                 "Internal behavioral expansion produced no result".to_string(),
             )
         })
     }
+}
+
+/// The expansion's finished operands, each with its tree depth. Every new node
+/// is held to the stack safety limit from its children's depths as it is
+/// pushed; walking each finished tree again instead made expanding nested
+/// `.FUNC` calls quadratic in the expanded size.
+#[derive(Default)]
+struct ExpandedValues {
+    values: Vec<NetExpr>,
+    depths: Vec<usize>,
+}
+
+impl ExpandedValues {
+    fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    fn push(&mut self, value: NetExpr, depth: usize) -> Result<(), BehavioralPreparationError> {
+        super::ensure_stack_safe_level(depth).map_err(|error| error.to_string())?;
+        self.values.push(value);
+        self.depths.push(depth);
+        Ok(())
+    }
+
+    fn push_leaf(&mut self, value: NetExpr) -> Result<(), BehavioralPreparationError> {
+        self.push(value, 1)
+    }
+
+    fn pop(&mut self) -> Option<(NetExpr, usize)> {
+        Some((self.values.pop()?, self.depths.pop()?))
+    }
+
+    fn split_off(&mut self, at: usize) -> (Vec<NetExpr>, Vec<usize>) {
+        (self.values.split_off(at), self.depths.split_off(at))
+    }
+}
+
+/// The number of levels in `expr`'s tree, its root being level 1.
+fn net_expr_depth(expr: &NetExpr) -> usize {
+    let mut deepest = 0;
+    let mut pending = vec![(expr, 1)];
+    while let Some((node, depth)) = pending.pop() {
+        deepest = deepest.max(depth);
+        match node {
+            NetExpr::BinOp { left, right, .. } => {
+                pending.push((right, depth + 1));
+                pending.push((left, depth + 1));
+            }
+            NetExpr::UnaryOp { operand, .. } => pending.push((operand, depth + 1)),
+            NetExpr::FnCall { args, .. } => {
+                pending.extend(args.iter().map(|arg| (arg, depth + 1)));
+            }
+            _ => {}
+        }
+    }
+    deepest
 }
 
 fn fold_real_binary(
@@ -1541,7 +1600,8 @@ fn fold_real_binary(
     value.is_finite().then_some(value)
 }
 
-fn fold_condition_function(name: &str, args: &[NetExpr]) -> Option<NetExpr> {
+/// The argument a constant-condition `IF` or ternary reduces to.
+fn fold_condition_branch(name: &str, args: &[NetExpr]) -> Option<usize> {
     if !(name.eq_ignore_ascii_case("IF") || name.eq_ignore_ascii_case("TERNARY_FCN"))
         || args.len() != 3
     {
@@ -1550,11 +1610,7 @@ fn fold_condition_function(name: &str, args: &[NetExpr]) -> Option<NetExpr> {
     let NetExpr::Number(condition) = &args[0] else {
         return None;
     };
-    Some(if *condition != 0.0 {
-        args[1].clone()
-    } else {
-        args[2].clone()
-    })
+    Some(if *condition != 0.0 { 1 } else { 2 })
 }
 
 fn is_behavioral_runtime_symbol(name: &str) -> bool {

@@ -104,5 +104,5 @@ pub use parameter_direction::ComplexDirection;
 #[doc(hidden)]
 pub use resolution::ParameterResolutionError;
 pub(crate) use resolution::{ParameterEnvironment, ParameterResolver};
-pub(crate) use types::require_real;
 pub use types::{BinOpKind, Expr, UnaryOpKind, is_real};
+pub(crate) use types::{ensure_stack_safe_level, require_real};
