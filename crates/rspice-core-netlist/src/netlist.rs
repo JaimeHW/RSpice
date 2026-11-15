@@ -54,6 +54,7 @@ pub use qpxf_card::{QpxfCard, QpxfCardLattices, QpxfCardOutput, QpxfCardSources}
 mod qpss_card;
 pub use qpss_card::QpssCard;
 mod remove_unused;
+mod replay_source;
 mod source_defaults;
 pub mod source_map;
 pub(crate) mod spectre_adapter;
@@ -1293,6 +1294,9 @@ pub struct Netlist {
     pub(crate) skip_unreferenced_models: bool,
     /// How many `.model` cards that reading skipped.
     pub(crate) skipped_model_cards: usize,
+    /// The root source as the parse that produced this netlist read it,
+    /// which a replay of the same source reuses (see [`replay_source`]).
+    pub(crate) replay_source: Option<std::sync::Arc<replay_source::ReplaySource>>,
 }
 
 impl Netlist {
@@ -1764,6 +1768,8 @@ struct NetlistSourceResolution {
     initcond_source_provider: IncludeProcessor,
     allow_filesystem_spef: bool,
     replay_context: NetlistReplayContext,
+    /// An earlier reading of the root source a replay may reuse.
+    replay_source: Option<std::sync::Arc<replay_source::ReplaySource>>,
 }
 
 impl Netlist {
@@ -1942,6 +1948,7 @@ impl Netlist {
             None,
             options,
             &[],
+            None,
             abort,
         )
     }
@@ -1966,6 +1973,7 @@ impl Netlist {
             sources,
             options,
             &[],
+            None,
             abort,
         )
     }
@@ -1976,6 +1984,7 @@ impl Netlist {
         sources: SealedSourceBundle,
         options: NetlistParseOptions,
         overrides: &[parser::ParameterOverride],
+        replay_source: Option<std::sync::Arc<replay_source::ReplaySource>>,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         let replay_sources = sources.clone();
@@ -1998,6 +2007,7 @@ impl Netlist {
                 initcond_source_provider,
                 allow_filesystem_spef: false,
                 replay_context: NetlistReplayContext::Sealed(replay_sources),
+                replay_source,
             },
         )
     }
@@ -2039,6 +2049,7 @@ impl Netlist {
             Some(execution_dir),
             options,
             &[],
+            None,
             abort,
         )
     }
@@ -2049,6 +2060,7 @@ impl Netlist {
         execution_dir: Option<&std::path::Path>,
         options: NetlistParseOptions,
         overrides: &[parser::ParameterOverride],
+        replay_source: Option<std::sync::Arc<replay_source::ReplaySource>>,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         let default_execution_dir = if execution_dir.is_none() {
@@ -2082,6 +2094,7 @@ impl Netlist {
                 replay_context: NetlistReplayContext::PathWithExecutionDir(
                     execution_dir.to_path_buf(),
                 ),
+                replay_source,
             },
         )
     }
@@ -2099,24 +2112,20 @@ impl Netlist {
             initcond_source_provider,
             allow_filesystem_spef,
             replay_context,
+            replay_source,
         } = sources;
         let mut include_processor =
             include_processor.with_expression_dialect(options.expression_dialect);
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
-        let expanded =
-            include_processor.expand_content_mapped_with_abort(input, file_path, abort)?;
-        let (expanded, control_script) =
-            control_source::prepare_expanded(expanded, options.retain_control_script, abort)?;
-        let options = options.with_control_script(control_script.is_some());
-        let (sanitized, mut diagnostics, dispositions) =
-            Self::sanitize_expanded_source_with_abort(expanded, abort)?;
-        let mut netlist = parser::parse_expanded_netlist_with_parameter_overrides_and_abort(
-            &sanitized, options, overrides, abort,
+        let source = replay_source::ReplaySource::read_with_abort(
+            &mut include_processor,
+            replay_source,
+            input,
+            file_path,
+            &options,
+            abort,
         )?;
-        diagnostics.extend(netlist.diagnostics);
-        netlist.diagnostics = diagnostics;
-        netlist.control_dispositions = dispositions;
-        netlist.control_script = control_script;
+        let mut netlist = Self::parse_read_source_with_abort(&source, options, overrides, abort)?;
         Self::normalize_model_string_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
@@ -2143,7 +2152,31 @@ impl Netlist {
         ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
         netlist.replay_context = Some(replay_context);
+        netlist.replay_source = Some(source);
         ensure_parse_not_aborted(abort)?;
+        Ok(netlist)
+    }
+
+    /// Parse a root source as `source` read it, with the diagnostics and
+    /// control script that reading found.
+    fn parse_read_source_with_abort(
+        source: &replay_source::ReplaySource,
+        options: NetlistParseOptions,
+        overrides: &[parser::ParameterOverride],
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        let options = options.with_control_script(source.control_script.is_some());
+        let mut netlist = parser::parse_expanded_netlist_with_parameter_overrides_and_abort(
+            &source.expanded,
+            options,
+            overrides,
+            abort,
+        )?;
+        let mut diagnostics = source.diagnostics.clone();
+        diagnostics.append(&mut netlist.diagnostics);
+        netlist.diagnostics = diagnostics;
+        netlist.control_dispositions = source.dispositions.clone();
+        netlist.control_script = source.control_script.clone();
         Ok(netlist)
     }
 
@@ -2175,6 +2208,7 @@ impl Netlist {
                     sources.clone(),
                     options,
                     overrides,
+                    self.replay_source.clone(),
                     abort,
                 )
             }
@@ -2185,6 +2219,7 @@ impl Netlist {
                     Some(execution_dir),
                     options,
                     overrides,
+                    self.replay_source.clone(),
                     abort,
                 )
             }
@@ -2201,10 +2236,17 @@ impl Netlist {
                 execution_dir,
                 options,
                 overrides,
+                self.replay_source.clone(),
                 abort,
             ),
             (None, Some(path)) => Self::parse_with_path_execution_dir_options_and_abort(
-                input, path, None, options, overrides, abort,
+                input,
+                path,
+                None,
+                options,
+                overrides,
+                self.replay_source.clone(),
+                abort,
             ),
             (Some(context), None) => Err(ParseError::Syntax {
                 line: 0,
@@ -2401,7 +2443,7 @@ impl Netlist {
             .collect();
         if search_paths.is_empty() {
             Self::parse_with_path_execution_dir_options_and_abort(
-                input, path, None, options, &overrides, abort,
+                input, path, None, options, &overrides, None, abort,
             )
         } else {
             let execution_dir = std::env::current_dir().map_err(ParseError::Io)?;
@@ -2412,6 +2454,7 @@ impl Netlist {
                 &execution_dir,
                 options,
                 &overrides,
+                None,
                 abort,
             )
         }
@@ -2436,6 +2479,7 @@ impl Netlist {
             &execution_dir,
             options,
             &[],
+            None,
             abort,
         )
     }
@@ -2447,6 +2491,7 @@ impl Netlist {
         execution_dir: &std::path::Path,
         options: NetlistParseOptions,
         overrides: &[parser::ParameterOverride],
+        replay_source: Option<std::sync::Arc<replay_source::ReplaySource>>,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
@@ -2457,19 +2502,15 @@ impl Netlist {
             poll_parse_abort(abort, index)?;
             processor.add_lib_path(dir.clone());
         }
-        let expanded = processor.expand_content_mapped_with_abort(input, path, abort)?;
-        let (expanded, control_script) =
-            control_source::prepare_expanded(expanded, options.retain_control_script, abort)?;
-        let options = options.with_control_script(control_script.is_some());
-        let (sanitized, mut diagnostics, dispositions) =
-            Self::sanitize_expanded_source_with_abort(expanded, abort)?;
-        let mut netlist = parser::parse_expanded_netlist_with_parameter_overrides_and_abort(
-            &sanitized, options, overrides, abort,
+        let source = replay_source::ReplaySource::read_with_abort(
+            &mut processor,
+            replay_source,
+            input,
+            path,
+            &options,
+            abort,
         )?;
-        diagnostics.extend(netlist.diagnostics);
-        netlist.diagnostics = diagnostics;
-        netlist.control_dispositions = dispositions;
-        netlist.control_script = control_script;
+        let mut netlist = Self::parse_read_source_with_abort(&source, options, overrides, abort)?;
         Self::normalize_model_string_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, path, abort)?;
@@ -2492,6 +2533,7 @@ impl Netlist {
             paths: search_paths.to_vec(),
             execution_dir: execution_dir.to_path_buf(),
         });
+        netlist.replay_source = Some(source);
         ensure_parse_not_aborted(abort)?;
         Ok(netlist)
     }
@@ -3956,6 +3998,7 @@ impl Default for Netlist {
             parse_dialect: crate::config::SpiceDialect::BestAvailable,
             skip_unreferenced_models: false,
             skipped_model_cards: 0,
+            replay_source: None,
         }
     }
 }

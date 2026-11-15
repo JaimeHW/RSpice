@@ -322,6 +322,7 @@ impl ParseState {
             parse_dialect: self.spice_dialect,
             skip_unreferenced_models: false,
             skipped_model_cards: self.skipped_model_cards,
+            replay_source: None,
         };
         if self.spice_dialect == crate::config::SpiceDialect::Ngspice {
             dialect_instances::apply_ngspice_instance_readings(&mut netlist);

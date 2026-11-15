@@ -820,6 +820,7 @@ fn clone_netlist_with_abort(
         parse_dialect: source.parse_dialect,
         skip_unreferenced_models: source.skip_unreferenced_models,
         skipped_model_cards: source.skipped_model_cards,
+        replay_source: None,
     })
 }
 

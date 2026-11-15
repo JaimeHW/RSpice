@@ -915,6 +915,16 @@ impl IncludeProcessor {
         &self.resolved_dependencies
     }
 
+    /// Take an earlier expansion's dependency edges as this processor's most
+    /// recent expansion, for a replay that reuses that expansion's output.
+    pub(crate) fn adopt_resolved_dependencies(
+        &mut self,
+        dependencies: Vec<ResolvedIncludeDependency>,
+    ) {
+        self.begin_source_operation();
+        self.resolved_dependencies = dependencies;
+    }
+
     /// Create a processor that can resolve sources only from an authenticated
     /// in-memory bundle. No path lookup or source read performed by this
     /// processor accesses the filesystem.
