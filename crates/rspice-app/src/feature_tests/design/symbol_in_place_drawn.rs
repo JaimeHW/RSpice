@@ -313,7 +313,11 @@ fn the_placed_preview_is_not_offered_in_place() {
         !buttons.contains(&"Preview as placed on a sheet"),
         "{buttons:?}"
     );
-    assert!(buttons.contains(&"Return to parent (Enter)"), "{buttons:?}");
+    // The key is lettered as the host writes it: Enter, or ↩ on a Mac.
+    let enter = crate::state::shortcuts::ShortcutStroke::new(egui::Key::Enter, false, false, false)
+        .display_label_for(egui::os::OperatingSystem::default());
+    let back = format!("Return to parent ({enter})");
+    assert!(buttons.contains(&back.as_str()), "{buttons:?}");
     assert_eq!(
         fixture
             .replay
