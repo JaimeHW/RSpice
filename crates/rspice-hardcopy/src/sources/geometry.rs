@@ -309,6 +309,37 @@ pub(super) fn symbol_bounds(
 ) -> Result<SemanticBounds, HardcopySourceError> {
     let mut bounds = BoundsAccumulator::default();
     include_symbol_document_bounds(&mut bounds, document, None);
+    // Printed alone, a symbol letters each pin's name beside its terminal;
+    // the page makes room for the name as it does for the artwork.
+    let world = |um: i64| um as f32 / SCHEMATIC_UNIT_UM as f32;
+    let (dx, dy) = SYMBOL_VIEW_PIN_NAME_OFFSET_UM;
+    for pin in &document.pins {
+        let Some(terminal) = pin.position else {
+            continue;
+        };
+        let terminal = terminal - document.origin;
+        let name = rspice_design::schematic::label_layout::text_box(
+            rspice_design::schematic::label_layout::PlacedText {
+                anchor: rspice_design::schematic::label_layout::LayoutPoint::new(
+                    terminal.x as f32 + world(dx),
+                    terminal.y as f32 + world(dy),
+                ),
+                horizontal: rspice_design::schematic::label_layout::TextEdge::Start,
+                vertical: rspice_design::schematic::label_layout::TextEdge::End,
+                upward: false,
+            },
+            &pin.name,
+            world(SYMBOL_VIEW_PIN_NAME_SIZE_UM as i64),
+        );
+        bounds.include(Point::new(
+            name.min.x.floor() as i32,
+            name.min.y.floor() as i32,
+        ));
+        bounds.include(Point::new(
+            name.max.x.ceil() as i32,
+            name.max.y.ceil() as i32,
+        ));
+    }
     bounds.finish(SYMBOL_EDGE_ALLOWANCE_UNITS)
 }
 
@@ -803,6 +834,37 @@ mod drawing_sheet_geometry_tests {
         assert_eq!(
             bounds.maximum.x_um,
             (10 + SCHEMATIC_EDGE_ALLOWANCE_UNITS) * SCHEMATIC_UNIT_UM
+        );
+    }
+}
+
+#[cfg(test)]
+mod symbol_view_bounds_tests {
+    use super::*;
+    use rspice_design::symbol::SymbolPin;
+    use rspice_design_model::port::PortDirection;
+
+    /// A symbol printed alone makes room for the names it letters beside its
+    /// terminals: a pin on its right edge keeps the whole of its name on the
+    /// page.
+    #[test]
+    fn a_printed_symbol_view_makes_room_for_its_pin_names() {
+        let document = SymbolDocument {
+            pins: vec![SymbolPin::new(
+                "OUTPUT",
+                PortDirection::Out,
+                Some(Point::new(40, 0)),
+            )],
+            ..SymbolDocument::default()
+        };
+        let bounds = symbol_bounds(&document).unwrap();
+        // The name starts a millimetre right of the terminal, six glyphs of
+        // a face 2.3 mm tall, each at least half as wide as it is tall.
+        let name_end = 40 * SCHEMATIC_UNIT_UM + 1_000 + 6 * 2_300 / 2;
+        assert!(
+            bounds.maximum.x_um >= name_end,
+            "the page ends at {} um, before the name's end at {name_end} um",
+            bounds.maximum.x_um
         );
     }
 }

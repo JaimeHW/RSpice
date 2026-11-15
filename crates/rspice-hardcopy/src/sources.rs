@@ -112,6 +112,11 @@ pub const MAX_WORKER_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 pub(super) const WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 3;
 const SCHEMATIC_EDGE_ALLOWANCE_UNITS: i64 = 16;
 const SYMBOL_EDGE_ALLOWANCE_UNITS: i64 = 10;
+/// Where a symbol printed alone letters a pin's name: this many micrometres
+/// right of and above its terminal, set from its start on its baseline.
+pub(crate) const SYMBOL_VIEW_PIN_NAME_OFFSET_UM: (i64, i64) = (1_000, -800);
+/// The height of the sans face a symbol printed alone letters pin names in.
+pub(crate) const SYMBOL_VIEW_PIN_NAME_SIZE_UM: u64 = 2_300;
 pub const PLOT_INSET_UM: i64 = 12_700;
 
 pub struct PlotHardcopySource<'a> {

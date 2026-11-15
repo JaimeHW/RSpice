@@ -307,8 +307,15 @@ impl SemanticSceneCompiler<'_> {
                 fill: None,
             });
             if component.is_none() {
-                let label = self.offset_scene_point(position, 1_000, -800)?;
-                self.add_text(label, &pin.name, SceneFont::Sans, 2_300, pin_stroke.color)?;
+                let (dx, dy) = crate::sources::SYMBOL_VIEW_PIN_NAME_OFFSET_UM;
+                let label = self.offset_scene_point(position, dx, dy)?;
+                self.add_text(
+                    label,
+                    &pin.name,
+                    SceneFont::Sans,
+                    crate::sources::SYMBOL_VIEW_PIN_NAME_SIZE_UM,
+                    pin_stroke.color,
+                )?;
             }
         }
         if let Some(component) = component {
