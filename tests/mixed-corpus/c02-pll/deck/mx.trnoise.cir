@@ -1,0 +1,18 @@
+* C2 charge-pump PLL, variant mx, trnoise
+.hdl "../net/vco_pwl.va"
+.hdl "../net/div20_pfd.v"
+.include ../net/pll-mx.cir
+.include ../net/loopf_mx.cir
+.include ../net/pll-models.cir
+.param r1v=300 c1v=10n
+* Transient noise renders every noise source up to 100 MHz: the VCO's
+* frequency noise (net/vco_pwl.va, "fm") and the loop filter's resistors. The
+* phase noise is read from v(vco_out)'s rising crossings over [20 us, 55 us].
+* The loop acquires from uic by 14 us; the deterministic residual left at
+* 20 us, 33 ps rms decaying with a 2.9 us time constant, sits under the Hann
+* window's leading taper, and its share of any band stays under 0.2 dB. The
+* run accepts about 33 thousand points per microsecond (each VCO edge is a
+* converter event), so 55 us stays inside the default 2 million point limit.
+.save v(vco_out)
+.tran 0.1n 55u uic NOISEFMAX=100meg NOISESEED=1
+.end

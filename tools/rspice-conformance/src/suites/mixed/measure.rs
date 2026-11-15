@@ -376,6 +376,15 @@ pub fn evaluate(
             }
         }
         "checks" => checks(observation, &single_signal(spec, variant)?).map(Measured::Values),
+        "phase_noise" => {
+            let signal = single_signal(spec, variant)?;
+            let series = real_series(observation, &signal)?;
+            let level = spec
+                .level
+                .ok_or(MeasureError::Invalid("phase_noise needs level".into()))?;
+            let times = crossings(&observation.axis, &series, level, true, window(spec)?);
+            phase_noise_bands(&times, &axis_points(spec)?).map(Measured::Values)
+        }
         other => invalid(format!(
             "measure kind {other} is not evaluable on one observation"
         )),
@@ -1085,6 +1094,96 @@ pub fn crossings(
     times
 }
 
+/// The single-sideband phase noise L(f) of a carrier, in dBc/Hz, from the
+/// times of its crossings of one level, averaged over each band between
+/// consecutive `edges` (Hz).
+///
+/// A carrier of mean frequency f₀ whose phase deviates by θ(t) crosses for
+/// the n-th time where 2π·f₀·tₙ + θ(tₙ) = 2π·(n + c), so
+/// θₙ = 2π·(n − f₀·(tₙ − t₀)) samples θ once per period. f₀ is the record's
+/// mean crossing rate, and the record's mean and linear trend (a static
+/// phase and a residual frequency offset) are removed. A periodic Hann taper
+/// wₙ gives the one-sided periodogram
+/// S_θ(f_k) = 2·|Σ wₙθₙ·e^{−2πikn/N}|² / (f₀·Σwₙ²) at f_k = k·f₀/N, and
+/// L = S_θ/2. A band's value is 10·log₁₀ of the mean L over the bins with
+/// low ≤ f_k < high, so it carries the statistics of that many adjacent Hann
+/// bins.
+fn phase_noise_bands(times: &[f64], edges: &[f64]) -> MeasureResult<Vec<f64>> {
+    let count = times.len();
+    if count < 64 {
+        return invalid(format!(
+            "phase_noise: {count} crossings in the window, at least 64 needed"
+        ));
+    }
+    if edges.len() < 2 || edges[0] <= 0.0 || edges.windows(2).any(|pair| pair[1] <= pair[0]) {
+        return invalid("phase_noise needs increasing positive band edges");
+    }
+    let rate = (count - 1) as f64 / (times[count - 1] - times[0]);
+    // A missed or doubled crossing would read as a whole cycle of phase.
+    let period = 1.0 / rate;
+    if let Some(pair) = times
+        .windows(2)
+        .find(|pair| !(pair[1] - pair[0] > 0.5 * period && pair[1] - pair[0] < 1.5 * period))
+    {
+        return invalid(format!(
+            "phase_noise: the crossings at {:e} and {:e} s are not one period ({period:e} s) apart",
+            pair[0], pair[1]
+        ));
+    }
+    if edges[edges.len() - 1] > 0.5 * rate {
+        return invalid(format!(
+            "phase_noise: a band ends above half the crossing rate ({:e} Hz)",
+            0.5 * rate
+        ));
+    }
+    let total = count as f64;
+    let mut phase: Vec<f64> = times
+        .iter()
+        .enumerate()
+        .map(|(index, time)| std::f64::consts::TAU * (index as f64 - rate * (time - times[0])))
+        .collect();
+    let middle = (total - 1.0) / 2.0;
+    let mean = phase.iter().sum::<f64>() / total;
+    let (mut covariance, mut spread) = (0.0, 0.0);
+    for (index, value) in phase.iter().enumerate() {
+        let offset = index as f64 - middle;
+        covariance += offset * (value - mean);
+        spread += offset * offset;
+    }
+    let slope = covariance / spread;
+    let mut power = 0.0;
+    for (index, value) in phase.iter_mut().enumerate() {
+        let weight = 0.5 - 0.5 * (std::f64::consts::TAU * index as f64 / total).cos();
+        *value = weight * (*value - mean - slope * (index as f64 - middle));
+        power += weight * weight;
+    }
+    let twiddles: Vec<Complex64> = (0..count)
+        .map(|index| Complex64::from_polar(1.0, -std::f64::consts::TAU * index as f64 / total))
+        .collect();
+    let resolution = rate / total;
+    let mut values = Vec::with_capacity(edges.len() - 1);
+    for band in edges.windows(2) {
+        let first = (band[0] / resolution).ceil() as u64;
+        let end = (band[1] / resolution).ceil() as u64;
+        if end <= first {
+            return invalid(format!(
+                "phase_noise: the band [{:e}, {:e}) Hz holds no bin of the {resolution:e} Hz record",
+                band[0], band[1]
+            ));
+        }
+        let mut sum = 0.0;
+        for bin in first..end {
+            let mut transform = Complex64::new(0.0, 0.0);
+            for (index, value) in phase.iter().enumerate() {
+                transform += *value * twiddles[((bin * index as u64) % count as u64) as usize];
+            }
+            sum += transform.norm_sqr() / (rate * power);
+        }
+        values.push(10.0 * (sum / (end - first) as f64).log10());
+    }
+    Ok(values)
+}
+
 /// First time after which `|x − target| ≤ band` holds to the window's end.
 pub fn settle_time(
     axis: &[f64],
@@ -1568,5 +1667,50 @@ mod tests {
             Measured::Values(vec![-0.6489])
         );
         assert!(matches!(checks("hdl:loud"), Err(MeasureError::Invalid(_))));
+    }
+
+    /// Crossing times of a 400 MHz carrier whose phase carries a tone of
+    /// `amplitude` rad at `bin` of a 4000-crossing record.
+    fn modulated_crossings(amplitude: f64, bin: f64) -> Vec<f64> {
+        let (rate, count) = (400e6, 4000);
+        (0..count)
+            .map(|index| {
+                let phase =
+                    amplitude * (std::f64::consts::TAU * bin * index as f64 / count as f64).sin();
+                (index as f64 - phase / std::f64::consts::TAU) / rate
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_phase_tone_measures_its_mean_square_over_its_band() {
+        // A tone of A rad holds A²/2 rad² of phase, so the one-sided S_θ
+        // integrates to A²/2 over the bins its Hann main lobe covers (49-51
+        // here) and L = S_θ/2 averages A²/(4·Δf·bins) over a band of them.
+        let amplitude = 1e-3;
+        let times = modulated_crossings(amplitude, 50.0);
+        let resolution = 400e6 / 4000.0;
+        let values = phase_noise_bands(&times, &[4.75e6, 5.25e6, 8e6, 9e6]).unwrap();
+        let expected = 10.0 * (amplitude * amplitude / (4.0 * resolution * 5.0)).log10();
+        assert!(
+            (values[0] - expected).abs() < 1e-3,
+            "{values:?} vs {expected}"
+        );
+        // Far from the tone only the detrended remainder is left.
+        assert!(values[1] < expected - 60.0, "{values:?}");
+    }
+
+    #[test]
+    fn a_phase_noise_record_with_a_missed_crossing_is_refused() {
+        let mut times = modulated_crossings(1e-3, 50.0);
+        times.remove(2000);
+        assert!(matches!(
+            phase_noise_bands(&times, &[4.75e6, 5.25e6]),
+            Err(MeasureError::Invalid(_))
+        ));
+        let times = modulated_crossings(1e-3, 50.0);
+        // Above half the crossing rate, and a band narrower than a bin.
+        assert!(phase_noise_bands(&times, &[1e6, 2.1e8]).is_err());
+        assert!(phase_noise_bands(&times, &[1.01e6, 1.02e6]).is_err());
     }
 }

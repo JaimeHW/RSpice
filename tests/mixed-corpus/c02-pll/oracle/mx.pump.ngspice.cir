@@ -1,0 +1,35 @@
+* C2 mx pump charge per PFD period against the edge offset (O1, ngspice-46)
+* The loopf_mx switches and R1 into int1 held at the lock voltage 1.943932 V
+* (net/vco_pwl.va's table at 400 MHz). The gates are driven as the Verilog PFD
+* drives them in deck/mx.*: 1 ps edges behind the built-in D/A's 20 ohm, up_n
+* falling at the divider edge, dn rising at the reference edge (2 ns), both
+* cleared 100 ps after the later one. delta = t(ref) - t(div): positive when
+* the divider leads. The charge into int1 over 6 ns is zero at
+* delta0 = -28.0 ps, and dQ/d(delta) there is the pump gain
+* analytic::c02::PUMP_GAIN uses: (1.81085e-14 + 1.79214e-14) C / 10 ps =
+* 3.603 mA. The locked loop's mixed tran puts the divider 27.8 ps after the
+* reference.
+.include ../net/pll-models.cir
+.param tref=2n edge=1p delta=-28p
+.param tdiv={tref-delta} trst={max(tref,tref-delta)+100p}
+vdd dd 0 dc 3.3
+vss ss 0 dc 0
+vu uh 0 pwl(0 3.3 {tdiv} 3.3 {tdiv+edge} 0 {trst} 0 {trst+edge} 3.3)
+ru uh u1n 20
+vd dh 0 pwl(0 0 {tref} 0 {tref+edge} 3.3 {trst} 3.3 {trst+edge} 0)
+rd dh d1 20
+mnd  dra d1  ss  ss  n1  w=12u  l=0.35u  AS=24p AD=24p PS=28u PD=28u
+mpd  dra u1n  dd  dd  p1  w=24u l=0.35u  AS=48p AD=48p PS=52u PD=52u
+r1 dra int1 300
+vh int1 0 dc 1.943932
+.options reltol=1e-5 abstol=1e-14 vntol=1e-7 chgtol=1e-19
+.control
+foreach d -33p -30p -28p -26p -23p
+  alterparam delta=$d
+  reset
+  tran 0.1p 6n 0 0.1p
+  meas tran q integ i(vh) from=0 to=6n
+  echo "delta $d charge $&q"
+end
+.endc
+.end

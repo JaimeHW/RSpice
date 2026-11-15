@@ -28,7 +28,7 @@ pub const ANALYSIS_KINDS: [&str; 15] = [
 pub fn required_analyses(id: &str) -> Option<&'static [&'static str]> {
     Some(match id {
         "C1" => &["tran", "op", "ac", "trnoise"],
-        "C2" => &["tran", "op", "ac", "mc-tran", "pss", "pnoise"],
+        "C2" => &["tran", "op", "ac", "mc-tran", "trnoise", "pss", "pnoise"],
         "C3" => &["tran", "op"],
         "C4" => &["tran", "ac", "noise", "mc-tran"],
         "C5" => &["op", "dc", "ac", "stb", "noise", "tf", "sens", "pz", "tran"],
@@ -399,6 +399,7 @@ pub const MEASURE_KINDS: [&str; 25] = [
     "identical",
     "meas",
     "checks",
+    "phase_noise",
 ];
 
 /// The oracle identities a quantity may compare against.

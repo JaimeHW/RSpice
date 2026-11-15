@@ -1,11 +1,19 @@
 // C2 mx: Verilog-A VCO replicating the ngspice d_osc of net/vco_sub_new.cir:
 // the same control-to-frequency points (linear between them, extrapolated past
 // the ends by the end segments), duty 0.5, init_phase 180 degrees, 100 ps edges.
+// Its frequency noise is white, sf Hz^2/Hz one-sided: V(fn) carries the "fm"
+// source through 1 ohm and adds to f at 1 Hz per volt. Only the noise analyses
+// see the source; every other analysis solves V(fn) = 0 exactly, so f is the
+// table's.
 `include "disciplines.vams"
 module vco_pwl(cont, out);
   input cont; output out; electrical cont, out;
+  electrical fn;
+  parameter real sf = 10;
   real v, f, ph;
   analog begin
+    I(fn) <+ V(fn);
+    I(fn) <+ white_noise(sf, "fm");
     v = V(cont);
     if (v < 1.0)
       f = 879.0820e6 + (v - 0.5) * (747.2197e6 - 879.0820e6) / 0.5;
@@ -15,6 +23,7 @@ module vco_pwl(cont, out);
       f = 579.9500e6 + (v - 1.5) * (377.2727e6 - 579.9500e6) / 0.5;
     else
       f = 377.2727e6 + (v - 2.0) * (161.1650e6 - 377.2727e6) / 0.5;
+    f = f + V(fn);
     ph = idtmod(f, 0.5, 1.0);
     @(cross(ph - 0.5, 0));
     V(out) <+ transition(ph >= 0.5 ? 1.0 : 0.0, 0, 100p, 100p);

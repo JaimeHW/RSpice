@@ -29,6 +29,9 @@ xs	mc-tran	worker	pass	fdiv (O6) trial 3: [0] |a−e|=2.415e-12 allowed 5.000e-1
 mx	mc-tran	interp	pass	fdiv (O6) trial 6: [0] |a−e|=7.369e-13 allowed 5.000e-11 (a=9.999926e-8, e=1.000000e-7)
 mx	mc-tran	native	pass	fdiv (O6) trial 6: [0] |a−e|=7.369e-13 allowed 5.000e-11 (a=9.999926e-8, e=1.000000e-7)
 mx	mc-tran	worker	pass	fdiv (O6) trial 6: [0] |a−e|=7.382e-13 allowed 5.000e-11 (a=9.999926e-8, e=1.000000e-7)
+mx	trnoise	interp	pass	pn.suppress (O6) -1.171815e2 in [-1.251637e2, -1.017048e2]
+mx	trnoise	native	pass	pn.suppress (O6) -1.171815e2 in [-1.251637e2, -1.017048e2]
+mx	trnoise	worker	pass	pn.suppress (O6) -1.171815e2 in [-1.251637e2, -1.017048e2]
 xs	pss	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=ABRIDGEREF form=structured; token-form=structured; analysis-form=structured
 xs	pss	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=ABRIDGEREF form=structured; token-form=structured; analysis-form=structured
 xs	pss	worker	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=ABRIDGEREF form=structured; token-form=structured; analysis-form=structured
