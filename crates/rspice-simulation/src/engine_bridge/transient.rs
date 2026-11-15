@@ -984,9 +984,9 @@ mod tests {
         rspice_core::Netlist::parse(source).expect("test netlist parses")
     }
 
-    /// Design P2 section 4.3: a headless transient carries what the deck's
-    /// HDL design printed, in emission order, and still hands every record
-    /// to the sink the caller installed.
+    /// A headless transient carries what the deck's HDL design printed, in
+    /// emission order, and still hands every record to the sink the caller
+    /// installed.
     #[test]
     fn a_transient_result_carries_its_hdl_output() {
         use rspice_core::config::{HdlOutputCollector, HdlStream};

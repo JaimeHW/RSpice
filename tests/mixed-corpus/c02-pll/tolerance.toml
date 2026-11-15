@@ -138,7 +138,7 @@ of = { kind = "settle", signal = "v(cont)", target = 1.94394, band = 0.030, wind
 trials = 8
 interval = [1e-15, 1e3]
 oracle = "O6"
-why = "8 trials ran and the R1/C1 draws moved the acquisition time (P0.6b in a real design)"
+why = "8 trials ran and the R1/C1 draws moved the acquisition time (Monte Carlo of a mixed transient in a real design)"
 
 [[q]]
 id = "zlf"
@@ -319,4 +319,4 @@ window = [0.0, 1.0e-7]
 oracle = "O6"
 expect = "c02::vlock"
 abs = 0.015
-why = "vlock as the DC harmonic of the periodic steady state (executed at the P7 exit)"
+why = "vlock as the DC harmonic of the periodic steady state, once one admits the running digital half"

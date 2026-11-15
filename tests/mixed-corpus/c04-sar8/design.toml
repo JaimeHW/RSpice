@@ -1,7 +1,6 @@
 schema = "rspice-mixed-design/1"
 id = "C4"
 title = "8-bit SAR ADC"
-exit_phases = ["P1", "P2"]
 dialect = "best-available"
 features = []
 
@@ -10,13 +9,11 @@ features = []
 [[variant]]
 name = "full"
 families = ["spice", "va-runtime", "vams-digital"]
-today = "parse:P2.3"
 
 # ports: the SAR register alone, clocked and started by SPICE sources.
 [[variant]]
 name = "ports"
 families = ["spice", "va-runtime", "vams-digital"]
-today = "runs"
 
 # split: full with the testbench in a file of its own (net/tb_sar.v, no
 # `timescale) read after net/sar8.v; the deck's HDL sources are one
@@ -24,14 +21,12 @@ today = "runs"
 [[variant]]
 name = "split"
 families = ["spice", "va-runtime", "vams-digital"]
-today = "runs"
 
 # vcd: ports with clk and start replayed from a VCD file (net/sar_ports.vcd)
 # by a d_vcd stimulus, onto the register's event nets.
 [[variant]]
 name = "vcd"
 families = ["spice", "xspice", "va-runtime", "vams-digital"]
-today = "runs"
 
 # vec: ports with clk and start driven by the input columns of an HSPICE
 # digital vector file (net/c04.vec, through net/sar_vec.cir), whose output
@@ -39,7 +34,6 @@ today = "runs"
 [[variant]]
 name = "vec"
 families = ["spice", "va-runtime", "vams-digital"]
-today = "runs"
 
 # Budgets are about five times the slower route's measured case time (at
 # least 30 s), so a hang surfaces quickly.
@@ -48,7 +42,6 @@ id = "tran"
 variants = ["full", "ports", "split", "vcd", "vec"]
 oracles = ["O6", "O2", "O5"]
 timeout_s = 520
-phase = "P2"
 
 # The coupled t = 0 fixed point (D-A): the sampling state.
 [[analysis]]
@@ -56,25 +49,21 @@ id = "op"
 variants = ["full", "ports", "split"]
 oracles = ["O6", "O2", "O5", "O5-O1"]
 timeout_s = 30
-phase = "P1"
 
 [[analysis]]
 id = "ac"
 variants = ["full", "ports"]
 oracles = ["O6", "O2", "O5", "O5-O1"]
 timeout_s = 30
-phase = "P1"
 
 [[analysis]]
 id = "noise"
 variants = ["full", "ports"]
 oracles = ["O6", "O2", "O5", "O5-O1"]
 timeout_s = 30
-phase = "P1"
 
 [[analysis]]
 id = "mc-tran"
 variants = ["full", "ports"]
 oracles = ["O6", "O2", "O5"]
 timeout_s = 310
-phase = "P1"

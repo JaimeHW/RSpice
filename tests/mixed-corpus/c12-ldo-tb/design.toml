@@ -1,7 +1,6 @@
 schema = "rspice-mixed-design/1"
 id = "C12"
 title = "Verilog-AMS testbench over the C5 LDO"
-exit_phases = ["P3", "P4"]
 dialect = "best-available"
 features = []
 
@@ -9,26 +8,22 @@ features = []
 [[variant]]
 name = "full"
 families = ["spice", "vams-digital", "vams-analog", "wreal"]
-today = "runs"
 
 # unrolled: the same sequence as straight-line code, no system tasks.
 [[variant]]
 name = "unrolled"
 families = ["spice", "vams-digital", "vams-analog", "wreal"]
-today = "runs"
 
 # top: Verilog-AMS on top, instantiating the SPICE subcircuit ldo.
 [[variant]]
 name = "top"
 families = ["spice", "vams-digital", "vams-analog", "wreal"]
-today = "runs"
 
 # fail: full with its step window narrowed to [5 mV, 7 mV], so the testbench
 # flags every code with $error; the cell compares those records.
 [[variant]]
 name = "fail"
 families = ["spice", "vams-digital", "vams-analog", "wreal"]
-today = "runs"
 
 # oomr: full, and at each reading the testbench also reads the LDO's feedback
 # node xldo.fb, inside the SPICE hierarchy and no port of the testbench, with
@@ -36,7 +31,6 @@ today = "runs"
 [[variant]]
 name = "oomr"
 families = ["spice", "vams-digital", "vams-analog", "wreal"]
-today = "runs"
 
 # Budgets are about five times the slower route's measured case time (at
 # least 30 s), so a hang surfaces quickly.
@@ -45,14 +39,12 @@ id = "tran"
 variants = ["full", "unrolled", "top", "fail", "oomr"]
 oracles = ["O5", "O6", "O5-O1"]
 timeout_s = 30
-phase = "P3"
 
 [[analysis]]
 id = "op"
 variants = ["full", "unrolled", "top", "oomr"]
 oracles = ["O5", "O6", "O5-O1"]
 timeout_s = 30
-phase = "P3"
 
 # ckpt: full, checkpointed inside its trim sequence and resumed to the
 # testbench's own $finish, which ends both runs.
@@ -62,4 +54,3 @@ variants = ["full"]
 oracles = ["O5", "O6", "O7"]
 timeout_s = 30
 checkpoint_at = [8.5e-4]
-phase = "P8"

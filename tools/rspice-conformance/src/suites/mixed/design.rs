@@ -22,7 +22,7 @@ pub const ANALYSIS_KINDS: [&str; 15] = [
     "pss", "pac", "pnoise",
 ];
 
-/// Plan §7's analysis list per design. A design may split one kind across
+/// The analyses each design must declare. A design may split one kind across
 /// several decks (`dc-line`, `dc-load`), so the check is that every listed
 /// kind is declared and nothing outside the kind set is.
 pub fn required_analyses(id: &str) -> Option<&'static [&'static str]> {
@@ -48,7 +48,7 @@ pub fn required_analyses(id: &str) -> Option<&'static [&'static str]> {
     })
 }
 
-/// Plan §7's oracle list per design, which each analysis must carry in full
+/// The oracles each design's analyses must carry in full
 /// (extras allowed, never fewer). Probes compare against analytic assertions.
 pub fn required_oracles(id: &str) -> Option<&'static [&'static str]> {
     Some(match id {
@@ -102,7 +102,6 @@ pub struct DesignFile {
     pub schema: String,
     pub id: String,
     pub title: String,
-    pub exit_phases: Vec<String>,
     pub dialect: String,
     #[serde(default)]
     pub features: Vec<String>,
@@ -117,7 +116,6 @@ pub struct DesignFile {
 pub struct Variant {
     pub name: String,
     pub families: Vec<String>,
-    pub today: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -135,7 +133,6 @@ pub struct AnalysisEntry {
     /// the variant's own: `o5-c15` is `oracle/<variant>.o5-c15.cir`.
     #[serde(default)]
     pub o5: Option<String>,
-    pub phase: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -655,7 +652,7 @@ pub fn integrity(design: &Design) -> Vec<Finding> {
             for oracle in required {
                 if !analysis.oracles.iter().any(|listed| listed == oracle) {
                     findings.push(format!(
-                        "{slug}: analysis {} lists fewer oracles than §7 ({oracle} missing)",
+                        "{slug}: analysis {} lists fewer oracles than its design ({oracle} missing)",
                         analysis.id
                     ));
                 }
@@ -688,7 +685,10 @@ pub fn integrity(design: &Design) -> Vec<Finding> {
                 }
             }
         }
-        None => findings.push(format!("{slug}: design id {} is not in plan §7", file.id)),
+        None => findings.push(format!(
+            "{slug}: design id {} is not a corpus design",
+            file.id
+        )),
     }
     for quantity in &design.tolerance.quantities {
         check_quantity(design, quantity, &mut findings);
@@ -970,10 +970,10 @@ mod tests {
     fn o3_takes_a_template_not_a_ref() {
         let dir = tempfile::tempdir().unwrap();
         let file: DesignFile = toml::from_str(
-            "schema = \"rspice-mixed-design/1\"\nid = \"C10\"\ntitle = \"t\"\nexit_phases = [\"P2\"]\ndialect = \"d\"\n\
-             [[variant]]\nname = \"a\"\nfamilies = [\"spice\"]\ntoday = \"runs\"\n\
-             [[variant]]\nname = \"b\"\nfamilies = [\"spice\"]\ntoday = \"runs\"\n\
-             [[analysis]]\nid = \"tran\"\nvariants = [\"a\", \"b\"]\noracles = [\"O3\"]\ntimeout_s = 10\nphase = \"P2\"\n",
+            "schema = \"rspice-mixed-design/1\"\nid = \"C10\"\ntitle = \"t\"\ndialect = \"d\"\n\
+             [[variant]]\nname = \"a\"\nfamilies = [\"spice\"]\n\
+             [[variant]]\nname = \"b\"\nfamilies = [\"spice\"]\n\
+             [[analysis]]\nid = \"tran\"\nvariants = [\"a\", \"b\"]\noracles = [\"O3\"]\ntimeout_s = 10\n",
         )
         .unwrap();
         let quantity = "[[q]]\nid = \"vec\"\nanalysis = \"tran\"\nvariants = [\"a\", \"b\"]\nkind = \"codes\"\nnets = [\"o\"]\nstrobe = \"s\"\noracle = \"O3\"\nwhy = \"w\"\n";

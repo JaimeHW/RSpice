@@ -1,7 +1,6 @@
 schema = "rspice-mixed-design/1"
 id = "C3"
 title = "ngspice d_cosim examples run natively"
-exit_phases = ["P2"]
 dialect = "best-available"
 features = []
 
@@ -10,34 +9,28 @@ features = []
 [[variant]]
 name = "555"
 families = ["spice", "xspice", "vams-digital"]
-today = "runs"
 
 [[variant]]
 name = "adc"
 families = ["spice", "xspice", "vams-digital"]
-today = "parse:P2.3"
 
 [[variant]]
 name = "delay"
 families = ["vams-digital"]
-today = "parse:P2.1"
 
 [[variant]]
 name = "pwm"
 families = ["spice", "vams-digital"]
-today = "parse:P2.1"
 
 # The rewrites of adc and delay: adc.v without its $display line, and
 # delay.v in 1364-2005 spelling (`out = out << 1;`, `endmodule` without `;`).
 [[variant]]
 name = "adc_nd"
 families = ["spice", "xspice", "vams-digital"]
-today = "runs"
 
 [[variant]]
 name = "delay_v2005"
 families = ["vams-digital"]
-today = "runs"
 
 # Budgets are about five times the slower route's measured case time
 # (tran: adc_nd 31 s interp, 16 s native; op: 555 2.5 s).
@@ -46,7 +39,6 @@ id = "tran"
 variants = ["555", "adc", "adc_nd", "delay", "delay_v2005", "pwm"]
 oracles = ["O2", "O6"]
 timeout_s = 150
-phase = "P2"
 
 # 555 op is an expected refusal, analysis.mixed_signal.astable: the astable
 # has no coupled t = 0 fixed point, so it declares no quantity and reads no
@@ -56,4 +48,3 @@ id = "op"
 variants = ["555", "adc", "adc_nd", "delay", "delay_v2005", "pwm"]
 oracles = ["O2", "O6"]
 timeout_s = 15
-phase = "P2"

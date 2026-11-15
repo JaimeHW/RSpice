@@ -1488,9 +1488,9 @@ mod tests {
             dir: dir.path().to_path_buf(),
             slug: "cxx".into(),
             file: toml::from_str(
-                "schema = \"rspice-mixed-design/1\"\nid = \"C99\"\ntitle = \"t\"\nexit_phases = [\"P1\"]\ndialect = \"d\"\n\
-                 [[variant]]\nname = \"mx\"\nfamilies = [\"spice\"]\ntoday = \"runs\"\n\
-                 [[analysis]]\nid = \"tran\"\nvariants = [\"mx\"]\noracles = [\"O6\"]\ntimeout_s = 60\nphase = \"P1\"\n",
+                "schema = \"rspice-mixed-design/1\"\nid = \"C99\"\ntitle = \"t\"\ndialect = \"d\"\n\
+                 [[variant]]\nname = \"mx\"\nfamilies = [\"spice\"]\n\
+                 [[analysis]]\nid = \"tran\"\nvariants = [\"mx\"]\noracles = [\"O6\"]\ntimeout_s = 60\n",
             )
             .unwrap(),
             tolerance: toml::from_str("schema = \"rspice-mixed-tolerance/1\"\ntime_precision = 1e-12\n")

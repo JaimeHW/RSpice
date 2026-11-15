@@ -1,20 +1,17 @@
 schema = "rspice-mixed-design/1"
 id = "C11"
 title = "Switched-capacitor filter with a Verilog non-overlapping clock"
-exit_phases = ["P7"]
 dialect = "best-available"
 features = []
 
 [[variant]]
 name = "mx"
 families = ["spice", "vams-digital"]
-today = "runs"
 
 # mx with a d_process peer clocked by ph1 beside the module, over 20 periods.
 [[variant]]
 name = "proc"
 families = ["spice", "xspice", "vams-digital"]
-today = "runs"
 
 # The analog-clock twin: the filter of net/sc.cir clocked by two PULSE sources
 # with the module's edges, no HDL (net/sc_pulse.cir). Its periodic cells are the
@@ -22,7 +19,6 @@ today = "runs"
 [[variant]]
 name = "pulse"
 families = ["spice"]
-today = "runs"
 
 # Budgets are about five times the slower route's measured case time (tran
 # 8.3 s interp, 9.7 s native). The periodic cells stop at preparation today
@@ -32,27 +28,23 @@ id = "tran"
 variants = ["mx", "proc", "pulse"]
 oracles = ["O6"]
 timeout_s = 50
-phase = "P0"
 
-# Periodic analyses with running digital come last (plan D-B); today each is
-# expected to refuse at its mixed-signal guard.
+# Periodic analyses: the mx variant refuses each at its mixed-signal guard
+# while its digital half runs; the pulse twin's analog clock admits them.
 [[analysis]]
 id = "pss"
 variants = ["mx", "pulse"]
 oracles = ["O6"]
 timeout_s = 60
-phase = "P7"
 
 [[analysis]]
 id = "pac"
 variants = ["mx", "pulse"]
 oracles = ["O6"]
 timeout_s = 60
-phase = "P7"
 
 [[analysis]]
 id = "pnoise"
 variants = ["mx", "pulse"]
 oracles = ["O6"]
 timeout_s = 60
-phase = "P7"

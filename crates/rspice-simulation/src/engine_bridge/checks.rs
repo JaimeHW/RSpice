@@ -5,8 +5,8 @@ use std::sync::Arc;
 use super::EngineBridge;
 use crate::error::SimulationError;
 
-/// The run's HDL output (design P2 section 4.3): kept, bounded, for the
-/// result, and still handed to whatever sink the caller installed.
+/// The run's HDL output: kept, bounded, for the result, and still handed to
+/// whatever sink the caller installed.
 #[derive(Debug, Default)]
 pub(super) struct HdlOutputCapture {
     pub(super) collector: rspice_core::config::HdlOutputCollector,

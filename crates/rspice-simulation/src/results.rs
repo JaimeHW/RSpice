@@ -101,7 +101,7 @@ pub enum SimulationResult {
         /// with no bound FFT analysis.
         spectra: Vec<std::sync::Arc<RecordedFftSpectrum>>,
         /// What the deck's HDL designs printed as this solve accepted its
-        /// points (design P2 section 4.3): `$display` and its kin, severity
+        /// points: `$display` and its kin, severity
         /// reports and finish notices, in emission order. Bounded at 64 MiB of
         /// text; an overflow ends in one explicit truncation record. Empty for
         /// a transient with no HDL design and for a PSS rebuild. A result

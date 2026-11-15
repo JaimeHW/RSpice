@@ -1,7 +1,6 @@
 schema = "rspice-mixed-design/1"
 id = "C9"
 title = "Power-on reset under a supply ramp"
-exit_phases = ["P1", "P3"]
 dialect = "best-available"
 features = []
 
@@ -9,21 +8,18 @@ features = []
 [[variant]]
 name = "base"
 families = ["spice", "xspice", "vams-digital"]
-today = "runs"
 
 # p3: authored supply-sensitive connect modules with a supply port,
 # bound to vdd by the port's inh_conn_def_value.
 [[variant]]
 name = "p3"
 families = ["spice", "xspice", "vams-digital", "vams-analog"]
-today = "runs"
 
 # live: no .param vcc; the supply is the vdd net, bound live:
 # its connect rules (net/por_ctrl_live.vams) name vdd as vsup.
 [[variant]]
 name = "live"
 families = ["spice", "xspice", "vams-digital"]
-today = "runs"
 
 # Budgets are about five times the slower route's measured case time (at
 # least 30 s), so a hang surfaces quickly.
@@ -32,7 +28,6 @@ id = "tran"
 variants = ["base", "p3", "live"]
 oracles = ["O6"]
 timeout_s = 50
-phase = "P1"
 
 # porn_up: the upward sweep, state carried from point to point (P1 S6).
 [[analysis]]
@@ -40,7 +35,6 @@ id = "dc"
 variants = ["base", "p3", "live"]
 oracles = ["O6"]
 timeout_s = 30
-phase = "P1"
 
 # porn_down: the downward sweep, state carried from point to point.
 [[analysis]]
@@ -48,7 +42,6 @@ id = "dc-down"
 variants = ["base", "p3", "live"]
 oracles = ["O6"]
 timeout_s = 30
-phase = "P1"
 
 # porn_restart: the upward sweep with RESTART=YES, every point a fresh .op.
 [[analysis]]
@@ -56,4 +49,3 @@ id = "dc-restart"
 variants = ["base", "p3", "live"]
 oracles = ["O6"]
 timeout_s = 30
-phase = "P1"
