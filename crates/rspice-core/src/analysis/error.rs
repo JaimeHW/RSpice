@@ -1050,6 +1050,10 @@ impl From<crate::device::behavioral::BehavioralBreakpointError> for SimulationEr
         match error {
             BehavioralBreakpointError::Aborted => Self::Aborted,
             BehavioralBreakpointError::Resource(error) => Self::ResourceLimit(error),
+            BehavioralBreakpointError::Allocation { source, .. } => Self::Allocation {
+                object: "behavioral source-event schedule",
+                source,
+            },
             other => Self::Circuit(other.to_string()),
         }
     }

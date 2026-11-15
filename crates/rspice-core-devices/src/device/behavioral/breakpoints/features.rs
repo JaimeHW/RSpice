@@ -20,18 +20,10 @@ impl EventSchedule<'_> {
         let Some(mut bounds) = TimeEnclosure::new(&program, self.tstop) else {
             return self.expression(expr, context, true);
         };
-        let mut operations: usize = 0;
         let mut vm = Vm::new();
-        let mut charge = || {
-            self.poll()?;
-            operations = operations.saturating_add(program.instructions.len());
-            if operations > 16_000_000 {
-                return Err(BehavioralBreakpointError::Invalid(
-                    "source-feature qualification exceeds its 16000000-instruction work limit",
-                ));
-            }
-            Ok(())
-        };
+        // The search ends at the time precision or the event policy; Stop
+        // and timeouts reach it through the run's abort hook.
+        let charge = || self.poll();
         let mut is_constant = |lower, upper| -> Result<bool, BehavioralBreakpointError> {
             charge()?;
             let Some(domain) = bounds
@@ -115,7 +107,7 @@ impl EventSchedule<'_> {
             None
         };
         let program = compile_time_expression(identical_difference.unwrap_or(expr), context);
-        self.charge_isolation_work(program.instructions.len())?;
+        self.poll()?;
         let Some(mut bounds) = TimeEnclosure::new(&program, self.tstop) else {
             return Ok(());
         };
@@ -132,11 +124,6 @@ impl EventSchedule<'_> {
         {
             let left = compile_time_expression(left, context);
             let right = compile_time_expression(right, context);
-            self.charge_isolation_work(
-                left.instructions
-                    .len()
-                    .saturating_add(right.instructions.len()),
-            )?;
             Some((left, right))
         } else {
             None
@@ -174,29 +161,9 @@ impl EventSchedule<'_> {
             }
         };
         let mut pending = vec![window];
-        let mut operations: usize = 0;
-        // Direct comparisons evaluate both operands even when compilation of
-        // the difference reused a sibling. Charge enough for either route.
-        let evaluation_cost = operands
-            .as_ref()
-            .map_or(program.instructions.len(), |(a, b)| {
-                program
-                    .instructions
-                    .len()
-                    .max(a.instructions.len().saturating_add(b.instructions.len()))
-            });
-        let mut charge = || {
-            self.poll()?;
-            self.charge_isolation_work(evaluation_cost)?;
-            operations = operations.saturating_add(evaluation_cost);
-            if operations > 16_000_000 {
-                Err(BehavioralBreakpointError::Invalid(
-                    "time-feature isolation exceeds its 16000000-instruction work limit",
-                ))
-            } else {
-                Ok(())
-            }
-        };
+        // Bisection ends at the time precision or the event policy; Stop and
+        // timeouts reach it through the run's abort hook.
+        let charge = || self.poll();
         // Accumulate separately while the work-budget closure borrows this
         // schedule. The ordinary distinct-event budget remains authoritative.
         let mut roots = BTreeSet::new();
@@ -442,11 +409,7 @@ impl EventSchedule<'_> {
                 ));
             }
             let count = (last - first + 1.0).max(0.0);
-            if count > 1_000_000.0 {
-                return Err(BehavioralBreakpointError::Invalid(
-                    "nonlinear phase schedule exceeds its 1000000-cycle work limit",
-                ));
-            }
+            self.reserve_cycles(count)?;
             for index in 0..count as usize {
                 self.poll()?;
                 self.level(phase, cycle.mul_add(first + index as Value, root), context)?;
@@ -514,7 +477,6 @@ impl EventSchedule<'_> {
             abort: self.abort,
             max_values: self.max_values,
             physical_corners: self.physical_corners,
-            isolation_work: self.isolation_work,
             events: BTreeSet::new(),
         };
         for &level in levels {
@@ -530,10 +492,8 @@ impl EventSchedule<'_> {
         x: &Expr,
         context: &Context<'_>,
     ) -> Result<(), BehavioralBreakpointError> {
-        let work = Cell::new(0);
         let mut candidates = EventSchedule {
             events: BTreeSet::new(),
-            isolation_work: Some(self.isolation_work.unwrap_or(&work)),
             ..*self
         };
         for coordinate in [y, x] {
@@ -563,10 +523,7 @@ impl EventSchedule<'_> {
             return Ok(());
         }
         let mut vm = Vm::new();
-        let work = Cell::new(0);
-        let budget = self.isolation_work.unwrap_or(&work);
         let mut evaluate = |time| -> Result<Value, BehavioralBreakpointError> {
-            Self::charge_feature_work(budget, program.instructions.len())?;
             Ok(vm.execute(&program, &context.at_time(time)))
         };
         let mut previous = 0.0;
@@ -645,7 +602,6 @@ impl EventSchedule<'_> {
         context: &Context<'_>,
     ) -> Result<(), BehavioralBreakpointError> {
         self.poll()?;
-        self.charge_isolation_work(1)?;
         if !target.is_finite() {
             return Ok(());
         }
@@ -770,17 +726,12 @@ impl EventSchedule<'_> {
                     // operands. Isolate those candidates directly: a cusp
                     // of the envelope need not have an exact VM zero or a
                     // sign change at adjacent representable timestamps.
-                    let work = Cell::new(0);
                     let mut levels = EventSchedule {
                         events: BTreeSet::new(),
-                        isolation_work: Some(self.isolation_work.unwrap_or(&work)),
                         ..*self
                     };
                     for arg in args {
                         levels.poll()?;
-                        levels.charge_isolation_work(
-                            compile_time_expression(arg, context).instructions.len(),
-                        )?;
                         levels.level(arg, target, context)?;
                     }
                     for bits in levels.events {
@@ -802,33 +753,15 @@ impl EventSchedule<'_> {
         if args.len() < 2 || args[1..].iter().all(|arg| arg == &args[0]) {
             return Ok(());
         }
-        // Pairwise equality contains every possible change of active branch.
-        // Bound this enumeration before cloning any operand trees.
-        if args.len().saturating_mul(args.len() - 1) / 2 > 1_000_000 {
-            return Err(BehavioralBreakpointError::Invalid(
-                "extrema branch enumeration exceeds its 1000000-pair work limit",
-            ));
-        }
-        let work = Cell::new(0);
+        // Pairwise equality contains every possible change of active branch:
+        // n(n-1)/2 pairs, each polled for cancellation.
         let mut corners = EventSchedule {
             events: BTreeSet::new(),
-            isolation_work: Some(self.isolation_work.unwrap_or(&work)),
             ..*self
         };
-        let mut operand_work = 0_usize;
-        for arg in args {
-            corners.poll()?;
-            let cost = compile_time_expression(arg, context).instructions.len();
-            corners.charge_isolation_work(cost)?;
-            operand_work = operand_work.saturating_add(cost);
-        }
-        // Each operand participates in n-1 pairs. Reserve the tree-copy work
-        // as well as charging actual root evaluations to the shared budget.
-        corners.charge_isolation_work(operand_work.saturating_mul(args.len() - 1))?;
         for (index, left) in args.iter().enumerate() {
             for right in &args[index + 1..] {
                 corners.poll()?;
-                corners.charge_isolation_work(1)?;
                 if left == right {
                     continue;
                 }

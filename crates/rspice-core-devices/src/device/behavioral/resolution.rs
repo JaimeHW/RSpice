@@ -65,7 +65,6 @@ impl BehavioralSources {
         }
         let mut additions = BTreeSet::new();
         let mut pending = Vec::new();
-        let mut operations: usize = 0;
         let sources = self
             .voltage_sources
             .iter()
@@ -92,15 +91,11 @@ impl BehavioralSources {
                 continue;
             };
             let mut vm = Vm::new();
-            let mut charge = || {
+            // Refinement ends at the time precision or the mesh policy; Stop
+            // and timeouts reach it through the run's abort hook.
+            let charge = || {
                 if abort.is_aborted() {
                     return Err(BehavioralBreakpointError::Aborted);
-                }
-                operations = operations.saturating_add(program.instructions.len());
-                if operations > 16_000_000 {
-                    return Err(BehavioralBreakpointError::Invalid(
-                        "source resolution exceeds its 16000000-instruction work limit",
-                    ));
                 }
                 Ok(())
             };

@@ -6,7 +6,6 @@ use crate::abort_signal::AbortSignal;
 use crate::expr::constant_value;
 use crate::numerics::integration::BreakpointManager;
 use crate::resource::{ResourceKind, ResourceLimitError};
-use std::cell::Cell;
 use std::collections::BTreeSet;
 
 mod features;
@@ -20,6 +19,16 @@ pub enum BehavioralBreakpointError {
     Resource(#[from] ResourceLimitError),
     #[error("behavioral source-event schedule is invalid: {0}")]
     Invalid(&'static str),
+    /// The schedule's table could not be reserved: its size came from the
+    /// source's own period and the run's window, and the allocator refused it.
+    #[error(
+        "Unable to allocate the behavioral source-event schedule: {bytes} bytes were needed: {source}"
+    )]
+    Allocation {
+        bytes: usize,
+        #[source]
+        source: std::collections::TryReserveError,
+    },
 }
 
 /// An affine clock, optionally reduced by floating remainder and transformed
@@ -146,9 +155,6 @@ struct EventSchedule<'a> {
     abort: &'a dyn AbortSignal,
     max_values: usize,
     physical_corners: bool,
-    // All candidate crossings of one n-ary extremum share an instruction
-    // budget, including recursive level isolation and temporary schedules.
-    isolation_work: Option<&'a Cell<usize>>,
     // Nonnegative finite event times have the same bit and numeric ordering.
     // One ordered union avoids quadratic Vec insertion for interleaved clocks.
     events: BTreeSet<u64>,
@@ -186,11 +192,7 @@ impl EventSchedule<'_> {
             ));
         }
         let count = (last - first + 1.0).max(0.0);
-        if count > 1_000_004.0 {
-            return Err(BehavioralBreakpointError::Invalid(
-                "periodic clock schedule exceeds the exact enumeration limit of 1000000 cycles",
-            ));
-        }
+        self.reserve_cycles(count)?;
         for index in 0..count as usize {
             self.poll()?;
             let coordinate = modulus.mul_add(first + index as Value, target);
@@ -209,25 +211,30 @@ impl EventSchedule<'_> {
         }
     }
 
-    fn charge_isolation_work(&self, cost: usize) -> Result<(), BehavioralBreakpointError> {
-        if let Some(work) = self.isolation_work {
-            Self::charge_feature_work(work, cost)?;
-        }
-        Ok(())
-    }
-
-    fn charge_feature_work(
-        work: &Cell<usize>,
-        cost: usize,
-    ) -> Result<(), BehavioralBreakpointError> {
-        let used = work.get().saturating_add(cost);
-        work.set(used);
-        if used > 16_000_000 {
-            return Err(BehavioralBreakpointError::Invalid(
-                "source feature qualification exceeds its 16000000-instruction work limit",
-            ));
-        }
-        Ok(())
+    /// Refuse, before enumerating it, a periodic clock with more cycles than
+    /// the event policy holds or than the allocator can table. Every cycle
+    /// inside the window adds a distinct time, and the count includes one
+    /// padding index at each end; times shared with other sources are not
+    /// counted, so the per-event check stays authoritative for the union.
+    /// Nothing else bounds the count: the schedule spans as many periods as
+    /// the run does.
+    fn reserve_cycles(&self, cycles: Value) -> Result<(), BehavioralBreakpointError> {
+        // A float-to-integer cast saturates, so an unbounded count is refused.
+        let cycles = if cycles.is_nan() { 0 } else { cycles as usize };
+        ResourceLimitError::ensure(
+            ResourceKind::ResultValues,
+            cycles.saturating_sub(2),
+            self.max_values,
+        )?;
+        // Ask the allocator for the table before filling it, so a schedule
+        // this machine cannot hold is a typed failure, not an abort.
+        let mut table: Vec<u64> = Vec::new();
+        table
+            .try_reserve_exact(cycles)
+            .map_err(|source| BehavioralBreakpointError::Allocation {
+                bytes: cycles.saturating_mul(std::mem::size_of::<u64>()),
+                source,
+            })
     }
 
     fn add(&mut self, time: Value) -> Result<(), BehavioralBreakpointError> {
@@ -262,24 +269,13 @@ impl EventSchedule<'_> {
         } else {
             first
         };
-        // Refuse obviously excessive schedules before retaining any events;
-        // the exact loop below remains authoritative at the count boundary.
-        if (self.tstop - first) / period > 1_000_001.0 {
-            return Err(BehavioralBreakpointError::Invalid(
-                "pulse schedule exceeds the exact enumeration limit of 1000000 cycles",
-            ));
-        }
+        self.reserve_cycles((self.tstop - first) / period)?;
         let mut previous = None;
-        for cycle in 0..=1_000_000 {
+        for cycle in 0usize.. {
             self.poll()?;
             let time = period.mul_add(cycle as Value, first);
             if time > self.tstop {
                 return Ok(());
-            }
-            if cycle == 1_000_000 {
-                return Err(BehavioralBreakpointError::Invalid(
-                    "pulse schedule exceeds the exact enumeration limit of 1000000 cycles",
-                ));
             }
             if previous.is_some_and(|previous| time <= previous) {
                 return Err(BehavioralBreakpointError::Invalid(
@@ -289,7 +285,7 @@ impl EventSchedule<'_> {
             self.add(time)?;
             previous = Some(time);
         }
-        unreachable!("the final cycle returns an enumeration error")
+        unreachable!("the cycle loop returns past the stop time")
     }
 
     fn table(
@@ -451,7 +447,6 @@ pub fn collect_expression_breakpoints<'a>(
         abort,
         max_values,
         physical_corners,
-        isolation_work: None,
     };
     schedule.poll()?;
     for (expression, context) in expressions {
@@ -469,7 +464,6 @@ pub(super) fn expression_transient_breakpoints(expr: &Expr, tstop: Value) -> Vec
         abort: &crate::abort_signal::NoAbort,
         max_values: usize::MAX,
         physical_corners: false,
-        isolation_work: None,
         events: BTreeSet::new(),
     };
     schedule
@@ -715,48 +709,31 @@ mod tests {
     }
 
     #[test]
-    fn extrema_crossings_share_work_limits_and_preserve_failed_collection() {
-        let work = Cell::new(16_000_000 - 1024);
-        let mut schedule = EventSchedule {
-            tstop: 1.0,
-            abort: &NoAbort,
-            max_values: 1024,
-            physical_corners: true,
-            isolation_work: Some(&work),
-            events: BTreeSet::new(),
-        };
-        let expr = crate::expr::parse_expression_strict(
+    fn extrema_crossings_are_cancellable_and_preserve_failed_collection() {
+        // The search has no instruction count: the run's abort hook, which
+        // Stop and timeouts reach, ends it, and a cancelled search leaves
+        // no partial schedule.
+        for expression in [
             "max(sin(8*pi*time),cos(6*pi*time),0.5*sin(2*pi*time))",
-        )
-        .unwrap();
-        let error = schedule
-            .temporal_features(&expr, &Context::transient(&[], &[], 0.0))
-            .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("16000000-instruction work limit"),
-            "{error}"
-        );
-        assert!(schedule.events.is_empty());
-
-        // Operand-level candidates must share the same aggregate budget,
-        // including analytically invertible clocks that need no bisection.
-        work.set(16_000_000 - 8);
-        let expr = crate::expr::parse_expression_strict(
             "sqr(max(sin(8*pi*time),cos(6*pi*time),sin(2*pi*time)))",
-        )
-        .unwrap();
-        let error = schedule
-            .temporal_features(&expr, &Context::transient(&[], &[], 0.0))
-            .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("16000000-instruction work limit"),
-            "{error}"
-        );
-        assert!(schedule.events.is_empty());
+        ] {
+            let mut manager = BreakpointManager::new();
+            manager.add(0.173);
+            let error = sources(expression)
+                .collect_transient_breakpoints(
+                    1.0,
+                    &mut manager,
+                    &CountingAbort::new(64),
+                    1024,
+                    true,
+                )
+                .unwrap_err();
+            assert!(
+                matches!(error, BehavioralBreakpointError::Aborted),
+                "{expression}: {error}"
+            );
+            assert_eq!(manager.times(), &[0.173], "{expression}");
+        }
 
         let args = (0..1500)
             .map(|index| format!("sin(time+{index})"))
@@ -765,10 +742,15 @@ mod tests {
         let source = sources(&format!("max({args})"));
         let mut manager = BreakpointManager::new();
         manager.add(0.173);
+        // 1500 operands are 1,124,250 branch pairs; each is examined, and
+        // the event policy, not a pair count, ends this schedule.
         let error = source
             .collect_transient_breakpoints(1.0, &mut manager, &NoAbort, 1024, true)
             .unwrap_err();
-        assert!(error.to_string().contains("1000000-pair"), "{error}");
+        assert!(
+            matches!(error, BehavioralBreakpointError::Resource(_)),
+            "{error}"
+        );
         assert_eq!(manager.times(), &[0.173]);
 
         let repeated = std::iter::repeat_n("time", 1500)
@@ -824,9 +806,11 @@ mod tests {
             Err(BehavioralBreakpointError::Aborted)
         ));
         assert!(manager.times().is_empty());
+        // 1.6e11 clock cycles: the event policy refuses them before one is
+        // enumerated.
         assert!(matches!(
-            collect(&sources("exp(cos(1e12*time))"), 1.0, usize::MAX, true),
-            Err(BehavioralBreakpointError::Invalid(_))
+            collect(&sources("exp(cos(1e12*time))"), 1.0, 25_000_000, true),
+            Err(BehavioralBreakpointError::Resource(_))
         ));
     }
 
@@ -1122,14 +1106,16 @@ mod tests {
             )
             .is_ok()
         );
+        // The search ends at the event policy: a 1.6e11-cycle combined
+        // clock stops at its 65th isolated feature.
         assert!(matches!(
             collect(
                 &sources("exp(cos(1e12*time)+sin(1e12*time))"),
                 1.0,
-                usize::MAX,
+                64,
                 true
             ),
-            Err(BehavioralBreakpointError::Invalid(_))
+            Err(BehavioralBreakpointError::Resource(_))
         ));
     }
 
@@ -1300,16 +1286,53 @@ mod tests {
             Err(BehavioralBreakpointError::Aborted)
         ));
         assert!(manager.times().is_empty());
+        // 2.5e11 cycles: refused up front by the event policy, before one is
+        // enumerated.
         for expression in [
             "table(time%1p,0,0,0.5p,1,1p,0)",
             "spice_pulse(0,1,0,1p,1p,1p,4p)",
         ] {
             assert!(
                 matches!(
-                    collect(&sources(expression), 1.0, usize::MAX, false),
-                    Err(BehavioralBreakpointError::Invalid(_))
+                    collect(&sources(expression), 1.0, 25_000_000, false),
+                    Err(BehavioralBreakpointError::Resource(_))
                 ),
                 "{expression}"
+            );
+        }
+        // With no policy, a table no address space holds is the allocator's
+        // typed refusal: 1e15 cycles are 8 PB.
+        for expression in [
+            "table(time%1f,0,0,0.5f,1,1f,0)",
+            "spice_pulse(0,1,0,0.25f,0.25f,0.25f,1f)",
+        ] {
+            assert!(
+                matches!(
+                    collect(&sources(expression), 1.0, usize::MAX, false),
+                    Err(BehavioralBreakpointError::Allocation { .. })
+                ),
+                "{expression}"
+            );
+        }
+    }
+
+    /// A behavioural pulse spans as many periods as the run does: 1.05
+    /// million 500 ns cycles, past the old million-cycle refusal, schedule
+    /// all four edges of the last cycle.
+    #[test]
+    fn a_behavioral_pulse_past_a_million_cycles_schedules_its_last_cycle() {
+        let times = collect(
+            &sources("spice_pulse(0,1,0,1n,1n,248n,500n)"),
+            0.525,
+            25_000_000,
+            false,
+        )
+        .expect("1.05 million cycles fit the event policy");
+        let last = 1_049_999.0 * 500.0e-9;
+        for offset in [0.0, 1.0e-9, 249.0e-9, 250.0e-9] {
+            assert!(
+                contains(&times, last + offset),
+                "last cycle edge +{offset:e}"
             );
         }
     }
