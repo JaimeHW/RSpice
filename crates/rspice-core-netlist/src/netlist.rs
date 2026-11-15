@@ -2494,6 +2494,8 @@ impl Netlist {
         )
     }
 
+    // The path parse's arguments plus its library search paths.
+    #[allow(clippy::too_many_arguments)]
     fn parse_with_search_paths_execution_dir_options_and_abort(
         input: &str,
         path: &std::path::Path,
