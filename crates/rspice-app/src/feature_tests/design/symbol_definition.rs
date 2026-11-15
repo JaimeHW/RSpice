@@ -29,6 +29,42 @@ fn import_action_opens_an_isolated_draft_in_the_writable_project_library() {
     assert!(!state.design.symbol_import.dirty);
 }
 
+/// Importing a symbol opens what it made in the symbol editor, as Create
+/// symbol does: the dialog's primary button publishes it and the symbol is
+/// the view in front of the Design workspace.
+#[test]
+fn importing_a_symbol_opens_it_in_the_symbol_editor() {
+    use crate::feature_tests::replay::Replay;
+    use crate::workbench::app::dialogs::symbol_definition::state::SymbolImportBindingChoice;
+    use crate::workbench::state::Workspace;
+    use egui::accesskit::Role;
+
+    let mut replay = Replay::new();
+    let state = &mut replay.app.state;
+    open_symbol_import_dialog(
+        &mut state.design.symbol_import,
+        &state.model,
+        &mut state.workbench,
+        &state.platform,
+    );
+    let library = state.design.symbol_import.target_library.clone();
+    state.design.symbol_import.accept_source(
+        "review.svg".to_owned(),
+        r#"<svg><rect x="0" y="0" width="40" height="20"/></svg>"#.to_owned(),
+    );
+    state.design.symbol_import.binding_choice = SymbolImportBindingChoice::UnboundForReview;
+    replay.click("Import into project library", Role::Button);
+
+    let state = &replay.app.state;
+    assert!(!state.design.symbol_import.open, "the import finished");
+    assert_eq!(
+        state.model.workspace.content.active_view,
+        CellViewRef::new(&library, "review", "symbol"),
+        "the imported symbol is in front"
+    );
+    assert_eq!(state.workbench.workspace, Workspace::Design);
+}
+
 #[test]
 fn form_action_loads_the_selected_typed_definition_as_the_next_revision() {
     let mut state = AppState::default();

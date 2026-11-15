@@ -1528,6 +1528,7 @@ impl DesignFeature {
             &mut cx.state.symbol_import,
             &mut cx.state.symbol_parameter_form,
             cx.model,
+            cx.wb,
             ctx,
         );
     }

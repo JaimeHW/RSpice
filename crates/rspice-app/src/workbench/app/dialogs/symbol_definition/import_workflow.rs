@@ -17,6 +17,8 @@ use super::source_picker;
 use super::state::SymbolImportBindingChoice;
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::publish_symbol_definition_candidate;
+use crate::workbench::framework::requests::OpenInDesign;
+use crate::workbench::state::WorkbenchSession;
 
 const IMPORT_TITLE: &str = "Import symbol definition";
 const DISCARD_TITLE: &str = "Discard unsaved symbol changes?";
@@ -26,6 +28,7 @@ const DISCARD_DETAIL: &str =
 pub(super) fn render_symbol_import_dialog(
     symbol_import: &mut SymbolImportDialogState,
     model: &mut Model,
+    workbench: &mut WorkbenchSession,
     ctx: &Context,
 ) {
     if !symbol_import.open {
@@ -97,7 +100,7 @@ pub(super) fn render_symbol_import_dialog(
         symbol_import.validation_error = None;
     }
     match response.choice {
-        DialogChoice::Primary => commit_symbol_import(symbol_import, model),
+        DialogChoice::Primary => commit_symbol_import(symbol_import, model, workbench),
         DialogChoice::Ghost | DialogChoice::Cancelled => {
             if symbol_import.dirty && !symbol_import.discard_confirm {
                 symbol_import.discard_confirm = true;
@@ -110,7 +113,14 @@ pub(super) fn render_symbol_import_dialog(
     }
 }
 
-fn commit_symbol_import(symbol_import: &mut SymbolImportDialogState, model: &mut Model) {
+/// Publish the import into its library and open what it made in the symbol
+/// editor, as Create symbol does, so the author sees the imported drawing at
+/// once.
+fn commit_symbol_import(
+    symbol_import: &mut SymbolImportDialogState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) {
     symbol_import.validation_error = None;
     let imported = match import_candidate(symbol_import, model) {
         Ok(imported) => imported,
@@ -142,6 +152,21 @@ fn commit_symbol_import(symbol_import: &mut SymbolImportDialogState, model: &mut
             model
                 .library_manager
                 .select_view(&library_name, &cell_name, "symbol");
+            let views = &imported.definition.generated_views;
+            let opened = if views.symbol {
+                Some("symbol")
+            } else if views.parameter_form {
+                Some("parameter_form")
+            } else {
+                views.simulation_test_fixture.then_some("testbench")
+            };
+            if let Some(view) = opened {
+                workbench.outbox.push(OpenInDesign(CellViewRef::new(
+                    &library_name,
+                    &cell_name,
+                    view,
+                )));
+            }
             let format = imported.report.format_label();
             if imported
                 .definition
