@@ -606,6 +606,9 @@ impl<'a> Flattener<'a> {
     ) -> Result<Vec<Element>, ParseWithAbortError> {
         self.instance_metadata.clear();
         self.param_resolver.clear_expansion();
+        // Every instance of a subcircuit evaluates the same body expressions;
+        // parse each text once for the whole expansion.
+        let _parsed_texts = super::expr::ParseMemo::enter();
         let result = self.flatten_impl(netlist, abort);
         if result.is_err() {
             self.instance_metadata.clear();

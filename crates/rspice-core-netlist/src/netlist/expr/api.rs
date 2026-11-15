@@ -13,8 +13,76 @@ use super::*;
 
 /// Parse a SPICE expression string into an AST
 pub fn parse_expression(input: &str) -> Result<Expr, ExprError> {
+    if let Some(parsed) = ParseMemo::recall(input) {
+        return parsed;
+    }
     let mut parser = ExprParser::new(input);
-    parser.parse()
+    let parsed = parser.parse();
+    ParseMemo::retain(input, &parsed);
+    parsed
+}
+
+/// The parse of every distinct expression text read while a [`ParseMemo`]
+/// scope is open on this thread, for each way of reading number suffixes.
+type ParsedTexts = [rustc_hash::FxHashMap<Box<str>, Result<Expr, ExprError>>; 2];
+
+thread_local! {
+    static PARSED_TEXTS: std::cell::RefCell<Option<ParsedTexts>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Keeps the parse of each expression text for as long as it lives.
+///
+/// Expanding a hierarchy evaluates one subcircuit body's value expressions
+/// once per instance; parsing the same text again for each instance made the
+/// parse, not the evaluation, most of a large hierarchical deck's expansion.
+/// A parse depends only on the text and on how this thread reads number
+/// suffixes, so a remembered parse is the parse. The memo is this thread's
+/// alone and is dropped with the outermost scope.
+pub(crate) struct ParseMemo {
+    outermost: bool,
+}
+
+impl ParseMemo {
+    /// Open a scope; an enclosing scope's memo stays in use.
+    pub(crate) fn enter() -> Self {
+        let outermost = PARSED_TEXTS.with(|texts| {
+            let mut texts = texts.borrow_mut();
+            let outermost = texts.is_none();
+            if outermost {
+                *texts = Some(Default::default());
+            }
+            outermost
+        });
+        Self { outermost }
+    }
+
+    fn recall(input: &str) -> Option<Result<Expr, ExprError>> {
+        let suffixes = usize::from(crate::spice_number::reading_numbers_as_ngspice());
+        PARSED_TEXTS.with(|texts| {
+            texts
+                .borrow()
+                .as_ref()
+                .and_then(|texts| texts[suffixes].get(input).cloned())
+        })
+    }
+
+    fn retain(input: &str, parsed: &Result<Expr, ExprError>) {
+        let suffixes = usize::from(crate::spice_number::reading_numbers_as_ngspice());
+        PARSED_TEXTS.with(|texts| {
+            if let Some(texts) = texts.borrow_mut().as_mut() {
+                texts[suffixes].insert(input.into(), parsed.clone());
+            }
+        });
+    }
+}
+
+impl Drop for ParseMemo {
+    fn drop(&mut self) {
+        if self.outermost {
+            PARSED_TEXTS.with(|texts| texts.borrow_mut().take());
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -29,11 +97,15 @@ pub fn parse_expression_with_abort(
     input: &str,
     abort: &dyn crate::abort_signal::AbortSignal,
 ) -> Result<Expr, ParseExpressionWithAbortError> {
+    if let Some(parsed) = ParseMemo::recall(input) {
+        return parsed.map_err(ParseExpressionWithAbortError::Parse);
+    }
     let mut parser = ExprParser::with_abort(input, abort);
     let result = parser.parse();
     if parser.was_aborted() {
         Err(ParseExpressionWithAbortError::Aborted)
     } else {
+        ParseMemo::retain(input, &result);
         result.map_err(ParseExpressionWithAbortError::Parse)
     }
 }
@@ -186,6 +258,54 @@ fn expression_needs_forward_reference_probe(expression: &Expr, params: &ParamCon
         }
     }
     false
+}
+
+#[cfg(test)]
+mod parse_memo_tests {
+    use super::*;
+
+    fn value(expression: &Result<Expr, ExprError>) -> String {
+        format!("{expression:?}")
+    }
+
+    #[test]
+    fn a_remembered_parse_is_the_parse_for_each_suffix_reading() {
+        let texts = ["2x*r/2", "1x", "{oops", "a+(b"];
+        let plain = texts.map(|text| value(&parse_expression(text)));
+        let ngspice = {
+            let _reading = crate::spice_number::read_suffixes_as_ngspice(true);
+            texts.map(|text| value(&parse_expression(text)))
+        };
+        assert_ne!(plain[1], ngspice[1], "the readings differ on `x`");
+        let _memo = ParseMemo::enter();
+        for _ in 0..2 {
+            assert_eq!(texts.map(|text| value(&parse_expression(text))), plain);
+            let _reading = crate::spice_number::read_suffixes_as_ngspice(true);
+            assert_eq!(
+                texts.map(|text| value(
+                    &parse_expression_with_abort(text, &crate::abort_signal::NoAbort).map_err(
+                        |error| match error {
+                            ParseExpressionWithAbortError::Parse(error) => error,
+                            ParseExpressionWithAbortError::Aborted => unreachable!(),
+                        }
+                    )
+                )),
+                ngspice
+            );
+        }
+    }
+
+    #[test]
+    fn the_memo_lives_as_long_as_its_outermost_scope() {
+        let outer = ParseMemo::enter();
+        {
+            let _inner = ParseMemo::enter();
+            parse_expression("r*2").expect("parses");
+        }
+        assert!(ParseMemo::recall("r*2").is_some());
+        drop(outer);
+        assert!(ParseMemo::recall("r*2").is_none());
+    }
 }
 
 #[cfg(test)]

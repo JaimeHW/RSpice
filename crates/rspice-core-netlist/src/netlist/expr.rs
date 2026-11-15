@@ -52,8 +52,10 @@ pub use api::{
     parse_control_expression_prefix_with_abort, parse_control_expression_with_abort,
     parse_expression_with_abort, parse_xyce_expression_with_abort,
 };
+pub(crate) use api::{
+    ParseMemo, eval_expression_complex_with_probe_and_abort, needs_forward_reference_probe,
+};
 pub use api::{eval_expression, eval_expression_complex, parse_expression};
-pub(crate) use api::{eval_expression_complex_with_probe_and_abort, needs_forward_reference_probe};
 #[cfg(any(test, feature = "test-support"))]
 pub use behavioral::finalize_parameter_expressions;
 #[doc(hidden)]
