@@ -227,6 +227,11 @@ impl HbSolver {
                 }
             }
         }
+        let num_unknowns = n
+            .checked_add(self.periodic_mna_branches.len())
+            .ok_or_else(|| {
+                HbError::InvalidCircuit("pnoise node and branch count overflows usize".to_string())
+            })?;
         for source in sources {
             if let Some(waveform) = &source.correlated {
                 if waveform.samples.len() != self.fft.size()
@@ -251,9 +256,23 @@ impl HbSolver {
             }
             let normalized_pos = (source.node_pos < n).then_some(source.node_pos);
             let normalized_neg = (source.node_neg < n).then_some(source.node_neg);
-            if normalized_pos == normalized_neg {
+            if source.further_rows.is_empty() && normalized_pos == normalized_neg {
                 return Err(HbError::InvalidCircuit(format!(
                     "pnoise source '{}' has identical terminals and no effective injection",
+                    source.name
+                )));
+            }
+            if source
+                .further_rows
+                .iter()
+                .any(|&(row, weight)| row >= num_unknowns || !weight.is_finite())
+                || (!source.further_rows.is_empty()
+                    && normalized_pos == normalized_neg
+                    && source.further_rows.iter().all(|&(_, weight)| weight == 0.0))
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' reaches a row outside the periodic state, with a \
+                     non-finite weight, or no row at all",
                     source.name
                 )));
             }
@@ -309,11 +328,6 @@ impl HbSolver {
                 }
             }
         }
-        let num_unknowns = n
-            .checked_add(self.periodic_mna_branches.len())
-            .ok_or_else(|| {
-                HbError::InvalidCircuit("pnoise node and branch count overflows usize".to_string())
-            })?;
         let (s, size, span) =
             periodic_sideband_geometry("pnoise", num_unknowns, sideband_min, sideband_max)?;
         if size == 0 {
@@ -492,7 +506,10 @@ impl HbSolver {
                     } else {
                         Complex64::ZERO
                     };
-                    let gain = positive - negative;
+                    let mut gain = positive - negative;
+                    for &(row, weight) in &source.further_rows {
+                        gain += adjoint[row * s + band] * weight;
+                    }
                     if !complex_is_finite(gain) {
                         return Err(HbError::InvalidCircuit(format!(
                             "pnoise source '{}' has a non-finite adjoint gain at sideband {}",

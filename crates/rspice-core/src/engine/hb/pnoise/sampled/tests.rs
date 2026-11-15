@@ -26,6 +26,7 @@ fn source() -> PeriodicNoiseSource {
         name: "modulated noise".into(),
         node_pos: 0,
         node_neg: usize::MAX,
+        further_rows: Vec::new(),
         psd: vec![Complex64::new(2.0, 0.0), Complex64::new(0.2, 0.3)],
         binary_scale_exponent: 0,
         flicker: None,

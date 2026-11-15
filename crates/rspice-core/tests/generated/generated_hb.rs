@@ -945,21 +945,13 @@ const PNOISE_CHECKS: &[(&str, PnoiseCheck)] = &[
 /// (see [`check_pnoise_refusal`]). Every other model with a settled-transient
 /// fixture has its periodic noise checked (see [`check_pnoise`]).
 const PNOISE_REFUSED_MODELS: &[(&str, &str)] = &[
-    ("angelov", "more than one pair of circuit rows"),
-    ("angelov_gan", "more than one pair of circuit rows"),
-    ("asmesd", "more than one pair of circuit rows"),
-    ("asmesd_dio", "more than one pair of circuit rows"),
+    (
+        "angelov_gan",
+        "on shooting's carrier misses its componentwise certificate",
+    ),
     ("asmhemt", "stalls at a normwise residual of 0.2"),
     ("bjt504tva", "fails its componentwise certificate"),
     ("bjtd504tva", "fails its componentwise certificate"),
-    ("bsimcmg108", "more than one pair of circuit rows"),
-    ("bsimcmg110", "more than one pair of circuit rows"),
-    ("bsimimg", "more than one pair of circuit rows"),
-    ("bsimsoi__18c250bc", "more than one pair of circuit rows"),
-    ("diode_cmc", "more than one pair of circuit rows"),
-    ("hisimhv_n4_va", "more than one pair of circuit rows"),
-    ("hisimhv_n5_va", "more than one pair of circuit rows"),
-    ("hisimhv_va", "more than one pair of circuit rows"),
 ];
 
 /// Periodic noise of a fixture's V(`node`) on both carriers, checked two

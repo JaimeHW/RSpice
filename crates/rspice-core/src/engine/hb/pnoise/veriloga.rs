@@ -10,11 +10,14 @@
 //! modulates one stationary `1/f^ef` process, as the native junction flicker
 //! laws are sampled.
 //!
-//! Folding needs a process to reach one pair of node rows through a gain that
-//! is real and the same at every frequency, and to keep its row pair and its
-//! spectral law over the orbit. A process that does not (a noise table, a
-//! filtered or multi-row injection, one entering a branch equation) is
-//! refused by instance and mechanism before any folding.
+//! Folding needs a process to reach the circuit through gains that are real
+//! and the same at every frequency, and to keep the rows it reaches, their
+//! proportion and its spectral law over the orbit. The rows may be any set of
+//! node and branch rows: a contribution whose current a flow probe also reads
+//! reaches the probe's row as well, and one noise function may feed several
+//! branch equations (LRM 2.4 section 4.6.4.6). A process that does not (a
+//! noise table, a filtered injection, rows that move or change proportion)
+//! is refused by instance and mechanism before any folding.
 
 use super::bjt::{NativeNoiseWaveform, sampled_noise_sources};
 use super::*;
@@ -45,34 +48,58 @@ fn refused(process: &CollectedNoiseProcess, reason: &str) -> SimulationError {
     .into()
 }
 
-/// One sample of one process: its rows, its frequency exponent and its power
-/// times its squared gain.
+/// The rows one sample of one process reaches: the pair of one-based node
+/// rows its unit current flows between, and every further one-based row,
+/// node or branch, with its weight relative to that current. A process that
+/// reaches one pair of node rows has no further rows; one that reaches any
+/// other set has the pair `[0, 0]` and every row among the further ones.
+#[derive(Clone, Debug, PartialEq)]
+struct ProcessRows {
+    nodes: [usize; 2],
+    further: Vec<(usize, Value)>,
+}
+
+impl ProcessRows {
+    /// Whether these are the rows `waveform` reaches, in its proportion up to
+    /// rounding.
+    fn reach_as(&self, waveform: &NativeNoiseWaveform) -> bool {
+        self.nodes == waveform.nodes
+            && self.further.len() == waveform.further_rows.len()
+            && self.further.iter().zip(&waveform.further_rows).all(
+                |(&(row, weight), &(other_row, other_weight))| {
+                    row == other_row
+                        && (weight - other_weight).abs()
+                            <= 64.0 * Value::EPSILON * weight.abs().max(other_weight.abs())
+                },
+            )
+    }
+}
+
+/// One sample of one process: the rows it reaches, its frequency exponent,
+/// and its power times its squared gain; `None` when its injections cancel
+/// and it reaches no row at this sample.
+///
+/// A process's injection vector is the sum of its injections' gains over
+/// the rows each enters, and periodic noise needs only that vector: the
+/// output noise of a unit train reaching the circuit through `u` is
+/// `|yᴴu|²` per sideband for the adjoint `y`, whatever rows `u` reaches. A
+/// process that reaches one pair of node rows keeps that pair; any other is
+/// scaled to the weight of its first row, which the power carries.
 fn sampled(
     process: &CollectedNoiseProcess,
     shifted: &CollectedNoiseProcess,
     num_nodes: usize,
-) -> Result<([usize; 2], Option<Value>, ScaledNonnegative), SimulationError> {
-    let [injection] = process.injections.as_slice() else {
-        return Err(refused(
-            process,
-            "one noise train reaches more than one pair of circuit rows",
-        ));
-    };
-    if injection.gain.im != 0.0
-        || shifted
+) -> Result<Option<(ProcessRows, Option<Value>, ScaledNonnegative)>, SimulationError> {
+    if process.injections.len() != shifted.injections.len()
+        || process
             .injections
-            .first()
-            .is_none_or(|other| other.gain != injection.gain)
+            .iter()
+            .zip(&shifted.injections)
+            .any(|(injection, other)| injection.gain.im != 0.0 || other.gain != injection.gain)
     {
         return Err(refused(
             process,
             "it reaches the circuit through a gain that varies with frequency",
-        ));
-    }
-    if injection.node_pos > num_nodes || injection.node_neg > num_nodes {
-        return Err(refused(
-            process,
-            "it enters a branch equation, which periodic noise folding does not address",
         ));
     }
     let exponent = match process.spectrum {
@@ -85,12 +112,66 @@ fn sampled(
             ));
         }
     };
-    let gain = injection.gain.re.abs();
-    let power = checked_scaled_positive_product(
-        &[process.psd, gain, gain],
-        &format!("periodic noise process '{}'", process.describe()),
-    )?;
-    Ok(([injection.node_pos, injection.node_neg], exponent, power))
+    let name = || format!("periodic noise process '{}'", process.describe());
+    if let [injection] = process.injections.as_slice()
+        && injection.node_pos <= num_nodes
+        && injection.node_neg <= num_nodes
+    {
+        let gain = injection.gain.re.abs();
+        let power = checked_scaled_positive_product(&[process.psd, gain, gain], &name())?;
+        let rows = ProcessRows {
+            nodes: [injection.node_pos, injection.node_neg],
+            further: Vec::new(),
+        };
+        return Ok(Some((rows, exponent, power)));
+    }
+    // The injection vector over one-based rows, ground dropped.
+    let mut weights: Vec<(usize, Value)> = Vec::with_capacity(2 * process.injections.len());
+    for injection in &process.injections {
+        for (row, gain) in [
+            (injection.node_pos, injection.gain.re),
+            (injection.node_neg, -injection.gain.re),
+        ] {
+            if row == 0 {
+                continue;
+            }
+            match weights.iter_mut().find(|(existing, _)| *existing == row) {
+                Some((_, weight)) => *weight += gain,
+                None => weights.push((row, gain)),
+            }
+        }
+    }
+    weights.retain(|&(_, weight)| weight != 0.0);
+    weights.sort_unstable_by_key(|&(row, _)| row);
+    let (rows, gain) = match weights.as_slice() {
+        [] => return Ok(None),
+        &[(row, weight)] if row <= num_nodes => (
+            ProcessRows {
+                nodes: [row, 0],
+                further: Vec::new(),
+            },
+            weight.abs(),
+        ),
+        &[(first, weight), (second, other)] if second <= num_nodes && weight == -other => (
+            ProcessRows {
+                nodes: [first, second],
+                further: Vec::new(),
+            },
+            weight.abs(),
+        ),
+        &[(_, scale), ..] => (
+            ProcessRows {
+                nodes: [0, 0],
+                further: weights
+                    .iter()
+                    .map(|&(row, weight)| (row, weight / scale))
+                    .collect(),
+            },
+            scale.abs(),
+        ),
+    };
+    let power = checked_scaled_positive_product(&[process.psd, gain, gain], &name())?;
+    Ok(Some((rows, exponent, power)))
 }
 
 /// Each generated instance as one sample of the orbit holds it, in the
@@ -227,20 +308,24 @@ impl Engine {
                         "it is active at one frequency and not another",
                     ));
                 };
-                let (nodes, exponent, power) = sampled(process, other, num_nodes)?;
+                let Some((rows, exponent, power)) = sampled(process, other, num_nodes)? else {
+                    continue;
+                };
                 let waveform =
                     waveforms
                         .entry(process.key())
                         .or_insert_with(|| NativeNoiseWaveform {
                             name: process.describe(),
-                            nodes,
+                            nodes: rows.nodes,
+                            further_rows: rows.further.clone(),
                             frequency_exponent: exponent,
                             samples: vec![ScaledNonnegative::ZERO; count],
                         });
-                if waveform.nodes != nodes {
+                if !rows.reach_as(waveform) {
                     return Err(refused(
                         process,
-                        "it moves between circuit rows over the orbit",
+                        "it moves between circuit rows, or changes its proportion across them, \
+                         over the orbit",
                     ));
                 }
                 if waveform.frequency_exponent != exponent {
@@ -270,7 +355,9 @@ impl Engine {
             solver,
             waveforms
                 .into_values()
-                .filter(|waveform| waveform.nodes[0] != waveform.nodes[1])
+                .filter(|waveform| {
+                    waveform.nodes[0] != waveform.nodes[1] || !waveform.further_rows.is_empty()
+                })
                 .collect(),
             abort,
         )

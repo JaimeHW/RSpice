@@ -1589,6 +1589,103 @@ fn veriloga_noise_folds_as_its_native_twins_on_a_pumped_carrier() {
     let _ = std::fs::remove_file(diode_model);
 }
 
+/// One noise train `n` shared by two branches, LRM 2.4 section 4.6.4.6
+/// Example 1, perfectly correlated: a current `n` through a 1 kOhm branch
+/// from `a` to `b` and `-0.5 n` through a 2 kOhm branch from `c` to `b`,
+/// each injected at a node row of its own.
+const SHARED_CURRENT_NOISE: &str = "`include \"disciplines.vams\"\n\
+     module va_shared_current_noise(a, b, c);\n\
+     inout a, b, c;\n\
+     electrical a, b, c;\n\
+     real n;\n\
+     analog begin\n\
+         n = white_noise(1.0e-16, \"shared\");\n\
+         I(a, b) <+ V(a, b) / 1.0e3 + n;\n\
+         I(c, b) <+ V(c, b) / 2.0e3 - 0.5 * n;\n\
+     end\n\
+     endmodule\n";
+
+/// The same train as series noise voltages of the two branches, each
+/// branch equation a row of its own.
+const SHARED_VOLTAGE_NOISE: &str = "`include \"disciplines.vams\"\n\
+     module va_shared_voltage_noise(a, b, c);\n\
+     inout a, b, c;\n\
+     electrical a, b, c;\n\
+     real n;\n\
+     analog begin\n\
+         n = white_noise(1.0e-16, \"shared\");\n\
+         V(a, b) <+ 1.0e3 * I(a, b) + n;\n\
+         V(c, b) <+ 2.0e3 * I(c, b) - 0.5 * n;\n\
+     end\n\
+     endmodule\n";
+
+/// Periodic noise folds one noise train that reaches several rows as one
+/// correlated injection, at node rows and at branch rows: driven through
+/// `R1` from a carrier, with `C1` at `a` and `R3` from `a` to `c`, the
+/// module's contribution to V(a) at output sidebands -2..=2 is
+/// `1e-16 |H(f)|^2` at `f = |offset + k f0|`, the linear stage's closed
+/// form. Folded as two independent sources it would be 2.5 times that in
+/// the current form and 1.48 times in the voltage form, with the
+/// injections' relative sign reversed 4 and 1.96 times. The current form is
+/// checked on harmonic balance's carrier and on
+/// shooting's; the voltage form on harmonic balance's, since shooting's
+/// period map stores no flux for a voltage contribution and its event
+/// carrier forms no Verilog-A operator. Allowance: 1e-9 of the closed form.
+#[test]
+fn periodic_noise_folds_one_train_shared_by_two_branches() {
+    // V(a)/n from the nodal equations at `a` and `c`, `lo` held: the
+    // branches' conductances and the train's weight into each node's row.
+    let transfer = |frequency: f64, weight_a: f64, weight_c: f64| {
+        let (g1, g3, ga, gc) = (1.0e-3, 1.0e-3, 1.0e-3, 0.5e-3);
+        let y = Complex64::new(0.0, std::f64::consts::TAU * frequency * 100.0e-12);
+        let numerator = weight_a + weight_c * g3 / (g3 + gc);
+        numerator / (Complex64::new(g1 + ga + g3 - g3 * g3 / (g3 + gc), 0.0) + y)
+    };
+    let cases = [
+        (
+            "va_shared_current_noise",
+            SHARED_CURRENT_NOISE,
+            (-1.0, 0.5),
+            &[false, true][..],
+        ),
+        (
+            "va_shared_voltage_noise",
+            SHARED_VOLTAGE_NOISE,
+            (1.0e-3, -0.25e-3),
+            &[false][..],
+        ),
+    ];
+    for (module, source, (weight_a, weight_c), carriers) in cases {
+        let path = write_model(module, source);
+        let deck = format!(
+            "* noise train shared by two branches\n\
+             VLO lo 0 DC 0 SIN(0 1 1meg)\n\
+             R1 lo a 1k\n\
+             C1 a 0 100p\n\
+             R3 a c 1k\n\
+             XN a 0 c {module}\n\
+             .va \"{path}\" {module}\n\
+             .end\n"
+        );
+        for &shooting in carriers {
+            let sidebands = pnoise_by_sideband(&deck, "xn", shooting);
+            for (sideband, noise) in (-2..=2).zip(&sidebands) {
+                for (&offset, &value) in [0.13 * F0, 0.37 * F0].iter().zip(&noise.device) {
+                    let frequency = (offset + f64::from(sideband) * F0).abs();
+                    let expected = 1.0e-16 * transfer(frequency, weight_a, weight_c).norm_sqr();
+                    assert!(
+                        (value - expected).abs() <= 1.0e-9 * expected,
+                        "{module}, shooting: {shooting}, sideband {sideband}, offset {offset} \
+                         Hz: the shared train contributes {value:e} against the closed form's \
+                         {expected:e}"
+                    );
+                }
+            }
+        }
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 /// Periodic noise refuses, by instance and module, the Verilog-A noise it
 /// cannot fold: a noise table, which has no cyclostationary form, refused as
 /// the folding evaluates it; and noise in a module with an operator harmonic

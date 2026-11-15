@@ -14,6 +14,10 @@ use std::collections::HashMap;
 pub(in crate::engine::hb) struct NativeNoiseWaveform {
     pub(in crate::engine::hb) name: String,
     pub(in crate::engine::hb) nodes: [usize; 2],
+    /// Every further one-based row, node or branch, the same train reaches,
+    /// with its weight relative to the unit current the samples describe
+    /// (see [`PeriodicNoiseSource::further_rows`]).
+    pub(in crate::engine::hb) further_rows: Vec<(usize, Value)>,
     pub(in crate::engine::hb) frequency_exponent: Option<Value>,
     pub(in crate::engine::hb) samples: Vec<ScaledNonnegative>,
 }
@@ -366,6 +370,7 @@ impl NativeNoiseWaveforms {
                 self.waveforms.push(NativeNoiseWaveform {
                     name,
                     nodes: [source.node_pos, source.node_neg],
+                    further_rows: Vec::new(),
                     frequency_exponent,
                     samples,
                 });
@@ -434,6 +439,11 @@ pub(in crate::engine::hb) fn sampled_noise_sources(
             name: waveform.name,
             node_pos: waveform.nodes[0].checked_sub(1).unwrap_or(usize::MAX),
             node_neg: waveform.nodes[1].checked_sub(1).unwrap_or(usize::MAX),
+            further_rows: waveform
+                .further_rows
+                .iter()
+                .map(|&(row, weight)| (row - 1, weight))
+                .collect(),
             psd: spectrum,
             binary_scale_exponent: exponent,
             flicker: None,
@@ -492,6 +502,7 @@ impl Engine {
                 name,
                 node_pos: usize::MAX,
                 node_neg: usize::MAX,
+                further_rows: Vec::new(),
                 psd: vec![],
                 binary_scale_exponent: 0,
                 flicker: None,

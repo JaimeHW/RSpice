@@ -369,15 +369,16 @@ const RUNTIME_VERILOGA_PSS_STATE: &str = "an analog body of memoryless equations
 /// [`cyclostationary_noise_gaps`] decides per instance from its artifact and
 /// the folding decides per process from its evaluation.
 const RUNTIME_VERILOGA_NOISE: &str = "every `white_noise` and `flicker_noise` process, sampled over the orbit, that \
-     reaches one pair of node rows through a real, frequency-independent gain, in a module \
-     with no operator harmonic balance carries as an unknown and no `$abstime`; no noise table";
+     reaches its node and branch rows through real, frequency-independent gains in one \
+     proportion over the orbit, in a module with no operator harmonic balance carries as an \
+     unknown and no `$abstime`; no noise table";
 /// The condition behind a generated model's periodic noise, decided as for a
 /// runtime module.
 const GENERATED_VERILOGA_NOISE: &str = "every `white_noise` and `flicker_noise` process of a model built with its noise \
      schedules, grouped into processes and sampled over the orbit at the orbit's value of \
-     every operator harmonic balance carries as an unknown, that reaches one pair of node \
-     rows through a real, frequency-independent gain, in a model whose carried operators' \
-     noise has been checked; no noise table";
+     every operator harmonic balance carries as an unknown, that reaches its node and branch \
+     rows through real, frequency-independent gains in one proportion over the orbit, in a \
+     model whose carried operators' noise has been checked; no noise table";
 /// The condition behind a generated compact model's harmonic-balance
 /// residual, which its generator decides once per model.
 const GENERATED_VERILOGA_HB_RESIDUAL: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \
@@ -1765,6 +1766,8 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
 /// balance's agree, and driven gently both give the model's own `.noise`.
 #[cfg(feature = "veriloga-builtins-base")]
 const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[&str] = &[
+    "asmesd",
+    "asmesd_dio",
     "bjt504va",
     "bjt505_va",
     "bjt505t_va",
@@ -1773,9 +1776,13 @@ const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[&str] = &[
     "bjtd505t_va",
     "bsimcmg111",
     "bsimcmg_va",
+    "bsimsoi__18c250bc",
     "ekv3_rf",
     "ekv_va",
     "hicumL2va",
+    "hisimhv_n4_va",
+    "hisimhv_n5_va",
+    "hisimhv_va",
     "hisimsoi_va__242bc21d",
     "hisimsoi_va__38074d06",
     "hisimsoi_va__5be18005",
@@ -1786,13 +1793,6 @@ const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[&str] = &[
     "PSPNQS103VA",
     "PSPNQS104VA",
 ];
-
-/// Why periodic noise refuses a model with a carried operator site whose
-/// noise trains, in a pumped stage, reach more than one pair of rows.
-#[cfg(feature = "veriloga-builtins-base")]
-const CARRIED_SITE_NOISE_ACROSS_ROWS: &str = "noise beside an operator harmonic balance carries as an unknown, unchecked for \
-     this model: in a pumped stage one of its noise trains reaches more than one pair of \
-     circuit rows, which periodic noise cannot fold";
 
 /// Why periodic noise refuses Mextram 504 with self-heating.
 #[cfg(feature = "veriloga-builtins-base")]
@@ -1805,9 +1805,12 @@ const CARRIED_SITE_NOISE_504T: &str = "noise beside an operator harmonic balance
 /// noise could not be checked, each with what the check met.
 #[cfg(feature = "veriloga-builtins-base")]
 const PNOISE_UNCHECKED_CARRIED_SITE_MODELS: &[(&str, &str)] = &[
-    ("angelov_gan", CARRIED_SITE_NOISE_ACROSS_ROWS),
-    ("asmesd", CARRIED_SITE_NOISE_ACROSS_ROWS),
-    ("asmesd_dio", CARRIED_SITE_NOISE_ACROSS_ROWS),
+    (
+        "angelov_gan",
+        "noise beside an operator harmonic balance carries as an unknown, unchecked for this \
+         model: driven gently, its periodic noise adjoint on shooting's carrier misses its \
+         componentwise certificate (backward error 4.9e-9)",
+    ),
     (
         "asmhemt",
         "noise beside an operator harmonic balance carries as an unknown, unchecked for this \
@@ -1816,10 +1819,6 @@ const PNOISE_UNCHECKED_CARRIED_SITE_MODELS: &[(&str, &str)] = &[
     ),
     ("bjt504tva", CARRIED_SITE_NOISE_504T),
     ("bjtd504tva", CARRIED_SITE_NOISE_504T),
-    ("bsimsoi__18c250bc", CARRIED_SITE_NOISE_ACROSS_ROWS),
-    ("hisimhv_n4_va", CARRIED_SITE_NOISE_ACROSS_ROWS),
-    ("hisimhv_n5_va", CARRIED_SITE_NOISE_ACROSS_ROWS),
-    ("hisimhv_va", CARRIED_SITE_NOISE_ACROSS_ROWS),
 ];
 
 /// Why periodic noise refuses a generated model with a carried operator
@@ -1912,9 +1911,10 @@ mod tests {
     fn periodic_noise_refuses_a_carried_operator_no_reference_has_checked() {
         assert_eq!(carried_site_noise_refusal("PSPNQS102VA"), None);
         assert_eq!(carried_site_noise_refusal("pspnqs102va"), None);
+        assert_eq!(carried_site_noise_refusal("HISIMHV_VA"), None);
         assert_eq!(
-            carried_site_noise_refusal("HISIMHV_VA"),
-            Some(CARRIED_SITE_NOISE_ACROSS_ROWS)
+            carried_site_noise_refusal("BJTD504TVA"),
+            Some(CARRIED_SITE_NOISE_504T)
         );
         assert!(
             carried_site_noise_refusal("a_model_newly_given_a_carried_site")

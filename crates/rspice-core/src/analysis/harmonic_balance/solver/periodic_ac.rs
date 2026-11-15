@@ -1984,6 +1984,7 @@ impl HbSolver {
                 name,
                 node_pos: p,
                 node_neg: q,
+                further_rows: Vec::new(),
                 psd,
                 binary_scale_exponent,
                 flicker: None,
@@ -2189,6 +2190,13 @@ pub struct PeriodicNoiseSource {
     pub node_pos: usize,
     /// Terminal the noise current flows out of.
     pub node_neg: usize,
+    /// Every further zero-based periodic-state row, node or MNA branch, the
+    /// same train reaches, with its real weight relative to the unit current
+    /// `psd` describes: a Verilog-A noise contribution whose current a flow
+    /// probe also reads, or one inside a branch equation. The injection is
+    /// the pair's unit current plus these rows; the pair may then be ground
+    /// at both ends. Empty for a source that reaches one pair of node rows.
+    pub further_rows: Vec<(usize, Value)>,
     /// Fourier coefficients of the intensity s(t) >= 0 in A^2/Hz, indexed by
     /// harmonic (c-convention; negative harmonics by conjugation).
     pub psd: Vec<Complex64>,
@@ -2611,6 +2619,7 @@ mod matrix_free_tests {
             name: "invalid source".to_string(),
             node_pos: 0,
             node_neg: usize::MAX,
+            further_rows: Vec::new(),
             psd: vec![Complex64::new(density, 0.0)],
             binary_scale_exponent: 0,
             flicker: None,
@@ -2653,6 +2662,7 @@ mod matrix_free_tests {
                     name: "infinite source".to_string(),
                     node_pos: 0,
                     node_neg: usize::MAX,
+                    further_rows: Vec::new(),
                     psd: vec![Complex64::new(Value::INFINITY, 0.0)],
                     binary_scale_exponent: 0,
                     flicker: None,
@@ -2665,6 +2675,7 @@ mod matrix_free_tests {
                     name: "complex DC source".to_string(),
                     node_pos: 0,
                     node_neg: usize::MAX,
+                    further_rows: Vec::new(),
                     psd: vec![Complex64::new(1.0, 1.0)],
                     binary_scale_exponent: 0,
                     flicker: None,
@@ -2677,6 +2688,7 @@ mod matrix_free_tests {
                     name: "empty source".to_string(),
                     node_pos: 0,
                     node_neg: usize::MAX,
+                    further_rows: Vec::new(),
                     psd: Vec::new(),
                     binary_scale_exponent: 0,
                     flicker: None,
@@ -2689,6 +2701,7 @@ mod matrix_free_tests {
                     name: "invalid flicker source".to_string(),
                     node_pos: 0,
                     node_neg: usize::MAX,
+                    further_rows: Vec::new(),
                     psd: vec![Complex64::new(0.0, 0.0)],
                     binary_scale_exponent: 0,
                     flicker: Some(PeriodicFlickerNoise {
@@ -2741,6 +2754,7 @@ mod matrix_free_tests {
             name: "flicker source".to_string(),
             node_pos: 0,
             node_neg: usize::MAX,
+            further_rows: Vec::new(),
             psd: vec![Complex64::new(0.0, 0.0)],
             binary_scale_exponent: 0,
             flicker: Some(PeriodicFlickerNoise {
@@ -2816,6 +2830,7 @@ mod matrix_free_tests {
                     name: "signed sinusoidal flicker".into(),
                     node_pos: 0,
                     node_neg: usize::MAX,
+                    further_rows: Vec::new(),
                     psd: vec![Complex64::default()],
                     binary_scale_exponent: 0,
                     flicker: Some(PeriodicFlickerNoise {
@@ -2965,6 +2980,7 @@ mod matrix_free_tests {
                 name: "cancelling flicker".into(),
                 node_pos: 0,
                 node_neg: usize::MAX,
+                further_rows: Vec::new(),
                 psd: vec![Complex64::default()],
                 binary_scale_exponent: i32::MAX,
                 flicker: Some(PeriodicFlickerNoise {
@@ -3091,6 +3107,7 @@ mod matrix_free_tests {
             name: "joint source".into(),
             node_pos: 0,
             node_neg: usize::MAX,
+            further_rows: Vec::new(),
             psd: vec![Complex64::new(1.0, 0.0)],
             binary_scale_exponent: -1073,
             flicker: Some(PeriodicFlickerNoise {

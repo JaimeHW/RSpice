@@ -119,6 +119,7 @@ impl Engine {
                     name: format!("RSHUNT:{node_name} thermal"),
                     node_pos: node_index,
                     node_neg: usize::MAX,
+                    further_rows: Vec::new(),
                     psd: vec![Complex64::new(shunt_density.mantissa, 0.0)],
                     binary_scale_exponent: shunt_density.exponent,
                     flicker: None,
@@ -171,6 +172,7 @@ impl Engine {
                 name: Self::periodic_resistor_thermal_noise_name(circuit, i),
                 node_pos: Self::hb_node_to_solver_index(np, num_nodes),
                 node_neg: Self::hb_node_to_solver_index(nn, num_nodes),
+                further_rows: Vec::new(),
                 psd: vec![Complex64::new(thermal_density.mantissa, 0.0)],
                 binary_scale_exponent: thermal_density.exponent,
                 flicker: None,
@@ -223,6 +225,7 @@ impl Engine {
                     name: format!("{name} flicker"),
                     node_pos,
                     node_neg,
+                    further_rows: Vec::new(),
                     psd: vec![Complex64::default()],
                     binary_scale_exponent: density.exponent.checked_add(binary_scale).ok_or_else(|| {
                         SimulationError::Circuit(format!("pnoise resistor '{name}' coefficient exceeds the retained binary exponent range"))
@@ -281,6 +284,7 @@ impl Engine {
                     circuit.resistor_branches.node_neg[i],
                     num_nodes,
                 ),
+                further_rows: Vec::new(),
                 psd: vec![Complex64::new(thermal_density.mantissa, 0.0)],
                 binary_scale_exponent: thermal_density.exponent,
                 flicker: None,
@@ -330,6 +334,7 @@ impl Engine {
                         circuit.resistor_branches.node_neg[i],
                         num_nodes,
                     ),
+                    further_rows: Vec::new(),
                     psd: vec![Complex64::default()],
                     binary_scale_exponent: binary_scale,
                     flicker: Some(PeriodicFlickerNoise {

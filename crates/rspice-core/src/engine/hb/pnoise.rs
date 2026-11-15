@@ -1264,6 +1264,7 @@ mod publication_tests {
             name: name.to_string(),
             node_pos: 0,
             node_neg: usize::MAX,
+            further_rows: Vec::new(),
             psd: vec![Complex64::new(0.0, 0.0)],
             binary_scale_exponent: 0,
             flicker: None,
