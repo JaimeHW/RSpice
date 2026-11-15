@@ -1,8 +1,12 @@
 //! Drawing in the symbol editor, through whole application frames: the shape
-//! being drawn is on the canvas before it is in the document.
+//! being drawn is on the canvas before it is in the document, a drawn shape
+//! is reshaped by its handles, and the canvas's context menu runs the same
+//! commands its keys do.
+
+use std::collections::HashMap;
 
 use crate::feature_tests::design::symbol_actions_drawn::open_symbol;
-use crate::state::{Point, SymbolShape};
+use crate::state::{Point, SymbolEditorMetadata, SymbolShape};
 use crate::workbench::RSpiceApp;
 use crate::workbench::chrome::status_bar::design::symbol_tool_hint;
 use crate::workbench::design::commands::DesignCommand;
@@ -15,12 +19,16 @@ struct Canvas {
     app: RSpiceApp,
     time: f64,
     viewport: SymbolViewport,
+    /// Every labelled control the last frame drew: where it is, and the key
+    /// it shows.
+    controls: HashMap<String, (egui::Rect, Option<String>)>,
 }
 
 impl Canvas {
     fn new() -> Self {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
         let mut app = open_symbol();
         let editor = &mut app.state.design.symbol.editor;
         editor.needs_fit = false;
@@ -31,7 +39,24 @@ impl Canvas {
             app,
             time: 0.0,
             viewport: SymbolViewport::new(egui::Rect::NOTHING, 2.0, egui::Vec2::ZERO),
+            controls: HashMap::new(),
         };
+        canvas.frame(vec![]);
+        canvas
+    }
+
+    /// The symbol with `body` for its artwork and its pins as they were.
+    fn with_body(body: Vec<SymbolShape>) -> Self {
+        let mut canvas = Self::new();
+        let state = &mut canvas.app.state;
+        let mut document = state.model.load_active_symbol_document().unwrap();
+        document.body = body;
+        state
+            .store_active_symbol_editor_bundle(
+                &document,
+                &SymbolEditorMetadata::for_document(&document),
+            )
+            .unwrap();
         canvas.frame(vec![]);
         canvas
     }
@@ -45,8 +70,9 @@ impl Canvas {
             app,
             time,
             viewport,
+            controls,
         } = self;
-        ctx.run_ui(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -71,7 +97,28 @@ impl Canvas {
                     None,
                 );
             },
-        )
+        );
+        // What a row raised runs once the surface has drawn, as in the
+        // application.
+        app.after_contribution();
+        if let Some(update) = &output.platform_output.accesskit_update {
+            controls.clear();
+            for (_, node) in &update.nodes {
+                if let (Some(label), Some(bounds)) = (node.label(), node.bounds()) {
+                    controls.insert(
+                        label.to_owned(),
+                        (
+                            egui::Rect::from_min_max(
+                                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                            ),
+                            node.keyboard_shortcut().map(str::to_owned),
+                        ),
+                    );
+                }
+            }
+        }
+        output
     }
 
     fn at(&self, point: Point) -> egui::Pos2 {
@@ -91,6 +138,68 @@ impl Canvas {
         self.frame(vec![egui::Event::PointerMoved(self.at(point))]);
         self.frame(vec![self.button(point, true)]);
         self.frame(vec![self.button(point, false)]);
+    }
+
+    fn right_click(&mut self, point: Point) {
+        let pos = self.at(point);
+        let button = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        self.frame(vec![egui::Event::PointerMoved(pos)]);
+        self.frame(vec![button(true)]);
+        self.frame(vec![button(false)]);
+        // A menu lays itself out unseen the frame it opens.
+        self.frame(vec![]);
+    }
+
+    /// Click the control the last frame labelled `label`.
+    fn click_control(&mut self, label: &str) {
+        let pos = self.controls[label].0.center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        self.frame(vec![egui::Event::PointerMoved(pos)]);
+        self.frame(vec![button(true)]);
+        self.frame(vec![button(false)]);
+    }
+
+    /// The key the control labelled `label` shows.
+    fn shortcut(&self, label: &str) -> Option<&str> {
+        self.controls.get(label)?.1.as_deref()
+    }
+
+    /// Press at `from`, carry the pointer to `to` and let go there, with
+    /// `midway` sent while the button is held halfway.
+    fn drag_with(&mut self, from: Point, to: Point, midway: Vec<egui::Event>) {
+        self.frame(vec![egui::Event::PointerMoved(self.at(from))]);
+        self.frame(vec![self.button(from, true)]);
+        let half = self.at(from) + (self.at(to) - self.at(from)) * 0.5;
+        self.frame(vec![egui::Event::PointerMoved(half)]);
+        self.frame(midway);
+        self.frame(vec![egui::Event::PointerMoved(self.at(to))]);
+        self.frame(vec![self.button(to, false)]);
+    }
+
+    fn drag(&mut self, from: Point, to: Point) {
+        self.drag_with(from, to, Vec::new());
+    }
+
+    /// The step Undo would take back, by name.
+    fn undo_step(&self) -> Option<String> {
+        let key = self.app.state.model.workspace.content.active_key();
+        self.app
+            .state
+            .design
+            .symbol
+            .history
+            .undo_step(&key)
+            .map(str::to_owned)
     }
 
     /// The frame painted with the pointer resting at `point`.
@@ -411,4 +520,213 @@ fn the_pin_tool_shows_its_pin_places_it_and_takes_its_name() {
         "Escape keeps the name it has"
     );
     assert_eq!(canvas.tool(), SymbolTool::PlacePin);
+}
+
+/// Whether `output` painted a filled handle of `radius` at `at`.
+fn fills_handle_at(output: &egui::FullOutput, at: egui::Pos2, radius: f32) -> bool {
+    output.shapes.iter().any(|clipped| {
+        matches!(&clipped.shape, egui::Shape::Circle(circle)
+            if circle.center == at && circle.radius == radius && circle.fill != egui::Color32::TRANSPARENT)
+    })
+}
+
+/// A selected line shows a ring on each of its points, filled under the
+/// pointer. Dragging one carries that point alone, snapped as drawing
+/// snaps, as one undo step named for it.
+#[test]
+fn dragging_a_selected_line_point_moves_that_point_as_one_step() {
+    let line = SymbolShape::Polyline {
+        points: vec![Point::new(-60, -40), Point::new(0, -40), Point::new(0, 40)],
+        closed: false,
+    };
+    let mut canvas = Canvas::with_body(vec![line.clone()]);
+    canvas.app.state.design.symbol.editor.select_shape(0);
+    let output = canvas.hover(Point::new(0, -40));
+    assert!(
+        fills_handle_at(&output, canvas.at(Point::new(0, -40)), 3.0),
+        "the point under the pointer is marked"
+    );
+
+    canvas.drag(Point::new(0, -40), Point::new(22, -51));
+
+    assert_eq!(
+        canvas.body(),
+        vec![SymbolShape::Polyline {
+            points: vec![Point::new(-60, -40), Point::new(20, -50), Point::new(0, 40)],
+            closed: false,
+        }]
+    );
+    assert_eq!(canvas.undo_step().as_deref(), Some("Move vertex"));
+    assert!(canvas.app.state.undo_active_symbol_document().unwrap());
+    assert_eq!(canvas.body(), vec![line]);
+}
+
+/// A rectangle's corner carries that corner and holds the opposite one, and
+/// the rectangle stays one.
+#[test]
+fn dragging_a_rectangle_corner_resizes_it() {
+    let mut canvas = Canvas::with_body(vec![SymbolShape::Rectangle {
+        min: Point::new(-40, -20),
+        max: Point::new(40, 20),
+    }]);
+    canvas.app.state.design.symbol.editor.select_shape(0);
+    canvas.frame(vec![]);
+
+    canvas.drag(Point::new(40, 20), Point::new(60, 40));
+
+    assert_eq!(
+        canvas.body(),
+        vec![SymbolShape::Rectangle {
+            min: Point::new(-40, -20),
+            max: Point::new(60, 40),
+        }]
+    );
+    assert_eq!(canvas.undo_step().as_deref(), Some("Resize rectangle"));
+}
+
+/// An arc's end turns the arc about its centre the way it was drawn and
+/// keeps where it starts.
+#[test]
+fn dragging_an_arc_end_turns_the_arc() {
+    let mut canvas = Canvas::with_body(vec![SymbolShape::Arc {
+        center: Point::origin(),
+        radius: 40,
+        start_degrees: 0,
+        sweep_degrees: 90,
+    }]);
+    canvas.app.state.design.symbol.editor.select_shape(0);
+    canvas.frame(vec![]);
+
+    // Clockwise on the screen from east to south; the end goes west.
+    canvas.drag(Point::new(0, 40), Point::new(-40, 0));
+
+    assert_eq!(
+        canvas.body(),
+        vec![SymbolShape::Arc {
+            center: Point::origin(),
+            radius: 40,
+            start_degrees: 0,
+            sweep_degrees: 180,
+        }]
+    );
+    assert_eq!(canvas.undo_step().as_deref(), Some("Move arc end"));
+}
+
+/// A right-click while a line is being drawn opens the drawing's menu and
+/// leaves the line as it was. Its rows show the keys they answer to, and
+/// Finish finishes the line as Enter does.
+#[test]
+fn a_right_click_while_drawing_opens_the_drawing_menu() {
+    let mut canvas = Canvas::new();
+    let before = canvas.body();
+    canvas.arm(DesignCommand::SymbolPolylineTool);
+    let (a, b) = (Point::new(-30, -30), Point::new(30, -30));
+    canvas.click(a);
+    canvas.click(b);
+
+    canvas.right_click(Point::new(30, 20));
+
+    assert_eq!(
+        canvas.app.state.design.symbol.editor.pending_polyline,
+        vec![a, b],
+        "the right-click neither finished nor let go of the line"
+    );
+    assert_eq!(canvas.tool(), SymbolTool::Line);
+    assert_eq!(canvas.shortcut("Finish"), Some("Enter"));
+    assert_eq!(canvas.shortcut("Remove last point"), Some("Backspace"));
+    assert!(canvas.controls.contains_key("Cancel"));
+    assert!(
+        !canvas.controls.contains_key("Delete"),
+        "the drawing's menu is not the selection's"
+    );
+
+    canvas.click_control("Finish");
+
+    let body = canvas.body();
+    assert_eq!(body.len(), before.len() + 1);
+    assert_eq!(
+        body.last(),
+        Some(&SymbolShape::Polyline {
+            points: vec![a, b],
+            closed: false,
+        })
+    );
+    assert_eq!(canvas.tool(), SymbolTool::Line, "the tool stays armed");
+}
+
+/// A right-click on a shape selects it and opens the selection's menu,
+/// whose Rotate runs Rotate: one undo step, about the shape's middle.
+#[test]
+fn a_right_click_on_a_shape_opens_its_menu_and_rotate_turns_it() {
+    let mut canvas = Canvas::with_body(vec![SymbolShape::Rectangle {
+        min: Point::new(60, 40),
+        max: Point::new(100, 60),
+    }]);
+    canvas.right_click(Point::new(80, 40));
+    assert_eq!(
+        canvas
+            .app
+            .state
+            .design
+            .symbol
+            .editor
+            .effective_selection()
+            .shapes,
+        [0].into()
+    );
+    assert!(canvas.controls.contains_key("Rotate 90°"));
+    assert!(canvas.controls.contains_key("Object properties…"));
+
+    canvas.click_control("Rotate 90°");
+
+    assert_eq!(
+        canvas.body(),
+        vec![SymbolShape::Rectangle {
+            min: Point::new(70, 30),
+            max: Point::new(90, 70),
+        }]
+    );
+    assert_eq!(canvas.undo_step().as_deref(), Some("Rotate rectangle"));
+}
+
+/// R while a pin is dragged turns its lead about its tip, and the turn is
+/// part of the drag's one undo step.
+#[test]
+fn r_turns_a_pin_while_it_is_dragged() {
+    let mut canvas = Canvas::new();
+    let pin = |canvas: &Canvas| {
+        let pin = canvas
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap()
+            .pin("IN")
+            .cloned()
+            .unwrap();
+        (pin.position, pin.side)
+    };
+    let (placed, side) = pin(&canvas);
+    let key = |pressed| egui::Event::Key {
+        key: egui::Key::R,
+        physical_key: Some(egui::Key::R),
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+
+    canvas.drag_with(
+        Point::new(-40, 10),
+        Point::new(-40, 40),
+        vec![key(true), key(false)],
+    );
+
+    assert_eq!(
+        pin(&canvas),
+        (Some(Point::new(-40, 40)), side.turned_clockwise())
+    );
+    assert_eq!(canvas.tool(), SymbolTool::Select, "R was the pin's");
+    assert_eq!(canvas.undo_step().as_deref(), Some("Move pin IN"));
+    assert!(canvas.app.state.undo_active_symbol_document().unwrap());
+    assert_eq!(pin(&canvas), (placed, side));
 }
