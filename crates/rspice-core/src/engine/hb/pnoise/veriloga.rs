@@ -20,8 +20,8 @@ use super::bjt::{NativeNoiseWaveform, sampled_noise_sources};
 use super::*;
 use crate::engine::UnsupportedCapabilityError;
 use crate::engine::transient::device_noise::processes::{
-    CollectedNoiseProcess, NoiseProcessKey, NoiseProcessSpectrum, collect_noise_processes_on_orbit,
-    has_structural_noise_processes,
+    CollectedNoiseProcess, GeneratedOrbitSample, NoiseProcessKey, NoiseProcessSpectrum,
+    collect_noise_processes_on_orbit, has_structural_noise_processes,
 };
 use rspice_veriloga_runtime::GeneratedPeriodicFrame;
 use std::collections::BTreeMap;
@@ -93,29 +93,54 @@ fn sampled(
     Ok(([injection.node_pos, injection.node_neg], exponent, power))
 }
 
-/// The carried operator sites of each generated instance, in the circuit's
-/// order, as one sample of the orbit holds them: the periodic state's row of
-/// each site's output, and the frame that supplies those outputs to the
-/// instance's noise evaluation. An instance with no carried site has none.
-struct CarriedSiteSamples {
+/// Each generated instance as one sample of the orbit holds it, in the
+/// circuit's order: harmonic balance's sampled copy of an instance with noise
+/// processes (see [`GeneratedOrbitSample`]), the periodic state's row of each
+/// carried operator site's output, and the frame that supplies those outputs
+/// to the instance's noise evaluation. An instance with no carried site has
+/// no rows and no frame.
+struct GeneratedNoiseSamples {
+    #[cfg(feature = "veriloga-builtins-base")]
+    instances: Vec<Option<crate::device::veriloga_builtins::BuiltinVerilogAInstance>>,
     rows: Vec<Vec<usize>>,
     outputs: Vec<Value>,
     frames: Vec<Option<GeneratedPeriodicFrame>>,
 }
 
-impl CarriedSiteSamples {
+impl GeneratedNoiseSamples {
     fn new(circuit: &CircuitData, solver: &HbSolver) -> Result<Self, SimulationError> {
         // Without generated models nothing is pushed.
         #[cfg_attr(not(feature = "veriloga-builtins-base"), allow(unused_mut))]
         let mut samples = Self {
+            #[cfg(feature = "veriloga-builtins-base")]
+            instances: Vec::new(),
             rows: Vec::new(),
             outputs: Vec::new(),
             frames: Vec::new(),
         };
         #[cfg(feature = "veriloga-builtins-base")]
         for device in circuit.generated_veriloga_devices().iter() {
+            let unsampled = || {
+                SimulationError::Circuit(format!(
+                    "periodic noise found no periodic sampler for generated Verilog-A instance \
+                     '{}'",
+                    device.instance_name
+                ))
+            };
+            if !device.has_grouped_noise_processes() {
+                samples.instances.push(None);
+                samples.rows.push(Vec::new());
+                samples.frames.push(None);
+                continue;
+            }
+            samples.instances.push(Some(
+                solver
+                    .generated_sampled_instance(&device.instance_name)
+                    .ok_or_else(unsampled)?
+                    .clone(),
+            ));
             let sites = device.harmonic_balance_periodic_sites().len();
-            if sites == 0 || !device.has_grouped_noise_processes() {
+            if sites == 0 {
                 samples.rows.push(Vec::new());
                 samples.frames.push(None);
                 continue;
@@ -143,6 +168,15 @@ impl CarriedSiteSamples {
         Ok(samples)
     }
 
+    /// The orbit sample [`Self::prepare`] last supplied.
+    fn orbit(&self) -> GeneratedOrbitSample<'_> {
+        GeneratedOrbitSample {
+            #[cfg(feature = "veriloga-builtins-base")]
+            instances: &self.instances,
+            frames: &self.frames,
+        }
+    }
+
     /// Supply each frame its sites' outputs at `solution`, one sample.
     fn prepare(&mut self, solution: &[Value]) {
         for (rows, frame) in self.rows.iter().zip(&mut self.frames) {
@@ -160,9 +194,10 @@ impl CarriedSiteSamples {
 
 impl Engine {
     /// Every runtime and generated Verilog-A noise process, sampled over the
-    /// retained orbit. A generated model's noise reads the orbit's value of
+    /// retained orbit. A generated model's noise is evaluated on harmonic
+    /// balance's own sampled copy of the instance, at the orbit's value of
     /// every operator site harmonic balance carries as an unknown of its own,
-    /// at each sample, as harmonic balance's own sampler of the model does.
+    /// at each sample, as harmonic balance's sampler of the model is.
     pub(in crate::engine::hb) fn veriloga_periodic_noise_sources(
         circuit: &CircuitData,
         solver: &mut HbSolver,
@@ -177,14 +212,14 @@ impl Engine {
         // reactive or filtered part.
         let frequency = solver.fundamental_freq();
         let mut waveforms: BTreeMap<NoiseProcessKey, NativeNoiseWaveform> = BTreeMap::new();
-        let mut carried = CarriedSiteSamples::new(circuit, solver)?;
+        let mut generated = GeneratedNoiseSamples::new(circuit, solver)?;
         let mut failure = None;
         let mut sample = |time: usize, count: usize, solution: &[Value]| {
-            carried.prepare(solution);
-            let frames = carried.frames.as_slice();
-            let processes = collect_noise_processes_on_orbit(circuit, solution, frequency, frames)?;
+            generated.prepare(solution);
+            let orbit = generated.orbit();
+            let processes = collect_noise_processes_on_orbit(circuit, solution, frequency, orbit)?;
             let shifted =
-                collect_noise_processes_on_orbit(circuit, solution, 2.5 * frequency, frames)?;
+                collect_noise_processes_on_orbit(circuit, solution, 2.5 * frequency, orbit)?;
             for process in &processes {
                 let Some(other) = shifted.iter().find(|other| other.key() == process.key()) else {
                     return Err(refused(

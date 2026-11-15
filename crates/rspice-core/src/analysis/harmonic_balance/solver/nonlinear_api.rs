@@ -167,6 +167,22 @@ impl HbSolver {
             .map(|device| device.carried_output_rows().collect())
     }
 
+    /// Generated instance `instance` as the solver samples it: a copy whose
+    /// analysis's initial step was evaluated and accepted when the sampler
+    /// was built, so a variable the generator proved set only there holds the
+    /// value every sample reads; `None` when the solver does not sample the
+    /// instance.
+    #[cfg(feature = "veriloga-builtins-base")]
+    pub(crate) fn generated_sampled_instance(
+        &self,
+        instance: &str,
+    ) -> Option<&crate::device::veriloga_builtins::BuiltinVerilogAInstance> {
+        self.generated_nonlinear_devices
+            .iter()
+            .find(|device| device.name() == instance)
+            .map(|device| device.sampled_instance())
+    }
+
     /// Add a generated compact model to the F/Q sampler. The generator must
     /// have proved its residual `F(x) + dQ(x)/dt`, which the harmonic-balance
     /// capability gate checks before the solver is built.

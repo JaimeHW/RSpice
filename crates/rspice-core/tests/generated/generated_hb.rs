@@ -915,24 +915,15 @@ const PNOISE_CHECK: PnoiseCheck = PnoiseCheck {
     gentle: GENTLE_DRIVE,
 };
 
-/// The shipped models with an operator harmonic balance carries as an
-/// unknown of its own whose periodic noise the walk checks (see
-/// [`check_pnoise`]), each with its check. MVSG's harmonic-balance carrier
+/// The shipped models whose periodic noise the walk reads other than by
+/// [`PNOISE_CHECK`], each with its check. MVSG's harmonic-balance carrier
 /// takes 16 harmonics: at 8 its sideband-0 noise sat 2.2e-3 from shooting's,
 /// at 16 2.0e-4 and at 24 2.2e-4, shooting's unmoved from 512 to 1024
 /// points. EKV3 RF's gentle drive is 1e-2 of the fixture's: at 1e-3 and
 /// 1e-4 the noise adjoint stops short of its certificate (backward error
 /// 3.6e-11 after 8 iterations), while at 1e-2 both carriers give `.noise`
 /// within 2.9e-7.
-const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[(&str, PnoiseCheck)] = &[
-    ("bjt504va", PNOISE_CHECK),
-    ("bjt505_va", PNOISE_CHECK),
-    ("bjt505t_va", PNOISE_CHECK),
-    ("bjtd504va", PNOISE_CHECK),
-    ("bjtd505_va", PNOISE_CHECK),
-    ("bjtd505t_va", PNOISE_CHECK),
-    ("bsimcmg111", PNOISE_CHECK),
-    ("bsimcmg_va", PNOISE_CHECK),
+const PNOISE_CHECKS: &[(&str, PnoiseCheck)] = &[
     (
         "ekv3_rf",
         PnoiseCheck {
@@ -940,11 +931,6 @@ const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[(&str, PnoiseCheck)] = &[
             gentle: 1e-2,
         },
     ),
-    ("ekv_va", PNOISE_CHECK),
-    ("hicumL2va", PNOISE_CHECK),
-    ("hisimsoi_va__242bc21d", PNOISE_CHECK),
-    ("hisimsoi_va__38074d06", PNOISE_CHECK),
-    ("hisimsoi_va__5be18005", PNOISE_CHECK),
     (
         "mvsg_cmc",
         PnoiseCheck {
@@ -952,24 +938,25 @@ const PNOISE_CHECKED_CARRIED_SITE_MODELS: &[(&str, PnoiseCheck)] = &[
             gentle: GENTLE_DRIVE,
         },
     ),
-    ("PSPNQS102BVA", PNOISE_CHECK),
-    ("PSPNQS102EVA", PNOISE_CHECK),
-    ("PSPNQS102VA", PNOISE_CHECK),
-    ("PSPNQS103VA", PNOISE_CHECK),
-    ("PSPNQS104VA", PNOISE_CHECK),
 ];
 
-/// The shipped models with a carried operator whose periodic noise could
-/// not be checked, each with the words of the reason periodic noise refuses
-/// it by on either carrier (see [`check_pnoise_refusal`]).
-const PNOISE_REFUSED_CARRIED_SITE_MODELS: &[(&str, &str)] = &[
+/// The shipped models whose periodic noise could not be checked, each with
+/// the words of the reason periodic noise refuses it by on either carrier
+/// (see [`check_pnoise_refusal`]). Every other model with a settled-transient
+/// fixture has its periodic noise checked (see [`check_pnoise`]).
+const PNOISE_REFUSED_MODELS: &[(&str, &str)] = &[
+    ("angelov", "more than one pair of circuit rows"),
     ("angelov_gan", "more than one pair of circuit rows"),
     ("asmesd", "more than one pair of circuit rows"),
     ("asmesd_dio", "more than one pair of circuit rows"),
     ("asmhemt", "stalls at a normwise residual of 0.2"),
     ("bjt504tva", "fails its componentwise certificate"),
     ("bjtd504tva", "fails its componentwise certificate"),
+    ("bsimcmg108", "more than one pair of circuit rows"),
+    ("bsimcmg110", "more than one pair of circuit rows"),
+    ("bsimimg", "more than one pair of circuit rows"),
     ("bsimsoi__18c250bc", "more than one pair of circuit rows"),
+    ("diode_cmc", "more than one pair of circuit rows"),
     ("hisimhv_n4_va", "more than one pair of circuit rows"),
     ("hisimhv_n5_va", "more than one pair of circuit rows"),
     ("hisimhv_va", "more than one pair of circuit rows"),
@@ -1458,9 +1445,9 @@ fn check_refusal(card: &str, instance: &str, module: &str, reason: &str) -> Opti
 /// Every shipped model this build compiles, walked by name: an admitted one
 /// must reach its fixture's settled transient, or shooting's orbit where no
 /// transient settles, PSTB must read a fixture's shooting orbit (see
-/// [`check_pstb`]), periodic noise must meet its references on a fixture of
-/// a model with a carried operator, or refuse it by name (see
-/// [`check_pnoise`] and [`check_pnoise_refusal`]), a refused one must give
+/// [`check_pstb`]), periodic noise must meet its references on every
+/// fixture, or refuse its model by name (see [`check_pnoise`] and
+/// [`check_pnoise_refusal`]), a refused one must give
 /// its named reason, and one with neither a fixture nor a named refusal
 /// fails, so a model the generator newly admits cannot go unchecked. A
 /// fixture or refusal names its model as a word of its deck. It needs every
@@ -1477,14 +1464,10 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
     let oracle_fixtures = shooting_oracle_fixtures();
     let refused = refused_models();
     let mut failures = Vec::new();
-    let mut pnoise_unread: Vec<&str> = PNOISE_CHECKED_CARRIED_SITE_MODELS
+    let mut pnoise_unread: Vec<&str> = PNOISE_CHECKS
         .iter()
         .map(|&(model, _)| model)
-        .chain(
-            PNOISE_REFUSED_CARRIED_SITE_MODELS
-                .iter()
-                .map(|&(model, _)| model),
-        )
+        .chain(PNOISE_REFUSED_MODELS.iter().map(|&(model, _)| model))
         .collect();
     for &name in builtins::builtin_names() {
         if let Some(&(card, instance, module, reason)) =
@@ -1498,16 +1481,17 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
             check_fixture(family, circuit, node, &mut failures);
             check_pstb(family, circuit, &mut failures);
             pnoise_unread.retain(|model| !model.eq_ignore_ascii_case(name));
-            if let Some(&(_, check)) = PNOISE_CHECKED_CARRIED_SITE_MODELS
-                .iter()
-                .find(|(model, _)| model.eq_ignore_ascii_case(name))
-            {
-                check_pnoise(family, circuit, node, check, &mut failures);
-            } else if let Some(&(_, reason)) = PNOISE_REFUSED_CARRIED_SITE_MODELS
+            if let Some(&(_, reason)) = PNOISE_REFUSED_MODELS
                 .iter()
                 .find(|(model, _)| model.eq_ignore_ascii_case(name))
             {
                 check_pnoise_refusal(family, circuit, node, reason, &mut failures);
+            } else {
+                let check = PNOISE_CHECKS
+                    .iter()
+                    .find(|(model, _)| model.eq_ignore_ascii_case(name))
+                    .map_or(PNOISE_CHECK, |&(_, check)| check);
+                check_pnoise(family, circuit, node, check, &mut failures);
             }
         } else if let Some(&(family, circuit, node)) = oracle_fixtures
             .iter()
@@ -1521,7 +1505,7 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
         }
     }
     failures.extend(pnoise_unread.into_iter().map(|model| {
-        format!("{model}: its periodic noise is checked on a settled-transient fixture it lacks")
+        format!("{model}: its periodic noise is read on a settled-transient fixture it lacks")
     }));
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

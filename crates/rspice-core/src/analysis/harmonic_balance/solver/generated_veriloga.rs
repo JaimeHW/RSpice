@@ -359,6 +359,12 @@ impl HbGeneratedDevice {
         &self.static_probe.instance_name
     }
 
+    /// The instance as every sample sees it: the static probe, whose
+    /// analysis's initial step was evaluated and accepted at construction.
+    pub(super) fn sampled_instance(&self) -> &BuiltinVerilogAInstance {
+        &self.static_probe
+    }
+
     /// Each carried site's output row, in the model's site order.
     pub(super) fn carried_output_rows(&self) -> impl Iterator<Item = usize> + '_ {
         self.operators.iter().map(|operator| operator.output)

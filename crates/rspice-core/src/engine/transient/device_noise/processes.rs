@@ -176,6 +176,26 @@ pub(in crate::engine) fn has_structural_noise_processes(circuit: &CircuitData) -
     false
 }
 
+/// What a periodic orbit's sampler holds of the circuit's generated devices,
+/// each slice in the circuit's order (empty, or `None` at a device, where it
+/// holds nothing of it).
+///
+/// `instances` gives the instance the sampler evaluates, whose analysis's
+/// initial step it evaluated and accepted when it was built: a variable the
+/// generator proved set only there (VBIC 1.3 keeps its model constants in an
+/// `@(initial_step)` block) holds in it the value every sample reads, where
+/// the circuit's own instance, which no analysis has stepped, holds none.
+/// `frames` gives the frame that supplies the device's carried operator
+/// sites' outputs at the sample, for a device that carries any.
+#[derive(Clone, Copy, Default)]
+#[cfg_attr(not(feature = "veriloga-builtins-base"), allow(dead_code))]
+pub(in crate::engine) struct GeneratedOrbitSample<'a> {
+    #[cfg(feature = "veriloga-builtins-base")]
+    pub(in crate::engine) instances:
+        &'a [Option<crate::device::veriloga_builtins::BuiltinVerilogAInstance>],
+    pub(in crate::engine) frames: &'a [Option<rspice_veriloga_runtime::GeneratedPeriodicFrame>],
+}
+
 /// Every active noise process of the circuit at `solution`, with its gains
 /// evaluated at `frequency`.
 ///
@@ -189,19 +209,23 @@ pub(in crate::engine) fn collect_noise_processes(
     solution: &[Value],
     frequency: Value,
 ) -> Result<Vec<CollectedNoiseProcess>, SimulationError> {
-    collect_noise_processes_on_orbit(circuit, solution, frequency, &[])
+    collect_noise_processes_on_orbit(
+        circuit,
+        solution,
+        frequency,
+        GeneratedOrbitSample::default(),
+    )
 }
 
-/// [`collect_noise_processes`] at one sample of a periodic orbit: `periodic`
-/// gives each generated device, in the circuit's order, the frame that
-/// supplies its carried operator sites' outputs at that sample (`None`, or
-/// no entry, for a device that carries none), so a process that depends on
-/// one is evaluated at the orbit's value there.
+/// [`collect_noise_processes`] at one sample of a periodic orbit, each
+/// generated device evaluated as `orbit` holds it, so a process that depends
+/// on a carried operator site, or on a value set at the analysis's initial
+/// step, is evaluated at the orbit's value there.
 pub(in crate::engine) fn collect_noise_processes_on_orbit(
     circuit: &CircuitData,
     solution: &[Value],
     frequency: Value,
-    periodic: &[Option<rspice_veriloga_runtime::GeneratedPeriodicFrame>],
+    orbit: GeneratedOrbitSample<'_>,
 ) -> Result<Vec<CollectedNoiseProcess>, SimulationError> {
     let mut processes = Vec::new();
     #[cfg(feature = "veriloga")]
@@ -220,8 +244,13 @@ pub(in crate::engine) fn collect_noise_processes_on_orbit(
     #[cfg(feature = "veriloga-builtins-base")]
     for (index, device) in circuit.generated_veriloga_devices().iter().enumerate() {
         if device.has_grouped_noise_processes() {
-            let frame = periodic.get(index).and_then(Option::as_ref);
-            collect_generated_device(circuit, device, solution, frequency, frame, &mut processes)?;
+            let sampled = orbit
+                .instances
+                .get(index)
+                .and_then(Option::as_ref)
+                .unwrap_or(device);
+            let frame = orbit.frames.get(index).and_then(Option::as_ref);
+            collect_generated_device(circuit, sampled, solution, frequency, frame, &mut processes)?;
         }
     }
     #[cfg(feature = "veriloga")]
@@ -241,7 +270,7 @@ pub(in crate::engine) fn collect_noise_processes_on_orbit(
     #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
     let _ = (circuit, solution, frequency, &mut processes);
     #[cfg(not(feature = "veriloga-builtins-base"))]
-    let _ = periodic;
+    let _ = orbit;
     Ok(processes)
 }
 
