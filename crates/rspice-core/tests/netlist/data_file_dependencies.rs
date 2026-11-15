@@ -31,36 +31,31 @@ fn behavioral_dependencies_expand_functions_and_use_the_readers_path_rules() {
     );
 }
 
-/// A lookup reaches an element through a subcircuit or instance parameter
-/// expression that names it, though the element's own text names none.
+/// A lookup a subcircuit body names is found through every instance's
+/// expansion, and a hierarchy whose expressions name none reads no file.
 #[test]
-fn a_lookup_substituted_through_a_parameter_names_its_file() {
-    let root = std::env::temp_dir().join("rspice-substituted-lookup-paths");
-    let deck = |instance: &str| {
+fn a_subcircuit_lookup_names_its_file_and_plain_expressions_name_none() {
+    let root = std::env::temp_dir().join("rspice-subcircuit-lookup-paths");
+    let deck = |body: &str| {
         format!(
-            "substituted lookups\n\
-             .subckt src out wave=1\n\
-             B1 out 0 V={{wave}}\n\
+            "subcircuit lookups\n\
+             .subckt src out r=1k\n\
+             {body}\n\
+             R1 out 0 {{r}}\n\
+             C1 out 0 {{1p*r/1k}}\n\
              .ends\n\
-             .subckt shaped out\n\
-             .param shape={{fasttablefile(\"shape.dat\")}}\n\
-             R1 out 0 R={{1k*shape}}\n\
-             .ends\n\
-             {instance}\nX3 c shaped\n.end\n"
+             X1 a src r=2k\nX2 b src r={{3k*2}}\n.end\n"
         )
     };
     let netlist = Netlist::parse_with_path(
-        &deck("X1 a src wave={tablefile(\"instance.dat\")}"),
+        &deck("B1 out 0 V={tablefile(\"wave.dat\")*r/1k}"),
         &root.join("deck.cir"),
     )
     .unwrap();
-    assert_eq!(
-        candidates(&netlist),
-        vec![root.join("instance.dat"), root.join("shape.dat")]
-    );
-    // Without the instance's lookup, the subcircuit body's own still counts.
-    let netlist = Netlist::parse_with_path(&deck("X1 a src"), &root.join("deck.cir")).unwrap();
-    assert_eq!(candidates(&netlist), vec![root.join("shape.dat")]);
+    assert_eq!(candidates(&netlist), vec![root.join("wave.dat")]);
+    let netlist =
+        Netlist::parse_with_path(&deck("B1 out 0 V={2*r/1k}"), &root.join("deck.cir")).unwrap();
+    assert!(candidates(&netlist).is_empty());
 }
 
 #[test]
