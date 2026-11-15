@@ -447,7 +447,8 @@ impl DrcViolationType {
             Self::UnresolvedReference => "Name exactly one instance of this cellview",
             Self::SymbolUnplacedPin => "Place the symbol pin on the terminal grid",
             Self::SymbolOrphanedPin => {
-                "Delete the pin, or declare it where the interface is read from"
+                "Click the finding to select the pin and press Delete, or declare the port where \
+                 the interface is read from"
             }
             Self::SymbolPinOffGrid => "Move the symbol pin onto the terminal grid",
             Self::SymbolPinOrder => "Reorder the symbol pins to the interface's order",

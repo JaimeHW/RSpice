@@ -512,6 +512,107 @@ fn the_pin_check_names_each_port_change_and_update_pins_answers_it() {
     assert_eq!(document(&replay.app, &symbol), updated, "and one redo");
 }
 
+/// Update pins keeps a pin no port declares, and the pin check's finding on
+/// it says how to take it off in one step: following the finding, as a click
+/// on its row does, selects the pin, and Delete removes it, which answers the
+/// finding.
+#[test]
+fn an_orphaned_pin_goes_in_one_step_from_its_finding() {
+    use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
+
+    let orphan = |replay: &Replay, symbol: &CellViewRef| {
+        replay
+            .app
+            .state
+            .model
+            .diagnostics
+            .batches()
+            .find(|batch| {
+                batch.inputs
+                    == DiagnosticInputs::SymbolPins {
+                        subject: symbol.clone(),
+                    }
+            })
+            .and_then(|batch| {
+                batch
+                    .records
+                    .iter()
+                    .find(|record| record.canonical.code.as_ref() == "SYMBOL-ORPHANED-PIN")
+                    .cloned()
+            })
+    };
+    let mut replay = new_project();
+    let schematic = replay.app.state.model.workspace.content.active_view.clone();
+    let symbol = symbol_of(&schematic);
+    declare(
+        &mut replay,
+        &[("IN", PortDirection::In), ("OUT", PortDirection::Out)],
+    );
+    open(&mut replay, &symbol);
+    hand_edit(&mut replay, "Move pin", |document| {
+        let pin = document.pins.iter_mut().find(|pin| pin.name == "OUT");
+        let pin = pin.expect("OUT is drawn");
+        pin.position = pin.position.map(|at| at + Point::new(0, 20));
+    });
+    open(&mut replay, &schematic);
+    delete_port(&mut replay, "OUT");
+    open(&mut replay, &symbol);
+    replay
+        .app
+        .execute_command_key(DesignCommand::SymbolUpdatePinsFromContract.key());
+    replay.frames(Vec::new());
+    assert!(
+        document(&replay.app, &symbol).pin("OUT").is_some(),
+        "Update pins keeps the pin"
+    );
+
+    replay
+        .app
+        .execute_command_key(DesignCommand::CheckCellview.key());
+    replay.frames(Vec::new());
+    let finding = orphan(&replay, &symbol).expect("the kept pin is a finding");
+    assert!(
+        finding.details.contains("select the pin and press Delete"),
+        "the finding says how: {:?}",
+        finding.details
+    );
+    // What a click on the finding's row does: follow its route, and give
+    // the canvas it lands on the keyboard.
+    let route = finding.route.clone().expect("the finding is routed");
+    replay.app.state.model.diagnostics.request_route(route);
+    crate::workbench::app_state::request_engineering_canvas_focus(replay.ctx());
+    replay.frames(Vec::new());
+    assert_eq!(replay.app.state.model.workspace.content.active_view, symbol);
+    assert_eq!(
+        replay
+            .app
+            .state
+            .design
+            .symbol
+            .editor
+            .selection
+            .pins
+            .iter()
+            .collect::<Vec<_>>(),
+        ["OUT"],
+        "following the finding selects the pin"
+    );
+
+    replay.key(egui::Key::Delete, egui::Modifiers::NONE);
+    assert!(
+        document(&replay.app, &symbol).pin("OUT").is_none(),
+        "Delete removes it"
+    );
+    replay
+        .app
+        .execute_command_key(DesignCommand::CheckCellview.key());
+    replay.frames(Vec::new());
+    assert!(
+        orphan(&replay, &symbol).is_none(),
+        "the finding is answered"
+    );
+}
+
 /// Update pins is named for the drawing it takes the pins from wherever it
 /// shows: the toolbar button and the navigator's, the Design menu row, the
 /// palette row that runs it, and the step Undo then takes back.

@@ -523,8 +523,9 @@ impl DrcViolationType {
                     cell's schematic, its compiled Verilog-A module, or the model the symbol is \
                     bound to. Every instance placed from it draws more terminals than the \
                     interface declares, and the netlister refuses it. A warning while the symbol \
-                    and its interface are still being drawn, in either order. Delete the pin, or \
-                    declare the port where the interface is read from.",
+                    and its interface are still being drawn, in either order. Click the finding \
+                    to select the pin and press Delete, or declare the port where the interface \
+                    is read from.",
                 default_severity: DrcSeverity::Warning,
                 floor: ANY,
                 max_severity: DrcSeverity::Critical,
