@@ -95,9 +95,13 @@ pub fn resolve_transient_maximum_step(
 /// explicit `TMAX` wins in every dialect. An omitted one is:
 /// - in the ngspice dialect, [`resolve_transient_maximum_step`]'s
 ///   `min(TSTEP, (TSTOP - TSTART) / 50)`;
-/// - in the Xyce dialect, a tenth of the analysis window: Xyce never bounds
-///   the step by `TSTEP`, which only seeds its first step (Xyce 7.10
-///   `N_TIA_StepErrorControl.C` `setFromTIAParams` and `updateMaxTimeStep`);
+/// - in the Xyce dialect, a tenth of the simulated interval, which starts at
+///   zero whatever `TSTART` is: Xyce never bounds the step by `TSTEP`, which
+///   only seeds its first step, and `TSTART` only delays the first output
+///   (Xyce 7.10 `N_TIA_StepErrorControl.C` `setFromTIAParams` and
+///   `updateMaxTimeStep` take `0.1 * (finalTime - initialTime)`, and
+///   `N_TIA_TIAParams.C` reads `TSTART` into `initialOutputTime`, never
+///   `initialTime`);
 /// - in the default dialect, QSPICE's and LTspice's `TSTOP / 1024`, whatever
 ///   `TSTEP` and `TSTART` are. Both step a `.TRAN 1N 100N` inverter at
 ///   97.66 ps, and still do with `TSTEP` 0.01N or `TSTART` 50N; `TSTOP` 200N
@@ -116,11 +120,10 @@ pub fn resolve_dialect_transient_maximum_step(
             if explicit_maximum_step.is_some() {
                 return Ok(maximum_step);
             }
-            // The validated window keeps a tenth of it finite; it can only
+            // The validated TSTOP keeps a tenth of it finite; it can only
             // underflow, and then the ngspice default it already exceeds is
             // the safe answer.
-            let window = stop - start.unwrap_or(0.0);
-            Ok((0.1 * window).max(maximum_step))
+            Ok((0.1 * stop).max(maximum_step))
         }
         crate::SpiceDialect::BestAvailable => {
             // A zero TMAX is an omitted one here too.
@@ -265,15 +268,22 @@ mod maximum_step_tests {
     }
 
     #[test]
-    fn xyce_default_maximum_is_a_tenth_of_the_window_not_the_print_step() {
+    fn xyce_default_maximum_is_a_tenth_of_tstop_not_the_print_step() {
         let xyce = crate::SpiceDialect::Xyce;
         assert_eq!(
             resolve_dialect_transient_maximum_step(xyce, 1.0e-6, 0.8, None, None),
             Ok(0.1 * 0.8)
         );
+        // TSTART delays the output, not the simulation: a `.TRAN 20N 1.5042U
+        // 1.504U` inverter chain still steps up to 150 ns before its output
+        // window, as Xyce's 301 steps do.
         assert_eq!(
             resolve_dialect_transient_maximum_step(xyce, 1.0e-6, 16.0e-3, Some(6.0e-3), None),
-            Ok(0.1 * (16.0e-3 - 6.0e-3))
+            Ok(0.1 * 16.0e-3)
+        );
+        assert_eq!(
+            resolve_dialect_transient_maximum_step(xyce, 20.0e-9, 1.5042e-6, Some(1.504e-6), None),
+            Ok(0.1 * 1.5042e-6)
         );
         assert_eq!(
             resolve_dialect_transient_maximum_step(xyce, 1.0e-6, 1.0e-3, None, Some(1.0e-6)),
@@ -290,7 +300,7 @@ mod maximum_step_tests {
             Ok(1.0e-6)
         );
         // A .TRAN with no print step is legal; Xyce's ceiling is still a
-        // tenth of the window.
+        // tenth of TSTOP.
         assert_eq!(
             resolve_dialect_transient_maximum_step(xyce, 0.0, 1.0, None, None),
             Ok(0.1)
