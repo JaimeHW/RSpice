@@ -153,7 +153,9 @@ fn timeout_interrupts_conditionals_and_eager_element_expressions() {
         ".IF 0\n.ELSEIF {work(26)}\nR2 out 0 1k\n.ENDIF",
         ".SUBCKT cell a\n.IF {work(26)}\nR2 a 0 1k\n.ENDIF\n.ENDS\nX1 out cell",
         ".MODEL dd D(IS={work(26)})\nD1 out 0 dd",
-        ".MODEL buffer d_buffer(rise_delay=work(26)+0)",
+        // A run reads only the model cards its deck names, so the instance
+        // is what makes this card's expression part of the run.
+        ".MODEL buffer d_buffer(rise_delay=work(26)+0)\nA2 out dout buffer",
         "R2 out 0 1k TEMP={work(26)}",
         "R2 out 0 1k TEMP=work(26)+0",
         "C1 out 0 {work(26)}",
