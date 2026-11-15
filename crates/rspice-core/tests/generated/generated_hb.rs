@@ -22,7 +22,12 @@ fn engine() -> Engine {
 #[cfg(any(
     feature = "veriloga-model-r2-cmc",
     feature = "veriloga-model-bjt504va",
-    feature = "veriloga-model-angelov"
+    feature = "veriloga-model-angelov",
+    feature = "veriloga-model-pspnqs102va",
+    feature = "veriloga-model-pspnqs102bva",
+    feature = "veriloga-model-pspnqs102eva",
+    feature = "veriloga-model-pspnqs103va",
+    feature = "veriloga-model-pspnqs104va"
 ))]
 fn run_hb(deck: &str) -> HbAnalysisResult {
     let netlist = Netlist::parse(deck).expect("parse");
@@ -960,12 +965,6 @@ fn check_against_shooting(family: &str, circuit: &str, node: &str, failures: &mu
     );
 }
 
-/// Why periodic AC, periodic transfer functions and periodic noise refuse a
-/// generated model with an `idt` carried as an unknown of its own.
-#[cfg(feature = "veriloga-model-pspnqs102va")]
-const SMALL_SIGNAL_INTEGRAL: &str = "it carries an `idt` as an unknown of its own, and the \
-     periodic small-signal sideband solve does not certify with one";
-
 /// Why shooting refuses a generated model that carries both a `ddt` and an
 /// `idt` as unknowns of their own.
 const CARRIED_SITE: &str = "harmonic balance carries both a `ddt` and an `idt` of it as \
@@ -1238,7 +1237,12 @@ fn shooting_carries_a_generated_models_stored_flux() {
 #[cfg(any(
     feature = "veriloga-model-r2-cmc",
     feature = "veriloga-model-bjt504va",
-    feature = "veriloga-model-angelov"
+    feature = "veriloga-model-angelov",
+    feature = "veriloga-model-pspnqs102va",
+    feature = "veriloga-model-pspnqs102bva",
+    feature = "veriloga-model-pspnqs102eva",
+    feature = "veriloga-model-pspnqs103va",
+    feature = "veriloga-model-pspnqs104va"
 ))]
 fn hb_carrier_transfers(deck: &str) -> Vec<Complex64> {
     use rspice_core::NoAbort;
@@ -1418,7 +1422,12 @@ fn a_generated_resistors_noise_folds_as_its_native_twins() {
 #[cfg(any(
     feature = "veriloga-model-r2-cmc",
     feature = "veriloga-model-bjt504va",
-    feature = "veriloga-model-angelov"
+    feature = "veriloga-model-angelov",
+    feature = "veriloga-model-pspnqs102va",
+    feature = "veriloga-model-pspnqs102bva",
+    feature = "veriloga-model-pspnqs102eva",
+    feature = "veriloga-model-pspnqs103va",
+    feature = "veriloga-model-pspnqs104va"
 ))]
 fn shooting_carrier_transfers(deck: &str) -> Vec<Complex64> {
     use rspice_core::NoAbort;
@@ -1505,100 +1514,119 @@ fn a_generated_resistor_mixes_its_native_twins_sidebands_on_a_shooting_carrier()
     );
 }
 
-/// Periodic AC, periodic transfer functions and periodic noise refuse PSP
-/// 102's non-quasi-static integrals by name on a shooting orbit that carries
-/// them, as on harmonic balance's carrier, each with the label of the
-/// analysis it runs (a periodic transfer function runs as periodic AC).
+/// A non-quasi-static PSP stage pumped at its gate, with the small-signal
+/// source `vrf` behind 10 kΩ, of model card `model` at `SWNQS=swnqs`.
+#[cfg(any(
+    feature = "veriloga-model-pspnqs102va",
+    feature = "veriloga-model-pspnqs102bva",
+    feature = "veriloga-model-pspnqs102eva",
+    feature = "veriloga-model-pspnqs103va",
+    feature = "veriloga-model-pspnqs104va"
+))]
+fn pumped_non_quasi_static_stage(model: &str, swnqs: u32) -> String {
+    format!(
+        "* pumped non-quasi-static stage\nVDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\n\
+         RG in g 1k\nVRF rf 0 DC 0\nR2 rf g 10k\nRD vdd a 1k\nM1 a g 0 0 nq\n\
+         .model nq {model} SWNQS={swnqs}\n.options method=gear\n.end\n"
+    )
+}
+
+/// Periodic AC and periodic transfer functions read PSP's non-quasi-static
+/// charges, each an `idt` carried as an unknown of its own, on either
+/// carrier, and give in a pumped stage every sideband transfer on a shooting
+/// orbit they give on harmonic balance's. Its 275-unknown sideband system
+/// takes the Krylov route, whose candidate failed the componentwise
+/// certificate on PSP's noise nodes, which no stimulus reaches (SWNQS=3), or
+/// stalled at a normwise residual of 1.2e-9 (SWNQS=9), and the analyses
+/// refused the integrals by name. Allowance: 1e-4 of the largest transfer,
+/// as for a carried `ddt`.
+#[cfg(any(
+    feature = "veriloga-model-pspnqs102va",
+    feature = "veriloga-model-pspnqs102bva",
+    feature = "veriloga-model-pspnqs102eva",
+    feature = "veriloga-model-pspnqs103va",
+    feature = "veriloga-model-pspnqs104va"
+))]
+#[test]
+fn periodic_small_signal_reads_a_generated_models_carried_integrals_on_either_carrier() {
+    let stages: Vec<(&str, &str, u32)> = vec![
+        #[cfg(feature = "veriloga-model-pspnqs102va")]
+        ("PSP 102 non-quasi-static, SWNQS=3", "PSPNQS102VA", 3),
+        #[cfg(feature = "veriloga-model-pspnqs102va")]
+        ("PSP 102 non-quasi-static, SWNQS=9", "PSPNQS102VA", 9),
+        #[cfg(feature = "veriloga-model-pspnqs102bva")]
+        ("PSP 102 non-quasi-static, binned", "PSPNQS102BVA", 3),
+        #[cfg(feature = "veriloga-model-pspnqs102eva")]
+        ("PSP 102 non-quasi-static, electrical", "PSPNQS102EVA", 3),
+        #[cfg(feature = "veriloga-model-pspnqs103va")]
+        ("PSP 103 non-quasi-static", "PSPNQS103VA", 3),
+        #[cfg(feature = "veriloga-model-pspnqs104va")]
+        ("PSP 104 non-quasi-static", "PSPNQS104VA", 3),
+    ];
+    for (name, model, swnqs) in stages {
+        assert_carriers_agree(name, &pumped_non_quasi_static_stage(model, swnqs));
+    }
+}
+
+/// Periodic noise refuses PSP's non-quasi-static stage by instance, model
+/// and reason on either carrier: its noise evaluation does not see the
+/// charges harmonic balance carries as unknowns of their own, as for every
+/// generated model with a carried operator site.
 #[cfg(feature = "veriloga-model-pspnqs102va")]
 #[test]
-fn periodic_small_signal_refuses_a_generated_models_integrals_by_name() {
+fn periodic_noise_refuses_a_generated_models_noise_beside_its_carried_integrals_by_name() {
     use rspice_core::NoAbort;
-    use rspice_core::analysis::pac::{PacConfig, PacSweepType};
+    use rspice_core::SimulationError;
     use rspice_core::engine::{PeriodicNoiseRequest, PeriodicNoiseSidebands};
-    use rspice_core::netlist::{FreqVariation, PeriodicSourceSelector, PeriodicSweep, PxfCard};
-    use rspice_core::{SimulationError, UnsupportedCapabilityError};
-    let deck = "* pumped non-quasi-static stage\nVDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\n\
-                RG in g 1k\nVRF rf 0 DC 0\nR2 rf g 10k\nRD vdd a 1k\nM1 a g 0 0 nq\n\
-                .model nq PSPNQS102VA SWNQS=3\n.options method=gear\n.end\n";
-    let netlist = Netlist::parse(deck).expect("parse");
+    let deck = pumped_non_quasi_static_stage("PSPNQS102VA", 3);
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let hb = run_hb(&deck);
     let point = engine()
         .run_pss_operating_point_with_abort(&netlist, PssConfig::new(F0), &NoAbort)
         .unwrap_or_else(|error| panic!("shooting must carry the integrals: {error}"));
-    let pac = PacConfig::new()
-        .with_fundamental(F0)
-        .with_sweep(0.13 * F0, 0.37 * F0, 3)
-        .with_sweep_type(PacSweepType::Linear)
-        .with_sidebands(-2, 2)
-        .with_input_source("vrf")
-        .with_output_node("a");
-    let card = PxfCard {
-        sweep: PeriodicSweep {
-            variation: FreqVariation::Lin,
-            points: 3,
-            start_freq: 0.13 * F0,
-            stop_freq: 0.37 * F0,
-        },
-        input_source: "vrf".into(),
-        input_sideband: 0,
-        output_node: "a".into(),
+    let request = PeriodicNoiseRequest {
+        sampling: None,
+        offsets: &[0.13 * F0],
+        output_node: "a",
         output_ref: None,
-        output_sideband: 1,
+        input_source: None,
         max_sideband: 2,
-        reltol: 1e-9,
-        abstol: 1e-15,
-        source: PeriodicSourceSelector::Preceding,
+        sidebands: PeriodicNoiseSidebands {
+            input: 0,
+            output: 0,
+        },
     };
     let refusals = [
         (
-            "PAC",
-            "PAC analysis",
+            "harmonic balance",
             engine()
-                .run_pac_from_pss_with_abort(&netlist, pac, &point, &NoAbort)
-                .map(drop),
-        ),
-        (
-            "PXF",
-            "PAC analysis",
-            engine()
-                .run_pxf_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
-                .map(drop),
-        ),
-        (
-            "pnoise",
-            "pnoise analysis",
-            engine()
-                .run_pnoise_from_pss_request_with_abort(
+                .run_pnoise_from_hb_request_with_abort(
                     &netlist,
-                    &PeriodicNoiseRequest {
-                        sampling: None,
-                        offsets: &[0.13 * F0],
-                        output_node: "a",
-                        output_ref: None,
-                        input_source: None,
-                        max_sideband: 2,
-                        sidebands: PeriodicNoiseSidebands {
-                            input: 0,
-                            output: 0,
-                        },
-                    },
-                    &point,
+                    &request,
+                    &hb.operating_point,
                     &NoAbort,
                 )
                 .map(drop),
         ),
+        (
+            "shooting",
+            engine()
+                .run_pnoise_from_pss_request_with_abort(&netlist, &request, &point, &NoAbort)
+                .map(drop),
+        ),
     ];
-    for (analysis, label, outcome) in refusals {
-        let error = outcome.expect_err("the integrals must be refused");
+    for (carrier, outcome) in refusals {
+        let error = outcome.expect_err("the noise must be refused");
         let SimulationError::UnsupportedCapability(refusal) = &error else {
-            panic!("{analysis}: expected a capability refusal, got {error}");
+            panic!("{carrier}: expected a capability refusal, got {error}");
         };
-        let UnsupportedCapabilityError {
-            instance, detail, ..
-        } = refusal.as_ref();
-        assert_eq!(instance.as_deref(), Some("M1"), "{error}");
         assert!(
-            detail.starts_with(label) && detail.ends_with(SMALL_SIGNAL_INTEGRAL),
-            "{analysis}: the refusal must name the analysis and its reason: {detail}"
+            refusal.capability == "analysis.pnoise.colored_noise"
+                && refusal.detail.ends_with(
+                    "generated Verilog-A instance 'M1' (model 'PSPNQS102VA'): noise in a model \
+                     with an operator harmonic balance carries as an unknown"
+                ),
+            "{carrier}: the refusal must name the instance, model and reason: {error}"
         );
     }
 }
@@ -1638,7 +1666,12 @@ fn periodic_small_signal_on_a_shooting_orbit_reads_a_generated_models_stored_flu
 /// harmonic-balance carrier.
 #[cfg(any(
     feature = "veriloga-model-bjt504va",
-    feature = "veriloga-model-angelov"
+    feature = "veriloga-model-angelov",
+    feature = "veriloga-model-pspnqs102va",
+    feature = "veriloga-model-pspnqs102bva",
+    feature = "veriloga-model-pspnqs102eva",
+    feature = "veriloga-model-pspnqs103va",
+    feature = "veriloga-model-pspnqs104va"
 ))]
 fn assert_carriers_agree(name: &str, deck: &str) {
     let harmonic_balance = hb_carrier_transfers(deck);

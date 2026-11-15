@@ -545,17 +545,19 @@ pub(in crate::engine) enum PeriodicCarrier {
 
 const PAC_VERILOGA_EVIDENCE: &[&str] = &[
     "tests/veriloga/veriloga_hb.rs::a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_harmonic_balance_carrier",
+    "tests/veriloga/veriloga_hb.rs::a_carried_non_quasi_static_charge_gives_its_closed_form_in_periodic_small_signal",
     "tests/veriloga/veriloga_hb.rs::a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_shooting_carrier",
     "tests/veriloga/veriloga_hb.rs::a_veriloga_inductor_gives_its_native_twins_sidebands_on_a_shooting_carrier",
 ];
 
 const PNOISE_VERILOGA_EVIDENCE: &[&str] = &[
     "tests/veriloga/veriloga_hb.rs::veriloga_noise_folds_as_its_native_twins_on_a_pumped_carrier",
+    "tests/veriloga/veriloga_hb.rs::a_carried_non_quasi_static_charge_gives_its_closed_form_in_periodic_small_signal",
 ];
 
 const PNOISE_GENERATED_EVIDENCE: &[&str] = &[
     "tests/generated/generated_hb.rs::a_generated_resistors_noise_folds_as_its_native_twins",
-    "tests/generated/generated_hb.rs::periodic_small_signal_refuses_a_generated_models_integrals_by_name",
+    "tests/generated/generated_hb.rs::periodic_noise_refuses_a_generated_models_noise_beside_its_carried_integrals_by_name",
 ];
 
 const PAC_GENERATED_EVIDENCE: &[&str] = &[
@@ -563,7 +565,7 @@ const PAC_GENERATED_EVIDENCE: &[&str] = &[
     "tests/generated/generated_hb.rs::a_generated_resistor_mixes_its_native_twins_sidebands_on_a_shooting_carrier",
     "tests/generated/generated_hb.rs::periodic_small_signal_on_a_shooting_orbit_reads_a_generated_models_carried_derivative",
     "tests/generated/generated_hb.rs::periodic_small_signal_on_a_shooting_orbit_reads_a_generated_models_stored_flux",
-    "tests/generated/generated_hb.rs::periodic_small_signal_refuses_a_generated_models_integrals_by_name",
+    "tests/generated/generated_hb.rs::periodic_small_signal_reads_a_generated_models_carried_integrals_on_either_carrier",
 ];
 
 /// Periodic AC and periodic transfer functions linearize harmonic balance's
@@ -572,15 +574,13 @@ const PAC_GENERATED_EVIDENCE: &[&str] = &[
 /// takes: on a harmonic-balance carrier what harmonic balance takes; on a
 /// shooting carrier the generated models shooting takes, and the runtime
 /// modules both shooting and harmonic balance take, whose state is the
-/// charges and fluxes the period map carries. Neither takes a generated model with an
-/// `idt` carried as an unknown of its own, whose sideband solve does not
-/// certify.
+/// charges and fluxes the period map carries.
 const fn carrier_admits_veriloga(generated: bool) -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::CarrierAdmitsVerilogA,
         token: PERIODIC_VERILOGA,
         condition: if generated {
-            "every generated compact model harmonic balance admits with no `idt` carried as an unknown of its own, on a harmonic-balance or a shooting (PSS) carrier"
+            "every generated compact model harmonic balance admits, on a harmonic-balance or a shooting (PSS) carrier"
         } else {
             "on a harmonic-balance carrier, every Verilog-A module harmonic balance admits; on a shooting (PSS) carrier, every one both shooting and harmonic balance admit"
         },
@@ -1219,21 +1219,9 @@ const PSS_GENERATED_CARRIED_SITE: &str = "harmonic balance carries both a `ddt` 
      it as unknowns of their own, and a shooting period starts its integrals from a hold that \
      would not seed the `ddt`'s charge";
 
-/// Why periodic AC, periodic transfer functions and periodic noise refuse a
-/// generated model with an `idt` carried as an unknown of its own, on either
-/// carrier: the sideband system carries each such integral's input and
-/// output, and on PSP 102's non-quasi-static stage its iterative solve fails
-/// its componentwise check (SWNQS=3) or stalls at a relative residual of
-/// 1.2e-9 (SWNQS=9), on a harmonic-balance carrier as on a shooting one.
-#[cfg(feature = "veriloga-builtins-base")]
-const PERIODIC_SMALL_SIGNAL_GENERATED_INTEGRAL: &str = "it carries an `idt` as an unknown of its \
-     own, and the periodic small-signal sideband solve does not certify with one";
-
 /// Harmonic balance refuses a generated compact model whose generator could
 /// not prove its residual `F(x) + dQ(x)/dt`, with the generator's reason, or
-/// one whose harmonics have not been checked, with what is missing. The
-/// periodic small-signal analyses, which reach a generated model through
-/// this gate on either carrier, also refuse one with a carried `idt`.
+/// one whose harmonics have not been checked, with what is missing.
 fn hb_generated_refusal(
     circuit: &CircuitData,
     analysis: CapabilityAnalysis,
@@ -1254,13 +1242,6 @@ fn hb_generated_refusal(
                     && device.periodic_integral_count()
                         < device.harmonic_balance_periodic_sites().len())
                 .then_some(PSS_GENERATED_CARRIED_SITE)
-            })
-            .or_else(|| {
-                (matches!(
-                    analysis,
-                    CapabilityAnalysis::Pac | CapabilityAnalysis::Pxf | CapabilityAnalysis::Pnoise
-                ) && device.periodic_integral_count() > 0)
-                    .then_some(PERIODIC_SMALL_SIGNAL_GENERATED_INTEGRAL)
             })
         else {
             continue;
