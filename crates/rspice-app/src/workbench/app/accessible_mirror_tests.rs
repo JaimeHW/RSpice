@@ -6,9 +6,11 @@ use super::veriloga_design_tests::{
     DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
 };
 use super::*;
-use crate::workbench::browser::accessible_mirror::{AccessibleProjection, MirrorState, project};
 use crate::workbench::documents::virtual_text_editor::speak_caret_lines;
 use egui::accesskit::Role;
+use rspice_app_workbench::workbench::browser::accessible_mirror::{
+    AccessibleProjection, MirrorState, project,
+};
 
 const FIRST_LINE: &str = "// Behavioral conductance.";
 const SECOND_LINE: &str = "module gain(p, n);";

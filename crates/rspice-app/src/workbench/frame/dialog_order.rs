@@ -6,7 +6,6 @@
 //! dialog in the same frame. Each step draws what it owns as the shell drew
 //! it before there was a list.
 
-use crate::workbench::app::dialogs;
 use crate::workbench::app_state::AppState;
 use crate::workbench::features;
 use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
@@ -14,6 +13,7 @@ use crate::workbench::project::ProjectFeature;
 use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::{RSpiceApp, SurfaceId};
 use rspice_app_workbench::workbench::app::command_palette;
+use rspice_app_workbench::workbench::app::dialogs;
 
 pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] = &[
     DialogSpec {

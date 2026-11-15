@@ -9,8 +9,11 @@ use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
 use crate::workbench::menu_bar::{FileMenuAction, dispatch_file_menu_action};
-use crate::workbench::state::pane_focus::PaneStep;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_workbench::workbench::app::dialogs::window_session::{
+    WindowSessionPage, WindowWorkflow, open_window_workflow,
+};
+use rspice_app_workbench::workbench::state::pane_focus::PaneStep;
 
 use super::state::{ConsoleChannel, ConsolePage, Workspace};
 
@@ -306,30 +309,16 @@ impl Command {
                 }
             }
             Self::ResetLayout => app.state.workbench.reset_layout(),
-            Self::NewApplicationWindow => crate::workbench::app::open_window_workflow(
-                app,
-                crate::workbench::app::WindowWorkflow::NewApplicationWindow,
-            ),
-            Self::DetachDocument => crate::workbench::app::open_window_workflow(
-                app,
-                crate::workbench::app::WindowWorkflow::DetachDocument,
-            ),
-            Self::MoveDocumentToWindow => crate::workbench::app::open_window_workflow(
-                app,
-                crate::workbench::app::WindowWorkflow::MoveDocument,
-            ),
-            Self::ReattachDocument => crate::workbench::app::open_window_workflow(
-                app,
-                crate::workbench::app::WindowWorkflow::ReattachDocument,
-            ),
-            Self::ConsolidateWindows => crate::workbench::app::open_window_workflow(
-                app,
-                crate::workbench::app::WindowWorkflow::ConsolidateWindows,
-            ),
-            Self::MonitorRecovery => crate::workbench::app::open_window_workflow(
-                app,
-                crate::workbench::app::WindowWorkflow::MonitorRecovery,
-            ),
+            Self::NewApplicationWindow => {
+                open_window_workflow(app, WindowWorkflow::NewApplicationWindow)
+            }
+            Self::DetachDocument => open_window_workflow(app, WindowWorkflow::DetachDocument),
+            Self::MoveDocumentToWindow => open_window_workflow(app, WindowWorkflow::MoveDocument),
+            Self::ReattachDocument => open_window_workflow(app, WindowWorkflow::ReattachDocument),
+            Self::ConsolidateWindows => {
+                open_window_workflow(app, WindowWorkflow::ConsolidateWindows)
+            }
+            Self::MonitorRecovery => open_window_workflow(app, WindowWorkflow::MonitorRecovery),
             Self::PreviousDocument => {
                 rspice_app_workbench::workbench::chrome::document_bar::cycle_document(
                     &mut app.state,
@@ -366,7 +355,7 @@ impl Command {
                 .state
                 .workbench
                 .window_session_dialog
-                .open(crate::workbench::app::WindowSessionPage::Windows),
+                .open(WindowSessionPage::Windows),
             Self::MinimizeWindow => app
                 .state
                 .workbench

@@ -3,9 +3,9 @@
 //! no fill band, and a review raised during a run offers Stop and no save verbs.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::dialogs::confirmation::*;
 use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use egui::Context;
+use rspice_app_workbench::workbench::app::dialogs::confirmation::*;
 
 fn render_close_review(app: &mut RSpiceApp, size: egui::Vec2) -> egui::FullOutput {
     let ctx = Context::default();

@@ -149,7 +149,6 @@ pub(crate) use dialogs::replace_instance::{
 pub(crate) use dialogs::stimulus_link::{
     StimulusLinkMode, open_stimulus_link, show_stimulus_definition,
 };
-pub(crate) use dialogs::window_session::{WindowSessionPage, WindowWorkflow, open_window_workflow};
 
 pub(crate) use actions::property_edit::{
     PropertyFormParts, authoritative_component_property_sheet, open_selected_object_properties_in,
@@ -444,7 +443,7 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         {
             cc.egui_ctx.add_plugin(
-                crate::workbench::browser::accessible_mirror::AccessibleMirror::default(),
+                rspice_app_workbench::workbench::browser::accessible_mirror::AccessibleMirror::default(),
             );
             crate::workbench::documents::virtual_text_editor::speak_caret_lines(&cc.egui_ctx);
         }
@@ -681,7 +680,7 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         {
             let messages = self.state.workbench.messages();
-            ctx.with_plugin::<crate::workbench::browser::accessible_mirror::AccessibleMirror, _>(
+            ctx.with_plugin::<rspice_app_workbench::workbench::browser::accessible_mirror::AccessibleMirror, _>(
                 |mirror| mirror.set_messages(messages),
             );
         }
@@ -1030,7 +1029,9 @@ impl eframe::App for RSpiceApp {
         self.terminate_code_runtime();
         log::info!("eframe on_exit — application shutting down");
         #[cfg(target_arch = "wasm32")]
-        if let Err(error) = crate::workbench::browser::navigation::uninstall_popstate_listener() {
+        if let Err(error) =
+            rspice_app_workbench::workbench::browser::navigation::uninstall_popstate_listener()
+        {
             log::warn!("Failed to remove browser route listener: {error}");
         }
     }

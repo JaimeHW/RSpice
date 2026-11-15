@@ -25,7 +25,6 @@ use crate::state::{CellViewRef, ViewType};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::app::ConfirmationResponse;
-use crate::workbench::app::dialogs::confirmation::ConfirmationHost;
 use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::cloud::CloudFeature;
@@ -56,6 +55,7 @@ use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 use menus::{APPLICATION_MENU, COMPACT_MENU, application_menu_entries};
+use rspice_app_workbench::workbench::app::dialogs::confirmation::ConfirmationHost;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
     self, ApplicationMenu,
 };

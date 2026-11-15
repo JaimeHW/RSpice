@@ -13,10 +13,10 @@ use crate::ui::widgets::{
 };
 use crate::workbench::browser::background_alerts::BackgroundAlerts;
 use crate::workbench::state::{ConsolePage, NotificationFilter};
-use crate::workbench::tools::notification_center::*;
 use crate::workbench::{AppState, RSpiceApp};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use rspice_app_workbench::workbench::chrome::title_bar;
+use rspice_app_workbench::workbench::tools::notification_center::*;
 
 mod raster;
 

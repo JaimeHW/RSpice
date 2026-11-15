@@ -828,7 +828,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str)] = &[
     ("app", "commands"),
     ("app", "chrome"),
     ("app", "workflows/file_workflow"),
-    ("app", "browser/navigation"),
     ("app", "workflows/file_actions"),
     ("app", "frame"),
     ("app", "cross_probe"),

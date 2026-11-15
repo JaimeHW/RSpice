@@ -10,7 +10,6 @@ mod stimulus_editor;
 use rspice_app_simulate::workbench::state::simulate_session;
 #[cfg(test)]
 use rspice_app_simulate::workbench::state::workflow_drafts;
-pub(crate) use rspice_app_workbench::workbench::state::pane_focus;
 pub(crate) use rspice_app_workbench::workbench::state::workbench_session;
 
 // The workbench's own session and the views over its records, which the

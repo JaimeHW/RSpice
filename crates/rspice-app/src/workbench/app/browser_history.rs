@@ -24,7 +24,7 @@ fn record_browser_history_warning(state: &mut AppState, text: String) {
 
 pub(super) fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &Context) {
     use crate::workbench::RouteTransitionSource;
-    use crate::workbench::browser::navigation::{
+    use rspice_app_workbench::workbench::browser::navigation::{
         current_location, install_popstate_listener, restart_history_session,
     };
 
@@ -81,11 +81,11 @@ pub(super) fn initialize_browser_surface_navigation(state: &mut AppState, ctx: &
 }
 
 pub(super) fn synchronize_browser_surface_navigation(state: &mut AppState) {
-    use crate::workbench::browser::navigation::{
+    use crate::workbench::{BrowserHistoryEffect, RouteTransitionSource};
+    use rspice_app_workbench::workbench::browser::navigation::{
         ensure_popstate_listener, history_session_ready, poll_popstate, push_route, replace_route,
         traversal_in_flight, traversal_watchdog_expired, traverse_history,
     };
-    use crate::workbench::{BrowserHistoryEffect, RouteTransitionSource};
 
     while let Some(event) = poll_popstate() {
         match event {
@@ -177,7 +177,9 @@ pub(super) fn synchronize_browser_surface_navigation(state: &mut AppState) {
             return;
         }
         let canonical = state.workbench.current_route();
-        match crate::workbench::browser::navigation::restart_history_session(canonical) {
+        match rspice_app_workbench::workbench::browser::navigation::restart_history_session(
+            canonical,
+        ) {
             Ok(()) => {
                 state
                     .workbench
@@ -218,7 +220,7 @@ pub(super) fn synchronize_browser_surface_navigation(state: &mut AppState) {
 }
 
 fn recover_browser_history_at_active_task(state: &mut AppState) {
-    use crate::workbench::browser::navigation::{
+    use rspice_app_workbench::workbench::browser::navigation::{
         ensure_popstate_listener, restart_history_session,
     };
 
@@ -250,10 +252,12 @@ fn recover_browser_history_at_active_task(state: &mut AppState) {
 
 fn rollback_browser_navigation_after_sync_failure(
     state: &mut AppState,
-    error: crate::workbench::browser::navigation::BrowserNavigationError,
+    error: rspice_app_workbench::workbench::browser::navigation::BrowserNavigationError,
 ) {
     use crate::workbench::RouteTransitionSource;
-    use crate::workbench::browser::navigation::{active_browser_route, restart_history_session};
+    use rspice_app_workbench::workbench::browser::navigation::{
+        active_browser_route, restart_history_session,
+    };
 
     match active_browser_route() {
         Ok(browser_route) => {

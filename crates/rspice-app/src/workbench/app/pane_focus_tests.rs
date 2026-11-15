@@ -6,8 +6,8 @@ use super::veriloga_design_tests::{
 };
 use super::*;
 use crate::workbench::state::Workspace;
-use crate::workbench::state::pane_focus::Pane;
 use egui::accesskit::TreeUpdate;
+use rspice_app_workbench::workbench::state::pane_focus::Pane;
 
 const EVERY_PANE: [Pane; 5] = [
     Pane::ActivityRail,
