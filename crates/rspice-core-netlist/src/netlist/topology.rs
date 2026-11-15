@@ -384,7 +384,9 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
     module_conduction: &dyn Fn(&Element) -> Option<ModuleDcConduction>,
     count_devices: bool,
 ) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
-    let mut union = TerminalNodes::default();
+    // A deck has about as many nets as elements; keying them all without
+    // rehashing is cheaper than growing into them.
+    let mut union = TerminalNodes::with_capacity(elements.len());
     // By union index, which is the order the elements first reach each node:
     // whether some authored element touches it. A rational-transfer
     // realization's state nodes reach only its own generated elements, and
@@ -399,6 +401,9 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
     let mut module_current_nodes: Vec<&str> = Vec::new();
     let mut analysis_complete = true;
     let mut terminals = Vec::new();
+    // Each terminal's net, keyed once; an element's own nodes lead its
+    // terminals, so they are the first of these.
+    let mut indices = Vec::new();
     // Dropped at the first element whose Xyce lead grouping is unknown:
     // `analyze_xyce_connectivity` refuses such a deck, so it has no count.
     let mut attachments = count_devices.then(DeviceAttachments::default);
@@ -406,21 +411,21 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
     for element in elements {
         terminals.clear();
         extend_element_terminal_nodes(element, &mut terminals);
+        indices.clear();
+        indices.extend(terminals.iter().map(|node| union.ensure_node(node)));
+        let node_indices = &indices[..element.nodes.len()];
         if attachments.is_some() && xyce_dc_lead_groups(element).is_err() {
             attachments = None;
         }
         if let Some(attachments) = &mut attachments {
             attachments.begin_device();
-            for &node in &terminals {
-                attachments.attach(union.ensure_node(node), &element.name);
+            for &index in &indices {
+                attachments.attach(index, &element.name);
             }
         }
         if matches!(element.kind, ElementKind::Subcircuit { .. }) {
             // An X card still standing after flattening is a compiled module.
-            for node in &element.nodes {
-                let index = union.ensure_node(node);
-                module_terminal_nodes.push(index);
-            }
+            module_terminal_nodes.extend_from_slice(node_indices);
         }
         let synthesized = matches!(
             element.provenance,
@@ -434,8 +439,7 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
         if model_specific_leads {
             analysis_complete = false;
         }
-        for &node in &terminals {
-            let index = union.ensure_node(node);
+        for &index in &indices {
             if authored.len() <= index {
                 authored.resize(index + 1, false);
             }
@@ -454,12 +458,11 @@ pub fn analyze_dc_ground_paths_with_ic_modes<'a>(
             continue;
         }
         match dc_conduction_groups(element, capacitor_ic_mode, inductor_ic_enforced) {
+            Ok(LeadGroups::AllTerminals) => union.join_indices(node_indices),
             Ok(groups) => union.join_groups(element, groups),
             Err(_) => {
                 analysis_complete = false;
-                for &node in &terminals {
-                    uncertain_nodes.push(union.ensure_node(node));
-                }
+                uncertain_nodes.extend_from_slice(&indices);
             }
         }
     }
@@ -1072,7 +1075,19 @@ impl Eq for NodeName<'_> {}
 
 impl std::hash::Hash for NodeName<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        with_node_key(self.0, |key| key.hash(state));
+        // `new` has spelled every ground name `0`, so the key is the name
+        // case-folded. Equal names have equal lengths, so a short name and a
+        // long one need not hash alike.
+        let mut buffer = [0_u8; 64];
+        match buffer.get_mut(..self.0.len()) {
+            Some(key) => {
+                key.copy_from_slice(self.0.as_bytes());
+                key.make_ascii_uppercase();
+                state.write(key);
+                state.write_u8(0xff);
+            }
+            None => self.0.to_ascii_uppercase().hash(state),
+        }
     }
 }
 
@@ -1088,6 +1103,18 @@ struct TerminalNodes<'a> {
 }
 
 impl<'a> TerminalNodes<'a> {
+    fn with_capacity(nets: usize) -> Self {
+        Self {
+            index_by_name: rustc_hash::FxHashMap::with_capacity_and_hasher(
+                nets,
+                Default::default(),
+            ),
+            names: Vec::with_capacity(nets),
+            parents: Vec::with_capacity(nets),
+            ranks: Vec::with_capacity(nets),
+        }
+    }
+
     fn index_of(&self, name: &'a str) -> Option<usize> {
         self.index_by_name.get(&NodeName::new(name)).copied()
     }
@@ -1136,6 +1163,10 @@ impl<'a> TerminalNodes<'a> {
     fn union_nodes(&mut self, left: &'a str, right: &'a str) {
         let left = self.ensure_node(left);
         let right = self.ensure_node(right);
+        self.union_indices(left, right);
+    }
+
+    fn union_indices(&mut self, left: usize, right: usize) {
         let mut left_root = self.find(left);
         let mut right_root = self.find(right);
         if left_root == right_root {
@@ -1147,6 +1178,16 @@ impl<'a> TerminalNodes<'a> {
         self.parents[right_root] = left_root;
         if self.ranks[left_root] == self.ranks[right_root] {
             self.ranks[left_root] += 1;
+        }
+    }
+
+    /// Join already keyed nets as [`Self::join_groups`] joins one group of
+    /// names: each to the first.
+    fn join_indices(&mut self, indices: &[usize]) {
+        if let Some((&first, rest)) = indices.split_first() {
+            for &index in rest {
+                self.union_indices(first, index);
+            }
         }
     }
 
