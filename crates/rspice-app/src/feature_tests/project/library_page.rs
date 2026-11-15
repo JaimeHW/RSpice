@@ -539,3 +539,75 @@ fn publication_commit_rejects_intervening_catalog_change_atomically() {
         revision_after_mutation
     );
 }
+
+/// In the library browser a click on a view selects it, and a double click
+/// opens it where it is edited: a symbol view in the symbol editor, in
+/// Design, as a library manager opens a cell view.
+#[test]
+fn a_double_click_on_a_symbol_view_opens_it_in_the_symbol_editor() {
+    use egui::accesskit::Role;
+
+    use super::super::replay::Replay;
+
+    let mut app = RSpiceApp::test_instance();
+    let mut view = View::new("symbol", ViewType::Symbol);
+    rspice_design::symbol::generated::store_generated_symbol(
+        &mut view,
+        &[crate::state::PortSpec {
+            name: "a".to_owned(),
+            direction: crate::state::PortDirection::InOut,
+        }],
+        |_| None,
+    )
+    .expect("the symbol stores");
+    let mut cell = Cell::new("amp");
+    cell.add_view(view);
+    let mut library = Library::new("authoring");
+    library.add_cell(cell);
+    app.state.model.library_manager.add_library(library);
+    app.state
+        .model
+        .library_manager
+        .select_cell("authoring", "amp");
+    app.state.project.project_page = ProjectPage::Library;
+    app.state.workbench.activate(Workspace::Project);
+    let mut replay = Replay::of(app);
+    replay.frames(Vec::new());
+
+    replay.click("symbol", Role::Button);
+    let state = &replay.app.state;
+    assert_eq!(
+        state.workbench.workspace,
+        Workspace::Project,
+        "a click opens nothing"
+    );
+    assert_eq!(
+        state.model.library_manager.selected_view.as_deref(),
+        Some("symbol"),
+        "a click selects the view"
+    );
+
+    let at = super::super::replay::only(&replay.frames(Vec::new()), "symbol", Role::Button).center;
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    replay.frame(vec![egui::Event::PointerMoved(at), press(true)]);
+    replay.frame(vec![press(false)]);
+    replay.frame(vec![press(true)]);
+    replay.frame(vec![press(false)]);
+    replay.frames(Vec::new());
+    let state = &replay.app.state;
+    assert_eq!(state.workbench.workspace, Workspace::Design);
+    assert_eq!(
+        state.model.workspace.content.active_view,
+        CellViewRef::new("authoring", "amp", "symbol"),
+        "the double click opens the symbol"
+    );
+    assert!(
+        state.model.load_active_symbol_document().is_ok(),
+        "the symbol editor has it in front"
+    );
+}
