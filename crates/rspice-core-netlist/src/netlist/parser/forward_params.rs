@@ -4,17 +4,25 @@
 //! every root parameter bound, and keeps its authored place in the deck.
 
 use super::*;
+use std::sync::Arc;
 
 /// Root `.param` names the deck declares anywhere, and the element cards
 /// that named one of them before it was bound.
 #[derive(Debug, Default)]
 pub(super) struct ForwardParameters {
+    names: Arc<ForwardParameterNames>,
+    postponed: Vec<PostponedElement>,
+    replaying: bool,
+}
+
+/// What a root's lines declare for [`ForwardParameters`]. It reads no
+/// parameter value, so every parse of one reading of the deck shares it.
+#[derive(Debug, Default)]
+pub(super) struct ForwardParameterNames {
     declared: HashSet<String>,
     /// Root URC model cards, which make a `U` card a distributed RC line
     /// wherever they sit.
     urc_models: HashSet<String>,
-    postponed: Vec<PostponedElement>,
-    replaying: bool,
 }
 
 #[derive(Debug)]
@@ -27,6 +35,17 @@ struct PostponedElement {
 }
 
 impl ForwardParameters {
+    /// Postpones the cards that name one of `names` before it is bound.
+    pub(super) fn new(names: Arc<ForwardParameterNames>) -> Self {
+        Self {
+            names,
+            postponed: Vec::new(),
+            replaying: false,
+        }
+    }
+}
+
+impl ForwardParameterNames {
     /// Collects the names every root `.param` card declares (subcircuit
     /// bodies keep their own scope and are left out).
     pub(super) fn scan(
@@ -86,8 +105,6 @@ impl ForwardParameters {
         Ok(Self {
             declared,
             urc_models,
-            postponed: Vec::new(),
-            replaying: false,
         })
     }
 }
@@ -107,14 +124,15 @@ pub(super) fn postpone_forward_reference(
     source_is_included: bool,
 ) -> bool {
     let plan = &state.forward_parameters;
+    let names = &plan.names;
     let designator = line.trim_start().chars().next();
     // A `U` card whose URC model card comes later is read once that card is.
     let urc_model_ahead = designator.is_some_and(|c| c.eq_ignore_ascii_case(&'U'))
         && urc::model_field(line)
-            .is_some_and(|model| plan.urc_models.contains(&model.to_ascii_uppercase()))
+            .is_some_and(|model| names.urc_models.contains(&model.to_ascii_uppercase()))
         && !urc::names_urc_model(line, &state.models);
     if plan.replaying
-        || (plan.declared.is_empty() && !urc_model_ahead)
+        || (names.declared.is_empty() && !urc_model_ahead)
         || !state.subckt_stack.is_empty()
         || state.open_machine.is_some()
         || !designator.is_some_and(char::is_alphabetic)
@@ -134,7 +152,7 @@ pub(super) fn postpone_forward_reference(
                     key.clear();
                     key.push_str(name);
                     key.make_ascii_uppercase();
-                    plan.declared.contains(&key) && !state.params.has_any_parameter_binding(name)
+                    names.declared.contains(&key) && !state.params.has_any_parameter_binding(name)
                 })
         });
     if names_unbound {

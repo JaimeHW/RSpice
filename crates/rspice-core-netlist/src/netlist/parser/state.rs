@@ -174,7 +174,8 @@ pub(super) struct ParseState {
     /// Root element cards that name a `.param` declared later in the deck.
     pub(super) forward_parameters: super::forward_params::ForwardParameters,
     /// The `.model` cards nothing names, when the parse skips them.
-    pub(super) unreferenced_models: Option<super::model_references::UnreferencedModels>,
+    pub(super) unreferenced_models:
+        Option<std::sync::Arc<super::model_references::UnreferencedModels>>,
     /// How many `.model` cards were skipped.
     pub(super) skipped_model_cards: usize,
 }

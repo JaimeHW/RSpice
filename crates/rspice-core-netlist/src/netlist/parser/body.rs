@@ -4,6 +4,7 @@ use super::*;
 pub(super) fn parse(
     lines: &[&str],
     body_start: usize,
+    scans: &root_scans::RootScans,
     options: &NetlistParseOptions,
     mut source_schedule: Option<SourceEventSchedule>,
     state: &mut ParseState,
@@ -25,27 +26,14 @@ pub(super) fn parse(
     // card open, so a `+` line here continues nothing.
     let mut veriloga_directive_line: Option<usize> = None;
     let mut shell_continuation = false;
-    state.forward_parameters = super::forward_params::ForwardParameters::scan(
-        lines,
-        body_start,
-        allow_non_semicolon_comments,
-        xyce_syntax,
-        abort,
-    )?;
+    state.forward_parameters = super::forward_params::ForwardParameters::new(
+        std::sync::Arc::clone(&scans.forward_parameter_names),
+    );
     // Any line that starts with a letter may be an element card. Sizing the
     // element column and the maps keyed by element for them up front spares a
     // large flat deck their repeated regrowth, each of which moved or rehashed
     // every element read so far.
-    let element_cards = lines
-        .iter()
-        .skip(body_start)
-        .filter(|line| {
-            line.trim_start()
-                .as_bytes()
-                .first()
-                .is_some_and(u8::is_ascii_alphabetic)
-        })
-        .count();
+    let element_cards = scans.element_cards;
     state.elements.reserve(element_cards);
     state.element_origins.reserve(element_cards);
     state.element_names.reserve(element_cards);

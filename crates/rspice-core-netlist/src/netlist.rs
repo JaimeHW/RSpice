@@ -2178,6 +2178,7 @@ impl Netlist {
         let options = options.with_control_script(source.control_script.is_some());
         let mut netlist = parser::parse_expanded_netlist_with_parameter_overrides_and_abort(
             &source.expanded,
+            &source.scans,
             options,
             overrides,
             abort,

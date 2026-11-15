@@ -59,6 +59,7 @@ mod command_parsers;
 mod commands;
 mod forward_params;
 mod root_redefinitions;
+mod root_scans;
 mod scopes;
 mod startup_cards;
 mod stream;
@@ -194,6 +195,7 @@ pub(in crate::netlist) use laplace_synthesis::TransferExpression;
 use laplace_synthesis::*;
 use line::*;
 use pspice_stim::*;
+pub(in crate::netlist) use root_scans::RootScansCell;
 use scoping::*;
 pub use source_specs::{independent_source_file_dependency, parse_source_spec_text};
 pub(super) use source_specs::{
@@ -625,6 +627,7 @@ pub(crate) fn parse_netlist_with_parameter_overrides_and_abort(
                             seed,
                             temperatures,
                             redefinitions: Some(redefinitions),
+                            scans: None,
                         },
                         overrides,
                         abort,
@@ -655,6 +658,7 @@ fn parse_reading_reachable_models(
 
 pub(crate) fn parse_expanded_netlist_with_parameter_overrides_and_abort(
     expanded: &ExpandedSource,
+    scans: &RootScansCell,
     options: NetlistParseOptions,
     overrides: &[ParameterOverride],
     abort: &dyn AbortSignal,
@@ -673,6 +677,7 @@ pub(crate) fn parse_expanded_netlist_with_parameter_overrides_and_abort(
                             seed,
                             temperatures,
                             redefinitions: Some(redefinitions),
+                            scans: Some(scans),
                         },
                         overrides,
                         abort,
@@ -748,6 +753,8 @@ struct ParserReplay<'a> {
     temperatures: Option<ParserTemperatures>,
     /// Pins in from the previous pass, and this pass's record out.
     redefinitions: Option<&'a mut RootRedefinitions>,
+    /// The scans of the reading this pass parses, when it keeps them.
+    scans: Option<&'a RootScansCell>,
 }
 
 fn parse_netlist_impl(
@@ -891,13 +898,8 @@ fn parse_netlist_impl(
     state.params.set_parameter_redefinition_diagnostic_policy(
         options.parameter_redefinition_diagnostic_policy,
     );
-    state.spectre_statistics = prescan_spectre_statistics_with_abort(
-        &lines,
-        body_start,
-        allow_non_semicolon_comments,
-        xyce_syntax,
-        abort,
-    )?;
+    let scans = root_scans::root_scans(replay.scans, &lines, body_start, xyce_syntax, abort)?;
+    state.spectre_statistics = scans.spectre_statistics.clone();
     state.params.set_spectre_statistical_parameters(
         state
             .spectre_statistics
@@ -908,8 +910,7 @@ fn parse_netlist_impl(
     // A Spectre `statistics` block draws as the deck is read, as a random
     // function does, so its decks read every model card.
     if options.skip_unreferenced_models && state.spectre_statistics.variations.is_empty() {
-        state.unreferenced_models =
-            model_references::UnreferencedModels::scan(&lines, body_start, abort)?;
+        state.unreferenced_models = scans.unreferenced_models(&lines, abort)?;
     }
     state.options.replace_ground = preprocess.replace_ground;
     state.options.remove_unused = preprocess.remove_unused;
@@ -918,16 +919,10 @@ fn parse_netlist_impl(
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the
     // `.options seed=` line appears.
-    let scanned_options = scan_option_and_temperature_cards(
-        &lines,
-        body_start,
-        allow_non_semicolon_comments,
-        xyce_syntax,
-        abort,
-    )?;
+    let scanned_options = &scans.option_and_temperature_cards;
     let seed = match options.statistical_seed.or(replay.seed) {
         Some(seed) => Some(seed),
-        None => prescan_random_seed(&scanned_options)?,
+        None => prescan_random_seed(scanned_options)?,
     };
     if let Some(seed) = seed {
         state.params.set_random_seed(seed);
@@ -938,12 +933,12 @@ fn parse_netlist_impl(
     // option (`--spice-dialect`) wins, as it does for the simulation.
     state.spice_dialect = match options.spice_dialect {
         Some(dialect) => dialect,
-        None => prescan_deck_word_option(&scanned_options, "RSPICE_DIALECT", spice_dialect_named)?
+        None => prescan_deck_word_option(scanned_options, "RSPICE_DIALECT", spice_dialect_named)?
             .unwrap_or_default(),
     };
     state.params.set_exp_train_dialect(
         prescan_deck_word_option(
-            &scanned_options,
+            scanned_options,
             "RSPICE_EXP_REPEAT",
             exp_train_dialect_named,
         )?
@@ -962,11 +957,9 @@ fn parse_netlist_impl(
     }
     // A deck from a program whose random functions always draw says so, and
     // no caller's parsing mode reads it another way.
-    if let Some(mode) = prescan_deck_word_option(
-        &scanned_options,
-        "RSPICE_STATISTICS",
-        statistical_mode_named,
-    )? {
+    if let Some(mode) =
+        prescan_deck_word_option(scanned_options, "RSPICE_STATISTICS", statistical_mode_named)?
+    {
         state.params.set_statistical_mode(mode);
     }
     let _suffixes = crate::spice_number::read_suffixes_as_ngspice(
@@ -974,7 +967,7 @@ fn parse_netlist_impl(
     );
     let mut temperatures = match replay.temperatures {
         Some(temperatures) => temperatures,
-        None => prescan_temperature_options(&scanned_options),
+        None => prescan_temperature_options(scanned_options),
     };
     temperatures.apply_override(overrides)?;
     temperatures.install(&mut state.params);
@@ -983,6 +976,7 @@ fn parse_netlist_impl(
     let root_eof = body::parse(
         &lines,
         body_start,
+        &scans,
         &options,
         source_schedule,
         &mut state,
@@ -4908,6 +4902,7 @@ fn process_line_gated(
 }
 
 /// One logical `.OPTIONS` or `.TEMP` card, with its first physical line.
+#[derive(Debug)]
 struct ScannedCard {
     text: String,
     line: usize,

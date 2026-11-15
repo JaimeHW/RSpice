@@ -36,6 +36,9 @@ pub(crate) struct ReplaySource {
     pub(super) diagnostics: Vec<ParseDiagnostic>,
     pub(super) dispositions: Vec<ControlCommandRecord>,
     pub(super) control_script: Option<Arc<ControlScriptSource>>,
+    /// What every parse of `expanded` scans ahead of its first card, kept
+    /// by the first parse for the replays after it.
+    pub(super) scans: super::parser::RootScansCell,
 }
 
 impl ReplaySource {
@@ -71,6 +74,7 @@ impl ReplaySource {
             diagnostics,
             dispositions,
             control_script,
+            scans: Default::default(),
         }))
     }
 
@@ -104,6 +108,48 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Every coordinate of a study may replay the deck from its one reading,
+    /// and from the netlist that keeps it, each on a thread of its own.
+    #[test]
+    fn a_reading_and_its_netlist_are_shared_across_threads() {
+        fn shared<T: Send + Sync>() {}
+        shared::<super::ReplaySource>();
+        shared::<Netlist>();
+    }
+
+    /// A replay reads what its first parse scanned the root's lines for (a
+    /// card naming a parameter declared further down, the `.OPTIONS`
+    /// temperature) with its own parameter values.
+    #[test]
+    fn a_replay_reads_the_scans_of_its_first_parse() {
+        let path = std::env::temp_dir()
+            .join(format!("rspice-replay-scans-{}", std::process::id()))
+            .join("deck.cir");
+        let deck =
+            "scans\nR1 a 0 {rload}\nV1 a 0 1\n.param rload=1k\n.options temp=50\n.op\n.end\n";
+        let netlist = Netlist::parse_with_path(deck, &path).expect("deck parses");
+        assert_eq!(resistances(&netlist), [("R1".to_owned(), 1e3)]);
+        assert_eq!(netlist.options.temp, Some(50.0));
+        let overrides = [ParameterOverride {
+            name: "RLOAD".to_owned(),
+            value: 2e3,
+            global: false,
+            direction: false,
+        }];
+        for _ in 0..2 {
+            let replayed = netlist
+                .replay_root_source_with_parameter_overrides_and_abort(
+                    deck,
+                    NetlistParseOptions::default(),
+                    &overrides,
+                    &NoAbort,
+                )
+                .expect("replay parses");
+            assert_eq!(resistances(&replayed), [("R1".to_owned(), 2e3)]);
+            assert_eq!(replayed.options.temp, Some(50.0));
+        }
     }
 
     #[test]
