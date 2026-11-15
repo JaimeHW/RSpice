@@ -1743,3 +1743,160 @@ endmodule
         assert_eq!(count(&circuit.mixed_signal_hosts[0], "second"), expected);
     }
 }
+
+fn probe_at(
+    circuit: &mut crate::CircuitData,
+    matrix: &mut crate::solver::StaticMatrix,
+    solution: &[f64],
+    companion: XspiceCompanionPolicy<'_>,
+    time: f64,
+    dt: f64,
+) {
+    matrix.values_mut().fill(0.0);
+    let mut rhs = vec![0.0; solution.len()];
+    circuit
+        .stamp_mixed_transient_trial(
+            &crate::abort_signal::NoAbort,
+            matrix,
+            &mut rhs,
+            time,
+            dt,
+            solution,
+            companion,
+            true,
+            false,
+        )
+        .unwrap();
+}
+
+fn inspect_at(
+    circuit: &mut crate::CircuitData,
+    solution: &[f64],
+    companion: XspiceCompanionPolicy<'_>,
+    (time, dt, minimum_timestep): (f64, f64, f64),
+    recorded: Option<MixedInspectionRecord>,
+) -> MixedCandidateInspection {
+    circuit
+        .visit_mixed_transient_candidate_task(
+            &crate::abort_signal::NoAbort,
+            time,
+            dt,
+            solution,
+            companion,
+            minimum_timestep,
+            true,
+            false,
+            rspice_veriloga_runtime::AnalogTaskKind::Finish,
+            false,
+            &mut |_| unreachable!("this fixture's module runs no analog task"),
+            recorded,
+        )
+        .unwrap()
+}
+
+/// The candidate inspection takes what the residual proof's probe trial read
+/// off its own settle of the same candidate, and only that.
+///
+/// A probe trial records only when asked, and taking the record ends the
+/// request. The record answers only the candidate, companion, minimum
+/// timestep, converter step and solution it was settled from, bit for bit;
+/// anything else is settled afresh. What it recorded is what a fresh
+/// inspection of the candidate finds, whichever bit the A/D bridge reads
+/// (debug builds also check that on every inspection that takes a record,
+/// which is what covers the interior-root answer: this fixture's first point
+/// has no interval to hold one).
+#[test]
+fn a_probe_trial_records_what_the_candidate_inspection_finds_there() {
+    let (mut circuit, mut matrix, mut solution, _) =
+        fixture(crate::xspice::EvaluationPhase::CircuitTrial);
+    let stimulus = circuit.get_node_by_name("stimulus").unwrap() - 1;
+    let coeff = crate::numerics::integration::CompanionCoefficients::backward_euler();
+    let companion = XspiceCompanionPolicy {
+        coefficients: &coeff,
+        xyce_one_step_order2: false,
+    };
+    let point @ (time, dt, minimum_timestep) = (0.0, 0.0, 1e-18);
+    let candidate = Candidate {
+        time,
+        dt,
+        analysis_step: Some((true, false)),
+    };
+    for level in [0.0, 1.0] {
+        solution[stimulus] = level;
+        probe_at(&mut circuit, &mut matrix, &solution, companion, time, dt);
+        assert!(circuit.take_mixed_inspection_record().is_none());
+        circuit.request_mixed_inspection_record(minimum_timestep);
+        probe_at(&mut circuit, &mut matrix, &solution, companion, time, dt);
+        let record = circuit
+            .take_mixed_inspection_record()
+            .expect("an asked probe trial with nothing to deliver records its candidate");
+        probe_at(&mut circuit, &mut matrix, &solution, companion, time, dt);
+        assert!(circuit.take_mixed_inspection_record().is_none());
+
+        let settled = inspect_at(&mut circuit, &solution, companion, point, None);
+        eprintln!(
+            "stimulus {level}: recorded {:?}, settled {settled:?}",
+            record.inspection
+        );
+        assert_eq!(record.inspection, settled);
+        assert_eq!(
+            inspect_at(
+                &mut circuit,
+                &solution,
+                companion,
+                point,
+                Some(record.clone())
+            ),
+            settled
+        );
+
+        let key = InspectionKey::of(
+            candidate,
+            companion,
+            minimum_timestep,
+            circuit.boundary_converter_stepped_at_accepted_point(),
+        )
+        .unwrap();
+        assert!(record.answers(key, &solution));
+        for moved in [f64::from_bits(level.to_bits() + 1), -level] {
+            let mut other = solution.clone();
+            other[stimulus] = moved;
+            assert!(!record.answers(key, &other), "{level} answered {moved}");
+        }
+        for other in [
+            InspectionKey {
+                time: 1e-9_f64.to_bits(),
+                ..key
+            },
+            InspectionKey {
+                dt: 1e-9_f64.to_bits(),
+                ..key
+            },
+            InspectionKey {
+                analysis_step: (false, false),
+                ..key
+            },
+            InspectionKey {
+                companion: [0; 4],
+                ..key
+            },
+            InspectionKey {
+                xyce_one_step_order2: true,
+                ..key
+            },
+            InspectionKey {
+                minimum_timestep: (2.0 * minimum_timestep).to_bits(),
+                ..key
+            },
+            InspectionKey {
+                converter_stepped: !key.converter_stepped,
+                ..key
+            },
+        ] {
+            assert!(
+                !record.answers(other, &solution),
+                "{other:?} answered {key:?}"
+            );
+        }
+    }
+}

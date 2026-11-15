@@ -471,6 +471,7 @@ impl Engine {
         minimum_timestep: f64,
         initial_step: bool,
         final_step: bool,
+        recorded: Option<crate::circuit::MixedInspectionRecord>,
     ) -> Result<TransientModelCandidate, SimulationError> {
         let point = ModelFinishPoint::Transient { time };
         let refinement_time = circuit
@@ -506,6 +507,7 @@ impl Engine {
                 AnalogTaskKind::Finish,
                 false,
                 &mut consume,
+                recorded,
             )?;
             (
                 mixed.refinement,
@@ -515,6 +517,7 @@ impl Engine {
         };
         #[cfg(not(feature = "veriloga"))]
         let (mixed_refinement_time, mixed_event_root, mixed_discontinuity) = (None, false, false);
+        #[cfg(not(feature = "veriloga"))]
         let _ = (
             abort,
             dt,
@@ -523,6 +526,7 @@ impl Engine {
             minimum_timestep,
             initial_step,
             final_step,
+            recorded,
         );
         if let Some(error) = invalid {
             return Err(SimulationError::Circuit(error.into()));
@@ -554,6 +558,7 @@ impl Engine {
                 AnalogTaskKind::Finish,
                 true,
                 &mut |_| {},
+                None,
             )?;
         }
         Ok(TransientModelCandidate {

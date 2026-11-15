@@ -5149,6 +5149,7 @@ impl Engine {
                 0.0,
                 true,
                 false,
+                None,
             )?
             .finish;
             if origin_model_finish.is_some() {
@@ -5262,6 +5263,7 @@ impl Engine {
                 0.0,
                 true,
                 false,
+                None,
             )?
             .finish;
             if origin_model_finish.is_some() {
@@ -8783,6 +8785,9 @@ impl Engine {
                 }};
             }
             let mut candidate_model_finish = None;
+            // What this attempt's last residual proof read off its settled
+            // mixed trial, for the inspection of the same candidate.
+            let mut residual_mixed_inspection = None;
             macro_rules! reject_for_veriloga_event_refinement {
                 ($candidate_solution:expr, $candidate_time:expr, $phase_start:expr) => {{
                     let mut discontinuity = false;
@@ -8794,6 +8799,7 @@ impl Engine {
                             &mut circuit, $candidate_time, dt, $candidate_solution,
                             XspiceCompanionPolicy { coefficients: &coeff, xyce_one_step_order2 },
                             timestep.hard_min_dt(), analysis_initial_step, analysis_final_step,
+                            residual_mixed_inspection.take(),
                         )?;
                         // A code model's own event this candidate stepped
                         // past is landed on as a mixed module's A/D crossing
@@ -10120,6 +10126,7 @@ impl Engine {
                             // residual criterion.
                             let postsolve_residual_start =
                                 DiagnosticTimer::start(diagnostic_timing_enabled);
+                            circuit.request_mixed_inspection_record(timestep.hard_min_dt());
                             residual_converged_for_acceptance = stamp_trial_or_reject!(
                                 self.transient_nonlinear_residual_converged(
                                     &mut circuit,
@@ -10178,6 +10185,7 @@ impl Engine {
                                     &mut correction_rhs,
                                 )
                             );
+                            residual_mixed_inspection = circuit.take_mixed_inspection_record();
                             mosfet_caps_valid = residual_converged_for_acceptance
                                 && classic_mos_stamp_cache.is_some()
                                 && mosfet_caps_scratch.len() == circuit.mosfets.devices.len();

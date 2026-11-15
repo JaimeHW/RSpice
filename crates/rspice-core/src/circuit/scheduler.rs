@@ -211,6 +211,14 @@ pub(crate) struct CircuitScheduler {
     /// during one it holds the place-holders the instances swapped out.
     #[cfg(feature = "veriloga")]
     pub(in crate::circuit) ledgers: Vec<crate::xspice::verilog::CandidateLedger>,
+    /// The minimum timestep of the candidate inspection the next probe trial
+    /// is to record its findings for; see
+    /// [`super::MixedInspectionRecord`].
+    #[cfg(feature = "veriloga")]
+    pub(in crate::circuit) inspection_request: Option<crate::Value>,
+    /// What that probe trial found, until the engine takes it.
+    #[cfg(feature = "veriloga")]
+    pub(in crate::circuit) inspection_record: Option<super::MixedInspectionRecord>,
     /// Whether a time-zero trial has been kept as the held equilibrium.
     ///
     /// Such a circuit belongs to an operating point, a DC sweep or a
@@ -237,6 +245,10 @@ impl CircuitScheduler {
             ledgers: Vec::new(),
             #[cfg(feature = "veriloga")]
             equilibrium_committed: false,
+            #[cfg(feature = "veriloga")]
+            inspection_request: None,
+            #[cfg(feature = "veriloga")]
+            inspection_record: None,
         }
     }
 

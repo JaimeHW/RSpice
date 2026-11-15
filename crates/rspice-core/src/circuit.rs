@@ -76,9 +76,23 @@ pub(crate) mod mixed_checkpoint;
 #[cfg(feature = "veriloga")]
 mod mixed_signal;
 #[cfg(feature = "veriloga")]
+pub(crate) use mixed_signal::MixedInspectionRecord;
+#[cfg(feature = "veriloga")]
 pub(crate) use mixed_signal::ThresholdFinding;
 #[cfg(all(test, feature = "veriloga"))]
 pub(crate) use mixed_signal::ThresholdFindingKind;
+/// A build without mixed modules has no inspection to record.
+#[cfg(not(feature = "veriloga"))]
+pub(crate) enum MixedInspectionRecord {}
+
+#[cfg(not(feature = "veriloga"))]
+impl CircuitData {
+    pub(crate) fn request_mixed_inspection_record(&mut self, _minimum_timestep: Value) {}
+
+    pub(crate) fn take_mixed_inspection_record(&mut self) -> Option<MixedInspectionRecord> {
+        None
+    }
+}
 mod net_kind;
 mod scheduler;
 pub(crate) use scheduler::{Activation, ActivationLanes, ModelDiscontinuity};

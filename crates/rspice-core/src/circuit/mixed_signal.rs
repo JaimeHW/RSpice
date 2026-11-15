@@ -53,8 +53,129 @@ pub(crate) struct ThresholdFinding {
     pub(crate) voltage: Value,
 }
 
+/// What a residual proof's probe trial found about its candidate, kept for
+/// the candidate inspection that follows it.
+///
+/// The residual proof restamps a converged candidate at its own solution,
+/// and its probe trial settles the mixed modules there; the inspection that
+/// follows opened a second trial and settled them again, at the same time,
+/// interval, companion and voltages, from the same accepted state — every
+/// trial in between is rolled back — to read the A/D roots, the analog
+/// event roots and the discontinuity off the settled trial. The two trials
+/// differ only in a monotonicity check that no candidate past the accepted
+/// point reaches, so the proof's trial reads the same answers off its own
+/// settle, and the inspection takes them when every input it would settle
+/// from is bit for bit the one the proof settled from. Anything else — an
+/// analog task or a design `$finish` to deliver, a refusal while reading, a
+/// different solution — records nothing, and the inspection settles as it
+/// always did.
+#[derive(Debug, Clone)]
+pub(crate) struct MixedInspectionRecord {
+    key: InspectionKey,
+    voltages: Vec<Value>,
+    inspection: MixedCandidateInspection,
+}
+
+/// Every scalar a candidate inspection settles from, as bits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct InspectionKey {
+    time: u64,
+    dt: u64,
+    analysis_step: (bool, bool),
+    companion: [u64; 4],
+    companion_two_history: bool,
+    xyce_one_step_order2: bool,
+    minimum_timestep: u64,
+    converter_stepped: bool,
+}
+
+impl InspectionKey {
+    fn of(
+        candidate: Candidate,
+        companion: XspiceCompanionPolicy<'_>,
+        minimum_timestep: Value,
+        converter_stepped: bool,
+    ) -> Option<Self> {
+        let coefficients = companion.coefficients;
+        Some(Self {
+            time: candidate.time.to_bits(),
+            dt: candidate.dt.to_bits(),
+            analysis_step: candidate.analysis_step?,
+            companion: [
+                coefficients.coeff_g.to_bits(),
+                coefficients.coeff_v_n.to_bits(),
+                coefficients.coeff_v_n_minus_1.to_bits(),
+                coefficients.coeff_i_n.to_bits(),
+            ],
+            companion_two_history: coefficients.needs_two_history,
+            xyce_one_step_order2: companion.xyce_one_step_order2,
+            minimum_timestep: minimum_timestep.to_bits(),
+            converter_stepped,
+        })
+    }
+}
+
+impl MixedInspectionRecord {
+    fn answers(&self, key: InspectionKey, voltages: &[Value]) -> bool {
+        self.key == key
+            && self.voltages.len() == voltages.len()
+            && self
+                .voltages
+                .iter()
+                .zip(voltages)
+                .all(|(recorded, voltage)| recorded.to_bits() == voltage.to_bits())
+    }
+}
+
+/// The candidate inspection's answer, read off a probe trial settled and
+/// stamped at the candidate exactly as the inspection reads it off its own:
+/// an A/D root inside the interval first; otherwise each instance's
+/// discontinuity and analog event root. `None` where the inspection would
+/// deliver something (a design `$finish`, an analog task) or refuse, which
+/// it then does itself.
+fn record_inspection(
+    hosts: &[MixedSignalHost],
+    refinement: Option<Value>,
+    finishing: bool,
+) -> Option<MixedCandidateInspection> {
+    if refinement.is_some() {
+        return Some(MixedCandidateInspection {
+            refinement,
+            analog_event_root: false,
+            discontinuity: false,
+        });
+    }
+    if finishing {
+        return None;
+    }
+    let mut refinement: Option<Value> = None;
+    let mut discontinuity = false;
+    for host in hosts {
+        discontinuity |= host.candidate_discontinuity();
+        let device = host.analog_device();
+        match device.try_transient_event_refinement_time().ok()? {
+            Some(target) => {
+                refinement = Some(refinement.map_or(target, |current| current.min(target)));
+            }
+            None => {
+                let task = device
+                    .first_candidate_analog_task(rspice_veriloga_runtime::AnalogTaskKind::Finish)
+                    .ok()?;
+                if task.is_some() {
+                    return None;
+                }
+            }
+        }
+    }
+    Some(MixedCandidateInspection {
+        refinement,
+        analog_event_root: refinement.is_some(),
+        discontinuity,
+    })
+}
+
 /// What inspecting a converged candidate found in the mixed modules.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct MixedCandidateInspection {
     /// The earliest root strictly inside the candidate's interval that the
     /// solver is asked to land on.
@@ -965,9 +1086,32 @@ impl CircuitData {
         } else {
             1.0
         };
+        let request = (kind == TrialKind::Probe)
+            .then(|| self.scheduler.inspection_request.take())
+            .flatten()
+            .and_then(|minimum_timestep| {
+                let converter_stepped = self.boundary_converter_stepped_at_accepted_point();
+                InspectionKey::of(candidate, companion, minimum_timestep, converter_stepped)
+            });
         let mut trial = self.open_trial(candidate, kind, companion, None)?;
+        let mut record = None;
         let stamped = (|| {
             trial.settle(abort, voltages)?;
+            // The roots the inspection reads right after its settle, read
+            // here before anything is stamped.
+            let roots = request.map(|key| {
+                let refinement = trial
+                    .interior_root(
+                        Value::from_bits(key.minimum_timestep),
+                        key.converter_stepped,
+                    )
+                    .ok()?;
+                let finishing = trial
+                    .coordinator()
+                    .and_then(crate::xspice::verilog::MixedDigitalCoordinator::hdl_finish)
+                    .is_some();
+                Some((key, refinement, finishing))
+            });
             if trial.has_code_models() {
                 // The same settled code-model candidate supplies its stamps.
                 trial
@@ -975,9 +1119,38 @@ impl CircuitData {
                     .stamp_xspice(matrix, rhs)
                     .map_err(SimulationError::from)?;
             }
-            trial.stamp(matrix, rhs, voltages, weight)
+            trial.stamp(matrix, rhs, voltages, weight)?;
+            if let Some(Some((key, refinement, finishing))) = roots {
+                record =
+                    record_inspection(trial.hosts_mut(), refinement, finishing).map(|inspection| {
+                        MixedInspectionRecord {
+                            key,
+                            voltages: voltages.to_vec(),
+                            inspection,
+                        }
+                    });
+            }
+            Ok(())
         })();
-        trial.finish(stamped)
+        let finished = trial.finish(stamped);
+        if finished.is_ok() && record.is_some() {
+            self.scheduler.inspection_record = record;
+        }
+        finished
+    }
+
+    /// Ask the next probe trial to record what the candidate inspection at
+    /// its point would find; see [`MixedInspectionRecord`].
+    pub(crate) fn request_mixed_inspection_record(&mut self, minimum_timestep: Value) {
+        self.scheduler.inspection_request = Some(minimum_timestep);
+        self.scheduler.inspection_record = None;
+    }
+
+    /// What the probe trial asked to record found, if it recorded anything,
+    /// and the end of the request.
+    pub(crate) fn take_mixed_inspection_record(&mut self) -> Option<MixedInspectionRecord> {
+        self.scheduler.inspection_request = None;
+        self.scheduler.inspection_record.take()
     }
 
     /// Stamp every mixed module into an operating-point assembly.
@@ -1485,21 +1658,52 @@ impl CircuitData {
         kind: rspice_veriloga_runtime::AnalogTaskKind,
         validate_acceptance: bool,
         consume: &mut dyn FnMut(rspice_veriloga_runtime::AnalogTaskEvent<'_>),
+        recorded: Option<MixedInspectionRecord>,
     ) -> Result<MixedCandidateInspection, SimulationError> {
         if self.mixed_signal_hosts.is_empty() {
             return Ok(MixedCandidateInspection::default());
         }
         let converter_stepped = self.boundary_converter_stepped_at_accepted_point();
-        let mut trial = self.open_trial(
-            Candidate {
-                time,
-                dt,
-                analysis_step: Some((initial_step, final_step)),
-            },
-            TrialKind::Inspection,
-            companion,
-            None,
-        )?;
+        let candidate = Candidate {
+            time,
+            dt,
+            analysis_step: Some((initial_step, final_step)),
+        };
+        // The residual proof just settled this candidate; see
+        // `MixedInspectionRecord`.
+        if kind == rspice_veriloga_runtime::AnalogTaskKind::Finish
+            && !validate_acceptance
+            && let Some(record) = recorded
+            && let Some(key) =
+                InspectionKey::of(candidate, companion, minimum_timestep, converter_stepped)
+            && record.answers(key, voltages)
+        {
+            #[cfg(debug_assertions)]
+            {
+                let mut delivered = false;
+                let settled = self.visit_mixed_transient_candidate_task(
+                    abort,
+                    time,
+                    dt,
+                    voltages,
+                    companion,
+                    minimum_timestep,
+                    initial_step,
+                    final_step,
+                    kind,
+                    validate_acceptance,
+                    &mut |_| delivered = true,
+                    None,
+                )?;
+                debug_assert!(
+                    !delivered && settled == record.inspection,
+                    "the residual proof's record {:?} differs from the settled inspection {settled:?}",
+                    record.inspection
+                );
+            }
+            return Ok(record.inspection);
+        }
+        let mut trial = self.open_trial(candidate, TrialKind::Inspection, companion, None)?;
         let inspected = (|| {
             let mut discontinuity = false;
             trial.settle(abort, voltages)?;
