@@ -1115,6 +1115,7 @@ fn attribute_section(
     if rspice_ui_kit::widgets::switch_row(ui, "Show on instances", &mut shown) {
         record_once(edit, &before);
         metadata.attributes[index].shown = shown;
+        document.show_on_instances(kind, shown);
         changed = true;
     }
 

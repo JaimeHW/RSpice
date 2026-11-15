@@ -165,6 +165,10 @@ fn deleting_a_selected_label_hides_it() {
     let shown = |kind| metadata.attribute(kind).map(|attribute| attribute.shown);
     assert_eq!(shown(SymbolAttributeKind::Value), Some(false));
     assert_eq!(shown(SymbolAttributeKind::Reference), Some(true));
+    assert!(
+        document.value_hidden && !document.name_hidden,
+        "placed parts stop lettering the value alone"
+    );
     assert_eq!(document.body.len(), 1);
     assert!(session.effective_selection().is_empty());
 }

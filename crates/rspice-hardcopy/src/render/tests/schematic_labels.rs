@@ -662,6 +662,31 @@ fn a_placed_symbol_prints_each_pins_lead_and_the_mark_of_its_style() {
     );
 }
 
+/// A symbol that keeps its name or its value off its instances prints a
+/// placed part without it, as the canvas draws the part.
+#[test]
+fn a_symbol_that_keeps_its_name_or_value_off_its_parts_prints_without_them() {
+    for (name_hidden, value_hidden) in [(false, false), (true, false), (false, true)] {
+        let mut symbol = cell_symbol();
+        symbol.name_hidden = name_hidden;
+        symbol.value_hidden = value_hidden;
+        let mut printed = sheet(Vec::new());
+        printed.components.push(SemanticComponent {
+            symbol_source: Some(SemanticSymbolSource::Authored),
+            component: part(1, ComponentType::CellInstance, (0, 0), "X1", "amp"),
+            resolved_symbol: Some(symbol),
+        });
+        let compiled = compile(&printed);
+        let texts = compiled
+            .texts()
+            .into_iter()
+            .map(|(text, ..)| text)
+            .collect::<Vec<_>>();
+        assert_eq!(texts.contains(&"X1"), !name_hidden, "{texts:?}");
+        assert_eq!(texts.contains(&"amp"), !value_hidden, "{texts:?}");
+    }
+}
+
 /// A layer the print mapping leaves out keeps its dots and fills in its own
 /// ink, as it keeps its lines: a dot is all fill, and would not print at all.
 #[test]

@@ -98,8 +98,19 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
         }
     };
     let visibility = SchematicParameterLabelVisibility::NamesAndValues;
+    // The symbol can keep its name or its value off its instances.
+    let (name_hidden, value_hidden) = semantic
+        .resolved_symbol
+        .as_ref()
+        .map_or((false, false), |document| {
+            (document.name_hidden, document.value_hidden)
+        });
+    let show_value = component.display_mode.show_value(visibility) && !value_hidden;
     let mut texts = Vec::with_capacity(2);
-    if component.display_mode.show_name(visibility) && !component.name.trim().is_empty() {
+    if component.display_mode.show_name(visibility)
+        && !name_hidden
+        && !component.name.trim().is_empty()
+    {
         texts.push(SchematicText {
             class: SchematicTextClass::Name,
             placed: name,
@@ -110,7 +121,7 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
     let pieces = value_pieces(component)
         .filter(|_| label_layout::instance_value_class(component) == ValueClass::Value);
     if let Some(pieces) = pieces {
-        if component.display_mode.show_value(visibility) {
+        if show_value {
             let origin = LayoutPoint::new(component.pos.x as f32, component.pos.y as f32);
             texts.extend(pieces.iter().filter_map(|piece| {
                 Some(SchematicText {
@@ -124,7 +135,7 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
         }
         return texts;
     }
-    if component.display_mode.show_value(visibility) && !value_text.trim().is_empty() {
+    if show_value && !value_text.trim().is_empty() {
         texts.push(SchematicText {
             class: match label_layout::instance_value_class(component) {
                 ValueClass::Value => SchematicTextClass::Value,

@@ -391,6 +391,7 @@ fn delete(
                 && attribute.shown
             {
                 attribute.shown = false;
+                document.show_on_instances(*kind, false);
                 changed = true;
             }
         }

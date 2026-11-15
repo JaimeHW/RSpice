@@ -431,6 +431,7 @@ fn draw_symbol_labels(
         scale,
         ppp,
     ) && component.display_mode.show_name(visibility)
+        && !symbol.document().name_hidden
         && !component.name.is_empty()
     {
         let (position, align, upward) = at(component.name_label_pos, symbol.document().name_anchor);
@@ -451,10 +452,14 @@ fn draw_symbol_labels(
     if component.display_mode.show_value(visibility) {
         draw_parameter_labels(painter, origin, scale, component, symbol, palette.text_dim);
     }
+    // The symbol can keep its value off its instances; its labels letter
+    // parameters of their own.
+    let value_shown =
+        component.display_mode.show_value(visibility) && !symbol.document().value_hidden;
     // A value the drawing lettered in texts of its own stands as they were
     // set.
     if let Some(pieces) = value_pieces(component) {
-        if component.display_mode.show_value(visibility) {
+        if value_shown {
             super::drawing::draw_value_pieces(painter, origin, scale, pieces, palette);
         }
         return;
@@ -464,7 +469,7 @@ fn draw_symbol_labels(
         component.value_label_pos.size_world(INSTANCE_VALUE_WORLD),
         scale,
         ppp,
-    ) && component.display_mode.show_value(visibility)
+    ) && value_shown
         && !value.is_empty()
     {
         let (position, align, upward) =
@@ -1198,6 +1203,45 @@ mod tests {
         );
         assert_eq!(drawn(&label("1u", false), "w=2u"), 0, "a hidden label");
         assert_eq!(drawn(&label("", true), ""), 0, "nothing to letter");
+    }
+
+    /// A symbol that keeps its name or its value off its instances draws a
+    /// placed part without it.
+    #[test]
+    fn a_symbol_keeps_the_name_or_value_it_hides_off_its_parts() {
+        // The name stands 40 units above the origin and the value 40 below.
+        let above = egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(320.0, 150.0));
+        let below = egui::Rect::from_min_max(pos2(0.0, 170.0), pos2(320.0, 320.0));
+        let drawn = |name_hidden, value_hidden| {
+            let symbol = ResolvedCellSymbol::from_authored_document(
+                SymbolDocument {
+                    name_hidden,
+                    value_hidden,
+                    ..SymbolDocument::default()
+                },
+                &[],
+            );
+            let component = Component::new(1, ComponentType::CellInstance, Point::origin())
+                .with_name_value("X1", "amp");
+            let canvas = rspice_ui_kit::raster::render(egui::vec2(320.0, 320.0), |ui, _| {
+                draw_symbol_labels(
+                    &ui.painter().clone(),
+                    pos2(160.0, 160.0),
+                    2.0,
+                    &component,
+                    &symbol,
+                    SchematicParameterLabelVisibility::NamesAndValues,
+                    &Tokens::get(ui.ctx()).color,
+                );
+            });
+            (
+                painted_span(&canvas, above).0 > 0,
+                painted_span(&canvas, below).0 > 0,
+            )
+        };
+        assert_eq!(drawn(false, false), (true, true), "both are lettered");
+        assert_eq!(drawn(true, false), (false, true), "the name is kept off");
+        assert_eq!(drawn(false, true), (true, false), "the value is kept off");
     }
 
     fn symbol_with_shifted_origin() -> ResolvedCellSymbol {

@@ -858,6 +858,14 @@ pub struct SymbolDocument {
     /// one it can open.
     #[serde(default, skip_serializing_if = "crate::drc::DrcWaivers::is_empty")]
     pub waivers: crate::drc::DrcWaivers,
+    /// A placed part letters no name: the symbol's reference is not shown
+    /// on its instances. Not written while it is.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub name_hidden: bool,
+    /// A placed part letters no value: the symbol's value is not shown on
+    /// its instances. Not written while it is.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub value_hidden: bool,
 }
 
 /// What a symbol's pins answer to.
@@ -925,11 +933,24 @@ impl Default for SymbolDocument {
             value_anchor: Point::new(-20, 40),
             pin_name_size: None,
             waivers: crate::drc::DrcWaivers::default(),
+            name_hidden: false,
+            value_hidden: false,
         }
     }
 }
 
 impl SymbolDocument {
+    /// Shows or hides the attribute `kind` names on every placed part: the
+    /// reference as the part's name, the value as its value. A placed part
+    /// letters no model, so the model's flag changes nothing here.
+    pub fn show_on_instances(&mut self, kind: SymbolAttributeKind, shown: bool) {
+        match kind {
+            SymbolAttributeKind::Reference => self.name_hidden = !shown,
+            SymbolAttributeKind::Value => self.value_hidden = !shown,
+            SymbolAttributeKind::Model => {}
+        }
+    }
+
     /// The type size of this symbol's pin names, in world units.
     #[must_use]
     pub fn pin_name_world(&self) -> f32 {
@@ -1000,6 +1021,8 @@ impl SymbolDocument {
             value_anchor,
             pin_name_size: None,
             waivers: crate::drc::DrcWaivers::default(),
+            name_hidden: false,
+            value_hidden: false,
         }
     }
 

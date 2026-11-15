@@ -62,6 +62,8 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
             value_anchor: Point::new(-half_width, half_height + 30),
             pin_name_size: None,
             waivers: crate::drc::DrcWaivers::default(),
+            name_hidden: false,
+            value_hidden: false,
         };
         document.settle_drawn_pins();
         return document;
@@ -99,6 +101,8 @@ pub fn materialize_symbol_document(definition: &ModelBoundSymbolDefinition) -> S
         value_anchor: Point::new(-half_width, half_height + 30),
         pin_name_size: None,
         waivers: crate::drc::DrcWaivers::default(),
+        name_hidden: false,
+        value_hidden: false,
     }
 }
 
