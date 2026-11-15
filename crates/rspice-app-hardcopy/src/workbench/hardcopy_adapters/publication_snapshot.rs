@@ -647,7 +647,7 @@ pub fn collect_scenes(
             sheets.push(SheetScene {
                 name: descriptor.display_name.clone(),
                 page_label: None,
-                scene: converted,
+                scene: on_paper(converted, &descriptor.display_name)?,
             });
         } else {
             let traces = match resolved.semantic_document() {
@@ -801,6 +801,49 @@ fn publication_schematic_setup() -> rspice_hardcopy_contract::SchematicHardcopyS
         true,
         false,
     )
+}
+
+/// The paper a published sheet is printed on: the white page of the default
+/// print, whose inks the sheet is drawn in.
+const PUBLISHED_PAPER: [u8; 4] = [255, 255, 255, 255];
+
+/// Lay a printed sheet on its paper. A published sheet is a page printed in
+/// print inks, so both of the page's themes show it on the print's paper,
+/// as a PDF viewer shows a white page in a dark interface, and the theme
+/// frames the page. The paper is an exact colour, which neither palette
+/// recolours, beneath everything the sheet draws.
+fn on_paper(mut scene: Scene, source: &str) -> Result<Scene, PublicationBuildError> {
+    let range = |_| PublicationBuildError::CoordinateRange {
+        source: source.to_string(),
+    };
+    let width = i64::try_from(scene.width_um).map_err(range)?;
+    let height = i64::try_from(scene.height_um).map_err(range)?;
+    let corner = |x_um, y_um| Point { x_um, y_um };
+    let paper = PathPrimitive {
+        segments: vec![
+            PathSegment::MoveTo { to: corner(0, 0) },
+            PathSegment::LineTo {
+                to: corner(width, 0),
+            },
+            PathSegment::LineTo {
+                to: corner(width, height),
+            },
+            PathSegment::LineTo {
+                to: corner(0, height),
+            },
+            PathSegment::Close,
+        ],
+        stroke: None,
+        fill: Some(Paint::Rgba(PUBLISHED_PAPER)),
+    };
+    scene.groups.insert(
+        0,
+        PrimitiveGroup {
+            tag: None,
+            primitives: vec![Primitive::Path(paper)],
+        },
+    );
+    Ok(scene)
 }
 
 /// Device pixels per micrometre fine enough for a published page's ellipses.

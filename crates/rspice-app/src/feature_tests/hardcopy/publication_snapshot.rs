@@ -196,6 +196,53 @@ fn a_multi_sheet_cell_view_publishes_each_sheet_once() {
 }
 
 #[test]
+fn a_published_sheet_lies_on_the_paper_it_prints_on() {
+    use crate::workbench::state::WorkspaceDocumentId;
+    use rspice_publication_contract::{Paint, PathSegment, Point, Primitive};
+
+    let mut state = AppState::default();
+    state.model.schematic.add_component(
+        crate::state::ComponentType::Resistor,
+        crate::state::Point::new(0, 0),
+    );
+    let reference = state.model.workspace.content.active_view.clone();
+    state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::CellView(reference));
+
+    let (sheets, _) = collect_scenes(publication_reads(&state)).unwrap();
+    let scene = &sheets[0].scene;
+    // Beneath everything the sheet draws lies the white page of the print
+    // whose inks it is drawn in, across the whole sheet.
+    let [Primitive::Path(paper)] = scene.groups[0].primitives.as_slice() else {
+        panic!("the sheet lies on no paper: {:?}", scene.groups[0]);
+    };
+    let corner = |x_um, y_um| Point { x_um, y_um };
+    let (width, height) = (scene.width_um as i64, scene.height_um as i64);
+    assert_eq!(
+        paper.segments,
+        [
+            PathSegment::MoveTo { to: corner(0, 0) },
+            PathSegment::LineTo {
+                to: corner(width, 0)
+            },
+            PathSegment::LineTo {
+                to: corner(width, height)
+            },
+            PathSegment::LineTo {
+                to: corner(0, height)
+            },
+            PathSegment::Close,
+        ]
+    );
+    assert_eq!(paper.stroke, None);
+    // An exact white, not a theme role: the page's dark theme shows the same
+    // white page its light theme does, and frames it.
+    assert_eq!(paper.fill, Some(Paint::Rgba([255, 255, 255, 255])));
+}
+
+#[test]
 fn native_engineering_projection_preserves_components_nets_and_signal_identity() {
     let mut state = AppState::default();
     state.model.schematic.add_component(
