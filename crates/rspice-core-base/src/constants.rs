@@ -39,8 +39,8 @@ pub(crate) const EVENT_FLUX_ABSTOL: Value = 1e-24;
 /// Similar to SPICE TRTOL parameter.
 pub const TRTOL: Value = 7.0;
 
-/// Largest nonlinear-device terminal-voltage change allowed per accepted
-/// transient step (volts).
+/// Largest transistor terminal-voltage change allowed per accepted transient
+/// step (volts).
 ///
 /// Polynomial charge LTE estimates truncation error from divided differences
 /// of sampled charges, so it is blind to waveform curvature that lies entirely
@@ -51,9 +51,17 @@ pub const TRTOL: Value = 7.0;
 /// — ngspice avoids this only by accident, through MOS2 Newton failures that
 /// force sub-ns steps). Production simulators bound timesteps by signal
 /// activity for exactly this reason (HSPICE's DVDT step algorithm, Spectre's
-/// activity-based step selection). When any MOSFET/BJT/JFET terminal voltage
-/// moves more than this bound across a candidate step, the step is rescaled
-/// proportionally so per-step device excursions stay resolved.
+/// activity-based step selection). When any transistor terminal voltage moves
+/// more than this bound across a candidate step, the step is rescaled
+/// proportionally so per-step device excursions stay resolved. Every
+/// transistor counts, whatever its model: the native families (bipolar,
+/// classic MOS, JFET, BSIM3, BSIM4, BSIM-SOI, EKV, VDMOS) and each generated
+/// compact model with a control terminal. A family left out keeps the
+/// smeared edges the bound exists to prevent: while BSIM4 was, a 20-stage
+/// BSIM4 inverter chain put its edges 76 ps late against a dense-step
+/// reference. The compatibility dialects keep their simulators' own step
+/// control: the ngspice dialect bounds bipolar transistors alone, and the
+/// Xyce dialect's accepted-solution truncation does not use the bound.
 pub const DEVICE_ACTIVITY_STEP_BOUND: Value = 0.4;
 
 /// Default voltage tolerance (volts)

@@ -2760,7 +2760,7 @@ impl Engine {
     }
 
     /// Prepare the unique, non-excluded solution indices used by the
-    /// nonlinear terminal-activity guard. Circuit topology is immutable
+    /// transistor terminal-activity guard. Circuit topology is immutable
     /// during an analysis, so the accepted-step loop should not rediscover
     /// these nodes through the large device-instance arrays.
     pub(super) fn nonlinear_terminal_solution_indices(
@@ -2783,29 +2783,15 @@ impl Engine {
             }
         };
 
-        for bjt in &circuit.bjts.devices {
-            include(bjt.node_collector);
-            include(bjt.node_base);
-            include(bjt.node_emitter);
-            include(bjt.node_substrate);
-        }
-        // The ngspice dialect leaves unipolar devices to its own truncation
-        // and Newton-failure cuts, the limits its references were made with.
-        // A bipolar latch keeps the bound: its regeneration turns a truncation
-        // estimate a fraction of a percent from ngspice's acceptance threshold
-        // into a whole step of difference on the edge.
-        if dialect != SpiceDialect::Ngspice {
-            for mos in &circuit.mosfets.devices {
-                include(mos.node_drain);
-                include(mos.node_gate);
-                include(mos.node_source);
-                include(mos.node_bulk);
-            }
-            for jfet in &circuit.jfets {
-                include(jfet.drain);
-                include(jfet.gate);
-                include(jfet.source);
-            }
+        // The ngspice dialect leaves every other transistor to its own
+        // truncation and Newton-failure cuts, the limits its references were
+        // made with. A bipolar latch keeps the bound: its regeneration turns
+        // a truncation estimate a fraction of a percent from ngspice's
+        // acceptance threshold into a whole step of difference on the edge.
+        if dialect == SpiceDialect::Ngspice {
+            circuit.visit_bipolar_transistor_terminals(&mut include);
+        } else {
+            circuit.visit_transistor_terminals(&mut include);
         }
 
         included
@@ -2816,8 +2802,8 @@ impl Engine {
     }
 
     /// Signal-activity step limit: rescale the candidate step so that no
-    /// solved nonlinear-device terminal voltage moves more than `bound` volts
-    /// in one step.
+    /// solved transistor terminal voltage moves more than `bound` volts in
+    /// one step.
     ///
     /// Complements the polynomial charge LTE, which estimates error from
     /// divided differences of sampled charges and is therefore blind to

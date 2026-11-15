@@ -18407,6 +18407,110 @@ D1 D 0 DMOD
         assert_eq!(terminals(SpiceDialect::BestAvailable), every);
     }
 
+    /// The activity bound's terminals, sorted, for `dialect`.
+    fn activity_terminals(
+        circuit: &crate::circuit::CircuitData,
+        dialect: SpiceDialect,
+    ) -> Vec<usize> {
+        let excluded = vec![false; circuit.matrix_size()];
+        let mut terminals =
+            Engine::nonlinear_terminal_solution_indices(circuit, &excluded, dialect);
+        terminals.sort_unstable();
+        terminals
+    }
+
+    fn solution_indices(circuit: &crate::circuit::CircuitData, nodes: &[&str]) -> Vec<usize> {
+        let mut indices: Vec<usize> = nodes
+            .iter()
+            .map(|name| circuit.get_node_by_name(name).expect("node exists") - 1)
+            .collect();
+        indices.sort_unstable();
+        indices
+    }
+
+    #[test]
+    fn step_activity_watches_every_native_transistor_family() {
+        // One instance of each family on nets of its own, and a diode, which
+        // has no control terminal and stays out.
+        let netlist = Netlist::parse(
+            "every transistor family\n\
+             Q1 qc qb qe QM\n.model QM NPN\n\
+             M1 m1d m1g 0 0 NM1\n.model NM1 NMOS level=1\n\
+             J1 jd jg 0 JM\n.model JM NJF\n\
+             M3 m3d m3g 0 0 NM3\n.model NM3 NMOS level=49\n\
+             M4 m4d m4g m4s m4b NM4\n.model NM4 NMOS level=54\n\
+             M5 m5d m5g 0 m5e NM5\n.model NM5 NMOS level=55\n\
+             M6 m6d m6g 0 m6e m6p NM6\n.model NM6 NMOS level=56\n\
+             M7 m7d m7g 0 m7e NM7\n.model NM7 NMOS level=57\n\
+             M8 m8d m8g 0 0 NM8\n.model NM8 NMOS level=260\n\
+             M9 m9d m9g 0 VDM\n.model VDM VDMOS nchan\n\
+             D1 da dk DM\n.model DM D\n\
+             R1 dk 0 1k\n.end",
+        )
+        .expect("deck parses");
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("deck builds");
+        assert_eq!(circuit.bsim3v3.devices.len(), 1);
+        assert_eq!(circuit.bsim4v8.devices.len(), 1);
+        assert_eq!(circuit.b3soi_fd.devices.len(), 1);
+        assert_eq!(circuit.b3soi.devices.len(), 1);
+        assert_eq!(circuit.b3soi_pd.devices.len(), 1);
+        assert_eq!(circuit.ekv26s.devices.len(), 1);
+        assert_eq!(circuit.vdmoses.devices.len(), 1);
+
+        let transistor_nets = solution_indices(
+            &circuit,
+            &[
+                "qc", "qb", "qe", "m1d", "m1g", "jd", "jg", "m3d", "m3g", "m4d", "m4g", "m4s",
+                "m4b", "m5d", "m5g", "m5e", "m6d", "m6g", "m6e", "m6p", "m7d", "m7g", "m7e", "m8d",
+                "m8g", "m9d", "m9g",
+            ],
+        );
+        assert_eq!(
+            activity_terminals(&circuit, SpiceDialect::BestAvailable),
+            transistor_nets
+        );
+        assert_eq!(
+            activity_terminals(&circuit, SpiceDialect::Ngspice),
+            solution_indices(&circuit, &["qc", "qb", "qe"])
+        );
+    }
+
+    #[cfg(feature = "veriloga-model-r3-cmc")]
+    #[test]
+    fn step_activity_watches_generated_models_with_a_control_terminal() {
+        // R3_CMC's control terminal makes it a transistor in this sense; its
+        // thermal port is not a voltage and stays out.
+        let netlist = Netlist::parse(
+            "generated three-terminal model\nX1 a b c t r3_cmc\nR1 a 0 1k\nR2 b 0 1k\n\
+             R3 c 0 1k\nR4 t 0 1meg\n.end",
+        )
+        .expect("deck parses");
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("deck builds");
+        assert_eq!(circuit.generated_veriloga_devices().len(), 1);
+        assert_eq!(
+            activity_terminals(&circuit, SpiceDialect::BestAvailable),
+            solution_indices(&circuit, &["a", "b", "c"])
+        );
+        assert!(activity_terminals(&circuit, SpiceDialect::Ngspice).is_empty());
+    }
+
+    #[cfg(feature = "veriloga-model-diode-cmc")]
+    #[test]
+    fn step_activity_leaves_two_terminal_generated_models_out() {
+        let netlist =
+            Netlist::parse("generated diode\nX1 a k diode_cmc\nR1 a 0 1k\nR2 k 0 1k\n.end")
+                .expect("deck parses");
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("deck builds");
+        assert_eq!(circuit.generated_veriloga_devices().len(), 1);
+        assert!(activity_terminals(&circuit, SpiceDialect::BestAvailable).is_empty());
+    }
+
     #[test]
     fn nonlinear_terminal_activity_limit_respects_voltage_lte_exclusions() {
         let mut circuit = crate::circuit::CircuitData::new();
