@@ -2883,8 +2883,64 @@ impl Engine {
                 );
             }
 
-            // Check convergence
-            if solver.check_convergence(&shooting_state) {
+            // Convergence needs the residual and, on a driven orbit, the
+            // state error the latest Jacobian predicts from it: a mode whose
+            // Floquet multiplier is near one passes the residual test far
+            // from its orbit. A correction outside its tolerance is the next
+            // step. A fixed-point chord's Jacobian is `-I`, so its correction
+            // is the residual itself; a mesh with no Jacobian yet
+            // differentiates its own.
+            let residual_converged = solver.check_convergence(&shooting_state);
+            let mut correction = None;
+            if residual_converged && !config.is_autonomous() && shooting_state.dimension() > 0 {
+                let predicted = match (preconditioner_jacobian.as_deref(), chord) {
+                    (Some(jacobian), _) | (None, Some(PssChord::Mesh(jacobian))) => self
+                        .pss_solve_with_integral_constants(
+                            circuit,
+                            &shooting_state,
+                            jacobian,
+                            &shooting_state.residual,
+                            config,
+                            abort,
+                        )?,
+                    (None, Some(PssChord::FixedPoint)) => shooting_state.residual.clone(),
+                    (None, None) => {
+                        let (delta, jacobian) = self.pss_compute_newton_step(
+                            circuit,
+                            &shooting_state,
+                            PssJacobianProbe {
+                                period: detected_period,
+                                config,
+                                fd_step: PSS_FD_STEP,
+                            },
+                            if affine {
+                                PssColumnStencil::Affine {
+                                    endpoint: &shooting_state.x_t,
+                                }
+                            } else {
+                                PssColumnStencil::Central
+                            },
+                            abort,
+                        )?;
+                        preconditioner_jacobian = Some(jacobian);
+                        jacobian_origin.clone_from(&shooting_state.x0);
+                        reused_jacobian = false;
+                        delta
+                    }
+                };
+                if !solver.check_state_correction(&shooting_state, &predicted) {
+                    if config.verbose {
+                        log::debug!(
+                            "PSS iteration {iteration}: residual converged, predicted state correction {:.6e} exceeds tolerance",
+                            predicted
+                                .iter()
+                                .fold(0.0, |norm: Value, value| norm.max(value.abs()))
+                        );
+                    }
+                    correction = Some(predicted);
+                }
+            }
+            if residual_converged && correction.is_none() {
                 let jacobian = preconditioner_jacobian.filter(|_| {
                     !reused_jacobian
                         || affine
@@ -2911,6 +2967,15 @@ impl Engine {
             // A nonconverged orbit is not retained while sensitivity workers
             // integrate their state-only perturbations.
             drop(waveform);
+
+            if let Some(delta) = correction {
+                if chord.is_some() {
+                    chord_residual = Some(shooting_state.residual_norm());
+                }
+                shooting_state.update_x0(&delta, solver.damping);
+                iteration += 1;
+                continue;
+            }
 
             if let Some(step) = chord {
                 let residual = shooting_state.residual_norm();

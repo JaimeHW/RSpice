@@ -172,6 +172,23 @@ impl ShootingNewtonSolver {
         self.converged
     }
 
+    /// Whether a correction the latest Jacobian predicts for the initial
+    /// state is within every coordinate's tolerance, `|e| <= tolerance *
+    /// |x(0)| + abstol`. The residual alone does not bound the state's
+    /// error: along a Floquet multiplier `lambda` it is that error scaled by
+    /// `1 - lambda`, so a slowly settling mode passes the residual test far
+    /// from its orbit.
+    pub(crate) fn check_state_correction(
+        &self,
+        state: &ShootingState,
+        correction: &[Value],
+    ) -> bool {
+        correction.len() == state.n_states
+            && state.x0.iter().zip(correction).all(|(&initial, &error)| {
+                error.is_finite() && error.abs() <= self.tolerance * initial.abs() + self.abstol
+            })
+    }
+
     /// Extract a complete Floquet spectrum and retain its canonical residual
     /// certificate, checking cancellation around the atomic eigensolve.
     pub fn compute_floquet_spectrum_with_abort(

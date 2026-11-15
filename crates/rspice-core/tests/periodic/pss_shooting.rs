@@ -3931,3 +3931,44 @@ l1 x 0 10u
         other => panic!("PSTB reads a spectrum whose saltation is partial: {other:?}"),
     }
 }
+
+#[test]
+fn pss_judges_a_slowly_settling_orbit_by_its_state_error() {
+    // R1*C1 = 1 s against a 1 us period: the capacitor's Floquet multiplier
+    // is exp(-1e-6), so x(T) - x(0) is the state's error scaled by 1e-6. The
+    // pulse's DC value seeds the capacitor at 0.4 V and its orbit averages
+    // 0.5 V, the pulse's mean: the seed's residual, 1e-7 V, passes the
+    // default tolerance of 1e-6 of 0.4 V while the state is 0.1 V off. The
+    // trapezoidal rule on the pulse's corners keeps the mean exact; the
+    // delay keeps the period's first step, a backward-Euler one, off them.
+    let netlist = Netlist::parse(
+        "slowly settling RC\nV1 in 0 PULSE(0.4 0.6 100n 1n 1n 499n 1u)\nR1 in a 1meg\nC1 a 0 1u\n.end\n",
+    )
+    .unwrap();
+    let mut config = PssConfig::new(F0).with_tstab_periods(0);
+    config.integration_method =
+        Some(rspice_core::numerics::integration::IntegrationMethod::Trapezoidal);
+    let analysis = Engine::default().run_pss(&netlist, config).unwrap();
+    let result = &analysis.result;
+    let output = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("a"))
+        .unwrap();
+    // The ripple is 0.1 V * (T/2) / RC = 5e-8 V about the mean.
+    for (&time, &voltage) in result.time.iter().zip(&result.waveforms[output].values) {
+        assert!(
+            (voltage - 0.5).abs() < 1e-6,
+            "t={time:e}: V(a)={voltage} is not on the orbit about 0.5 V"
+        );
+    }
+    let multiplier = (-1e-6_f64).exp();
+    assert!(
+        analysis
+            .floquet_multipliers
+            .iter()
+            .any(|actual| (actual.re - multiplier).abs() < 1e-9 && actual.im == 0.0),
+        "{:?}",
+        analysis.floquet_multipliers
+    );
+}
