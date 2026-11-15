@@ -177,7 +177,7 @@ impl HbSolver {
                         branch_ordinal,
                         canonical: false,
                     },
-                    &format!("{}:{kind:?}{index}:{role}", device.instance_name),
+                    &super::generated_site_row_name(&device.instance_name, *kind, index, role),
                 )?;
             }
             ports.push((rows[0], rows[1]));

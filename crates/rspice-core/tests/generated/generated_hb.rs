@@ -960,6 +960,12 @@ fn check_against_shooting(family: &str, circuit: &str, node: &str, failures: &mu
 const FLUX: &str = "a voltage contribution takes the time derivative of its branch current (an \
                     inductance), and the shooting state fixes node voltages, not branch currents";
 
+/// Why periodic AC, periodic transfer functions and periodic noise refuse a
+/// generated model with an `idt` carried as an unknown of its own.
+#[cfg(feature = "veriloga-model-pspnqs102va")]
+const SMALL_SIGNAL_INTEGRAL: &str = "it carries an `idt` as an unknown of its own, and the \
+     periodic small-signal sideband solve does not certify with one";
+
 /// Why shooting refuses a generated model that carries both a `ddt` and an
 /// `idt` as unknowns of their own.
 const CARRIED_SITE: &str = "harmonic balance carries both a `ddt` and an `idt` of it as \
@@ -1230,7 +1236,7 @@ fn shooting_refuses_a_generated_model_by_its_reason() {
 /// `V(a)` at three offsets, and the periodic transfer function from it into
 /// the upper first sideband, on the deck's harmonic-balance carrier: once
 /// solved by periodic AC itself and once retained from `.hb`.
-#[cfg(feature = "veriloga-model-r2-cmc")]
+#[cfg(any(feature = "veriloga-model-r2-cmc", feature = "veriloga-model-bjt504va"))]
 fn hb_carrier_transfers(deck: &str) -> Vec<Complex64> {
     use rspice_core::NoAbort;
     use rspice_core::analysis::pac::{PacConfig, PacSweepType};
@@ -1406,7 +1412,7 @@ fn a_generated_resistors_noise_folds_as_its_native_twins() {
 /// Periodic AC from `vrf` into sidebands -2..=2 of `V(a)` at three offsets,
 /// and the periodic transfer function into the upper first sideband, on the
 /// deck's shooting carrier.
-#[cfg(feature = "veriloga-model-r2-cmc")]
+#[cfg(any(feature = "veriloga-model-r2-cmc", feature = "veriloga-model-bjt504va"))]
 fn shooting_carrier_transfers(deck: &str) -> Vec<Complex64> {
     use rspice_core::NoAbort;
     use rspice_core::analysis::pac::{PacConfig, PacSweepType};
@@ -1490,6 +1496,138 @@ fn a_generated_resistor_mixes_its_native_twins_sidebands_on_a_shooting_carrier()
         native[1].norm() > 1e-3 * scale && native[3].norm() > 1e-3 * scale,
         "the pumped diode must convert into the first sidebands: {native:?}"
     );
+}
+
+/// Periodic AC, periodic transfer functions and periodic noise refuse PSP
+/// 102's non-quasi-static integrals by name on a shooting orbit that carries
+/// them, as on harmonic balance's carrier, each with the label of the
+/// analysis it runs (a periodic transfer function runs as periodic AC).
+#[cfg(feature = "veriloga-model-pspnqs102va")]
+#[test]
+fn periodic_small_signal_refuses_a_generated_models_integrals_by_name() {
+    use rspice_core::NoAbort;
+    use rspice_core::analysis::pac::{PacConfig, PacSweepType};
+    use rspice_core::engine::{PeriodicNoiseRequest, PeriodicNoiseSidebands};
+    use rspice_core::netlist::{FreqVariation, PeriodicSourceSelector, PeriodicSweep, PxfCard};
+    use rspice_core::{SimulationError, UnsupportedCapabilityError};
+    let deck = "* pumped non-quasi-static stage\nVDD vdd 0 1\nV1 in 0 SIN(0.6 0.1 1meg)\n\
+                RG in g 1k\nVRF rf 0 DC 0\nR2 rf g 10k\nRD vdd a 1k\nM1 a g 0 0 nq\n\
+                .model nq PSPNQS102VA SWNQS=3\n.options method=gear\n.end\n";
+    let netlist = Netlist::parse(deck).expect("parse");
+    let point = engine()
+        .run_pss_operating_point_with_abort(&netlist, PssConfig::new(F0), &NoAbort)
+        .unwrap_or_else(|error| panic!("shooting must carry the integrals: {error}"));
+    let pac = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(0.13 * F0, 0.37 * F0, 3)
+        .with_sweep_type(PacSweepType::Linear)
+        .with_sidebands(-2, 2)
+        .with_input_source("vrf")
+        .with_output_node("a");
+    let card = PxfCard {
+        sweep: PeriodicSweep {
+            variation: FreqVariation::Lin,
+            points: 3,
+            start_freq: 0.13 * F0,
+            stop_freq: 0.37 * F0,
+        },
+        input_source: "vrf".into(),
+        input_sideband: 0,
+        output_node: "a".into(),
+        output_ref: None,
+        output_sideband: 1,
+        max_sideband: 2,
+        reltol: 1e-9,
+        abstol: 1e-15,
+        source: PeriodicSourceSelector::Preceding,
+    };
+    let refusals = [
+        (
+            "PAC",
+            "PAC analysis",
+            engine()
+                .run_pac_from_pss_with_abort(&netlist, pac, &point, &NoAbort)
+                .map(drop),
+        ),
+        (
+            "PXF",
+            "PAC analysis",
+            engine()
+                .run_pxf_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
+                .map(drop),
+        ),
+        (
+            "pnoise",
+            "pnoise analysis",
+            engine()
+                .run_pnoise_from_pss_request_with_abort(
+                    &netlist,
+                    &PeriodicNoiseRequest {
+                        sampling: None,
+                        offsets: &[0.13 * F0],
+                        output_node: "a",
+                        output_ref: None,
+                        input_source: None,
+                        max_sideband: 2,
+                        sidebands: PeriodicNoiseSidebands {
+                            input: 0,
+                            output: 0,
+                        },
+                    },
+                    &point,
+                    &NoAbort,
+                )
+                .map(drop),
+        ),
+    ];
+    for (analysis, label, outcome) in refusals {
+        let error = outcome.expect_err("the integrals must be refused");
+        let SimulationError::UnsupportedCapability(refusal) = &error else {
+            panic!("{analysis}: expected a capability refusal, got {error}");
+        };
+        let UnsupportedCapabilityError {
+            instance, detail, ..
+        } = refusal.as_ref();
+        assert_eq!(instance.as_deref(), Some("M1"), "{error}");
+        assert!(
+            detail.starts_with(label) && detail.ends_with(SMALL_SIGNAL_INTEGRAL),
+            "{analysis}: the refusal must name the analysis and its reason: {detail}"
+        );
+    }
+}
+
+/// Periodic AC and periodic transfer functions on a shooting orbit read a
+/// generated model's carried `ddt` (Mextram 504's) off the model over the
+/// orbit, and give in a pumped common-emitter stage every sideband transfer
+/// they give on harmonic balance's carrier. Allowance: 1e-4 of the largest
+/// transfer.
+#[cfg(feature = "veriloga-model-bjt504va")]
+#[test]
+fn periodic_small_signal_on_a_shooting_orbit_reads_a_generated_models_carried_derivative() {
+    let deck = "* pumped common-emitter stage\nVCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\n\
+                RB in b 10k\nVRF rf 0 DC 0\nR2 rf b 10k\nRC vcc a 1k\nXQ a b 0 0 bjt504va\n.end\n";
+    let harmonic_balance = hb_carrier_transfers(deck);
+    let shooting = shooting_carrier_transfers(deck);
+    let retained = &harmonic_balance[15..];
+    let scale = retained
+        .iter()
+        .map(|value| value.norm())
+        .fold(0.0, f64::max);
+    let worst = shooting
+        .iter()
+        .zip(retained)
+        .map(|(shot, balanced)| (shot - balanced).norm())
+        .fold(0.0, f64::max);
+    eprintln!(
+        "Mextram 504: shooting carrier worst {:.3e} of the largest transfer",
+        worst / scale
+    );
+    for (index, (shot, balanced)) in shooting.iter().zip(retained).enumerate() {
+        assert!(
+            (shot - balanced).norm() <= 1e-4 * scale,
+            "transfer {index}: shooting carrier {shot} against harmonic balance's {balanced}"
+        );
+    }
 }
 
 /// The PSTB multipliers of `deck`'s orbit read at inductor `probe`, largest

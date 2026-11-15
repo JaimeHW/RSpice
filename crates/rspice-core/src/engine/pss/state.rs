@@ -17,6 +17,8 @@ mod forcing;
 use forcing::BehavioralForcing;
 mod integral;
 pub(super) use integral::PssGeneratedIntegrals;
+#[cfg(feature = "veriloga-builtins-base")]
+pub(in crate::engine) use integral::generated_integral_coordinate_name;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ConstraintSource {
@@ -2258,9 +2260,7 @@ impl PssCircuit {
         self.project_physical_coordinates(solution, Some(linearize_at))
             .chain(std::iter::repeat_n(
                 0.0,
-                self.behavioral_sources.integral_count()
-                    + self.capacitors.integral_count()
-                    + self.delay_basis.dimension(),
+                self.integral_probe_scales.len() + self.delay_basis.dimension(),
             ))
     }
 

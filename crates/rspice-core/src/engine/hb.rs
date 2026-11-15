@@ -1211,12 +1211,41 @@ impl Engine {
                 result.frequency, config.fundamental_freq
             )));
         }
+        // A generated model's carried operator sites have no waveform of the
+        // orbit's own: their rows are read off the model over it.
+        #[cfg(feature = "veriloga-builtins-base")]
+        let sites = self.hb_project_generated_sites(
+            circuit,
+            &|name: &str| {
+                operating_point
+                    .shooting_state_basis()
+                    .iter()
+                    .position(|candidate| candidate == name)
+                    .and_then(|index| operating_point.shooting_state().get(index).copied())
+            },
+            &result.time,
+            analysis.period,
+            config.num_harmonics,
+            result
+                .node_names
+                .iter()
+                .zip(&result.waveforms)
+                .map(|(name, waveform)| (name.as_str(), waveform.values.as_slice())),
+            result
+                .branch_names
+                .iter()
+                .zip(&result.branch_waveforms)
+                .map(|(name, waveform)| (name.as_str(), waveform.values.as_slice())),
+            abort,
+        )?;
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let sites: Vec<(String, Vec<Complex64>)> = Vec::new();
         for (kind, count, expected) in [
             ("node", result.waveforms.len(), node_names.len()),
             (
                 "branch",
                 result.branch_waveforms.len(),
-                physical_branch_names.len(),
+                physical_branch_names.len().saturating_sub(sites.len()),
             ),
         ] {
             if count != expected {
@@ -1269,6 +1298,15 @@ impl Engine {
                 .map(|(index, name)| (name.to_ascii_uppercase(), index))
                 .collect();
             for (target_name, spectrum) in target_names.iter().zip(spectra) {
+                if let Some((_, site)) = sites
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(target_name))
+                {
+                    for (coefficient, &value) in spectrum.iter_mut().zip(site) {
+                        *coefficient = value;
+                    }
+                    continue;
+                }
                 let source_index = source_indices.get(&target_name.to_ascii_uppercase())
                     .copied().ok_or_else(|| SimulationError::Circuit(format!(
                         "periodic operating point has no waveform for dependent-circuit {kind} '{target_name}'"

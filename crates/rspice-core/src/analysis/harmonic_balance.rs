@@ -33,6 +33,8 @@ pub use result::{
 };
 #[cfg(test)]
 pub(crate) use solver::DC_SHORT_CONDUCTANCE;
+#[cfg(feature = "veriloga-builtins-base")]
+pub(crate) use solver::generated_site_row_name;
 pub use solver::{
     DepletionCap, HbError, HbSolver, HbSolverState, HbSwitchNodes, HbVoltageSwitchModel,
     NonlinearDeviceInstance, NonlinearDeviceParams, NonlinearDeviceType, PeriodicAcExcitation,

@@ -19,6 +19,12 @@
 //! multiplier of exactly one that nothing in the circuit has.
 use super::*;
 
+/// The shooting basis's name for a generated instance's `slot`-th `idt`.
+#[cfg(feature = "veriloga-builtins-base")]
+pub(in crate::engine) fn generated_integral_coordinate_name(instance: &str, slot: usize) -> String {
+    format!("X:{instance}:idt:{slot}")
+}
+
 #[derive(Debug, Clone, Default)]
 pub(in crate::engine::pss) struct PssGeneratedIntegrals {
     /// Each generated device whose integrals can move, in device order, with
@@ -83,7 +89,9 @@ impl PssGeneratedIntegrals {
         {
             let devices: Vec<_> = circuit.generated_veriloga_devices().iter().collect();
             self.sites()
-                .map(|(device, index)| format!("X:{}:idt:{index}", devices[device].instance_name()))
+                .map(|(device, index)| {
+                    generated_integral_coordinate_name(devices[device].instance_name(), index)
+                })
                 .collect()
         }
         #[cfg(not(feature = "veriloga-builtins-base"))]

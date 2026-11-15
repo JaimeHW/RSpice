@@ -547,12 +547,16 @@ const PNOISE_VERILOGA_EVIDENCE: &[&str] = &[
     "tests/veriloga/veriloga_hb.rs::veriloga_noise_folds_as_its_native_twins_on_a_pumped_carrier",
 ];
 
-const PNOISE_GENERATED_EVIDENCE: &[&str] =
-    &["tests/generated/generated_hb.rs::a_generated_resistors_noise_folds_as_its_native_twins"];
+const PNOISE_GENERATED_EVIDENCE: &[&str] = &[
+    "tests/generated/generated_hb.rs::a_generated_resistors_noise_folds_as_its_native_twins",
+    "tests/generated/generated_hb.rs::periodic_small_signal_refuses_a_generated_models_integrals_by_name",
+];
 
 const PAC_GENERATED_EVIDENCE: &[&str] = &[
     "tests/generated/generated_hb.rs::a_generated_resistor_mixes_its_native_twins_sidebands",
     "tests/generated/generated_hb.rs::a_generated_resistor_mixes_its_native_twins_sidebands_on_a_shooting_carrier",
+    "tests/generated/generated_hb.rs::periodic_small_signal_on_a_shooting_orbit_reads_a_generated_models_carried_derivative",
+    "tests/generated/generated_hb.rs::periodic_small_signal_refuses_a_generated_models_integrals_by_name",
 ];
 
 /// Periodic AC and periodic transfer functions linearize harmonic balance's
@@ -561,13 +565,15 @@ const PAC_GENERATED_EVIDENCE: &[&str] = &[
 /// takes: on a harmonic-balance carrier what harmonic balance takes; on a
 /// shooting carrier the generated models shooting takes, and the runtime
 /// modules both shooting and harmonic balance take, whose state is the
-/// charges the period map carries.
+/// charges the period map carries. Neither takes a generated model with an
+/// `idt` carried as an unknown of its own, whose sideband solve does not
+/// certify.
 const fn carrier_admits_veriloga(generated: bool) -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::CarrierAdmitsVerilogA,
         token: PERIODIC_VERILOGA,
         condition: if generated {
-            "every generated compact model harmonic balance admits, on a harmonic-balance or a shooting (PSS) carrier"
+            "every generated compact model harmonic balance admits with no `idt` carried as an unknown of its own, on a harmonic-balance or a shooting (PSS) carrier"
         } else {
             "on a harmonic-balance carrier, every Verilog-A module harmonic balance admits; on a shooting (PSS) carrier, every one both shooting and harmonic balance admit"
         },
@@ -1217,9 +1223,21 @@ const PSS_GENERATED_CARRIED_SITE: &str = "harmonic balance carries both a `ddt` 
      it as unknowns of their own, and a shooting period starts its integrals from a hold that \
      would not seed the `ddt`'s charge";
 
+/// Why periodic AC, periodic transfer functions and periodic noise refuse a
+/// generated model with an `idt` carried as an unknown of its own, on either
+/// carrier: the sideband system carries each such integral's input and
+/// output, and on PSP 102's non-quasi-static stage its iterative solve fails
+/// its componentwise check (SWNQS=3) or stalls at a relative residual of
+/// 1.2e-9 (SWNQS=9), on a harmonic-balance carrier as on a shooting one.
+#[cfg(feature = "veriloga-builtins-base")]
+const PERIODIC_SMALL_SIGNAL_GENERATED_INTEGRAL: &str = "it carries an `idt` as an unknown of its \
+     own, and the periodic small-signal sideband solve does not certify with one";
+
 /// Harmonic balance refuses a generated compact model whose generator could
 /// not prove its residual `F(x) + dQ(x)/dt`, with the generator's reason, or
-/// one whose harmonics have not been checked, with what is missing.
+/// one whose harmonics have not been checked, with what is missing. The
+/// periodic small-signal analyses, which reach a generated model through
+/// this gate on either carrier, also refuse one with a carried `idt`.
 ///
 /// Shooting also refuses one whose source branch stores flux at its
 /// parameters, which only an evaluation of the model can tell; without
@@ -1251,6 +1269,13 @@ fn hb_generated_refusal<const PROBE_DEVICES: bool>(
                     && device
                         .stores_flux(circuit.num_nodes(), circuit.generated_simulation_parameters))
                 .then_some(PSS_GENERATED_FLUX)
+            })
+            .or_else(|| {
+                (matches!(
+                    analysis,
+                    CapabilityAnalysis::Pac | CapabilityAnalysis::Pxf | CapabilityAnalysis::Pnoise
+                ) && device.periodic_integral_count() > 0)
+                    .then_some(PERIODIC_SMALL_SIGNAL_GENERATED_INTEGRAL)
             })
         else {
             continue;

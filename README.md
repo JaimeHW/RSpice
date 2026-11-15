@@ -171,7 +171,7 @@ A restricted cell runs the instances its condition admits and refuses the others
 - (11) every generated compact model whose harmonics a settled-transient fixture confirmed and whose generator proved its residual memoryless equations plus `ddt` (of a charge it contributes, or carried as an unknown of its own) and `idt` with an initial condition that fixes its DC output: no idtmod, cross, above, timer, last_crossing or $abstime in its equations, no `ddt` or `idt` a bias-dependent condition switches, and no variable the next evaluation reads back after the body assigned it
 - (12) every instance whose declared periodic contracts admit it, and on an event shooting orbit voltage- and current-controlled switches whose controls carry no small signal where they change
 - (13) on a harmonic-balance carrier, every Verilog-A module harmonic balance admits; on a shooting (PSS) carrier, every one both shooting and harmonic balance admit
-- (14) every generated compact model harmonic balance admits, on a harmonic-balance or a shooting (PSS) carrier
+- (14) every generated compact model harmonic balance admits with no `idt` carried as an unknown of its own, on a harmonic-balance or a shooting (PSS) carrier
 - (15) every instance whose declared periodic contracts admit it, and on an event shooting orbit voltage- and current-controlled switches whose controls carry no noise where they change, for driven noise from white sources, output-referred or sampled at a phase
 - (16) every Verilog-A module periodic AC admits on the same carrier, its white_noise and flicker_noise processes sampled over the orbit
 - (17) every generated compact model periodic AC admits on the same carrier, its white_noise and flicker_noise processes sampled over the orbit

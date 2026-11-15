@@ -48,6 +48,8 @@ mod integral_gauge;
 mod integral_replay_tests;
 mod state;
 pub(in crate::engine) use state::PssCircuit;
+#[cfg(feature = "veriloga-builtins-base")]
+pub(in crate::engine) use state::generated_integral_coordinate_name;
 mod history_events;
 mod mesh;
 mod time_control;

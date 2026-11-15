@@ -53,6 +53,18 @@ use rspice_veriloga_runtime::{
     GeneratedSimulationParameters,
 };
 
+/// The name harmonic balance gives the input or the output (`role`) row of
+/// a generated instance's `index`-th carried site, which a projection of a
+/// shooting orbit fills by the same name.
+pub(crate) fn generated_site_row_name(
+    instance: &str,
+    kind: GeneratedPeriodicKind,
+    index: usize,
+    role: &str,
+) -> String {
+    format!("{instance}:{kind:?}{index}:{role}")
+}
+
 /// Each carried site's input and output rows and its transfer, in site
 /// order, for the solver to register as networks.
 pub(super) type OperatorNetworks = Vec<(usize, usize, HbOperatorTransfer)>;

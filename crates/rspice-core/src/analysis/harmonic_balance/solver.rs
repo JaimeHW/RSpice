@@ -57,6 +57,8 @@ pub(crate) enum HbOperatorTransfer {
 
 #[cfg(feature = "veriloga-builtins-base")]
 use generated_veriloga::HbGeneratedDevice;
+#[cfg(feature = "veriloga-builtins-base")]
+pub(crate) use generated_veriloga::generated_site_row_name;
 #[cfg(feature = "veriloga")]
 use veriloga::HbVerilogADevice;
 
