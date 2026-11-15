@@ -19,7 +19,11 @@ fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
 }
 
-#[cfg(feature = "veriloga-model-r2-cmc")]
+#[cfg(any(
+    feature = "veriloga-model-r2-cmc",
+    feature = "veriloga-model-bjt504va",
+    feature = "veriloga-model-angelov"
+))]
 fn run_hb(deck: &str) -> HbAnalysisResult {
     let netlist = Netlist::parse(deck).expect("parse");
     engine()
