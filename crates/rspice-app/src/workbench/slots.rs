@@ -16,7 +16,7 @@ use rspice_app_models::workbench::slots::models;
 use rspice_app_project::workbench::slots::project;
 use rspice_app_results::workbench::slots::results;
 use rspice_app_runs::workbench::slots::runs;
-pub(in crate::workbench) use rspice_app_services::workbench::slots::platform;
+use rspice_app_services::workbench::slots::platform;
 use rspice_app_settings::workbench::slots::settings;
 use rspice_app_sheets::workbench::slots::sheets;
 mod shell;

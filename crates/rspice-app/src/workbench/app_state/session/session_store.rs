@@ -11,8 +11,8 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::services::session::SessionKept;
 use crate::workbench::app_state::{Model, PlatformState};
+use rspice_app_services::services::session::SessionKept;
 
 /// What the store did with one encoding of the session.
 pub(crate) enum Offer {

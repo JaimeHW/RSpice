@@ -108,7 +108,6 @@ pub(crate) mod services {
     pub(crate) use rspice_app_cloud::services::license;
     pub(crate) use rspice_app_services::services::model_hub;
     pub(crate) use rspice_app_services::services::recent_files;
-    pub(crate) use rspice_app_services::services::session;
 
     // No flattening re-exports: every consumer of a service type names the module
     // that defines it, so the owner of a name is readable at the use site.
@@ -129,9 +128,6 @@ pub(crate) use rspice_app_state::quantity;
 /// model and the structured, filterable application log.
 pub(crate) use rspice_app_state::diagnostics;
 
-/// The build this process runs, installed by the shell at startup for the
-/// layers below it.
-pub(crate) use rspice_app_services::build_identity;
 /// Clock shims for the browser build. `std::time::{Instant, SystemTime}` trap
 /// at runtime on wasm32-unknown-unknown, so every layer uses these instead.
 pub(crate) use rspice_app_state::time_compat;

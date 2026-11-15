@@ -12,12 +12,9 @@ use crate::diagnostics::{LogSeverity, LogSource};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::FileWorkflowIo;
 use crate::io::ProjectSnapshot;
-use crate::services::session::SessionKept;
 use crate::state::{CellViewRef, LibraryManager, ViewType};
 use crate::workbench::app::actions::workspace::symbol_document::revert_active_symbol_with;
 use crate::workbench::app_state::AppState;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::workbench::app_state::session::autosave::{self, AutosaveRestore};
 use crate::workbench::app_state::session::serialization::WithoutRuns;
 use crate::workbench::app_state::session::session_store::{Offer, offer, settle};
 use crate::workbench::lifecycle::project_lifecycle::{
@@ -28,6 +25,9 @@ use crate::workbench::lifecycle::project_lifecycle::{
 use crate::workbench::lifecycle::recovery::{self, RecoveryCandidate};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::workflows::file_workflow;
+use rspice_app_services::services::session::SessionKept;
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_app_services::workbench::app_state::session::autosave::{self, AutosaveRestore};
 
 impl LifecycleSource for AppState {
     fn lifecycle_view(&self) -> LifecycleView<'_> {

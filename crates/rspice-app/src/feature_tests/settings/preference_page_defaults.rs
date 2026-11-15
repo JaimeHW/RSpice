@@ -157,7 +157,7 @@ fn restoring_a_page_clears_every_override_behind_it() {
         );
         assert_eq!(
             app.state.platform.autosave_minutes,
-            crate::services::session::DEFAULT_AUTOSAVE_MINUTES,
+            rspice_app_services::services::session::DEFAULT_AUTOSAVE_MINUTES,
             "{} left the autosave interval changed",
             category.label()
         );

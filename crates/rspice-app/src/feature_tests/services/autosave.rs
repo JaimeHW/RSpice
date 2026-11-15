@@ -1,7 +1,7 @@
 //! Autosave's failure notice, through the application that shows it.
 
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::session::autosave::autosave_tick;
+use rspice_app_services::workbench::app_state::session::autosave::autosave_tick;
 
 /// A checkpoint that could not be written is said when it happens: the
 /// user is relying on it, and a bell record is found too late.

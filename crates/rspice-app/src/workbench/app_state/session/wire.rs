@@ -102,7 +102,7 @@ pub(in crate::workbench) struct UiSessionWire {
 }
 
 fn default_autosave_minutes() -> u8 {
-    crate::services::session::DEFAULT_AUTOSAVE_MINUTES
+    rspice_app_services::services::session::DEFAULT_AUTOSAVE_MINUTES
 }
 
 fn default_true() -> bool {
