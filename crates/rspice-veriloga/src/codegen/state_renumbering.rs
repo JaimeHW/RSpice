@@ -1157,6 +1157,7 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
         internal_nodes: _,
         internal_state_nodes: _,
         branch_sources,
+        shorting_switches: _,
         laplace_filters: _,
         zi_filters: _,
         zi_filter_definitions,

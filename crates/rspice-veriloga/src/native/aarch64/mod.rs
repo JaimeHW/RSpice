@@ -306,6 +306,7 @@ mod tests {
             internal_nodes: 0,
             internal_state_nodes: Vec::new(),
             branch_sources: Vec::new(),
+            shorting_switches: Vec::new(),
             laplace_filters: Vec::new(),
             zi_filters: Vec::new(),
             zi_filter_definitions: Vec::new(),

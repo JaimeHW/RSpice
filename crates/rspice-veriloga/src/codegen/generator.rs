@@ -554,6 +554,16 @@ impl CodeGenerator {
                     })
                 })
                 .collect::<CompileResult<Vec<_>>>()?,
+            shorting_switches: ir
+                .shorting_switches
+                .iter()
+                .map(|switch| CompiledShortingSwitch {
+                    kind: switch.kind,
+                    state: Self::node_stamp_index(num_terminals, switch.state),
+                    pos: Self::node_stamp_index(num_terminals, switch.pos),
+                    neg: Self::node_stamp_index(num_terminals, switch.neg),
+                })
+                .collect(),
             laplace_filters: Vec::new(),
             zi_filters: Vec::new(),
             zi_filter_definitions: Vec::new(),

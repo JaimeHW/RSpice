@@ -156,6 +156,8 @@ pub struct CompiledModel {
     /// Branch-current unknowns required by potential contributions; the
     /// engine must allocate one extra system unknown per entry
     pub branch_sources: Vec<CompiledBranchSource>,
+    /// The private switch branches whose potential arm is a short.
+    pub shorting_switches: Vec<CompiledShortingSwitch>,
     /// Laplace state-space filters
     pub laplace_filters: Vec<StateSpaceFilter>,
     /// Z-domain (sampled-data) filters
@@ -798,6 +800,24 @@ pub struct CompiledBranchSource {
     pub indirect: bool,
     /// Evaluated once after parameter defaults and overrides are resolved.
     pub equation_abstol: Option<BytecodeProgram>,
+}
+
+/// A switch branch whose current only its own equation reads, and whose
+/// every potential write is the literal zero.
+///
+/// In its potential arm the branch shorts `pos` to `neg`. When an instance
+/// binds both to one circuit node, that row and the current's KCL column are
+/// empty: the short carries no current anyone can observe, so the host holds
+/// the current at zero, as a host that merges the two nodes drops it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledShortingSwitch {
+    /// The variable slot holding the branch's source kind, 1 in the
+    /// potential arm.
+    pub kind: usize,
+    /// The branch's current unknown, an internal state node.
+    pub state: StampIndex,
+    pub pos: StampIndex,
+    pub neg: StampIndex,
 }
 
 /// Jacobian entry

@@ -1074,6 +1074,49 @@ fn an_omitted_port_the_module_ties_is_a_net_of_the_instances_own() {
     );
 }
 
+/// The `.va` route alone, on a module a debug build compiles at once, whose
+/// ports the card wires to node 0. While the parameter `sh` is 0 the module
+/// ties `t` through a switch branch in its potential arm (`V(t) <+ 0`, a flow
+/// otherwise) and `u` through a plain source (`V(u) <+ 0`). Each tie's current
+/// then stamps into node 0 alone: its row and column are empty, and nothing
+/// can observe it. The generated route allocates no unknown for either, as
+/// Xyce and OSDI collapse such a branch; the `.va` route holds each current on
+/// the diagonal. It used to keep both bare, and every BSIM-BULK, BSIM-CMG 111
+/// and 112, BSIM-IMG, BSIM-SOI 4.7 and 100, ASM-ESD, HICUM L2 and MVSG card
+/// that wired its thermal terminal to node 0 was singular on it. With `sh = 1`
+/// the switch carries its own current and the source is undriven.
+#[test]
+fn a_module_tie_of_a_port_wired_to_node_0_leaves_the_circuit_regular() {
+    let path = std::env::temp_dir().join(format!(
+        "rspice_grounded_port_tie_{}.va",
+        std::process::id()
+    ));
+    std::fs::write(
+        &path,
+        "`include \"disciplines.vams\"\nmodule tie(a, b, t, u);\ninout a, b, t, u;\n\
+         electrical a, b, t, u;\nparameter integer sh = 0;\nanalog begin\n  \
+         I(a, b) <+ V(a, b) / 1k;\n  if (sh == 0) begin\n    V(t) <+ 0;\n    V(u) <+ 0;\n  \
+         end else\n    I(t) <+ V(t) / 1k;\nend\nendmodule\n",
+    )
+    .expect("write the module");
+    let source = path.display().to_string().replace('\\', "/");
+    for sh in [0, 1] {
+        let deck = format!(
+            "* port ties on node 0, sh={sh}\n.va \"{source}\" tie\n\
+             V1 in 0 DC 1 SIN(1 0.5 1MEG)\nX1 in 0 0 0 tie sh={sh}\n.end\n"
+        );
+        let op = operating_point_trace(&deck, &["in"], &["V1"]);
+        assert_eq!(op[0].text.as_deref(), Some("ok"), "sh={sh}: {op:?}");
+        assert!(
+            (traced(&op, "op.i(V1)") + 1.0e-3).abs() < 1.0e-9,
+            "sh={sh}: 1 V across 1k, and gmin: {op:?}"
+        );
+        let tran = transient_trace(&deck, 2.0e-6, 1.0e-7, &["in"], &["V1"]);
+        assert_eq!(tran[0].text.as_deref(), Some("ok"), "sh={sh}: {tran:?}");
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
 /// A compact model's own nodes take no GMIN floor, so the model alone must
 /// give each one a DC path. An omitted port no equation reaches (`u`: empty
 /// row, column and right-hand side) is solved by any value and nothing sees
@@ -1324,6 +1367,44 @@ fn bsimbulk_reaches_an_operating_point_with_its_thermal_terminal_omitted() {
     ];
     assert_operating_points_identical("BSIM-BULK on d g s b", &traces);
     assert_eq!(traced(&traces[0].1, "op.v(t)"), 0.0);
+    assert!(
+        traced(&traces[0].1, "op.i(Vd)") < -1.0e-6,
+        "{:?}",
+        traces[0].1
+    );
+}
+
+/// BSIM-BULK 107.2.1 on `d g s b t`, `t` wired to node 0: with self-heating
+/// off the module ties `t` to ground, `Temp(t) <+ 0`, a short from node 0 to
+/// node 0. The `.va` route's X card, the generated X card and the generated M
+/// card reach the same operating point, bit for bit.
+#[cfg(feature = "veriloga-model-bsimbulk")]
+#[test]
+fn bsimbulk_reaches_an_operating_point_with_its_thermal_terminal_grounded() {
+    let supplies = "Vd d 0 0.5\nVg g 0 1.0";
+    let x_card = format!("{supplies}\nX1 d g 0 0 0 bsimbulk L=1u W=10u");
+    let m_card = format!("{supplies}\nM1 d g 0 0 0 nch L=1u W=10u\n.model nch bsimbulk");
+    let runtime = format!(
+        "* bsimbulk runtime route\n.va \"{}\" bsimbulk\n{x_card}\n.end\n",
+        model_source("models/veriloga/cmc/BSIM-BULK107.2.1_02112025/code/bsimbulk.va")
+    );
+    let generated_x = format!("* bsimbulk generated X card\n{x_card}\n.end\n");
+    let generated_m = format!("* bsimbulk generated M card\n{m_card}\n.end\n");
+    assert!(!uses_generated_devices(&runtime));
+    assert!(uses_generated_devices(&generated_x) && uses_generated_devices(&generated_m));
+    let (nodes, branches) = (&["d", "g"][..], &["Vd", "Vg"][..]);
+    let traces = [
+        (".va X", operating_point_trace(&runtime, nodes, branches)),
+        (
+            "generated X",
+            operating_point_trace(&generated_x, nodes, branches),
+        ),
+        (
+            "generated M",
+            operating_point_trace(&generated_m, nodes, branches),
+        ),
+    ];
+    assert_operating_points_identical("BSIM-BULK on d g s b t, t on node 0", &traces);
     assert!(
         traced(&traces[0].1, "op.i(Vd)") < -1.0e-6,
         "{:?}",

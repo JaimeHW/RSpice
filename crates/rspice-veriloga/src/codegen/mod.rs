@@ -23,8 +23,8 @@ pub use lookup_table::TableRangeError;
 pub use model::{
     AnalogOperatorOrigin, AssignmentProgram, AssignmentStep, BytecodeProgram, CodeGenerator,
     ColumnAxis, CompiledBranchSource, CompiledModel, CompiledNoiseInjection, CompiledNoiseSource,
-    CompiledParameter, CompiledZiFilterDefinition, CompiledZiPolynomial, Instruction,
-    JacobianEntry, LookupTable, StampIndex, StampLocation, StampProgram, TableControl,
+    CompiledParameter, CompiledShortingSwitch, CompiledZiFilterDefinition, CompiledZiPolynomial,
+    Instruction, JacobianEntry, LookupTable, StampIndex, StampLocation, StampProgram, TableControl,
     TableExtrapolation, TableInterpolation, ZiPolynomialLayout, ZiRuntimeLayout,
 };
 pub use state_renumbering::StateRenumberingError;

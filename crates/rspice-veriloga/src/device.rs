@@ -1605,6 +1605,10 @@ pub struct MatrixIndices {
     pub reactive: Vec<Vec<JacobianIndex>>,
     /// RHS mappings grouped per stamp program.
     pub rhs: Vec<Vec<RhsIndex>>,
+    /// `(row, kind slot)` of each shorting switch whose two nodes this
+    /// instance binds to one circuit node; see
+    /// [`crate::codegen::CompiledShortingSwitch`].
+    pub self_shorted_switches: Vec<(usize, usize)>,
 }
 
 /// Single Jacobian matrix entry index
@@ -6161,16 +6165,33 @@ impl VerilogADevice {
             reactive[program_idx] = map_entries(&program.reactive_jacobians, program_idx);
         }
 
+        let node = |index: &StampIndex| {
+            Self::index_to_node(
+                index,
+                &self.node_mapping,
+                &self.internal_node_indices,
+                &self.branch_current_indices,
+            )
+        };
+        let self_shorted_switches = self
+            .model
+            .shorting_switches
+            .iter()
+            .filter(|switch| node(&switch.pos) == node(&switch.neg))
+            .filter_map(|switch| Some((node(&switch.state)?, switch.kind)))
+            .collect();
         self.matrix_indices = MatrixIndices {
             jacobian,
             reactive,
             rhs,
+            self_shorted_switches,
         };
         let matrix_capacity = self
             .model
             .branch_sources
             .len()
             .saturating_mul(4)
+            .saturating_add(self.matrix_indices.self_shorted_switches.len())
             .saturating_add(
                 self.matrix_indices
                     .jacobian
@@ -6372,6 +6393,8 @@ impl VerilogADevice {
             &self.node_mapping,
             &self.internal_node_indices,
             &self.branch_current_indices,
+            &matrix_indices.self_shorted_switches,
+            &self.context.variables,
             &mut real_structural,
             self.context.multiplicity,
         );
@@ -6470,6 +6493,8 @@ impl VerilogADevice {
             &self.node_mapping,
             &self.internal_node_indices,
             &self.branch_current_indices,
+            &self.matrix_indices.self_shorted_switches,
+            &self.context.variables,
             &mut structural,
             self.context.multiplicity,
         );
@@ -8009,15 +8034,35 @@ impl VerilogADevice {
         self.try_stamp_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
     }
 
+    /// The entries no program computes: each branch unknown's incidence, and a
+    /// unit diagonal on a current that no node's balance can see.
+    ///
+    /// That is the current of an undriven source branch; of a direct source
+    /// whose two ends the instance binds to one circuit node, as a card that
+    /// wires a thermal terminal to node 0 binds a module's own `Temp(t) <+ 0`;
+    /// and of a shorting switch in its potential arm on one node the same way.
+    /// Its column is empty, and the generated route allocates no unknown for
+    /// it, as Xyce and OSDI collapse such a branch. Holding it on the diagonal
+    /// keeps the matrix regular and leaves every other unknown as the
+    /// collapsed circuit has it. An indirect source keeps its incidence: its
+    /// row is a constraint that a branch on one node cannot meet.
+    #[allow(clippy::too_many_arguments)]
     fn buffer_structural_branches(
         model: &CompiledModel,
         branch_active: &[bool],
         node_mapping: &[usize],
         internal_node_indices: &[usize],
         branch_current_indices: &[usize],
+        self_shorted_switches: &[(usize, usize)],
+        variables: &[f64],
         matrix_buffer: &mut Vec<(usize, usize, f64)>,
         multiplicity: f64,
     ) {
+        for &(row, kind) in self_shorted_switches {
+            if variables.get(kind) == Some(&1.0) {
+                matrix_buffer.push((row, row, 1.0));
+            }
+        }
         for (ordinal, source) in model.branch_sources.iter().enumerate() {
             let br = Self::index_to_node(
                 &StampIndex::Branch(ordinal),
@@ -8044,6 +8089,10 @@ impl VerilogADevice {
                 internal_node_indices,
                 branch_current_indices,
             );
+            if pos == neg && !source.indirect {
+                matrix_buffer.push((br, br, 1.0));
+                continue;
+            }
 
             if let Some(p) = pos {
                 matrix_buffer.push((p, br, multiplicity));
@@ -8291,6 +8340,8 @@ impl VerilogADevice {
             &self.node_mapping,
             &self.internal_node_indices,
             &self.branch_current_indices,
+            &self.matrix_indices.self_shorted_switches,
+            &self.context.variables,
             &mut self.stamp_matrix_buffer,
             m,
         );
@@ -8426,6 +8477,8 @@ impl VerilogADevice {
             &self.node_mapping,
             &self.internal_node_indices,
             &self.branch_current_indices,
+            &matrix_indices.self_shorted_switches,
+            &vm.context.variables,
             &mut self.stamp_matrix_buffer,
             m,
         );

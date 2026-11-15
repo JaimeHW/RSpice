@@ -286,6 +286,8 @@ pub struct DeviceIR {
     pub equations: Vec<BranchEquation>,
     /// Branch-current unknowns introduced by potential contributions
     pub branch_unknowns: Vec<BranchUnknownDef>,
+    /// The private switch branches whose potential arm is a short.
+    pub shorting_switches: Vec<ShortingSwitchDef>,
     /// Noise sources
     pub noise_sources: Vec<NoiseSourceDef>,
     /// Where the spliced reaching-definition copies belong for a route that
@@ -449,6 +451,17 @@ pub struct BranchUnknownDef {
     /// not be stamped
     pub indirect: bool,
     pub equation_abstol: Option<NodeId>,
+}
+
+/// A private switch branch whose potential arm writes zero: the slot holding
+/// its source kind, and its current unknown and two nodes as unified node
+/// indices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShortingSwitchDef {
+    pub kind: usize,
+    pub state: usize,
+    pub pos: usize,
+    pub neg: usize,
 }
 
 /// Branch reference
@@ -706,6 +719,7 @@ impl DeviceIR {
             arrays: Vec::new(),
             equations: Vec::new(),
             branch_unknowns: Vec::new(),
+            shorting_switches: Vec::new(),
             noise_sources: Vec::new(),
             reaching_snapshots: ReachingSnapshotPlan::default(),
         };
@@ -991,6 +1005,19 @@ impl DeviceIR {
             parsed_contribs.push(branch_ref);
         }
         let num_branches = ir.branch_unknowns.len();
+        ir.shorting_switches = module
+            .private_switches
+            .iter()
+            .filter(|switch| switch.shorts)
+            .filter_map(|switch| {
+                Some(ShortingSwitchDef {
+                    kind: switch.kind,
+                    state: ctx.node_index(&switch.state)?,
+                    pos: ctx.node_index(&switch.pos)?,
+                    neg: ctx.node_index(&switch.neg)?,
+                })
+            })
+            .collect();
 
         // Convert contribution expressions exactly once.  Besides avoiding
         // duplicate stateful-operator identities, this makes the preorder
