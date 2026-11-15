@@ -261,15 +261,17 @@ pub struct PublicationDraft {
 pub trait HardcopyPort {
     /// The validated publication snapshot `draft` describes, built from the
     /// open project in `model` as `workbench`, `results` and `runs` show it:
-    /// every printable schematic sheet and plot pane, the active run's
-    /// analyses, datasets and measurements, and the effective deck. A refusal
-    /// names the boundary that refused.
+    /// every printable schematic sheet, lettering the part labels
+    /// `parameter_labels` says the canvas letters, and every plot pane, the
+    /// active run's analyses, datasets and measurements, and the effective
+    /// deck. A refusal names the boundary that refused.
     fn build_publication_snapshot(
         &self,
         model: &Model,
         workbench: &WorkbenchSession,
         results: &dyn ResultsPort,
         runs: &RunsState,
+        parameter_labels: SchematicParameterLabelVisibility,
         draft: &PublicationDraft,
     ) -> Result<rspice_publication_contract::PublicationSnapshot, String>;
 

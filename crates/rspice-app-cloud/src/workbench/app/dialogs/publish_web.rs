@@ -23,7 +23,7 @@ use crate::workbench::app::dialogs::unpublish_web::{
     UnpublishWebDialogState, open_unpublish_web_dialog,
 };
 use crate::workbench::app_state::Model;
-use crate::workbench::framework::feature::{HardcopyPort, PublicationDraft};
+use crate::workbench::framework::feature::{DesignPort, HardcopyPort, PublicationDraft};
 use crate::workbench::framework::ports::ResultsPort;
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
@@ -81,11 +81,13 @@ pub struct PublishWebDialogState {
     pub submitted: bool,
 }
 
-/// What a review build reads: the open project, and the hardcopy feature's
+/// What a review build reads: the open project, the design workspace that
+/// says which part labels the canvas letters, and the hardcopy feature's
 /// port with the parts it builds the snapshot from beside its own state.
 #[derive(Clone, Copy)]
 pub struct SnapshotSource<'a> {
     pub hardcopy: &'a dyn HardcopyPort,
+    pub design: &'a dyn DesignPort,
     pub model: &'a Model,
     pub workbench: &'a WorkbenchSession,
     pub results: &'a dyn ResultsPort,
@@ -93,13 +95,15 @@ pub struct SnapshotSource<'a> {
 }
 
 impl<'a> SnapshotSource<'a> {
-    /// The snapshot `draft` describes, as the hardcopy feature builds it.
-    fn build(self, draft: &PublicationDraft) -> Result<PublicationSnapshot, String> {
+    /// The snapshot `draft` describes, as the hardcopy feature builds it,
+    /// lettering the part labels the design workspace's canvas letters.
+    pub fn build(self, draft: &PublicationDraft) -> Result<PublicationSnapshot, String> {
         self.hardcopy.build_publication_snapshot(
             self.model,
             self.workbench,
             self.results,
             self.runs,
+            self.design.parameter_labels(),
             draft,
         )
     }
@@ -158,12 +162,14 @@ pub(crate) fn open_publish_web_dialog(
 /// What the publish dialog reads and writes: its own fields, the unpublish
 /// dialog it hands a live page to, the account service that publishes, the
 /// model it builds from and logs to, the session it prompts in, and what the
-/// hardcopy feature, the results workspace and the run tier lend the build.
+/// hardcopy feature, the design workspace, the results workspace and the run
+/// tier lend the build.
 pub(crate) struct PublishWebParts<'a> {
     pub dialog: &'a mut PublishWebDialogState,
     pub unpublish: &'a mut UnpublishWebDialogState,
     pub account: &'a mut CloudAccountService,
     pub hardcopy: &'a dyn HardcopyPort,
+    pub design: &'a dyn DesignPort,
     pub model: &'a mut Model,
     pub workbench: &'a mut WorkbenchSession,
     pub results: &'a dyn ResultsPort,
@@ -175,6 +181,7 @@ impl PublishWebParts<'_> {
     fn source(&self) -> SnapshotSource<'_> {
         SnapshotSource {
             hardcopy: self.hardcopy,
+            design: self.design,
             model: &*self.model,
             workbench: &*self.workbench,
             results: self.results,

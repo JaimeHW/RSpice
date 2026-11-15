@@ -14,6 +14,7 @@ use rspice_app_workbench::workbench::framework::feature::PublicationDraft;
 fn snapshot_source(state: &AppState) -> SnapshotSource<'_> {
     SnapshotSource {
         hardcopy: &*state.hardcopy,
+        design: &*state.design,
         model: &state.model,
         workbench: &state.workbench,
         results: &*state.results,
@@ -35,6 +36,75 @@ fn empty_project_scope_reports_the_builder_refusal() {
     );
     let reason = scope.expect_err("empty project cannot publish");
     assert!(reason.contains("no schematic"), "{reason}");
+}
+
+/// A published design letters the part labels the author's canvas letters,
+/// names and values, values only, or neither, as a print of it does.
+#[test]
+fn a_published_design_letters_the_part_labels_the_canvas_shows() {
+    use rspice_design::schematic::component_display::SchematicParameterLabelVisibility;
+    use rspice_publication_contract::Primitive;
+
+    let mut state = AppState::default();
+    state.model.schematic.add_component(
+        crate::state::ComponentType::Resistor,
+        crate::state::Point::new(0, 0),
+    );
+    let reference = state.model.workspace.content.active_view.clone();
+    state
+        .workbench
+        .documents
+        .activate(crate::workbench::state::WorkspaceDocumentId::CellView(
+            reference,
+        ));
+    let part = state.model.schematic.document().components[0].clone();
+    let letters = |state: &AppState| -> Vec<String> {
+        let snapshot = snapshot_source(state)
+            .build(&PublicationDraft {
+                title: "Divider".to_owned(),
+                author_display: "Ada".to_owned(),
+                created_utc: "2026-08-06T00:00:00Z".to_owned(),
+                include_schematic: true,
+                ..Default::default()
+            })
+            .expect("a placed part publishes");
+        snapshot
+            .schematic
+            .expect("the schematic publishes")
+            .sheets
+            .into_iter()
+            .flat_map(|sheet| sheet.scene.groups)
+            .flat_map(|group| group.primitives)
+            .filter_map(|primitive| match primitive {
+                Primitive::Text(text) => Some(text.text),
+                Primitive::Path(_) => None,
+            })
+            .collect()
+    };
+    let shows = |letters: &[String], text: &str| letters.iter().any(|letter| letter == text);
+
+    for (labels, name, value) in [
+        (
+            SchematicParameterLabelVisibility::NamesAndValues,
+            true,
+            true,
+        ),
+        (SchematicParameterLabelVisibility::ValuesOnly, false, true),
+        (SchematicParameterLabelVisibility::Hidden, false, false),
+    ] {
+        state.design.schematic_visibility.parameter_labels = labels;
+        let published = letters(&state);
+        assert_eq!(
+            shows(&published, &part.name),
+            name,
+            "{labels:?}: {published:?}"
+        );
+        assert_eq!(
+            shows(&published, &part.value),
+            value,
+            "{labels:?}: {published:?}"
+        );
+    }
 }
 
 #[test]

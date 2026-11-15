@@ -190,6 +190,7 @@ fn publish_web_parts<'a>(cx: &'a mut Cx<'_, CloudFeature>) -> PublishWebParts<'a
         unpublish: &mut cloud.unpublish_web,
         account: &mut cx.own.account,
         hardcopy: cx.peers.hardcopy(),
+        design: cx.peers.design(),
         model: cx.model,
         workbench: cx.wb,
         results: cx.peers.results(),
@@ -329,6 +330,7 @@ impl CommandSet for CloudCommand {
             Self::PublishToWeb => {
                 let source = SnapshotSource {
                     hardcopy: cx.peers.hardcopy(),
+                    design: cx.peers.design(),
                     model: cx.model,
                     workbench: cx.wb,
                     results: cx.peers.results(),

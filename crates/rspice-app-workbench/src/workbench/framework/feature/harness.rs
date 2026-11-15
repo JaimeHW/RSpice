@@ -25,7 +25,9 @@ use rspice_results_ui::histogram::HistogramState;
 use rspice_results_ui::presentation::PlotView;
 use rspice_results_ui::selection::SelectedResultTrace;
 use rspice_results_ui::session::MarkerView;
-use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
+use rspice_schematic_editor::session::visibility::{
+    SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility,
+};
 use rspice_ui_kit::plot::CursorPair;
 use rspice_vocabulary::product::ResultDocumentId;
 
@@ -151,6 +153,7 @@ impl HardcopyPort for NullPorts {
         _workbench: &crate::workbench::state::WorkbenchSession,
         _results: &dyn ResultsPort,
         _runs: &RunsState,
+        _parameter_labels: SchematicParameterLabelVisibility,
         _draft: &PublicationDraft,
     ) -> Result<rspice_publication_contract::PublicationSnapshot, String> {
         Err("a feature's own test builds no publication snapshot".to_owned())

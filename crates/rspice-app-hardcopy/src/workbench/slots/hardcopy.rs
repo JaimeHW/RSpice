@@ -11,6 +11,7 @@ use crate::workbench::hardcopy_adapters::publication_snapshot::{
 use crate::workbench::hardcopy_adapters::sources::SourceReads;
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::slots::runs::RunsState;
+use rspice_design::schematic::component_display::SchematicParameterLabelVisibility;
 
 /// What the hardcopy feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -33,6 +34,7 @@ impl HardcopyPort for HardcopyState {
         workbench: &WorkbenchSession,
         results: &dyn ResultsPort,
         runs: &RunsState,
+        parameter_labels: SchematicParameterLabelVisibility,
         draft: &PublicationDraft,
     ) -> Result<rspice_publication_contract::PublicationSnapshot, String> {
         let reads = PublicationReads {
@@ -41,9 +43,9 @@ impl HardcopyPort for HardcopyState {
                 workbench,
                 report_authoring: &self.report_authoring,
                 results,
-                // A published design letters every part's name and value,
-                // whatever the author's canvas shows.
-                parameter_labels: Default::default(),
+                // A published design letters the part labels the author's
+                // canvas letters, as a print of it does.
+                parameter_labels,
             },
             runs,
         };
