@@ -1288,9 +1288,21 @@ pub struct Netlist {
     /// The compatibility dialect the deck was read in (see
     /// [`NetlistParseOptions::spice_dialect`]); flattening and replay keep it.
     pub(crate) parse_dialect: crate::config::SpiceDialect,
+    /// Whether the deck was read without the `.model` cards nothing names
+    /// ([`NetlistParseOptions::skip_unreferenced_models`]); replay keeps it.
+    pub(crate) skip_unreferenced_models: bool,
+    /// How many `.model` cards that reading skipped.
+    pub(crate) skipped_model_cards: usize,
 }
 
 impl Netlist {
+    /// Whether this deck was read without the `.model` cards nothing names
+    /// (see [`NetlistParseOptions::skip_unreferenced_models`]). A replay of
+    /// the deck reads it the same way.
+    pub fn skips_unreferenced_models(&self) -> bool {
+        self.skip_unreferenced_models
+    }
+
     /// Resolved paths read by `.INCLUDE`/`.LIB` expansion, including empty
     /// files and library sections. Excludes the root (`source_path`) and files
     /// loaded later by device elaboration. Sealed inputs retain virtual paths.
@@ -1854,6 +1866,7 @@ impl Netlist {
         let (read, unread_sections) = include::read_inline_library_sections(input)?;
         let (declarative, control_script) =
             control_source::prepare_text(&read, options.retain_control_script, abort)?;
+        let options = options.with_control_script(control_script.is_some());
         let (sanitized, mut diagnostics, dispositions) =
             Self::sanitize_control_regions_with_abort(&declarative, abort)?;
         let mut netlist = parser::parse_netlist_with_parameter_overrides_and_abort(
@@ -2094,6 +2107,7 @@ impl Netlist {
             include_processor.expand_content_mapped_with_abort(input, file_path, abort)?;
         let (expanded, control_script) =
             control_source::prepare_expanded(expanded, options.retain_control_script, abort)?;
+        let options = options.with_control_script(control_script.is_some());
         let (sanitized, mut diagnostics, dispositions) =
             Self::sanitize_expanded_source_with_abort(expanded, abort)?;
         let mut netlist = parser::parse_expanded_netlist_with_parameter_overrides_and_abort(
@@ -2148,6 +2162,7 @@ impl Netlist {
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         options.retain_control_script |= self.control_script.is_some();
+        options.skip_unreferenced_models |= self.skip_unreferenced_models;
         options.spice_dialect.get_or_insert(self.parse_dialect);
         match (&self.replay_context, self.source_path.as_deref()) {
             (Some(NetlistReplayContext::InMemory), _) | (None, None) => {
@@ -2445,6 +2460,7 @@ impl Netlist {
         let expanded = processor.expand_content_mapped_with_abort(input, path, abort)?;
         let (expanded, control_script) =
             control_source::prepare_expanded(expanded, options.retain_control_script, abort)?;
+        let options = options.with_control_script(control_script.is_some());
         let (sanitized, mut diagnostics, dispositions) =
             Self::sanitize_expanded_source_with_abort(expanded, abort)?;
         let mut netlist = parser::parse_expanded_netlist_with_parameter_overrides_and_abort(
@@ -3938,6 +3954,8 @@ impl Default for Netlist {
             ast_overlay: NetlistAstOverlay::default(),
             parameter_direction: None,
             parse_dialect: crate::config::SpiceDialect::BestAvailable,
+            skip_unreferenced_models: false,
+            skipped_model_cards: 0,
         }
     }
 }

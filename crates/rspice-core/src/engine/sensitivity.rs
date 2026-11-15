@@ -741,6 +741,7 @@ impl Engine {
                 .params
                 .parameter_redefinition_diagnostic_policy(),
             resource_limits,
+            skip_unreferenced_models: netlist.skips_unreferenced_models(),
         };
         let mut reparsed = netlist
             .replay_root_source_with_parameter_overrides_and_abort(

@@ -818,6 +818,8 @@ fn clone_netlist_with_abort(
         ast_overlay: Default::default(),
         parameter_direction: None,
         parse_dialect: source.parse_dialect,
+        skip_unreferenced_models: source.skip_unreferenced_models,
+        skipped_model_cards: source.skipped_model_cards,
     })
 }
 

@@ -17,11 +17,16 @@ pub(super) fn parse_options_for_run(
     args: &RunArgs,
     resource_limits: rspice_core::ResourceLimits,
 ) -> rspice_core::netlist::NetlistParseOptions {
-    crate::commands::input::parse_options(
-        &args.netlist_options,
-        resource_limits,
-        requested_mode_name(args).is_none(),
-    )
+    // A run reads only the model cards its deck names; `check` still reads
+    // every card it validates.
+    rspice_core::netlist::NetlistParseOptions {
+        skip_unreferenced_models: true,
+        ..crate::commands::input::parse_options(
+            &args.netlist_options,
+            resource_limits,
+            requested_mode_name(args).is_none(),
+        )
+    }
 }
 
 /// `--pss-freq` and an authored `.PSS` both name a periodic steady state.

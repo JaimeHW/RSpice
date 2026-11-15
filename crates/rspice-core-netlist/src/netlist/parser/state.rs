@@ -160,6 +160,10 @@ pub(super) struct ParseState {
     pub(super) machine_count: usize,
     /// Root element cards that name a `.param` declared later in the deck.
     pub(super) forward_parameters: super::forward_params::ForwardParameters,
+    /// The `.model` cards nothing names, when the parse skips them.
+    pub(super) unreferenced_models: Option<super::model_references::UnreferencedModels>,
+    /// How many `.model` cards were skipped.
+    pub(super) skipped_model_cards: usize,
 }
 
 impl ParseState {
@@ -214,6 +218,8 @@ impl ParseState {
             open_machine: None,
             machine_count: 0,
             forward_parameters: Default::default(),
+            unreferenced_models: None,
+            skipped_model_cards: 0,
         }
     }
 
@@ -314,6 +320,8 @@ impl ParseState {
             ast_overlay: Default::default(),
             parameter_direction: self.parameter_direction,
             parse_dialect: self.spice_dialect,
+            skip_unreferenced_models: false,
+            skipped_model_cards: self.skipped_model_cards,
         };
         if self.spice_dialect == crate::config::SpiceDialect::Ngspice {
             dialect_instances::apply_ngspice_instance_readings(&mut netlist);

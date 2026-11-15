@@ -165,6 +165,7 @@ mod hb_card;
 mod laplace_synthesis;
 mod line;
 mod machine;
+mod model_references;
 #[doc(hidden)]
 pub mod monte_carlo_identity;
 mod periodic_cards;
@@ -319,6 +320,14 @@ pub struct NetlistParseOptions {
     pub parameter_redefinition_diagnostic_policy: ParameterRedefinitionDiagnosticPolicy,
     /// Limits applied before parser-owned collections are materialized.
     pub resource_limits: crate::resource::ResourceLimits,
+    /// Read only the `.model` cards some other card of the deck names, the
+    /// families of binned models and the cards those cards name. A run reads
+    /// a large library section in the time its few used models take. Off by
+    /// default: a parse that lists a deck's models, as an editor or a model
+    /// browser does, wants every card. A deck that draws statistical values,
+    /// holds HDL that may instantiate a model card or keeps a `.control`
+    /// script reads every card.
+    pub skip_unreferenced_models: bool,
 }
 
 impl Default for NetlistParseOptions {
@@ -332,6 +341,19 @@ impl Default for NetlistParseOptions {
             parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
             parameter_redefinition_diagnostic_policy: ParameterRedefinitionDiagnosticPolicy::Silent,
             resource_limits: crate::resource::ResourceLimits::default(),
+            skip_unreferenced_models: false,
+        }
+    }
+}
+
+impl NetlistParseOptions {
+    /// These options for a deck whose `.control` script is retained: the
+    /// script may name models (`altermod`, `showmod`) that no declarative
+    /// card names, so such a deck reads every model card.
+    pub(crate) fn with_control_script(self, retained: bool) -> Self {
+        Self {
+            skip_unreferenced_models: self.skip_unreferenced_models && !retained,
+            ..self
         }
     }
 }
@@ -590,24 +612,44 @@ pub(crate) fn parse_netlist_with_parameter_overrides_and_abort(
     overrides: &[ParameterOverride],
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
-    parse_with_consistent_random_seed(|seed| {
-        parse_with_consistent_temperatures(|temperatures| {
-            parse_with_settled_root_redefinitions(|redefinitions| {
-                parse_netlist_impl(
-                    input,
-                    options,
-                    None,
-                    None,
-                    ParserReplay {
-                        seed,
-                        temperatures,
-                        redefinitions: Some(redefinitions),
-                    },
-                    overrides,
-                    abort,
-                )
+    parse_reading_reachable_models(options, |options| {
+        parse_with_consistent_random_seed(|seed| {
+            parse_with_consistent_temperatures(|temperatures| {
+                parse_with_settled_root_redefinitions(|redefinitions| {
+                    parse_netlist_impl(
+                        input,
+                        options,
+                        None,
+                        None,
+                        ParserReplay {
+                            seed,
+                            temperatures,
+                            redefinitions: Some(redefinitions),
+                        },
+                        overrides,
+                        abort,
+                    )
+                })
             })
         })
+    })
+}
+
+/// Parse under `options`, then once more reading every `.model` card when a
+/// parse that skipped some finds HDL in the deck: a design may instantiate a
+/// deck model card that no card of the deck names.
+fn parse_reading_reachable_models(
+    options: NetlistParseOptions,
+    mut parse: impl FnMut(NetlistParseOptions) -> Result<Netlist, ParseWithAbortError>,
+) -> Result<Netlist, ParseWithAbortError> {
+    let netlist = parse(options)?;
+    if netlist.skipped_model_cards == 0 || netlist.veriloga_includes.is_empty() {
+        return Ok(netlist);
+    }
+    drop(netlist);
+    parse(NetlistParseOptions {
+        skip_unreferenced_models: false,
+        ..options
     })
 }
 
@@ -618,22 +660,24 @@ pub(crate) fn parse_expanded_netlist_with_parameter_overrides_and_abort(
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
     let rendered = expanded.render();
-    let mut netlist = parse_with_consistent_random_seed(|seed| {
-        parse_with_consistent_temperatures(|temperatures| {
-            parse_with_settled_root_redefinitions(|redefinitions| {
-                parse_netlist_impl(
-                    &rendered,
-                    options,
-                    Some(SourceEventSchedule::from_expanded(expanded)),
-                    expanded.implicit_title(),
-                    ParserReplay {
-                        seed,
-                        temperatures,
-                        redefinitions: Some(redefinitions),
-                    },
-                    overrides,
-                    abort,
-                )
+    let mut netlist = parse_reading_reachable_models(options, |options| {
+        parse_with_consistent_random_seed(|seed| {
+            parse_with_consistent_temperatures(|temperatures| {
+                parse_with_settled_root_redefinitions(|redefinitions| {
+                    parse_netlist_impl(
+                        &rendered,
+                        options,
+                        Some(SourceEventSchedule::from_expanded(expanded)),
+                        expanded.implicit_title(),
+                        ParserReplay {
+                            seed,
+                            temperatures,
+                            redefinitions: Some(redefinitions),
+                        },
+                        overrides,
+                        abort,
+                    )
+                })
             })
         })
     })?;
@@ -849,6 +893,12 @@ fn parse_netlist_impl(
             .iter()
             .map(|variation| variation.parameter.clone()),
     );
+    // A Spectre `statistics` block draws as the deck is read, as a random
+    // function does, so its decks read every model card.
+    if options.skip_unreferenced_models && state.spectre_statistics.variations.is_empty() {
+        state.unreferenced_models =
+            model_references::UnreferencedModels::scan(&lines, body_start, abort)?;
+    }
     state.options.replace_ground = preprocess.replace_ground;
     state.options.remove_unused = preprocess.remove_unused;
     state.options.add_resistors = preprocess.add_resistors;
@@ -1070,6 +1120,7 @@ fn parse_netlist_impl(
         root_eof.unwrap_or_else(|| NetlistSourceLocation::in_memory(lines.len() + 1)),
         abort,
     )?;
+    netlist.skip_unreferenced_models = options.skip_unreferenced_models;
     if let Some(redefinitions) = replay.redefinitions {
         *redefinitions = root_redefinitions;
     }
@@ -4782,14 +4833,18 @@ fn process_line_gated(
                 ParseWithAbortError::Parse(error) => map_current_error(error),
             });
     }
-    if state.conditionals_suppress()
-        || forward_params::postpone_forward_reference(
-            state,
-            line,
-            line_num,
-            origin,
-            source_is_included,
-        )
+    if state.conditionals_suppress() {
+        return Ok(());
+    }
+    if state
+        .unreferenced_models
+        .as_ref()
+        .is_some_and(|models| models.skips(line))
+    {
+        state.skipped_model_cards += 1;
+        return Ok(());
+    }
+    if forward_params::postpone_forward_reference(state, line, line_num, origin, source_is_included)
     {
         return Ok(());
     }
