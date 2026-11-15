@@ -24,7 +24,7 @@ use crate::abort_signal::AbortSignal;
 use crate::analysis::FloquetOrbitKind;
 use crate::analysis::pstb::{PstbAnalyzer, PstbConfig, PstbResult};
 use crate::circuit::CircuitData;
-use crate::netlist::{Netlist, PstbCard};
+use crate::netlist::{ElementKind, Netlist, PstbCard};
 use crate::{SimulationError, Value};
 
 use super::{Engine, PssOperatingPoint};
@@ -233,17 +233,38 @@ impl Engine {
         )?;
 
         if operating_point.is_event_orbit() {
-            // Every inductor current is a coordinate of an event orbit.
+            // Every inductor current is a coordinate of an event orbit, named
+            // by its branch. An authored inductor the basis names is the
+            // probe, and the netlist says so without a circuit being built.
+            let prefix = super::pss_event::EVENT_BASIS_PREFIX;
+            let coordinate = format!("{prefix}I({probe_name})");
+            let index = basis
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(&coordinate));
+            if let Some(index) = index
+                && netlist.elements.iter().any(|element| {
+                    element.name.eq_ignore_ascii_case(probe_name)
+                        && matches!(element.kind, ElementKind::Inductor { model: None, .. })
+                })
+                && let Some(canonical_name) = basis[index]
+                    .get(prefix.len()..)
+                    .and_then(|name| name.strip_prefix("I("))
+                    .and_then(|name| name.strip_suffix(')'))
+            {
+                return Ok(ResolvedPstbProbe {
+                    canonical_name: canonical_name.to_owned(),
+                    projection: vec![(index, 1.0)],
+                });
+            }
+            // A probe inside a subcircuit or bound to a model, and every
+            // refusal, read the circuit.
             let circuit = engine.build_circuit_with_abort(netlist, abort)?;
             let inductor = circuit
                 .inductor_probe_names()
                 .into_iter()
                 .find(|name| name.eq_ignore_ascii_case(probe_name));
-            let coordinate = format!("{}I({probe_name})", super::pss_event::EVENT_BASIS_PREFIX);
             if let Some(canonical_name) = inductor
-                && let Some(index) = basis
-                    .iter()
-                    .position(|name| name.eq_ignore_ascii_case(&coordinate))
+                && let Some(index) = index
             {
                 return Ok(ResolvedPstbProbe {
                     canonical_name,

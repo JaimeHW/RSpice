@@ -3868,6 +3868,24 @@ l1 x 0 10u
     );
     assert_eq!(stability.probe_instance.to_ascii_lowercase(), "l1");
     assert_eq!(stability.probe_participation, [1.0]);
+    // The netlist settles the inductor probe; any other branch still gets
+    // the circuit's own diagnostic.
+    let card = rspice_core::netlist::PstbCard {
+        probe_instance: "vdd".to_owned(),
+        ..card
+    };
+    let error = engine
+        .run_pstb_card_from_pss_with_abort(&netlist, &card, &point, &NoAbort)
+        .expect_err("a source is not a loop probe");
+    let message = error.to_string();
+    assert!(
+        message.contains("PSTB probe 'vdd' resolved to branch ordinal")
+            && message.contains(
+                "but is not an inductor probe. PSTB supports dynamic inductor-current probes \
+                 only. Available inductor probes: "
+            ),
+        "{message}"
+    );
 }
 
 /// The switched RL with its clock filtered through an RC: the switch's control
