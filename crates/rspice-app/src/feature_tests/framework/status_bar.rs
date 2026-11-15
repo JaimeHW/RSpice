@@ -2,10 +2,6 @@
 //! checks count and marks, the result, zoom, page and coordinate segments,
 //! the engine's lifecycle mark, and what gives way on a narrow bar.
 
-use crate::simulation::status::EngineAvailability;
-use crate::simulation::status::{
-    preflight_status, simulation_engine_status, simulation_progress_percent,
-};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Problem;
@@ -20,6 +16,10 @@ use crate::workbench::chrome::status_bar::*;
 use crate::workbench::framework::host::StatusMark;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::state::Workspace;
+use rspice_app_runs::simulation::status::EngineAvailability;
+use rspice_app_runs::simulation::status::{
+    preflight_status, simulation_engine_status, simulation_progress_percent,
+};
 
 /// The counts the bar states, read as the page reads them.
 fn counts(app: &RSpiceApp) -> DiagnosticCounts {

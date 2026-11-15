@@ -27,7 +27,7 @@ mod modal_gate_tests;
 pub(crate) use rspice_app_state::workbench::app_state::model;
 mod model_access;
 mod run_access;
-pub(crate) use rspice_app_runs::workbench::app_state::run_preflight;
+use rspice_app_runs::workbench::app_state::run_preflight;
 mod schematic_drag;
 pub(crate) mod services_access;
 pub(crate) mod session;

@@ -1,7 +1,6 @@
 //! The run tier's host frozen for a campaign: what the frozen host records
 //! stays off the live results and runs it was frozen from.
 
-use crate::simulation::{RunHost, ViewerHost};
 use crate::state::{RunEvent, RunEventSink};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::model::compile_project_bundle_receipt;
@@ -10,6 +9,7 @@ use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::feature::LowerHandles;
 use crate::workbench::framework::feature::{Cx, Peers};
 use crate::workbench::simulate::run_host::{FrozenRun, run_host};
+use rspice_app_runs::simulation::{RunHost, ViewerHost};
 use std::sync::Arc;
 
 /// What the run tier's host over simulate's context over `app` freezes,

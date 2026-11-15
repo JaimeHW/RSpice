@@ -8,7 +8,6 @@
 
 use std::borrow::Cow;
 
-use crate::simulation::status::{EngineAvailability, preflight_status, simulation_engine_status};
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::diagnostic_store::listing::listing_in_pass;
 use crate::workbench::chrome::status_bar::design::{
@@ -29,6 +28,9 @@ use crate::workbench::framework::host::{
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_runs::simulation::status::{
+    EngineAvailability, preflight_status, simulation_engine_status,
+};
 
 /// What the cells read in common on a frame, worked out before any of them.
 pub struct StatusReadings {

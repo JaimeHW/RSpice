@@ -1459,7 +1459,7 @@ mod tests {
     }
 
     fn schematic_readiness(state: &AppState) -> Option<String> {
-        crate::workbench::app_state::run_preflight::run_preflight_block_reason(
+        rspice_app_runs::workbench::app_state::run_preflight::run_preflight_block_reason(
             &state.model.sim_setup,
             &state.model.workspace,
             &state.model.schematic,

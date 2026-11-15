@@ -54,7 +54,6 @@ pub(crate) mod simulation {
     //! complete simulation workflow from netlist generation to result display.
 
     pub(crate) use rspice_app_runs::simulation::controller;
-    pub(crate) use rspice_app_runs::simulation::status;
     pub(crate) use rspice_app_state::simulation::placed_sources;
     pub(crate) use rspice_app_state::simulation::plan;
     pub(crate) use rspice_app_state::simulation::stimulus_realize;
@@ -70,9 +69,6 @@ pub(crate) mod simulation {
     // engine bridge are all reached through their own modules; flattening their
     // types here duplicated the path without shortening any call site.
     pub use controller::SimulationController;
-    pub(crate) use rspice_app_runs::simulation::{
-        NetlistShown, RunHost, ViewerHost, ViewerReading,
-    };
     #[cfg(test)]
     pub use rspice_simulation::results::SampledWaveform;
 }
