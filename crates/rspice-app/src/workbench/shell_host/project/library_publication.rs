@@ -882,7 +882,7 @@ pub(crate) fn rollback_project_library_publication(
                 crate::workbench::app_state::SimSetupState::new_with_user_preferences(
                     &state.model.preferences,
                 ),
-                crate::workbench::app_state::default_model_library_manager(),
+                rspice_app_state::workbench::workspace::default_model_library_manager(),
                 vec![
                     "The publication predates durable simulation plans; documented defaults were restored"
                         .to_owned(),
