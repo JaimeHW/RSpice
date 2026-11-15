@@ -180,12 +180,12 @@ fn at_1024_the_schematic_row_sets_aside_what_it_has_no_room_for() {
 /// where their labels do, with no gap after them.
 #[test]
 fn at_1920_a_labelled_tool_takes_exactly_its_labels_room() {
-    use crate::ui::theme::{self, FontWeight};
+    use rspice_app_workbench::ui::theme::{self, FontWeight};
 
     let window = vec2(1920.0, 1080.0);
     let (mut replay, _) = amp_in(window);
     let controls = assert_no_tool_under_another_in(&mut replay, window);
-    let font = theme::sans(crate::ui::tokens::FS_1, FontWeight::Regular);
+    let font = theme::sans(rspice_app_workbench::ui::tokens::FS_1, FontWeight::Regular);
     for name in ["Check cellview", "Check design"] {
         let (label, rect) = controls
             .iter()

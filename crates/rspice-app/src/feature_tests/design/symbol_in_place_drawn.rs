@@ -1540,7 +1540,7 @@ fn a_pin_on_another_pins_terminal_is_found_and_goes_from_its_finding() {
             "in place {in_place}: the symbol stays in front"
         );
         assert_eq!(
-            crate::workbench::app::in_place_session(&state.design.symbol.in_place, &state.model)
+            rspice_app_design::workbench::app::actions::workspace::symbol_in_place::in_place_session(&state.design.symbol.in_place, &state.model)
                 .is_some(),
             in_place,
             "following the finding neither enters nor leaves an in-place edit"

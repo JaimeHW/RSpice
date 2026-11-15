@@ -783,29 +783,30 @@ fn a_cell_symbol_pin_on_another_pins_terminal_blocks_the_save() {
 
     let mut state = AppState::default();
     let terminal = Point::new(-40, 0);
-    let mut symbol = crate::state::SymbolDocument::default();
+    let mut symbol = rspice_app_state::state::SymbolDocument::default();
     for name in ["A", "B"] {
         symbol.pins.push(SymbolPin::new(
             name,
-            crate::state::PortDirection::InOut,
+            rspice_app_state::state::PortDirection::InOut,
             Some(terminal),
         ));
     }
-    let mut symbol_view = crate::state::View::new("symbol", crate::state::ViewType::Symbol);
+    let mut symbol_view =
+        rspice_app_state::state::View::new("symbol", rspice_app_state::state::ViewType::Symbol);
     symbol
         .store_in_view(&mut symbol_view)
         .expect("the symbol stores");
-    let mut cell = crate::state::Cell::new("amp");
+    let mut cell = rspice_app_state::state::Cell::new("amp");
     cell.add_view(symbol_view);
-    cell.add_view(crate::state::View::new(
+    cell.add_view(rspice_app_state::state::View::new(
         "schematic",
-        crate::state::ViewType::Schematic,
+        rspice_app_state::state::ViewType::Schematic,
     ));
-    let mut work = crate::state::Library::new("work");
+    let mut work = rspice_app_state::state::Library::new("work");
     work.add_cell(cell);
     state.model.library_manager.add_library(work);
 
-    let mut schematic = crate::state::SchematicState::default();
+    let mut schematic = rspice_app_state::state::SchematicState::default();
     add_port(&mut schematic, "A", "inout");
     add_port(&mut schematic, "B", "inout");
     state
@@ -828,7 +829,7 @@ fn a_cell_symbol_pin_on_another_pins_terminal_blocks_the_save() {
     assert_eq!(
         overlap.location,
         Some(DrcLocation::SymbolPin {
-            reference: crate::state::CellViewRef::new("work", "amp", "schematic"),
+            reference: rspice_app_state::state::CellViewRef::new("work", "amp", "schematic"),
             pin_name: "B".to_owned(),
             point: Some(terminal),
         })

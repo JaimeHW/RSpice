@@ -419,7 +419,7 @@ fn check_and_save_checks_the_symbol_and_never_refuses_the_save() {
 /// symbol as drawn.
 #[test]
 fn check_and_save_finds_a_pin_sitting_on_another() {
-    use crate::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticLevel};
+    use rspice_app_state::workbench::app_state::diagnostic_store::{DiagnosticInputs, DiagnosticLevel};
 
     let mut fixture = Fixture::new("overlap", Some(&["IN", "OUT"]), &["IN", "OUT"]);
     let terminal = |fixture: &Fixture, name: &str| {

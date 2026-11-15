@@ -167,7 +167,10 @@ fn long_toolbar_labels_remain_bounded() {
         "a short label takes only its own room: {short}"
     );
     assert!(label > short && selected > label, "{widths:?}");
-    assert_eq!(long, crate::workbench::layout::RUN_CONFIG_CHIP_MAX_WIDTH);
+    assert_eq!(
+        long,
+        rspice_app_workbench::workbench::layout::RUN_CONFIG_CHIP_MAX_WIDTH
+    );
 }
 
 #[test]
