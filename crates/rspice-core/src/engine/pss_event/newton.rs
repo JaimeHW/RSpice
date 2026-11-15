@@ -61,8 +61,9 @@ pub(super) struct Orbit<'a> {
     pub(super) config: &'a PssConfig,
     pub(super) max_step: Value,
     pub(super) guard: Value,
-    /// The run's own relative and absolute voltage tolerances, which an
-    /// orbit's mesh is certified against.
+    /// The relative and absolute tolerances of a node voltage an orbit's
+    /// mesh is certified against, by the rule native shooting reads
+    /// ([`crate::engine::Engine::periodic_refinement_tolerances`]).
     pub(super) mesh_tolerance: (Value, Value),
     pub(super) abort: &'a dyn AbortSignal,
 }

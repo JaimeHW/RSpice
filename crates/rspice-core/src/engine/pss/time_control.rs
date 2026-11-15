@@ -3,11 +3,6 @@
 use super::*;
 
 impl Engine {
-    pub(super) fn pss_lte_abstol(&self, physical_abstol: Value) -> Value {
-        let scale = (self.transient_lte_abstol() / self.voltage_abstol()).min(1.0);
-        (physical_abstol * scale).max(Value::MIN_POSITIVE)
-    }
-
     pub(super) fn pss_step_ceiling(&self) -> Value {
         [
             Some(self.config.max_timestep),

@@ -3276,7 +3276,8 @@ impl Engine {
         let coarse_period = *coarse.time.last().unwrap();
         let fine_period = *fine.time.last().unwrap();
         let period_scale = coarse_period.max(fine_period);
-        let reltol = self.voltage_reltol().min(self.transient_lte_reltol());
+        let tolerances = self.periodic_refinement_tolerances();
+        let reltol = tolerances.reltol;
         let mut error = (coarse_period / period_scale - fine_period / period_scale).abs() / reltol;
         let channels = coarse
             .voltages
@@ -3305,7 +3306,7 @@ impl Engine {
             // The estimator normalizes current/charge states into voltage
             // units. Use that same scale here, and retain the circuit's
             // physical accuracy floor when TIMEINT asks for a looser bound.
-            let abstol = self.pss_lte_abstol(abstol);
+            let abstol = tolerances.abstol(abstol);
             if coarse_values.len() != coarse.time.len() || fine_values.len() != fine.time.len() {
                 return Err(SimulationError::Circuit(
                     "PSS refinement waveform has an inconsistent sample count".to_owned(),

@@ -8,6 +8,24 @@ use crate::SpiceDialect;
 /// iter"), the default ITL1.
 const NGSPICE_NIITER_FLOOR: usize = 100;
 
+/// The relative tolerance and absolute-tolerance scale a periodic orbit's
+/// refinement certificate holds it to; see
+/// [`Engine::periodic_refinement_tolerances`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PeriodicRefinementTolerances {
+    pub(crate) reltol: Value,
+    /// The LTE absolute tolerance's share of the Newton one, at most one.
+    abstol_scale: Value,
+}
+
+impl PeriodicRefinementTolerances {
+    /// The absolute tolerance of an unknown whose Newton absolute tolerance
+    /// is `physical`, in that unknown's units.
+    pub(crate) fn abstol(&self, physical: Value) -> Value {
+        (physical * self.abstol_scale).max(Value::MIN_POSITIVE)
+    }
+}
+
 impl Engine {
     /// The direct DC operating-point Newton's budget: ITL1 as authored, with
     /// ngspice's floor of 100. Past it the operating point belongs to the
@@ -128,6 +146,20 @@ impl Engine {
                 SpiceDialect::Xyce => 1.0e-6,
                 SpiceDialect::BestAvailable | SpiceDialect::Ngspice => self.voltage_abstol(),
             })
+    }
+
+    /// The tolerances a periodic orbit's time discretization is held to when
+    /// shooting compares it with its refinement: the one rule native and
+    /// event shooting both read. Spectre derives a PSS's LTE tolerances from
+    /// its Newton tolerances (`lteratio`) and its steady-state tolerances
+    /// from the LTE tolerances (`steadyratio`), so the mesh answers to the
+    /// LTE tolerances a deck states (TIMEINT RELTOL and ABSTOL), and never to
+    /// a looser bound than the Newton tolerances its traversals solve to.
+    pub(crate) fn periodic_refinement_tolerances(&self) -> PeriodicRefinementTolerances {
+        PeriodicRefinementTolerances {
+            reltol: self.voltage_reltol().min(self.transient_lte_reltol()),
+            abstol_scale: (self.transient_lte_abstol() / self.voltage_abstol()).min(1.0),
+        }
     }
 
     #[inline]

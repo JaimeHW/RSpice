@@ -1232,3 +1232,61 @@ s1 a 0 a 0 swm
         "multiplier {dominant:e} against {multiplier:e}"
     );
 }
+
+/// A deck that states LTE tolerances tighter than its Newton ones holds its
+/// event orbit's mesh to them, as native shooting holds its own: both read
+/// [`Engine::periodic_refinement_tolerances`]. The switch across its own
+/// control, at TIMEINT RELTOL=5e-5 ABSTOL=1e-8, takes three bisections and
+/// meets the closed form within 1.07e-6 V; held to the Newton tolerances
+/// alone it stopped at one, 1.71e-5 V from it.
+#[test]
+fn event_shooting_holds_its_mesh_to_the_lte_tolerances_a_deck_states() {
+    let deck = "switch across its own control, tight LTE tolerances
+vin in 0 sin(0 2 1meg)
+r1 in a 1k
+c1 a 0 100p
+s1 a 0 a 0 swm
+.model swm sw vt=1 vh=0.2 ron=1k roff=1e9
+.options timeint reltol=5e-5 abstol=1e-8
+.end
+";
+    let config = PssConfig::new(1.0e6).with_tstab(5.0e-6);
+    let netlist = Netlist::parse(deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let resolved = engine.resolved_for_netlist(&netlist);
+    let tolerances = resolved.periodic_refinement_tolerances();
+    let prepared = engine
+        .prepare_event_orbit(&netlist, None, &config, None, &NoAbort)
+        .expect("the orbit stabilizes");
+    eprintln!(
+        "event mesh tolerance {:?}, shared rule ({:e}, {:e})",
+        prepared.mesh_tolerance,
+        tolerances.reltol,
+        tolerances.abstol(resolved.voltage_abstol())
+    );
+    let event = engine
+        .run_event_pss(&netlist, None, &config, None, &NoAbort)
+        .expect("the orbit certifies");
+    let result = &event.analysis.result;
+    let exact = self_controlled_closed_form::Orbit::settled(20.0e-6);
+    let worst = result
+        .time
+        .iter()
+        .zip(waveform(result, "a"))
+        .map(|(&t, &v)| (v - exact.voltage(20.0e-6 + t)).abs())
+        .fold(0.0, Value::max);
+    eprintln!(
+        "certified {:?}; |V(a) - closed form| = {worst:e} V",
+        event.certification
+    );
+    assert!(worst <= 5.0e-6, "|V(a) - closed form| = {worst:e} V");
+    assert_eq!(tolerances.reltol, 5.0e-5);
+    assert!((tolerances.abstol(resolved.voltage_abstol()) / 1.0e-8 - 1.0).abs() < 1.0e-12);
+    assert_eq!(
+        prepared.mesh_tolerance,
+        (
+            tolerances.reltol,
+            tolerances.abstol(resolved.voltage_abstol())
+        )
+    );
+}

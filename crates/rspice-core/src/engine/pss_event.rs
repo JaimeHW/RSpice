@@ -346,7 +346,8 @@ fn opaque_veriloga_refusal(_circuit: &CircuitData) -> Option<SimulationError> {
 struct Prepared {
     /// The engine every traversal runs on, with tightened Newton tolerances.
     traversals: Engine,
-    /// The run's own relative and absolute voltage tolerances.
+    /// The relative and absolute tolerances of a node voltage, by the rule
+    /// native shooting certifies its mesh by.
     mesh_tolerance: (Value, Value),
     period: Value,
     max_step: Value,
@@ -542,7 +543,13 @@ impl Engine {
             .collect();
         let mesh = boundary::nominal_mesh(&stabilization.time, boundary_time, period, &excluded);
         Ok(Prepared {
-            mesh_tolerance: (resolved.voltage_reltol(), resolved.voltage_abstol()),
+            mesh_tolerance: {
+                let refinement = resolved.periodic_refinement_tolerances();
+                (
+                    refinement.reltol,
+                    refinement.abstol(resolved.voltage_abstol()),
+                )
+            },
             traversals,
             period,
             max_step,
