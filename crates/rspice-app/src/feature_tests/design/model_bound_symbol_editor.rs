@@ -332,6 +332,33 @@ fn the_symbol_editor_answers_a_bound_symbol_to_its_model() {
     assert!(fixture.binding().is_some(), "the binding stays");
 }
 
+/// Generate draws a bound symbol from its model's definition, as Create
+/// drew it, not the default artwork for a list of ports, and keeps the
+/// binding.
+#[test]
+fn generate_draws_a_bound_symbol_from_its_model() {
+    let mut fixture = Fixture::new("generate");
+    let created = fixture.document();
+    fixture.edit("Delete pin", |document| {
+        document.pins.retain(|pin| pin.name != "B");
+        document.body.clear();
+    });
+
+    crate::workbench::app::generate_active_symbol_document(
+        &mut fixture.app.state.design.symbol,
+        &mut fixture.app.state.model,
+    )
+    .expect("the symbol generates");
+
+    let generated = fixture.document();
+    assert_eq!(
+        generated.pins, created.pins,
+        "the model's terminals, where it draws them"
+    );
+    assert_eq!(generated.body, created.body, "the model's artwork");
+    assert!(fixture.binding().is_some(), "the binding stays");
+}
+
 /// Editing the drawing never loses the binding: through an edit, its undo
 /// and redo, a save and the file it writes, and Revert to saved. The save
 /// that wrote the edit records a revision, as a drawn symbol's does.
