@@ -1,7 +1,7 @@
 # variant	analysis	route	outcome	detail
 xs	tran	interp	pass	code (O6) [6] |a−e|=2.901e0 allowed 3.000e0 (a=6.080000e2, e=6.109006e2)
 xs	tran	native	pass	code (O6) [6] |a−e|=2.901e0 allowed 3.000e0 (a=6.080000e2, e=6.109006e2)
-xs	tran	worker	pass	code (O6) [6] |a−e|=2.901e0 allowed 3.000e0 (a=6.080000e2, e=6.109006e2)
+xs	tran	worker	pass	code (O1) [16] |a−e|=2.000e0 allowed 2.000e0 (a=3.870000e2, e=3.890000e2)
 vams	tran	interp	pass	code (O6) [1] |a−e|=2.551e0 allowed 3.000e0 (a=5.540000e2, e=5.565506e2)
 vams	tran	native	pass	code (O6) [1] |a−e|=2.551e0 allowed 3.000e0 (a=5.540000e2, e=5.565506e2)
 vams	tran	worker	pass	code (O6) [1] |a−e|=2.551e0 allowed 3.000e0 (a=5.540000e2, e=5.565506e2)
@@ -28,4 +28,4 @@ xs	trnoise	native	pass	var (O6) var over 49 samples: 1.463435e0 in [7.330000e-1,
 xs	trnoise	worker	pass	var (O6) var over 49 samples: 1.504252e0 in [7.330000e-1, 3.970000e0]
 vams	trnoise	interp	pass	var (O6) var over 49 samples: 1.337585e0 in [7.330000e-1, 3.970000e0]
 vams	trnoise	native	pass	var (O6) var over 49 samples: 1.337585e0 in [7.330000e-1, 3.970000e0]
-vams	trnoise	worker	pass	var (O6) var over 49 samples: 1.379252e0 in [7.330000e-1, 3.970000e0]
+vams	trnoise	worker	pass	var (O6) var over 49 samples: 1.335884e0 in [7.330000e-1, 3.970000e0]
