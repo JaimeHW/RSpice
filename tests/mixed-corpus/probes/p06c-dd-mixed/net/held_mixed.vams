@@ -1,4 +1,4 @@
-// P0.6c: a variable read before it is assigned in a mixed module's analog
+// A variable read before it is assigned in a mixed module's analog
 // block. `seen` must carry `held` from the previous accepted point.
 `include "disciplines.vams"
 `timescale 1ns/1ps

@@ -1,6 +1,6 @@
 * C9 power-on reset, variant live, tran
 * No .param vcc: the connect rules of net/por_ctrl_live.vams name the vdd net
-* as the converters' supply, which binds live (plan D-C, P3.2a).
+* as the converters' supply, which binds live.
 .hdl "../net/por_ctrl_live.vams" module=por_ctrl
 .options connectrules=por_live
 .include ../net/por.cir

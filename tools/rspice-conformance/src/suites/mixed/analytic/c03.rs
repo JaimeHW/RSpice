@@ -1,4 +1,4 @@
-//! C3 — ngspice `d_cosim` examples run natively (design §3 C3).
+//! C3 — ngspice `d_cosim` examples run natively.
 //!
 //! Circuit constants from the upstream `555.shared`, `adc.shared`, `delay.v`
 //! and `pwm.cir` (ngspice-46 `examples/xspice/verilator`).

@@ -1941,7 +1941,7 @@ fn an_output_symbol_the_result_cannot_supply_exits_eighty_three() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A mixed deck whose HDL half ends with `report` (design P2 section 4.3).
+/// A mixed deck whose HDL half ends with `report`.
 fn hdl_report_deck(dir: &std::path::Path, report: &str) -> std::path::PathBuf {
     let model = dir.join("hdl_check.va");
     std::fs::write(
@@ -1969,7 +1969,7 @@ fn hdl_report_deck(dir: &std::path::Path, report: &str) -> std::path::PathBuf {
     deck
 }
 
-/// Design P2 section 4.3: a design's `$error` or `$fatal` fails the run the
+/// A design's `$error` or `$fatal` fails the run the
 /// way a failed `.MEAS` does, while `$warning` and `$finish` do not.
 #[test]
 fn an_hdl_error_or_fatal_exits_three() {

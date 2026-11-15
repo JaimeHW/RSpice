@@ -389,7 +389,7 @@ fn linked_digital_analog_probes_and_refusals_preserve_instance_identity() {
     assert!(error.contains("cancelled"), "{error}");
 }
 
-/// Design P2 section 4.9: each linked instance is a root named by its
+/// Each linked instance is a root named by its
 /// instance path, and a name over the one linked store may start at any root
 /// (`b.u1.q`) or at `$root` (IEEE 1800-2017 section 23.3.1). A compiled
 /// module is its own root.

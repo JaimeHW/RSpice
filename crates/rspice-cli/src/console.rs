@@ -49,7 +49,7 @@ pub(crate) fn write_json(
         .map_err(|error| CliError::output_error(Path::new("stdout"), error))
 }
 
-/// The console of the run's HDL designs (design P2 section 4.3).
+/// The console of the run's HDL designs.
 ///
 /// Records arrive at each accepted point, in emission order, and are written
 /// as they arrive: design text to stdout (to stderr when stdout carries a

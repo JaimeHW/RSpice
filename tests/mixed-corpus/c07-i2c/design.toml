@@ -11,7 +11,7 @@ name = "flat"
 families = ["spice", "xspice", "vams-digital"]
 today = "runs"
 
-# The same script written with tasks (P2.2, lane L3).
+# The same script written with tasks.
 [[variant]]
 name = "tasks"
 families = ["spice", "xspice", "vams-digital"]

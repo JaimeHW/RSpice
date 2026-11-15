@@ -1,4 +1,4 @@
-//! C8 — abstraction ladder (design §3 C8).
+//! C8 — abstraction ladder.
 //!
 //! One unity-gain low-pass, f0 = 10 kHz, Q = 1/√2, driven by `net/tb_c8.vams`:
 //! 0 V, a 0.6 V step at 20 µs, then from 200 µs one period of a 2 kHz sine

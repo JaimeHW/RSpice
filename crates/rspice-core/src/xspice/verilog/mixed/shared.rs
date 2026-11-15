@@ -289,8 +289,8 @@ pub struct MixedDigitalCoordinator {
     /// Every A/D bit one settle pass moved, across every enrolled instance,
     /// ordered by the instant it crossed. Scratch, refilled per pass.
     publications: Vec<AdcPublication>,
-    /// Receives the HDL output each committed trial produced (design P2
-    /// section 4.3). Output of a trial the solver rejects never reaches it.
+    /// Receives the HDL output each committed trial produced. Output of a
+    /// trial the solver rejects never reaches it.
     hdl_output: Option<Arc<dyn crate::config::HdlOutputSink>>,
 }
 
@@ -731,7 +731,7 @@ impl MixedDigitalCoordinator {
     pub fn configure_hdl(&mut self, config: &crate::config::HdlRunConfig) {
         use super::super::effects::files::{HdlFileOptions, HdlFileStore, HdlFileTarget};
         self.hdl_output = config.output.clone();
-        // Design P2 section 4.3: relative HDL paths resolve against the
+        // Relative HDL paths resolve against the
         // explicit run directory, else the deck's directory.
         let directory = config
             .run_directory
@@ -1977,7 +1977,7 @@ impl MixedDigitalCoordinator {
             !cursor.probe,
             "a numerical probe cannot commit shared digital state"
         );
-        // Design P2 section 4.3: output is printed once per committed
+        // Output is printed once per committed
         // equilibrium. The store kept here has run its time-zero activations,
         // so a transient that continues from it does not print them again.
         self.release_hdl_output(crate::config::HdlPoint::OperatingPoint);

@@ -6154,7 +6154,7 @@ module top(inp,p); inout inp,p; electrical inp,p; matrix u(inp,p); endmodule
 }
 
 // ---------------------------------------------------------------------------
-// System tasks on the mixed route (design P2 sections 4.3 and 5)
+// System tasks on the mixed route
 // ---------------------------------------------------------------------------
 
 /// A clocked counter that prints each rising edge and finishes on the
@@ -6217,7 +6217,7 @@ fn run_ticker(
     (outcome, collector.take(), rejections)
 }
 
-/// Design P2 section 4.3: a digital `$finish` is a model finish on the
+/// A digital `$finish` is a model finish on the
 /// transient's accepted point — the run ends at the tick it was called in —
 /// and everything the design printed is released at that point's commit,
 /// stamped with it, once.
@@ -6268,7 +6268,7 @@ fn a_digital_finish_ends_the_transient_at_its_tick() {
     );
 }
 
-/// Design P2 section 4.9: an X-card with no nodes instantiates a portless
+/// An X-card with no nodes instantiates a portless
 /// testbench, and each X-card instance is a root of the digital design named
 /// by its SPICE path, which is what `%m` prints, at the deck's top level and
 /// inside a subcircuit.
@@ -6433,7 +6433,7 @@ fn a_known_differing_bit_decides_equality_beside_unknown_bits() {
     );
 }
 
-/// Design P2 section 4.3: an operating point prints the time-zero output once,
+/// An operating point prints the time-zero output once,
 /// at its committed equilibrium, stamped as the operating point.
 #[test]
 fn an_operating_point_prints_its_time_zero_output_once() {
@@ -6464,7 +6464,7 @@ fn an_operating_point_prints_its_time_zero_output_once() {
     assert_eq!(printed, [(HdlPoint::OperatingPoint, "gain 2\n".to_owned())]);
 }
 
-/// Design P2 section 5: output is released only when a trial is accepted, so a
+/// Output is released only when a trial is accepted, so a
 /// run whose step controller throws timepoints away prints exactly what a run
 /// that throws none away prints.
 #[test]
@@ -6516,7 +6516,7 @@ module file_ticker(p, n, q);
 endmodule
 "#;
 
-/// Design P2 sections 4.3 and 5.3: file writes land only when a trial is
+/// File writes land only when a trial is
 /// accepted, so a run whose step controller throws timepoints away writes
 /// exactly the files a run that throws none away writes — the design's own
 /// file and its value change dump alike — under the run directory.
@@ -7507,7 +7507,7 @@ fn saving_the_current_of_a_runtime_veriloga_instance_reports_it() {
 }
 
 // ---------------------------------------------------------------------------
-// `force` on boundary nets (IEEE 1364-2005 section 9.3.2; design P2 §4.2)
+// `force` on boundary nets (IEEE 1364-2005 section 9.3.2)
 // ---------------------------------------------------------------------------
 
 /// `a` arrives across an A/D bridge and `z` leaves across a D/A one; both are

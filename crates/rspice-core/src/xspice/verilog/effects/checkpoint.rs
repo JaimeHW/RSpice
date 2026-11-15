@@ -1,4 +1,4 @@
-//! The effects section of a host checkpoint image (design P2 section 5.4).
+//! The effects section of a host checkpoint image.
 //!
 //! Randomness, `$timeformat`, the active `$monitor` and the severity counts
 //! are design state like any signal, and a resumed run must continue them

@@ -2162,7 +2162,7 @@ fn an_override_naming_an_undeclared_or_variable_operand_is_a_language_error() {
 }
 
 /// A `defparam` on a digital root's own parameter takes precedence over the
-/// instance value an X card gives it, with a warning (design P2 section 4.2).
+/// instance value an X card gives it, with a warning.
 #[test]
 fn a_defparam_on_a_root_parameter_takes_precedence_over_its_instance_value() {
     let source = "module top(y);\n\
@@ -4071,7 +4071,7 @@ fn inline_discrete_disciplines_and_port_prefixes_retain_the_declared_domain() {
 }
 
 // ===========================================================================
-// System tasks and the IEEE 1800 statement forms (design P2 sections 1.2, 1.3)
+// System tasks and the IEEE 1800 statement forms
 // ===========================================================================
 
 /// The statements of one `initial` block, parsed.
@@ -4116,7 +4116,7 @@ fn system_task_enables_parse_with_their_arguments() {
 }
 
 /// IEEE 1800-2017 section 11.4.1-2's statement forms, which both reference
-/// simulators accept in a `.v` source (design P2 G2): each is the blocking
+/// simulators accept in a `.v` source: each is the blocking
 /// assignment it abbreviates.
 #[test]
 fn compound_and_step_assignments_desugar_to_blocking_assignments() {
@@ -4190,7 +4190,7 @@ fn a_semicolon_after_endmodule_is_an_empty_item() {
     assert_eq!(file.items.len(), 2);
 }
 
-/// Design P2 section 1.5: a name outside IEEE 1364-2005 section 17 and the
+/// A name outside IEEE 1364-2005 section 17 and the
 /// named 1800 extensions is refused by name, and a task and a function cannot
 /// stand in for each other.
 #[test]
@@ -4226,8 +4226,8 @@ fn system_calls_outside_the_subset_are_refused_by_name() {
     }
 }
 
-/// Every design P2 section 1.3 kind is accepted by the front end, including
-/// the file and waveform tasks whose host behaviour lane L5 adds.
+/// Every registered system call kind is accepted by the front end, the file
+/// and waveform tasks included.
 #[test]
 fn every_registered_system_call_is_accepted() {
     analyze(&digital_module(

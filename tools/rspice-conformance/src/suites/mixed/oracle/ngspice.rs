@@ -254,7 +254,7 @@ fn fenced_control(source: &str) -> Vec<String> {
 }
 
 /// An analysis ngspice reported it could not complete although it exited 0.
-/// Its reference records the refusal and only O5 applies (design §3 C5).
+/// Its reference records the refusal and only O5 applies.
 pub fn refusal(analysis: &str, log: &str) -> Option<String> {
     let kind = crate::suites::mixed::design::analysis_kind(analysis).unwrap_or(analysis);
     (kind == "pz")

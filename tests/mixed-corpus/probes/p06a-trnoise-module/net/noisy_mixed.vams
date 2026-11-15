@@ -1,4 +1,4 @@
-// P0.6a: a mixed module whose analog block declares a white-noise source.
+// A mixed module whose analog block declares a white-noise source.
 `include "disciplines.vams"
 `timescale 1ns/1ps
 module noisy_mixed(p, n, q);

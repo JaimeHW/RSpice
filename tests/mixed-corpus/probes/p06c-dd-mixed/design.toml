@@ -1,6 +1,6 @@
 schema = "rspice-mixed-design/1"
 id = "P06c"
-title = "P0.6c: read-before-assign state on the interpreter and native routes"
+title = "Read-before-assign state on the interpreter and native routes"
 exit_phases = ["P0"]
 dialect = "best-available"
 features = []

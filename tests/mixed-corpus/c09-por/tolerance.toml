@@ -5,7 +5,7 @@ time_precision = 1e-12
 # Threshold model of the O6 expectations (analytic/c09.rs): base converts at
 # its stated static supply (A/D threshold 1.65 V, D/A level 3.3 V); p3 and live
 # convert against the supply itself (threshold v(vdd)/2, level v(vdd)), as
-# P3.2 and P3.2a define them. The two models put tpor 34 ns and tbo 15 ns
+# their supply-tracking converters do. The two models put tpor 34 ns and tbo 15 ns
 # apart, inside every time tolerance below.
 
 # ---- tran ------------------------------------------------------------------
@@ -107,7 +107,8 @@ why = "a held 1 drives the supply it converts against: v(vdd) = 1.65, 3.3, 2.0 V
 # ---- dc: upward sweep, state carried (P1 S6) --------------------------------
 # The sweep points are split around the hi threshold (2.70 V). At exactly
 # 2.70 V v(hi) equals v(vdd)/2, an A/D input on its threshold for the
-# supply-tracking variants (plan §6.2: excluded as at-threshold).
+# supply-tracking variants, whose digital value there is not defined, so the
+# point is excluded.
 
 [[q]]
 id = "porn_up.lo"

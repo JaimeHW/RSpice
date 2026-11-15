@@ -1,5 +1,5 @@
 //! HDL file I/O (IEEE 1364-2005 sections 17.2.1 to 17.2.8), as the host
-//! performs it (design P2 section 4.3).
+//! performs it.
 //!
 //! # Where a path goes
 //!
@@ -978,7 +978,7 @@ pub(crate) fn text_bytes(text: &str) -> Vec<u8> {
     bytes
 }
 
-/// A saved open handle (design P2 section 5.4, the effects section's file
+/// A saved open handle (the effects section's file
 /// table). A write is restored by truncating the file to what the handle
 /// had written, so output after the checkpoint is discarded; a read is
 /// restored by re-reading the file, which must be what the handle read.

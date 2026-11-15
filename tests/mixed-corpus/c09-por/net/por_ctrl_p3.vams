@@ -1,4 +1,4 @@
-// C9 variant p3 (RSpice-authored; corpus design C9, amendment A4): the
+// C9 variant p3 (RSpice-authored; corpus design C9): the
 // controller of net/por_ctrl.v unchanged, with its boundaries converted by
 // authored supply-sensitive connect modules. Each converter has a third port,
 // the supply it converts against: a 1 drives V(vsup) behind 20 ohm and an

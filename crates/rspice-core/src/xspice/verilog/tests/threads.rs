@@ -1,4 +1,4 @@
-//! Tasks, functions and procedural threads end to end (design P2 §4.1, §4.2).
+//! Tasks, functions and procedural threads end to end.
 //!
 //! Expected text is what Icarus Verilog 13.0 printed for the same source
 //! (`iverilog -g2005`, `vvp -n`).
@@ -175,7 +175,7 @@ endmodule
 ///
 /// Icarus starts zero-delay branches last first (`vvp` pushes each forked
 /// thread onto the front of the active queue), so it prints `second n=0`
-/// before `first`. Design P2 §4.2 starts them in source order, which is the
+/// before `first`. RSpice starts them in source order, which is the
 /// one line here that differs from what Icarus printed.
 #[test]
 fn fork_and_join_run_as_icarus_runs_them() {
@@ -331,7 +331,7 @@ endmodule
     }
 }
 
-/// `disable` (section 10.3, design P2 §4.1): a named block disabled from
+/// `disable` (section 10.3): a named block disabled from
 /// inside it is left at once (a loop break); one disabled from another
 /// process while it waits is left where it waits; a task disabled while it
 /// waits ends, and its enable goes on; a task that disables itself returns,
@@ -435,7 +435,7 @@ endmodule
 }
 
 /// A task disabled from outside copies nothing back, output or inout
-/// (design P2 §4.1, where section 10.3 leaves the result unspecified).
+/// (where section 10.3 leaves the result unspecified).
 /// Icarus does copy them and printed `r=5 s=4 t=5`.
 #[test]
 fn a_task_disabled_from_outside_copies_nothing_back() {

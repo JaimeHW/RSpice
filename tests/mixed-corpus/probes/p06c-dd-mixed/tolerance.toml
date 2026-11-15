@@ -1,7 +1,7 @@
 schema = "rspice-mixed-tolerance/1"
 time_precision = 1e-12
 
-# Decisive assertion (design §4c): for every accepted point k ≥ 1,
+# Decisive assertion: for every accepted point k ≥ 1,
 # V(o)[k] = V(a)[k−1] within 1 nV, for the mixed module and its twin, on the
 # route this build is.
 

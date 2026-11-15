@@ -28,7 +28,7 @@ impl Default for HostCheckpointLimits {
     }
 }
 
-/// The host image version this build writes (design P2 section 5.4).
+/// The host image version this build writes.
 ///
 /// Version 2 saves threads rather than process slots, and carries
 /// self-tagged sections later lanes fill without a further version step.
@@ -1561,7 +1561,7 @@ endmodule
         assert!(error.contains("out of order"), "{error}");
     }
 
-    /// Design P2 section 5.3: a rejected trial takes back the pending updates
+    /// A rejected trial takes back the pending updates
     /// with the rest of the host. A trial in which a pulse shorter than the
     /// delay cancels a pending update, so that it stops being the next tick,
     /// rolls back to the update pending at its original tick.
@@ -1588,7 +1588,7 @@ endmodule
         assert_eq!(host.read(signal(&host, "y")).unwrap().spelling(), "1");
     }
 
-    /// Design P2 section 5.4: a version 1 image (per-process slots, no
+    /// A version 1 image (per-process slots, no
     /// sections) restores as the version 2 image of the same state.
     #[test]
     fn a_version_one_host_image_upcasts_to_single_frame_threads() {
@@ -1666,7 +1666,7 @@ module th;
 endmodule
 "#;
 
-    /// Design P2 section 5.4: threads checkpoint mid-fork and mid-task. At
+    /// Threads checkpoint mid-fork and mid-task. At
     /// tick 1 the first process waits at a join for three children, one of
     /// them at a join of its own; the second sleeps inside an automatic task;
     /// the third waits at a join inside a static task, whose two children run

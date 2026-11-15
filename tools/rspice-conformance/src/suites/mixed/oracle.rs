@@ -422,8 +422,8 @@ pub fn parse(text: &str) -> Result<Reference, String> {
     })
 }
 
-/// Header line of a reference the oracle could not produce (design §3 C5:
-/// "if ngspice pz fails, the ref records oracle-refused and only O5 applies").
+/// Header line of a reference the oracle could not produce: when ngspice's pz
+/// fails, the ref records oracle-refused and only O5 applies.
 pub const REFUSED_PREFIX: &str = "oracle-refused: ";
 
 /// A loaded reference: the oracle's observation, or its recorded refusal.

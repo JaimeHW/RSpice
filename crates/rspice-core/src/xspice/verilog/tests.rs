@@ -1552,7 +1552,7 @@ fn repeat_controls_count_each_transition_and_retain_all_expression_baselines() {
 }
 
 // ===========================================================================
-// Self-checking testbenches: system tasks end to end (design P2 section 2.3)
+// Self-checking testbenches: system tasks end to end
 //
 // Expected text is what Icarus Verilog 13.0 printed for the same source
 // (`iverilog -g2005`, `vvp -n`), less its own `$finish called at` line, which
@@ -1844,7 +1844,7 @@ fn formats_distributions_and_severities_match_icarus() {
     assert_eq!((report.warnings, report.errors, report.fatals), (1, 1, 1));
 }
 
-/// Design P2 section 4.3: `$finish` ends the thread at once, the rest of its
+/// `$finish` ends the thread at once, the rest of its
 /// tick still runs — other same-tick processes, the nonblocking update it
 /// scheduled, the event that update wakes, and the strobe region — and no
 /// later tick runs. Icarus prints the same four lines.
@@ -1890,7 +1890,7 @@ fn stop_ends_a_batch_run() {
     assert_eq!(stdout(&report), "");
 }
 
-/// Design P2 section 2.3: every source is one compilation unit, every module
+/// Every source is one compilation unit, every module
 /// nothing instantiates is a root, and the roots are linked into one design;
 /// `%m` of a root is its module name and each record keeps its own file line.
 #[test]
@@ -1920,7 +1920,7 @@ fn every_uninstantiated_module_is_a_linked_root() {
     assert_eq!(report.end_tick, 2, "the timescale carried into alpha.v");
 }
 
-/// Design P2 section 2.4: the reverse schedule starts same-tick activations
+/// The reverse schedule starts same-tick activations
 /// in the reverse of source order, which is what exposes a racy test.
 #[test]
 fn the_reverse_schedule_reverses_same_tick_starts() {

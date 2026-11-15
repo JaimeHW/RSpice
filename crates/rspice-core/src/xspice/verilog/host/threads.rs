@@ -1,4 +1,4 @@
-//! `disable` across threads (IEEE 1364-2005 section 10.3, design P2 §4.1).
+//! `disable` across threads (IEEE 1364-2005 section 10.3).
 //!
 //! Disabling a named block or a task ends every execution of it, in every
 //! thread. Each thread inside the target goes on from the state its resume

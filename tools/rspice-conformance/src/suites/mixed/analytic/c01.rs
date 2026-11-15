@@ -1,4 +1,4 @@
-//! C1 — first-order continuous-time sigma-delta modulator (design §3 C1).
+//! C1 — first-order continuous-time sigma-delta modulator.
 //!
 //! Circuit constants from `net/mod1-ct.cir` and `net/converter.cir`: input
 //! 0.5 V at 500 Hz, clock 5 MHz (first edge 0.1 µs), decimation 500 clocks

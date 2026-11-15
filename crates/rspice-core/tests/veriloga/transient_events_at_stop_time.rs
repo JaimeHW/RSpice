@@ -133,7 +133,7 @@ fn counter(rise: u32) -> String {
 #[cfg(feature = "veriloga")]
 fn p06b_deck(module: &std::path::Path, cards: &str) -> Netlist {
     Netlist::parse(&format!(
-        "* P0.6b\n.hdl \"{}\"\nvp p 0 1\nx1 p 0 q cnt\nrp p 0 {{r}}\nrq q 0 10k\n{cards}\n.tran 1n {STOP_ONE_ULP_LATE}\n.end\n",
+        "* mixed counter\n.hdl \"{}\"\nvp p 0 1\nx1 p 0 q cnt\nrp p 0 {{r}}\nrq q 0 10k\n{cards}\n.tran 1n {STOP_ONE_ULP_LATE}\n.end\n",
         module.display().to_string().replace('\\', "/")
     ))
     .expect("deck parses")

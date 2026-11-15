@@ -389,7 +389,7 @@ const GENERATED_VERILOGA_PSS_STATE: &str = "a model whose generator proved its r
      operator and no variable the next evaluation reads back";
 /// One reason covers all six contracts for a mixed Verilog-AMS module, so it
 /// is stated once instead of six near-identical times.
-const MIXED_SIGNAL_INTERLEAVE: &str = "periodic steady state with running discrete state (P7): a mixed Verilog-AMS module's \
+const MIXED_SIGNAL_INTERLEAVE: &str = "periodic steady state with running discrete state: a mixed Verilog-AMS module's \
      discrete half runs as a transient event interleave, and its event queue, process \
      resumptions and drivers are not part of a period map; small-signal analyses linearize \
      it around its held equilibrium instead";
@@ -1971,7 +1971,7 @@ mod tests {
                 );
             };
             assert!(
-                missing.contains("periodic steady state with running discrete state (P7)"),
+                missing.contains("periodic steady state with running discrete state:"),
                 "{capability:?} must name the capability a mixed module is still missing: \
                  {missing}"
             );

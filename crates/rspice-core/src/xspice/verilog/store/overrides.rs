@@ -110,7 +110,7 @@ impl Overrides {
 }
 
 /// The override layer at a drained boundary: the host image's `forces`
-/// section (design P2 section 5.4).
+/// section.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct OverridesImage {

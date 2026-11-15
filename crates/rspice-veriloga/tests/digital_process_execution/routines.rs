@@ -1,6 +1,6 @@
-//! Tasks and functions executed by the interpreter (IEEE 1364-2005 section 10,
-//! design P2 §4.1). Expected values are what Icarus Verilog 13.0 computes for
-//! the same source.
+//! Tasks and functions executed by the interpreter (IEEE 1364-2005 section
+//! 10). Expected values are what Icarus Verilog 13.0 computes for the same
+//! source.
 
 use super::*;
 use rspice_veriloga::canonical_ir::digital_eval::{MAX_CALL_DEPTH, start_with_limit};
@@ -100,7 +100,7 @@ fn a_checkpoint_keeps_the_task_frames_of_a_suspended_process() {
 }
 
 /// `fork` hands the kernel one start state per branch, in source order, and
-/// the state that resumes at the join (section 9.8.2, design P2 §4.2). A
+/// the state that resumes at the join (section 9.8.2). A
 /// branch runs in the forking task's frame and ends at its own end; the join
 /// keeps the process frame below the task.
 #[test]
@@ -145,7 +145,7 @@ fn a_fork_hands_the_kernel_its_branches_in_source_order_and_its_join() {
 /// A `disable` of a named block another process waits in names the block's
 /// scope. The waiting thread unwinds to where it stands and, resumed, leaves
 /// the block at once, skipping the rest of it; the disabling thread is not
-/// inside the block and goes on (section 10.3, design P2 §4.1).
+/// inside the block and goes on (section 10.3).
 #[test]
 fn a_disabled_block_is_left_from_where_its_thread_waits() {
     use rspice_veriloga::canonical_ir::cfg::DigitalDisableTarget;

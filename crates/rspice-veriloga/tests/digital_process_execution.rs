@@ -8842,7 +8842,6 @@ fn multidimensional_arrays_diagnose_rank_shape_and_storage_errors() {
 
 // ===========================================================================
 // System tasks, system functions and the IEEE 1800 statement forms
-// (design P2 sections 1.2, 1.3 and 2)
 // ===========================================================================
 
 fn four_state(scalar: &DigitalScalar) -> String {

@@ -1,4 +1,4 @@
-//! C4 — 8-bit SAR ADC (design §3 C4).
+//! C4 — 8-bit SAR ADC.
 //!
 //! The staircase converts the mid-code inputs `(S_k + 0.5)/256 V` (Vref 1 V),
 //! so each code is exactly `S_k`. The comparator is `gm = 1 mS`,

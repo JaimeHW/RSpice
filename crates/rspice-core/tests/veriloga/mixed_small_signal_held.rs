@@ -1,4 +1,4 @@
-//! Small-signal analyses around a held discrete state (P1 design S1–S5, S11).
+//! Small-signal analyses around a held discrete state.
 //!
 //! The oracle is O5, held-digital equivalence: the same circuit with every
 //! converter replaced by what its held state is — a built-in D/A converter by

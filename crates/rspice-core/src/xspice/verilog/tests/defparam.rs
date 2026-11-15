@@ -1,5 +1,4 @@
-//! `defparam` end to end (IEEE 1364-2005 section 12.2.1; design P2 section
-//! 4.2).
+//! `defparam` end to end (IEEE 1364-2005 section 12.2.1).
 //!
 //! Expected text is what Icarus Verilog 13.0 printed for the same source
 //! (`iverilog -g2005`, `vvp -n`), an RSpice-authored probe.

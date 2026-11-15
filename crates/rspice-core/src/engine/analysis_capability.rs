@@ -1707,8 +1707,9 @@ pub(in crate::engine) fn event_shooting_capability_refusal(
 mod tests {
     use super::*;
 
-    /// Whether text names a roadmap item (`P1.6`, `P7.2/P7.3`) or a lane
-    /// (`L2b`, `lane L5`), which user-facing text must never do.
+    /// Whether text names a roadmap item (a `P`, a digit, a dot and a digit)
+    /// or a lane (an `L` and a digit after a space or a parenthesis), which
+    /// user-facing text must never do.
     fn names_a_plan_item(text: &str) -> bool {
         let bytes = text.as_bytes();
         let item = bytes.windows(4).any(|window| {

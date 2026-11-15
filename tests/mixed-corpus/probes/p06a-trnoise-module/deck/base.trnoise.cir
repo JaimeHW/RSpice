@@ -1,4 +1,4 @@
-* P0.6a transient noise through a mixed module, its analog-only twin, and a resistor
+* Transient noise through a mixed module, its analog-only twin, and a resistor
 .hdl "../net/noisy_mixed.vams"
 .hdl "../net/noisy_va.va"
 x1 p 0 q noisy_mixed

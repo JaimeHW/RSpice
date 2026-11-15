@@ -1,4 +1,4 @@
-// P0.6b: a mixed module whose digital state starts from its initial block on
+// A mixed module whose digital state starts from its initial block on
 // every point: q rises at the third 10 ns tick, exactly 30 ns.
 `include "disciplines.vams"
 `timescale 1ns/1ps

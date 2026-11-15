@@ -1,7 +1,6 @@
 # RSpice mixed-signal reference corpus: provenance
 
-This directory is the mixed-signal reference corpus of
-`MIXED_SIMULATION_PLAN.md` §7 (plan item P0.4), run by
+This directory is the mixed-signal reference corpus, run by
 `tools/rspice-conformance` (`suites::mixed`, binary `rspice-mixed-corpus`,
 nightly test `tests/mixed_corpus.rs`). Each design directory holds its decks
 (`deck/`), circuit sources (`net/`), oracle decks (`oracle/`), checked-in
@@ -116,8 +115,7 @@ Upstream: ngspice-46 `examples/xspice/{verilator,icarus_verilog}`.
 | `net/pwm.cir`, `oracle/pwm.o2/deck.cir` | `icarus_verilog/pwm.cir` | `a93c823b4d48c4b4e0c3d8a06a2b2a829b8189dfa0a366968f54e529ecd92b46` |
 
 Edits:
-- `555.v`, `adc.v`, `delay.v`, `pwm.v`: none (verbatim, so they flip when P2
-  lane L1 lands).
+- `555.v`, `adc.v`, `delay.v`, `pwm.v`: none (verbatim).
 - `adc_nd.v`: `adc.v` without its `$display` line. `delay_v2005.v`:
   `out = out << 1;` for `out <<= 1;`, `endmodule` without `;`.
 - `555.shared`: the d_cosim instance becomes
@@ -202,7 +200,7 @@ with the supply-port connect modules and their `connectrules` (variant `p3`).
 
 **Licensing: the ISCAS-derived files fall under the hold of
 `tests/iscas85/RSPICE-VENDORING.md`: internal validation, licensing decision
-owed before release (amendment A5).** They are derived from these repository
+owed before release.** They are derived from these repository
 files (SHA-256 of the committed LF content):
 
 | Circuit | Source | SHA-256 |
@@ -276,11 +274,11 @@ subcircuit (`net/ldo_sub.cir`, read by relative path, not copied) with C5's
 BSIM4 cards (`../c05-ldo-trim/net/models-bsim4.cir`, see C5) and C5's
 `net/spi_trim.v`. `net/supply_load.cir` is C5's supply and static load
 without its load-step source. `net/top.vams` repeats `spi_trim.v` and
-`net/tb_ldo_unrolled.vams` verbatim beside the top module, because a design
-split across HDL files is plan P2 lane L8. `net/tb_ldo_unrolled.vams` and the
+`net/tb_ldo_unrolled.vams` verbatim beside the top module, because the design
+is read from one HDL file. `net/tb_ldo_unrolled.vams` and the
 sixteen `oracle/c<k>.op.o5.ngspice.cir` decks are generated from the rules in
 their headers. C5's ESD junction is not part of C12.
 
-## P0.6 probes (`probes/`)
+## Probes (`probes/`)
 
-All RSpice-authored from design §4.
+All RSpice-authored.

@@ -5,20 +5,20 @@ exit_phases = ["P1", "P3"]
 dialect = "best-available"
 features = []
 
-# base: .param vcc=3.3, a static converter supply (amendment A4: correct as stated).
+# base: .param vcc=3.3, a static converter supply.
 [[variant]]
 name = "base"
 families = ["spice", "xspice", "vams-digital"]
 today = "runs"
 
-# p3: authored supply-sensitive connect modules with a supply port (A4),
+# p3: authored supply-sensitive connect modules with a supply port,
 # bound to vdd by the port's inh_conn_def_value.
 [[variant]]
 name = "p3"
 families = ["spice", "xspice", "vams-digital", "vams-analog"]
 today = "runs"
 
-# live: no .param vcc; the supply is the vdd net, bound live (A4b, plan D-C):
+# live: no .param vcc; the supply is the vdd net, bound live:
 # its connect rules (net/por_ctrl_live.vams) name vdd as vsup.
 [[variant]]
 name = "live"

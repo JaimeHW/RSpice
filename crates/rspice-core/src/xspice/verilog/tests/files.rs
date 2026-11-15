@@ -1,5 +1,4 @@
-//! File I/O, string I/O, `$readmem*` and the value change dump end to end
-//! (design P2 section 4.3).
+//! File I/O, string I/O, `$readmem*` and the value change dump end to end.
 //!
 //! Expected text is what Icarus Verilog 13.0 printed for the same source
 //! (`iverilog -g2005`, `vvp -n`, RSpice-authored probes), with binary modes
@@ -438,7 +437,7 @@ endmodule
     );
 }
 
-/// Design P2 section 4.3: a write that would leave the run directory fails as
+/// A write that would leave the run directory fails as
 /// section 17.2.1 prescribes, with a located warning; the run may lift the
 /// confinement.
 #[test]

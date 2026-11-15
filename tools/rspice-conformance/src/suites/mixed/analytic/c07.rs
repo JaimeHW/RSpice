@@ -1,4 +1,4 @@
-//! C7 — open-drain bus (design §3 C7).
+//! C7 — open-drain bus.
 //!
 //! SDA and SCL: Rp = 2.2 kΩ to 3.3 V, Cbus = 200 pF. The modules reach the bus
 //! through the built-in connect-rule bidirectional converter at the

@@ -537,7 +537,7 @@ pub fn resolve_simulation_config(
     resolved
 }
 
-/// The deck's HDL options (design P2 section 4.3) under the front end's:
+/// The deck's HDL options under the front end's:
 /// the deck's plusargs follow the command line's, so the first match is the
 /// command line's, and a command-line run directory, delay selection or
 /// path delays left out wins.
@@ -1368,7 +1368,7 @@ mod tests {
         );
     }
 
-    /// Design P2 sections 4.3 and 4.4: every HDL `.options` key parses and
+    /// Every HDL `.options` key parses and
     /// resolves over the caller's base; the command line's plusargs come
     /// first, and its run directory and delay selection are not replaced.
     #[test]

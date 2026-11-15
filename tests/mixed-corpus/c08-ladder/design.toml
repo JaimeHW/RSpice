@@ -23,7 +23,7 @@ name = "wr"
 families = ["vams-digital", "vams-analog", "wreal"]
 today = "runs"
 
-# (d) SystemVerilog real-number-modelling nettype twin of (c) (P5).
+# (d) SystemVerilog real-number-modelling nettype twin of (c).
 [[variant]]
 name = "sv"
 families = ["vams-digital", "vams-analog", "sv-rnm"]

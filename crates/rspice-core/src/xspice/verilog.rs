@@ -716,7 +716,7 @@ fn invert(bit: FourStateBit) -> FourStateBit {
     }
 }
 
-/// Which order same-tick activations start in (design P2 section 2.4).
+/// Which order same-tick activations start in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HdlSchedule {
     /// Source order: processes start, and a change wakes its waiters, in
@@ -729,7 +729,7 @@ pub enum HdlSchedule {
     ReverseActive,
 }
 
-/// How a self-checking testbench run is configured (design P2 section 2.3).
+/// How a self-checking testbench run is configured.
 #[derive(Debug, Clone)]
 pub struct HdlTestbenchOptions {
     /// Where relative HDL file paths resolve; the working directory when
@@ -873,7 +873,7 @@ fn declared_modules(
     Ok((declared, instantiated))
 }
 
-/// Run a self-checking HDL testbench to its end (design P2 section 2.3).
+/// Run a self-checking HDL testbench to its end.
 ///
 /// Every source is one compilation unit, read in order, so macros and
 /// `timescale` carry from one file into the next (IEEE 1364-2005 sections

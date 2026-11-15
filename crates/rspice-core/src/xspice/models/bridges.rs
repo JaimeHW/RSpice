@@ -1621,7 +1621,7 @@ impl CodeModel for TrackingDacBridge {
         evaluate_stock_dac_bridge(ctx, Some(supply))
     }
     /// The supply partial of the output level `fraction·V(sup)`: the fraction
-    /// (plan §8.2 rule 3; a held 1 has gain 1 from its supply).
+    /// (the level tracks the supply, so a held 1 has gain 1 from it).
     fn output_vector_input_partials(
         &self,
         ctx: &CmContext,

@@ -266,8 +266,7 @@ impl Pcg32 {
 mod tests {
     use super::*;
 
-    /// The vectors design P2 section 4.4 pins, from Icarus 13.0 runs of
-    /// RSpice-authored probes.
+    /// The pinned vectors, from Icarus 13.0 runs of RSpice-authored probes.
     #[test]
     fn random_matches_the_reference_algorithm_sequences() {
         let mut seed = 5;

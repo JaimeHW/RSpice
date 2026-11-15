@@ -74,7 +74,7 @@ pub enum Route {
     Native,
     /// The browser worker, as an external producer.
     Worker,
-    /// The desktop application (P4), as an external producer.
+    /// The desktop application, as an external producer.
     App,
 }
 

@@ -225,7 +225,7 @@ fn comparison_conversion_and_compilation_propagate_broken_pipes() {
 }
 
 // ---------------------------------------------------------------------------
-// The HDL console (design P2 section 4.3)
+// The HDL console
 // ---------------------------------------------------------------------------
 
 /// A mixed deck whose HDL half prints, reads a plusarg, reports an error and
@@ -489,7 +489,7 @@ fn hdl_path_delays_keeps_or_leaves_out_module_paths() {
     }
 }
 
-/// Design P2 section 4.3: a design's relative file names resolve against the
+/// A design's relative file names resolve against the
 /// deck's directory, or `--hdl-run-dir`; a write that would leave that
 /// directory fails as `$fopen` failures do (0, with a located warning) unless
 /// the run passes `--hdl-unrestricted-io`.

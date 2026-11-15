@@ -1,4 +1,4 @@
-* P0.6c read-before-assign state in a mixed module and its analog-only twin
+* Read-before-assign state in a mixed module and its analog-only twin
 .hdl "../net/held_mixed.vams"
 .hdl "../net/held_va.va"
 va a 0 pwl(0 0 30n 3)

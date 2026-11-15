@@ -491,10 +491,10 @@ mod veriloga_pole_zero {
 /// The analyses a mixed Verilog-AMS deck takes part in around its held
 /// equilibrium, and the ones that still refuse it by name.
 ///
-/// The operating point is committed as the held equilibrium (P1 design S1),
-/// so every small-signal analysis, pole-zero and a DC sweep run on a mixed
+/// The operating point is committed as the held equilibrium, so
+/// every small-signal analysis, pole-zero and a DC sweep run on a mixed
 /// deck. A periodic analysis asks for a steady state with a *running*
-/// discrete half, which has no formulation yet (P7), and refuses through the
+/// discrete half, which has no formulation yet, and refuses through the
 /// capability matrix with a typed token, analysis kind, instance and module.
 #[cfg(feature = "veriloga")]
 mod mixed_signal_discrete_state {
@@ -633,7 +633,7 @@ mod mixed_signal_discrete_state {
     }
 
     /// A periodic analysis asks for a steady state with the discrete half
-    /// running, which the matrix refuses (P7). Each refusal names the
+    /// running, which the matrix refuses. Each refusal names the
     /// analysis kind, the instance and its module as typed fields, not only
     /// in prose.
     #[test]

@@ -132,7 +132,7 @@ pub enum SimulationConfigError {
 }
 
 // ============================================================================
-// HDL runs (design P2 section 4.3)
+// HDL runs
 // ============================================================================
 
 /// The analysis point an HDL output record belongs to.
@@ -217,7 +217,7 @@ pub trait HdlOutputSink: Send + Sync + std::fmt::Debug {
 }
 
 /// A sink that keeps the records, for a headless caller that reads them after
-/// the run (design P2 section 4.3).
+/// the run.
 ///
 /// Bounded by text bytes. The record that would cross the bound is replaced
 /// by one explicit truncation warning, and the output after it is dropped, so
@@ -702,7 +702,7 @@ pub struct SimulationConfig {
     /// same length as the locked grid; callers that provide only a grid retain
     /// the normal timestamp-difference behavior.
     pub locked_time_step_sizes: Option<std::sync::Arc<Vec<Value>>>,
-    /// The HDL half's run options and output receiver (design P2 section 4.3).
+    /// The HDL half's run options and output receiver.
     pub hdl: HdlRunConfig,
 }
 
@@ -1404,7 +1404,7 @@ mod timeint_config_tests {
         }
     }
 
-    /// Design P2 section 4.3: headless output is bounded, and the overflow is
+    /// Headless output is bounded, and the overflow is
     /// one explicit record rather than silence.
     #[test]
     fn the_hdl_collector_bounds_its_text_with_one_truncation_record() {

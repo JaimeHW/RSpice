@@ -1,5 +1,5 @@
 //! `force`/`release` and procedural `assign`/`deassign` end to end (IEEE
-//! 1364-2005 section 9.3; design P2 section 4.2).
+//! 1364-2005 section 9.3).
 //!
 //! Expected text is what Icarus Verilog 13.0 printed for the same source
 //! (`iverilog -g2005`, `vvp -n`), an RSpice-authored probe.
@@ -204,7 +204,7 @@ fn host(source: &str) -> DigitalHost {
     )
 }
 
-/// Design P2 section 5.4: an active `force` and `assign` survive a host image
+/// An active `force` and `assign` survive a host image
 /// round trip in its `forces` section, including the value a net resolves to
 /// beneath the force, and the restored host continues exactly as the original.
 #[test]

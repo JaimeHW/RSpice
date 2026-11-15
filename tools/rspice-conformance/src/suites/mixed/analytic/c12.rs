@@ -1,4 +1,4 @@
-//! C12 — Verilog-AMS testbench over the C5 LDO (design §3 C12).
+//! C12 — Verilog-AMS testbench over the C5 LDO.
 //!
 //! The testbench loads trim codes 0..15 every 100 µs and raises `ok` at
 //! 1600 µs when every step of its readings lies in [5 mV, 20 mV]. The ladder

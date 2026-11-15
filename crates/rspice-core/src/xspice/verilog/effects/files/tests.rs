@@ -1,5 +1,5 @@
 //! Resolution, confinement, snapshot reads, commit-time writes and checkpoint
-//! offset truncation (design P2 section 4.3).
+//! offset truncation.
 
 use super::*;
 

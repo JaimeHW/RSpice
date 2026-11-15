@@ -1,4 +1,4 @@
-// P0.6a: the analog-only twin of noisy_mixed.
+// The analog-only twin of noisy_mixed.
 `include "disciplines.vams"
 module noisy_va(p, n);
   inout p, n; electrical p, n;

@@ -268,7 +268,7 @@ pub enum DigitalRunError {
         requested: String,
     },
     /// A well-formed request this build deliberately refuses, such as a
-    /// testbench option whose P2 lane has not landed. Typed, with a token.
+    /// testbench option this build does not implement. Typed, with a token.
     Unsupported(Box<crate::UnsupportedCapabilityError>),
 }
 
@@ -458,7 +458,7 @@ enum ProcessStatus {
 }
 
 /// One thread's schedule state: a process's own thread, or a child a `fork`
-/// started (design P2 §5.2). Process threads occupy the first slots, in
+/// started. Process threads occupy the first slots, in
 /// process order; children take the lowest free slot after them.
 #[derive(Debug, Clone)]
 struct ProcessSlot {
@@ -618,10 +618,10 @@ pub struct DigitalHost {
     scratch: DigitalEvalScratch,
     /// System-task output, randomness, the monitor region and the finish
     /// request. Part of the host so a rejected trial's clone restore takes
-    /// all of it back with everything else (design P2 section 5.3).
+    /// all of it back with everything else.
     effects: HdlEffects,
     /// Start processes, and wake a change's waiters, in reverse declaration
-    /// order: the racy-test classifier's schedule (design P2 section 2.4).
+    /// order: the racy-test classifier's schedule.
     reverse_active: bool,
     /// Start time zero in Icarus Verilog's three steps; see
     /// [`Self::prepare_start`]. Set for a discrete testbench.
@@ -817,7 +817,7 @@ impl DigitalHost {
         }
     }
 
-    /// Select the reverse same-tick start order (design P2 section 2.4).
+    /// Select the reverse same-tick start order.
     pub(crate) fn set_reverse_active(&mut self, reverse: bool) {
         self.reverse_active = reverse;
     }

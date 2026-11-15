@@ -1,5 +1,5 @@
-//! DC sweeps carry the held discrete state from point to point (P1 design S6,
-//! S8), and `RESTART=YES` makes every point an independent operating point.
+//! DC sweeps carry the held discrete state from point to point, and
+//! `RESTART=YES` makes every point an independent operating point.
 //!
 //! The fixture is a set/reset latch: `posedge hi` sets `q`, `negedge lo`
 //! clears it, and two behavioural comparators on `vin` drive `hi` above

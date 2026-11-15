@@ -1,7 +1,7 @@
 schema = "rspice-mixed-tolerance/1"
 time_precision = 1e-12
 
-# Decisive assertion (design §4a): sample standard deviation over [0.1 µs, 2 µs]
+# Decisive assertion: sample standard deviation over [0.1 µs, 2 µs]
 # of ~1900 independent held samples; χ² 99% ⇒ ±4.2%.
 
 [[q]]

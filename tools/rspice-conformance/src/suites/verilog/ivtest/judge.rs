@@ -1,6 +1,6 @@
 //! Judging one run of one test, and combining the two schedules' verdicts.
 //!
-//! # Pass rules (design P2 section 2.1)
+//! # Pass rules
 //!
 //! - A `passed` test passes on a line reading `passed` on its own, in any
 //!   case and with any surrounding white space. A test from the JSON list is
@@ -146,7 +146,7 @@ pub enum Outcome {
     Racy,
     Excluded(String),
     /// A failing run the manifest accepts: the test expects what the cited
-    /// clause does not give, and RSpice follows the clause (design §2.5). The
+    /// clause does not give, and RSpice follows the clause. The
     /// clause is the row's detail; only the manifest marks a row so, and a
     /// run that fails such a row keeps the mark.
     Deviation,

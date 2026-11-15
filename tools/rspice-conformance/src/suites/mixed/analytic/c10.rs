@@ -1,4 +1,4 @@
-//! C10 — digital-heavy (design §3 C10, amendment A5).
+//! C10 — digital-heavy.
 //!
 //! The ISCAS-85 expectations are the Boolean function of the circuit's
 //! gate-level rendering (`net/<c>.v`, Verilog primitives) evaluated on the

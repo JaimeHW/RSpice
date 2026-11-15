@@ -2237,7 +2237,7 @@ fn realtobits_is_sixty_four_bits_and_bitstoreal_takes_sixty_four() {
 }
 
 // ===========================================================================
-// System tasks and functions (design P2 sections 1.3 and 2)
+// System tasks and functions
 // ===========================================================================
 
 use rspice_veriloga::canonical_ir::digital::{
@@ -2338,7 +2338,7 @@ fn a_named_block_opens_a_scope_under_its_module() {
     assert_eq!(scopes, [plan.scopes[2].id, plan.scopes[1].id]);
 }
 
-/// Design P2 section 2.3: `$monitor` registers once, and its operands are
+/// `$monitor` registers once, and its operands are
 /// re-evaluated by a separate pure function on every change of a signal it
 /// reads, so the process carries no operands and the observer carries all.
 #[test]
@@ -2415,11 +2415,11 @@ fn pure_system_functions_are_value_nodes_rather_than_sites() {
     )));
 }
 
-/// Design P2 section 1.3: every kind registers at L1, including the file and
-/// waveform tasks whose host behaviour is lane L5's, so a design that uses one
-/// compiles and is refused at run time by name rather than at compile time.
+/// Every kind registers, the file and waveform tasks included, each with the
+/// host half that runs it, so a design that uses one compiles and any refusal
+/// comes at run time by name rather than at compile time.
 #[test]
-fn file_tasks_register_as_lane_l5_sites() {
+fn file_tasks_register_with_the_files_half() {
     let plan = plan(
         "    integer fd; reg [7:0] mem [0:3];\n\
          \x20   initial begin fd = $fopen(\"a.txt\"); $readmemh(\"m.hex\", mem); $dumpvars(0, dut); end",

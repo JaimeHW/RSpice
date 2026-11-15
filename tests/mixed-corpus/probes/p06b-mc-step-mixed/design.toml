@@ -1,6 +1,6 @@
 schema = "rspice-mixed-design/1"
 id = "P06b"
-title = "P0.6b: MC and .step of a transient on a mixed design"
+title = "MC and .step of a transient on a mixed design"
 exit_phases = ["P0"]
 dialect = "best-available"
 features = []

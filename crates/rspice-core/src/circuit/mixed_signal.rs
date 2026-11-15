@@ -106,7 +106,7 @@ impl std::fmt::Display for ThresholdFinding {
 }
 
 /// The held equilibrium of one DC sweep point, carried into the circuit the
-/// next point rebuilds (design §4.3).
+/// next point rebuilds.
 ///
 /// A sibling of the transient checkpoint's mixed image rather than one, for
 /// the reasons that image cannot serve: it never leaves the analysis, so it is

@@ -1,5 +1,4 @@
-//! C9 — power-on reset under a supply ramp (design §3 C9, amendments A4, A4b
-//! and A6).
+//! C9 — power-on reset under a supply ramp.
 //!
 //! Supply `pwl(0 0 100u 3.3 300u 3.3 310u 2.0 320u 2.0 330u 3.3)`; comparators
 //! `hi = v·½(1 + tanh(200(v − 2.7)))` and `lo_n = v·½(1 + tanh(200(v − 2.4)))`
@@ -7,9 +6,9 @@
 //! rises on the 17th clock rise after `por_n` (the next one plus 16 µs).
 //!
 //! The converter model is the variant's: `base` states `.param vcc=3.3`, a
-//! static supply (A/D threshold 1.65 V, D/A level 3.3 V, amendment A4); `p3`
-//! (authored supply-port connect modules) and `live` (inferred supply,
-//! P3.2a) convert against v(vdd) itself (threshold v/2, level v).
+//! static supply (A/D threshold 1.65 V, D/A level 3.3 V); `p3` (authored
+//! supply-port connect modules) and `live` (inferred supply) convert against
+//! v(vdd) itself (threshold v/2, level v).
 
 use super::{Context, Registry, points, values};
 use crate::suites::mixed::compare::Expected;

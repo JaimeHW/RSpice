@@ -5,9 +5,8 @@ exit_phases = ["P2"]
 dialect = "best-available"
 features = []
 
-# The upstream Verilog of ngspice-46 examples/xspice/verilator, unedited. adc,
-# delay and pwm use constructs the digital front end refuses until P2 lane L1
-# (design-p2 §3); each flips by itself when L1 lands.
+# The upstream Verilog of ngspice-46 examples/xspice/verilator, unedited: adc
+# with its $display line and delay in its upstream spelling.
 [[variant]]
 name = "555"
 families = ["spice", "xspice", "vams-digital"]
@@ -28,7 +27,7 @@ name = "pwm"
 families = ["spice", "vams-digital"]
 today = "parse:P2.1"
 
-# Today-runnable rewrites (design §3 C3): adc.v without its $display line, and
+# The rewrites of adc and delay: adc.v without its $display line, and
 # delay.v in 1364-2005 spelling (`out = out << 1;`, `endmodule` without `;`).
 [[variant]]
 name = "adc_nd"

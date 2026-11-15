@@ -1,6 +1,6 @@
 // C7: I2C controller with its script written as tasks (RSpice-authored).
-// The same bus behaviour as i2c_ctrl.v's MODE = 0 script; tasks are refused
-// by the digital front end until P2 lane L3.
+// The same bus behaviour as i2c_ctrl.v's MODE = 0 script, written with
+// tasks.
 `timescale 1ns/1ps
 module i2c_ctrl(scl, sda);
   inout scl, sda;

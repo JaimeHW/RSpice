@@ -5277,7 +5277,7 @@ pub struct SimulationOptions {
     /// 2 = force transport, 3 = force inertial.
     pub digital_delay_type: Option<i64>,
     /// `.OPTIONS HDLSEED=<u32>`: the HDL design-global `$random` seed and the
-    /// root of every process's `$urandom` stream (design P2 section 4.4).
+    /// root of every process's `$urandom` stream.
     pub hdl_seed: Option<u32>,
     /// `.OPTIONS HDL_PLUSARGS='+A=1 +B'`: plusargs after the command line's.
     pub hdl_plusargs: Option<Vec<String>>,

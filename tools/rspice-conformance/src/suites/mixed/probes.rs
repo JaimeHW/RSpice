@@ -1,6 +1,6 @@
-//! Probes (`tests/mixed-corpus/probes/`, design §4): three questions the
-//! plan could not answer by reading code, each a small design with the same
-//! schema and a decisive assertion.
+//! Probes (`tests/mixed-corpus/probes/`): questions reading the code could
+//! not settle, each a small design with the same schema and a decisive
+//! assertion.
 //!
 //! - (a) `p06a-trnoise-module`: does transient noise include a Verilog-A noise
 //!   source in a mixed module, in its analog-only twin, and in a plain

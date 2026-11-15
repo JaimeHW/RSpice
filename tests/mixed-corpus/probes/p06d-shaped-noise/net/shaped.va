@@ -1,4 +1,4 @@
-// P0.6d: a module that shapes its own noise through a single-pole low-pass,
+// A module that shapes its own noise through a single-pole low-pass,
 // H(s) = 1/(1 + s/1e6). A pole entry is the root of 1 - s/p (LRM 2.4
 // §4.5.13), so the stable pole is the negative one.
 `include "disciplines.vams"

@@ -1,5 +1,5 @@
 //! What a digital design's system tasks do (IEEE 1364-2005 section 17), as
-//! the host performs them (design P2 section 4.3).
+//! the host performs them.
 //!
 //! # Accepted-only output
 //!

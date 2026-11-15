@@ -1,4 +1,4 @@
-//! C6 — digitally controlled buck converter (design §3 C6).
+//! C6 — digitally controlled buck converter.
 //!
 //! 5 V in; 22 µH; a 2 µs switching period of 64 ticks with two dead ticks on
 //! each side of the low-side pulse; 2 Ω load. The controller regulates the

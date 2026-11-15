@@ -1966,7 +1966,7 @@ fn every_analysis_that_copies_the_circuit_copies_the_held_equilibrium() {
 
 /// **Attack 2, periodic half.** The periodic small-signal analyses still refuse
 /// a mixed module — a periodic steady state with its discrete half running
-/// has no formulation yet (P7) — with one typed token, the analysis kind, the
+/// has no formulation yet — with one typed token, the analysis kind, the
 /// instance and its module.
 ///
 /// These are the routes the refusal was once missing from: the old mixed

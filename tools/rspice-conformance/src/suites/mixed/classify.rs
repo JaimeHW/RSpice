@@ -1,5 +1,5 @@
 //! One cell's outcome: `fail`, `refused`, `wrong`, `pass` or `unverified`,
-//! decided in that order (design §2.7).
+//! decided in that order.
 //!
 //! A refusal is an outcome only when it is precise. It must carry a capability
 //! token (or an elaboration/parse kind), a reason beyond the token, the

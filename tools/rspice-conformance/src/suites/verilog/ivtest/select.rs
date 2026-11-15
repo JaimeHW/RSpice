@@ -1,9 +1,8 @@
 //! Which ivtest tests are in the selection, and which lane's bucket each is in.
 //!
-//! The rules are the P2 design of record's (section 2.2). A test is taken from
-//! the standard and synthesis lists, or from the JSON list when it asks for no
-//! language generation beyond 1364-2005. It is excluded, with the reason
-//! recorded, when:
+//! A test is taken from the standard and synthesis lists, or from the JSON
+//! list when it asks for no language generation beyond 1364-2005. It is
+//! excluded, with the reason recorded, when:
 //!
 //! - an Icarus-specific list overrides it;
 //! - its type is not `normal`, `CE`, `RE` or `CO` (`NI` and `EF` are upstream's
@@ -547,7 +546,8 @@ const STANDARD_SYSTEM_NAMES: &[&str] = &[
     "atanh",
 ];
 
-/// The clause 17.2 file tasks and the clause 18 VCD tasks (lane L5).
+/// The clause 17.2 file tasks and the clause 18 VCD tasks: the file-I/O
+/// bucket.
 const FILE_SYSTEM_NAMES: &[&str] = &[
     "fopen",
     "fclose",
@@ -595,7 +595,7 @@ const FILE_SYSTEM_NAMES: &[&str] = &[
     "dumpflush",
 ];
 
-/// The clause 15 timing checks (lane L6, with `specify`).
+/// The clause 15 timing checks: the delay bucket, with `specify`.
 const TIMING_CHECK_NAMES: &[&str] = &[
     "setup",
     "hold",

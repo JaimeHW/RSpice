@@ -526,7 +526,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         "CONNECTRULES",
                     )?);
                 }
-                // Design P2 section 4.4: the HDL random root seed.
+                // The HDL random root seed.
                 (None, "HDLSEED" | "HDL_SEED") => {
                     let value = expect_u64_literal(stream, line_num, "HDLSEED")?;
                     options.hdl_seed =

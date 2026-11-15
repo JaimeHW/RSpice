@@ -1,9 +1,9 @@
-// C9 variant live (RSpice-authored; corpus design C9, amendment A4b): the
+// C9 variant live (RSpice-authored; corpus design C9): the
 // controller of net/por_ctrl.v unchanged, with its boundaries converted by the
 // shipped a2d and d2a connect modules (verbatim), whose supply is named as the
 // vdd net. A net-named vsup binds the built-in converters to that net live: a
 // held 1 drives V(vdd) and an input compares against V(vdd)/2 at every
-// instant (plan D-C, P3.2a).
+// instant.
 `include "disciplines.vams"
 `timescale 1ns/1ps
 module por_ctrl(hi, lo_n, por_n, rst_n, tie_hi, clk);

@@ -1,10 +1,9 @@
 // C12 variant top (RSpice-authored; corpus design C12): Verilog-AMS on top.
 // top instantiates the SPICE subcircuit ldo (net/ldo_sub.cir), the trim
 // register and the unrolled testbench; the supply and load stay SPICE at the
-// deck level. Instantiating a SPICE subcircuit from Verilog is plan item
-// P3.6. spi_trim is ../../c05-ldo-trim/net/spi_trim.v verbatim and tb_ldo
-// is net/tb_ldo_unrolled.vams verbatim, in this one file because a design
-// split across HDL files is P2 lane L8.
+// deck level. spi_trim is ../../c05-ldo-trim/net/spi_trim.v verbatim and
+// tb_ldo is net/tb_ldo_unrolled.vams verbatim, in this one file so the
+// design is read from one HDL file.
 `include "disciplines.vams"
 `timescale 1ns/1ps
 module top(vin, vout, ok, meas);

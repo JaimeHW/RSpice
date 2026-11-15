@@ -1,6 +1,6 @@
 schema = "rspice-mixed-design/1"
 id = "P06a"
-title = "P0.6a: mixed-module noise in transient noise"
+title = "Mixed-module noise in transient noise"
 exit_phases = ["P0"]
 dialect = "best-available"
 features = []
