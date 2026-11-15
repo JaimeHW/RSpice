@@ -196,6 +196,83 @@ fn the_zoom_chip_reads_the_in_place_view() {
     );
 }
 
+/// Every text painted in `output`.
+fn painted(output: &egui::FullOutput) -> Vec<String> {
+    fn collect(shape: &egui::Shape, into: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect(shape, into)),
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    for clipped in &output.shapes {
+        collect(&clipped.shape, &mut texts);
+    }
+    texts
+}
+
+/// While the symbol is edited in place, every place that names the document
+/// says so and names the instance: the status bar, the window title, the
+/// inspector's header and the canvas's announced name. Leaving takes it all
+/// back to the sheet.
+#[test]
+fn the_shell_says_the_symbol_is_edited_in_place_and_where() {
+    let mut fixture = InPlace::new();
+    let project = fixture
+        .replay
+        .app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .display_name()
+        .to_owned();
+    let entered = fixture.enter();
+    let status: Vec<&str> = entered
+        .iter()
+        .filter(|control| control.role == Role::Label)
+        .map(|control| control.value.as_str())
+        .collect();
+    assert!(
+        status.contains(&"In place on X1 \u{00b7} top"),
+        "the status bar says where: {status:?}"
+    );
+    let title = fixture.replay.app.last_window_title.clone();
+    assert!(title.starts_with("amp in place on X1"), "{title}");
+    assert!(
+        title.ends_with(&format!(" \u{2014} {project} \u{2014} RSpice")),
+        "{title}"
+    );
+    let canvas = entered
+        .iter()
+        .find(|control| control.role == Role::Canvas)
+        .expect("the canvas is announced");
+    assert!(
+        canvas
+            .label
+            .starts_with("Symbol editor canvas, in place on X1 in top. "),
+        "{}",
+        canvas.label
+    );
+    let output = fixture.replay.frame(vec![]);
+    assert!(
+        painted(&output).contains(&"In place on X1".to_owned()),
+        "the inspector's header says where"
+    );
+
+    fixture.replay.key(egui::Key::Escape, egui::Modifiers::NONE);
+    let back = fixture.replay.frames(vec![]);
+    assert!(
+        back.iter()
+            .all(|control| !control.value.starts_with("In place on")),
+        "the status bar no longer says it"
+    );
+    let title = fixture.replay.app.last_window_title.clone();
+    assert!(title.starts_with("top"), "{title}");
+}
+
 /// The placed preview has nothing to add in place, where the symbol already
 /// stands placed on its sheet: its toolbar toggle gives way to the way back,
 /// and its command says why it is not offered. In the symbol's own view the

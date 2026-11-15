@@ -49,10 +49,17 @@ pub(crate) fn symbol_canvas_accessibility_label(
             ids::CANCEL,
         ],
     );
+    let in_place = state.symbol_in_place().map(|session| {
+        format!(
+            "in place on {} in {}",
+            session.instance_name, session.parent.cell
+        )
+    });
     surface::symbol_canvas_accessibility_label(
         document,
         &state.design.symbol.editor,
         read_only,
+        in_place.as_deref(),
         &shortcuts,
     )
 }

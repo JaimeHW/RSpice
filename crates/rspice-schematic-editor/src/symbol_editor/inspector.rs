@@ -98,10 +98,11 @@ pub struct SymbolInspectorRequest {
 
 /// The symbol inspector. `ports` is the interface the symbol answers to, and
 /// `interface_source` names what it is read from: the schematic, the compiled
-/// module or the bound model.
+/// module or the bound model. `in_place_on` names the instance the symbol is
+/// edited in place at, while it is.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the document and its metadata, the interface and what it is read from, its parameters, the session and what it may edit"
+    reason = "the document and its metadata, the interface and what it is read from, its parameters, the session, what it may edit and where it is edited"
 )]
 pub fn show(
     ui: &mut Ui,
@@ -113,6 +114,7 @@ pub fn show(
     parameters: &[LabelParameter],
     editor: &SymbolEditorSession,
     capabilities: SymbolEditCapabilities,
+    in_place_on: Option<&str>,
 ) -> SymbolInspectorRequest {
     let expected_selection = editor.effective_selection();
     let mut edit = InspectorEdit {
@@ -130,7 +132,7 @@ pub fn show(
         edit.session.generation,
     );
     ui.push_id(field_id, |ui| {
-        hero(ui, &source.document, &document, ports);
+        hero(ui, &source.document, &document, ports, in_place_on);
         ui.add_enabled_ui(capabilities.edit, |ui| {
             let selection = edit.selection.clone();
             let total = selection.len();
@@ -212,7 +214,15 @@ impl InspectorEdit {
 // Hero
 // =============================================================================
 
-fn hero(ui: &mut Ui, reference: &CellViewRef, document: &SymbolDocument, ports: &[PortSpec]) {
+/// The symbol's header: its preview, where it lives, its name, and what it
+/// holds or, edited in place, the instance it stands at.
+fn hero(
+    ui: &mut Ui,
+    reference: &CellViewRef,
+    document: &SymbolDocument,
+    ports: &[PortSpec],
+    in_place_on: Option<&str>,
+) {
     let t = Tokens::get(ui.ctx());
     let inset = panel_inset(ui);
     let (rect, _) =
@@ -272,7 +282,10 @@ fn hero(ui: &mut Ui, reference: &CellViewRef, document: &SymbolDocument, ports: 
     painter.text(
         at(49.0),
         egui::Align2::LEFT_CENTER,
-        document_counts(document),
+        in_place_on.map_or_else(
+            || document_counts(document),
+            |instance| format!("In place on {instance}"),
+        ),
         theme::sans(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );

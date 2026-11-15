@@ -23,10 +23,14 @@ pub struct SymbolSurfaceRequest {
     pub action: SymbolSurfaceAction,
 }
 
+/// What the symbol canvas announces: what it holds and has selected, the
+/// armed tool, whether it takes edits, and its shortcuts. `in_place`, while
+/// the symbol is edited in place, says where: "in place on X1 in top".
 pub fn symbol_canvas_accessibility_label(
     document: &SymbolDocument,
     session: &SymbolEditorSession,
     read_only: bool,
+    in_place: Option<&str>,
     shortcuts: &str,
 ) -> String {
     let placed_pins = document
@@ -37,8 +41,11 @@ pub fn symbol_canvas_accessibility_label(
     let selection = session.effective_selection();
     let selected = selection.pins.len() + selection.shapes.len() + selection.attributes.len();
     let edit_state = if read_only { "Read only." } else { "Editable." };
+    let place = in_place
+        .map(|place| format!(", {place}"))
+        .unwrap_or_default();
     format!(
-        "Symbol editor canvas. {}; {}, {}; {}. Active tool: {}. {}{shortcuts}",
+        "Symbol editor canvas{place}. {}; {}, {}; {}. Active tool: {}. {}{shortcuts}",
         counted(document.body.len(), "shape", "shapes"),
         counted(document.pins.len(), "pin", "pins"),
         counted(placed_pins, "pin placed", "pins placed"),

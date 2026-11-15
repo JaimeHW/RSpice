@@ -781,6 +781,7 @@ impl Editor {
                             SymbolEditCapabilities {
                                 edit: !self.app.state.model.schematic_edit_read_only(),
                             },
+                            None,
                         ));
                     });
                 });

@@ -9,6 +9,7 @@
 use std::borrow::Cow;
 
 use crate::ui::tokens::Tokens;
+use crate::workbench::app::in_place_session;
 use crate::workbench::app_state::diagnostic_store::listing::listing_in_pass;
 use crate::workbench::chrome::status_bar::design::{
     design_engineering_context, selection_summary, symbol_tool_hint, zoom_factor,
@@ -123,6 +124,14 @@ pub(super) static STATUS_ORDER: &[StatusCell<RSpiceApp>] = &[
         order: 3,
         workspace: None,
         content: selection_cell,
+        activate: None,
+    },
+    StatusCell {
+        key: StatusKey::Page,
+        zone: StatusZone::Leading,
+        order: 4,
+        workspace: Some(Workspace::Design),
+        content: in_place_cell,
         activate: None,
     },
     StatusCell {
@@ -245,6 +254,25 @@ fn selection_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusTe
         &app.state.platform,
         &app.state.design.symbol,
     )))
+}
+
+/// A symbol edited in place says where it stands, in the page's slot: the
+/// instance it is edited at and the sheet that places it. Its prompt says so
+/// once on the way in and expires; this stays while the session does.
+fn in_place_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<StatusText<'a>> {
+    let session = in_place_session(&app.state.design.symbol.in_place, &app.state.model)?;
+    Some(StatusText {
+        text: Cow::Owned(format!(
+            "In place on {} \u{00b7} {}",
+            session.instance_name, session.parent.cell
+        )),
+        mark: StatusMark::None,
+        control: StatusControl::Label,
+        hover: Some(Cow::Owned(format!(
+            "Editing the {} symbol where {} stands on {}. Esc or Return goes back to {}.",
+            session.symbol.cell, session.instance_name, session.parent.cell, session.parent.cell
+        ))),
+    })
 }
 
 /// The page a multi-sheet drawing is open at reads beside where the cursor

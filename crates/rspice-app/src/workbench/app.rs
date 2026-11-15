@@ -722,7 +722,8 @@ impl RSpiceApp {
     }
 
     /// Keep the OS window title (or browser tab title) in sync with the
-    /// active document: `cell* — project — RSpice`.
+    /// active document: `cell* — project — RSpice`, or `cell in place on
+    /// X1* — project — RSpice` while a symbol is edited in place.
     fn sync_window_title(&mut self, ctx: &Context) {
         let project_has_unsaved_changes =
             crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state);
@@ -744,9 +745,14 @@ impl RSpiceApp {
             ""
         };
         let view = &self.state.model.workspace.content.active_view;
+        // A symbol edited in place is named with the instance it stands at.
+        let document = in_place_session(&self.state.design.symbol.in_place, &self.state.model)
+            .map_or_else(
+                || view.cell.clone(),
+                |session| format!("{} in place on {}", view.cell, session.instance_name),
+            );
         let title = format!(
-            "{}{dirty} — {} — RSpice",
-            view.cell,
+            "{document}{dirty} — {} — RSpice",
             self.state.model.workspace.content.project.display_name()
         );
         if self.last_window_title != title {

@@ -5,6 +5,7 @@ use crate::workbench::app::actions::workspace::symbol_document::{
     active_symbol_label_parameters, active_symbol_ports, commit_active_symbol_edit,
     load_active_symbol_editor_metadata, record_symbol_edit, symbol_editor_request_source,
 };
+use crate::workbench::app::in_place_session;
 use crate::workbench::design::DesignFeature;
 use crate::workbench::framework::feature::Cx;
 use egui::Ui;
@@ -42,6 +43,8 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
         SymbolEditCapabilities {
             edit: !cx.model.schematic_edit_read_only() && !cx.application_modal_open(),
         },
+        in_place_session(&cx.state.symbol.in_place, cx.model)
+            .map(|session| session.instance_name.as_str()),
     );
     apply_request(cx, request);
 }
