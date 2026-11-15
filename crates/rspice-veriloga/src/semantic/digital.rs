@@ -912,6 +912,7 @@ impl SemanticAnalyzer {
             }
         }
         self.coerce_driven_input_ports(module, analyzed, &continuous_assigns);
+        mark_floating_output_ports(module, analyzed, &continuous_assigns);
         let paths = self.analyze_specify_paths(module, &signals);
         let timing_checks = self.analyze_timing_checks(module, &signals);
 
@@ -4496,6 +4497,83 @@ fn collect_analog_names_impl(
                     pending.extend(literal.elements.iter().map(Work::Element));
                 }
             },
+        }
+    }
+}
+
+/// Mark each `output` net of `module` that a continuous assignment inside
+/// reads and nothing inside drives ([`AnalyzedPort::floating_output`]). An
+/// instance connection may drive it, so a port any instance connects is not
+/// marked.
+fn mark_floating_output_ports(
+    module: &Module,
+    analyzed: &mut AnalyzedModule,
+    assignments: &[AnalyzedContinuousAssign],
+) {
+    let variables: std::collections::HashSet<&SmolStr> = module
+        .digital_variables
+        .iter()
+        .flat_map(|declaration| declaration.items.iter().map(|item| &item.name))
+        .collect();
+    let outputs: std::collections::HashSet<&SmolStr> = module
+        .port_declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.direction == PortDirection::Output
+                && matches!(
+                    declaration.net_type,
+                    None | Some(crate::ast::PortNetType::Wire(_))
+                )
+        })
+        .flat_map(|declaration| declaration.names.iter())
+        .filter(|name| !variables.contains(name))
+        .collect();
+    if outputs.is_empty() {
+        return;
+    }
+    let mut driven = std::collections::HashSet::new();
+    let mut read = std::collections::HashSet::new();
+    let names = |expression: &Expression, into: &mut std::collections::HashSet<SmolStr>| {
+        crate::ast::visit_expression(expression, &mut |node| {
+            let name = match node {
+                Expression::Identifier(identifier) => Some(&identifier.name),
+                Expression::ArrayAccess(access) => Some(&access.array),
+                Expression::Digital(expression) => expression.base_name(),
+                _ => None,
+            };
+            if let Some(name) = name {
+                into.insert(name.clone());
+            }
+        });
+    };
+    for assignment in assignments {
+        for (name, _) in assignment.assignment.target.written_names() {
+            driven.insert(name.clone());
+        }
+        names(&assignment.assignment.value, &mut read);
+    }
+    for connection in module
+        .instances
+        .iter()
+        .flat_map(|instance| &instance.connections)
+    {
+        let (crate::ast::Connection::Ordered { signal, .. }
+        | crate::ast::Connection::Named { signal, .. }) = connection;
+        if let Some(expression) = signal {
+            names(expression, &mut driven);
+        }
+    }
+    for port in &mut analyzed.ports {
+        let name = port
+            .name
+            .split_once('[')
+            .map_or(port.name.as_str(), |(name, _)| name);
+        if port.direction == PortDirection::Output
+            && outputs.contains(&SmolStr::new(name))
+            && read.contains(name)
+            && !driven.contains(name)
+        {
+            port.floating_output = true;
         }
     }
 }

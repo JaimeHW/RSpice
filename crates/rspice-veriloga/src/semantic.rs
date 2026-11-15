@@ -1397,6 +1397,7 @@ impl SemanticAnalyzer {
                 supply_sensitivity: sensitivity.supply,
                 ground_sensitivity: sensitivity.ground,
                 coerced_from_input: false,
+                floating_output: false,
             });
 
             self.define_symbol(Symbol {

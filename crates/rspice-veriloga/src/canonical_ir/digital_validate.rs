@@ -302,6 +302,24 @@ impl CanonicalDigitalPlan {
                 ));
             }
         }
+        if !self.start_order.is_empty() {
+            let mut started = vec![false; self.processes.len()];
+            for process in &self.start_order {
+                match started.get_mut(usize::from(*process)) {
+                    Some(seen) if !*seen => *seen = true,
+                    _ => {
+                        return Err(error(
+                            "a digital start order must name every process exactly once",
+                        ));
+                    }
+                }
+            }
+            if started.contains(&false) {
+                return Err(error(
+                    "a digital start order must name every process exactly once",
+                ));
+            }
+        }
         let mut names = HashSet::new();
         let mut local_declarations = HashSet::new();
         for (index, signal) in self.signals.iter().enumerate() {

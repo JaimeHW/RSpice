@@ -1136,9 +1136,14 @@ impl DigitalElaborator<'_> {
                                 &outer.elaborated,
                                 span,
                             ));
-                        } else if converts && port.direction == PortDirection::Output {
+                        } else if converts
+                            && port.direction == PortDirection::Output
+                            && !port.floating_output
+                        {
                             // And a differently sized output as `assign net =
                             // port;`: a wider net's extra bits are driven 0.
+                            // One the module only reads is coerced to inout
+                            // (section 12.3.8) and joins below.
                             port_drivers.push(implicit_port_assignment(
                                 &outer.elaborated,
                                 &own,

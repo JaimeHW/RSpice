@@ -9717,6 +9717,7 @@ mod tests {
                     supply_sensitivity: None,
                     ground_sensitivity: None,
                     coerced_from_input: false,
+                    floating_output: false,
                 },
                 AnalyzedPort {
                     name: "n".into(),
@@ -9727,6 +9728,7 @@ mod tests {
                     supply_sensitivity: None,
                     ground_sensitivity: None,
                     coerced_from_input: false,
+                    floating_output: false,
                 },
             ],
             formal_ports: ["p", "n"]

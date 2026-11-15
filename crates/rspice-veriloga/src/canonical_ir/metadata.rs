@@ -267,8 +267,9 @@ use smol_str::SmolStr;
 /// shorts and would keep every such branch as an unknown, so it must be rebuilt.
 /// Version 191 records the signals and scopes a digital plan names in another
 /// top-level module (`CanonicalDigitalPlan::external_signals` and
-/// `external_scopes`), which linking the roots joins. An earlier artifact
-/// refused such a name.
+/// `external_scopes`), which linking the roots joins, and the order a
+/// discrete testbench starts its processes (`start_order`). An earlier
+/// artifact refused such a name and starts a parent before its children.
 pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 191;
 
 /// Collision-resistant identity of one exact preprocessed source closure.

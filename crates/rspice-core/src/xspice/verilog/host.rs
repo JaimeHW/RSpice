@@ -1076,11 +1076,27 @@ impl DigitalHost {
                 self.effects.warn_unsited(None, &warning);
             }
         }
-        let order: Vec<usize> = if self.reverse_active {
-            (0..self.slots.len()).rev().collect()
+        // A discrete testbench starts an instance's children before its own
+        // processes, as Icarus Verilog elaborates them (the plan's start
+        // order); a mixed module starts in process order. The reverse order,
+        // which looks for a result that depends on the start order, is the
+        // process order reversed: children before parents as well, every
+        // other order turned round.
+        let mut order: Vec<usize> = if self.staged_start
+            && !self.reverse_active
+            && self.plan.start_order.len() == self.slots.len()
+        {
+            self.plan
+                .start_order
+                .iter()
+                .map(|&process| usize::from(process))
+                .collect()
         } else {
             (0..self.slots.len()).collect()
         };
+        if self.reverse_active {
+            order.reverse();
+        }
         // Time zero starts in three steps, as Icarus Verilog starts it (IEEE
         // 1364-2005 section 11.4 leaves the order open, and this is the order
         // the oracle's gold files record). Every `always` that opens with a
@@ -1092,7 +1108,9 @@ impl DigitalHost {
         // declaration order once that has settled, so a net that a constant
         // or another net drives already holds its value when such a block
         // first reads it, and a register whose reset an `initial` block raises
-        // at time zero has seen no edge.
+        // at time zero has seen no edge. Each step keeps the start order, so a
+        // child's edge-triggered `always` waits before its parent's `initial`
+        // raises that reset (ivtest pr596).
         // Only a discrete testbench starts in three steps. A mixed module
         // starts every process in the first delta: its coordinator drives the
         // first settle through the analog trial, and its time-zero analog

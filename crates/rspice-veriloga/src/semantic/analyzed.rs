@@ -384,6 +384,12 @@ pub struct AnalyzedPort {
     /// section 12.3.8 coerced it to `inout`; `direction` says `Inout`. A
     /// boundary that would convert it refuses it by this flag.
     pub coerced_from_input: bool,
+    /// Declared an `output` net that a continuous assignment inside its
+    /// module reads and nothing inside drives. IEEE 1364-2005 section 12.3.8
+    /// lets such a port be coerced to `inout`, and Icarus Verilog does where
+    /// it connects a net: a connection of another width joins the low bits
+    /// both have rather than taking a copy of the port.
+    pub floating_output: bool,
 }
 
 /// One port of the module header, before vector expansion.

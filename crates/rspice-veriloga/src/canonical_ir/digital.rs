@@ -1389,6 +1389,11 @@ pub struct CanonicalDigitalPlan {
     /// not a whole design.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub external_signals: Vec<DigitalExternalSignal>,
+    /// The order a discrete testbench starts its processes at time zero:
+    /// every process once, an instance's children before its own processes,
+    /// as Icarus Verilog elaborates them. Empty when it is the id order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub start_order: Vec<DigitalProcessId>,
     /// One entry per system task or function call site (IEEE 1364-2005
     /// section 17), in lowering order. A call node names its entry here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

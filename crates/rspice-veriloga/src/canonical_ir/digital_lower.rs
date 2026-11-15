@@ -1031,6 +1031,7 @@ fn lower_with_analog_variables(
             Err(mut errors) => diagnostics.append(&mut errors),
         }
     }
+    let root_start = processes.len();
     for process in locals.processes(0, &digital.processes).iter() {
         match lower_process(
             process,
@@ -1071,6 +1072,8 @@ fn lower_with_analog_variables(
             Err(mut errors) => diagnostics.append(&mut errors),
         }
     }
+    let root_processes = root_start..processes.len();
+    let mut frame_processes = Vec::with_capacity(digital.instances.len());
     for (frame, ((((instance, scope), constants), frame_scope), frame_routines)) in digital
         .instances
         .iter()
@@ -1080,6 +1083,7 @@ fn lower_with_analog_variables(
         .zip(&instance_routines)
         .enumerate()
     {
+        let frame_start = processes.len();
         let frame_array_names: HashSet<_> = instance
             .signals
             .iter()
@@ -1185,7 +1189,9 @@ fn lower_with_analog_variables(
                 Err(mut errors) => diagnostics.append(&mut errors),
             }
         }
+        frame_processes.push(frame_start..processes.len());
     }
+    let start_order = start_order(digital, root_processes, &frame_processes, processes.len());
 
     disable::resolve_disables(
         &mut processes,
@@ -1484,6 +1490,7 @@ fn lower_with_analog_variables(
         content_identity: [0; 32],
         external_signals,
         external_scopes: calls.external_scopes,
+        start_order,
         elaboration_parameters: std::iter::once(("", &digital.elaboration_parameters))
             .chain(
                 digital
@@ -6634,6 +6641,67 @@ fn scope_references(
         }
     }
     found
+}
+
+/// The order processes start at time zero, as Icarus Verilog elaborates
+/// them: an instance's children before its own processes, children in
+/// declaration order (post-order), and each scope's processes in declaration
+/// order. `root` and `frames` are each frame's process range; the processes
+/// after them follow in id order. Empty when that is the id order.
+fn start_order(
+    digital: &AnalyzedDigital,
+    root: std::ops::Range<usize>,
+    frames: &[std::ops::Range<usize>],
+    total: usize,
+) -> Vec<DigitalProcessId> {
+    if frames.is_empty() {
+        return Vec::new();
+    }
+    let index: HashMap<&str, usize> = digital
+        .instances
+        .iter()
+        .enumerate()
+        .map(|(frame, instance)| (instance.path.as_str(), frame + 1))
+        .collect();
+    // A frame's parent is the nearest frame above it; a generate block is a
+    // scope of its module's frame.
+    let mut children = vec![Vec::new(); frames.len() + 1];
+    for (frame, instance) in digital.instances.iter().enumerate() {
+        let mut path = instance.path.as_str();
+        let parent = loop {
+            match path.rsplit_once('.') {
+                Some((above, _)) => match index.get(above) {
+                    Some(&parent) => break parent,
+                    None => path = above,
+                },
+                None => break 0,
+            }
+        };
+        children[parent].push(frame + 1);
+    }
+    let ranges: Vec<_> = std::iter::once(root)
+        .chain(frames.iter().cloned())
+        .collect();
+    let tail = ranges.iter().map(|range| range.end).max().unwrap_or(0);
+    let mut order = Vec::with_capacity(total);
+    let mut stack = vec![(0, false)];
+    while let Some((frame, children_done)) = stack.pop() {
+        if children_done {
+            order.extend(ranges[frame].clone());
+            continue;
+        }
+        stack.push((frame, true));
+        stack.extend(children[frame].iter().rev().map(|&child| (child, false)));
+    }
+    order.extend(tail..total);
+    if order
+        .iter()
+        .enumerate()
+        .all(|(position, &process)| position == process)
+    {
+        return Vec::new();
+    }
+    order.into_iter().map(DigitalProcessId::from).collect()
 }
 
 /// The storage each hierarchical name into another top-level module was

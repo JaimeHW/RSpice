@@ -771,6 +771,31 @@ pub fn link_digital_plans(
         )?;
         layouts[owner].map.connection_processes.push(process);
     }
+    // Each instance starts in its own order, instances in name order, and the
+    // connection processes last.
+    if layouts
+        .iter()
+        .any(|layout| !layout.instance.plan.start_order.is_empty())
+    {
+        let mut order = Vec::with_capacity(plan.processes.len());
+        for layout in &layouts {
+            let own = &layout.instance.plan.start_order;
+            if own.is_empty() {
+                order.extend(layout.map.processes.iter().copied());
+            } else {
+                order.extend(
+                    own.iter()
+                        .map(|process| layout.map.processes[usize::from(*process)]),
+                );
+            }
+        }
+        order.extend(
+            layouts
+                .iter()
+                .flat_map(|layout| layout.map.connection_processes.iter().copied()),
+        );
+        plan.start_order = order;
+    }
     check_cancel(control)?;
     let plan = plan.seal()?;
     Ok(LinkedDigitalPlan {

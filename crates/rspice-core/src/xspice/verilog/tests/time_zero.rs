@@ -113,3 +113,38 @@ fn a_net_only_a_constant_z_drives_stays_z_and_wakes_nothing() {
     );
     assert_eq!(printed, "v=z w=x u=0 k=x m=xzzz nv=0 nw=0 nu=1 nk=0 nm=1\n");
 }
+
+/// An instance's children start before its own processes, children in
+/// declaration order and top-level modules by name, as Icarus elaborates
+/// them (ivtest pr596): a child's edge-triggered `always` is already waiting
+/// when its parent's `initial` raises the edge. The reverse order starts the
+/// other way round, so this case runs in source order only.
+#[test]
+fn children_start_before_their_parent_and_see_its_first_edge() {
+    let printed = source_order(
+        "module leaf;
+  initial $display(\"leaf %m a\");
+  initial $display(\"leaf %m b\");
+endmodule
+module mid;
+  initial $display(\"mid %m a\");
+  leaf l1();
+  always @(negedge top.rst) $display(\"%m saw reset fall\");
+  leaf l2();
+endmodule
+module top;
+  reg rst;
+  initial begin $display(\"top a\"); rst = 0; end
+  mid m1();
+  initial $display(\"top b\");
+endmodule
+module other; initial $display(\"other a\"); leaf x(); endmodule
+",
+    );
+    assert_eq!(
+        printed,
+        "leaf other.x a\nleaf other.x b\nother a\n\
+         leaf top.m1.l1 a\nleaf top.m1.l1 b\nleaf top.m1.l2 a\nleaf top.m1.l2 b\n\
+         mid top.m1 a\ntop a\ntop b\ntop.m1 saw reset fall\n"
+    );
+}

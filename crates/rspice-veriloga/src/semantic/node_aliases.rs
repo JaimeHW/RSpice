@@ -183,6 +183,7 @@ impl SemanticAnalyzer {
                 supply_sensitivity: None,
                 ground_sensitivity: None,
                 coerced_from_input: false,
+                floating_output: false,
             });
             if let Some(symbol) = analyzed.symbol_table.lookup_mut(&alias.net) {
                 symbol.kind = SymbolKind::Port;

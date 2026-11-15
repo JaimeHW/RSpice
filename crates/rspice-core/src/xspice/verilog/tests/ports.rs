@@ -147,3 +147,28 @@ endmodule
          5 top.b[0] holds 01\n"
     );
 }
+
+/// An `output` net its module only reads is coerced to `inout` (IEEE
+/// 1364-2005 section 12.3.8), as Icarus coerces it (ivtest br_gh127c): a
+/// connection of another width joins the low bits both have, so the module
+/// reads its parent's value and a missing high bit floats.
+#[test]
+fn an_output_its_module_only_reads_joins_its_connection_as_an_inout() {
+    let report = bench(
+        "module copy(input [1:0] out, output [1:0] in);
+  assign out = in;
+endmodule
+module top;
+  reg [2:0] r;
+  wire [0:0] i1 = r;
+  wire [2:0] i3 = r;
+  wire [1:0] o1, o3;
+  copy c1(o1, i1);
+  copy c3(o3, i3);
+  initial for (r = 0; r < 4; r = r + 1) #1 $display(\"%b %b %b\", r[1:0], o1, o3);
+endmodule
+",
+        &[],
+    );
+    assert_eq!(stdout(&report), "00 z0 00\n01 z1 01\n10 z0 10\n11 z1 11\n");
+}
