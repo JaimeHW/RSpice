@@ -629,7 +629,7 @@ pub struct CmContext {
     outputs: CopyOnWrite<HashMap<String, OutputValue>>,
     /// The port wiring and the parameters, behind one pointer; see
     /// [`ContextSetup`].
-    setup: CopyOnWrite<ContextSetup>,
+    setup: SetupCell,
 
     //-------------------------------------------------------------------------
     // Parameters
@@ -741,6 +741,49 @@ struct ContextSetup {
     integer_vector_params: HashMap<String, Vec<i64>>,
     /// Parameters explicitly supplied by the instance or model card.
     provided_params: HashSet<String>,
+    /// What the model read from the tables above; see
+    /// [`CmContext::prepared`].
+    prepared: PreparedReading,
+}
+
+/// A model's reading of its parameters and port widths, kept beside them.
+///
+/// Empty until the model first asks for it, and emptied by every write to the
+/// setup ([`SetupCell`]), so it never outlives the values it was read from.
+#[derive(Clone, Default)]
+struct PreparedReading(std::sync::OnceLock<Arc<dyn Any + Send + Sync>>);
+
+impl fmt::Debug for PreparedReading {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(if self.0.get().is_some() {
+            "PreparedReading(read)"
+        } else {
+            "PreparedReading(empty)"
+        })
+    }
+}
+
+/// [`ContextSetup`] behind its shared pointer. Reads go straight through;
+/// every write first empties the prepared reading, so a parameter a sweep
+/// sets or a port rewired after the model read them is read again.
+#[derive(Debug, Clone, Default)]
+struct SetupCell(CopyOnWrite<ContextSetup>);
+
+impl std::ops::Deref for SetupCell {
+    type Target = ContextSetup;
+
+    #[inline]
+    fn deref(&self) -> &ContextSetup {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for SetupCell {
+    fn deref_mut(&mut self) -> &mut ContextSetup {
+        let setup = &mut *self.0;
+        setup.prepared = PreparedReading::default();
+        setup
+    }
 }
 
 /// A context's output values and partials, captured by
@@ -813,7 +856,7 @@ impl CmContext {
             port_vector_total_loads: CopyOnWrite::default(),
             event_loads_revision: 0,
             outputs: CopyOnWrite::default(),
-            setup: CopyOnWrite::default(),
+            setup: SetupCell::default(),
             next_string_param_revision: 1,
             next_real_vector_param_revision: 1,
             state: Vec::new(),
@@ -2528,6 +2571,34 @@ impl CmContext {
     // Parameter Access
     //-------------------------------------------------------------------------
 
+    /// What a model reads from its parameters and port widths, read by
+    /// `read` once and returned from then on.
+    ///
+    /// A model whose evaluation starts by reading and checking the same
+    /// parameters every time asks for them through this instead, so no
+    /// evaluation looks a parameter up by name. `read` may look only at the
+    /// setup — the parameters, which of them were given, the port wiring and
+    /// widths — since only a write to those empties the reading. A failed
+    /// read is not kept: the next call reads again and fails the same way.
+    /// One context keeps one reading; a model that reads two kinds keeps them
+    /// in one value.
+    pub(crate) fn prepared<T: Copy + Send + Sync + 'static>(
+        &self,
+        read: impl FnOnce(&Self) -> CmResult<T>,
+    ) -> CmResult<T> {
+        let slot = &self.setup.prepared.0;
+        if let Some(reading) = slot.get().and_then(|reading| reading.downcast_ref::<T>()) {
+            return Ok(*reading);
+        }
+        let reading = read(self)?;
+        debug_assert!(
+            slot.get().is_none(),
+            "a context keeps one prepared reading, of one type"
+        );
+        let _ = slot.set(Arc::new(reading));
+        Ok(reading)
+    }
+
     /// Get parameter value
     pub fn param(&self, name: &str) -> Value {
         let key = Self::canonical_param_lookup_key(name);
@@ -3220,7 +3291,7 @@ impl CmContext {
                 &before.output_analog_transitions,
             )
             && same(&self.resources, &before.resources)
-            && same(&self.setup, &before.setup);
+            && same(&self.setup.0, &before.setup.0);
         debug_assert!(
             unchanged,
             "code model '{model}' declares that a probe writes only its outputs, \
@@ -3276,6 +3347,54 @@ impl CmContext {
 mod tests {
     use super::*;
     use crate::xspice::{DigitalState, DigitalStrength};
+
+    #[test]
+    fn a_prepared_reading_is_read_once_and_again_after_any_setup_write() {
+        let mut ctx = CmContext::new();
+        ctx.set_param("gain", 2.0);
+        ctx.set_port_width("out", 3);
+        let reads = std::cell::Cell::new(0);
+        let read = |ctx: &CmContext| -> CmResult<(Value, usize)> {
+            reads.set(reads.get() + 1);
+            Ok((ctx.param("gain"), ctx.port_width("out")))
+        };
+        assert_eq!(ctx.prepared(read).ok(), Some((2.0, 3)));
+        assert_eq!(ctx.prepared(read).ok(), Some((2.0, 3)));
+        assert_eq!(reads.get(), 1, "the second call reuses the reading");
+
+        // A copy shares the reading with the setup it shares.
+        let copy = ctx.clone();
+        assert_eq!(copy.prepared(read).ok(), Some((2.0, 3)));
+        assert_eq!(reads.get(), 1);
+
+        // A sweep's parameter write and a rewired port each read again,
+        // and the copy taken before keeps the values it was read from.
+        ctx.set_param("gain", 5.0);
+        assert_eq!(ctx.prepared(read).ok(), Some((5.0, 3)));
+        ctx.set_port_width("out", 4);
+        assert_eq!(ctx.prepared(read).ok(), Some((5.0, 4)));
+        assert_eq!(reads.get(), 3);
+        assert_eq!(copy.prepared(read).ok(), Some((2.0, 3)));
+        assert_eq!(reads.get(), 3);
+
+        // A refused reading is not kept.
+        let mut refused = CmContext::new();
+        refused.set_param("gain", Value::NAN);
+        let check = |ctx: &CmContext| -> CmResult<Value> {
+            reads.set(reads.get() + 1);
+            let gain = ctx.param("gain");
+            if gain.is_finite() {
+                Ok(gain)
+            } else {
+                Err(CmError::EvaluationError("gain must be finite".into()))
+            }
+        };
+        assert!(refused.prepared(check).is_err());
+        assert!(refused.prepared(check).is_err());
+        assert_eq!(reads.get(), 5);
+        refused.set_param("gain", 1.0);
+        assert_eq!(refused.prepared(check).ok(), Some(1.0));
+    }
 
     #[test]
     fn scalar_analog_input_accessor_defaults_for_non_analog_ports() {

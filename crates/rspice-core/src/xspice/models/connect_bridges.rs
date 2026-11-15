@@ -386,6 +386,71 @@ impl AdcLaw {
     }
 }
 
+/// What a converter reads from its parameters and port widths, read once
+/// per instance ([`CmContext::prepared`]): the vector width and the law.
+#[derive(Clone, Copy)]
+struct Reading<L> {
+    width: usize,
+    law: L,
+}
+
+impl Reading<AdcLaw> {
+    fn adc(ctx: &CmContext, model: &str, tracking: bool) -> CmResult<Self> {
+        ctx.prepared(|ctx| {
+            Ok(Self {
+                width: bridge_vector_width(ctx, model)?,
+                law: AdcLaw::from_params(ctx, model, tracking)?,
+            })
+        })
+    }
+}
+
+impl Reading<DacLaw> {
+    fn dac(ctx: &CmContext, model: &str, tracking: bool) -> CmResult<Self> {
+        ctx.prepared(|ctx| {
+            Ok(Self {
+                width: bridge_vector_width(ctx, model)?,
+                law: DacLaw::from_params(ctx, model, tracking)?,
+            })
+        })
+    }
+}
+
+/// A bidirectional converter's reading: both halves' laws over one width.
+///
+/// Each half's law is kept apart, `None` where its parameters are refused,
+/// so a question one half answers alone (the A/D thresholds, the D/A noise)
+/// is answered as before whatever the other half's parameters are, and a
+/// refused law is read again only to give its refusal.
+#[derive(Clone, Copy)]
+struct BidiReading {
+    width: usize,
+    dac: Option<DacLaw>,
+    adc: Option<AdcLaw>,
+}
+
+impl BidiReading {
+    fn of(ctx: &CmContext, model: &str, tracking: bool) -> CmResult<Self> {
+        ctx.prepared(|ctx| {
+            Ok(Self {
+                width: bidi_width(ctx, model)?,
+                dac: DacLaw::from_params(ctx, model, tracking).ok(),
+                adc: AdcLaw::from_params(ctx, model, tracking).ok(),
+            })
+        })
+    }
+
+    fn dac(self, ctx: &CmContext, model: &str, tracking: bool) -> CmResult<DacLaw> {
+        self.dac
+            .map_or_else(|| DacLaw::from_params(ctx, model, tracking), Ok)
+    }
+
+    fn adc(self, ctx: &CmContext, model: &str, tracking: bool) -> CmResult<AdcLaw> {
+        self.adc
+            .map_or_else(|| AdcLaw::from_params(ctx, model, tracking), Ok)
+    }
+}
+
 /// Where an A/D half reads, publishes and keeps its state.
 #[derive(Debug, Clone, Copy)]
 struct AdcSlots {
@@ -415,12 +480,11 @@ fn adc_code(state: DigitalState) -> i64 {
 
 fn evaluate_adc(
     ctx: &mut CmContext,
-    model: &str,
+    law: AdcLaw,
     tracking: bool,
     slots: AdcSlots,
     width: usize,
 ) -> CmResult<()> {
-    let law = AdcLaw::from_params(ctx, model, tracking)?;
     let commit = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
     let supply = tracking.then(|| tracked_supply(ctx));
     let (unpowered, unpowered_at) = located_power(ctx, supply, law.supply_min)
@@ -668,14 +732,8 @@ impl CodeModel for ConnectAdc {
     }
 
     fn analog_input_thresholds(&self, ctx: &CmContext) -> CmResult<Vec<AnalogInputThreshold>> {
-        let width = bridge_vector_width(ctx, self.name())?;
-        Ok(
-            AdcLaw::from_params(ctx, self.name(), self.tracking)?.thresholds(
-                ADC_SLOTS.input,
-                width,
-                self.tracking,
-            ),
-        )
+        let Reading { width, law } = Reading::adc(ctx, self.name(), self.tracking)?;
+        Ok(law.thresholds(ADC_SLOTS.input, width, self.tracking))
     }
 
     fn analog_threshold_input(
@@ -696,7 +754,13 @@ impl CodeModel for ConnectAdc {
         threshold: usize,
         input: Value,
     ) -> Value {
-        adc_crossing(ctx, self.name(), self.tracking, port, threshold, input)
+        if !self.tracking || port.eq_ignore_ascii_case("sup") {
+            return input;
+        }
+        match Reading::adc(ctx, self.name(), self.tracking) {
+            Ok(Reading { law, .. }) => law.crossing(tracked_supply(ctx), threshold, input),
+            Err(_) => input,
+        }
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -706,27 +770,8 @@ impl CodeModel for ConnectAdc {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let width = bridge_vector_width(ctx, self.name())?;
-        evaluate_adc(ctx, self.name(), self.tracking, ADC_SLOTS, width)
-    }
-}
-
-/// [`CodeModel::analog_threshold_input_at`] for an A/D half: the edge's
-/// crossing function on its input, and the supply itself on `sup`.
-fn adc_crossing(
-    ctx: &CmContext,
-    model: &str,
-    tracking: bool,
-    port: &str,
-    threshold: usize,
-    input: Value,
-) -> Value {
-    if !tracking || port.eq_ignore_ascii_case("sup") {
-        return input;
-    }
-    match AdcLaw::from_params(ctx, model, tracking) {
-        Ok(law) => law.crossing(tracked_supply(ctx), threshold, input),
-        Err(_) => input,
+        let Reading { width, law } = Reading::adc(ctx, self.name(), self.tracking)?;
+        evaluate_adc(ctx, law, self.tracking, ADC_SLOTS, width)
     }
 }
 
@@ -1139,20 +1184,19 @@ fn init_dac(ctx: &mut CmContext, width: usize, model: &str) -> CmResult<usize> {
 
 fn evaluate_dac(
     ctx: &mut CmContext,
-    model: &str,
+    law: &DacLaw,
     tracking: bool,
     slots: DacSlots,
     width: usize,
 ) -> CmResult<()> {
-    let law = DacLaw::from_params(ctx, model, tracking)?;
     let supply = tracking.then(|| tracked_supply(ctx));
     let commit = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
     for index in 0..width {
-        let drive = dac_drive(ctx, &law, slots, index, supply);
+        let drive = dac_drive(ctx, law, slots, index, supply);
         if commit {
             drive.change.store(ctx, index * DAC_STATE_STRIDE);
             if ctx.is_transient() {
-                request_dac_breakpoints(ctx, &law, drive, supply);
+                request_dac_breakpoints(ctx, law, drive, supply);
             }
         }
         let voltage = drive.level.at(supply);
@@ -1201,7 +1245,7 @@ fn request_dac_breakpoints(
 /// `G·(V(out) − level)`: `−G·fraction`.
 fn dac_supply_partials(
     ctx: &CmContext,
-    model: &str,
+    law: CmResult<DacLaw>,
     tracking: bool,
     slots: DacSlots,
     output_port: &str,
@@ -1210,7 +1254,7 @@ fn dac_supply_partials(
     if !tracking || !output_port.eq_ignore_ascii_case("out") {
         return Vec::new();
     }
-    let Ok(law) = DacLaw::from_params(ctx, model, tracking) else {
+    let Ok(law) = law else {
         return Vec::new();
     };
     let drive = dac_drive(ctx, &law, slots, index, Some(tracked_supply(ctx)));
@@ -1224,18 +1268,15 @@ fn dac_supply_partials(
 /// and so noisy at the circuit temperature.
 fn dac_noise_conductances(
     ctx: &CmContext,
-    model: &str,
+    law: &DacLaw,
     tracking: bool,
     slots: DacSlots,
     width: usize,
 ) -> Vec<(usize, Value)> {
-    let Ok(law) = DacLaw::from_params(ctx, model, tracking) else {
-        return Vec::new();
-    };
     let supply = tracking.then(|| tracked_supply(ctx));
     (0..width)
         .filter_map(|index| {
-            let conductance = dac_drive(ctx, &law, slots, index, supply).conductance;
+            let conductance = dac_drive(ctx, law, slots, index, supply).conductance;
             (conductance > 0.0 && conductance.is_finite()).then_some((index, conductance))
         })
         .collect()
@@ -1336,8 +1377,8 @@ impl CodeModel for ConnectDac {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let width = bridge_vector_width(ctx, self.name())?;
-        evaluate_dac(ctx, self.name(), self.tracking, DAC_SLOTS, width)
+        let Reading { width, law } = Reading::dac(ctx, self.name(), self.tracking)?;
+        evaluate_dac(ctx, &law, self.tracking, DAC_SLOTS, width)
     }
 
     fn output_vector_input_partials(
@@ -1348,7 +1389,7 @@ impl CodeModel for ConnectDac {
     ) -> Vec<(String, Value)> {
         dac_supply_partials(
             ctx,
-            self.name(),
+            Reading::dac(ctx, self.name(), self.tracking).map(|reading| reading.law),
             self.tracking,
             DAC_SLOTS,
             output_port,
@@ -1361,10 +1402,10 @@ impl CodeModel for ConnectDac {
     }
 
     fn converter_noise_conductances(&self, ctx: &CmContext) -> Vec<(usize, Value)> {
-        let Ok(width) = bridge_vector_width(ctx, self.name()) else {
+        let Ok(Reading { width, law }) = Reading::dac(ctx, self.name(), self.tracking) else {
             return Vec::new();
         };
-        dac_noise_conductances(ctx, self.name(), self.tracking, DAC_SLOTS, width)
+        dac_noise_conductances(ctx, &law, self.tracking, DAC_SLOTS, width)
     }
 }
 
@@ -1496,14 +1537,9 @@ impl CodeModel for ConnectBidi {
     }
 
     fn analog_input_thresholds(&self, ctx: &CmContext) -> CmResult<Vec<AnalogInputThreshold>> {
-        let width = bidi_width(ctx, self.name())?;
-        Ok(
-            AdcLaw::from_params(ctx, self.name(), self.tracking)?.thresholds(
-                "sense",
-                width,
-                self.tracking,
-            ),
-        )
+        let reading = BidiReading::of(ctx, self.name(), self.tracking)?;
+        let adc = reading.adc(ctx, self.name(), self.tracking)?;
+        Ok(adc.thresholds("sense", reading.width, self.tracking))
     }
 
     fn analog_threshold_input(
@@ -1524,7 +1560,13 @@ impl CodeModel for ConnectBidi {
         threshold: usize,
         input: Value,
     ) -> Value {
-        adc_crossing(ctx, self.name(), self.tracking, port, threshold, input)
+        if !self.tracking || port.eq_ignore_ascii_case("sup") {
+            return input;
+        }
+        match BidiReading::of(ctx, self.name(), self.tracking).map(|reading| reading.adc) {
+            Ok(Some(adc)) => adc.crossing(tracked_supply(ctx), threshold, input),
+            _ => input,
+        }
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -1536,15 +1578,12 @@ impl CodeModel for ConnectBidi {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let width = bidi_width(ctx, self.name())?;
-        evaluate_dac(ctx, self.name(), self.tracking, BIDI_DAC_SLOTS, width)?;
-        evaluate_adc(
-            ctx,
-            self.name(),
-            self.tracking,
-            bidi_adc_slots(width),
-            width,
-        )
+        let reading = BidiReading::of(ctx, self.name(), self.tracking)?;
+        let width = reading.width;
+        let dac = reading.dac(ctx, self.name(), self.tracking)?;
+        evaluate_dac(ctx, &dac, self.tracking, BIDI_DAC_SLOTS, width)?;
+        let adc = reading.adc(ctx, self.name(), self.tracking)?;
+        evaluate_adc(ctx, adc, self.tracking, bidi_adc_slots(width), width)
     }
 
     fn output_vector_input_partials(
@@ -1555,7 +1594,8 @@ impl CodeModel for ConnectBidi {
     ) -> Vec<(String, Value)> {
         dac_supply_partials(
             ctx,
-            self.name(),
+            BidiReading::of(ctx, self.name(), self.tracking)
+                .and_then(|reading| reading.dac(ctx, self.name(), self.tracking)),
             self.tracking,
             BIDI_DAC_SLOTS,
             output_port,
@@ -1568,9 +1608,14 @@ impl CodeModel for ConnectBidi {
     }
 
     fn converter_noise_conductances(&self, ctx: &CmContext) -> Vec<(usize, Value)> {
-        let Ok(width) = bidi_width(ctx, self.name()) else {
+        let Ok(BidiReading {
+            width,
+            dac: Some(dac),
+            ..
+        }) = BidiReading::of(ctx, self.name(), self.tracking)
+        else {
             return Vec::new();
         };
-        dac_noise_conductances(ctx, self.name(), self.tracking, BIDI_DAC_SLOTS, width)
+        dac_noise_conductances(ctx, &dac, self.tracking, BIDI_DAC_SLOTS, width)
     }
 }

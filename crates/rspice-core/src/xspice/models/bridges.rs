@@ -358,12 +358,37 @@ fn located_adc_decision(
     None
 }
 
+/// The stock `adc_bridge`'s reading of its parameters and width, read once
+/// per instance ([`CmContext::prepared`]).
+#[derive(Clone, Copy)]
+struct StockAdcReading {
+    width: usize,
+    in_low: Value,
+    in_high: Value,
+    rise_delay: Value,
+    fall_delay: Value,
+}
+
+fn stock_adc_reading(ctx: &CmContext) -> CmResult<StockAdcReading> {
+    ctx.prepared(|ctx| {
+        Ok(StockAdcReading {
+            width: bridge_vector_width(ctx, "adc_bridge")?,
+            in_low: finite_bridge_param(ctx, "adc_bridge", "in_low")?,
+            in_high: finite_bridge_param(ctx, "adc_bridge", "in_high")?,
+            rise_delay: bridge_timing_param(ctx, "adc_bridge", "rise_delay")?,
+            fall_delay: bridge_timing_param(ctx, "adc_bridge", "fall_delay")?,
+        })
+    })
+}
+
 fn evaluate_stock_adc_bridge(ctx: &mut CmContext, supply: Option<Value>) -> CmResult<()> {
-    let width = bridge_vector_width(ctx, "adc_bridge")?;
-    let in_low = finite_bridge_param(ctx, "adc_bridge", "in_low")?;
-    let in_high = finite_bridge_param(ctx, "adc_bridge", "in_high")?;
-    let rise_delay = bridge_timing_param(ctx, "adc_bridge", "rise_delay")?;
-    let fall_delay = bridge_timing_param(ctx, "adc_bridge", "fall_delay")?;
+    let StockAdcReading {
+        width,
+        in_low,
+        in_high,
+        rise_delay,
+        fall_delay,
+    } = stock_adc_reading(ctx)?;
     let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
 
     for index in 0..width {
@@ -1631,10 +1656,12 @@ impl CodeModel for TrackingDacBridge {
         if !output_port.eq_ignore_ascii_case("out") {
             return Vec::new();
         }
-        let (Ok(width), Ok((ramp, out_undef))) = (
-            bridge_vector_width(ctx, "dac_bridge"),
-            stock_dac_bridge_ramp(ctx),
-        ) else {
+        let Ok(StockDacReading {
+            width,
+            ramp,
+            out_undef,
+        }) = stock_dac_reading(ctx)
+        else {
             return Vec::new();
         };
         let Ok(layout) = dac_bridge_state_layout(width) else {
@@ -1651,27 +1678,42 @@ impl CodeModel for TrackingDacBridge {
     }
 }
 
-/// The stock `dac_bridge` ramp from the instance's parameters.
-fn stock_dac_bridge_ramp(ctx: &CmContext) -> CmResult<(DacBridgeRamp, Value)> {
-    let out_low = finite_bridge_param(ctx, "dac_bridge", "out_low")?;
-    let out_high = finite_bridge_param(ctx, "dac_bridge", "out_high")?;
-    let out_undef = dac_bridge_out_undef(ctx, out_low, out_high)?;
-    let t_rise = bridge_timing_param(ctx, "dac_bridge", "t_rise")?;
-    let t_fall = bridge_timing_param(ctx, "dac_bridge", "t_fall")?;
-    Ok((
-        DacBridgeRamp {
-            out_low,
-            out_high,
-            t_rise,
-            t_fall,
-        },
-        out_undef,
-    ))
+/// The stock `dac_bridge`'s reading of its width and ramp, read once per
+/// instance ([`CmContext::prepared`]).
+#[derive(Clone, Copy)]
+struct StockDacReading {
+    width: usize,
+    ramp: DacBridgeRamp,
+    out_undef: Value,
+}
+
+fn stock_dac_reading(ctx: &CmContext) -> CmResult<StockDacReading> {
+    ctx.prepared(|ctx| {
+        let width = bridge_vector_width(ctx, "dac_bridge")?;
+        let out_low = finite_bridge_param(ctx, "dac_bridge", "out_low")?;
+        let out_high = finite_bridge_param(ctx, "dac_bridge", "out_high")?;
+        let out_undef = dac_bridge_out_undef(ctx, out_low, out_high)?;
+        let t_rise = bridge_timing_param(ctx, "dac_bridge", "t_rise")?;
+        let t_fall = bridge_timing_param(ctx, "dac_bridge", "t_fall")?;
+        Ok(StockDacReading {
+            width,
+            ramp: DacBridgeRamp {
+                out_low,
+                out_high,
+                t_rise,
+                t_fall,
+            },
+            out_undef,
+        })
+    })
 }
 
 fn evaluate_stock_dac_bridge(ctx: &mut CmContext, supply: Option<Value>) -> CmResult<()> {
-    let width = bridge_vector_width(ctx, "dac_bridge")?;
-    let (ramp, out_undef) = stock_dac_bridge_ramp(ctx)?;
+    let StockDacReading {
+        width,
+        ramp,
+        out_undef,
+    } = stock_dac_reading(ctx)?;
     evaluate_dac_bridge(ctx, width, ramp, out_undef, supply)
 }
 

@@ -1036,15 +1036,23 @@ impl CodeModel for DigitalFrequencyDivider {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let div_factor = official_min_integer_param(ctx, "div_factor", 1)?;
-        let high_cycles = official_min_integer_param(ctx, "high_cycles", 1)?;
+        // Read once per instance; `init` has already refused each of the
+        // three, so reading `i_count` here with the other two refuses nothing
+        // new.
+        let (div_factor, high_cycles, initial_count) = ctx.prepared(|ctx| {
+            Ok((
+                official_min_integer_param(ctx, "div_factor", 1)?,
+                official_min_integer_param(ctx, "high_cycles", 1)?,
+                official_min_integer_param(ctx, "i_count", 0)?,
+            ))
+        })?;
         let input = input_code(ctx.input_digital("freq_in"));
         let mut count = ctx.int_state(FDIV_COUNT);
         let mut output = ctx.int_state(FDIV_OUTPUT);
         let mut previous_input = ctx.int_state(FDIV_PREV_INPUT);
 
         if ctx.time == 0.0 || output == FDIV_INITIAL_OUTPUT {
-            count = official_min_integer_param(ctx, "i_count", 0)?;
+            count = initial_count;
             output = if count >= div_factor || count < 0 {
                 count = 0;
                 0
