@@ -433,10 +433,17 @@ impl ControlCircuit {
         }
         let kind = CommandKind::parse(command)?;
         if self.removed && kind.needs_circuit() {
-            // ngspice refuses these once `remcirc` has removed the only
-            // circuit (frontend/runcoms.c:246 dosim, com_option.c:22,
-            // device.c:1260 com_alter_common).
-            return Err(command_error(line, format!("{}: no circuit loaded", command.name)).into());
+            // ngspice reports these once `remcirc` has removed the only
+            // circuit, does nothing and runs on (frontend/runcoms.c:246
+            // dosim, com_option.c:22, device.c:1260 com_alter_common,
+            // runcoms2.c:180 com_rset).
+            return Ok(Self::batch_output(
+                command,
+                ControlPresentationKind::Ignored(format!(
+                    "there is no circuit loaded; {} is ignored",
+                    command.name
+                )),
+            ));
         }
         if command.arguments.contains('@')
             && !matches!(

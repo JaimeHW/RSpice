@@ -61,6 +61,17 @@ fn texts(presented: &[ControlPresentation]) -> Vec<&str> {
         .collect()
 }
 
+/// Every reason a command was ignored for, in order.
+fn ignored(presented: &[ControlPresentation]) -> Vec<&str> {
+    presented
+        .iter()
+        .filter_map(|request| match &request.kind {
+            ControlPresentationKind::Ignored(reason) => Some(reason.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Every printed column, by expression, in print order.
 fn printed(presented: &[ControlPresentation]) -> Vec<(String, Vec<f64>)> {
     presented
@@ -205,22 +216,35 @@ fn a_vector_alter_value_replaces_the_source_waveform() {
     }
 }
 
-/// ngspice-46 prints v(1) = 2 after `remcirc`, ignores a second `remcirc`
-/// with a warning, and refuses `op` with no circuit loaded.
+/// ngspice-46 prints v(1) = 2 after `remcirc`, then reports a second
+/// `remcirc` and each command that needs the circuit, does none of them
+/// and runs on (frontend/runcoms.c:246, com_option.c:22, device.c:1260,
+/// runcoms2.c:180), so it prints v(1) = 2 again.
 #[test]
 fn remcirc_keeps_the_plots_and_removes_the_circuit() {
-    let (_, presented, error) = run(
+    let (circuit, presented, error) = run(
         "remcirc\nV1 1 0 2\nR1 1 0 1k\n.control\nop\nremcirc\nprint v(1)\nremcirc\nop\n\
-         .endc\n.end\n",
+         alter R1 2k\noption reltol=1e-4\nreset\nprint v(1)\n.endc\n.end\n",
     );
-    assert!(close(&printed(&presented)[0].1, &[2.0], 1e-12));
+    assert_eq!(error, None);
+    let values = printed(&presented);
+    assert_eq!(values.len(), 2, "{values:?}");
     assert!(
-        presented
+        values
             .iter()
-            .any(|request| matches!(request.kind, ControlPresentationKind::Ignored(_)))
+            .all(|(_, samples)| close(samples, &[2.0], 1e-12))
     );
-    let error = error.expect("op with no circuit is refused");
-    assert!(error.contains("op: no circuit loaded"), "{error}");
+    assert_eq!(
+        ignored(&presented),
+        [
+            "there is no circuit loaded; remcirc is ignored",
+            "there is no circuit loaded; op is ignored",
+            "there is no circuit loaded; alter is ignored",
+            "there is no circuit loaded; option is ignored",
+            "there is no circuit loaded; reset is ignored",
+        ]
+    );
+    assert_eq!(circuit.datasets().len(), 1);
 }
 
 /// Two stops interrupt one transient, and each `resume` continues it into
