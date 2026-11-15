@@ -136,20 +136,37 @@ pub fn try_expand_multi_run_with_limits_and_abort(
         resource_limits.max_netlist_bytes,
     )?;
 
+    // A line that opens another run is led by `.alter`, `.data` or
+    // `.enddata`, or is a `.dc` or `.tran` sweep naming a data table, so a
+    // source that spells none of them opens none: only its line count is
+    // left to check, and that needs no line split.
+    let may_open_runs = [".alter", ".data", ".enddata", ".dc", ".tran"]
+        .into_iter()
+        .any(|word| super::parser::spells_ignoring_ascii_case(source, word.as_bytes()));
     let mut has_multi_run = false;
-    for (index, line) in source.lines().enumerate() {
-        poll_abort(abort, index)?;
-        poll_text_abort(abort, line)?;
+    if may_open_runs {
+        for (index, line) in source.lines().enumerate() {
+            poll_abort(abort, index)?;
+            poll_text_abort(abort, line)?;
+            ensure_resource(
+                ResourceKind::NetlistLines,
+                index.saturating_add(1),
+                resource_limits.max_netlist_lines,
+            )?;
+            let token = first_token(line);
+            has_multi_run |= token.eq_ignore_ascii_case(".alter")
+                || token.eq_ignore_ascii_case(".data")
+                || token.eq_ignore_ascii_case(".enddata")
+                || references_data_table(line);
+        }
+    } else {
+        // The first line past the limit is the one the scan would refuse.
+        let limit = resource_limits.max_netlist_lines;
         ensure_resource(
             ResourceKind::NetlistLines,
-            index.saturating_add(1),
-            resource_limits.max_netlist_lines,
+            source.lines().count().min(limit.saturating_add(1)),
+            limit,
         )?;
-        let token = first_token(line);
-        has_multi_run |= token.eq_ignore_ascii_case(".alter")
-            || token.eq_ignore_ascii_case(".data")
-            || token.eq_ignore_ascii_case(".enddata")
-            || references_data_table(line);
     }
     if !has_multi_run {
         let mut decks = Vec::new();
@@ -1227,6 +1244,31 @@ mod tests {
         .model d1 d is=1e-14\n\
         .tran 1u 1m\n\
         .end\n";
+
+    #[test]
+    fn a_source_past_the_line_limit_is_refused_at_its_first_extra_line() {
+        let mut limits = ResourceLimits::default();
+        limits.max_netlist_lines = 3;
+        let mut roomier = limits;
+        roomier.max_netlist_lines = 4;
+        // One source spells no card that opens a run, the other does.
+        for source in [
+            "lines\nR1 1 0 1k\n.op\n.end\n",
+            "lines\nR1 1 0 1k\n.tran 1u 1m\n.end\n",
+        ] {
+            let error = try_expand_multi_run_with_limits(source, limits).unwrap_err();
+            assert_eq!(
+                error.resource_limit_error(),
+                Some(ResourceLimitError {
+                    resource: ResourceKind::NetlistLines,
+                    requested: 4,
+                    limit: 3,
+                }),
+                "{source}"
+            );
+            assert!(try_expand_multi_run_with_limits(source, roomier).is_ok());
+        }
+    }
 
     #[test]
     fn plain_deck_passes_through_untouched() {
