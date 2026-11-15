@@ -1,6 +1,11 @@
 use super::*;
 use crate::circuit::{ResistorFlickerNoise, ThermalResistorState};
 
+/// ngspice's names for the resistor model's etch corrections: `dw` spells
+/// `narrow` and `dlr` spells `short` (spicelib/devices/res/res.c:47-50).
+const NGSPICE_NARROW: &[&str] = &["NARROW", "DW"];
+const NGSPICE_SHORT: &[&str] = &["SHORT", "DLR"];
+
 /// Resolve the resnoise.c flicker-noise terms for a resistor instance:
 /// Keep a binary scale for KF, effective noise area and M^(1-AF). Geometry
 /// applies only when an instance specifies L or W (ressetup.c); the missing
@@ -56,8 +61,8 @@ fn resolve_resistor_flicker_noise(
             Some(value) => value,
             None => parameter(&["W", "WIDTH", "DEFW"], 10e-6)?,
         };
-        let l_eff = (-2.0_f64).mul_add(parameter(&["SHORT"], 0.0)?, length);
-        let w_eff = (-2.0_f64).mul_add(parameter(&["NARROW"], 0.0)?, width);
+        let l_eff = (-2.0_f64).mul_add(parameter(NGSPICE_SHORT, 0.0)?, length);
+        let w_eff = (-2.0_f64).mul_add(parameter(NGSPICE_NARROW, 0.0)?, width);
         for (label, value) in [
             ("L", length),
             ("W", width),
@@ -555,11 +560,14 @@ fn resolve_level1_model_geometry_resistance(
             eval_ctx,
         )?
         .unwrap_or(10.0e-6);
-        let narrow = resolve_model_param(model_def, &["NARROW"], eval_ctx)?.unwrap_or(0.0);
-        let short = if expression_dialect == crate::config::ExpressionDialect::Xyce {
-            0.0
+        let (narrow, short) = if expression_dialect == crate::config::ExpressionDialect::Xyce {
+            let narrow = resolve_model_param(model_def, &["NARROW"], eval_ctx)?.unwrap_or(0.0);
+            (narrow, 0.0)
         } else {
-            resolve_model_param(model_def, &["SHORT"], eval_ctx)?.unwrap_or(0.0)
+            (
+                resolve_model_param(model_def, NGSPICE_NARROW, eval_ctx)?.unwrap_or(0.0),
+                resolve_model_param(model_def, NGSPICE_SHORT, eval_ctx)?.unwrap_or(0.0),
+            )
         };
         let (l_eff, w_eff) = if expression_dialect == crate::config::ExpressionDialect::Xyce {
             // Xyce 7.10 defines no resistor-model SHORT parameter and uses
