@@ -688,13 +688,13 @@ impl SymbolEditorMetadata {
                 SymbolAttribute {
                     kind: SymbolAttributeKind::Reference,
                     default_value: "U?".to_owned(),
-                    shown: true,
+                    shown: !document.name_hidden,
                     position: document.name_anchor,
                 },
                 SymbolAttribute {
                     kind: SymbolAttributeKind::Value,
                     default_value: "VALUE".to_owned(),
-                    shown: true,
+                    shown: !document.value_hidden,
                     position: document.value_anchor,
                 },
                 SymbolAttribute {
@@ -997,6 +997,14 @@ impl SymbolDocument {
             SymbolAttributeKind::Value => self.value_hidden = !shown,
             SymbolAttributeKind::Model => {}
         }
+    }
+
+    /// Takes what `before` letters on its placed parts: whether they show
+    /// its name and its value. Drawing a symbol again redraws its artwork,
+    /// never that choice.
+    pub fn keep_instance_lettering(&mut self, before: &SymbolDocument) {
+        self.name_hidden = before.name_hidden;
+        self.value_hidden = before.value_hidden;
     }
 
     /// The type size of this symbol's pin names, in world units.
@@ -2175,6 +2183,31 @@ mod validation_tests {
             document.pin("vss").map(|pin| pin.side),
             Some(SymbolPinSide::Bottom)
         );
+    }
+
+    /// Attributes made for a symbol with no editor sidecar show what its
+    /// placed parts letter, and a symbol drawn again keeps that choice.
+    #[test]
+    fn a_symbols_attributes_and_redrawing_keep_what_its_parts_letter() {
+        let mut hidden = SymbolDocument::default();
+        hidden.show_on_instances(SymbolAttributeKind::Reference, false);
+        hidden.show_on_instances(SymbolAttributeKind::Value, false);
+        let shown = |metadata: &SymbolEditorMetadata, kind| {
+            metadata
+                .attribute(kind)
+                .map(|attribute| attribute.shown)
+                .expect("every symbol has the attribute")
+        };
+        let metadata = SymbolEditorMetadata::for_document(&hidden);
+        assert!(!shown(&metadata, SymbolAttributeKind::Reference));
+        assert!(!shown(&metadata, SymbolAttributeKind::Value));
+        let metadata = SymbolEditorMetadata::for_document(&SymbolDocument::default());
+        assert!(shown(&metadata, SymbolAttributeKind::Reference));
+        assert!(shown(&metadata, SymbolAttributeKind::Value));
+
+        let mut redrawn = SymbolDocument::generated_from_ports(&[]);
+        redrawn.keep_instance_lettering(&hidden);
+        assert!(redrawn.name_hidden && redrawn.value_hidden);
     }
 
     #[test]

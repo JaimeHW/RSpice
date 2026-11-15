@@ -487,7 +487,11 @@ pub(crate) fn generate_active_symbol_document(
     }
     let before = model.load_active_symbol_document()?;
     let ports = active_symbol_ports(model);
-    let document = model.generated_symbol_document(&model.workspace.content.active_view, &ports);
+    let mut document =
+        model.generated_symbol_document(&model.workspace.content.active_view, &ports);
+    // Drawing the symbol again redraws its artwork; what its placed parts
+    // letter is the user's choice, and stands.
+    document.keep_instance_lettering(&before);
     if document != before {
         record_symbol_metadata_edit(symbol, model, &before);
     }

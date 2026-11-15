@@ -450,6 +450,64 @@ fn generating_active_symbol_document_writes_symbol_view_metadata() {
 }
 
 #[test]
+fn generating_a_symbol_again_keeps_what_its_parts_letter() {
+    use rspice_design::symbol::SymbolAttributeKind;
+    let mut state = DesignTestHost::default();
+    let mut library = Library::new("work");
+    let mut amp = Cell::new("amp");
+    amp.add_view(View::new("schematic", ViewType::Schematic));
+    amp.add_view(View::new("symbol", ViewType::Symbol));
+    library.add_cell(amp);
+    state.model.library_manager.add_library(library);
+    let mut schematic = SchematicState::default();
+    let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
+    schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.id == port_id)
+        .expect("port exists")
+        .value = "IN".to_owned();
+    state.model.workspace.insert_schematic_editor(
+        CellViewRef::new("work", "amp", "schematic").key(),
+        schematic,
+    );
+    state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+    let generate = |state: &mut DesignTestHost| {
+        super::symbol_document::generate_active_symbol_document(
+            &mut state.design.symbol,
+            &mut state.model,
+        )
+        .expect("symbol document generated");
+    };
+    generate(&mut state);
+    // The user keeps the part's name and value off its instances.
+    let mut hidden = state
+        .model
+        .load_active_symbol_document()
+        .expect("generated symbol loads");
+    hidden.show_on_instances(SymbolAttributeKind::Reference, false);
+    hidden.show_on_instances(SymbolAttributeKind::Value, false);
+    super::symbol_document::store_active_symbol_document(
+        &mut state.design.symbol,
+        &mut state.model,
+        &hidden,
+    )
+    .expect("hidden lettering stored");
+
+    generate(&mut state);
+
+    let regenerated = state
+        .model
+        .load_active_symbol_document()
+        .expect("regenerated symbol loads");
+    assert!(
+        regenerated.name_hidden && regenerated.value_hidden,
+        "drawing the symbol again redraws its artwork, never what its parts letter"
+    );
+}
+
+#[test]
 fn generate_symbol_document_is_one_undoable_transaction() {
     let mut state = DesignTestHost::default();
 
