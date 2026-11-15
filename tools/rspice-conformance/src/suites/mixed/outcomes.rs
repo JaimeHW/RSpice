@@ -695,8 +695,10 @@ mod tests {
     /// The child half of `a_killed_recorder_does_not_wedge_the_next_one`,
     /// which re-runs this test binary on it; on its own it does nothing.
     #[test]
+    #[ignore = "child half of a_killed_recorder_does_not_wedge_the_next_one, which runs it"]
     fn hold_the_table_lock_until_killed() {
         let Some(path) = std::env::var_os(HOLD_ENV) else {
+            eprintln!("{HOLD_ENV} is unset; the lock holder only runs under its parent test");
             return;
         };
         let file = OpenOptions::new()
@@ -719,6 +721,7 @@ mod tests {
         let mut holder = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
+                "--ignored",
                 "suites::mixed::outcomes::tests::hold_the_table_lock_until_killed",
                 "--nocapture",
                 "--test-threads=1",

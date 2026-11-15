@@ -426,9 +426,8 @@ fn the_trace_list_shows_whole_on_a_crowded_row() {
 #[test]
 #[ignore = "writes the review pictures"]
 fn write_the_crowded_row_picture() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let mut state = crowded_pane();
     super::lanes::place_cursors(&mut state, Some(13.0e-6), None);
     let canvas = rspice_ui_kit::raster::render(egui::vec2(760.0, 420.0), |ui, _| {
@@ -853,9 +852,8 @@ fn the_legend_states_values_past_the_ends_of_the_prefix_ladder() {
 #[test]
 #[ignore = "writes the review pictures"]
 fn write_the_tiny_value_legend_picture() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let mut state = review_strip(false);
     let canvas =
         rspice_ui_kit::raster::render_themed(crate::ui::Theme::default(), FRAME, |ui, _| {
@@ -1018,9 +1016,8 @@ fn the_trial_under_the_pointer_is_highlighted_over_its_siblings() {
 #[test]
 #[ignore = "writes the review pictures"]
 fn write_the_monte_carlo_family_picture() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/mixed-corpus/c06-buck/deck/vdig.mc-tran.cir");
     let source = std::fs::read_to_string(&path).expect("the corpus deck is readable");

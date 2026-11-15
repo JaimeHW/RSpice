@@ -910,9 +910,8 @@ fn bode_family() -> ResultsTestHost {
 #[test]
 #[ignore = "writes the review pictures"]
 fn write_the_pane_pictures() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let themes = [
         ("dark-dark", Mode::Dark, EngineeringCanvasTheme::Dark),
         ("light-light", Mode::Light, EngineeringCanvasTheme::Light),

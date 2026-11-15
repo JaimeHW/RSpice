@@ -734,9 +734,8 @@ pub(super) fn well(ui: &mut Ui) {
 #[test]
 #[ignore = "writes the review pictures"]
 fn write_the_review_pictures() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let themed = |mode, canvas_theme| crate::ui::Theme {
         mode,
         canvas_theme,

@@ -1664,9 +1664,8 @@ mod tests {
     fn write_the_check_verdict_picture() {
         use rspice_core::config::HdlSeverity;
 
-        let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-            return;
-        };
+        let directory = std::env::var("RSPICE_PICTURES")
+            .expect("set RSPICE_PICTURES to the directory the pictures are written to");
         let mut state = SimulateTestHost::default();
         for severities in [
             &[][..],

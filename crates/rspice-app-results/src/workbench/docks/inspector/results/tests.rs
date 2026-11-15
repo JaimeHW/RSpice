@@ -243,9 +243,8 @@ fn write_the_trace_statistics_picture() {
     use crate::workbench::documents::result_document::{AnalysisPresentationKey, ResultsTestHost};
     use rspice_results_ui::selection::SelectedResultTrace;
 
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let mut host = ResultsTestHost::default();
     host.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![

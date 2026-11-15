@@ -590,9 +590,8 @@ fn an_event_instant_reads_the_value_after_the_event() {
 #[test]
 #[ignore = "writes the review pictures"]
 fn write_the_pane_legend_pictures() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let write = |name: &str, state: &mut ResultsTestHost| {
         let canvas = rspice_ui_kit::raster::render(FRAME, |ui, _| {
             super::lanes::well(ui);

@@ -84,6 +84,16 @@ jobs:
       - name: Formatting gate regression tests
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
         run: python3 tools/ci/test_check_formatting.py
+      # A skipped test reads as a pass. libtest lists a bare #[ignore] without
+      # saying why, and reports "ok" for a test that returned before checking
+      # anything. The gate fails on either unless the reason is stated at the
+      # test, and lists every announced runtime skip so the set stays visible.
+      - name: Test skips state their reason
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 tools/ci/check_test_skips.py
+      - name: Test skip gate regression tests
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 tools/ci/test_check_test_skips.py
       - name: Lint GitHub workflows
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: |

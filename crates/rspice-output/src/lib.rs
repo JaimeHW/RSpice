@@ -1135,6 +1135,7 @@ mod tests {
         if let Err(error) = std::os::windows::fs::symlink_file(&target, &destination) {
             if error.kind() == io::ErrorKind::PermissionDenied || error.raw_os_error() == Some(1314)
             {
+                eprintln!("Windows symlink privilege unavailable; skipping the assertion: {error}");
                 return;
             }
             panic!("create artifact symlink: {error}");

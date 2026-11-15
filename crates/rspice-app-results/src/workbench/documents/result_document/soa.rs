@@ -589,9 +589,8 @@ mod tests {
     #[test]
     #[ignore = "writes the review pictures"]
     fn write_the_soa_sheet_pictures() {
-        let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-            return;
-        };
+        let directory = std::env::var("RSPICE_PICTURES")
+            .expect("set RSPICE_PICTURES to the directory the pictures are written to");
         let mismatched = crate::ui::Theme {
             mode: rspice_ui_kit::tokens::Mode::Light,
             ..crate::ui::Theme::default()

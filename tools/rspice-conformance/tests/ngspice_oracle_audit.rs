@@ -104,6 +104,9 @@ struct DiffLine {
 #[ignore = "requires NGSPICE_SOURCE_ROOT and NGSPICE_EXE; report-only unless NGSPICE_ORACLE_AUDIT_FAIL_ON_DRIFT=1"]
 fn audit_checked_out_against_live_ngspice() {
     let Some(config) = audit_config_from_env() else {
+        println!(
+            "Skipping ngspice oracle audit; set NGSPICE_SOURCE_ROOT and NGSPICE_EXE to opt in."
+        );
         return;
     };
 
@@ -126,12 +129,7 @@ fn audit_config_from_env() -> Option<AuditConfig> {
     let source_root = path_env("NGSPICE_SOURCE_ROOT");
     let ngspice_exe = path_env("NGSPICE_EXE");
     let (source_root, ngspice_exe) = match (source_root, ngspice_exe) {
-        (None, None) => {
-            println!(
-                "Skipping ngspice oracle audit; set NGSPICE_SOURCE_ROOT and NGSPICE_EXE to opt in."
-            );
-            return None;
-        }
+        (None, None) => return None,
         (Some(_), None) => panic!("NGSPICE_SOURCE_ROOT is set but NGSPICE_EXE is missing"),
         (None, Some(_)) => panic!("NGSPICE_EXE is set but NGSPICE_SOURCE_ROOT is missing"),
         (Some(source_root), Some(ngspice_exe)) => {

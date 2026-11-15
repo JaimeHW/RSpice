@@ -575,9 +575,8 @@ fn picture(
 #[test]
 #[ignore = "writes the review pictures"]
 fn write_the_marker_pictures() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     // Each picture whole, and the strip's band with its hover at full size.
     let write = |name: &str, canvas: rspice_ui_kit::raster::Canvas| {
         for (suffix, height) in [("", canvas.height()), ("-top", canvas.height().min(560))] {
@@ -648,9 +647,8 @@ fn write_the_marker_pictures() {
 #[test]
 #[ignore = "writes a review picture from a long run"]
 fn write_the_c12_picture() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let deck = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/mixed-corpus/c12-ldo-tb/deck/fail.tran.cir");
     let source = std::fs::read_to_string(&deck).expect("the corpus deck is readable");

@@ -523,9 +523,8 @@ fn unreadable_document(
 #[ignore = "writes the review pictures"]
 fn write_the_document_pane_pictures() {
     use rspice_results::document_creation::ResultDocumentFamily;
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     for (name, family, viewer_id, state) in [
         (
             "histogram-document",

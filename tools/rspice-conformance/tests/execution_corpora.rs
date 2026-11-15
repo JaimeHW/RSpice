@@ -41,6 +41,7 @@ fn paranoia_corpus_meets_its_execution_contracts() {
 #[test]
 fn paranoia_decks_named_by_env_meet_their_contracts() {
     let Ok(keys) = std::env::var("RSPICE_PROBE_DECK") else {
+        println!("RSPICE_PROBE_DECK is unset; no deck probed");
         return;
     };
     let runner = ExecutionRunner::new(ExecutionCorpus::Paranoia, &tests_dir(), config());

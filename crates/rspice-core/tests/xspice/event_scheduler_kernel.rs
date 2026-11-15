@@ -1206,12 +1206,14 @@ fn repeated_runs_produce_identical_orderings() {
 
 /// Child half of the two-process determinism check.
 ///
-/// Without the environment variable this test is inert, so a normal run pays
-/// nothing for it. The parent re-invokes the test binary with the variable set
-/// and `--exact` on this name, and reads the ordering back off stdout.
+/// Ignored, so a normal run pays nothing for it. The parent re-invokes the
+/// test binary with the variable set and `--exact --ignored` on this name, and
+/// reads the ordering back off stdout.
 #[test]
+#[ignore = "child half of separate_processes_produce_identical_orderings, which runs it"]
 fn scheduler_order_child_probe() {
     if env::var_os(CHILD_ENV).is_none() {
+        eprintln!("{CHILD_ENV} is unset; the child probe only runs under its parent test");
         return;
     }
     println!("{ORDER_MARKER}{}", ordering_fingerprint().join(";"));
@@ -1223,6 +1225,7 @@ fn separate_processes_produce_identical_orderings() {
     let output = Command::new(&exe)
         .args([
             "--exact",
+            "--ignored",
             "event_scheduler_kernel::scheduler_order_child_probe",
             "--nocapture",
         ])

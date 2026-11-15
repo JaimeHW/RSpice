@@ -985,9 +985,8 @@ fn a_ruler_flag_on_a_logarithmic_axis_reads_the_cursor_value() {
 #[test]
 #[ignore = "writes the review pictures"]
 fn write_the_cursor_pictures() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let write = |name: &str, state: &mut ResultsTestHost| {
         let mut controller = crate::simulation::SimulationController::new();
         for _ in 0..2 {

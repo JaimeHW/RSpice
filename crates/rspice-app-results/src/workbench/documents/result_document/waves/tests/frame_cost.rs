@@ -589,9 +589,8 @@ fn a_strip_stroking_more_curves_than_the_cache_bound_rebuilds_nothing_warm_or_ho
 fn write_the_family_pictures() {
     /// The picture, in points; it is drawn at twice that, as a 2x display does.
     const SIZE: egui::Vec2 = egui::vec2(1280.0, 820.0);
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let ctx = new_context();
     let draw = |state: &mut ResultsTestHost, events: Vec<egui::Event>| {
         let mut input = rspice_ui_kit::raster::display_input(SIZE, 2.0);

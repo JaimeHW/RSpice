@@ -326,9 +326,8 @@ mod tests {
     #[test]
     #[ignore = "writes the review pictures"]
     fn write_the_noise_contributor_picture() {
-        let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-            return;
-        };
+        let directory = std::env::var("RSPICE_PICTURES")
+            .expect("set RSPICE_PICTURES to the directory the pictures are written to");
         let summary = contributor_summary();
         let canvas = rspice_ui_kit::raster::render_themed(
             crate::ui::Theme::default(),

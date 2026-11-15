@@ -190,9 +190,8 @@ impl Review {
 #[test]
 #[ignore = "writes review pictures; runs the C12 testbench"]
 fn write_the_browser_pictures() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let mut run = c12_run();
     // The regulation loop on the plot: the output, the reference and the
     // feedback node inside the regulator.

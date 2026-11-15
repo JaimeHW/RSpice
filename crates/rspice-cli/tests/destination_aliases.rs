@@ -127,10 +127,7 @@ mod windows {
         buffer.truncate(count as usize);
         let alias = PathBuf::from(std::ffi::OsString::from_wide(&buffer));
         if alias.file_name() == path.file_name() {
-            eprintln!(
-                "8.3 names are disabled for {}; alias probe unavailable",
-                path.display()
-            );
+            // 8.3 names are disabled on this volume; the caller says so.
             return None;
         }
         assert_eq!(std::fs::read(&alias).unwrap(), std::fs::read(path).unwrap());
@@ -150,6 +147,10 @@ mod windows {
             let source = dir.join("long_circuit_source_filename.cir");
             std::fs::write(&source, DECK).unwrap();
             let Some(alias) = short_alias(&source) else {
+                eprintln!(
+                    "8.3 names are disabled for {}; alias probe skipped",
+                    source.display()
+                );
                 return;
             };
             let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
@@ -181,6 +182,10 @@ mod windows {
         std::fs::write(&waveform, "time,V(out)\n0,1\n1,1\n").unwrap();
         let (Some(model_alias), Some(config_alias)) = (short_alias(&model), short_alias(&config))
         else {
+            eprintln!(
+                "8.3 names are disabled under {}; alias probe skipped",
+                dir.display()
+            );
             return;
         };
         for (command, input, output) in [
@@ -220,6 +225,10 @@ mod windows {
         std::fs::write(&source, DECK).unwrap();
         std::fs::write(&destination, "previous result").unwrap();
         let Some(alias) = short_alias(&destination) else {
+            eprintln!(
+                "8.3 names are disabled for {}; alias probe skipped",
+                destination.display()
+            );
             return;
         };
         let result = Command::new(env!("CARGO_BIN_EXE_rspice"))

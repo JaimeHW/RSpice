@@ -814,6 +814,12 @@ fn deck_a_digital_instants_keep_their_pre_fix_analog_solution() {
     if !DIODE_CMC || emitting() {
         // Without the generated card the deck is a different circuit and the
         // pinned samples are not its samples.
+        let reason = if DIODE_CMC {
+            "this run emits new pins"
+        } else {
+            "this build has no veriloga-model-diode-cmc card"
+        };
+        println!("TRIFAMILY deck_a_instant_voltages: SKIPPED the pins because {reason}");
         return;
     }
     assert_eq!(

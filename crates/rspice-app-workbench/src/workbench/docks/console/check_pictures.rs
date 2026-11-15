@@ -220,9 +220,8 @@ fn write(directory: &str, name: &str, size: egui::Vec2, mut pass: impl FnMut(&mu
 #[test]
 #[ignore = "writes the review pictures"]
 fn write_the_run_check_pictures() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let mut state = checked_run();
     write(
         &directory,

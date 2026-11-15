@@ -468,9 +468,8 @@ fn a_pwl_source_over_a_frequency_sweep_says_why_it_cannot() {
 #[test]
 #[ignore = "writes a review picture"]
 fn write_the_export_form_picture() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let size = egui::vec2(760.0, 420.0);
     for (format, name) in [(RAW_BINARY, "export-form"), (PWL, "export-form-pwl")] {
         let mut state = two_strip_state();

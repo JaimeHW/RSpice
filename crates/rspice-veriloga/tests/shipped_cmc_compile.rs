@@ -236,6 +236,7 @@ fn compile_jobs(sources: &[ModelSource]) -> Vec<CompileJob> {
 #[ignore = "spawned by shipped_veriloga_models_compile_end_to_end for per-module isolation"]
 fn compile_one_shipped_veriloga_module_child() {
     if env::var_os(CHILD_ENV).is_none() {
+        eprintln!("{CHILD_ENV} is unset; the per-module child only runs under its parent test");
         return;
     }
 

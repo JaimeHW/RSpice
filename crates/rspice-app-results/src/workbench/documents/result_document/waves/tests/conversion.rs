@@ -370,9 +370,8 @@ fn the_staircase_has_a_pane_of_its_own() {
 #[test]
 #[ignore = "writes the review pictures"]
 fn write_the_conversion_pictures() {
-    let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-        return;
-    };
+    let directory = std::env::var("RSPICE_PICTURES")
+        .expect("set RSPICE_PICTURES to the directory the pictures are written to");
     let run = sar_run();
     let eoc = history(run, "EOC");
     let samp = history(run, "SAMP");

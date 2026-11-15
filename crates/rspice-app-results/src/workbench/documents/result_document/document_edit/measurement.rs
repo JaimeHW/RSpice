@@ -809,9 +809,8 @@ mod tests {
     #[test]
     #[ignore = "writes the review picture"]
     fn write_the_result_line_picture() {
-        let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-            return;
-        };
+        let directory = std::env::var("RSPICE_PICTURES")
+            .expect("set RSPICE_PICTURES to the directory the pictures are written to");
         let mut run = SimulationRun::new(1);
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
@@ -938,9 +937,8 @@ mod tests {
     #[test]
     #[ignore = "writes the review pictures"]
     fn write_the_family_pictures() {
-        let Ok(directory) = std::env::var("RSPICE_PICTURES") else {
-            return;
-        };
+        let directory = std::env::var("RSPICE_PICTURES")
+            .expect("set RSPICE_PICTURES to the directory the pictures are written to");
         let (mut host, document) = kept_yield();
         let modes = [
             (crate::ui::Mode::Dark, "dark"),
