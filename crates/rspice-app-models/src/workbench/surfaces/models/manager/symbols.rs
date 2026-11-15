@@ -361,8 +361,8 @@ fn symbol_group_band(ui: &mut Ui, label: &str) {
 const fn status_problem(status: SymbolStatus) -> Option<Problem> {
     match status {
         SymbolStatus::PinMismatch => Some(Problem::Failure),
-        SymbolStatus::Review => Some(Problem::Warning),
-        SymbolStatus::Bound | SymbolStatus::ReadOnly => None,
+        SymbolStatus::Review | SymbolStatus::InterfaceMismatch => Some(Problem::Warning),
+        SymbolStatus::Bound | SymbolStatus::ReadOnly | SymbolStatus::PinsMatch => None,
     }
 }
 
@@ -610,9 +610,27 @@ fn symbol_detail(
                         }
                     });
                 });
+            if let Some(standing) = &row.standing {
+                card(ui, |ui| {
+                    card_title(ui, "Pin check", Some(row.status.label()));
+                    ui.label(
+                        RichText::new(standing)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                    );
+                });
+            }
             if !row.diagnostics.is_empty() {
                 card(ui, |ui| {
-                    card_title(ui, "Blocking contract findings", Some(row.status.label()));
+                    // A symbol its cell's schematic or module defines is
+                    // checked as the pin check checks it: findings, not a
+                    // blocked contract.
+                    let title = if row.status == SymbolStatus::InterfaceMismatch {
+                        "Pin check"
+                    } else {
+                        "Blocking contract findings"
+                    };
+                    card_title(ui, title, Some(row.status.label()));
                     for diagnostic in &row.diagnostics {
                         problem_line(
                             ui,

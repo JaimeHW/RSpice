@@ -14,7 +14,9 @@ use rspice_design::symbol::generated::{
     GENERATED_PORTS_KEY, decode_ports, generated_interface_document, is_generated_symbol,
 };
 
-use rspice_design::symbol::publication::{EncodedSymbolEditorBundle, bound_interface};
+use rspice_design::symbol::publication::{
+    EncodedSymbolEditorBundle, bound_interface, check_symbol_pins,
+};
 
 use super::model::{Model, interface_pins, port_electrical_type};
 use crate::state::{
@@ -39,6 +41,48 @@ impl Model {
             interface: self.symbol_interface(reference),
             binding: self.symbol_model_binding(reference),
         })
+    }
+
+    /// What the pin check says of one symbol view, finding by finding, in
+    /// the words the Problems page shows; empty where its pins agree with
+    /// the interface they answer to.
+    pub fn symbol_pin_check_messages(
+        &self,
+        reference: &CellViewRef,
+    ) -> Result<Vec<String>, String> {
+        let inputs = self.symbol_pin_check_inputs(reference)?;
+        Ok(check_symbol_pins(
+            &inputs.document,
+            &inputs.interface,
+            inputs.binding.as_ref(),
+            reference,
+            self.symbol_contract_source(reference),
+        )
+        .violations()
+        .iter()
+        .map(|violation| violation.message.clone())
+        .collect())
+    }
+
+    /// A stamp of the schematics a symbol's interface can be read from as
+    /// they stand open, the one in front and every held buffer: equal
+    /// stamps, the same drawings. A reader that caches what it derived from
+    /// [`Self::symbol_interface`] keys on this beside the library's content,
+    /// which covers the rest.
+    pub fn open_schematics_stamp(&self) -> u64 {
+        use std::hash::{DefaultHasher, Hash as _, Hasher as _};
+        let mut buffers = 0_u64;
+        for (key, schematic) in &self.workspace.content.schematic_buffers {
+            let mut entry = DefaultHasher::new();
+            key.hash(&mut entry);
+            schematic.content_stamp().hash(&mut entry);
+            buffers ^= entry.finish();
+        }
+        let mut hasher = DefaultHasher::new();
+        buffers.hash(&mut hasher);
+        self.workspace.content.active_view.key().hash(&mut hasher);
+        self.schematic.content_stamp().hash(&mut hasher);
+        hasher.finish()
     }
 
     /// The model one symbol view is bound to, if any.

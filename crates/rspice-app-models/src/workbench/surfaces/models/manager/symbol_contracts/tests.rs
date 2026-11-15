@@ -196,6 +196,7 @@ fn row_for(definition: ModelBoundSymbolDefinition) -> SymbolRow {
         status: SymbolStatus::Bound,
         definition: Some(definition),
         diagnostics: Vec::new(),
+        standing: None,
     }
 }
 
@@ -512,6 +513,116 @@ fn the_registry_states_a_verdict_per_symbol_rather_than_one_for_the_library() {
     );
 }
 
+/// A symbol no model binds answers to its cell's schematic or compiled
+/// module, so its row states the pin check's standing against that interface
+/// — "pins match", or the check's own findings — and a schematic edited in a
+/// buffer is read as it stands, not as the library last held it.
+#[test]
+fn a_symbol_its_schematic_or_module_defines_states_its_pin_check() {
+    use crate::state::{
+        ComponentType, Point, PortDirection, SchematicState, SymbolDocument, SymbolPin,
+    };
+
+    let ctx = egui::Context::default();
+    let mut state = harness();
+    state.model.library_manager = LibraryManager::new();
+    state
+        .model
+        .library_manager
+        .add_library(Library::new("project_symbols"));
+    let drawn = |pins: &[(&str, PortDirection)]| {
+        let mut view = View::new("symbol", ViewType::Symbol);
+        SymbolDocument {
+            pins: pins
+                .iter()
+                .enumerate()
+                .map(|(index, &(name, direction))| {
+                    SymbolPin::new(name, direction, Some(Point::new(-20, 10 * index as i32)))
+                })
+                .collect(),
+            ..SymbolDocument::default()
+        }
+        .store_in_view(&mut view)
+        .expect("the artwork stores");
+        view
+    };
+    let mut schematic = SchematicState::default();
+    for (index, name) in ["A", "B"].into_iter().enumerate() {
+        let id = schematic.add_component(ComponentType::Port, Point::new(0, 40 * index as i32));
+        schematic
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == id)
+            .expect("the port was just placed")
+            .value = name.to_owned();
+    }
+    let ports = schematic.document().interface_ports();
+    let declared = ports
+        .iter()
+        .map(|port| (port.name.as_str(), port.direction))
+        .collect::<Vec<_>>();
+    let library = state
+        .model
+        .library_manager
+        .get_library_mut("project_symbols")
+        .expect("the library was just added");
+    let mut amp = Cell::new("amp");
+    amp.add_view(View::new("schematic", ViewType::Schematic));
+    amp.add_view(drawn(&declared));
+    library.add_cell(amp);
+    let mut module = View::new("veriloga", ViewType::VerilogA);
+    module
+        .metadata
+        .insert("veriloga.module".to_owned(), "gain".to_owned());
+    module
+        .metadata
+        .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
+    let mut gain = Cell::new("gain");
+    gain.add_view(module);
+    gain.add_view(drawn(&[("p", PortDirection::InOut)]));
+    library.add_cell(gain);
+
+    let schematic_key = CellViewRef::new("project_symbols", "amp", "schematic").key();
+    state
+        .model
+        .workspace
+        .insert_schematic_editor(schematic_key.clone(), schematic.clone());
+
+    let row = |rows: &[SymbolRow], cell: &str| {
+        rows.iter()
+            .find(|row| row.reference.cell == cell)
+            .unwrap_or_else(|| panic!("{cell} is in the registry"))
+            .clone()
+    };
+    let rows = painted_rows(&ctx, &mut state);
+    let amp = row(&rows, "amp");
+    assert_eq!(amp.status, SymbolStatus::PinsMatch);
+    assert_eq!(amp.standing.as_deref(), Some("Pins match the schematic."));
+    assert!(amp.diagnostics.is_empty(), "{:?}", amp.diagnostics);
+    let gain = row(&rows, "gain");
+    assert_eq!(gain.status, SymbolStatus::InterfaceMismatch);
+    assert_eq!(gain.diagnostics, ["Symbol pin is not placed: n"]);
+    assert!(gain.status.needs_attention() && !amp.status.needs_attention());
+
+    // A port added in the schematic's buffer is read from the buffer.
+    let id = schematic.add_component(ComponentType::Port, Point::new(0, 80));
+    schematic
+        .document_mut_for_test()
+        .components
+        .iter_mut()
+        .find(|component| component.id == id)
+        .expect("the port was just placed")
+        .value = "C".to_owned();
+    state
+        .model
+        .workspace
+        .insert_schematic_editor(schematic_key, schematic);
+    let amp = row(&painted_rows(&ctx, &mut state), "amp");
+    assert_eq!(amp.status, SymbolStatus::InterfaceMismatch);
+    assert_eq!(amp.diagnostics, ["Symbol pin is not placed: C"]);
+}
+
 #[test]
 fn a_bound_pdk_package_is_grouped_under_its_own_band() {
     // The only shape that draws a band, built the way the product builds it:
@@ -580,6 +691,7 @@ fn the_two_corpora_are_grouped_and_the_band_names_the_technology() {
         status: SymbolStatus::Bound,
         definition: None,
         diagnostics: Vec::new(),
+        standing: None,
     };
     let technology = |cell: &str| SymbolRow {
         reference: CellViewRef::new("demo180", cell, "symbol"),

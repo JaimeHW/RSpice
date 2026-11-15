@@ -27,7 +27,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash as _, Hasher as _};
 
-use crate::state::{PortSpec, SymbolPinDefinition, SymbolSourceContract};
+use crate::state::{PortSpec, SymbolInterface, SymbolPinDefinition, SymbolSourceContract};
 
 use super::*;
 
@@ -42,6 +42,10 @@ pub(super) struct SymbolRow {
     pub(super) status: SymbolStatus,
     pub(super) definition: Option<ModelBoundSymbolDefinition>,
     pub(super) diagnostics: Vec<String>,
+    /// What the pin check found where it found nothing to report, for a
+    /// symbol its cell's schematic or module defines: "Pins match the
+    /// module."
+    pub(super) standing: Option<String>,
 }
 
 #[derive(Clone)]
@@ -77,22 +81,33 @@ pub(super) enum SymbolStatus {
     Bound,
     /// Bound, and owned by a library this project may not write.
     ReadOnly,
+    /// No model binds the symbol; its cell's schematic or compiled module
+    /// declares the interface, and the pin check finds nothing.
+    PinsMatch,
+    /// No model binds the symbol; the pin check against its cell's schematic
+    /// or compiled module has findings. A warning, as the pin check reports
+    /// them, while the two are still being drawn.
+    InterfaceMismatch,
 }
 
 impl SymbolStatus {
     pub(super) const fn label(self) -> &'static str {
         match self {
-            Self::PinMismatch => "pin mismatch",
+            Self::PinMismatch | Self::InterfaceMismatch => "pin mismatch",
             Self::Review => "review",
             Self::Bound => "bound",
             Self::ReadOnly => "read-only",
+            Self::PinsMatch => "pins match",
         }
     }
 
     /// Whether the row is one a reader still has work to do about — the count
     /// the registry footer reports.
     pub(super) const fn needs_attention(self) -> bool {
-        matches!(self, Self::PinMismatch | Self::Review)
+        matches!(
+            self,
+            Self::PinMismatch | Self::Review | Self::InterfaceMismatch
+        )
     }
 }
 
@@ -143,6 +158,7 @@ struct ParsedSymbolView {
     status: SymbolStatus,
     definition: Option<ModelBoundSymbolDefinition>,
     diagnostics: Vec<String>,
+    standing: Option<String>,
 }
 
 #[derive(Clone)]
@@ -193,6 +209,7 @@ pub(super) fn symbol_rows(ui: &Ui, app: &ManagerRenderContext<'_>) -> Vec<Symbol
                 status: SymbolStatus::ReadOnly,
                 definition: Some(definition.clone()),
                 diagnostics: Vec::new(),
+                standing: None,
             });
         }
     }
@@ -284,6 +301,7 @@ fn design_library_rows(ui: &Ui, app: &ManagerRenderContext<'_>) -> Vec<SymbolRow
             status: view.status,
             definition: view.definition,
             diagnostics: view.diagnostics,
+            standing: view.standing,
         });
     }
     rows
@@ -306,7 +324,10 @@ fn parsed_symbol_views(ui: &Ui, app: &ManagerRenderContext<'_>) -> Vec<ParsedSym
         return cached.views;
     }
 
-    let parsed = views.iter().map(parse_symbol_view).collect::<Vec<_>>();
+    let parsed = views
+        .iter()
+        .map(|site| parse_symbol_view(site, app.model))
+        .collect::<Vec<_>>();
     ui.ctx().data_mut(|data| {
         data.insert_temp(
             cache_id,
@@ -334,7 +355,9 @@ fn parsed_symbol_views(ui: &Ui, app: &ManagerRenderContext<'_>) -> Vec<ParsedSym
 ///
 /// `show_read_only` is in the key because it decides which libraries
 /// `libraries_sorted` returns at all, and it is a plain field that no mutation
-/// counter watches.
+/// counter watches. The open schematics are in it because a symbol no model
+/// binds is checked against its cell's schematic, which may stand edited in a
+/// buffer the library has not been given yet.
 fn symbol_corpus_revision<'a>(
     app: &'a ManagerRenderContext<'_>,
     hasher: &mut DefaultHasher,
@@ -342,6 +365,7 @@ fn symbol_corpus_revision<'a>(
 ) {
     app.model.library_manager.revision().hash(hasher);
     app.model.library_manager.show_read_only.hash(hasher);
+    app.model.open_schematics_stamp().hash(hasher);
     for library in app.model.library_manager.libraries_sorted() {
         library.name.hash(hasher);
         library.read_only.hash(hasher);
@@ -390,8 +414,9 @@ fn hash_metadata(metadata: &std::collections::HashMap<String, String>, hasher: &
 }
 
 /// Deserialize one symbol cellview's typed contract and its artwork, and say
-/// where the two disagree.
-fn parse_symbol_view(site: &SymbolViewSite<'_>) -> ParsedSymbolView {
+/// where the two disagree; for a symbol no model binds, check its pins against
+/// the interface its cell declares.
+fn parse_symbol_view(site: &SymbolViewSite<'_>, model: &Model) -> ParsedSymbolView {
     let &SymbolViewSite {
         library,
         read_only,
@@ -424,7 +449,7 @@ fn parse_symbol_view(site: &SymbolViewSite<'_>) -> ParsedSymbolView {
     let form = definition
         .as_ref()
         .map(super::super::symbol_parameter_form_label)
-        .unwrap_or_else(|| "legacy / none".to_owned());
+        .unwrap_or_else(|| "none".to_owned());
     let template = definition
         .as_ref()
         .map(|definition| definition.netlist.template.clone())
@@ -458,10 +483,37 @@ fn parse_symbol_view(site: &SymbolViewSite<'_>) -> ParsedSymbolView {
         if let Err(error) = definition.validate() {
             diagnostics.push(format!("Executable contract: {error}"));
         }
-    } else if definition.is_none() {
-        diagnostics.push("Legacy symbol has no typed model/netlist/form contract.".to_owned());
     }
-    let status = if diagnostics
+    let reference = CellViewRef::new(library, &cell.name, &view.name);
+    // A symbol no model binds answers to the interface its cell's schematic or
+    // compiled module declares, so its standing is the pin check's against
+    // that interface, in the pin check's own words.
+    let mut interface_findings = false;
+    let mut standing = None;
+    if definition.is_none() && diagnostics.is_empty() {
+        match model.symbol_interface(&reference) {
+            SymbolInterface::SymbolDefined => diagnostics
+                .push("No model, schematic or module defines this symbol's pins.".to_owned()),
+            SymbolInterface::Declared(_) => match model.symbol_pin_check_messages(&reference) {
+                Ok(findings) if findings.is_empty() => {
+                    standing = Some(format!(
+                        "Pins match the {}.",
+                        model.symbol_contract_source(&reference)
+                    ));
+                }
+                Ok(findings) => {
+                    interface_findings = true;
+                    diagnostics = findings;
+                }
+                Err(error) => diagnostics.push(format!("Pin check: {error}")),
+            },
+        }
+    }
+    let status = if interface_findings {
+        SymbolStatus::InterfaceMismatch
+    } else if standing.is_some() {
+        SymbolStatus::PinsMatch
+    } else if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.contains("Blocking"))
     {
@@ -474,7 +526,7 @@ fn parse_symbol_view(site: &SymbolViewSite<'_>) -> ParsedSymbolView {
         SymbolStatus::Bound
     };
     ParsedSymbolView {
-        reference: CellViewRef::new(library, &cell.name, &view.name),
+        reference,
         read_only,
         declared_family,
         pins,
@@ -483,6 +535,7 @@ fn parse_symbol_view(site: &SymbolViewSite<'_>) -> ParsedSymbolView {
         status,
         definition,
         diagnostics,
+        standing,
     }
 }
 
