@@ -1233,8 +1233,9 @@ impl SymbolDocument {
     /// author owns.
     ///
     /// - A declared port with no pin gains one, placed against the body on
-    ///   the side its direction implies and clear of the terminals already
-    ///   there.
+    ///   the side generation gives it (inputs left, outputs right, positive
+    ///   rails on top, ground and negative rails below) and clear of the
+    ///   terminals already there.
     /// - A pin that already exists keeps its authored geometry and takes the
     ///   port's direction. It keeps its electrical type while its direction
     ///   stands; a changed direction re-derives the type from the new one.
@@ -1295,7 +1296,12 @@ impl SymbolDocument {
                 }
                 None => false,
             };
-            let side = stated_side(port).unwrap_or_else(|| default_pin_side(port.direction, None));
+            // The side the model states, else the edge generation gives the
+            // port: a ground or negative rail goes to the bottom, as on a
+            // symbol made from the schematic.
+            let side = stated_side(port).unwrap_or_else(|| {
+                crate::pin_roles::interface_pin(&port.name, port.direction, false).inferred_side()
+            });
             let (tip, length) = self.free_place(side, bounds);
             if known {
                 if let Some(pin) = self.pin_mut(&port.name) {
@@ -2013,6 +2019,35 @@ mod validation_tests {
         assert_eq!(tip.x, column);
         let (min, _) = document.body_bounds();
         assert_eq!(added.lead_inner().map(|inner| inner.x), Some(min.x));
+    }
+
+    /// A rail added to the schematic joins the symbol on the edge a symbol
+    /// made from that schematic gives it: a positive supply on top, ground
+    /// and a negative supply below, whichever way the port is declared.
+    #[test]
+    fn reconciling_puts_a_new_rail_on_the_edge_generation_gives_it() {
+        let port = |name: &str, direction| PortSpec {
+            name: name.to_owned(),
+            direction,
+        };
+        let mut ports = vec![port("a", PortDirection::In), port("y", PortDirection::Out)];
+        let mut document = SymbolDocument::generated_from_ports(&ports);
+        ports.extend([
+            port("vdd", PortDirection::Supply),
+            port("vss", PortDirection::Supply),
+            port("gnd", PortDirection::InOut),
+            port("vcc", PortDirection::InOut),
+        ]);
+        document.reconcile_ports(&ports);
+        let generated = SymbolDocument::generated_from_ports(&ports);
+        for name in ["vdd", "vss", "gnd", "vcc"] {
+            let side = |document: &SymbolDocument| document.pin(name).map(|pin| pin.side);
+            assert_eq!(side(&document), side(&generated), "{name}");
+        }
+        assert_eq!(
+            document.pin("vss").map(|pin| pin.side),
+            Some(SymbolPinSide::Bottom)
+        );
     }
 
     #[test]
