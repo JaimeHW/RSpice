@@ -129,8 +129,18 @@ const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 /// and the 713 points downstream of the edges (the inverter's, the DAC's
 /// ramp corners, the steps between them) move by the same ulp. The count and
 /// the step sequence are unchanged. Linux x64 measured the same hash.
-const DECK_A_POINTS: usize = 1156;
-const DECK_A_GRID_HASH: u64 = 0x7665_aafb_3056_dd2f;
+///
+/// Re-measured at 1072 points, grid c9c0f44b35dacca1, when a coupled
+/// code-model event that no analog-output instance reads began landing
+/// without restarting the integrator. Each of the twelve clock crossings
+/// publishes `d_clk`'s `x` and then its new level 3 ps apart, and only the
+/// inverter reads `d_clk`; each crossing used to restart at first order and a
+/// tenth of the step, and now takes 7 fewer points in the half nanosecond
+/// between the crossing and the inverter's edge. 1156 − 12 × 7 is 1072. Every
+/// `d_clk` and `d_inv` event lands at the same instant, bit for bit. Linux x64
+/// measured the same hash.
+const DECK_A_POINTS: usize = 1072;
+const DECK_A_GRID_HASH: u64 = 0xc9c0_f44b_35da_cca1;
 
 // Deck A pins its point count and grid hash, not a hash of its node waveforms.
 // Its generated diode and its sources run through the platform's libm, which
