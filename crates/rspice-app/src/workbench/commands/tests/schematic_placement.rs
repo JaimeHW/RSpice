@@ -231,7 +231,9 @@ fn port_undo_and_redo_resynchronize_the_generated_symbol_contract() {
 
     Command::Undo.execute(&mut app);
     assert!(app.state.model.schematic.document().components.is_empty());
-    assert!(symbol_ports(&app).is_none());
+    // No view goes by itself: the symbol the port made stays as it was
+    // drawn, its pin the one the pin checks report as not in the schematic.
+    assert_eq!(symbol_ports(&app).as_deref(), Some("BIAS_EN:in"));
 
     Command::Redo.execute(&mut app);
     assert_eq!(symbol_ports(&app).as_deref(), Some("BIAS_EN:in"));
