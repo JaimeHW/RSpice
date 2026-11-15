@@ -2768,6 +2768,11 @@ impl Netlist {
             .collect::<Vec<_>>();
 
         let mut output = include::ExpandedSource::default();
+        // Every line is kept, commented out or not, and the promoted
+        // commands join them.
+        output
+            .items
+            .reserve(expanded.items.len().saturating_add(promoted.len()));
         if let Some(title) = implicit_title {
             output.set_implicit_title(title);
         }

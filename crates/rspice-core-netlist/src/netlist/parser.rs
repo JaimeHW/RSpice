@@ -1316,6 +1316,16 @@ mod xyce_physical_comment_tests {
     }
 }
 
+/// Whether two expanded lines come from the same source file. The spelling
+/// settles the usual case, a line of the file before it, without walking
+/// either path's components; differing spellings still compare as paths.
+fn same_source(left: Option<&std::path::Path>, right: Option<&std::path::Path>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => left.as_os_str() == right.as_os_str() || left == right,
+        (left, right) => left.is_none() && right.is_none(),
+    }
+}
+
 fn root_physical_origin(
     source_schedule: Option<&SourceEventSchedule>,
     expanded_line_count: usize,
@@ -1414,8 +1424,8 @@ fn apply_root_preprocessing(
         let source_path = source_schedule
             .and_then(|schedule| schedule.origin(index))
             .and_then(|origin| origin.path.as_deref());
-        let is_root = source_schedule.is_none_or(|_| source_path == root_path);
-        if active_source_path != Some(source_path) {
+        let is_root = source_schedule.is_none_or(|_| same_source(source_path, root_path));
+        if !active_source_path.is_some_and(|active| same_source(active, source_path)) {
             active_source_path = Some(source_path);
             logical_policy = LogicalLinePolicy::Rewrite;
         }
@@ -2407,7 +2417,7 @@ fn prescan_root_preprocess_with_dialect(
             let Some(origin) = schedule.origin(index) else {
                 continue;
             };
-            if origin.path.as_deref() != root_path {
+            if !same_source(origin.path.as_deref(), root_path) {
                 scan_root_preprocess_logical_line(
                     &logical_line,
                     logical_origin_line,
