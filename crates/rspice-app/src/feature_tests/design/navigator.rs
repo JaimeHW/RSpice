@@ -923,7 +923,7 @@ fn the_parent_a_path_click_ascends_to_draws_on_the_frame_the_click_repaints() {
     );
 }
 
-/// Update pins from contract runs once the navigator has drawn, so the
+/// Update pins from schematic runs once the navigator has drawn, so the
 /// click's own frame still lists the port without a pin. The click is
 /// input, and egui asks for the frame after any input at once; that frame
 /// lists the pin the command placed.

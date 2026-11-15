@@ -161,6 +161,7 @@ pub(crate) fn update_active_symbol_pins_from_contract(
             );
         }
     };
+    let source = model.symbol_contract_source(&reference);
     let before = model.load_active_symbol_document()?;
     let metadata = load_active_symbol_editor_metadata(model, &before)?;
     let mut document = before.clone();
@@ -170,16 +171,21 @@ pub(crate) fn update_active_symbol_pins_from_contract(
         &ports,
     );
     if document == before {
-        return Ok("Symbol pins already match the interface contract".to_owned());
+        return Ok(format!("Symbol pins already match the {source}"));
     }
     let added = document.pins.len().saturating_sub(before.pins.len());
     let orphaned = document
         .pin_summary(&SymbolInterface::Declared(ports))
         .orphaned;
-    record_symbol_edit(symbol, model, &before, "Update pins from contract");
+    record_symbol_edit(
+        symbol,
+        model,
+        &before,
+        crate::workbench::design::commands::update_pins_label(source),
+    );
     store_active_symbol_editor_bundle(symbol, model, wb, &document, &metadata)?;
     Ok(format!(
-        "Symbol pins updated from the interface contract: {added} added, {orphaned} left orphaned"
+        "Symbol pins updated from the {source}: {added} added, {orphaned} left orphaned"
     ))
 }
 

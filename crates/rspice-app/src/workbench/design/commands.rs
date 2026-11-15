@@ -1027,8 +1027,11 @@ impl DesignCommand {
                 symbol_canvas,
                 SYMBOL_TEXT,
             ),
+            // Where a symbol is in front the command is named for the drawing
+            // it takes the pins from (`update_pins_label`); this is its name
+            // with none.
             Self::SymbolUpdatePinsFromContract => (
-                "Update pins from contract",
+                "Update pins from schematic",
                 "Design",
                 palette,
                 symbol_canvas,
@@ -1062,5 +1065,19 @@ impl DesignCommand {
             bindings,
             owner: CommandOwner::Design,
         }
+    }
+}
+
+/// What Update pins is called where the symbol's interface is read from
+/// `source`, as `Model::symbol_contract_source` names it: the drawing the
+/// pins come from, "Update pins from module" for a cell a compiled module
+/// defines, "... from model" for a symbol bound to a model, and "... from
+/// schematic" otherwise. The menu row, the palette, the toolbar and the
+/// undo step all read this one name.
+pub(crate) fn update_pins_label(source: &str) -> &'static str {
+    match source {
+        "module" => "Update pins from module",
+        "model" => "Update pins from model",
+        _ => "Update pins from schematic",
     }
 }

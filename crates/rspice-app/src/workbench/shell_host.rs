@@ -746,6 +746,16 @@ impl Host for RSpiceApp {
     }
 
     fn label(&self, key: CommandKey) -> &'static str {
+        // Update pins names the drawing it takes the pins from, so every
+        // place the command is shown says which one.
+        if key
+            == crate::workbench::design::commands::DesignCommand::SymbolUpdatePinsFromContract.key()
+        {
+            let model = &self.state.model;
+            return crate::workbench::design::commands::update_pins_label(
+                model.symbol_contract_source(&model.workspace.content.active_view),
+            );
+        }
         legacy_command(key).map_or_else(
             || features::spec(key).map_or_else(|| command_registry().label(key), |spec| spec.label),
             |command| command.spec().label,

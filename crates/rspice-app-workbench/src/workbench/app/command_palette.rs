@@ -336,6 +336,9 @@ pub struct SignalEntry {
 #[derive(Debug, Clone, Copy)]
 pub struct PaletteCommand {
     spec: &'static CommandSpec,
+    /// What the command is called here, as the host names it: the label a
+    /// command named for what it acts on carries in front of that.
+    label: &'static str,
     /// The glyph the shell gives the command, where it has one of its own
     /// rather than its scope's.
     icon: Option<Icon>,
@@ -394,7 +397,7 @@ impl PaletteEntry {
 
     fn name(&self) -> Cow<'_, str> {
         match self {
-            Self::Command(command) => Cow::Borrowed(command_name(command.spec)),
+            Self::Command(command) => Cow::Borrowed(command.label.trim_end_matches('…')),
             Self::CellView(entry) => Cow::Owned(format!(
                 "Open {} / {}",
                 entry.reference.cell, entry.reference.view
@@ -636,6 +639,7 @@ pub fn palette_commands(host: &impl Host) -> impl Iterator<Item = PaletteCommand
         .filter(|spec| spec.flags.contains(CommandFlags::PALETTE_VISIBLE))
         .map(|spec| PaletteCommand {
             spec,
+            label: host.label(spec.key),
             icon: host.palette_icon(spec.key),
             place: host.menu_place(spec.key),
         })

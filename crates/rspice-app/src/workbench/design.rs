@@ -30,14 +30,15 @@ use crate::schematic::view::sheet_visibility::objects_of_kind_on_active_sheet;
 use crate::schematic::view::standard_value_snap::{run_snap_to_standard_value, snap_block_reason};
 use crate::schematic::view::{highlight_selected_net, selected_net, transient_annotation_status};
 use crate::state::{
-    CellViewRef, ComponentType, GridStyle, LibraryCellInstance, SchematicAnnotationVisibility, Tool,
+    CellViewRef, ComponentType, GridStyle, LibraryCellInstance, SchematicAnnotationVisibility,
+    SymbolInterface, Tool,
 };
 use crate::workbench::app::actions::property_edit::{
     open_selected_object_properties_in, selected_object_properties_available_in,
 };
 use crate::workbench::app::actions::workspace::design_checks;
 use crate::workbench::app::actions::workspace::symbol_document::{
-    active_symbol_pin_finding_count, active_symbol_ports, clear_active_symbol_pin_checks,
+    active_symbol_pin_finding_count, clear_active_symbol_pin_checks,
     create_schematic_pins_from_active_symbol, run_active_symbol_pin_checks,
     update_active_symbol_pins_from_contract,
 };
@@ -512,9 +513,23 @@ impl CommandSet for DesignCommand {
             // Nothing to reconcile against without a declared interface, and
             // the command must say so by reporting unavailable rather than
             // opening on an empty contract.
-            Self::SymbolUpdatePinsFromContract => (!editable_symbol(reads)
-                || active_symbol_ports(reads.model).is_empty())
-            .then_some("command is unavailable in this context"),
+            Self::SymbolUpdatePinsFromContract if !editable_symbol(reads) => {
+                Some("command is unavailable in this context")
+            }
+            Self::SymbolUpdatePinsFromContract => {
+                let active = &reads.model.workspace.content.active_view;
+                match reads.model.symbol_interface(active) {
+                    SymbolInterface::Declared(ports) if !ports.is_empty() => None,
+                    SymbolInterface::SymbolDefined => Some("the symbol defines its own pins"),
+                    SymbolInterface::Declared(_) => {
+                        Some(match reads.model.symbol_contract_source(active) {
+                            "module" => "the module declares no pins",
+                            "model" => "the model declares no pins",
+                            _ => "the schematic declares no pins",
+                        })
+                    }
+                }
+            }
             // The other direction: offered only beside a schematic that
             // lacks one of the symbol's pins, and named for what is missing.
             Self::SymbolCreateSchematicPins if !editable_symbol(reads) => {

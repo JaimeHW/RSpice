@@ -688,7 +688,7 @@ const PINNED_SYMBOL_MENUS: [(ApplicationMenu, &[&str]); 1] = [(
         "  Polygon | symbol-polygon-tool | Shift+L | on",
         "  Text | symbol-text-tool | T | on",
         "  ---",
-        "  Update pins from contract | update-pins-from-contract |  | off: command is unavailable in this context",
+        "  Update pins from schematic | update-pins-from-contract |  | off: the schematic declares no pins",
         "  Create schematic pins from symbol | create-schematic-pins-from-symbol |  | off: the schematic declares every pin of the symbol",
         "Arrange >",
         "  Rotate clockwise | rotate-selection | Ctrl+R | off: select an editable object",

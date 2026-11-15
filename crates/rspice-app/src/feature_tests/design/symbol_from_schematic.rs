@@ -512,6 +512,118 @@ fn the_pin_check_names_each_port_change_and_update_pins_answers_it() {
     assert_eq!(document(&replay.app, &symbol), updated, "and one redo");
 }
 
+/// Update pins is named for the drawing it takes the pins from wherever it
+/// shows: the toolbar button and the navigator's, the Design menu row, the
+/// palette row that runs it, and the step Undo then takes back.
+#[test]
+fn update_pins_is_named_for_the_schematic_wherever_it_shows() {
+    use crate::workbench::framework::host::Host;
+    use egui::accesskit::Role;
+
+    let mut replay = new_project();
+    let schematic = replay.app.state.model.workspace.content.active_view.clone();
+    let symbol = symbol_of(&schematic);
+    declare(&mut replay, &[("IN", PortDirection::In)]);
+    open(&mut replay, &symbol);
+    hand_edit(&mut replay, "Move pin", |document| {
+        let pin = document.pins.iter_mut().find(|pin| pin.name == "IN");
+        let pin = pin.expect("IN is drawn");
+        pin.position = pin.position.map(|at| at + Point::new(0, 20));
+    });
+    open(&mut replay, &schematic);
+    declare(&mut replay, &[("EN", PortDirection::In)]);
+    open(&mut replay, &symbol);
+
+    let label = "Update pins from schematic";
+    let controls = replay.frames(Vec::new());
+    let buttons = controls
+        .iter()
+        .filter(|control| control.role == Role::Button && control.label == label)
+        .count();
+    assert_eq!(buttons, 2, "the toolbar's button and the navigator's");
+    assert!(
+        controls
+            .iter()
+            .all(|control| !control.label.contains("contract")),
+        "no control says contract"
+    );
+    let key = DesignCommand::SymbolUpdatePinsFromContract.key();
+    assert_eq!(Host::menu_label(&replay.app, key), label, "the menu row");
+
+    replay.choose_command(label);
+    assert!(
+        document(&replay.app, &symbol).pin("EN").is_some(),
+        "the palette row ran it"
+    );
+    assert_eq!(
+        Host::menu_label(&replay.app, ids::UNDO),
+        "Undo update pins from schematic"
+    );
+}
+
+/// A cell its compiled module defines takes its pins from the module, and
+/// Update pins says so, from the menu row to the step Undo takes back.
+#[test]
+fn update_pins_is_named_for_the_module_of_a_module_defined_cell() {
+    use crate::state::{Cell, View};
+    use crate::workbench::framework::host::Host;
+
+    let mut replay = new_project();
+    let library = replay
+        .app
+        .state
+        .model
+        .workspace
+        .content
+        .active_view
+        .library
+        .clone();
+    let symbol = CellViewRef::new(&library, "gain", "symbol");
+    let mut module = View::new("veriloga", ViewType::VerilogA);
+    module
+        .metadata
+        .insert("veriloga.module".to_owned(), "gain".to_owned());
+    module
+        .metadata
+        .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
+    let mut drawn = View::new("symbol", ViewType::Symbol);
+    SymbolDocument {
+        pins: vec![SymbolPin::new(
+            "p",
+            PortDirection::InOut,
+            Some(Point::new(-20, 0)),
+        )],
+        ..SymbolDocument::default()
+    }
+    .store_in_view(&mut drawn)
+    .expect("the symbol stores");
+    let mut cell = Cell::new("gain");
+    cell.add_view(module);
+    cell.add_view(drawn);
+    replay
+        .app
+        .state
+        .model
+        .library_manager
+        .get_library_mut(&library)
+        .expect("the project library")
+        .add_cell(cell);
+    open(&mut replay, &symbol);
+
+    let key = DesignCommand::SymbolUpdatePinsFromContract.key();
+    assert_eq!(
+        Host::menu_label(&replay.app, key),
+        "Update pins from module"
+    );
+    replay.app.execute_command_key(key);
+    replay.frames(Vec::new());
+    assert!(document(&replay.app, &symbol).pin("n").is_some());
+    assert_eq!(
+        Host::menu_label(&replay.app, ids::UNDO),
+        "Undo update pins from module"
+    );
+}
+
 /// Create schematic pins from symbol declares a port for each pin the
 /// schematic lacks, with its direction, as one undo step of the schematic,
 /// and leaves the symbol as it is.

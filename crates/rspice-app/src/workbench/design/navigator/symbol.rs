@@ -135,7 +135,7 @@ fn pins_section(
             if super::super::super::design_system::labeled_icon_button(
                 ui,
                 WorkbenchIcon::Refresh,
-                &format!("Update pins from {source}"),
+                crate::workbench::design::commands::update_pins_label(source),
                 false,
                 width,
             )

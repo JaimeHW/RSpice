@@ -351,7 +351,7 @@ const SYMBOL: &[ToolbarEntry<DesignFeature>] = &[
         DesignCommand::MirrorSelectionHorizontal.key(),
         WorkbenchIcon::Mirror,
     ),
-    // Reconciling the pin list against the interface contract.
+    // Update pins, named for the drawing the pins come from.
     icon(
         DesignCommand::SymbolUpdatePinsFromContract.key(),
         WorkbenchIcon::Pin,
