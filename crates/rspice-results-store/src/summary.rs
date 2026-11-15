@@ -38,33 +38,6 @@ impl Level {
     }
 }
 
-/// A `SUMMARY` frame as `END` lists it.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct SummaryDirEntry {
-    pub(crate) level: u8,
-    pub(crate) buckets: u32,
-    pub(crate) offset: u64,
-    pub(crate) ordinal: u64,
-    pub(crate) first_row: u64,
-    pub(crate) rows: u64,
-    pub(crate) x_min: f64,
-    pub(crate) x_max: f64,
-}
-
-impl SummaryDirEntry {
-    pub(crate) fn put(&self, frame: &mut FrameBuf) {
-        frame.put_u8(self.level);
-        frame.put(&[0, 0, 0]);
-        frame.put_u32(self.buckets);
-        frame.put_u64(self.offset);
-        frame.put_u64(self.ordinal);
-        frame.put_u64(self.first_row);
-        frame.put_u64(self.rows);
-        frame.put_f64(self.x_min);
-        frame.put_f64(self.x_max);
-    }
-}
-
 /// The writer's summary levels 2 and up. Memory is one 64-bucket frame per level.
 pub(crate) struct Pyramid {
     signals: usize,
@@ -174,14 +147,14 @@ impl Pyramid {
     }
 
     /// Encode level `index`'s open frame (`rows` rows from `first_row`) and start its next frame.
-    /// Returns the directory entry without its offset, which the caller fills in.
+    /// Returns the frame's x range.
     pub(crate) fn encode(
         &mut self,
         index: usize,
         first_row: u64,
         rows: u64,
         frame: &mut FrameBuf,
-    ) -> SummaryDirEntry {
+    ) -> (f64, f64) {
         let level = &mut self.levels[index];
         let buckets = level.buckets;
         let (mut x_min, mut x_max) = (f64::NAN, f64::NAN);
@@ -204,18 +177,8 @@ impl Pyramid {
                 frame.put_f64(value);
             }
         }
-        let entry = SummaryDirEntry {
-            level: index as u8 + 2,
-            buckets: buckets as u32,
-            offset: 0,
-            ordinal: level.frames,
-            first_row,
-            rows,
-            x_min: canonical(x_min),
-            x_max: canonical(x_max),
-        };
         level.frames += 1;
         level.buckets = 0;
-        entry
+        (canonical(x_min), canonical(x_max))
     }
 }

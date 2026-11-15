@@ -1,7 +1,8 @@
 //! Opening a segment, recovering one a crash cut short, and decoding rows on demand.
 //!
-//! A complete segment opens from the superblock's `END` pointer and the index chain. Without a
-//! valid `END`, the reader walks back from the last durable index the superblock names, then scans
+//! A complete segment opens from the superblock's `END` pointer alone: `END` carries a copy of
+//! every index entry, so no index frame is read however long the run. Without a valid `END`, the
+//! reader walks back from the last durable index the superblock names, then scans
 //! forward frame by frame, accepting a frame while its magic, length and CRC check out and it
 //! continues its stream (the next chunk index and row, the next index in the chain). A provisional
 //! frame is accepted as the last data; nothing real may follow it. What a crash leaves readable is
@@ -249,6 +250,11 @@ impl<I: SegmentIo> SegmentReader<I> {
         &self.schema
     }
 
+    #[cfg(test)]
+    pub(crate) fn io(&self) -> &I {
+        &self.io
+    }
+
     pub fn run_meta(&self) -> &RunMeta {
         &self.meta
     }
@@ -312,12 +318,22 @@ impl<I: SegmentIo> SegmentReader<I> {
                 "the END pointer does not name END",
             ));
         }
-        let end = Self::parse_end(&payload, end_at)?;
-        let (catalogue, _) = self.load_chain(end.last_index, body)?;
-        if !self.end_matches(&end, &catalogue) {
+        let (end, directory) = Self::parse_end(&payload, end_at)?;
+        if end.last_index < body || end.last_index >= end_at {
+            return Err(StoreError::corrupt(end_at, "END names no index before it"));
+        }
+        let mut cursor = Cursor::new(
+            &payload[directory..],
+            end_at + (FRAME_HEADER_LEN + directory) as u64,
+        );
+        let count = cursor.count(INDEX_ENTRY_LEN)?;
+        let mut catalogue = Catalogue::default();
+        self.replay_entries(&mut catalogue, &mut cursor, count, end_at)?;
+        catalogue.last_index = Some(end.last_index);
+        if cursor.remaining() != 0 || !self.end_matches(&end, &catalogue) {
             return Err(StoreError::corrupt(
                 end_at,
-                "END's totals disagree with its index chain",
+                "END's totals disagree with its frame directory",
             ));
         }
         self.catalogue = catalogue;
@@ -328,7 +344,8 @@ impl<I: SegmentIo> SegmentReader<I> {
         Ok(())
     }
 
-    fn parse_end(payload: &[u8], offset: u64) -> Result<EndRecord, StoreError> {
+    /// Parse `END` up to its frame directory; returns the record and where the directory starts.
+    fn parse_end(payload: &[u8], offset: u64) -> Result<(EndRecord, usize), StoreError> {
         let mut cursor = Cursor::new(payload, offset + FRAME_HEADER_LEN as u64);
         let code = cursor.u8()?;
         let reason = cursor.u8()?;
@@ -348,14 +365,15 @@ impl<I: SegmentIo> SegmentReader<I> {
             cursor.u32()?;
             event_totals.push((signal, cursor.u64()?));
         }
-        Ok(EndRecord {
+        let record = EndRecord {
             status,
             rows,
             chunks,
             last_index,
             digest: Digest(digest),
             event_totals,
-        })
+        };
+        Ok((record, cursor.pos()))
     }
 
     /// Walk the index chain back from `last`, then replay it forwards into a catalogue. Returns the
@@ -408,6 +426,22 @@ impl<I: SegmentIo> SegmentReader<I> {
         let rows = cursor.u64()?;
         let count = cursor.count(INDEX_ENTRY_LEN)?;
         cursor.u32()?;
+        self.replay_entries(catalogue, &mut cursor, count, offset)?;
+        if rows != catalogue.rows {
+            return Err(cursor.error("an index's row count disagrees with its chunks"));
+        }
+        catalogue.last_index = Some(offset);
+        Ok(())
+    }
+
+    /// Add `count` index entries, each naming a frame before offset `before`, to `catalogue`.
+    fn replay_entries(
+        &self,
+        catalogue: &mut Catalogue,
+        cursor: &mut Cursor<'_>,
+        count: usize,
+        before: u64,
+    ) -> Result<(), StoreError> {
         for _ in 0..count {
             let kind = FrameKind::from_u8(cursor.u8()?)
                 .ok_or_else(|| cursor.error("unknown frame kind"))?;
@@ -430,7 +464,7 @@ impl<I: SegmentIo> SegmentReader<I> {
                     t_min: x_min,
                     t_max: x_max,
                 };
-                if frame >= offset
+                if frame >= before
                     || position.is_none_or(|position| !catalogue.events(position, events))
                 {
                     return Err(cursor.error("an index lists event changes out of order"));
@@ -446,7 +480,7 @@ impl<I: SegmentIo> SegmentReader<I> {
                     x_min,
                     x_max,
                 };
-                if frame >= offset || !catalogue.summary(level, summary) {
+                if frame >= before || !catalogue.summary(level, summary) {
                     return Err(cursor.error("an index lists a summary out of order"));
                 }
             }
@@ -460,15 +494,11 @@ impl<I: SegmentIo> SegmentReader<I> {
                     x_min,
                     x_max,
                 };
-                if frame >= offset || !catalogue.chunk(catalogue.chunks.len() as u64, chunk) {
+                if frame >= before || !catalogue.chunk(catalogue.chunks.len() as u64, chunk) {
                     return Err(cursor.error("an index lists a chunk out of order"));
                 }
             }
         }
-        if rows != catalogue.rows {
-            return Err(cursor.error("an index's row count disagrees with its chunks"));
-        }
-        catalogue.last_index = Some(offset);
         Ok(())
     }
 
@@ -516,6 +546,7 @@ impl<I: SegmentIo> SegmentReader<I> {
                 FrameKind::End if !header.partial() => {
                     return Self::parse_end(&payload, at)
                         .ok()
+                        .map(|(end, _)| end)
                         .filter(|end| self.end_matches(end, catalogue));
                 }
                 _ => false,

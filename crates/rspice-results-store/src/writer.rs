@@ -20,11 +20,11 @@
 use crate::digest::{Digest, LogicalDigest};
 use crate::events::{EventBuffer, EventChange, EventKind, EventScratch};
 use crate::format::{
-    FLAG_PARTIAL, FORMAT_VERSION, FrameBuf, FrameKind, INDEX_CHUNKS, INDEX_ENTRY_LIMIT,
-    LEVEL1_ROWS, POINTERS_AT, POINTERS_LEN, SEGMENT_MAGIC, SUPERBLOCK_LEN, bucket_rows, canonical,
-    chunk_rows, fold_max, fold_min, summary_frame_rows,
+    FLAG_PARTIAL, FORMAT_VERSION, FRAME_HEADER_LEN, FrameBuf, FrameKind, INDEX_CHUNKS,
+    INDEX_ENTRY_LIMIT, LEVEL1_ROWS, POINTERS_AT, POINTERS_LEN, SEGMENT_MAGIC, SUPERBLOCK_LEN,
+    bucket_rows, canonical, chunk_rows, fold_max, fold_min, summary_frame_rows,
 };
-use crate::summary::{Pyramid, SummaryDirEntry};
+use crate::summary::Pyramid;
 use crate::{RunMeta, Schema, SegmentIo, StoreError, codec};
 
 /// Why a run stopped before completing.
@@ -221,6 +221,8 @@ pub(crate) struct IndexEntry {
 }
 
 pub(crate) const INDEX_ENTRY_LEN: usize = 48;
+/// An `INDEX` payload before its entries: previous index, ordinal, rows, entry count, padding.
+pub(crate) const INDEX_HEADER_LEN: usize = 32;
 
 impl IndexEntry {
     fn put(&self, frame: &mut FrameBuf) {
@@ -234,17 +236,6 @@ impl IndexEntry {
         frame.put_f64(self.x_min);
         frame.put_f64(self.x_max);
     }
-}
-
-/// An `INDEX` frame as `END` lists it, so a reader can find any index without walking the chain.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct IndexDirEntry {
-    pub(crate) offset: u64,
-    pub(crate) first_row: u64,
-    pub(crate) rows: u64,
-    pub(crate) x_min: f64,
-    pub(crate) x_max: f64,
-    pub(crate) entries: u32,
 }
 
 /// The distance between columns in the encoder's transposed chunk: one cache line more than a
@@ -312,9 +303,9 @@ pub(crate) struct Encoder<I: SegmentIo> {
     chunks_since_index: usize,
     index_first_row: u64,
     last_index: Option<u64>,
-    index_dir: Vec<IndexDirEntry>,
+    /// Every `INDEX` frame written: its offset and entry count. `END` copies their entries.
+    index_frames: Vec<(u64, u32)>,
     pyramid: Pyramid,
-    summary_dir: Vec<SummaryDirEntry>,
     events: Vec<EventBuffer>,
     event_scratch: EventScratch,
     /// Whether blocks may be compressed (tests write `plain`-only segments to compare digests).
@@ -353,9 +344,8 @@ impl<I: SegmentIo> Encoder<I> {
             chunks_since_index: 0,
             index_first_row: 0,
             last_index: None,
-            index_dir: Vec::new(),
+            index_frames: Vec::new(),
             pyramid: Pyramid::new(layout.analog.len()),
-            summary_dir: Vec::new(),
             events: layout
                 .events
                 .iter()
@@ -569,19 +559,18 @@ impl<I: SegmentIo> Encoder<I> {
         let first_row = self.pyramid.frames(index) * summary_frame_rows(level);
         let rows = (self.rows - first_row).min(summary_frame_rows(level));
         debug_assert!(rows.div_ceil(bucket_rows(level)) <= 64);
-        let mut entry = self.pyramid.encode(index, first_row, rows, &mut self.frame);
-        entry.offset = self.emit_real()?;
+        let (x_min, x_max) = self.pyramid.encode(index, first_row, rows, &mut self.frame);
+        let offset = self.emit_real()?;
         self.entries.push(IndexEntry {
             kind: FrameKind::Summary,
             level,
             signal: 0,
-            offset: entry.offset,
+            offset,
             first: first_row,
             count: rows,
-            x_min: entry.x_min,
-            x_max: entry.x_max,
+            x_min,
+            x_max,
         });
-        self.summary_dir.push(entry);
         Ok(())
     }
 
@@ -602,29 +591,17 @@ impl<I: SegmentIo> Encoder<I> {
 
     fn write_index(&mut self) -> Result<(), StoreError> {
         let count = self.entries.len();
-        let (mut x_min, mut x_max) = (f64::NAN, f64::NAN);
         self.frame.begin(FrameKind::Index, 0);
         self.frame.put_u64(self.last_index.unwrap_or(u64::MAX));
-        self.frame.put_u64(self.index_dir.len() as u64);
+        self.frame.put_u64(self.index_frames.len() as u64);
         self.frame.put_u64(self.rows);
         self.frame.put_u32(count as u32);
         self.frame.put_u32(0);
         for entry in &self.entries {
-            if entry.kind == FrameKind::Chunk {
-                x_min = fold_min(x_min, entry.x_min);
-                x_max = fold_max(x_max, entry.x_max);
-            }
             entry.put(&mut self.frame);
         }
         let offset = self.emit_real()?;
-        self.index_dir.push(IndexDirEntry {
-            offset,
-            first_row: self.index_first_row,
-            rows: self.rows - self.index_first_row,
-            x_min: canonical(x_min),
-            x_max: canonical(x_max),
-            entries: count as u32,
-        });
+        self.index_frames.push((offset, count as u32));
         self.entries.clear();
         self.chunks_since_index = 0;
         self.index_first_row = self.rows;
@@ -730,18 +707,25 @@ impl<I: SegmentIo> Encoder<I> {
             self.frame.put_u32(0);
             self.frame.put_u64(buffer.written);
         }
-        self.frame.put_u32(self.index_dir.len() as u32);
-        for entry in &self.index_dir {
-            self.frame.put_u64(entry.offset);
-            self.frame.put_u64(entry.first_row);
-            self.frame.put_u64(entry.rows);
-            self.frame.put_f64(entry.x_min);
-            self.frame.put_f64(entry.x_max);
-            self.frame.put_u32(entry.entries);
-        }
-        self.frame.put_u32(self.summary_dir.len() as u32);
-        for entry in &self.summary_dir {
-            entry.put(&mut self.frame);
+        // Every index's entries, read back from the index frames, so a reader opens a complete
+        // segment from END alone instead of reading every index frame.
+        let total: usize = self
+            .index_frames
+            .iter()
+            .map(|&(_, count)| count as usize)
+            .sum();
+        self.frame.put_u32(
+            u32::try_from(total)
+                .map_err(|_| StoreError::Schema("a segment of more than 2^32 frames".into()))?,
+        );
+        let mut entries = Vec::new();
+        for &(offset, count) in &self.index_frames {
+            entries.resize(count as usize * INDEX_ENTRY_LEN, 0);
+            self.io.read_at(
+                offset + (FRAME_HEADER_LEN + INDEX_HEADER_LEN) as u64,
+                &mut entries,
+            )?;
+            self.frame.put(&entries);
         }
         let end = self.emit_real()?;
         self.settle()?;

@@ -285,6 +285,10 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    pub(crate) fn pos(&self) -> usize {
+        self.pos
+    }
+
     pub(crate) fn remaining(&self) -> usize {
         self.bytes.len() - self.pos
     }

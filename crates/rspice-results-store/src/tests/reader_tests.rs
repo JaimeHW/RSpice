@@ -272,6 +272,49 @@ fn a_damaged_superblock_pointer_falls_back_to_scanning() {
     }
 }
 
+/// Counts reads, to show what opening a segment costs.
+struct CountingIo(MemoryIo, std::cell::Cell<usize>);
+
+impl SegmentIo for CountingIo {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        self.1.set(self.1.get() + 1);
+        self.0.read_at(offset, buf)
+    }
+    fn write_at(&mut self, offset: u64, data: &[u8]) -> io::Result<()> {
+        self.0.write_at(offset, data)
+    }
+    fn truncate(&mut self, len: u64) -> io::Result<()> {
+        self.0.truncate(len)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+    fn size(&self) -> io::Result<u64> {
+        self.0.size()
+    }
+}
+
+#[test]
+fn a_complete_segment_opens_from_end_whatever_its_length() {
+    let schema = mixed_schema();
+    let slots = schema.slots();
+    let mut opened = Vec::new();
+    for chunks in [3, 70, 700] {
+        let (x, values) = rows(64 * chunks, slots, 7);
+        let mut writer =
+            SegmentWriter::with_chunk_rows(MemoryIo::new(), &schema, &meta(), 64).unwrap();
+        writer.push_rows(&x, &values).unwrap();
+        let (receipt, io) = writer.finish(RunStatus::Completed).unwrap();
+        let reader = SegmentReader::open(CountingIo(io, Default::default())).unwrap();
+        assert_eq!(reader.rows(), 64 * chunks as u64);
+        assert!(
+            matches!(reader.state(), SegmentState::Complete { digest, .. } if *digest == receipt.digest)
+        );
+        opened.push(reader.io().1.get());
+    }
+    assert!(opened.iter().all(|&reads| reads == opened[0]), "{opened:?}");
+}
+
 #[test]
 fn foreign_bytes_are_refused() {
     assert!(SegmentReader::open(MemoryIo::from_bytes(vec![0; 10])).is_err());
