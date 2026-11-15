@@ -243,6 +243,13 @@ pub(crate) struct IndexDirEntry {
     pub(crate) entries: u32,
 }
 
+/// The distance between columns in the encoder's transposed chunk: one cache line more than a
+/// chunk, because columns a power of two apart all fall into the same cache sets and the transpose
+/// would evict its own writes.
+fn column_stride(chunk_rows: usize) -> usize {
+    chunk_rows + 8
+}
+
 /// Transpose `rows` row-major rows of `slots` values into columns `stride` apart, in tiles so both
 /// sides stay in cache.
 fn transpose(values: &[f64], rows: usize, slots: usize, out: &mut [f64], stride: usize) {
@@ -281,7 +288,7 @@ pub(crate) struct Encoder<I: SegmentIo> {
     io: I,
     layout: Layout,
     frame: FrameBuf,
-    /// The chunk transposed: `slots` columns of `chunk_rows` values.
+    /// The chunk transposed: `slots` columns of `chunk_rows` values, `column_stride` apart.
     columns: Vec<f64>,
     /// Shuffle scratch, `chunk_rows * 8` bytes.
     planes: Vec<u8>,
@@ -329,7 +336,7 @@ impl<I: SegmentIo> Encoder<I> {
             + block_bytes * (layout.slots + 1);
         let mut encoder = Self {
             frame: FrameBuf::with_capacity(chunk_frame),
-            columns: vec![0.0; layout.slots * chunk_rows],
+            columns: vec![0.0; layout.slots * column_stride(chunk_rows)],
             planes: vec![0; chunk_rows * 8],
             scratch: vec![0.0; chunk_rows],
             level1_x: Vec::with_capacity(2 * buckets),
@@ -422,7 +429,7 @@ impl<I: SegmentIo> Encoder<I> {
     fn encode_chunk(&mut self, batch: &Batch, chunk_index: u64, flags: u8) -> (f64, f64) {
         let rows = batch.rows;
         let slots = self.layout.slots;
-        let stride = self.layout.chunk_rows;
+        let stride = column_stride(self.layout.chunk_rows);
         transpose(&batch.values, rows, slots, &mut self.columns, stride);
         let buckets = rows.div_ceil(LEVEL1_ROWS);
 

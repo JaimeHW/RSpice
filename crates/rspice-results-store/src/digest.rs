@@ -96,6 +96,25 @@ impl ValueHasher {
         self.len += 8;
     }
 
+    /// Hash several values; the same bytes as one [`Self::value`] per value.
+    #[inline]
+    pub(crate) fn values(&mut self, mut values: &[f64]) {
+        while !values.is_empty() {
+            let room = (self.buffer.len() - self.len) / 8;
+            if room == 0 {
+                self.drain();
+                continue;
+            }
+            let take = room.min(values.len());
+            let out = &mut self.buffer[self.len..self.len + 8 * take];
+            for (out, &value) in out.chunks_exact_mut(8).zip(&values[..take]) {
+                out.copy_from_slice(&canonical_bits(value).to_le_bytes());
+            }
+            self.len += 8 * take;
+            values = &values[take..];
+        }
+    }
+
     fn drain(&mut self) {
         self.hasher.update(&self.buffer[..self.len]);
         self.len = 0;
@@ -130,9 +149,7 @@ impl LogicalDigest {
     pub(crate) fn rows(&mut self, x: &[f64], values: &[f64], slots: usize, rows: usize) {
         for (row, &x) in x[..rows].iter().enumerate() {
             self.rows.value(x);
-            for &value in &values[row * slots..row * slots + slots] {
-                self.rows.value(value);
-            }
+            self.rows.values(&values[row * slots..row * slots + slots]);
         }
         self.row_count += rows as u64;
     }
