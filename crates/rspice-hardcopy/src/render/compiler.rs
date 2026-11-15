@@ -269,9 +269,15 @@ impl<'a> SemanticSceneCompiler<'a> {
         fallback: Option<SceneFill>,
     ) -> Option<SceneFill> {
         let mapped_id = self.mapping_stable_id(stable_id);
-        let entry = self.mapping.entries().iter().find(|entry| {
-            entry.object().kind() == kind && entry.object().stable_id() == mapped_id
-        })?;
+        // A layer the mapping leaves out keeps its own fill, as it keeps its
+        // own stroke: a dot is all fill, and would not print at all.
+        let Some(entry) =
+            self.mapping.entries().iter().find(|entry| {
+                entry.object().kind() == kind && entry.object().stable_id() == mapped_id
+            })
+        else {
+            return fallback;
+        };
         let color = SemanticColor::Exact(print_color_rgb(entry.print_color()));
         match entry.redundancy() {
             PrintRedundancy::SolidFill => Some(SceneFill::solid(color)),

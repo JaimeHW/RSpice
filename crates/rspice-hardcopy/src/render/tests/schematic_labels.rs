@@ -662,6 +662,59 @@ fn a_placed_symbol_prints_each_pins_lead_and_the_mark_of_its_style() {
     );
 }
 
+/// A layer the print mapping leaves out keeps its dots and fills in its own
+/// ink, as it keeps its lines: a dot is all fill, and would not print at all.
+#[test]
+fn a_layer_the_print_mapping_leaves_out_keeps_its_dots_and_fills() {
+    use rspice_design::symbol::{SymbolFill, SymbolStyle};
+
+    let mut symbol = cell_symbol();
+    if let SymbolShape::Polyline { style, .. } = &mut symbol.body[0] {
+        *style = SymbolStyle {
+            fill: SymbolFill::Solid,
+            ..SymbolStyle::default()
+        };
+    }
+    symbol.body.push(SymbolShape::Dot {
+        center: SchematicPoint::new(0, 0),
+        radius: 2,
+    });
+    let mut printed = sheet(Vec::new());
+    printed.components.push(SemanticComponent {
+        symbol_source: Some(SemanticSymbolSource::Authored),
+        component: part(1, ComponentType::CellInstance, (0, 0), "X1", "amp"),
+        resolved_symbol: Some(symbol),
+    });
+    // The page's mapping is empty.
+    let compiled = compile(&printed);
+    let body_fill = compiled
+        .primitives
+        .iter()
+        .find_map(|primitive| match primitive {
+            ScenePrimitive::Polyline {
+                closed: true, fill, ..
+            } => Some(*fill),
+            _ => None,
+        });
+    assert!(
+        matches!(body_fill, Some(Some(SceneFill::Solid { .. }))),
+        "the filled body prints filled: {body_fill:?}"
+    );
+    let dot_fill = compiled
+        .primitives
+        .iter()
+        .find_map(|primitive| match primitive {
+            ScenePrimitive::Circle {
+                stroke: None, fill, ..
+            } => Some(*fill),
+            _ => None,
+        });
+    assert!(
+        matches!(dot_fill, Some(Some(SceneFill::Solid { .. }))),
+        "the dot prints: {dot_fill:?}"
+    );
+}
+
 /// A placed part prints held by its symbol's origin, as the canvas draws it
 /// and as its wires reach it: a symbol whose origin was moved prints its
 /// body, its curves and its pins where the canvas does.
