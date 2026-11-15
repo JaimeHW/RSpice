@@ -505,7 +505,8 @@ const fn pstb_admissible_generated() -> CellSupport {
 /// take: what their declared periodic contracts admit, and on a driven orbit
 /// the voltage- and current-controlled switches native shooting does not
 /// carry, which event shooting solves, PAC, PXF and PNOISE linearize in the
-/// time domain, and PSTB reads through event shooting's monodromy.
+/// time domain, and PSTB reads through event shooting's monodromy, whose
+/// saltations move each change a circuit state dates with that state.
 const fn event_carrier_contracts(analysis: CapabilityAnalysis) -> CellSupport {
     periodic_contracts(
         "analysis.periodic.device",
@@ -517,7 +518,7 @@ const fn event_carrier_contracts(analysis: CapabilityAnalysis) -> CellSupport {
                 "every instance whose declared periodic contracts admit it, and on an event shooting orbit voltage- and current-controlled switches whose controls carry no noise where they change, for driven noise from white sources, output-referred or sampled at a phase"
             }
             CapabilityAnalysis::Pstb => {
-                "every instance whose declared periodic contracts admit it, and on a driven orbit voltage- and current-controlled switches, read through the monodromy event shooting certifies over the coordinates the period remembers"
+                "every instance whose declared periodic contracts admit it, and on a driven orbit voltage- and current-controlled switches, read through the monodromy event shooting certifies over the coordinates the period remembers, switches whose controls a circuit state drives included"
             }
             _ => {
                 "every instance whose declared periodic contracts admit it, and on an event shooting orbit voltage- and current-controlled switches whose controls carry no small signal where they change"
