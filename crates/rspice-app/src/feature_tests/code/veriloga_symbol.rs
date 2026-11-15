@@ -441,6 +441,101 @@ fn a_pin_the_module_dropped_is_named_against_the_module() {
     );
 }
 
+/// A compiled module's symbol is edited, undone, saved and reverted as a
+/// drawn symbol is. Its first edit makes it its author's, and undoing that
+/// edit gives it back to the compile, which draws it again.
+#[test]
+fn a_compiled_symbol_undoes_saves_and_reverts_as_a_drawn_one() {
+    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::lifecycle::project_lifecycle::{
+        has_unsaved_changes, prepare_revert_active_document,
+    };
+    use crate::workbench::project::commands::ProjectCommand;
+
+    let mut app = open_project_app();
+    let reference = compiled_amplifier(&mut app);
+    let path = std::env::temp_dir().join(format!(
+        "rspice-veriloga-symbol-{}-{}.rspiceproj",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    assert!(app.state.save_project_to_path(&path), "the project saves");
+    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
+    let symbol_view = || CellViewRef::new(LIBRARY, "ota", GENERATED_SYMBOL_VIEW);
+    let compiled = symbol(&app, &reference);
+    let revision = |app: &RSpiceApp| {
+        app.state
+            .model
+            .load_symbol_editor_metadata(&symbol_view(), &symbol(app, &reference))
+            .expect("the metadata loads")
+            .revision
+    };
+    let saved_revision = revision(&app);
+    let move_rail = |app: &mut RSpiceApp, by: Point| {
+        let before = symbol(app, &reference);
+        let metadata = app
+            .state
+            .model
+            .load_symbol_editor_metadata(&symbol_view(), &before)
+            .expect("the metadata loads");
+        let mut moved = before.clone();
+        let rail = moved
+            .pins
+            .iter_mut()
+            .find(|pin| pin.name == "vdd")
+            .expect("the rail");
+        rail.position = rail.position.map(|at| at + by);
+        crate::workbench::app::record_symbol_edit(
+            &mut app.state.design.symbol,
+            &app.state.model,
+            &before,
+            "Move pin",
+        );
+        app.state
+            .store_active_symbol_editor_bundle(&moved, &metadata)
+            .expect("the edit stores");
+    };
+    let generated = |app: &RSpiceApp| {
+        is_generated_symbol(view(app, &reference, GENERATED_SYMBOL_VIEW).expect("the symbol"))
+    };
+    assert!(generated(&app), "saving left the compile's symbol the compile's");
+
+    move_rail(&mut app, Point::new(20, 0));
+    assert!(!generated(&app), "the edit made the symbol its author's");
+    app.execute_command_key(Command::Undo.key());
+    assert_eq!(symbol(&app, &reference), compiled);
+    assert!(generated(&app), "undo gave it back to the compile");
+    app.execute_command_key(Command::Redo.key());
+    assert_eq!(
+        terminal(&symbol(&app, &reference), "vdd"),
+        terminal(&compiled, "vdd") + Point::new(20, 0)
+    );
+
+    app.execute_command_key(ProjectCommand::Save.key());
+    assert!(!has_unsaved_changes(&app.state));
+    assert_eq!(
+        revision(&app),
+        saved_revision + 1,
+        "the save recorded the edit"
+    );
+    let saved = symbol(&app, &reference);
+
+    move_rail(&mut app, Point::new(20, 0));
+    let token = prepare_revert_active_document(&app.state).expect("the revert is reviewed");
+    assert!(app.state.confirm_revert_active_document(&token));
+    assert_eq!(
+        symbol(&app, &reference),
+        saved,
+        "the symbol is as last saved"
+    );
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path.with_extension("rspiceproj.bak"));
+    let mut lock = path.as_os_str().to_os_string();
+    lock.push(".rspice.lock");
+    let _ = std::fs::remove_file(std::path::PathBuf::from(lock));
+}
+
 /// Pins no port declares are their author's to remove, so Update symbol is
 /// not offered for them alone.
 #[test]

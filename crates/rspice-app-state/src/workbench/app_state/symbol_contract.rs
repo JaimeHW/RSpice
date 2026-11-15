@@ -10,7 +10,7 @@ use rspice_design::library::metadata::{
     module_interface_view,
 };
 use rspice_design::symbol::generated::{
-    GENERATED_PORTS_KEY, decode_ports, generated_interface_document,
+    GENERATED_PORTS_KEY, decode_ports, generated_interface_document, is_generated_symbol,
 };
 
 use rspice_design::symbol::publication::{EncodedSymbolEditorBundle, bound_interface};
@@ -316,6 +316,7 @@ impl Model {
             .is_some_and(|view| {
                 view.view_type == ViewType::Symbol
                     && view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY)
+                    && !is_generated_symbol(view)
             });
         if !authored {
             return Ok(None);
