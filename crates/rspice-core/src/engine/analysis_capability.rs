@@ -1192,7 +1192,8 @@ const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[(
          stage its floating body's charging slows only as 1/t, so after 384 periods its \
          fundamental still moves by 1.7e-4 of itself each period, and harmonic balance and the \
          transient disagree on the fundamental by a factor of 9; shooting, which needs no \
-         settled transient, refuses it for the `ddt` site harmonic balance carries",
+         settled transient, cannot place the body: its Floquet multiplier is within 1e-8 of \
+         one, so the period map's steps, which settle to 1e-11 V, leave it 1e-3 V apart",
 )];
 
 /// Why shooting refuses a generated model whose source branch stores flux at
@@ -1205,14 +1206,16 @@ const PSS_GENERATED_FLUX: &str = "a voltage contribution takes the time derivati
      branch current (an inductance), and the shooting state fixes node voltages, not branch \
      currents";
 
-/// Why shooting refuses a generated model with an operator site harmonic
-/// balance carries as an unknown of its own: its period map integrates the
-/// charges F(x) + dQ(x)/dt holds, and no settled transient has confirmed it
-/// on a residual of another form.
+/// Why shooting refuses a generated model with an `idt` site harmonic
+/// balance carries as an unknown of its own: the period map starts from node
+/// voltages and the charges they fix, and an integral's value is a state of
+/// its own that none of them fixes. A `ddt` site's operand is a function of
+/// those voltages, so shooting integrates it as a charge; settled transients
+/// confirm it on every shipped model with one.
 #[cfg(feature = "veriloga-builtins-base")]
 const PSS_GENERATED_CARRIED_SITE: &str = "its residual is not F(x) + dQ(x)/dt: harmonic balance \
-     carries a `ddt` or `idt` of it as an unknown of its own, and no settled transient has \
-     confirmed shooting's period map on it";
+     carries an `idt` of it as an unknown of its own, and the shooting state fixes node \
+     voltages and charges, not an integral's value";
 
 /// Harmonic balance refuses a generated compact model whose generator could
 /// not prove its residual `F(x) + dQ(x)/dt`, with the generator's reason, or
@@ -1237,7 +1240,12 @@ fn hb_generated_refusal<const PROBE_DEVICES: bool>(
             })
             .or_else(|| {
                 (matches!(analysis, CapabilityAnalysis::Pss)
-                    && !device.harmonic_balance_periodic_sites().is_empty())
+                    && device.harmonic_balance_periodic_sites().iter().any(|kind| {
+                        matches!(
+                            kind,
+                            rspice_veriloga_runtime::GeneratedPeriodicKind::Integral
+                        )
+                    }))
                 .then_some(PSS_GENERATED_CARRIED_SITE)
             })
             .or_else(|| {

@@ -728,7 +728,7 @@ fn check_pstb(family: &str, circuit: &str, failures: &mut Vec<String>) {
     ) {
         Ok(point) => point,
         Err(rspice_core::SimulationError::UnsupportedCapability(refusal))
-            if refusal.detail.ends_with(CARRIED_SITE) =>
+            if refusal.detail.ends_with(CARRIED_SITE) || refusal.detail.ends_with(FLUX) =>
         {
             return;
         }
@@ -943,21 +943,22 @@ fn check_against_shooting(family: &str, circuit: &str, node: &str, failures: &mu
 }
 
 /// Why shooting refuses a generated model whose source branch stores flux.
-#[cfg(feature = "veriloga-model-angelov")]
 const FLUX: &str = "a voltage contribution takes the time derivative of its branch current (an \
                     inductance), and the shooting state fixes node voltages, not branch currents";
 
-/// Why shooting refuses a generated model with a site harmonic balance
-/// carries as an unknown of its own.
-const CARRIED_SITE: &str = "its residual is not F(x) + dQ(x)/dt: harmonic balance carries a \
-                            `ddt` or `idt` of it as an unknown of its own, and no settled \
-                            transient has confirmed shooting's period map on it";
+/// Why shooting refuses a generated model with an `idt` site harmonic
+/// balance carries as an unknown of its own.
+const CARRIED_SITE: &str = "its residual is not F(x) + dQ(x)/dt: harmonic balance carries an \
+                            `idt` of it as an unknown of its own, and the shooting state fixes \
+                            node voltages and charges, not an integral's value";
 
 /// Shooting reaches the same settled transient for every fixture harmonic
 /// balance does, under the same allowance, or refuses before solving a model
-/// with a site harmonic balance carries as an unknown of its own: the period
-/// map integrates each generated model's charges from the state the period
-/// starts at, with the nodes its own source branches tie taken as one.
+/// with an `idt` site harmonic balance carries as an unknown of its own, or
+/// one whose source branch stores flux: the period map integrates each
+/// generated model's charges, its `ddt` operands among them, from the state
+/// the period starts at, with the nodes its own source branches tie taken as
+/// one.
 #[test]
 fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
     let mut failures = Vec::new();
@@ -971,11 +972,12 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
                 .with_tolerance(1e-9),
         ) {
             Ok(result) => result.result,
-            // A model with a site harmonic balance carries as an unknown of
-            // its own is refused before solving, by name and reason (see
+            // A model with an `idt` site harmonic balance carries as an
+            // unknown of its own, or one whose source branch stores flux, is
+            // refused before solving, by name and reason (see
             // `shooting_refuses_a_generated_model_by_its_reason`).
             Err(rspice_core::SimulationError::UnsupportedCapability(refusal))
-                if refusal.detail.ends_with(CARRIED_SITE) =>
+                if refusal.detail.ends_with(CARRIED_SITE) || refusal.detail.ends_with(FLUX) =>
             {
                 eprintln!("{family}: shooting refuses it: {}", refusal.detail);
                 continue;
@@ -1004,6 +1006,39 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// Shooting carries a self-heating generated model's temperature as a state
+/// of the period: ASM-HEMT's thermal node closes over the orbit. Read as the
+/// tie its disabled-self-heating arm (`Temp(dt) <+ 0`) makes, the node was
+/// solved afresh at each period start, 0.242 K above ambient against the
+/// period end's 0.261 K.
+#[cfg(feature = "veriloga-model-asmhemt")]
+#[test]
+fn shooting_carries_a_self_heating_models_temperature_through_the_period() {
+    let deck = "* ASM-HEMT self-heating orbit\nVDD vdd 0 10\nV1 in 0 SIN(-1 0.5 1meg)\n\
+                RG in g 1k\nRD vdd d 100\nXH d g 0 0 t asmhemt\n.end\n";
+    let netlist = Netlist::parse(deck).expect("parse");
+    let pss = engine()
+        .run_pss(
+            &netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(512)
+                .with_tolerance(1e-9),
+        )
+        .expect("shooting solves ASM-HEMT")
+        .result;
+    let node = pss
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("t"))
+        .expect("the thermal node");
+    let temperature = &pss.waveforms[node].values;
+    let (start, end) = (temperature[0], temperature[temperature.len() - 1]);
+    assert!(
+        end > 0.25 && (end - start).abs() <= 1e-6 * end,
+        "the thermal node closes over the period: {start} K at its start, {end} K at its end"
+    );
+}
+
 /// A generated model whose harmonics neither a settled transient nor shooting
 /// has confirmed is refused before solving, by instance and module, with
 /// what is missing (BSIM-SOI 4.6.1), as is one whose generator could not
@@ -1030,8 +1065,9 @@ fn refused_models() -> Vec<(&'static str, &'static str, &'static str, &'static s
             "XM d d 0 0 bsimsoi_va",
             "XM",
             "bsimsoi_va",
-            "shooting, which needs no settled transient, refuses it for the `ddt` site harmonic \
-             balance carries",
+            "shooting, which needs no settled transient, cannot place the body: its Floquet \
+             multiplier is within 1e-8 of one, so the period map's steps, which settle to 1e-11 \
+             V, leave it 1e-3 V apart",
         ),
     ]
 }
@@ -1123,16 +1159,16 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
 }
 
 /// Shooting refuses before solving, by instance and module, a generated
-/// model with a site harmonic balance carries as an unknown of its own (the
-/// ASM-ESD diode) and one whose source branch stores flux at its parameters,
-/// each with its reason and shooting's own token.
+/// model with an `idt` site harmonic balance carries as an unknown of its own
+/// (PSP 102's non-quasi-static charges) and one whose source branch stores
+/// flux at its parameters, each with its reason and shooting's own token.
 #[test]
 fn shooting_refuses_a_generated_model_by_its_reason() {
     use rspice_core::identity::AnalysisKind;
     use rspice_core::{SimulationError, UnsupportedCapabilityError};
     let cases: Vec<(&str, &str, &str, &str)> = vec![
-        #[cfg(feature = "veriloga-model-asmesd-dio")]
-        ("XA d 0 asmesd_dio", "XA", "asmesd_dio", CARRIED_SITE),
+        #[cfg(feature = "veriloga-model-pspnqs102va")]
+        ("XN d d 0 0 pspnqs102va", "XN", "pspnqs102va", CARRIED_SITE),
         // A 1 mH drain inductance, whose current the period map would miss:
         // admitted, shooting stops short of the settled transient.
         #[cfg(feature = "veriloga-model-angelov")]
