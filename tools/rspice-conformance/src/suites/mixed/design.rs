@@ -370,7 +370,7 @@ pub fn check_quantity_keys(text: &str) -> Result<(), String> {
 }
 
 /// The measure kinds `tolerance.toml` may name.
-pub const MEASURE_KINDS: [&str; 25] = [
+pub const MEASURE_KINDS: [&str; 26] = [
     "op",
     "held_at",
     "interp_at",
