@@ -772,3 +772,64 @@ fn the_loop_check_and_save_blocks_on_is_the_one_the_page_lists() {
         "the page lists the loop the report blocks on"
     );
 }
+
+/// A cell whose symbol puts one pin on another's terminal cannot be saved
+/// as checked: a wire to that point would join both ports. The finding
+/// names both pins and goes to the one on top.
+#[test]
+fn a_cell_symbol_pin_on_another_pins_terminal_blocks_the_save() {
+    use rspice_design::symbol::SymbolPin;
+
+    let mut state = AppState::default();
+    let terminal = Point::new(-40, 0);
+    let mut symbol = crate::state::SymbolDocument::default();
+    for name in ["A", "B"] {
+        symbol.pins.push(SymbolPin::new(
+            name,
+            crate::state::PortDirection::InOut,
+            Some(terminal),
+        ));
+    }
+    let mut symbol_view = crate::state::View::new("symbol", crate::state::ViewType::Symbol);
+    symbol
+        .store_in_view(&mut symbol_view)
+        .expect("the symbol stores");
+    let mut cell = crate::state::Cell::new("amp");
+    cell.add_view(symbol_view);
+    cell.add_view(crate::state::View::new(
+        "schematic",
+        crate::state::ViewType::Schematic,
+    ));
+    let mut work = crate::state::Library::new("work");
+    work.add_cell(cell);
+    state.model.library_manager.add_library(work);
+
+    let mut schematic = crate::state::SchematicState::default();
+    add_port(&mut schematic, "A", "inout");
+    add_port(&mut schematic, "B", "inout");
+    state
+        .model
+        .workspace
+        .insert_schematic_editor("work/amp/schematic".to_owned(), schematic);
+    state.sync_active_schematic_to_workspace();
+
+    let report = CheckAndSaveValidationReport::validate(&state).expect("report");
+    let overlap = report
+        .blockers()
+        .iter()
+        .find(|finding| finding.message.contains("sits on pin"))
+        .unwrap_or_else(|| panic!("no overlap finding in {:?}", report.blockers()));
+    assert_eq!(
+        overlap.message,
+        "work/amp/schematic: cell symbol pin 'B' sits on pin 'A'."
+    );
+    assert_eq!(overlap.source, "pins");
+    assert_eq!(
+        overlap.location,
+        Some(DrcLocation::SymbolPin {
+            reference: crate::state::CellViewRef::new("work", "amp", "schematic"),
+            pin_name: "B".to_owned(),
+            point: Some(terminal),
+        })
+    );
+}

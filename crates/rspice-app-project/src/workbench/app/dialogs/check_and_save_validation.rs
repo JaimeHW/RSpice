@@ -839,7 +839,7 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
                         format!(
                             "{document_key}: cell symbol pin '{}' {}.",
                             issue.pin_name,
-                            pin_issue_text(issue.kind)
+                            pin_issue_text(&issue.kind)
                         ),
                         Some(DrcLocation::SymbolPin {
                             reference: reference.clone(),
@@ -954,7 +954,7 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
                     "{document_key}: {} pin '{}' {}.",
                     component.name,
                     issue.pin_name,
-                    pin_issue_text(issue.kind)
+                    pin_issue_text(&issue.kind)
                 ),
                 at(component),
             );
@@ -1220,15 +1220,14 @@ fn digest_serializable(value: &impl Serialize) -> Result<ContentDigest, String> 
 }
 
 /// What a symbol-pin issue says about its pin, in a finding's words.
-const fn pin_issue_text(
-    kind: rspice_design::resolved_symbol::ResolvedSymbolIssueKind,
-) -> &'static str {
+fn pin_issue_text(kind: &rspice_design::resolved_symbol::ResolvedSymbolIssueKind) -> String {
     use rspice_design::resolved_symbol::ResolvedSymbolIssueKind;
     match kind {
-        ResolvedSymbolIssueKind::UnplacedPin => "is not placed on its symbol",
-        ResolvedSymbolIssueKind::OrphanedPin => "is on the symbol but matches no port",
-        ResolvedSymbolIssueKind::PinOffGrid => "is off the grid on its symbol",
-        ResolvedSymbolIssueKind::InvalidMetadata => "has invalid symbol metadata",
+        ResolvedSymbolIssueKind::UnplacedPin => "is not placed on its symbol".to_owned(),
+        ResolvedSymbolIssueKind::OrphanedPin => "is on the symbol but matches no port".to_owned(),
+        ResolvedSymbolIssueKind::PinOffGrid => "is off the grid on its symbol".to_owned(),
+        ResolvedSymbolIssueKind::OverlappingPin { under } => format!("sits on pin '{under}'"),
+        ResolvedSymbolIssueKind::InvalidMetadata => "has invalid symbol metadata".to_owned(),
     }
 }
 

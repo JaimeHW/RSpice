@@ -19,11 +19,16 @@ pub enum ResolvedSymbolSource {
     Generated,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedSymbolIssueKind {
     UnplacedPin,
     OrphanedPin,
     PinOffGrid,
+    /// The pin's terminal is where an earlier pin's is, so a wire to it
+    /// joins both. `under` names the first pin at that point.
+    OverlappingPin {
+        under: String,
+    },
     InvalidMetadata,
 }
 
@@ -240,6 +245,16 @@ impl ResolvedCellSymbol {
         {
             issues.push(ResolvedSymbolIssue {
                 kind: ResolvedSymbolIssueKind::PinOffGrid,
+                pin_name: pin.name.clone(),
+                point: pin.position,
+            });
+        }
+
+        for (pin, under) in document.pins_on_earlier_terminals() {
+            issues.push(ResolvedSymbolIssue {
+                kind: ResolvedSymbolIssueKind::OverlappingPin {
+                    under: under.name.clone(),
+                },
                 pin_name: pin.name.clone(),
                 point: pin.position,
             });

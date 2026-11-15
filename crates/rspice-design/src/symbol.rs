@@ -1598,23 +1598,29 @@ impl SymbolDocument {
                 });
             }
         }
-        for (index, pin) in self.pins.iter().enumerate() {
-            let Some(terminal) = pin.position else {
-                continue;
-            };
-            if let Some(under) = self.pins[..index]
-                .iter()
-                .find(|earlier| earlier.position == Some(terminal))
-            {
-                findings.push(PinFinding {
-                    kind: PinFindingKind::OverlappingPin {
-                        under: under.name.clone(),
-                    },
-                    pin_name: pin.name.clone(),
-                });
-            }
+        for (pin, under) in self.pins_on_earlier_terminals() {
+            findings.push(PinFinding {
+                kind: PinFindingKind::OverlappingPin {
+                    under: under.name.clone(),
+                },
+                pin_name: pin.name.clone(),
+            });
         }
         findings
+    }
+
+    /// Each placed pin whose terminal is where an earlier pin's is, with the
+    /// first pin at that point.
+    pub(crate) fn pins_on_earlier_terminals(
+        &self,
+    ) -> impl Iterator<Item = (&SymbolPin, &SymbolPin)> {
+        self.pins.iter().enumerate().filter_map(|(index, pin)| {
+            let terminal = pin.position?;
+            self.pins[..index]
+                .iter()
+                .find(|earlier| earlier.position == Some(terminal))
+                .map(|under| (pin, under))
+        })
     }
 
     pub fn labels(&self) -> SymbolLabelAnchors {
