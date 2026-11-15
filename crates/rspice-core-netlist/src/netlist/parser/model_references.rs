@@ -205,12 +205,16 @@ fn draws_statistical_values(
     body_start: usize,
     abort: &dyn AbortSignal,
 ) -> Result<bool, ParseWithAbortError> {
-    let mut buffer = String::new();
+    // A drawing function's name is all letters, so it is a word of the scan
+    // exactly when it is a whole run of the letters, digits, underscores and
+    // non-ASCII characters that [`for_each_word`] splits its parts on.
+    let is_part = |byte: &u8| byte.is_ascii_alphanumeric() || *byte == b'_' || !byte.is_ascii();
     for (index, line) in lines.iter().enumerate().skip(body_start) {
         poll_parse_abort(abort, index)?;
-        let mut draws = false;
-        for_each_word(line, &mut buffer, |word| {
-            draws |= DRAWING_FUNCTIONS.contains(&word);
+        let draws = line.as_bytes().split(|byte| !is_part(byte)).any(|run| {
+            DRAWING_FUNCTIONS
+                .iter()
+                .any(|name| run.eq_ignore_ascii_case(name.as_bytes()))
         });
         if draws {
             return Ok(true);
@@ -270,6 +274,30 @@ mod tests {
         let deck = "t\n.param r0={agauss(1k, 10, 3)}\nR1 a 0 {r0}\nD1 a 0 used\n\
                     .model used D\n.model spare D\n.end\n";
         assert!(skipped(deck).is_empty());
+    }
+
+    #[test]
+    fn a_drawing_function_is_found_as_any_word_of_any_card() {
+        let draws = |card: &str| {
+            draws_statistical_values(&["t", card], 1, &NoAbort).expect("scan completes")
+        };
+        for card in [
+            ".param r={AGauss(1k, 10, 3)}",
+            ".MC 6 SEED 17",
+            "R1 a b {x.Rand-y}",
+            "+ vth0={unif (0.4, 0.1)}",
+            "* limit",
+        ] {
+            assert!(draws(card), "{card}");
+        }
+        for card in [
+            "R1 a b {rand_x}",
+            ".param gaussian=1",
+            "D1 a 0 mcmod",
+            "R2 a b 1k",
+        ] {
+            assert!(!draws(card), "{card}");
+        }
     }
 
     #[test]
