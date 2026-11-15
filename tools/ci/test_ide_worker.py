@@ -278,7 +278,7 @@ class IdeWorkerRoutingTests(unittest.TestCase):
         self.assertIn("instance.exports[artifact.postAssignmentExport]", worker)
         self.assertIn("const WASM_JIT_CACHE_MAX_MODELS = 64", worker)
         self.assertIn("const WASM_JIT_CACHE_MAX_BYTES = 64 * 1024 * 1024", worker)
-        self.assertIn("const WASM_JIT_MODEL_MAX_BYTES = 32 * 1024 * 1024", worker)
+        self.assertIn("const WASM_JIT_MODEL_MAX_BYTES = 1024 * 1024 * 1024", worker)
         self.assertIn("WASM_JIT_IDENTITY.test(artifact.digest", worker)
         self.assertIn("artifact.abiVersion !== module.rspiceUiWasmJitAbiVersion()", worker)
         self.assertIn(
