@@ -1153,8 +1153,9 @@ pub struct GeneratedPeriodicStructure {
     /// The bound source branches (1-based solution branch indices) whose
     /// equations the reactive stamp can write: each can store flux (an
     /// inductance, a `ddt` of its current in its voltage contribution), whose
-    /// current no node voltage fixes. [`BuiltinVerilogAInstance::stores_flux`]
-    /// says whether one does at the instance's parameters.
+    /// current no node voltage fixes.
+    /// [`BuiltinVerilogAInstance::flux_storing_branches`] says which do at the
+    /// instance's parameters.
     pub flux_branches: Vec<usize>,
 }
 
@@ -1901,26 +1902,37 @@ impl BuiltinVerilogAInstance {
         structure
     }
 
-    /// Whether a source branch of this instance stores flux at its
-    /// parameters: a `ddt` operand of the model moves when the current of a
-    /// branch in [`GeneratedPeriodicStructure::flux_branches`] does. Probed
-    /// at zero bias on a copy, so the live instance is untouched; a model
-    /// that cannot be evaluated there is taken to store flux.
+    /// The source branches of [`GeneratedPeriodicStructure::flux_branches`]
+    /// that store flux at the instance's parameters, as 1-based solution
+    /// branch indices: a `ddt` operand of the model moves when that branch's
+    /// current does. Probed at zero bias on a copy, so the live instance is
+    /// untouched; a model that cannot be evaluated there is taken to store
+    /// flux in every one.
     #[doc(hidden)]
-    pub fn stores_flux(&self, num_nodes: usize, simparams: GeneratedSimulationParameters) -> bool {
+    pub fn flux_storing_branches(
+        &self,
+        num_nodes: usize,
+        simparams: GeneratedSimulationParameters,
+    ) -> Vec<usize> {
         let flux_branches = self.periodic_structure().flux_branches;
         let Some(&last) = flux_branches.iter().max() else {
-            return false;
+            return Vec::new();
         };
         let mut solution = vec![0.0; num_nodes + last];
         let Some(at_rest) = self.dynamic_charges_at(&solution, num_nodes, simparams) else {
-            return true;
+            return flux_branches;
         };
-        for &branch in &flux_branches {
-            solution[num_nodes + branch - 1] = 1.0;
-        }
-        self.dynamic_charges_at(&solution, num_nodes, simparams)
-            .is_none_or(|carrying| carrying.current != at_rest.current)
+        flux_branches
+            .into_iter()
+            .filter(|&branch| {
+                solution[num_nodes + branch - 1] = 1.0;
+                let moved = self
+                    .dynamic_charges_at(&solution, num_nodes, simparams)
+                    .is_none_or(|carrying| carrying.current != at_rest.current);
+                solution[num_nodes + branch - 1] = 0.0;
+                moved
+            })
+            .collect()
     }
 
     /// [`Self::periodic_structure`] at the instance's parameters, which
@@ -1932,7 +1944,7 @@ impl BuiltinVerilogAInstance {
     /// as a state, it would free the very voltage its equation holds. A bound
     /// branch in its flow arm ties nothing (a thermal node a disabled
     /// self-heating would ground keeps its capacitance's state). Probed at
-    /// zero bias on a copy, as [`Self::stores_flux`] is; a model that cannot
+    /// zero bias on a copy, as [`Self::flux_storing_branches`] is; a model that cannot
     /// be evaluated there keeps the stamp pattern's reading.
     #[doc(hidden)]
     pub fn periodic_structure_at_rest(

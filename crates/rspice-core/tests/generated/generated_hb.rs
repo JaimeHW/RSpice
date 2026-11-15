@@ -728,7 +728,7 @@ fn check_pstb(family: &str, circuit: &str, failures: &mut Vec<String>) {
     ) {
         Ok(point) => point,
         Err(rspice_core::SimulationError::UnsupportedCapability(refusal))
-            if refusal.detail.ends_with(CARRIED_SITE) || refusal.detail.ends_with(FLUX) =>
+            if refusal.detail.ends_with(CARRIED_SITE) =>
         {
             return;
         }
@@ -956,10 +956,6 @@ fn check_against_shooting(family: &str, circuit: &str, node: &str, failures: &mu
     );
 }
 
-/// Why shooting refuses a generated model whose source branch stores flux.
-const FLUX: &str = "a voltage contribution takes the time derivative of its branch current (an \
-                    inductance), and the shooting state fixes node voltages, not branch currents";
-
 /// Why periodic AC, periodic transfer functions and periodic noise refuse a
 /// generated model with an `idt` carried as an unknown of its own.
 #[cfg(feature = "veriloga-model-pspnqs102va")]
@@ -973,12 +969,12 @@ const CARRIED_SITE: &str = "harmonic balance carries both a `ddt` and an `idt` o
                             from a hold that would not seed the `ddt`'s charge";
 
 /// Shooting reaches the same settled transient for every fixture harmonic
-/// balance does, under the same allowance, or refuses before solving a model
-/// whose source branch stores flux: the period map integrates each generated
-/// model's charges, its `ddt` operands among them, from the state the period
-/// starts at, with the nodes its own source branches tie taken as one, and
-/// carries each `idt` as a coordinate of its own (PSP's non-quasi-static
-/// charges).
+/// balance does, under the same allowance: the period map integrates each
+/// generated model's charges, its `ddt` operands among them, from the state
+/// the period starts at, with the nodes its own source branches tie taken as
+/// one, and carries each `idt` (PSP's non-quasi-static charges) and each
+/// source branch's stored flux (Angelov-GaN's delay line) as a coordinate of
+/// its own.
 #[test]
 fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
     let mut failures = Vec::new();
@@ -992,12 +988,11 @@ fn generated_models_reach_the_settled_transients_steady_state_by_shooting() {
                 .with_tolerance(1e-9),
         ) {
             Ok(result) => result.result,
-            // A model with an `idt` site harmonic balance carries as an
-            // unknown of its own, or one whose source branch stores flux, is
-            // refused before solving, by name and reason (see
-            // `shooting_refuses_a_generated_model_by_its_reason`).
+            // A model of which harmonic balance carries both a `ddt` and an
+            // `idt` as unknowns of their own is refused before solving, by name
+            // and reason; no shipped model is.
             Err(rspice_core::SimulationError::UnsupportedCapability(refusal))
-                if refusal.detail.ends_with(CARRIED_SITE) || refusal.detail.ends_with(FLUX) =>
+                if refusal.detail.ends_with(CARRIED_SITE) =>
             {
                 eprintln!("{family}: shooting refuses it: {}", refusal.detail);
                 continue;
@@ -1178,65 +1173,69 @@ fn every_shipped_model_reaches_its_fixture_or_names_its_refusal() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Shooting refuses before solving, by instance and module, a generated
-/// model with an `idt` site harmonic balance carries as an unknown of its own
-/// (PSP 102's non-quasi-static charges) and one whose source branch stores
-/// flux at its parameters, each with its reason and shooting's own token.
+/// Shooting carries each source branch that stores flux as a coordinate of
+/// its own, the branch's current: Angelov and Angelov-GaN with a 1 mH drain
+/// inductance, each diode-connected behind 1 kΩ, which sets the inductance's
+/// time constant within a period so that the transient settles, reach the
+/// settled transient and harmonic balance under the standing allowances.
+/// Shooting refused them before; admitted with node voltages for its only
+/// state, Angelov settled 0.18 V off the transient's DC level.
+#[cfg(any(
+    feature = "veriloga-model-angelov",
+    feature = "veriloga-model-angelov-gan"
+))]
 #[test]
-fn shooting_refuses_a_generated_model_by_its_reason() {
-    use rspice_core::identity::AnalysisKind;
-    use rspice_core::{SimulationError, UnsupportedCapabilityError};
-    let cases: Vec<(&str, &str, &str, &str)> = vec![
-        // A 1 mH drain inductance, whose current the period map would miss:
-        // admitted, shooting stops short of the settled transient.
+fn shooting_carries_a_generated_models_stored_flux() {
+    let fixtures: Vec<(&str, &str)> = vec![
         #[cfg(feature = "veriloga-model-angelov")]
         (
-            "MA d d 0 am\n.model am angelov ld=1m",
-            "MA",
-            "angelov",
-            FLUX,
+            "GaAs FET (Angelov, 1 mH drain inductance)",
+            "V1 in 0 SIN(0 1 1meg)\nR1 in d 1k\nMA d d 0 am\n.model am angelov ld=1m\n",
+        ),
+        #[cfg(feature = "veriloga-model-angelov-gan")]
+        (
+            "GaN FET (Angelov-GaN, 1 mH drain inductance)",
+            "V1 in 0 SIN(0 1 1meg)\nR1 in d 1k\nMA d d 0 ag\n.model ag angelov_gan ld=1m\n",
         ),
     ];
-    for (card, instance, module, reason) in cases {
-        let deck =
-            format!("* refused generated model\nV1 in 0 SIN(0 1 1meg)\nR1 in d 1k\n{card}\n.end\n");
+    let mut failures = Vec::new();
+    for (family, circuit) in fixtures {
+        let deck = format!("* {family} periodic steady state\n{circuit}.end\n");
         let netlist = Netlist::parse(&deck).expect("parse");
-        let error = engine()
-            .run_pss(&netlist, PssConfig::new(F0))
-            .map(drop)
-            .expect_err("shooting must refuse the model");
-        let SimulationError::UnsupportedCapability(refusal) = &error else {
-            panic!("{module}: expected a capability refusal, got {error}");
+        let pss = match engine().run_pss(
+            &netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(512)
+                .with_tolerance(1e-9),
+        ) {
+            Ok(result) => result.result,
+            Err(error) => {
+                failures.push(format!("{family}: shooting must run: {error}"));
+                continue;
+            }
         };
-        let UnsupportedCapabilityError {
-            capability,
-            analysis_kind,
-            instance: refused_instance,
-            module: refused_module,
-            detail,
-            ..
-        } = refusal.as_ref();
-        assert_eq!(*capability, "analysis.pss.veriloga_operator", "{error}");
-        assert_eq!(*analysis_kind, Some(AnalysisKind::Pss), "{error}");
-        assert_eq!(refused_instance.as_deref(), Some(instance), "{error}");
-        assert!(
-            refused_module
-                .as_deref()
-                .is_some_and(|name| name.eq_ignore_ascii_case(module)),
-            "{error}"
-        );
-        assert!(
-            detail.contains("PSS analysis") && detail.ends_with(reason),
-            "{module}: the refusal must name the analysis and its reason: {detail}"
-        );
+        let output = pss
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("d"))
+            .unwrap_or_else(|| panic!("{family}: V(d) present"));
+        let end = *pss.time.last().expect("a periodic waveform");
+        let spectrum = period_spectrum(&pss.time, &pss.waveforms[output].values, end, 512);
+        compare_with_settled_transient(&netlist, family, "d", "shooting", &spectrum, &mut failures);
+        check_against_shooting(family, circuit, "d", &mut failures);
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Periodic AC from the small-signal source `vrf` into sidebands -2..=2 of
 /// `V(a)` at three offsets, and the periodic transfer function from it into
 /// the upper first sideband, on the deck's harmonic-balance carrier: once
 /// solved by periodic AC itself and once retained from `.hb`.
-#[cfg(any(feature = "veriloga-model-r2-cmc", feature = "veriloga-model-bjt504va"))]
+#[cfg(any(
+    feature = "veriloga-model-r2-cmc",
+    feature = "veriloga-model-bjt504va",
+    feature = "veriloga-model-angelov"
+))]
 fn hb_carrier_transfers(deck: &str) -> Vec<Complex64> {
     use rspice_core::NoAbort;
     use rspice_core::analysis::pac::{PacConfig, PacSweepType};
@@ -1412,7 +1411,11 @@ fn a_generated_resistors_noise_folds_as_its_native_twins() {
 /// Periodic AC from `vrf` into sidebands -2..=2 of `V(a)` at three offsets,
 /// and the periodic transfer function into the upper first sideband, on the
 /// deck's shooting carrier.
-#[cfg(any(feature = "veriloga-model-r2-cmc", feature = "veriloga-model-bjt504va"))]
+#[cfg(any(
+    feature = "veriloga-model-r2-cmc",
+    feature = "veriloga-model-bjt504va",
+    feature = "veriloga-model-angelov"
+))]
 fn shooting_carrier_transfers(deck: &str) -> Vec<Complex64> {
     use rspice_core::NoAbort;
     use rspice_core::analysis::pac::{PacConfig, PacSweepType};
@@ -1604,8 +1607,36 @@ fn periodic_small_signal_refuses_a_generated_models_integrals_by_name() {
 #[cfg(feature = "veriloga-model-bjt504va")]
 #[test]
 fn periodic_small_signal_on_a_shooting_orbit_reads_a_generated_models_carried_derivative() {
-    let deck = "* pumped common-emitter stage\nVCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\n\
-                RB in b 10k\nVRF rf 0 DC 0\nR2 rf b 10k\nRC vcc a 1k\nXQ a b 0 0 bjt504va\n.end\n";
+    assert_carriers_agree(
+        "Mextram 504",
+        "* pumped common-emitter stage\nVCC vcc 0 3\nV1 in 0 SIN(0.8 0.02 1meg)\n\
+         RB in b 10k\nVRF rf 0 DC 0\nR2 rf b 10k\nRC vcc a 1k\nXQ a b 0 0 bjt504va\n.end\n",
+    );
+}
+
+/// Periodic AC and periodic transfer functions on a shooting orbit read a
+/// generated model's stored flux, which the orbit carries as a coordinate:
+/// Angelov with a 1 mH drain inductance, diode-connected in a pumped stage,
+/// gives every sideband transfer it gives on harmonic balance's carrier.
+/// Allowance: 1e-4 of the largest transfer.
+#[cfg(feature = "veriloga-model-angelov")]
+#[test]
+fn periodic_small_signal_on_a_shooting_orbit_reads_a_generated_models_stored_flux() {
+    assert_carriers_agree(
+        "Angelov, 1 mH drain inductance",
+        "* pumped diode-connected FET\nV1 in 0 SIN(0.5 0.05 1meg)\nR1 in a 1k\nVRF rf 0 DC 0\n\
+         R2 rf a 10k\nMA a a 0 am\n.model am angelov ld=1m\n.end\n",
+    );
+}
+
+/// Every sideband transfer and periodic transfer function of `deck` on its
+/// shooting carrier within 1e-4 of the largest of those on its
+/// harmonic-balance carrier.
+#[cfg(any(
+    feature = "veriloga-model-bjt504va",
+    feature = "veriloga-model-angelov"
+))]
+fn assert_carriers_agree(name: &str, deck: &str) {
     let harmonic_balance = hb_carrier_transfers(deck);
     let shooting = shooting_carrier_transfers(deck);
     let retained = &harmonic_balance[15..];
@@ -1619,13 +1650,14 @@ fn periodic_small_signal_on_a_shooting_orbit_reads_a_generated_models_carried_de
         .map(|(shot, balanced)| (shot - balanced).norm())
         .fold(0.0, f64::max);
     eprintln!(
-        "Mextram 504: shooting carrier worst {:.3e} of the largest transfer",
+        "{name}: shooting carrier worst {:.3e} of the largest transfer",
         worst / scale
     );
     for (index, (shot, balanced)) in shooting.iter().zip(retained).enumerate() {
         assert!(
             (shot - balanced).norm() <= 1e-4 * scale,
-            "transfer {index}: shooting carrier {shot} against harmonic balance's {balanced}"
+            "{name}: transfer {index}: shooting carrier {shot} against harmonic balance's \
+             {balanced}"
         );
     }
 }

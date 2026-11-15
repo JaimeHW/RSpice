@@ -539,7 +539,8 @@ impl PssCircuit {
         let prefix = self.physical_state_dimension()
             + self.behavioral_sources.integral_count()
             + self.capacitors.integral_count()
-            + self.generated_integrals.dimension();
+            + self.generated_integrals.dimension()
+            + self.fluxes.dimension();
         let names = names.get(prefix..).ok_or_else(|| {
             SimulationError::Circuit(
                 "retained PSS basis omitted physical/integral coordinates".into(),

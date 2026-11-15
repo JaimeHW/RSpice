@@ -15,7 +15,9 @@ use voltage::{
 };
 mod forcing;
 use forcing::BehavioralForcing;
+mod flux;
 mod integral;
+use flux::PssFluxes;
 pub(super) use integral::PssGeneratedIntegrals;
 #[cfg(feature = "veriloga-builtins-base")]
 pub(in crate::engine) use integral::generated_integral_coordinate_name;
@@ -785,6 +787,9 @@ pub(in crate::engine) struct PssCircuit {
     /// The `idt` sites generated models carry, the coordinates after the
     /// expression integrals.
     pub(super) generated_integrals: PssGeneratedIntegrals,
+    /// The currents of the source branches generated models and runtime
+    /// modules store flux in, the coordinates after the generated integrals.
+    fluxes: PssFluxes,
 }
 
 /// See [`PssCircuit::generated_step_rows`]: every node a generated model
@@ -905,6 +910,7 @@ impl PssCircuit {
         let bsim3_history = Engine::initialize_bsim3_history(&circuit, &solution_scratch[1..]);
         let bsim4_history = Engine::initialize_bsim4_history(&circuit, &solution_scratch[1..]);
         let generated_integrals = PssGeneratedIntegrals::new(&circuit);
+        let fluxes = PssFluxes::new(&circuit);
         let integral_probe_scales = vec![
             1.0;
             circuit.behavioral_sources.integral_count()
@@ -942,6 +948,7 @@ impl PssCircuit {
             current_source_times: [0.0; 2],
             generated_step_rows,
             generated_integrals,
+            fluxes,
         })
     }
 
@@ -957,6 +964,7 @@ impl PssCircuit {
             + self.behavioral_sources.integral_count()
             + self.capacitors.integral_count()
             + self.generated_integrals.dimension()
+            + self.fluxes.dimension()
             + self.delay_basis.dimension()
     }
 
@@ -1021,13 +1029,16 @@ impl PssCircuit {
             .chain(self.behavioral_sources.integral_names())
             .chain(self.capacitors.integral_names())
             .chain(self.generated_integrals.names(&self.circuit))
+            .chain(self.fluxes.names())
             .chain(self.delay_basis.names(&self.circuit))
             .collect()
     }
 
     fn is_current_coordinate(&self, index: usize) -> bool {
         if index >= self.physical_state_dimension() {
-            return false; // Expression-integral coordinates are not physical amperes.
+            // Expression-integral coordinates are not physical amperes; a
+            // module's stored flux is its branch current.
+            return self.is_flux_coordinate(index);
         }
         if index >= self.basis.charge_branches.len() {
             return true; // Independent winding currents.
@@ -1035,6 +1046,11 @@ impl PssCircuit {
         let (pos, neg) = self.basis.voltage_nodes(&self.circuit, index);
         self.basis.node_units[pos] == CoordinateUnit::Current
             || self.basis.node_units[neg] == CoordinateUnit::Current
+    }
+
+    fn is_flux_coordinate(&self, index: usize) -> bool {
+        let first = self.physical_state_dimension() + self.integral_probe_scales.len();
+        (first..first + self.fluxes.dimension()).contains(&index)
     }
 
     fn is_charge_coordinate(&self, index: usize) -> bool {
@@ -1087,7 +1103,9 @@ impl PssCircuit {
         charge_scale: Value,
     ) -> Value {
         let physical_count = self.physical_state_dimension();
-        let unit = if index >= physical_count + self.integral_probe_scales.len() {
+        let unit = if self.is_flux_coordinate(index) {
+            current_scale
+        } else if index >= physical_count + self.integral_probe_scales.len() {
             1.0 // Travelling-wave coordinates have voltage units.
         } else if index >= physical_count {
             self.integral_probe_scales[index - physical_count]
@@ -1123,12 +1141,13 @@ impl PssCircuit {
     /// tiny charge coefficients can amplify harmless current roundoff into a
     /// large rate change while the fixed node voltages have already converged.
     pub(super) fn is_initial_charge_rate(&self, index: usize) -> bool {
-        self.initial_charge_rates.as_ref().is_some_and(|rates| {
-            rates
-                .branches
-                .iter()
-                .any(|&branch| index == self.num_nodes() + branch - 1)
-        })
+        self.fluxes.is_pin(index)
+            || self.initial_charge_rates.as_ref().is_some_and(|rates| {
+                rates
+                    .branches
+                    .iter()
+                    .any(|&branch| index == self.num_nodes() + branch - 1)
+            })
     }
 
     /// Candidate values in the independent shooting-state basis, normalized
@@ -1151,6 +1170,7 @@ impl PssCircuit {
                     .chain(self.behavioral_sources.accepted_integrals())
                     .chain(self.capacitors.accepted_integrals())
                     .chain(self.generated_integrals.extract(&self.circuit))
+                    .chain(self.fluxes.extract(solution))
                     .chain(self.delay_basis.extract(&self.circuit)),
             )
             .enumerate()
@@ -1202,6 +1222,7 @@ impl PssCircuit {
             .chain(self.behavioral_sources.accepted_integrals())
             .chain(self.capacitors.accepted_integrals())
             .chain(self.generated_integrals.extract(&self.circuit))
+            .chain(self.fluxes.extract(&self.solution_scratch[1..]))
             .chain(self.delay_basis.extract(&self.circuit))
             .collect()
     }
@@ -1217,8 +1238,9 @@ impl PssCircuit {
         let behavioral_end = physical_count + self.behavioral_sources.integral_count();
         let integral_end = behavioral_end + self.capacitors.integral_count();
         let generated_end = integral_end + self.generated_integrals.dimension();
+        let flux_end = generated_end + self.fluxes.dimension();
         self.delay_basis
-            .set(&mut self.circuit, &state[generated_end..])?;
+            .set(&mut self.circuit, &state[flux_end..])?;
         self.circuit
             .behavioral_sources
             .reset_integrals(&state[physical_count..behavioral_end])
@@ -1318,6 +1340,10 @@ impl PssCircuit {
             self.solution_scratch[circuit.num_nodes() + circuit.inductors.branch_indices[index]] =
                 current;
         }
+        self.fluxes.set(
+            &mut self.solution_scratch[1..],
+            &state[generated_end..flux_end],
+        );
         // Mutual flux shares these physical winding currents. Restart both
         // accepted history generations for each shooting perturbation; a
         // prior period or derivative probe must never leak into the next.
@@ -1541,6 +1567,8 @@ impl PssCircuit {
                 value,
             );
         }
+        self.fluxes
+            .pin(&mut self.circuit, &self.solution_scratch[1..]);
         if self.basis.currents.needs_flux_rates() {
             let first = self.circuit.allocate_branch();
             self.initial_flux_rates = Some(first);
@@ -1558,6 +1586,7 @@ impl PssCircuit {
             self.initial_flux_rates,
             |row, col, _| entries.push((row, col)),
         );
+        entries.extend(self.fluxes.pin_pattern());
         if let Some(rates) = &self.initial_charge_rates {
             for (index, &branch) in rates.branches.iter().enumerate() {
                 let (pos, neg) = self.basis.voltage_nodes(&self.circuit, index);
@@ -1848,13 +1877,16 @@ impl PssCircuit {
             &self.current_balance,
             |row, value| rhs[row] = value,
         )?;
+        self.fluxes.stamp_pins(matrix, rhs);
         Ok(())
     }
 
     pub(super) fn is_initial_current_row(&self, row: usize) -> bool {
-        self.basis
-            .currents
-            .is_current_row(&self.circuit, row, self.initial_flux_rates)
+        self.fluxes.is_pin(row)
+            || self
+                .basis
+                .currents
+                .is_current_row(&self.circuit, row, self.initial_flux_rates)
             || self.initial_charge_rates.as_ref().is_some_and(|rates| {
                 rates.branches.iter().enumerate().any(|(index, &branch)| {
                     row == self.num_nodes() + branch - 1 && self.is_current_coordinate(index)
@@ -2258,10 +2290,9 @@ impl PssCircuit {
         linearize_at: &'a [Value],
     ) -> impl Iterator<Item = Value> + 'a {
         self.project_physical_coordinates(solution, Some(linearize_at))
-            .chain(std::iter::repeat_n(
-                0.0,
-                self.integral_probe_scales.len() + self.delay_basis.dimension(),
-            ))
+            .chain(std::iter::repeat_n(0.0, self.integral_probe_scales.len()))
+            .chain(self.fluxes.extract(solution))
+            .chain(std::iter::repeat_n(0.0, self.delay_basis.dimension()))
     }
 
     fn project_physical_coordinates<'a>(

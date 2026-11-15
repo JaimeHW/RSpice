@@ -1136,6 +1136,29 @@ fn a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_shooting_carrier() {
     );
 }
 
+/// Periodic AC and periodic transfer functions read a runtime module's
+/// stored flux on the shooting orbit that carries it as a coordinate: the
+/// Verilog-A inductor [`flux_inductor`] in the pumped stage gives every
+/// sideband transfer its native twin `L1 a 0 100u` gives on that carrier.
+/// Allowance: 1e-6 of the largest native transfer, as for the diode.
+#[test]
+fn a_veriloga_inductor_gives_its_native_twins_sidebands_on_a_shooting_carrier() {
+    let model = flux_inductor("pss_carrier_inductor");
+    let native = shooting_carrier_transfers(&pumped_mixer("L1 a 0 100u", ""));
+    let twin = shooting_carrier_transfers(&pumped_mixer(
+        "XL1 a 0 va_pss_inductor",
+        &format!(".va \"{model}\" va_pss_inductor"),
+    ));
+    let _ = std::fs::remove_file(model);
+    let scale = native.iter().map(|value| value.norm()).fold(0.0, f64::max);
+    for (index, (twin_value, native_value)) in twin.iter().zip(&native).enumerate() {
+        assert!(
+            (twin_value - native_value).norm() <= 1.0e-6 * scale,
+            "transfer {index}: Verilog-A {twin_value} against native {native_value}"
+        );
+    }
+}
+
 /// Shooting takes a runtime module whose state is the charges it contributes,
 /// integrating them over the period from the node voltages the period starts
 /// at, and reaches RSpice's own settled transient: a nonlinear varactor with
@@ -1245,6 +1268,80 @@ fn a_charge_form_module_reaches_its_settled_transient_by_shooting() {
                 .fold(0.0, f64::max)
         );
     }
+}
+
+/// The inductance of [`flux_inductor`].
+const FLUX_INDUCTANCE: f64 = 100.0e-6;
+
+/// Write a runtime inductor that stores flux, `V(p, n) <+ ddt(L·I(p, n))`
+/// with L = [`FLUX_INDUCTANCE`], as module `va_pss_inductor`.
+fn flux_inductor(name: &str) -> String {
+    write_model(
+        name,
+        &format!(
+            "`include \"disciplines.vams\"\n\
+             module va_pss_inductor(p, n);\n\
+             inout p, n;\n\
+             electrical p, n;\n\
+             analog V(p, n) <+ ddt({FLUX_INDUCTANCE:e} * I(p, n));\n\
+             endmodule\n"
+        ),
+    )
+}
+
+/// Shooting carries a runtime module's stored flux: an inductor written as
+/// `V(p, n) <+ ddt(L·I(p, n))`, driven through a resistor, gives at the node
+/// between them the fundamental of the closed form `jωL/(R + jωL)` and no
+/// other harmonic. Allowance: 1e-3 of the fundamental, as for the
+/// charge-form modules.
+#[test]
+fn a_flux_form_module_reaches_its_closed_form_by_shooting() {
+    const SAMPLES: usize = 512;
+    let resistance = 1.0e3;
+    let model = flux_inductor("pss_inductor");
+    let deck = format!(
+        "* shooting integrates a module's flux\n\
+         V1 in 0 DC 0 SIN(0 1 1meg)\n\
+         R1 in a {resistance:e}\n\
+         XVA a 0 va_pss_inductor\n\
+         .va \"{model}\" va_pss_inductor\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let pss = Engine::new(SimulationConfig::default()).run_pss(
+        &netlist,
+        PssConfig::new(F0)
+            .with_points_per_period(SAMPLES)
+            .with_tolerance(1e-9),
+    );
+    let _ = std::fs::remove_file(&model);
+    let pss = pss
+        .unwrap_or_else(|error| panic!("shooting must run: {error}"))
+        .result;
+    let output = pss
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("a"))
+        .expect("V(a) present");
+    let end = *pss.time.last().expect("a periodic waveform");
+    let shooting = period_spectrum(&pss.time, &pss.waveforms[output].values, end, SAMPLES, 3);
+    let reactance = Complex64::new(0.0, std::f64::consts::TAU * F0 * FLUX_INDUCTANCE);
+    let expected = Complex64::new(0.0, -1.0) * reactance / (resistance + reactance);
+    let error = (0..=3)
+        .map(|k| {
+            let reference = if k == 1 {
+                expected
+            } else {
+                Complex64::new(0.0, 0.0)
+            };
+            (shooting[k] - reference).norm() / expected.norm()
+        })
+        .fold(0.0, f64::max);
+    eprintln!("flux module: shooting worst {error:.3e} of the closed form's fundamental");
+    assert!(
+        error <= 1e-3,
+        "shooting {shooting:?} against the closed form's fundamental {expected}"
+    );
 }
 
 /// Shooting refuses a runtime module whose operator keeps a history neither
@@ -1761,6 +1858,42 @@ fn pstb_reads_a_veriloga_capacitors_charge_from_its_period_map() {
     assert!(!twin_point.shooting_state_basis()[0].starts_with("event:"));
     assert_multipliers("Verilog-A ddt RC", &module, &expected, 1.0e-4);
     assert_multipliers("native RC twin", &twin, &expected, 1.0e-4);
+    for (a, b) in module.iter().zip(&twin) {
+        assert!((a - b).norm() <= 1.0e-9, "Verilog-A {a} against native {b}");
+    }
+}
+
+/// PSTB reads a runtime module's stored flux from the period map that
+/// carries its branch current as a coordinate: a driven RL whose inductor is
+/// [`flux_inductor`], L = 100 µH behind R1 = 200 Ω, maps a current deviation
+/// over the period by exp(−T·R/L) = exp(−2); the probe loop adds exp(−1).
+/// The native twin's inductor gives the same spectrum.
+#[test]
+fn pstb_reads_a_veriloga_inductors_flux_from_its_period_map() {
+    let model = flux_inductor("pstb_inductor");
+    let deck = |inductor: &str| {
+        format!(
+            "* pstb of a driven RL\nV1 in 0 SIN(0 1 1meg)\nR1 in a 200\n{inductor}\n{PROBE_LOOP}.end\n"
+        )
+    };
+    let config = || {
+        PssConfig::new(F0)
+            .with_points_per_period(512)
+            .with_tolerance(1e-9)
+    };
+    let expected = [(-1.0_f64).exp(), (-2.0_f64).exp()];
+    let (twin, _) = pstb_spectrum(&deck("L1 a 0 100u"), config(), "L2");
+    let (module, point) = pstb_spectrum(
+        &deck(&format!(
+            ".va \"{model}\" va_pss_inductor\nXL1 a 0 va_pss_inductor"
+        )),
+        config(),
+        "L2",
+    );
+    let _ = std::fs::remove_file(model);
+    assert!(!point.shooting_state_basis()[0].starts_with("event:"));
+    assert_multipliers("Verilog-A flux RL", &module, &expected, 1.0e-4);
+    assert_multipliers("native RL twin", &twin, &expected, 1.0e-4);
     for (a, b) in module.iter().zip(&twin) {
         assert!((a - b).norm() <= 1.0e-9, "Verilog-A {a} against native {b}");
     }

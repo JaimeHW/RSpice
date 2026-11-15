@@ -5425,6 +5425,25 @@ impl VerilogADevice {
         self.model.branch_sources.len()
     }
 
+    /// The ordinals of the branch-current unknowns a `ddt` operand reads,
+    /// ascending: each stores flux (an inductance, `V(p, n) <+ ddt(L·I(p,
+    /// n))`), and its current is the state that flux keeps.
+    pub fn flux_branch_ordinals(&self) -> Vec<usize> {
+        let mut ordinals: Vec<usize> = self
+            .model
+            .stamp_programs
+            .iter()
+            .flat_map(|stamp| &stamp.reactive_jacobians)
+            .filter_map(|jacobian| match jacobian.col_axis {
+                crate::codegen::ColumnAxis::Branch(ordinal) => Some(ordinal),
+                crate::codegen::ColumnAxis::Node(_) => None,
+            })
+            .collect();
+        ordinals.sort_unstable();
+        ordinals.dedup();
+        ordinals
+    }
+
     /// Set the circuit node indices allocated for branch-current unknowns
     pub fn set_branch_current_indices(&mut self, indices: &[usize]) {
         self.try_set_branch_current_indices(indices)

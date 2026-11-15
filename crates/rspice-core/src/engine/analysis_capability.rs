@@ -428,30 +428,34 @@ const fn hb_admissible_generated() -> CellSupport {
 
 const PSS_GENERATED_EVIDENCE: &[&str] = &[
     "tests/generated/generated_hb.rs::generated_models_reach_the_settled_transients_steady_state_by_shooting",
-    "tests/generated/generated_hb.rs::shooting_refuses_a_generated_model_by_its_reason",
+    "tests/generated/generated_hb.rs::shooting_and_harmonic_balance_agree_on_a_generated_models_integrals",
+    "tests/generated/generated_hb.rs::shooting_carries_a_generated_models_stored_flux",
 ];
 
 /// Shooting takes the generated compact models harmonic balance takes: the
 /// period map integrates their charges from the state the period starts at,
 /// whose coordinates fix the nodes their charges are functions of, with the
-/// nodes their own source branches tie taken as one.
+/// nodes their own source branches tie taken as one, and carries each `idt`
+/// and each source branch's stored flux as a coordinate of its own.
 const fn pss_admissible_generated() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::HbAdmissibleVerilogA,
         token: PSS_VERILOGA_OPERATOR,
-        condition: "every generated compact model harmonic balance admits whose residual is F(x) + dQ(x)/dt with nothing kept between evaluations, no `ddt` or `idt` carried as an unknown of its own and no voltage contribution that stores flux (an inductance) at its parameters; its charges are integrated over the period from the state the period starts at, with the nodes its own voltage contributions tie taken as one",
+        condition: "every generated compact model harmonic balance admits whose residual is F(x) + dQ(x)/dt with nothing kept between evaluations, unless harmonic balance carries both a `ddt` and an `idt` of it as unknowns of their own; its charges are integrated over the period from the state the period starts at, with the nodes its own voltage contributions tie taken as one, each `idt` from its initial condition as a coordinate of its own, and each voltage contribution that stores flux (an inductance) from its branch current as a coordinate of its own",
         evidence: PSS_GENERATED_EVIDENCE,
     }
 }
 
 const PSS_VERILOGA_EVIDENCE: &[&str] = &[
     "tests/veriloga/veriloga_hb.rs::a_charge_form_module_reaches_its_settled_transient_by_shooting",
+    "tests/veriloga/veriloga_hb.rs::a_flux_form_module_reaches_its_closed_form_by_shooting",
     "tests/veriloga/veriloga_hb.rs::shooting_refuses_each_operator_with_state_by_name",
 ];
 
 /// Native shooting takes a runtime Verilog-A module whose state is the
-/// charges it contributes: the period map integrates them from the node
-/// voltages the period starts at, as it does a generated model's. A driven
+/// charges and fluxes it contributes: the period map integrates the charges
+/// from the node voltages the period starts at, and each flux from its
+/// branch current, as it does a generated model's. A driven
 /// orbit whose modules keep other state goes to event shooting, which reads
 /// that state from the transient's own image; the gate here is native
 /// shooting's, and event shooting answers its own admission.
@@ -459,13 +463,14 @@ const fn pss_admissible_veriloga() -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::PssAdmissibleVerilogA,
         token: PSS_VERILOGA_OPERATOR,
-        condition: "by native shooting, every Verilog-A module whose analog body is memoryless equations and `ddt` of the charges it contributes, with no voltage contribution, no `ddt` it does not contribute as a charge, no idt, laplace_*, absdelay, idtmod or zi_*, no transition, slew, cross, above, timer or last_crossing, no $abstime and no variable kept between time points, its charges integrated over the period from the node voltages the period starts at; on a driven orbit, by event shooting, every other module without laplace_*, absdelay, idtmod or zi_* whose events and the values they write come back every period",
+        condition: "by native shooting, every Verilog-A module whose analog body is memoryless equations and `ddt` of the charges and fluxes it contributes, with no voltage contribution that stores no flux, no other `ddt`, no idt, laplace_*, absdelay, idtmod or zi_*, no transition, slew, cross, above, timer or last_crossing, no $abstime and no variable kept between time points, its charges integrated over the period from the node voltages the period starts at and each flux from its branch current; on a driven orbit, by event shooting, every other module without laplace_*, absdelay, idtmod or zi_* whose events and the values they write come back every period",
         evidence: PSS_VERILOGA_EVIDENCE,
     }
 }
 
 const PSTB_VERILOGA_EVIDENCE: &[&str] = &[
     "tests/veriloga/veriloga_hb.rs::pstb_reads_a_veriloga_capacitors_charge_from_its_period_map",
+    "tests/veriloga/veriloga_hb.rs::pstb_reads_a_veriloga_inductors_flux_from_its_period_map",
     "tests/veriloga/veriloga_hb.rs::pstb_reads_an_idt_integrators_state_on_an_event_orbit",
     "tests/veriloga/veriloga_hb.rs::pstb_reads_a_veriloga_oscillators_orbit_with_its_phase_multiplier",
 ];
@@ -541,6 +546,7 @@ pub(in crate::engine) enum PeriodicCarrier {
 const PAC_VERILOGA_EVIDENCE: &[&str] = &[
     "tests/veriloga/veriloga_hb.rs::a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_harmonic_balance_carrier",
     "tests/veriloga/veriloga_hb.rs::a_veriloga_diode_mixes_its_native_twins_sidebands_on_a_shooting_carrier",
+    "tests/veriloga/veriloga_hb.rs::a_veriloga_inductor_gives_its_native_twins_sidebands_on_a_shooting_carrier",
 ];
 
 const PNOISE_VERILOGA_EVIDENCE: &[&str] = &[
@@ -556,6 +562,7 @@ const PAC_GENERATED_EVIDENCE: &[&str] = &[
     "tests/generated/generated_hb.rs::a_generated_resistor_mixes_its_native_twins_sidebands",
     "tests/generated/generated_hb.rs::a_generated_resistor_mixes_its_native_twins_sidebands_on_a_shooting_carrier",
     "tests/generated/generated_hb.rs::periodic_small_signal_on_a_shooting_orbit_reads_a_generated_models_carried_derivative",
+    "tests/generated/generated_hb.rs::periodic_small_signal_on_a_shooting_orbit_reads_a_generated_models_stored_flux",
     "tests/generated/generated_hb.rs::periodic_small_signal_refuses_a_generated_models_integrals_by_name",
 ];
 
@@ -565,7 +572,7 @@ const PAC_GENERATED_EVIDENCE: &[&str] = &[
 /// takes: on a harmonic-balance carrier what harmonic balance takes; on a
 /// shooting carrier the generated models shooting takes, and the runtime
 /// modules both shooting and harmonic balance take, whose state is the
-/// charges the period map carries. Neither takes a generated model with an
+/// charges and fluxes the period map carries. Neither takes a generated model with an
 /// `idt` carried as an unknown of its own, whose sideband solve does not
 /// certify.
 const fn carrier_admits_veriloga(generated: bool) -> CellSupport {
@@ -1090,8 +1097,9 @@ fn pss_operator_reason(operator: &str) -> Option<&'static str> {
 }
 
 /// Shooting refuses a runtime Verilog-A instance whose state is not the
-/// charges it contributes, naming the first operator in the way and where
-/// the module wrote it, or its voltage contribution.
+/// charges and fluxes it contributes, naming the first operator in the way
+/// and where the module wrote it, or its voltage contribution that stores no
+/// flux.
 fn pss_veriloga_refusal(
     circuit: &CircuitData,
     analysis: CapabilityAnalysis,
@@ -1117,9 +1125,9 @@ fn pss_veriloga_refusal(
                  not a node voltage the shooting state fixes at the period start",
                 written_operator(device, "ddt")
             )
-        } else if device.num_branch_unknowns() > 0 {
-            "it has a voltage contribution, whose branch current the shooting state does not \
-             fix and whose ties its node coordinates would each fix at the period start"
+        } else if device.num_branch_unknowns() > device.flux_branch_ordinals().len() {
+            "it has a voltage contribution that stores no flux, whose ties its node \
+             coordinates would each fix at the period start"
                 .to_owned()
         } else {
             continue;
@@ -1146,15 +1154,13 @@ fn pss_veriloga_refusal(
 
 /// The first Verilog-A instance of `family` harmonic balance cannot sample,
 /// refused by `analysis` with harmonic balance's reason.
-fn hb_admission_refusal<const PROBE_DEVICES: bool>(
+fn hb_admission_refusal(
     circuit: &CircuitData,
     family: CapabilityFamily,
     analysis: CapabilityAnalysis,
 ) -> Option<UnsupportedCapabilityError> {
     match family {
-        CapabilityFamily::VerilogAGenerated => {
-            hb_generated_refusal::<PROBE_DEVICES>(circuit, analysis)
-        }
+        CapabilityFamily::VerilogAGenerated => hb_generated_refusal(circuit, analysis),
         _ => hb_veriloga_operator_refusal(circuit, analysis),
     }
 }
@@ -1203,16 +1209,6 @@ const HB_UNVERIFIED_GENERATED_MODELS: &[(&str, &str)] = &[(
          one, so the period map's steps, which settle to 1e-11 V, leave it 1e-3 V apart",
 )];
 
-/// Why shooting refuses a generated model whose source branch stores flux at
-/// its parameters: the period map's state is node voltages, and an
-/// inductance's state is its branch current, which none of them fixes. An
-/// Angelov card with a 1 mH drain inductance, admitted, settles 0.18 V off
-/// the transient's DC level.
-#[cfg(feature = "veriloga-builtins-base")]
-const PSS_GENERATED_FLUX: &str = "a voltage contribution takes the time derivative of its \
-     branch current (an inductance), and the shooting state fixes node voltages, not branch \
-     currents";
-
 /// Why shooting refuses a generated model that carries both a `ddt` and an
 /// `idt` as unknowns of their own: a period starts with every carried
 /// integral held at its coordinate, and the hold that does so also holds a
@@ -1238,11 +1234,7 @@ const PERIODIC_SMALL_SIGNAL_GENERATED_INTEGRAL: &str = "it carries an `idt` as a
 /// one whose harmonics have not been checked, with what is missing. The
 /// periodic small-signal analyses, which reach a generated model through
 /// this gate on either carrier, also refuse one with a carried `idt`.
-///
-/// Shooting also refuses one whose source branch stores flux at its
-/// parameters, which only an evaluation of the model can tell; without
-/// `PROBE_DEVICES` that check is left out, along with the model code it runs.
-fn hb_generated_refusal<const PROBE_DEVICES: bool>(
+fn hb_generated_refusal(
     circuit: &CircuitData,
     analysis: CapabilityAnalysis,
 ) -> Option<UnsupportedCapabilityError> {
@@ -1262,13 +1254,6 @@ fn hb_generated_refusal<const PROBE_DEVICES: bool>(
                     && device.periodic_integral_count()
                         < device.harmonic_balance_periodic_sites().len())
                 .then_some(PSS_GENERATED_CARRIED_SITE)
-            })
-            .or_else(|| {
-                (PROBE_DEVICES
-                    && matches!(analysis, CapabilityAnalysis::Pss)
-                    && device
-                        .stores_flux(circuit.num_nodes(), circuit.generated_simulation_parameters))
-                .then_some(PSS_GENERATED_FLUX)
             })
             .or_else(|| {
                 (matches!(
@@ -1528,23 +1513,7 @@ impl Engine {
         circuit: &CircuitData,
         analysis: CapabilityAnalysis,
     ) -> Result<(), SimulationError> {
-        Self::ensure_capability_on_carrier::<true>(circuit, analysis, None)
-    }
-
-    /// [`Self::ensure_analysis_capability`] without the checks that evaluate a
-    /// device, for a query that reads only the circuit's structure.
-    ///
-    /// The one such check probes whether a generated model's source branch
-    /// stores flux, by running the model's stamp. A structural query is asked
-    /// where no model is evaluated, in the browser's UI thread among others,
-    /// and asking the full gate there links every compiled model's stamp into
-    /// that image for a check it never needs: the analysis asks the full gate
-    /// again before it solves, and refuses such a model there.
-    pub(in crate::engine) fn ensure_structural_analysis_capability(
-        circuit: &CircuitData,
-        analysis: CapabilityAnalysis,
-    ) -> Result<(), SimulationError> {
-        Self::ensure_capability_on_carrier::<false>(circuit, analysis, None)
+        Self::ensure_capability_on_carrier(circuit, analysis, None)
     }
 
     /// [`Self::ensure_analysis_capability`] for a periodic small-signal
@@ -1554,13 +1523,14 @@ impl Engine {
         analysis: CapabilityAnalysis,
         carrier: PeriodicCarrier,
     ) -> Result<(), SimulationError> {
-        Self::ensure_capability_on_carrier::<true>(circuit, analysis, Some(carrier))
+        Self::ensure_capability_on_carrier(circuit, analysis, Some(carrier))
     }
 
     /// The gate itself. Without a carrier, a cell that depends on one admits
-    /// nothing it restricts. `PROBE_DEVICES` keeps the checks that evaluate a
-    /// device; see [`Self::ensure_structural_analysis_capability`].
-    fn ensure_capability_on_carrier<const PROBE_DEVICES: bool>(
+    /// nothing it restricts. No check evaluates a device, so a query asked
+    /// where no model is evaluated (the browser's UI thread among others)
+    /// links no model's stamp.
+    fn ensure_capability_on_carrier(
         circuit: &CircuitData,
         analysis: CapabilityAnalysis,
         carrier: Option<PeriodicCarrier>,
@@ -1586,9 +1556,7 @@ impl Engine {
                         }
                     }
                     InstanceGate::HbAdmissibleVerilogA => {
-                        if let Some(refusal) =
-                            hb_admission_refusal::<PROBE_DEVICES>(circuit, family, analysis)
-                        {
+                        if let Some(refusal) = hb_admission_refusal(circuit, family, analysis) {
                             return Err(refusal.into());
                         }
                     }
@@ -1600,7 +1568,7 @@ impl Engine {
                     InstanceGate::CarrierAdmitsVerilogA => {
                         let refusal = match carrier {
                             Some(PeriodicCarrier::HarmonicBalance) => {
-                                hb_admission_refusal::<PROBE_DEVICES>(circuit, family, analysis)
+                                hb_admission_refusal(circuit, family, analysis)
                             }
                             // A shooting orbit carries the generated models
                             // shooting takes, which are those harmonic
@@ -1608,15 +1576,14 @@ impl Engine {
                             Some(PeriodicCarrier::Shooting)
                                 if family == CapabilityFamily::VerilogAGenerated =>
                             {
-                                hb_admission_refusal::<PROBE_DEVICES>(circuit, family, analysis)
+                                hb_admission_refusal(circuit, family, analysis)
                             }
                             // A runtime module rides a shooting orbit when
                             // the period map carried its state and harmonic
                             // balance's samples linearize it.
                             Some(PeriodicCarrier::Shooting) => {
-                                pss_veriloga_refusal(circuit, analysis).or_else(|| {
-                                    hb_admission_refusal::<PROBE_DEVICES>(circuit, family, analysis)
-                                })
+                                pss_veriloga_refusal(circuit, analysis)
+                                    .or_else(|| hb_admission_refusal(circuit, family, analysis))
                             }
                             None => carrier_refusal(circuit, family, analysis),
                         };
@@ -1662,8 +1629,9 @@ impl Engine {
 /// Whether native shooting refuses a runtime Verilog-A module of `circuit`
 /// for state its period map does not carry: an event operator, `$abstime`,
 /// a variable kept between time points or written by an event, `idt`, a
-/// `ddt` it does not contribute as a charge, or a voltage contribution. Event shooting carries
-/// that state through the transient itself.
+/// `ddt` it does not contribute as a charge or a flux, or a voltage
+/// contribution that stores no flux. Event shooting carries that state
+/// through the transient itself.
 pub(in crate::engine) fn native_shooting_refuses_runtime_veriloga(circuit: &CircuitData) -> bool {
     pss_veriloga_refusal(circuit, CapabilityAnalysis::Pss).is_some()
         || retained_state_refusal(circuit, CapabilityAnalysis::Pss).is_some()
@@ -1727,7 +1695,7 @@ pub(in crate::engine) fn event_shooting_capability_refusal(
             CellSupport::Restricted { gate, .. } => match gate {
                 InstanceGate::RationalDescriptor => rational_descriptor_refusal(circuit, analysis),
                 InstanceGate::HbAdmissibleVerilogA | InstanceGate::CarrierAdmitsVerilogA => {
-                    hb_admission_refusal::<true>(circuit, family, analysis)
+                    hb_admission_refusal(circuit, family, analysis)
                 }
                 InstanceGate::PssAdmissibleVerilogA => pss_veriloga_refusal(circuit, analysis),
                 InstanceGate::PeriodicContracts

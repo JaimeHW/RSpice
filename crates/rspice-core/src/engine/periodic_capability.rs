@@ -359,10 +359,12 @@ const RUNTIME_VERILOGA_HB_RESIDUAL: &str = "an analog body of memoryless equatio
      no variable kept between time points";
 /// The condition behind the state shooting's period map carries for a
 /// runtime module, which the analysis capability gate decides per instance
-/// from its operator inventory: the charges it contributes and nothing else.
-const RUNTIME_VERILOGA_PSS_STATE: &str = "an analog body of memoryless equations and `ddt` of the charges it contributes, \
-     F(x) + dQ(x)/dt, with no voltage contribution, no other operator with state, no event \
-     operator, no `$abstime` and no variable kept between time points";
+/// from its operator inventory: the charges and fluxes it contributes and
+/// nothing else.
+const RUNTIME_VERILOGA_PSS_STATE: &str = "an analog body of memoryless equations and `ddt` of the charges and fluxes it \
+     contributes, F(x) + dQ(x)/dt, with no voltage contribution that stores no flux, no \
+     other operator with state, no event operator, no `$abstime` and no variable kept \
+     between time points";
 /// The condition behind a runtime module's periodic noise, which
 /// [`cyclostationary_noise_gaps`] decides per instance from its artifact and
 /// the folding decides per process from its evaluation.
@@ -382,11 +384,13 @@ const GENERATED_VERILOGA_HB_RESIDUAL: &str = "a model whose generator proved its
      as an unknown of its own, no event operator and no variable the next evaluation reads \
      back";
 /// The condition behind the state shooting's period map carries for a
-/// generated compact model: the charges of F(x) + dQ(x)/dt and nothing else.
+/// generated compact model: the charges of F(x) + dQ(x)/dt, each `idt` it
+/// carries and each source branch's stored flux.
 const GENERATED_VERILOGA_PSS_STATE: &str = "a model whose generator proved its residual memoryless equations and `ddt` of the \
-     charges it contributes, F(x) + dQ(x)/dt, with no `ddt` or `idt` carried as an unknown \
-     of its own, no voltage contribution that stores flux at its parameters, no event \
-     operator and no variable the next evaluation reads back";
+     charges it contributes, F(x) + dQ(x)/dt, with each `idt` integrated from its initial \
+     condition and each voltage contribution that stores flux from its branch current, not \
+     both a `ddt` and an `idt` carried as unknowns of their own, no event operator and no \
+     variable the next evaluation reads back";
 /// One reason covers all six contracts for a mixed Verilog-AMS module, so it
 /// is stated once instead of six near-identical times.
 const MIXED_SIGNAL_INTERLEAVE: &str = "periodic steady state with running discrete state: a mixed Verilog-AMS module's \

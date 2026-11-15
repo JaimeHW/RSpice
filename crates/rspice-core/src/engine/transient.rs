@@ -3277,9 +3277,6 @@ impl Engine {
     /// mixed module's discrete state, which no periodic analysis can take part
     /// in yet — and then the gate's refusal, naming that instance, is the
     /// answer, where "no tone source" would name nothing the deck got wrong.
-    /// The gate asked is the structural one: a run's preparation asks this,
-    /// in the browser's UI thread too, and the analysis itself makes the
-    /// checks that evaluate a device before it solves.
     pub fn driven_pss_tone_sources(
         &self,
         netlist: &Netlist,
@@ -3288,7 +3285,7 @@ impl Engine {
         let circuit = engine.build_circuit_with_abort(netlist, &NoAbort)?;
         let names = Self::elaborated_transient_source_names(&circuit);
         if names.is_empty() {
-            Self::ensure_structural_analysis_capability(&circuit, super::CapabilityAnalysis::Pss)?;
+            Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Pss)?;
         }
         Ok(names)
     }
