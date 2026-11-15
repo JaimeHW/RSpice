@@ -7,6 +7,7 @@
 use crate::feature_tests::design::symbol_actions_drawn::open_symbol;
 use crate::state::{Point, SymbolDocument, SymbolEditorMetadata, SymbolShape};
 use crate::workbench::app::*;
+use crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes;
 use egui::{Event, Pos2, Rect, TouchId, TouchPhase, Vec2};
 use rspice_schematic_editor::symbol_editor::SymbolViewport;
 use rspice_schematic_editor::symbol_editor::session::{SymbolSelection, SymbolTool};
@@ -204,6 +205,17 @@ impl Finger {
         self.settle();
         let at = self.expect(name).center();
         self.tap(at);
+    }
+
+    /// Two taps in quick succession: egui's double click.
+    fn double_tap(&mut self, pos: Pos2) {
+        self.settle();
+        self.down(pos);
+        self.up(pos);
+        self.down(pos);
+        self.up(pos);
+        self.frame(Vec::new());
+        self.frame(Vec::new());
     }
 
     /// A finger held still past egui's long-press time, then lifted.
@@ -603,6 +615,92 @@ fn a_pinch_zooms_the_symbol_about_the_point_between_the_fingers() {
     );
 }
 
+/// A symbol drawn, pinned, named, undone and saved on a tablet with nothing
+/// but a finger: every tool armed from the long-press menu, a line ended
+/// with a double tap, a polygon closed from the menu, a pin named on the
+/// on-screen keyboard, and the strip's Undo, Redo and Cancel.
+#[test]
+fn a_tablet_draws_a_symbol_by_finger_alone() {
+    let mut finger = Finger::with_body(Vec::new());
+    let project = ProjectFile::new();
+    assert!(
+        finger.app.state.save_project_to_path(&project.0),
+        "the project saves"
+    );
+    finger.settle();
+    let empty = finger.screen(Point::new(70, -70));
+    let shapes = |finger: &Finger| finger.document().body.len();
+
+    finger.long_press(empty);
+    finger.press("Draw rectangle");
+    finger.tap(finger.screen(Point::new(-30, -30)));
+    finger.tap(finger.screen(Point::new(30, 30)));
+    assert_eq!(shapes(&finger), 1, "two taps drew the rectangle");
+
+    finger.press("Cancel");
+    finger.long_press(empty);
+    finger.press("Draw circle");
+    finger.tap(finger.screen(Point::new(0, 0)));
+    finger.tap(finger.screen(Point::new(10, 0)));
+    assert_eq!(shapes(&finger), 2, "two taps drew the circle");
+
+    finger.press("Cancel");
+    finger.long_press(empty);
+    finger.press("Draw arc");
+    finger.tap(finger.screen(Point::new(0, 0)));
+    finger.tap(finger.screen(Point::new(20, 0)));
+    finger.tap(finger.screen(Point::new(0, 20)));
+    assert_eq!(shapes(&finger), 3, "three taps drew the arc");
+
+    finger.press("Cancel");
+    finger.long_press(empty);
+    finger.press("Draw line");
+    finger.tap(finger.screen(Point::new(-40, 40)));
+    finger.double_tap(finger.screen(Point::new(40, 40)));
+    assert_eq!(shapes(&finger), 4, "a double tap ended the line");
+
+    finger.press("Cancel");
+    finger.long_press(empty);
+    finger.press("Draw polygon");
+    for corner in [
+        Point::new(-10, -50),
+        Point::new(10, -50),
+        Point::new(0, -40),
+    ] {
+        finger.tap(finger.screen(corner));
+    }
+    finger.long_press(finger.screen(Point::new(60, -60)));
+    finger.press("Finish");
+    assert_eq!(shapes(&finger), 5, "the menu's Finish closed the polygon");
+    finger.press("Cancel");
+
+    finger.long_press(empty);
+    finger.press("Place pin");
+    finger.tap(finger.screen(Point::new(-60, 0)));
+    assert!(finger.typing, "the pin's name field holds the keyboard");
+    finger.type_on_screen("OUT");
+    assert!(
+        finger.document().pin("OUT").is_some(),
+        "the on-screen keyboard named the pin: {:?}",
+        finger.document().pins
+    );
+    finger.press("Cancel");
+
+    finger.press("Undo");
+    assert!(finger.document().pin("OUT").is_none());
+    finger.press("Redo");
+    assert!(finger.document().pin("OUT").is_some());
+
+    // The File menu's Save, on a project that has a file to save to.
+    assert!(has_unsaved_changes(&finger.app.state));
+    finger.press("File");
+    finger.press("Save");
+    assert!(
+        !has_unsaved_changes(&finger.app.state),
+        "the symbol was saved with the project"
+    );
+}
+
 /// The inspector's fields take a tap and the on-screen keyboard: a pin's
 /// name cleared and typed again as one word, the way a keyboard's
 /// suggestion sends it, renames the pin.
@@ -626,4 +724,28 @@ fn the_on_screen_keyboard_renames_a_pin_in_the_inspector() {
         "the pin took the typed name: {:?}",
         pins.iter().map(|pin| &pin.name).collect::<Vec<_>>()
     );
+}
+
+/// A project file in the temporary folder, removed with what saving it
+/// leaves beside it.
+struct ProjectFile(std::path::PathBuf);
+
+impl ProjectFile {
+    fn new() -> Self {
+        Self(std::env::temp_dir().join(format!(
+            "rspice-symbol-touch-{}-{}.rspiceproj",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        )))
+    }
+}
+
+impl Drop for ProjectFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(self.0.with_extension("rspiceproj.bak"));
+        let mut lock = self.0.as_os_str().to_os_string();
+        lock.push(".rspice.lock");
+        let _ = std::fs::remove_file(std::path::PathBuf::from(lock));
+    }
 }
