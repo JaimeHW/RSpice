@@ -571,8 +571,11 @@ jobs:
           >> "$GITHUB_OUTPUT"
       # x64 reads the per-push test-linux cache: the corpus runner's release
       # dependency set is the one test-linux builds for rspice-conformance's
-      # release suites (cargo tree: identical crates and features on every
-      # route). The two ARM64 routes build that same set and share one cache.
+      # release suites (cargo tree: the same crates and features with or
+      # without veriloga-native); only the worker's wasm image builds its own.
+      # The two ARM64 routes build that set too and share one cache. This job
+      # only builds, so it saves on success alone: a failed build would store
+      # a partial set that the next runs restore without replacing.
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           shared-key: ${{ matrix.os == 'ubuntu-24.04-arm' && 'mixed-corpus' || 'test-linux' }}-${{ steps.deps.outputs.digest }}
