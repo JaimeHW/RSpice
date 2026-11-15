@@ -1142,8 +1142,8 @@
           "reference_captures": 0
         },
         "execution_paranoia": {
-          "decks": 200,
-          "reference_captures": 138
+          "decks": 194,
+          "reference_captures": 136
         },
         "gf180mcu": {
           "decks": 828,
