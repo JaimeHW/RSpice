@@ -8478,10 +8478,7 @@ impl Engine {
                         .map_err(SimulationError::Circuit)?;
                     bjt.validate_legacy_excess_phase()
                         .map_err(SimulationError::Circuit)?;
-                    bjt.refresh_noise_temperature_offset(
-                        self.config.temperature,
-                        netlist.options.tnom.unwrap_or(27.0),
-                    );
+                    bjt.refresh_noise_temperature_offset(self.config.temperature);
                     let three_terminal_vbic = bjt.uses_three_terminal_vbic();
                     if three_terminal_vbic && element.nodes.len() > 4 {
                         return Err(SimulationError::Circuit(format!(

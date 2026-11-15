@@ -2686,10 +2686,11 @@ impl Bjt {
 
     /// Resolve the thermal-noise temperature offset, bjtnoise.c/vbicnoise.c
     /// semantics: DTEMP directly, or with an absolute instance TEMP given,
-    /// temp − CKTtemp + tnom in Celsius terms (ngspice's quirk, mirrored).
-    pub fn refresh_noise_temperature_offset(&mut self, analysis_temp_k: Value, tnom_c: Value) {
+    /// `TEMP − CKTtemp`, so the parasitic resistances run at the instance
+    /// temperature itself (ngspice-47 and pre-master-48 both measure this).
+    pub fn refresh_noise_temperature_offset(&mut self, analysis_temp_k: Value) {
         self.noise_temperature_offset = match self.instance_temp {
-            Some(temp_k) => temp_k - analysis_temp_k + tnom_c,
+            Some(temp_k) => temp_k - analysis_temp_k,
             None => self.instance_dtemp,
         };
     }
@@ -3894,6 +3895,26 @@ mod tests {
             let bjt = bjt.with_instance_params(&params);
             assert_eq!(bjt.requested_temperature().to_bits(), expected.to_bits());
         }
+    }
+
+    /// The parasitic-resistance thermal sources run at the instance
+    /// temperature: `TEMP − CKTtemp` with TEMP given, DTEMP otherwise. With
+    /// TEMP=77 at 27 C, ngspice-47 and pre-master-48 report RB thermal noise
+    /// at 350.15 K (Gummel-Poon and VBIC LEVEL=4 alike), not 27 K hotter.
+    #[test]
+    fn noise_temperature_offset_lands_on_the_instance_temperature() {
+        let ambient = crate::constants::celsius_to_kelvin(27.0);
+        let mut bjt = model_with(&[]);
+        bjt.set_temperature(ambient);
+        let mut bjt = bjt.with_instance_params(&[("TEMP".to_string(), 77.0)]);
+        bjt.refresh_noise_temperature_offset(ambient);
+        assert!((bjt.noise_temperature_offset - 50.0).abs() < 1e-9);
+
+        let mut bjt = model_with(&[]);
+        bjt.set_temperature(ambient);
+        let mut bjt = bjt.with_instance_params(&[("DTEMP".to_string(), 20.0)]);
+        bjt.refresh_noise_temperature_offset(ambient);
+        assert_eq!(bjt.noise_temperature_offset, 20.0);
     }
 
     #[test]

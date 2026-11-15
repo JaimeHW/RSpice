@@ -8129,6 +8129,61 @@ Q1 C B E 0 N1 M=3
         assert_ne!(flicker.node_neg, bjt.node_emitter);
     }
 
+    /// An instance `TEMP=77` at 27 C runs the parasitic base resistance's
+    /// thermal source at 350.15 K, the instance temperature. The references
+    /// are the RB densities at 1 kHz (V/sqrt(Hz)) for these two decks: for
+    /// Gummel-Poon QSPICE's `V(onoise_q1.rb)` (8.935797e-8; LTspice 26.1.1
+    /// 8.935627e-8, ngspice-47 8.935851e-8), for VBIC LEVEL=4 LTspice's
+    /// `v(Q1.rb)` (9.125759e-8; ngspice-47 9.125753e-8; QSPICE's VBIC has no
+    /// noise). A source 27 K too hot reads sqrt(377.15/350.15) = 3.8 percent
+    /// high.
+    #[test]
+    fn bjt_instance_temp_sets_the_parasitic_thermal_noise_temperature() {
+        let cases = [
+            (
+                "* Gummel-Poon instance TEMP\nVcc vcc 0 5\nRc vcc c 2k\nVb bb 0 DC 0.72 AC 1\n\
+                 Rb bb b 100\nQ1 c b 0 qn TEMP=77\n\
+                 .model qn NPN(IS=1e-16 BF=100 RB=100 RC=10 RE=5 TRB1=0 TRC1=0 TRE1=0)\n\
+                 .noise v(c) Vb lin 1 1k 1k\n.end\n",
+                "DNO(q1,rb)",
+                8.935797e-8,
+            ),
+            (
+                "* VBIC LEVEL=4 instance TEMP\nVcc vcc 0 5\nRc vcc c 2k\nVb bb 0 DC 0.72 AC 1\n\
+                 Rb bb b 100\nQ1 c b 0 0 qv TEMP=77\n\
+                 .model qv NPN(LEVEL=4 IS=1e-16 IBEI=1e-18 NEI=1 IBCI=1e-17 NCI=1 RCX=10 \
+                 RCI=10 RBX=100 RBI=20 RE=5 RBP=100 RS=0 ISP=0 IBEIP=0 CJE=0 CJC=0 KFN=0 \
+                 XRBX=0 XRBI=0 XRE=0 XRCX=0 XRCI=0)\n\
+                 .noise v(c) Vb lin 1 1k 1k\n.end\n",
+                "DNO(q1,rbx)",
+                9.125759e-8,
+            ),
+        ];
+        for (deck, probe, reference) in cases {
+            let netlist = Netlist::parse(deck).expect("deck parses");
+            let engine = Engine::default().resolved_for_netlist(&netlist);
+            let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+            let output = circuit.get_node_by_name("c").expect("output node");
+            let result = engine
+                .run_noise_with_input_source(&netlist, output, None, "Vb", &[1.0e3], 300.15)
+                .expect("noise analysis runs")
+                .into_iter()
+                .next()
+                .expect("one noise point");
+            let parsed =
+                crate::analysis::NoiseContributionProbe::parse(probe).expect("probe parses");
+            let density = result
+                .contribution(&parsed)
+                .expect("mechanism is valid")
+                .sqrt();
+            let relative = (density - reference).abs() / reference;
+            assert!(
+                relative < 1e-4,
+                "{probe}: ours {density:.6e} vs oracle {reference:.6e} (rel {relative:.3e})"
+            );
+        }
+    }
+
     /// A self-heated LEVEL=4 VBIC runs its parasitic-resistance thermal
     /// sources at the junction temperature, ambient plus the thermal node's
     /// rise, as vbicnoise.c does since ngspice commit 5c4e9ab1d (ngspice-47
