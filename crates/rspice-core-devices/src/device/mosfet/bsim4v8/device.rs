@@ -2415,6 +2415,51 @@ mod tests {
         assert_eq!(device.limited_branch_voltages(&iterate).0, once);
     }
 
+    /// The charge state of a device that takes every iterate unlimited: the
+    /// physical equations at the solution itself.
+    fn charge_at_the_solution(iterate: &[Value]) -> String {
+        let mut unlimited = nmos();
+        unlimited.set_voltage_limiting_enabled(false);
+        unlimited.update(iterate);
+        format!("{:?}", unlimited.charge_at(iterate))
+    }
+
+    /// A converged iterate no limiter touches is evaluated at the solution
+    /// exactly, so the acceptance proof's probe there is the update's own
+    /// evaluation. 0.93 - (0.93 - 0.41) rounds, which is the b4ld.c rebuild
+    /// this iterate would otherwise be evaluated at.
+    #[test]
+    fn an_untouched_iterate_is_evaluated_at_the_solution() {
+        let mut device = nmos();
+        device.update(&[0.40, 0.92]);
+        let _ = device.charge_at(&[0.40, 0.92]);
+        device.stamp_nonlinear(&[0.40, 0.92], &mut NoStamp, &mut []);
+        let iterate = [0.41, 0.93];
+        assert_ne!(0.93 - (0.93 - 0.41), 0.41);
+
+        device.update(&iterate);
+        assert_eq!(device.bias, device.raw_branch_voltages(&iterate));
+        assert!(!device.last_limited.get());
+        let probe = format!("{:?}", device.charge_at_with_probe(&iterate, true));
+        assert_eq!(probe, format!("{:?}", device.charge_at(&iterate)));
+        assert_eq!(probe, charge_at_the_solution(&iterate));
+    }
+
+    /// A limited iterate is not the solution, and the proof's probe still
+    /// evaluates the solution rather than reusing the limited evaluation.
+    #[test]
+    fn a_limited_iterate_is_still_probed_at_the_solution() {
+        let mut device = nmos();
+        device.update(&[0.0, 0.0]);
+        let iterate = [0.05, 4.0];
+        device.update(&iterate);
+        assert_ne!(device.bias, device.raw_branch_voltages(&iterate));
+
+        let probe = format!("{:?}", device.charge_at_with_probe(&iterate, true));
+        assert_eq!(probe, charge_at_the_solution(&iterate));
+        assert_ne!(probe, format!("{:?}", device.charge_at(&iterate)));
+    }
+
     /// A Newton solve can return the voltages it was linearised at (every
     /// terminal pinned by a source, or an iterate projected back to the same
     /// point). After the load the next update is the next iteration and

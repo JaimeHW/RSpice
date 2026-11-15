@@ -1466,6 +1466,138 @@ fn limiting_follows_b4ld_sequence() {
     assert!((lim.vds - 0.01).abs() < 1e-15 && (lim.vgs - 0.02).abs() < 1e-15);
 }
 
+/// b4ld.c's own arithmetic: the voltages each limiter did not change are
+/// rebuilt by subtraction, so they come back only up to rounding.
+fn b4ld_limit_voltages(
+    dev: &Bsim4v8,
+    new: Bsim4v8Bias,
+    old: Bsim4v8Bias,
+    von: Value,
+) -> Bsim4v8Bias {
+    use crate::device::mosfet::{dev_fetlim, dev_limvds};
+    let (mut vgs, mut vds) = (new.vgs, new.vds);
+    let vgd = vgs - vds;
+    if old.vds >= 0.0 {
+        vgs = dev_fetlim(vgs, old.vgs, von);
+        vds = dev_limvds(vgs - vgd, old.vds);
+    } else {
+        let vgd = dev_fetlim(vgd, old.vgs - old.vds, von);
+        vds = -dev_limvds(-(vgs - vgd), -old.vds);
+        vgs = vgd + vds;
+    }
+    let mut check = false;
+    let vt = common::CONST_VT0;
+    let vcrit = dev.model_temp.vcrit;
+    let vbs = if vds >= 0.0 {
+        pnjlim(new.vbs, old.vbs, vt, vcrit, &mut check)
+    } else {
+        pnjlim(new.vbs - vds, old.vbs - old.vds, vt, vcrit, &mut check) + vds
+    };
+    Bsim4v8Bias { vds, vgs, vbs }
+}
+
+/// An iterate no limiter touches is the solution itself, bit for bit, in
+/// both channel orientations, including the iterates whose b4ld.c rebuild
+/// rounds; the acceptance proof's evaluation at the solution is then the
+/// one the instance already holds.
+#[test]
+fn limiting_passes_untouched_voltages_through_exactly() {
+    let dev = nmos_device(1e-6, 0.1e-6, 1.0, T300);
+    let mut rounded = 0;
+    for &(vds0, vgs0) in &[(0.40, 0.92), (0.05, 0.6), (-0.29, 0.69), (-0.6, 0.3)] {
+        let old = Bsim4v8Bias {
+            vds: vds0,
+            vgs: vgs0,
+            vbs: -0.1,
+        };
+        for step in 1..=40 {
+            let delta = 1.0e-3 * step as Value;
+            let new = Bsim4v8Bias {
+                vds: vds0 - 0.37 * delta * vds0.signum(),
+                vgs: vgs0 + delta,
+                vbs: -0.1 + 0.25 * delta,
+            };
+            let (lim, check) = dev.limit_voltages(new, old, 0.35);
+            assert!(!check);
+            assert_eq!(lim, new, "an untouched iterate from {old:?}");
+            if b4ld_limit_voltages(&dev, new, old, 0.35) != new {
+                rounded += 1;
+            }
+        }
+    }
+    assert!(
+        rounded > 0,
+        "the sweep must include iterates whose b4ld.c rebuild rounds"
+    );
+}
+
+/// Where a limiter acts, the result is b4ld.c's to the last bit: the exact
+/// pass-through never stands in for a limited voltage.
+#[test]
+fn limited_voltages_keep_the_b4ld_arithmetic() {
+    let dev = nmos_device(1e-6, 0.1e-6, 1.0, T300);
+    // Dyadic voltages, so the voltages no limiter changes rebuild exactly
+    // and b4ld.c's whole result is the reference.
+    let cases = [
+        // DEVfetlim holds a 4 V gate step out of cutoff near threshold.
+        (
+            Bsim4v8Bias {
+                vds: 0.0625,
+                vgs: 4.0,
+                vbs: 0.0,
+            },
+            Bsim4v8Bias {
+                vds: 0.0,
+                vgs: 0.0,
+                vbs: 0.0,
+            },
+        ),
+        // The same step in inverse mode limits vgd.
+        (
+            Bsim4v8Bias {
+                vds: -0.0625,
+                vgs: 4.0,
+                vbs: 0.0,
+            },
+            Bsim4v8Bias {
+                vds: -0.125,
+                vgs: 0.0,
+                vbs: 0.0,
+            },
+        ),
+        // DEVpnjlim clips a forward body jump in each orientation.
+        (
+            Bsim4v8Bias {
+                vds: 0.125,
+                vgs: 0.5,
+                vbs: 5.0,
+            },
+            Bsim4v8Bias {
+                vds: 0.125,
+                vgs: 0.5,
+                vbs: 0.0,
+            },
+        ),
+        (
+            Bsim4v8Bias {
+                vds: -0.125,
+                vgs: 0.5,
+                vbs: 5.0,
+            },
+            Bsim4v8Bias {
+                vds: -0.125,
+                vgs: 0.5,
+                vbs: 0.0,
+            },
+        ),
+    ];
+    for (new, old) in cases {
+        let (lim, _) = dev.limit_voltages(new, old, 0.35);
+        assert_ne!(lim, new, "the case must engage a limiter: {new:?}");
+        assert_eq!(lim, b4ld_limit_voltages(&dev, new, old, 0.35), "{new:?}");
+    }
+}
+
 #[test]
 fn pmos_polarity_mirrors_nmos_conventions() {
     let dev = pmos_device(1e-6, 90e-9, T300);

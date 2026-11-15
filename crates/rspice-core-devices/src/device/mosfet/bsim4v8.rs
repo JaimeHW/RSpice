@@ -383,51 +383,68 @@ impl Bsim4v8 {
     /// `von_prev` is the previous iterate's threshold (`here->BSIM4von`,
     /// 0 before the first evaluation). Returns the limited bias and the
     /// `Check` flag from `DEVpnjlim` (ngspice bumps `CKTnoncon` when set).
+    ///
+    /// b4ld.c rebuilds vds from the limited vgs (vgd in inverse mode) by
+    /// subtraction, and vgs and vbs likewise, which hands back a voltage no
+    /// limiter changed only up to rounding. Here a limiter that leaves its
+    /// argument unchanged passes the solved voltage through exactly, so an
+    /// iterate no limiter touches is evaluated at the solution itself: the
+    /// bias the transient acceptance proof evaluates, which then reuses
+    /// that evaluation instead of repeating it.
     pub fn limit_voltages(
         &self,
         new: Bsim4v8Bias,
         old: Bsim4v8Bias,
         von_prev: Value,
     ) -> (Bsim4v8Bias, bool) {
-        let mut vgs = new.vgs;
-        let mut vds = new.vds;
-        let mut vbs = new.vbs;
-        let mut vgd = vgs - vds;
+        let vgd = new.vgs - new.vds;
         let vgdo = old.vgs - old.vds;
 
-        if old.vds >= 0.0 {
-            vgs = super::dev_fetlim(vgs, old.vgs, von_prev);
-            vds = vgs - vgd;
-            vds = super::dev_limvds(vds, old.vds);
-            vgd = vgs - vds;
-            let _ = vgd;
+        let (vgs, vds) = if old.vds >= 0.0 {
+            let vgs = super::dev_fetlim(new.vgs, old.vgs, von_prev);
+            let vds = if vgs == new.vgs { new.vds } else { vgs - vgd };
+            (vgs, super::dev_limvds(vds, old.vds))
         } else {
-            vgd = super::dev_fetlim(vgd, vgdo, von_prev);
-            vds = vgs - vgd;
-            vds = -super::dev_limvds(-vds, -old.vds);
-            vgs = vgd + vds;
-        }
+            let limited_vgd = super::dev_fetlim(vgd, vgdo, von_prev);
+            let vds = if limited_vgd == vgd {
+                new.vds
+            } else {
+                new.vgs - limited_vgd
+            };
+            let vds = -super::dev_limvds(-vds, -old.vds);
+            let vgs = if limited_vgd == vgd && vds == new.vds {
+                new.vgs
+            } else {
+                limited_vgd + vds
+            };
+            (vgs, vds)
+        };
 
         let mut check = false;
-        if vds >= 0.0 {
-            vbs = pnjlim(
-                vbs,
+        let vbs = if vds >= 0.0 {
+            pnjlim(
+                new.vbs,
                 old.vbs,
                 common::CONST_VT0,
                 self.model_temp.vcrit,
                 &mut check,
-            );
+            )
         } else {
             let vbd_old = old.vbs - old.vds;
-            let vbd = pnjlim(
-                vbs - vds,
+            let vbd = new.vbs - vds;
+            let limited_vbd = pnjlim(
+                vbd,
                 vbd_old,
                 common::CONST_VT0,
                 self.model_temp.vcrit,
                 &mut check,
             );
-            vbs = vbd + vds;
-        }
+            if limited_vbd == vbd {
+                new.vbs
+            } else {
+                limited_vbd + vds
+            }
+        };
 
         (Bsim4v8Bias { vds, vgs, vbs }, check)
     }
