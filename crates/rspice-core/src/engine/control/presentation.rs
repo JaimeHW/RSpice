@@ -606,7 +606,11 @@ impl ControlCircuit {
                 format!("i({name})"),
                 SignalUnit::Ampere,
             )
-        } else if probe.is_none() && lower == dataset.scale_name() {
+        } else if probe.is_none()
+            && (lower == dataset.scale_name() || lower == wrdata::plot_scale_name(dataset))
+        {
+            // A DC sweep's scale also answers to the name ngspice gives it,
+            // `v-sweep`, `temp-sweep` and so on (dctrcurv.c:181).
             (Column::Scale, lower, dataset.scale_unit())
         } else if probe.is_none()
             && let ControlAnalysisResult::DcSweep(result) = &dataset.result
