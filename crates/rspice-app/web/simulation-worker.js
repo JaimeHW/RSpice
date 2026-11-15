@@ -25,7 +25,7 @@ let workerModule = null;
 const wasmJitModelCache = new Map();
 const WASM_JIT_CACHE_MAX_MODELS = 64;
 const WASM_JIT_CACHE_MAX_BYTES = 64 * 1024 * 1024;
-const WASM_JIT_MODEL_MAX_BYTES = 32 * 1024 * 1024;
+const WASM_JIT_MODEL_MAX_BYTES = 1024 * 1024 * 1024;
 const WASM_JIT_IDENTITY = /^[0-9a-f]{64}$/;
 // Raw WebAssembly exports of the primary module, bound straight into every
 // generated module. Passing the wasm-bindgen JavaScript wrappers instead would

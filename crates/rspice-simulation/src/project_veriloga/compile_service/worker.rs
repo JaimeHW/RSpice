@@ -19,7 +19,6 @@ use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 /// 4: a request carries the min:typ:max selection the design is compiled
 ///    under when that is not `typ`.
 const VERILOGA_WORKER_PROTOCOL_VERSION: u32 = 4;
-const MAX_VERILOGA_WORKER_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -119,7 +118,6 @@ impl VerilogAWorkerResponse {
             wasm_jit_artifact,
             wasm_jit_error,
         };
-        response.validate_transfer_size()?;
         Ok(response)
     }
 
@@ -141,20 +139,7 @@ impl VerilogAWorkerResponse {
                 format!("Verilog-A worker returned an invalid runtime artifact: {error}")
             })?;
         }
-        self.validate_transfer_size()?;
         Ok(self.outcome)
-    }
-
-    fn validate_transfer_size(&self) -> Result<(), String> {
-        let bytes = serde_json::to_vec(self)
-            .map_err(|error| format!("Could not encode Verilog-A worker response: {error}"))?;
-        if bytes.len() > MAX_VERILOGA_WORKER_RESPONSE_BYTES {
-            return Err(format!(
-                "Verilog-A worker response exceeds the {}-byte transfer limit.",
-                MAX_VERILOGA_WORKER_RESPONSE_BYTES
-            ));
-        }
-        Ok(())
     }
 }
 

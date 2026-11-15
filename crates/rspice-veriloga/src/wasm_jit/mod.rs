@@ -165,8 +165,11 @@ pub const WASM_JIT_ABI_VERSION: u32 = 20;
 /// spills to mutable globals past the engines' locals limit.
 pub const WASM_JIT_EMITTER_VERSION: u32 = 61;
 
-/// Hard ceiling for one qualified shipped model's generated module.
-pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
+/// The largest module the browsers compile: the WebAssembly JavaScript API's
+/// implementation limit (<https://webassembly.github.io/spec/js-api/#limits>),
+/// which V8, SpiderMonkey and JavaScriptCore enforce. A larger module could not
+/// run, so the compiler refuses it here rather than in the worker.
+pub const WASM_JIT_MAX_MODULE_BYTES: usize = 1024 * 1024 * 1024;
 
 /// Maximum allowed size of the architecture probe. A larger probe indicates
 /// accidental dependency/code inclusion and fails before reaching a browser.

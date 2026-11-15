@@ -290,10 +290,10 @@ pub(crate) fn verify_value_program_set(
     bytes: &[u8],
     expected_programs: &[PlanProgramRef<'_>],
 ) -> WasmJitResult<()> {
-    if bytes.len() > super::SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES {
+    if bytes.len() > super::WASM_JIT_MAX_MODULE_BYTES {
         return Err(WasmJitError::ArtifactTooLarge {
             actual: bytes.len(),
-            limit: super::SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES,
+            limit: super::WASM_JIT_MAX_MODULE_BYTES,
         });
     }
     Validator::new()
@@ -317,10 +317,10 @@ fn verify_model_module(
     kernels: &[WasmAssignmentKernel],
     fused: &[WasmFusedKernel],
 ) -> WasmJitResult<()> {
-    if bytes.len() > super::SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES {
+    if bytes.len() > super::WASM_JIT_MAX_MODULE_BYTES {
         return Err(WasmJitError::ArtifactTooLarge {
             actual: bytes.len(),
-            limit: super::SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES,
+            limit: super::WASM_JIT_MAX_MODULE_BYTES,
         });
     }
     Validator::new()
@@ -1371,10 +1371,10 @@ pub(crate) fn verify_value_program(
     bytes: &[u8],
     expected_program: &NativeProgram,
 ) -> WasmJitResult<()> {
-    if bytes.len() > super::SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES {
+    if bytes.len() > super::WASM_JIT_MAX_MODULE_BYTES {
         return Err(WasmJitError::ArtifactTooLarge {
             actual: bytes.len(),
-            limit: super::SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES,
+            limit: super::WASM_JIT_MAX_MODULE_BYTES,
         });
     }
     Validator::new()
@@ -1390,6 +1390,12 @@ pub(crate) fn verify_value_program(
 
     verify_value_module_shape(bytes, 1, &[], &[], true)
 }
+
+/// The largest function body the browsers compile: the WebAssembly JavaScript
+/// API's implementation limit (<https://webassembly.github.io/spec/js-api/#limits>).
+/// The module validator's own limit is far higher, so a body past this one
+/// would validate here and fail in the worker.
+const MAX_FUNCTION_BODY_BYTES: u64 = 7_654_321;
 
 fn verify_value_module_shape(
     bytes: &[u8],
@@ -1601,7 +1607,17 @@ fn verify_value_module_shape(
                     ));
                 }
             }
-            Payload::CodeSectionEntry(_) => code_bodies += 1,
+            Payload::CodeSectionEntry(body) => {
+                code_bodies += 1;
+                let range = body.range();
+                let size = range.end - range.start;
+                if size > MAX_FUNCTION_BODY_BYTES {
+                    return Err(WasmJitError::Encoding(format!(
+                        "a function body is {size} bytes, past the {MAX_FUNCTION_BODY_BYTES} bytes \
+                         browsers compile in one function"
+                    )));
+                }
+            }
             // The locals a value entry spilled past the engines' limit: each
             // mutable, numeric and starting at zero, and never exported.
             Payload::GlobalSection(reader) => {
@@ -4292,7 +4308,7 @@ endmodule
             );
             let module = emit_verified_value_program(&program)
                 .unwrap_or_else(|error| panic!("missing WASM translation for {op:?}: {error}"));
-            assert!(module.len() <= super::super::SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES);
+            assert!(module.len() <= super::super::WASM_JIT_MAX_MODULE_BYTES);
         }
     }
 
