@@ -792,28 +792,40 @@ fn parse_netlist_impl(
     let body_start = usize::from(implicit_title.is_none());
     let xyce_syntax = options.expression_dialect == ExpressionDialect::Xyce;
     let allow_non_semicolon_comments = !xyce_syntax;
-    let preprocess = prescan_root_preprocess_with_dialect(
-        &original_lines,
-        source_schedule.as_ref(),
-        body_start,
-        allow_non_semicolon_comments,
-        xyce_syntax,
-        abort,
-    )?;
-    let transformed_input = apply_root_preprocessing(
-        input,
-        &original_lines,
-        source_schedule.as_ref(),
-        body_start,
-        RootPreprocessingPolicy {
-            replace_ground: preprocess.replace_ground == Some(true),
+    // A source that never spells `.PREPROCESS` selects no root policy and
+    // holds no card to rewrite or drop, and without a carriage return its
+    // lines rejoin as its own text: it is read as written.
+    let read_as_written =
+        !input.as_bytes().contains(&b'\r') && !spells_ignoring_ascii_case(input, b".preprocess");
+    let (preprocess, transformed_input) = if read_as_written {
+        (RootPreprocessPolicy::default(), None)
+    } else {
+        let preprocess = prescan_root_preprocess_with_dialect(
+            &original_lines,
+            source_schedule.as_ref(),
+            body_start,
             allow_non_semicolon_comments,
             xyce_syntax,
-        },
-        abort,
-    )?;
-    let parse_input = transformed_input.as_str();
-    let lines = parse_input.lines().collect::<Vec<_>>();
+            abort,
+        )?;
+        let transformed = apply_root_preprocessing(
+            input,
+            &original_lines,
+            source_schedule.as_ref(),
+            body_start,
+            RootPreprocessingPolicy {
+                replace_ground: preprocess.replace_ground == Some(true),
+                allow_non_semicolon_comments,
+                xyce_syntax,
+            },
+            abort,
+        )?;
+        (preprocess, Some(transformed))
+    };
+    let lines = match &transformed_input {
+        Some(transformed) => transformed.lines().collect::<Vec<_>>(),
+        None => original_lines,
+    };
 
     // SPICE consumes the first physical record as a mandatory title. Native
     // Spectre roots have no title card, so their file-backed expansion carries
@@ -2386,6 +2398,20 @@ struct RootPreprocessPolicy {
     remove_unused: Option<RemoveUnusedPolicy>,
     add_resistors: Option<XyceAddResistorsPolicy>,
     add_resistors_extra_lines: Vec<usize>,
+}
+
+/// Whether `text` spells `word` anywhere, in any ASCII case.
+pub(crate) fn spells_ignoring_ascii_case(text: &str, word: &[u8]) -> bool {
+    let bytes = text.as_bytes();
+    let Some(first) = word.first() else {
+        return true;
+    };
+    bytes.iter().enumerate().any(|(start, byte)| {
+        byte.eq_ignore_ascii_case(first)
+            && bytes
+                .get(start..start + word.len())
+                .is_some_and(|window| window.eq_ignore_ascii_case(word))
+    })
 }
 
 fn prescan_root_preprocess_with_dialect(
