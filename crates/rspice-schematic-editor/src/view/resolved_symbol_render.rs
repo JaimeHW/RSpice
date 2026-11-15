@@ -1066,7 +1066,10 @@ mod tests {
             rspice_design::schematic::drawing_metrics::SYMBOL_BACKGROUND_TINT,
         );
         let inside = egui::Rect::from_center_size(pos2(100.0, 200.0), egui::vec2(8.0, 8.0));
-        assert!(canvas.pixels_in(inside).count() > 0, "the probe fell off the canvas");
+        assert!(
+            canvas.pixels_in(inside).count() > 0,
+            "the probe fell off the canvas"
+        );
         assert!(
             canvas.pixels_in(inside).all(|pixel| pixel == tint),
             "the inside is not a tint of the outline's ink"

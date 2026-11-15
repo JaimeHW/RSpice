@@ -373,7 +373,10 @@ mod tests {
                     .zip(expected)
                     .all(|(drawn, expected)| (drawn - expected).abs() < 1e-4)
         };
-        assert!(near(dash_array(&stroke(Some([1, 1249])), 0.01), [2.51, 9.99]));
+        assert!(near(
+            dash_array(&stroke(Some([1, 1249])), 0.01),
+            [2.51, 9.99]
+        ));
         assert!(near(dash_array(&stroke(None), 0.01), [2.5, 7.5]));
     }
 

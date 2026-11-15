@@ -1541,9 +1541,9 @@ mod tests {
             .primitives()
             .iter()
             .filter_map(|primitive| match primitive {
-                ScenePrimitive::Polyline { stroke: printed, .. } => {
-                    Some((printed.exact_dash_um(), stroke(printed)))
-                }
+                ScenePrimitive::Polyline {
+                    stroke: printed, ..
+                } => Some((printed.exact_dash_um(), stroke(printed))),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1554,7 +1554,10 @@ mod tests {
                 .all(|(printed, published)| published.dash_um == *printed)
         );
         assert_eq!(published[0].1.dash_um, None, "a whole line has no pattern");
-        let [dash, gap] = published[1].1.dash_um.expect("a dashed line keeps its dash");
+        let [dash, gap] = published[1]
+            .1
+            .dash_um
+            .expect("a dashed line keeps its dash");
         assert!(dash > 1 && gap > 1, "{dash} {gap}");
         let [dot, _] = published[2].1.dash_um.expect("a dotted line keeps its dot");
         assert_eq!(dot, 1, "a dot is a round-capped dash of next to nothing");

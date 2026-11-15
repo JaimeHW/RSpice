@@ -532,12 +532,10 @@ pub(super) fn write_svg_fill(output: &mut String, plan: &HardcopyPlan, fill: Opt
             svg_color(resolve_color(plan, color))
         )
         .expect("write to string"),
-        Some(SceneFill::Tint { color }) => write!(
-            output,
-            " fill=\"{}\"",
-            svg_color(resolve_tint(plan, color))
-        )
-        .expect("write to string"),
+        Some(SceneFill::Tint { color }) => {
+            write!(output, " fill=\"{}\"", svg_color(resolve_tint(plan, color)))
+                .expect("write to string")
+        }
         Some(fill @ SceneFill::CrossHatch { .. }) => {
             write!(output, " fill=\"url(#{})\"", hatch_pattern_id(fill)).expect("write to string")
         }
