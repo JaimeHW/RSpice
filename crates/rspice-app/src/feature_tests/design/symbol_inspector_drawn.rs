@@ -538,6 +538,14 @@ fn a_style_row_restyles_every_selected_shape_as_one_undo_step() {
             .iter()
             .all(|style| style.fill == SymbolFill::None && style.dash == SymbolDash::Dotted)
     );
+
+    // A background is the third way to fill: a light shade under a body.
+    pick(&mut editor, "Fill", "background");
+    assert!(
+        styles(&editor)
+            .iter()
+            .all(|style| style.fill == SymbolFill::Background)
+    );
 }
 
 /// The Rotation row turns a selected text run to read upward, as one undo

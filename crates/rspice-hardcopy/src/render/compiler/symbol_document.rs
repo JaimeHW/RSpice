@@ -102,19 +102,30 @@ impl SemanticSceneCompiler<'_> {
             }
         };
         let convert = |this: &Self, point: SchematicPoint| this.schematic_point(world(point));
-        for shape in &symbol.body {
+        // A shaded shape prints first, so its tint lies under every other
+        // line, pin and run of lettering, as the canvas lays it.
+        let shaded = |shape: &&SymbolShape| shape.fill() == SymbolFill::Background;
+        for shape in symbol
+            .body
+            .iter()
+            .filter(shaded)
+            .chain(symbol.body.iter().filter(|shape| !shaded(shape)))
+        {
             let style = shape.style().unwrap_or_default();
             let stroke = styled_print_stroke(body_stroke, style);
-            // The inside takes the outline's ink, through the same mapping a
-            // printed dot's does.
-            let fill = if shape.is_filled() {
-                self.mapped_fill(
+            // A solid inside takes the outline's ink, through the same
+            // mapping a printed dot's does; a background takes a light tint
+            // of that ink, which the page's palette resolves.
+            let fill = match shape.fill() {
+                SymbolFill::None => None,
+                SymbolFill::Background => Some(SceneFill::Tint {
+                    color: body_stroke.color,
+                }),
+                SymbolFill::Solid => self.mapped_fill(
                     PrintObjectKind::Layer,
                     body_stable_id,
                     Some(SceneFill::solid(body_stroke.color)),
-                )
-            } else {
-                None
+                ),
             };
             match shape {
                 SymbolShape::Polyline { points, closed, .. } => {

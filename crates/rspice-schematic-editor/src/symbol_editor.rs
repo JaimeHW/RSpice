@@ -17,7 +17,9 @@ use crate::view::navigation::{
     handle_viewport_navigation,
 };
 use crate::view::resolved_symbol_render::{draw_resolved_symbol, text_hang};
-use crate::view::symbol_style::{broken_outline, inside_outline, paint_fill, styled_stroke};
+use crate::view::symbol_style::{
+    broken_outline, inside_color, inside_outline, paint_fill, styled_stroke,
+};
 use egui::{Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2, pos2, vec2};
 use placement::SymbolPlacement;
 use rspice_design::{
@@ -698,7 +700,15 @@ fn draw_body(
     selected_shapes: &std::collections::BTreeSet<usize>,
     selected_color: Color32,
 ) {
-    for (index, shape) in document.body.iter().enumerate() {
+    let ground = Tokens::get(painter.ctx()).color.canvas_bg;
+    // A background lies under every other line, pin and run of lettering,
+    // as it does on a placed part and on paper.
+    let shaded = |index: &usize| document.body[*index].fill() == SymbolFill::Background;
+    let order = (0..document.body.len())
+        .filter(shaded)
+        .chain((0..document.body.len()).filter(|index| !shaded(index)));
+    for index in order {
+        let shape = &document.body[index];
         let is_selected = selected_shapes.contains(&index);
         let shape_color = if is_selected { selected_color } else { color };
         let style = shape.style().unwrap_or_default();
@@ -706,25 +716,26 @@ fn draw_body(
             Stroke::new(if is_selected { 2.0 } else { 1.3 }, shape_color),
             style,
         );
+        let inside = inside_color(shape.fill(), shape_color, ground);
         let screen = |point: Point| viewport.world_to_screen(point);
         match shape {
             SymbolShape::Polyline { points, .. } => {
                 let outline: Vec<Pos2> = points.iter().copied().map(screen).collect();
                 let closed = shape.is_closed();
                 if closed {
-                    paint_fill(painter, &outline, style, shape_color);
+                    paint_fill(painter, &outline, inside);
                 }
                 draw_outline(painter, &outline, closed, stroke, style, viewport.zoom);
             }
             SymbolShape::Rectangle { min, max, .. } => {
                 let outline = rectangle_corners(*min, *max).map(screen);
-                paint_fill(painter, &outline, style, shape_color);
+                paint_fill(painter, &outline, inside);
                 draw_outline(painter, &outline, true, stroke, style, viewport.zoom);
             }
             SymbolShape::Circle { center, radius, .. } => {
                 let (middle, reach) = (screen(*center), *radius as f32 * viewport.zoom);
-                if style.fill == SymbolFill::Solid {
-                    painter.circle_filled(middle, reach, shape_color);
+                if let Some(inside) = inside {
+                    painter.circle_filled(middle, reach, inside);
                 }
                 if style.dash == SymbolDash::Solid {
                     painter.circle_stroke(middle, reach, stroke);
@@ -1427,14 +1438,21 @@ pub fn hit_handle(
         .map(|(handle, _)| handle)
 }
 
+/// The shape a click at `pos` picks: the topmost the canvas draws there, so
+/// a background, drawn under everything else, is picked last.
 pub fn hit_shape(document: &SymbolDocument, viewport: SymbolViewport, pos: Pos2) -> Option<usize> {
-    document
-        .body
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, shape)| shape_hit(shape, viewport, pos))
-        .map(|(index, _)| index)
+    let shaded = |shape: &SymbolShape| shape.fill() == SymbolFill::Background;
+    let topmost = |under: bool| {
+        document
+            .body
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, shape)| shaded(shape) == under)
+            .find(|(_, shape)| shape_hit(shape, viewport, pos))
+            .map(|(index, _)| index)
+    };
+    topmost(false).or_else(|| topmost(true))
 }
 
 /// How far from a shape's outline a mouse still takes it, in points.

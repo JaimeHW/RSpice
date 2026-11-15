@@ -842,12 +842,24 @@ fn stroke(style: &StrokeStyle) -> Stroke {
     }
 }
 
-fn fill(value: &SceneFill) -> Paint {
+fn fill(value: &SceneFill) -> Option<Paint> {
     match value {
-        SceneFill::Solid { color } => paint(*color),
+        SceneFill::Solid { color } => Some(paint(*color)),
         // Cross-hatch is a print-redundancy affordance; the color page
         // carries the same information as a solid fill of the mapped color.
-        SceneFill::CrossHatch { color, .. } => paint(*color),
+        SceneFill::CrossHatch { color, .. } => Some(paint(*color)),
+        // A shaded body is its exact ink, a light share of it laid over
+        // whatever page the viewer shows. A role's ink is the viewer's own
+        // to choose, so it has no share to lay down and stays bare.
+        SceneFill::Tint { color } => match color {
+            SemanticColor::Exact(rgb) => {
+                let share = (f32::from(u8::MAX)
+                    * rspice_design::schematic::drawing_metrics::SYMBOL_BACKGROUND_TINT)
+                    .round() as u8;
+                Some(Paint::Rgba([rgb.red, rgb.green, rgb.blue, share]))
+            }
+            _ => None,
+        },
     }
 }
 
@@ -894,7 +906,7 @@ fn convert_primitive(
             out.push(Primitive::Path(PathPrimitive {
                 segments,
                 stroke: Some(stroke(style)),
-                fill: fill_style.as_ref().map(fill),
+                fill: fill_style.as_ref().and_then(fill),
             }));
         }
         ScenePrimitive::Rect {
@@ -937,7 +949,7 @@ fn convert_primitive(
                     PathSegment::Close,
                 ],
                 stroke: style.as_ref().map(stroke),
-                fill: fill_style.as_ref().map(fill),
+                fill: fill_style.as_ref().and_then(fill),
             }));
         }
         ScenePrimitive::Circle {
@@ -953,7 +965,7 @@ fn convert_primitive(
                 sweep_millideg: 360_000,
             }],
             stroke: style.as_ref().map(stroke),
-            fill: fill_style.as_ref().map(fill),
+            fill: fill_style.as_ref().and_then(fill),
         })),
         ScenePrimitive::Ellipse {
             center,

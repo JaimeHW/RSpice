@@ -319,6 +319,9 @@ pub(super) fn set_pdf_scene_fill(
         Some(SceneFill::Solid { color }) => {
             set_pdf_fill(surface, resolve_color(plan, color), NormalizedF32::ONE)
         }
+        Some(SceneFill::Tint { color }) => {
+            set_pdf_fill(surface, resolve_tint(plan, color), NormalizedF32::ONE)
+        }
         Some(SceneFill::CrossHatch { .. }) | None => surface.set_fill(None),
     }
 }

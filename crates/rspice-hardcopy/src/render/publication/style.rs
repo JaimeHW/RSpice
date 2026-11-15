@@ -231,6 +231,23 @@ pub(super) fn resolve_color(plan: &HardcopyPlan, color: SemanticColor) -> Rgb8 {
     }
 }
 
+/// A tint of `color` as the page prints it: the ink the palette gives the
+/// colour, laid over the page's background at the share of ink a shaded
+/// symbol body takes on the canvas. A transparent page tints over white.
+pub(super) fn resolve_tint(plan: &HardcopyPlan, color: SemanticColor) -> Rgb8 {
+    let ink = resolve_color(plan, color);
+    let paper = background_color(plan).unwrap_or(Rgb8::new(255, 255, 255));
+    let share = f64::from(rspice_design::schematic::drawing_metrics::SYMBOL_BACKGROUND_TINT);
+    let over = |paper: u8, ink: u8| {
+        (f64::from(paper) + (f64::from(ink) - f64::from(paper)) * share).round() as u8
+    };
+    Rgb8::new(
+        over(paper.red, ink.red),
+        over(paper.green, ink.green),
+        over(paper.blue, ink.blue),
+    )
+}
+
 pub(super) fn print_safe(color: Rgb8) -> Rgb8 {
     // Constrain saturated screen colors to a reproducible, contrast-safe sRGB
     // print palette. Exact black stays black; near-white ink is darkened.

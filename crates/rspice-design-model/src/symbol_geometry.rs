@@ -278,21 +278,28 @@ impl SymbolDash {
     }
 }
 
-/// Whether a closed shape's inside is painted in its outline's ink.
+/// How a closed shape's inside is painted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SymbolFill {
+    /// Left bare.
     #[default]
     None,
+    /// A light tint of the outline's ink, laid under every pin, name and
+    /// line of lettering: a body's shading.
+    Background,
+    /// The outline's ink itself: a mark, such as a filled dot, arrowhead or
+    /// triangle.
     Solid,
 }
 
 impl SymbolFill {
-    pub const ALL: [Self; 2] = [Self::None, Self::Solid];
+    pub const ALL: [Self; 3] = [Self::None, Self::Background, Self::Solid];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::None => "none",
+            Self::Background => "background",
             Self::Solid => "solid",
         }
     }
@@ -659,12 +666,18 @@ impl SymbolShape {
         }
     }
 
-    /// Whether the shape's inside is painted.
+    /// How the shape's inside is painted: bare for a shape with no inside,
+    /// whatever its style says.
+    pub fn fill(&self) -> SymbolFill {
+        match self.style() {
+            Some(style) if self.is_closed() => style.fill,
+            _ => SymbolFill::None,
+        }
+    }
+
+    /// Whether the shape's inside is painted, in a tint or in ink.
     pub fn is_filled(&self) -> bool {
-        self.is_closed()
-            && self
-                .style()
-                .is_some_and(|style| style.fill == SymbolFill::Solid)
+        self.fill() != SymbolFill::None
     }
 
     pub fn translate(&mut self, delta: Point) {
@@ -1473,5 +1486,37 @@ mod tests {
             assert_eq!(solid.style(), None);
             assert!(!solid.is_filled());
         }
+    }
+
+    /// A background fill is stored by name beside the others, and a shape
+    /// with no inside paints none of it.
+    #[test]
+    fn a_background_fill_is_stored_and_needs_an_inside() {
+        let mut shaded = SymbolShape::rectangle(Point::new(0, 0), Point::new(20, 10));
+        shaded.style_mut().unwrap().fill = SymbolFill::Background;
+        let written = serde_json::to_string(&shaded).unwrap();
+        assert!(
+            written.contains(r#""style":{"stroke":"normal","dash":"solid","fill":"background"}"#),
+            "{written}"
+        );
+        assert_eq!(
+            serde_json::from_str::<SymbolShape>(&written).unwrap(),
+            shaded
+        );
+        assert_eq!(shaded.fill(), SymbolFill::Background);
+        assert!(shaded.is_filled());
+        let mut arc = SymbolShape::Arc {
+            center: Point::new(5, 5),
+            radius: 4,
+            start_degrees: 0,
+            sweep_degrees: 90,
+            style: SymbolStyle::default(),
+        };
+        arc.style_mut().unwrap().fill = SymbolFill::Background;
+        assert_eq!(arc.fill(), SymbolFill::None);
+        assert_eq!(
+            SymbolFill::ALL.map(SymbolFill::label),
+            ["none", "background", "solid"]
+        );
     }
 }

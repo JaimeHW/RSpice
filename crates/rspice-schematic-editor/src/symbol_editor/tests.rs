@@ -625,3 +625,68 @@ fn the_canvas_draws_and_picks_a_shape_in_its_style() {
     );
     assert!(thin < normal && normal < heavy, "{thin} {normal} {heavy}");
 }
+
+/// A background tints its inside under every other shape, as a placed part
+/// and the page lay it, so a line kept before the shaded box still shows
+/// and a click on it picks the line, not the box over it in the list. A
+/// click anywhere else inside picks the box.
+#[test]
+fn a_background_lies_under_the_shapes_the_editor_draws_and_picks() {
+    use rspice_design::symbol::{SymbolFill, SymbolStyle};
+
+    let ink_color = Color32::from_rgb(255, 64, 64);
+    let viewport = SymbolViewport::new(
+        Rect::from_min_size(Pos2::ZERO, vec2(320.0, 320.0)),
+        4.0,
+        Vec2::ZERO,
+    );
+    // The inner box's top edge runs along y 140; the shaded box spans x 80
+    // to 240 and y 100 to 220.
+    let document = SymbolDocument {
+        body: vec![
+            SymbolShape::Rectangle {
+                min: Point::new(-10, -5),
+                max: Point::new(10, 5),
+                style: SymbolStyle::default(),
+            },
+            SymbolShape::Rectangle {
+                min: Point::new(-20, -15),
+                max: Point::new(20, 15),
+                style: SymbolStyle {
+                    fill: SymbolFill::Background,
+                    ..SymbolStyle::default()
+                },
+            },
+        ],
+        ..SymbolDocument::default()
+    };
+    let mut ground = Color32::TRANSPARENT;
+    let canvas = rspice_ui_kit::raster::render(vec2(320.0, 320.0), |ui, _| {
+        ground = Tokens::get(ui.ctx()).color.canvas_bg;
+        draw_body(
+            &ui.painter().clone(),
+            viewport,
+            &document,
+            ink_color,
+            &Default::default(),
+            Color32::WHITE,
+        );
+    });
+    let tint = rspice_ui_kit::theme::mix(
+        ground,
+        ink_color,
+        rspice_design::schematic::drawing_metrics::SYMBOL_BACKGROUND_TINT,
+    );
+    let inside = Rect::from_center_size(pos2(100.0, 200.0), vec2(8.0, 8.0));
+    assert!(canvas.pixels_in(inside).count() > 0);
+    assert!(canvas.pixels_in(inside).all(|pixel| pixel == tint));
+    let deepest = canvas
+        .pixels_in(Rect::from_min_max(pos2(150.0, 136.0), pos2(170.0, 144.0)))
+        .map(|pixel| pixel.g())
+        .min()
+        .expect("the probe fell off the canvas");
+    assert!(deepest < 160, "the shaded box covered the line: {deepest}");
+
+    assert_eq!(hit_shape(&document, viewport, pos2(160.0, 140.0)), Some(0));
+    assert_eq!(hit_shape(&document, viewport, pos2(100.0, 200.0)), Some(1));
+}

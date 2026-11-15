@@ -592,6 +592,165 @@ fn exact_cross_hatch_is_shared_by_svg_pdf_and_raster_paths() {
     decoder.read_info().unwrap();
 }
 
+/// A background prints as a light tint of its ink over the paper in every
+/// palette, monochrome too, where it is a light grey under black lines, and
+/// in every format a page goes out in.
+#[test]
+fn a_background_tint_prints_in_every_palette_and_format() {
+    let content = extent(100_000, 60_000);
+    let metadata = HardcopySceneMetadata::try_new("tint test", "RSpice").unwrap();
+    let scene = HardcopyScene::try_new(
+        content,
+        metadata,
+        vec![ScenePrimitive::Rect {
+            rect: SceneRect::try_new(
+                Length::from_micrometres(5_000),
+                Length::from_micrometres(5_000),
+                Length::from_micrometres(30_000),
+                Length::from_micrometres(20_000),
+            )
+            .unwrap(),
+            stroke: Some(StrokeStyle::default()),
+            fill: Some(SceneFill::Tint {
+                color: SemanticColor::Foreground,
+            }),
+        }],
+        Vec::new(),
+    )
+    .unwrap();
+    let plan_in = |format: OutputFormat, mapping: ColorMapping| {
+        let base = setup(format, false);
+        let setup = HardcopySetup::try_new(
+            base.physical_page().clone(),
+            base.scale(),
+            base.tiling(),
+            RenderSetup::try_new(
+                RenderTarget::ExportArtifact,
+                format,
+                mapping,
+                BackgroundMode::White,
+                FontPolicy::new(format.is_vector(), format.is_vector()),
+                true,
+            )
+            .unwrap(),
+            base.decorations().clone(),
+            base.print_mapping().clone(),
+        )
+        .unwrap();
+        HardcopyPlan::compile_with_id(
+            HardcopyPlanId::try_from_uuid(Uuid::from_u128(5)).unwrap(),
+            source(),
+            setup,
+            content,
+        )
+        .unwrap()
+    };
+    let hex = |text: &str| -> [u8; 3] {
+        let channel = |at: usize| u8::from_str_radix(&text[at..at + 2], 16).unwrap();
+        [channel(1), channel(3), channel(5)]
+    };
+    let attribute = |element: &str, name: &str| -> [u8; 3] {
+        let start = element
+            .find(&format!(" {name}=\"#"))
+            .unwrap_or_else(|| panic!("no {name} in {element}"))
+            + name.len()
+            + 3;
+        hex(&element[start..start + 7])
+    };
+    for mapping in [
+        ColorMapping::ScreenColors,
+        ColorMapping::PrintSafeEngineeringPalette,
+        ColorMapping::GrayscaleWithDashMarkerRedundancy,
+        ColorMapping::Monochrome,
+    ] {
+        let publication =
+            HardcopyRenderer::render(&plan_in(OutputFormat::SvgVector, mapping), &scene).unwrap();
+        let svg = std::str::from_utf8(publication.single_part().unwrap().bytes()).unwrap();
+        let shaded = svg
+            .split('<')
+            .find(|element| element.starts_with("rect") && element.contains(" stroke=\"#"))
+            .unwrap_or_else(|| panic!("no outlined rectangle in {svg}"));
+        let (ink, tint) = (attribute(shaded, "stroke"), attribute(shaded, "fill"));
+        let share = f64::from(rspice_design::schematic::drawing_metrics::SYMBOL_BACKGROUND_TINT);
+        let expected =
+            ink.map(|channel| (255.0 + (f64::from(channel) - 255.0) * share).round() as u8);
+        assert_eq!(tint, expected, "{mapping:?}: {shaded}");
+        assert_ne!(tint, ink, "{mapping:?} printed the tint as solid ink");
+        if mapping == ColorMapping::Monochrome {
+            assert_eq!(ink, [0, 0, 0]);
+            assert_eq!(tint, [217, 217, 217], "monochrome shades in light grey");
+        }
+    }
+    let pdf = HardcopyRenderer::render(
+        &plan_in(OutputFormat::PdfVector, ColorMapping::Monochrome),
+        &scene,
+    )
+    .unwrap();
+    ParsedPdf::load_mem(pdf.single_part().unwrap().bytes()).unwrap();
+    let png = HardcopyRenderer::render(
+        &plan_in(OutputFormat::Png { dpi: 72 }, ColorMapping::Monochrome),
+        &scene,
+    )
+    .unwrap();
+    let decoder = png::Decoder::new(Cursor::new(png.single_part().unwrap().bytes()));
+    decoder.read_info().unwrap();
+}
+
+/// A printed symbol lays a shaded shape down before the rest of its body,
+/// so the tint lies under every line the symbol keeps before it, and fills
+/// it with a tint of the body's ink where a solid inside takes the ink.
+#[test]
+fn a_printed_symbol_lays_its_background_under_the_rest_of_its_body() {
+    use rspice_design::symbol::SymbolFill;
+
+    let shaded = SymbolStyle {
+        fill: SymbolFill::Background,
+        ..SymbolStyle::default()
+    };
+    let source = resolved_symbol_with_body(vec![
+        SymbolShape::Rectangle {
+            min: SchematicPoint::new(-10, -5),
+            max: SchematicPoint::new(10, 5),
+            style: SymbolStyle::default(),
+        },
+        SymbolShape::Rectangle {
+            min: SchematicPoint::new(-20, -15),
+            max: SchematicPoint::new(20, 15),
+            style: shaded,
+        },
+    ]);
+    let plan = plan_for_resolved(&source, OutputFormat::SvgVector);
+    let scene = scene_from_resolved(
+        &source,
+        source.default_print_mapping(),
+        plan.setup().schematic(),
+        resolved_metadata(),
+    )
+    .unwrap();
+    let outlines = scene
+        .primitives()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            ScenePrimitive::Polyline {
+                closed: true,
+                stroke,
+                fill,
+                points,
+            } if points.len() == 4 => Some((*stroke, *fill)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(outlines.len(), 2, "{outlines:?}");
+    assert_eq!(
+        outlines[0].1,
+        Some(SceneFill::Tint {
+            color: outlines[0].0.color
+        }),
+        "the shaded box prints first, in a tint of its ink"
+    );
+    assert_eq!(outlines[1].1, None, "the inner box prints over it, bare");
+}
+
 /// The dangerous direction is a ceiling that promises more than the publisher
 /// will accept, so that is the one pinned here: one step above it has to be
 /// refused, and refused for the budget rather than for anything else. The

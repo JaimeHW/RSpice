@@ -520,6 +520,7 @@ pub(super) fn hatch_pattern_id(fill: SceneFill) -> String {
             )
         }
         SceneFill::Solid { .. } => "solid".to_owned(),
+        SceneFill::Tint { .. } => "tint".to_owned(),
     }
 }
 
@@ -529,6 +530,12 @@ pub(super) fn write_svg_fill(output: &mut String, plan: &HardcopyPlan, fill: Opt
             output,
             " fill=\"{}\"",
             svg_color(resolve_color(plan, color))
+        )
+        .expect("write to string"),
+        Some(SceneFill::Tint { color }) => write!(
+            output,
+            " fill=\"{}\"",
+            svg_color(resolve_tint(plan, color))
         )
         .expect("write to string"),
         Some(fill @ SceneFill::CrossHatch { .. }) => {

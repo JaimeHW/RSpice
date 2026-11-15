@@ -2492,5 +2492,5 @@ mod style;
 pub(super) use style::auto_trace_pattern;
 use style::{
     PUBLICATION_MONO, PUBLICATION_SANS, ResolvedStroke, background_color, page_primitives,
-    page_transform, publication_face, resolve_color, resolve_stroke, svg_color,
+    page_transform, publication_face, resolve_color, resolve_stroke, resolve_tint, svg_color,
 };

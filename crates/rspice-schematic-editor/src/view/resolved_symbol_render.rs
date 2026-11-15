@@ -11,7 +11,7 @@
 use egui::{Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};
 
 use super::lod;
-use super::symbol_style::{broken_outline, paint_fill, styled_stroke};
+use super::symbol_style::{broken_outline, inside_color, paint_fill, styled_stroke};
 use crate::symbols::PinLeads;
 use rspice_design::{
     resolved_symbol::ResolvedCellSymbol,
@@ -69,7 +69,16 @@ pub fn draw_resolved_symbol_with_visibility(
     palette: &Palette,
     leads: &PinLeads<'_>,
 ) {
-    draw_symbol_body(painter, origin, scale, component, symbol, stroke, leads);
+    draw_symbol_body(
+        painter,
+        origin,
+        scale,
+        component,
+        symbol,
+        stroke,
+        palette.canvas_bg,
+        leads,
+    );
     draw_symbol_pins(
         painter, origin, scale, component, symbol, stroke, true, leads,
     );
@@ -96,6 +105,14 @@ pub fn resolved_symbol_world_bounds(
     bounds.finish()
 }
 
+/// The symbol's artwork: every shape shaded with a background first, so the
+/// tint lies under every other line, pin and run of lettering the symbol
+/// draws, then the rest in the order the symbol keeps them. `ground` is what
+/// the canvas shows under the symbol, which a background is a tint over.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Independent canvas transform, resolved symbol, and paint inputs."
+)]
 fn draw_symbol_body(
     painter: &Painter,
     origin: Pos2,
@@ -103,11 +120,19 @@ fn draw_symbol_body(
     component: &Component,
     symbol: &ResolvedCellSymbol,
     stroke: Stroke,
+    ground: Color32,
     leads: &PinLeads<'_>,
 ) {
-    for shape in &symbol.document().body {
+    let body = &symbol.document().body;
+    let shaded = |shape: &&SymbolShape| shape.fill() == SymbolFill::Background;
+    for shape in body
+        .iter()
+        .filter(shaded)
+        .chain(body.iter().filter(|shape| !shaded(shape)))
+    {
         let style = shape.style().unwrap_or_default();
         let outline = styled_stroke(stroke, style);
+        let inside = inside_color(shape.fill(), stroke.color, ground);
         match shape {
             SymbolShape::Polyline { points, closed, .. } => {
                 let mut screen_points: Vec<Pos2> = points
@@ -116,7 +141,7 @@ fn draw_symbol_body(
                     .collect();
                 screen_points.dedup();
                 if *closed && screen_points.len() > 2 {
-                    paint_fill(painter, &screen_points, style, stroke.color);
+                    paint_fill(painter, &screen_points, inside);
                     paint_outline(painter, screen_points, true, outline, style, scale);
                 } else {
                     // A lead is wire, whatever the artwork it runs into.
@@ -133,7 +158,7 @@ fn draw_symbol_body(
                     .collect();
                 screen_points.dedup();
                 if screen_points.len() > 2 {
-                    paint_fill(painter, &screen_points, style, stroke.color);
+                    paint_fill(painter, &screen_points, inside);
                     paint_outline(painter, screen_points, true, outline, style, scale);
                 } else if screen_points.len() == 2 {
                     paint_outline(painter, screen_points, false, outline, style, scale);
@@ -142,8 +167,8 @@ fn draw_symbol_body(
             SymbolShape::Circle { center, radius, .. } => {
                 let middle = to_screen_symbol(origin, scale, component, symbol, *center);
                 let reach = *radius as f32 * scale;
-                if style.fill == SymbolFill::Solid {
-                    painter.circle_filled(middle, reach, stroke.color);
+                if let Some(inside) = inside {
+                    painter.circle_filled(middle, reach, inside);
                 }
                 if style.dash == SymbolDash::Solid {
                     painter.circle_stroke(middle, reach, outline);
@@ -846,6 +871,7 @@ mod tests {
                 component,
                 symbol,
                 Stroke::new(1.2, Color32::from_rgb(255, 64, 64)),
+                Color32::WHITE,
                 &PinLeads::NONE,
             );
         })
@@ -1002,6 +1028,60 @@ mod tests {
                 .pixels_in(inside)
                 .all(|pixel| pixel == Color32::from_rgb(255, 64, 64)),
             "the inside is not the outline's ink"
+        );
+    }
+
+    /// A background shades the inside with a light tint of the outline's ink
+    /// over the ground, and lies under every other line of the body, though
+    /// the symbol keeps the line before the shaded box.
+    #[test]
+    fn a_background_tints_the_inside_under_the_rest_of_the_body() {
+        let ink = Color32::from_rgb(255, 64, 64);
+        let symbol = ResolvedCellSymbol::from_authored_document(
+            SymbolDocument {
+                body: vec![
+                    SymbolShape::Rectangle {
+                        min: Point::new(-10, -5),
+                        max: Point::new(10, 5),
+                        style: SymbolStyle::default(),
+                    },
+                    SymbolShape::Rectangle {
+                        min: Point::new(-20, -15),
+                        max: Point::new(20, 15),
+                        style: SymbolStyle {
+                            fill: SymbolFill::Background,
+                            ..SymbolStyle::default()
+                        },
+                    },
+                ],
+                ..SymbolDocument::default()
+            },
+            &[],
+        );
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        let canvas = raster_instance(&component, &symbol, pos2(160.0, 160.0));
+        let tint = rspice_ui_kit::theme::mix(
+            Color32::WHITE,
+            ink,
+            rspice_design::schematic::drawing_metrics::SYMBOL_BACKGROUND_TINT,
+        );
+        let inside = egui::Rect::from_center_size(pos2(100.0, 200.0), egui::vec2(8.0, 8.0));
+        assert!(canvas.pixels_in(inside).count() > 0, "the probe fell off the canvas");
+        assert!(
+            canvas.pixels_in(inside).all(|pixel| pixel == tint),
+            "the inside is not a tint of the outline's ink"
+        );
+        // The inner box's top edge, 5 units above the middle, still reads
+        // in full ink over the tint.
+        let edge = egui::Rect::from_min_max(pos2(150.0, 136.0), pos2(170.0, 144.0));
+        let deepest = canvas
+            .pixels_in(edge)
+            .map(|pixel| pixel.g())
+            .min()
+            .expect("the probe fell off the canvas");
+        assert!(
+            deepest < 160,
+            "the shaded box covered the line drawn inside it: {deepest}"
         );
     }
 

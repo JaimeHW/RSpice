@@ -5,6 +5,7 @@
 //! here, so the shape being edited and the shape on a sheet cannot disagree.
 
 use egui::{Color32, Painter, Pos2, Shape, Stroke, epaint::Mesh};
+use rspice_design::schematic::drawing_metrics;
 use rspice_design::symbol::{SymbolDash, SymbolFill, SymbolStyle};
 
 /// The stroke an outline in `style` is drawn with, from the weight the
@@ -13,12 +14,27 @@ pub(crate) fn styled_stroke(stroke: Stroke, style: SymbolStyle) -> Stroke {
     Stroke::new(stroke.width * style.stroke.scale(), stroke.color)
 }
 
-/// Paints the inside of the closed outline `points` in `color` when `style`
-/// fills it. The outline itself is drawn afterwards, over the fill's edge.
-pub(crate) fn paint_fill(painter: &Painter, points: &[Pos2], style: SymbolStyle, color: Color32) {
-    if style.fill != SymbolFill::Solid {
-        return;
+/// What a closed shape filled `fill` paints its inside in, drawn in the ink
+/// `ink` over `ground`: nothing, a light tint of the ink over the ground, or
+/// the ink itself. Print takes the same share of its ink over its paper.
+pub(crate) fn inside_color(fill: SymbolFill, ink: Color32, ground: Color32) -> Option<Color32> {
+    match fill {
+        SymbolFill::None => None,
+        SymbolFill::Background => Some(rspice_ui_kit::theme::mix(
+            ground,
+            ink,
+            drawing_metrics::SYMBOL_BACKGROUND_TINT,
+        )),
+        SymbolFill::Solid => Some(ink),
     }
+}
+
+/// Paints the inside of the closed outline `points` in `color`, when it has
+/// one. The outline itself is drawn afterwards, over the fill's edge.
+pub(crate) fn paint_fill(painter: &Painter, points: &[Pos2], color: Option<Color32>) {
+    let Some(color) = color else {
+        return;
+    };
     let mut outline = points.to_vec();
     outline.dedup();
     if outline.len() > 2 && outline.first() == outline.last() {

@@ -47,7 +47,7 @@ use rspice_design::schematic::{
     component::Component, documentation_shape::DocumentationShapeGeometry,
 };
 use rspice_design::symbol::{
-    SymbolCurve, SymbolDash, SymbolDocument, SymbolShape, SymbolStyle, SymbolTextAlign,
+    SymbolCurve, SymbolDash, SymbolDocument, SymbolFill, SymbolShape, SymbolStyle, SymbolTextAlign,
     SymbolTextRotation, rectangle_corners,
 };
 use rspice_design::symbol_artwork::{PathCommand, SymbolLibrary};
@@ -434,6 +434,12 @@ pub enum SceneFill {
         color: SemanticColor,
         line_width: Length,
         spacing: Length,
+    },
+    /// A light tint of `color` over the page: a shaded symbol body. The
+    /// palette the page is printed in resolves the ink first and the tint
+    /// from it, so a monochrome page shades in a light grey of its black.
+    Tint {
+        color: SemanticColor,
     },
 }
 
