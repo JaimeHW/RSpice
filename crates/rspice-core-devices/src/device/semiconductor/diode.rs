@@ -1949,31 +1949,29 @@ impl Diode {
     /// Resolve the LEVEL=3 geometric instance parameters into the AREA and PJ
     /// factors the rest of the model is written against.
     ///
-    /// ngspice derives both from the drawn rectangle when the instance gives
-    /// `W` and `L`: `AREA = (W+XW)·(L+XW)·M·scale²` and
-    /// `PJ = 2·((W+XW)+(L+XW))·M·scale`. Note that `M` lands here *and* again
-    /// in the per-instance scaling, so a W/L-specified LEVEL=3 diode with
-    /// `M>1` scales its area by `M²`. That is what ngspice-46 computes
-    /// (`diosetup.c` folds `DIOm` into `DIOarea`, and `diotemp.c` multiplies
-    /// by `DIOm` a second time), and the conformance corpora are pinned to it,
-    /// so it is reproduced deliberately rather than quietly corrected.
+    /// When the instance gives `W` and `L`, both come from the drawn rectangle
+    /// of one device: `AREA = (W+XW)·(L+XW)·scale²` and
+    /// `PJ = 2·((W+XW)+(L+XW))·scale`. They carry no `M`: the multiplicity is
+    /// applied once, by `apply_instance_scaling` and `set_sidewall_perimeter`,
+    /// exactly as for an explicit `AREA`/`PJ`, so `M=2` is two parallel
+    /// copies. ngspice-47 folded `M` in here as well and so scaled a W/L diode
+    /// by `M²`; ngspice fixed that in commit 8533ad9fb ("Diode model: soft
+    /// reverse recovery scaling and general revision", `diosetup.c`). QSPICE
+    /// also scales a W/L diode by `M²`, though it scales an explicit area by
+    /// `M` once and documents `M` as identical parallel devices; that is the
+    /// same defect, not a convention, so it is not reproduced in any dialect.
     ///
-    /// Returns `(area, perimeter)` — both still un-multiplied by `M`, which
-    /// `apply_instance_scaling` and `set_sidewall_perimeter` apply.
+    /// Returns `(area, perimeter)` per device, un-multiplied by `M`.
     #[doc(hidden)]
     pub fn geometric_area_and_perimeter(
         width: Value,
         length: Value,
-        multiplicity: Value,
         mask_offset: Value,
         scale: Value,
     ) -> (Value, Value) {
         let w = width + mask_offset;
         let l = length + mask_offset;
-        (
-            w * l * multiplicity * scale * scale,
-            2.0 * (w + l) * multiplicity * scale,
-        )
+        (w * l * scale * scale, 2.0 * (w + l) * scale)
     }
 
     /// Set the LEVEL=3 metal and poly overlap capacitances.
@@ -3757,19 +3755,18 @@ mod tests {
         assert!((scale_ibv(3.0) - 1e-3 * 12.0).abs() <= 1e-18);
     }
 
-    /// LEVEL=3 derives AREA and PJ from the drawn rectangle. The multiplicity
-    /// appears here and again in the instance scaling, which is what
-    /// ngspice-46 computes; see `geometric_area_and_perimeter`.
+    /// LEVEL=3 derives AREA and PJ from the drawn rectangle of one device;
+    /// the multiplicity is left to the instance scaling, which applies it once.
     #[test]
     fn geometric_area_and_perimeter_come_from_the_drawn_rectangle() {
-        let (area, perimeter) = Diode::geometric_area_and_perimeter(2e-6, 5e-6, 2.0, 1e-7, 1.0);
+        let (area, perimeter) = Diode::geometric_area_and_perimeter(2e-6, 5e-6, 1e-7, 1.0);
         let (w, l) = (2e-6 + 1e-7, 5e-6 + 1e-7);
-        assert!((area - w * l * 2.0).abs() <= area * 1e-12);
-        assert!((perimeter - 2.0 * (w + l) * 2.0).abs() <= perimeter * 1e-12);
+        assert!((area - w * l).abs() <= area * 1e-12);
+        assert!((perimeter - 2.0 * (w + l)).abs() <= perimeter * 1e-12);
 
         // `.options scale` multiplies each dimension, so it enters area squared.
         let (scaled_area, scaled_perimeter) =
-            Diode::geometric_area_and_perimeter(2e-6, 5e-6, 2.0, 1e-7, 2.0);
+            Diode::geometric_area_and_perimeter(2e-6, 5e-6, 1e-7, 2.0);
         assert!((scaled_area - area * 4.0).abs() <= scaled_area * 1e-12);
         assert!((scaled_perimeter - perimeter * 2.0).abs() <= scaled_perimeter * 1e-12);
     }

@@ -8077,7 +8077,6 @@ impl Engine {
                             Some(Diode::geometric_area_and_perimeter(
                                 width,
                                 length,
-                                mult,
                                 diode_model_param(model_params, "XW").unwrap_or(0.0),
                                 scale,
                             ))
@@ -13580,6 +13579,51 @@ mod tests {
             panic!("expected one diode");
         };
         assert!(legacy.is > drawn.is * 1e6, "LEVEL=1 ignores W/L geometry");
+    }
+
+    /// `M=2` on a W/L-drawn LEVEL=3 diode is two parallel copies of the drawn
+    /// junction: saturation current, sidewall perimeter, depletion charge and
+    /// overlap capacitance double, and series resistance halves. ngspice-47
+    /// folded `M` into the derived area as well and scaled by `M²`; ngspice
+    /// fixed `diosetup.c` in commit 8533ad9fb. The oracle-pinned current is in
+    /// `tests/devices/multiplicity.rs`.
+    #[test]
+    fn level3_drawn_multiplicity_scales_the_junction_once() {
+        let build = |instance: &str| {
+            let deck = format!(
+                "level3 multiplicity\n\
+                 V1 in 0 1\n\
+                 D1 in 0 DGEO {instance}\n\
+                 .model DGEO D LEVEL=3 IS=2.2959e-7 JSW=2.1207e-13 N=1.01 CJ=9.6797e-4\n\
+                 + CJSW=1e-10 RS=10 XOM=1e-6 WM=5u LM=5u\n\
+                 .end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("geometric diode deck parses");
+            let circuit = Engine::new(SimulationConfig::default())
+                .build_circuit(&netlist)
+                .expect("geometric diode deck builds");
+            let [diode] = circuit.diodes.devices.as_slice() else {
+                panic!("expected one diode");
+            };
+            diode.clone()
+        };
+
+        let single = build("W=10u L=10u");
+        let double = build("W=10u L=10u M=2");
+        let close = |got: Value, want: Value| (got - want).abs() <= want.abs() * 1e-12;
+
+        assert!(close(double.is, 2.0 * single.is), "{} vs {}", double.is, single.is);
+        assert!(close(
+            double.sidewall_perimeter,
+            2.0 * single.sidewall_perimeter
+        ));
+        assert!(close(double.cj0, 2.0 * single.cj0));
+        assert!(close(
+            double.overlap_capacitance,
+            2.0 * single.overlap_capacitance
+        ));
+        assert!(single.overlap_capacitance > 0.0);
+        assert!(close(double.rs, 0.5 * single.rs));
     }
 
     /// `.options scale` multiplies drawn dimensions, so it enters the derived
