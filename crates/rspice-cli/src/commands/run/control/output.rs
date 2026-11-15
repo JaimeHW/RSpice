@@ -30,77 +30,11 @@ pub(super) fn present(
         | ControlPresentationKind::RawFile { .. } => return Ok(Vec::new()),
     };
     let summary_stdout = args.summary.as_deref() == Some(Path::new("-"));
-    if options.is_none() && !summary_stdout {
+    if options.is_none() && !summary_stdout && request.redirect.is_none() {
         // An authored print is output, including under --quiet. That flag
         // suppresses progress chatter, not the script's requested table.
         let mut stdout = std::io::stdout().lock();
-        let mut scalar_index = 0;
-        let mut trace_index = 0;
-        for position in 0..traces.len().saturating_add(request.scalars.len()) {
-            if rspice_core::AbortSignal::is_aborted(&crate::abort::ProcessAbort) {
-                return Err(cancellation_cli_error(args.timeout));
-            }
-            if let Some(scalar) = request
-                .scalars
-                .get(scalar_index)
-                .filter(|scalar| scalar.position == position)
-            {
-                use rspice_core::execution::result_document::{ScalarUnavailability, ScalarValue};
-                let text = match scalar.scalar.value() {
-                    ScalarValue::Unavailable {
-                        reason: ScalarUnavailability::PositiveInfinity,
-                    } => "inf".to_owned(),
-                    ScalarValue::Unavailable {
-                        reason: ScalarUnavailability::NegativeInfinity,
-                    } => "-inf".to_owned(),
-                    value => {
-                        serde_json::to_string(value).map_err(|error| CliError::InternalError {
-                            message: error.to_string(),
-                        })?
-                    }
-                };
-                let unit = scalar
-                    .scalar
-                    .unit()
-                    .map_or_else(|| "unspecified".into(), |unit| unit.symbol());
-                writeln!(
-                    stdout,
-                    "# {} [{}]\n{}",
-                    scalar.scalar.display_name(),
-                    unit,
-                    text
-                )
-                .map_err(|error| CliError::output_error(Path::new("stdout"), error))?;
-                scalar_index += 1;
-                continue;
-            }
-            let trace = traces
-                .get(trace_index)
-                .ok_or_else(|| CliError::InternalError {
-                    message: "control print scalar positions do not match its traces".into(),
-                })?;
-            trace_index += 1;
-            writeln!(
-                stdout,
-                "# {} [{}] vs {} [{}]",
-                trace.y.expression,
-                trace.y.unit.symbol(),
-                trace.x.expression,
-                trace.x.unit.symbol()
-            )
-            .map_err(|error| CliError::output_error(Path::new("stdout"), error))?;
-            for (x, y) in trace.x.samples.iter().zip(&trace.y.samples) {
-                rspice_core::AbortSignal::is_aborted(&crate::abort::ProcessAbort)
-                    .then(|| cancellation_cli_error(args.timeout))
-                    .map_or(Ok(()), Err)?;
-                writeln!(
-                    stdout,
-                    "{:.17e}\t{:.17e}\t{:.17e}\t{:.17e}",
-                    x.re, x.im, y.re, y.im
-                )
-                .map_err(|error| CliError::output_error(Path::new("stdout"), error))?;
-            }
-        }
+        print_table(&mut stdout, request, traces, args, Path::new("stdout"))?;
         stdout
             .flush()
             .map_err(|error| CliError::output_error(Path::new("stdout"), error))?;
@@ -169,6 +103,85 @@ pub(super) fn present(
         }
     }
     Ok(paths)
+}
+
+/// The table an authored `print` writes, its scalars and traces in the order
+/// the command named them, to standard output or to the file a `>` names.
+/// `destination` names the writer in an error.
+pub(super) fn print_table(
+    writer: &mut dyn Write,
+    request: &ControlPresentation,
+    traces: &[ControlTrace],
+    args: &RunArgs,
+    destination: &Path,
+) -> Result<(), CliError> {
+    let failed = |error| CliError::output_error(destination, error);
+    let mut scalar_index = 0;
+    let mut trace_index = 0;
+    for position in 0..traces.len().saturating_add(request.scalars.len()) {
+        if rspice_core::AbortSignal::is_aborted(&crate::abort::ProcessAbort) {
+            return Err(cancellation_cli_error(args.timeout));
+        }
+        if let Some(scalar) = request
+            .scalars
+            .get(scalar_index)
+            .filter(|scalar| scalar.position == position)
+        {
+            use rspice_core::execution::result_document::{ScalarUnavailability, ScalarValue};
+            let text = match scalar.scalar.value() {
+                ScalarValue::Unavailable {
+                    reason: ScalarUnavailability::PositiveInfinity,
+                } => "inf".to_owned(),
+                ScalarValue::Unavailable {
+                    reason: ScalarUnavailability::NegativeInfinity,
+                } => "-inf".to_owned(),
+                value => serde_json::to_string(value).map_err(|error| CliError::InternalError {
+                    message: error.to_string(),
+                })?,
+            };
+            let unit = scalar
+                .scalar
+                .unit()
+                .map_or_else(|| "unspecified".into(), |unit| unit.symbol());
+            writeln!(
+                writer,
+                "# {} [{}]\n{}",
+                scalar.scalar.display_name(),
+                unit,
+                text
+            )
+            .map_err(failed)?;
+            scalar_index += 1;
+            continue;
+        }
+        let trace = traces
+            .get(trace_index)
+            .ok_or_else(|| CliError::InternalError {
+                message: "control print scalar positions do not match its traces".into(),
+            })?;
+        trace_index += 1;
+        writeln!(
+            writer,
+            "# {} [{}] vs {} [{}]",
+            trace.y.expression,
+            trace.y.unit.symbol(),
+            trace.x.expression,
+            trace.x.unit.symbol()
+        )
+        .map_err(failed)?;
+        for (x, y) in trace.x.samples.iter().zip(&trace.y.samples) {
+            rspice_core::AbortSignal::is_aborted(&crate::abort::ProcessAbort)
+                .then(|| cancellation_cli_error(args.timeout))
+                .map_or(Ok(()), Err)?;
+            writeln!(
+                writer,
+                "{:.17e}\t{:.17e}\t{:.17e}\t{:.17e}",
+                x.re, x.im, y.re, y.im
+            )
+            .map_err(failed)?;
+        }
+    }
+    Ok(())
 }
 
 /// Batch output of `echo`, `display`, `setplot`, `listing` and `rusage`, and

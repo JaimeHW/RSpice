@@ -151,6 +151,18 @@ pub struct ControlPresentation {
     /// Scalar determinations accompanying PRINT, such as exact infinite impedance.
     /// Finite vector samples remain in `kind`; these values are never clamped.
     pub scalars: Vec<ControlScalar>,
+    /// The file a `print`'s `> path` or `>> path` sends its table to instead
+    /// of standard output (ngspice cp_redirect, frontend/streams.c:47). The
+    /// presentation host writes it as it writes `File`.
+    pub redirect: Option<ControlRedirect>,
+}
+
+/// Where a redirected command's output goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlRedirect {
+    pub path: String,
+    /// `>>`: the output is appended to the file.
+    pub append: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1009,6 +1021,7 @@ impl ControlCircuit {
             command: command.clone(),
             kind,
             scalars,
+            redirect: None,
         })
     }
 }

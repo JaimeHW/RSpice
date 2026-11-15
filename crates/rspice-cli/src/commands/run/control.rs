@@ -289,6 +289,28 @@ pub(super) fn run(
                     ControlPresentationKind::Plot { .. }
                     | ControlPresentationKind::Print(_)
                     | ControlPresentationKind::UnitsChanged { .. } => {
+                        // `print > file` writes the table it would have
+                        // printed to that file (frontend/streams.c:47).
+                        if let (ControlPresentationKind::Print(traces), Some(redirect)) =
+                            (&request.kind, &request.redirect)
+                        {
+                            let mut table = Vec::new();
+                            output::print_table(
+                                &mut table,
+                                &request,
+                                traces,
+                                args,
+                                std::path::Path::new(&redirect.path),
+                            )?;
+                            control_files.record(
+                                &redirect.path,
+                                &table,
+                                redirect.append,
+                                request.command.line,
+                                script,
+                                args,
+                            )?;
+                        }
                         presentation_ordinal += 1;
                         outputs.extend(output::present(
                             &request,

@@ -28,7 +28,8 @@ pub(super) use options::apply_runtime_options;
 use presentation::VectorValue;
 pub use presentation::{
     ControlCurrentSource, ControlPlotOptions, ControlPresentation, ControlPresentationKind,
-    ControlScalar, ControlTrace, ControlVector, ControlVectorId, ControlVoltageSource,
+    ControlRedirect, ControlScalar, ControlTrace, ControlVector, ControlVectorId,
+    ControlVoltageSource,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -112,6 +113,8 @@ enum CommandKind {
     Analysis,
     Run,
     Presentation,
+    /// `print`, whose table a redirection can send to a file.
+    Print,
     Echo,
     Display,
     /// `cd directory`.
@@ -164,6 +167,7 @@ impl CommandKind {
         matches!(
             self,
             Self::Echo
+                | Self::Print
                 | Self::Display
                 | Self::EventDisplay
                 | Self::EventPrint
@@ -187,7 +191,8 @@ impl CommandKind {
             "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb"
             | "dcmatch" | "sp" => Self::Analysis,
             "run" => Self::Run,
-            "plot" | "print" | "settype" => Self::Presentation,
+            "plot" | "settype" => Self::Presentation,
+            "print" => Self::Print,
             "echo" => Self::Echo,
             "display" => Self::Display,
             "edisplay" => Self::EventDisplay,
@@ -428,6 +433,14 @@ impl ControlCircuit {
                     text: std::mem::take(text),
                     append: redirect.append,
                 };
+            } else if let PreparedCommand::Complete(ControlCommandEffect::Presentation(request)) =
+                &mut prepared
+                && let ControlPresentationKind::Print(_) = request.kind
+            {
+                request.redirect = Some(ControlRedirect {
+                    path: self.script_file(redirect.path),
+                    append: redirect.append,
+                });
             }
             return Ok(prepared);
         }
@@ -630,6 +643,9 @@ impl ControlCircuit {
                 }
                 Ok(PreparedCommand::Analyses(analyses))
             }
+            CommandKind::Print => {
+                self.prepare_kind(CommandKind::Presentation, engine, command, variables, abort)
+            }
             CommandKind::Presentation => match self.present(engine, command, variables, abort) {
                 Ok(request) => Ok(PreparedCommand::Complete(
                     ControlCommandEffect::Presentation(request),
@@ -830,6 +846,7 @@ impl ControlCircuit {
             command: command.clone(),
             kind,
             scalars: Vec::new(),
+            redirect: None,
         }))
     }
 
