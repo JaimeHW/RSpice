@@ -433,3 +433,17 @@ fn the_box_latch_draws_a_selection_box_on_the_symbol() {
     assert_eq!(finger.selection().shapes, [0, 1].into_iter().collect());
     assert_eq!(finger.pan(), pan, "the view stayed");
 }
+
+/// With the strip's add latch on, a tap adds to the selection or takes out
+/// of it, as a click with Shift does.
+#[test]
+fn the_add_latch_adds_to_the_symbol_selection() {
+    let mut finger = Finger::with_body(vec![square_at(-40, -40), square_at(40, -40)]);
+    finger.tap(finger.screen(Point::new(-30, -40)));
+    assert_eq!(finger.selection(), SymbolSelection::single_shape(0));
+    finger.press("Add to selection");
+    finger.tap(finger.screen(Point::new(50, -40)));
+    assert_eq!(finger.selection().shapes, [0, 1].into_iter().collect());
+    finger.tap(finger.screen(Point::new(-30, -40)));
+    assert_eq!(finger.selection(), SymbolSelection::single_shape(1));
+}

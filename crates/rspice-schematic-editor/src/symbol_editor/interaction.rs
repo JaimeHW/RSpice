@@ -61,6 +61,8 @@ pub struct SymbolCanvasInput {
     pub drag_stopped: bool,
     pub clicked: bool,
     pub double_clicked: bool,
+    /// Shift, or on touch the strip's add latch: a click adds to the
+    /// selection or takes out of it.
     pub extend_selection: bool,
     /// The touch strip's box latch: a finger's drag off the selection draws
     /// a selection box rather than panning.
@@ -109,7 +111,7 @@ pub fn canvas_request(
         && response
             .ctx
             .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace));
-    // On touch the strip's box latch stands in for a box drag.
+    // On touch the strip's latches stand in for Shift and for a box drag.
     let latches = (viewport.pointer == SymbolPointer::Finger)
         .then(|| touch_latches(&response.ctx))
         .unwrap_or_default();
@@ -123,7 +125,7 @@ pub fn canvas_request(
         drag_stopped: response.drag_stopped_by(egui::PointerButton::Primary),
         clicked: response.clicked_by(egui::PointerButton::Primary),
         double_clicked: response.double_clicked_by(egui::PointerButton::Primary),
-        extend_selection: response.ctx.input(|input| input.modifiers.shift),
+        extend_selection: response.ctx.input(|input| input.modifiers.shift) || latches.select_add,
         box_latched: latches.select_box,
         finish,
         remove_last_point,
