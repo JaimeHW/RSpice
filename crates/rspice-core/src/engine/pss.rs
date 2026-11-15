@@ -25,6 +25,7 @@ use super::{
     Engine, SimulationError, TransientCheckpoint, TransientResult, UnsupportedCapabilityError,
 };
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::pss::RefinementTolerance;
 use crate::analysis::{
     FloquetOrbitKind, FloquetSpectrumError, FloquetSpectrumEvidence, PeriodDetector,
     PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver, ShootingState,
@@ -3312,14 +3313,13 @@ impl Engine {
                 }
                 peak = peak.max(value.abs());
             }
-            let scale = peak.max(abstol);
-            let tolerance = abstol / scale + reltol * (peak / scale);
+            let tolerance = RefinementTolerance::from_peak(peak, reltol, abstol);
             for (index, &a) in coarse_values.iter().enumerate() {
                 if index & 0x3ff == 0 && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
                 let b = fine_values[samples.index(index)];
-                error = error.max((a / scale - b / scale).abs() / tolerance);
+                error = error.max(tolerance.deviation(a, b));
             }
             if let PssSampleMap::Enriched(indices) = samples {
                 // Newly propagated echoes can be narrower than the old grid.
@@ -3338,9 +3338,11 @@ impl Engine {
                             return Err(SimulationError::Aborted);
                         }
                         let weight = (fine.time[point] - left) / width;
-                        let interpolated = (1.0 - weight) * (coarse_values[interval] / scale)
-                            + weight * (coarse_values[interval + 1] / scale);
-                        error = error.max((interpolated - fine_value / scale).abs() / tolerance);
+                        error = error.max(tolerance.deviation_from_line(
+                            (coarse_values[interval], coarse_values[interval + 1]),
+                            weight,
+                            fine_value,
+                        ));
                     }
                 }
             }

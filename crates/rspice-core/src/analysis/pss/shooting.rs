@@ -88,6 +88,49 @@ impl ShootingState {
     }
 }
 
+/// The tolerance one waveform of a periodic orbit is held to when the orbit
+/// is compared with its refinement: `abstol` plus `reltol` of the largest
+/// magnitude the waveform takes over the period on either mesh, Spectre's
+/// `relref=sigglobal`. A node is held to the accuracy of its swing, so its
+/// zero crossings are not held to `abstol` alone. Native and event shooting
+/// certify their meshes by it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RefinementTolerance {
+    /// The waveform's peak, at least `abstol`; deviations are formed in its
+    /// units so that no product overflows.
+    scale: Value,
+    tolerance: Value,
+}
+
+impl RefinementTolerance {
+    /// The tolerance of a waveform whose largest magnitude on either mesh is
+    /// `peak`.
+    pub(crate) fn from_peak(peak: Value, reltol: Value, abstol: Value) -> Self {
+        let scale = peak.max(abstol);
+        Self {
+            scale,
+            tolerance: abstol / scale + reltol * (peak / scale),
+        }
+    }
+
+    /// How far apart `a` and `b` are, in tolerances.
+    pub(crate) fn deviation(&self, a: Value, b: Value) -> Value {
+        (a / self.scale - b / self.scale).abs() / self.tolerance
+    }
+
+    /// How far `value` is from the straight line between `left` and `right`
+    /// at `weight` of the way, in tolerances.
+    pub(crate) fn deviation_from_line(
+        &self,
+        (left, right): (Value, Value),
+        weight: Value,
+        value: Value,
+    ) -> Value {
+        let line = (1.0 - weight) * (left / self.scale) + weight * (right / self.scale);
+        (line - value / self.scale).abs() / self.tolerance
+    }
+}
+
 /// Shooting Newton solver for PSS
 ///
 /// Uses Newton's method to solve the nonlinear equation F(x0) = x(T) - x0 = 0
