@@ -132,6 +132,56 @@ fn extra_rails_fan_out_without_collisions() {
     assert_eq!(side_of(&symbol, "vssa"), SymbolPinSide::Bottom);
 }
 
+/// Names lettered across the top and bottom edges stand apart however long
+/// they are, and inside the body: the rails are spaced for their names, on
+/// the grid.
+#[test]
+fn rail_names_along_an_edge_never_meet() {
+    let ports = vec![
+        spec("in", PortDirection::In),
+        spec("out", PortDirection::Out),
+        spec("avdd_1v8", PortDirection::Supply),
+        spec("vdd", PortDirection::Supply),
+        spec("vddio_3v3", PortDirection::Supply),
+        spec("avss", PortDirection::InOut),
+        spec("dvss", PortDirection::InOut),
+    ];
+    let symbol = generate_symbol(&ports);
+    let (min, max) = symbol.body_bounds();
+    for side in [SymbolPinSide::Top, SymbolPinSide::Bottom] {
+        let mut names = symbol
+            .pins
+            .iter()
+            .filter(|pin| pin.side == side)
+            .map(|pin| {
+                assert_eq!(pin.offset.x % GENERATED_STUB, 0, "{pin:?} is off the grid");
+                let half = name_span(&pin.name, PRINTED_NAMES) as f32 / 2.0;
+                (
+                    pin.name.as_str(),
+                    pin.offset.x as f32 - half,
+                    pin.offset.x as f32 + half,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(names.len() > 1, "{side:?} carries more than one rail");
+        names.sort_by(|a, b| a.1.total_cmp(&b.1));
+        for pair in names.windows(2) {
+            assert!(
+                pair[1].1 - pair[0].2 >= GENERATED_LABEL_GUTTER as f32,
+                "{} and {} meet on the {side:?} edge: {names:?}",
+                pair[0].0,
+                pair[1].0
+            );
+        }
+        let (first, last) = (names[0], names[names.len() - 1]);
+        assert!(
+            first.1 >= (min.x + GENERATED_LABEL_GUTTER) as f32
+                && last.2 <= (max.x - GENERATED_LABEL_GUTTER) as f32,
+            "the {side:?} names stay inside the body {min:?}..{max:?}: {names:?}"
+        );
+    }
+}
+
 #[test]
 fn every_rail_lands_on_the_body_edge_it_is_drawn_against() {
     let ports: Vec<PortSpec> = (0..6)

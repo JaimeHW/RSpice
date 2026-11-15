@@ -580,8 +580,38 @@ fn side_axis(n: usize) -> Vec<i32> {
 /// X coordinate of the `k`-th pin sharing the top or bottom edge: 0, then
 /// fanning out by `RAIL_PITCH` alternating right/left of centre.
 fn rail_x(k: usize) -> i32 {
-    let step = k.div_ceil(2) as i32 * RAIL_PITCH;
+    rail_slot(k) * RAIL_PITCH
+}
+
+/// Which pitch from the centre of its edge the `k`-th pin sharing the top
+/// or bottom edge takes: 0, 1, -1, 2, -2, and so on.
+fn rail_slot(k: usize) -> i32 {
+    let step = k.div_ceil(2) as i32;
     if k % 2 == 1 { step } else { -step }
+}
+
+/// The pitch pins at `slots` along one edge stand apart, each slot paired
+/// with the interface index whose name `span` measures: neighbours are at
+/// least their two half names and a column gap apart, never closer than
+/// [`RAIL_PITCH`], and the pitch is a whole number of grid steps.
+fn rail_pitch(slots: &[(i32, usize)], span: impl Fn(usize) -> i32) -> i32 {
+    let mut ordered = slots.to_vec();
+    ordered.sort_unstable();
+    let needed = ordered
+        .windows(2)
+        .map(|pair| {
+            let apart = (pair[1].0 - pair[0].0).max(1);
+            let reach = ceil_div(span(pair[0].1) + span(pair[1].1), 2) + PRINTED_NAMES.column_gap;
+            ceil_div(reach, apart)
+        })
+        .max()
+        .unwrap_or(0);
+    (ceil_div(needed, GENERATED_STUB) * GENERATED_STUB).max(RAIL_PITCH)
+}
+
+/// `value / by` rounded up, for a `value` of zero or more and a positive `by`.
+const fn ceil_div(value: i32, by: i32) -> i32 {
+    (value + by - 1) / by
 }
 
 /// The pin name as it is printed: the name itself, or an elided form that
@@ -752,22 +782,28 @@ pub fn generate_interface_symbol(ports: &[PortSpec], pins: &[InterfacePin]) -> G
         .sort_by_key(|&index| (pin(index).mark == PinMark::Thermal, index));
     let [left, right, top, bottom] = &edges;
 
-    // Top and bottom pins fan out from the centre of their edge; thermal
-    // nodes continue right of the last rail.
+    // Top and bottom pins fan out from the centre of their edge, far enough
+    // apart that the names they letter across it never meet; thermal nodes
+    // continue right of the last rail.
     let mut x_of = vec![0; ports.len()];
     for edge in [top, bottom] {
+        let mut slots = Vec::with_capacity(edge.len());
         let mut fanned = 0;
         let mut rightmost: Option<i32> = None;
         for &index in edge {
-            let x = if pin(index).mark == PinMark::Thermal && edge == bottom {
-                rightmost.map_or(RAIL_PITCH, |x| x + RAIL_PITCH)
+            let slot = if pin(index).mark == PinMark::Thermal && edge == bottom {
+                rightmost.map_or(1, |slot| slot + 1)
             } else {
-                let x = rail_x(fanned);
+                let slot = rail_slot(fanned);
                 fanned += 1;
-                x
+                slot
             };
-            rightmost = Some(rightmost.map_or(x, |most| most.max(x)));
-            x_of[index] = x;
+            rightmost = Some(rightmost.map_or(slot, |most| most.max(slot)));
+            slots.push((slot, index));
+        }
+        let pitch = rail_pitch(&slots, |index| name_span(&ports[index].name, PRINTED_NAMES));
+        for (slot, index) in slots {
+            x_of[index] = slot * pitch;
         }
     }
 
@@ -796,10 +832,16 @@ pub fn generate_interface_symbol(ports: &[PortSpec], pins: &[InterfacePin]) -> G
         0
     };
     let names = 2 * PRINTED_NAMES.gutter + left_span + right_span + gap;
+    // A rail's name is centred on its lead, so the body reaches past the
+    // outermost one by half its name and a gutter.
     let rail_reach = top
         .iter()
         .chain(bottom)
-        .map(|&index| x_of[index].abs() + GENERATED_STUB)
+        .map(|&index| {
+            let half_name =
+                ceil_div(name_span(&ports[index].name, PRINTED_NAMES), 2) + GENERATED_LABEL_GUTTER;
+            x_of[index].abs() + half_name.max(GENERATED_STUB)
+        })
         .max()
         .unwrap_or(0);
     let body_width = onto_grid(names.max(2 * rail_reach).max(MIN_BODY_WIDTH));
