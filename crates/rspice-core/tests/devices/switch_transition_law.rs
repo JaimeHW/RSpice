@@ -588,3 +588,94 @@ fn a_switch_parameter_with_no_law_at_its_level_is_refused_by_name() {
     assert!(current("It=.5m Ron=1 Roff=1k Vser=.5").contains("VSER"));
     assert!(current("It=.5m Ron=1 Roff=1k Lser=1u").contains("LSER"));
 }
+
+/// The level crossings of `node` after `from`, rising (`true`) or falling.
+fn level_crossings(
+    tran: &rspice_core::engine::TransientResult,
+    node: &str,
+    level: f64,
+    from: f64,
+) -> Vec<(bool, f64)> {
+    let wave = tran
+        .try_voltage_waveform_named(node)
+        .unwrap_or_else(|| panic!("node {node} missing"));
+    let time = &tran.time;
+    (1..time.len())
+        .filter(|&index| time[index - 1] >= from)
+        .filter(|&index| (wave[index - 1] - level) * (wave[index] - level) < 0.0)
+        .map(|index| {
+            let fraction = (level - wave[index - 1]) / (wave[index] - wave[index - 1]);
+            (
+                wave[index] > wave[index - 1],
+                time[index - 1] + fraction * (time[index] - time[index - 1]),
+            )
+        })
+        .collect()
+}
+
+/// A switch across its own control node: `s1 a 0 a 0` closes where the RC
+/// at `a` rises through VT + VH = 1.2 V and, closed, pulls `a` toward half
+/// the sine through RON = R1, inside its band, so it holds closed until `a`
+/// falls below VT − VH = 0.8 V. A solution with the switch closed lands
+/// inside the band, where the switch once held its accepted (open) state, and
+/// the step's iterates alternated between the two until the run stopped. The
+/// band holds the changed state once a solution with the open switch has
+/// crossed, as ngspice's does: ngspice-46 (RELTOL = 1e-6, step 0.1 ns) has
+/// `a` rise through 1 V at 9.18985 µs, fall through it at 9.31459 µs and
+/// through 0 V at 9.57739 µs; a 1 ns allowance is RSpice's default RELTOL
+/// and maximum step.
+#[test]
+fn a_switch_that_drives_its_own_control_holds_its_changed_state_in_its_band() {
+    let deck = "\
+switch across its own control
+vin in 0 sin(0 2 1meg)
+r1 in a 1k
+c1 a 0 100p
+s1 a 0 a 0 swm
+.model swm sw vt=1 vh=0.2 ron=1k roff=1e9
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let tran = engine(SpiceDialect::BestAvailable)
+        .run_tran(&netlist, 10.0e-6, 1.0e-9)
+        .expect("the switch's own control settles its state");
+    let mut crossings = level_crossings(&tran, "a", 1.0, 9.0e-6);
+    crossings.extend(level_crossings(&tran, "a", 0.0, 9.1e-6));
+    let expected = [(true, 9.18985e-6), (false, 9.31459e-6), (false, 9.57739e-6)];
+    assert_eq!(crossings.len(), expected.len(), "{crossings:?}");
+    for ((rising, time), (want_rising, want)) in crossings.iter().zip(expected) {
+        assert_eq!(*rising, want_rising, "{crossings:?}");
+        assert!(
+            (time - want).abs() <= 1.0e-9,
+            "crossing at {time:e} s, ngspice-46 {want:e} s"
+        );
+    }
+}
+
+/// The same switch with no capacitor at its control: closing it divides the
+/// sine to under half at `a`, below VT − VH, so it opens again, and open, `a`
+/// is past VT + VH. No state is consistent there; ngspice-46 stops at
+/// 103.614 ns with "trouble with swm-instance s1". RSpice stops at the same
+/// instant and names the switch.
+#[test]
+fn a_switch_with_no_consistent_state_is_named() {
+    let deck = "\
+switch that chatters across its band
+vin in 0 sin(0 2 1meg)
+r1 in a 1k
+r2 a 0 100k
+s1 a 0 a 0 swm
+c2 in 0 1p
+.model swm sw vt=1 vh=0.2 ron=1k roff=1e9
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let error = engine(SpiceDialect::BestAvailable)
+        .run_tran(&netlist, 10.0e-6, 1.0e-9)
+        .expect_err("no state of S1 is consistent past 103.6 ns");
+    let message = error.to_string();
+    assert!(
+        message.contains("switch S1 has no consistent state at t=1.0361"),
+        "{message}"
+    );
+}

@@ -862,6 +862,14 @@ fn annotate_terminal_convergence_failure(
     if !error.is_convergence_failure() {
         return error;
     }
+    let error = match circuit.switch_with_no_consistent_state() {
+        Some(switch) => error.with_convergence_context(&format!(
+            "switch {switch} has no consistent state at t={time:.6e} s: with the state it held, \
+             the step's solution carries its control past the threshold that changes it, and \
+             changed, back past the other one, so it chatters across its whole band"
+        )),
+        None => error,
+    };
     let edge = circuit.boundary_edge_before_failure(time, step, &|net, edge| {
         digital_value_before(traces, net, edge)
     });

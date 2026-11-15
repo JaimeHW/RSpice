@@ -947,3 +947,34 @@ c2 x 0 300p
         );
     }
 }
+
+/// A switch across its own control node: `s1 a 0 a 0` closes where the RC
+/// at `a` rises through VT + VH = 1.2 V and, closed, holds `a` inside its band
+/// until it falls below VT − VH = 0.8 V. Its iterates once alternated between
+/// the two states at the closing and no step converged, so no period of the
+/// map traversed; one period now closes and opens the switch once each.
+#[test]
+fn a_switch_that_drives_its_own_control_traverses_its_period() {
+    let deck = "switch across its own control
+vin in 0 sin(0 2 1meg)
+r1 in a 1k
+c1 a 0 100p
+s1 a 0 a 0 swm
+.model swm sw vt=1 vh=0.2 ron=1k roff=1e9
+.end
+";
+    let config = PssConfig::new(1.0e6).with_tstab(5.0e-6);
+    let netlist = Netlist::parse(deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let prepared = engine
+        .prepare_event_orbit(&netlist, &config, None, &NoAbort)
+        .expect("the orbit stabilizes");
+    let orbit = prepared.orbit(&netlist, &config, &NoAbort);
+    let z = prepared.basis.read(&prepared.image).expect("coordinates");
+    let traversal = orbit
+        .traverse(&prepared.image, &z, &prepared.mesh)
+        .expect("one period of the map");
+    let changes: Vec<u64> = traversal.events.iter().map(|event| event.value).collect();
+    assert_eq!(changes.len(), 2, "{:?}", traversal.events);
+    assert_ne!(changes[0], changes[1]);
+}

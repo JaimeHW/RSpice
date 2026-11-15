@@ -425,18 +425,7 @@ fn ideal_threshold_crossing(
 
 /// The state a switch with a positive hysteresis band takes at `control`:
 /// on above `upper`, off below `lower`, and inside the band the state it
-/// `held` at the last accepted point.
-///
-/// The state at a candidate is decided by the control's path across the
-/// step, and a Newton iterate is not on that path. `swload.c` and
-/// `cswload.c` hold the previous iterate's state inside the band, which is
-/// the accepted state wherever a step's first iterate is the accepted
-/// solution, as it is in ngspice. This solver's first iterate is extrapolated
-/// from the accepted history; an extrapolation that overshoots the band would
-/// otherwise latch a state that no solution of the step reached and that the
-/// converged control, inside the band, never asks for. Before the first
-/// accepted transient point there is no accepted state, and the caller holds
-/// the iterate's.
+/// `held`.
 #[inline]
 fn banded_state(control: Value, upper: Value, lower: Value, held: SwitchState) -> SwitchState {
     if control > upper {
@@ -445,6 +434,69 @@ fn banded_state(control: Value, upper: Value, lower: Value, held: SwitchState) -
         SwitchState::Off
     } else {
         held
+    }
+}
+
+/// What a step attempt's Newton iterates have shown of an ideal switch with a
+/// positive hysteresis band, which decides the state it holds inside the band.
+///
+/// The state at a candidate is decided by the control's path across the
+/// step, and a Newton iterate is not on that path. `swload.c` and
+/// `cswload.c` hold the previous iterate's state inside the band, which is
+/// the accepted state wherever a step's first iterate is the accepted
+/// solution, as it is in ngspice. This solver's first iterate is extrapolated
+/// from the accepted history, and an extrapolation that overshoots the band
+/// would latch a state that no solution of the step reached and that the
+/// converged control, inside the band, never asks for. So the band holds the
+/// accepted state until a solution of the step with the accepted state has
+/// carried the control past the threshold that changes it: the switch has
+/// then changed on the step's path, and the band holds the changed state,
+/// as ngspice's does. A switch that drives its own control (its control
+/// node is one of its terminals, or its control current flows through it)
+/// can bring the control back inside the band once it has changed; without
+/// that witness its iterates alternated between the two states and the step
+/// never converged.
+#[derive(Debug, Clone, Copy, Default)]
+struct BandWitness {
+    /// Whether the attempt's first iterate has been read; it is the
+    /// extrapolated predictor, not a solution of the step.
+    predicted: bool,
+    /// The control of the last solution with the accepted state that crossed
+    /// the threshold changing it: where the control's path, before the
+    /// change, ends.
+    carried: Option<Value>,
+    /// Whether, after that crossing, a solution with the changed state took
+    /// the control back past the other threshold: no state is consistent
+    /// with the step.
+    contradicted: bool,
+}
+
+impl BandWitness {
+    /// The state at `control` for an iterate solved with `current`, the
+    /// witness updated with what the iterate shows. Before the first accepted
+    /// transient point there is no accepted state, and the iterate's is held.
+    fn state(
+        &mut self,
+        (control, upper, lower): (Value, Value, Value),
+        accepted: Option<SwitchState>,
+        current: SwitchState,
+    ) -> SwitchState {
+        let Some(accepted) = accepted else {
+            return banded_state(control, upper, lower, current);
+        };
+        let solved = std::mem::replace(&mut self.predicted, true);
+        let held = if self.carried.is_some() {
+            current
+        } else {
+            accepted
+        };
+        let next = banded_state(control, upper, lower, held);
+        if solved && current == accepted && next != accepted {
+            self.carried = Some(control);
+        } else if solved && self.carried.is_some() && current != accepted && next == accepted {
+            self.contradicted = true;
+        }
+        next
     }
 }
 
@@ -773,6 +825,9 @@ pub struct VoltageSwitch {
     /// see [`Self::stepped_since_accepted`].
     accepted_state: Option<SwitchState>,
     in_hysteresis_band: bool,
+    /// What the present step attempt's iterates have shown; see
+    /// [`BandWitness`].
+    witness: BandWitness,
     current_resistance: Value,
     prev_resistance: Value,
     current_dg_dcontrol: Value,
@@ -844,6 +899,7 @@ impl VoltageSwitch {
             prev_state: SwitchState::Off,
             accepted_state: None,
             in_hysteresis_band: false,
+            witness: BandWitness::default(),
             current_resistance: 1e6,
             prev_resistance: 1e6,
             current_dg_dcontrol: 0.0,
@@ -1229,11 +1285,14 @@ impl VoltageSwitch {
     /// Where the step from `accepted` to `candidate` carries the control
     /// across the threshold that changes the state the switch held at the
     /// accepted point, as a fraction of the step on the control's linear
-    /// interpolant. A run on a locked mesh cuts the step there, so the switch
-    /// changes at its crossing rather than at whichever mesh point follows
-    /// it. `None` when the control keeps the held state over the step, and
-    /// for a smooth or curve switch, whose transition is resolved by what it
-    /// drives.
+    /// interpolant. The interpolant ends at the control of the step's
+    /// solution with the accepted state where one crossed: that is the path
+    /// the control takes until the switch changes, and a switch that drives
+    /// its own control moves it once changed. A run on a locked mesh cuts
+    /// the step there, so the switch changes at its crossing rather than at
+    /// whichever mesh point follows it. `None` when the control keeps the
+    /// held state over the step, and for a smooth or curve switch, whose
+    /// transition is resolved by what it drives.
     #[doc(hidden)]
     pub fn threshold_crossing_fraction(
         &self,
@@ -1258,7 +1317,7 @@ impl VoltageSwitch {
             self.vt,
             self.vh,
             control(accepted),
-            control(candidate),
+            self.witness.carried.unwrap_or_else(|| control(candidate)),
         )
     }
 
@@ -1306,6 +1365,7 @@ impl VoltageSwitch {
         self.state = runtime.state;
         self.prev_state = runtime.prev_state;
         self.accepted_state = Some(runtime.state);
+        self.witness = BandWitness::default();
         self.in_hysteresis_band = runtime.in_hysteresis_band;
         self.current_resistance = runtime.current_resistance;
         self.prev_resistance = runtime.prev_resistance;
@@ -1402,6 +1462,17 @@ impl VoltageSwitch {
         self.smooth == 0.0 && self.xyce_curve.is_none() && !self.arctan_curve
     }
 
+    /// Whether the present step attempt found no state this ideal switch can
+    /// hold: a solution with its accepted state carried its control past the
+    /// threshold that changes it, and a solution with the changed state
+    /// carried it back past the other one. A switch that drives its own
+    /// control across its whole band chatters there, and no step is short
+    /// enough to resolve it.
+    #[doc(hidden)]
+    pub fn holds_no_consistent_state(&self) -> bool {
+        self.witness.contradicted
+    }
+
     /// Whether this is an ideal switch whose state differs from its state at
     /// the last accepted transient point: its conductance stepped between
     /// RON and ROFF inside the step to the present candidate. The step lands
@@ -1423,6 +1494,7 @@ impl VoltageSwitch {
     /// Commit hysteresis-side state after an accepted transient timestep.
     pub fn commit_transient_hysteresis(&mut self) {
         self.accepted_state = Some(self.state);
+        self.witness = BandWitness::default();
         if let Some(curve) = &mut self.xyce_curve {
             curve.commit_pending_side();
         }
@@ -1531,11 +1603,10 @@ impl VoltageSwitch {
         }
 
         self.in_hysteresis_band = false;
-        self.state = banded_state(
-            vctrl,
-            self.vt + self.vh,
-            self.vt - self.vh,
-            self.accepted_state.unwrap_or(self.state),
+        self.state = self.witness.state(
+            (vctrl, self.vt + self.vh, self.vt - self.vh),
+            self.accepted_state,
+            self.state,
         );
     }
 
@@ -1693,6 +1764,8 @@ pub struct CurrentSwitch {
     /// see [`VoltageSwitch::stepped_since_accepted`].
     accepted_state: Option<SwitchState>,
     in_hysteresis_band: bool,
+    /// See [`VoltageSwitch`]'s `witness`.
+    witness: BandWitness,
     current_resistance: Value,
     prev_resistance: Value,
     current_dg_dictrl: Value,
@@ -1720,6 +1793,7 @@ impl CurrentSwitch {
             prev_state: SwitchState::Off,
             accepted_state: None,
             in_hysteresis_band: false,
+            witness: BandWitness::default(),
             current_resistance: 1e6,
             prev_resistance: 1e6,
             current_dg_dictrl: 0.0,
@@ -1971,7 +2045,9 @@ impl CurrentSwitch {
             self.it,
             self.ih,
             self.control_current(accepted),
-            self.control_current(candidate),
+            self.witness
+                .carried
+                .unwrap_or_else(|| self.control_current(candidate)),
         )
     }
 
@@ -2019,6 +2095,7 @@ impl CurrentSwitch {
         self.state = runtime.state;
         self.prev_state = runtime.prev_state;
         self.accepted_state = Some(runtime.state);
+        self.witness = BandWitness::default();
         self.in_hysteresis_band = runtime.in_hysteresis_band;
         self.current_resistance = runtime.current_resistance;
         self.prev_resistance = runtime.prev_resistance;
@@ -2032,9 +2109,16 @@ impl CurrentSwitch {
     /// Commit hysteresis-side state after an accepted transient timestep.
     pub fn commit_transient_hysteresis(&mut self) {
         self.accepted_state = Some(self.state);
+        self.witness = BandWitness::default();
         if let Some(curve) = &mut self.xyce_curve {
             curve.commit_pending_side();
         }
+    }
+
+    /// See [`VoltageSwitch::holds_no_consistent_state`].
+    #[doc(hidden)]
+    pub fn holds_no_consistent_state(&self) -> bool {
+        self.witness.contradicted
     }
 
     /// See [`VoltageSwitch::stepped_since_accepted`].
@@ -2148,11 +2232,10 @@ impl CurrentSwitch {
         }
 
         self.in_hysteresis_band = false;
-        self.state = banded_state(
-            ictrl,
-            self.it + self.ih,
-            self.it - self.ih,
-            self.accepted_state.unwrap_or(self.state),
+        self.state = self.witness.state(
+            (ictrl, self.it + self.ih, self.it - self.ih),
+            self.accepted_state,
+            self.state,
         );
     }
 

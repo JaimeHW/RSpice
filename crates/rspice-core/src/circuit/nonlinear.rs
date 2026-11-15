@@ -1615,6 +1615,21 @@ impl CircuitData {
         }
     }
 
+    /// The first ideal switch the present step attempt found no consistent
+    /// state for: see `VoltageSwitch::holds_no_consistent_state`.
+    pub(crate) fn switch_with_no_consistent_state(&self) -> Option<&str> {
+        self.vswitches
+            .iter()
+            .find(|switch| switch.holds_no_consistent_state())
+            .map(|switch| switch.name.as_str())
+            .or_else(|| {
+                self.iswitches
+                    .iter()
+                    .find(|switch| switch.holds_no_consistent_state())
+                    .map(|switch| switch.name.as_str())
+            })
+    }
+
     /// Whether an ideal switch changed state between the last accepted
     /// transient point and the present candidate, so that the solution
     /// stepped at the candidate: see `VoltageSwitch::stepped_since_accepted`.
