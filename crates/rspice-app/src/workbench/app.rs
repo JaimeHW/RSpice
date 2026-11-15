@@ -31,7 +31,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::{
     restore_global_veriloga_library, save_global_veriloga_library,
 };
-use crate::workbench::framework::feature::ModelsPort;
+use crate::workbench::framework::feature::{CodePort, ModelsPort};
 
 const CONTEXT_LONG_PRESS_DURATION_SECONDS: f64 = 0.56;
 const CONTEXT_LONG_PRESS_MOVE_TOLERANCE_POINTS: f32 = 9.0;
@@ -330,7 +330,7 @@ impl RSpiceApp {
         if let Some(projection) = crate::workbench::synchronize_schematic_cross_probe(
             &state.model,
             &mut state.design.schematic_cross_probe,
-            state.code.netlist.active_document,
+            state.code.shown_netlist_document_key(),
         ) {
             state
                 .results

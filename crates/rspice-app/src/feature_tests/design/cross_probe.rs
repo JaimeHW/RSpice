@@ -10,6 +10,7 @@ use crate::state::{
 };
 use crate::workbench::AppState;
 use crate::workbench::TogglePreference;
+use crate::workbench::framework::feature::CodePort as _;
 
 /// The end-frame step as the shell runs it: the projection, applied
 /// through the results' and the netlist's own fns.
@@ -17,7 +18,7 @@ fn synchronize_schematic_cross_probe(state: &mut AppState) {
     if let Some(projection) = crate::workbench::synchronize_schematic_cross_probe(
         &state.model,
         &mut state.design.schematic_cross_probe,
-        state.code.netlist.active_document,
+        state.code.shown_netlist_document_key(),
     ) {
         state
             .results

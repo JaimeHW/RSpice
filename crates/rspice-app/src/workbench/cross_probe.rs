@@ -12,7 +12,7 @@ use crate::product::ContentDigest;
 use crate::state::{GeneratedArtifact, GeneratedSourceMapEntry};
 use crate::workbench::TogglePreference;
 use crate::workbench::app_state::Model;
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
+use crate::workbench::framework::feature::NetlistDocumentKey;
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
 use rspice_results_ui::selection::SelectedResultTrace;
 
@@ -48,7 +48,7 @@ struct SynchronizationKey {
     result_data_version: u64,
     active_dataset: Option<crate::product::DatasetId>,
     active_analysis_index: Option<usize>,
-    active_netlist_document: ActiveNetlistDocument,
+    shown_netlist_document: NetlistDocumentKey,
     generated_input_digest: Option<ContentDigest>,
 }
 
@@ -98,12 +98,16 @@ pub(crate) struct CrossProbeProjection {
 /// one device-local synchronization boundary and avoids order-dependent
 /// behavior among the three surfaces.
 ///
+/// `shown_netlist_document` is the code feature's key for the netlist
+/// document its editor shows; a switch between documents makes the
+/// projection stale.
+///
 /// `None` when nothing that decides the projection changed, so nothing is
 /// written.
 pub(crate) fn synchronize_schematic_cross_probe(
     model: &Model,
     runtime: &mut SchematicCrossProbeRuntime,
-    active_netlist_document: ActiveNetlistDocument,
+    shown_netlist_document: NetlistDocumentKey,
 ) -> Option<CrossProbeProjection> {
     if !model
         .preferences
@@ -135,7 +139,7 @@ pub(crate) fn synchronize_schematic_cross_probe(
         result_data_version: model.simulation.view.data_version,
         active_dataset: model.simulation.active_run().map(|run| run.dataset_id),
         active_analysis_index: model.simulation.view.active_analysis_idx,
-        active_netlist_document,
+        shown_netlist_document,
         generated_input_digest,
     };
     if runtime.key.as_ref() == Some(&key) {
