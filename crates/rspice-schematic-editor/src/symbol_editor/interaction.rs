@@ -67,6 +67,9 @@ pub struct SymbolCanvasInput {
     /// The touch strip's box latch: a finger's drag off the selection draws
     /// a selection box rather than panning.
     pub box_latched: bool,
+    /// Ctrl, Shift or Command held as a marquee is let go: what the marquee
+    /// takes joins the selection, as the schematic's marquee adds it.
+    pub add_to_selection: bool,
     /// Enter, while a line or polygon is being drawn: finish it.
     pub finish: bool,
     /// Backspace, while a shape is being drawn: take back its last point.
@@ -135,6 +138,10 @@ pub fn canvas_request(
         double_clicked: response.double_clicked_by(egui::PointerButton::Primary),
         extend_selection: response.ctx.input(|input| input.modifiers.shift) || latches.select_add,
         box_latched: latches.select_box,
+        add_to_selection: latches.select_add
+            || response.ctx.input(|input| {
+                input.modifiers.ctrl || input.modifiers.shift || input.modifiers.command
+            }),
         finish,
         remove_last_point,
         turn_pin: false,
@@ -519,8 +526,15 @@ fn handle_canvas_interaction(
     if input.drag_stopped {
         if let Some(start) = edit.session.marquee_start.take() {
             let end = edit.session.marquee_current.take().unwrap_or(body_point);
-            edit.session
-                .set_selection(SymbolSelection::in_rect(document, editor, start, end));
+            let mut taken = SymbolSelection::in_rect(document, editor, start, end);
+            if input.add_to_selection {
+                let mut selection = edit.session.effective_selection();
+                selection.pins.append(&mut taken.pins);
+                selection.shapes.append(&mut taken.shapes);
+                selection.attributes.append(&mut taken.attributes);
+                taken = selection;
+            }
+            edit.session.set_selection(taken);
         }
         edit.session.clear_drag_state();
     }

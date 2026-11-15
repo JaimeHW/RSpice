@@ -595,3 +595,59 @@ fn a_pin_is_never_dropped_on_another_pin() {
     );
     assert_eq!(parent_nets(&state), nets);
 }
+
+/// A marquee let go with Ctrl, Shift or Command held adds what it takes to
+/// the selection, as the schematic's marquee does; let go without one, it
+/// replaces the selection.
+#[test]
+fn a_marquee_let_go_with_a_modifier_adds_to_the_selection() {
+    for add in [false, true] {
+        let mut state = open_symbol();
+        state.design.symbol.editor.select_pin("IN");
+        // Round the circle, clear of the pin at (-40, 0).
+        let (from, to) = (Point::new(-20, -20), Point::new(20, 20));
+        for (point, input) in [
+            (
+                from,
+                SymbolCanvasInput {
+                    drag_started: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                to,
+                SymbolCanvasInput {
+                    dragged: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                to,
+                SymbolCanvasInput {
+                    drag_stopped: true,
+                    add_to_selection: add,
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let request = request(
+                &state,
+                SymbolCanvasInput {
+                    pointer: viewport().world_to_screen(point),
+                    ..input
+                },
+            );
+            apply(&mut state, request);
+        }
+        let selection = state.design.symbol.editor.effective_selection();
+        assert!(
+            selection.shapes.contains(&0),
+            "the marquee takes the circle"
+        );
+        assert_eq!(
+            selection.contains_pin("IN"),
+            add,
+            "the pin selected before stays only when the marquee adds"
+        );
+    }
+}
