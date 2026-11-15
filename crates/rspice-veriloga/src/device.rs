@@ -5746,7 +5746,7 @@ impl VerilogADevice {
     /// ([`dispatch_model_entry`](crate::wasm_jit::install_browser_dispatcher)),
     /// so there is no synchronous device-initiated compile to make lazy. The
     /// two shapes that remain are a second module installed eagerly for every
-    /// model — up to another 32 MiB apiece in a worker registry that holds
+    /// model — as large again as the first, in a worker registry that holds
     /// sixty-four — or an interpreted pass over the assignment steps the
     /// `CompiledModel` already carries. The second costs nothing until it is
     /// called, and the readback it serves is not on any hot path in a browser.
