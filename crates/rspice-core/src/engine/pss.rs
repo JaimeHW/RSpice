@@ -4647,6 +4647,11 @@ impl Engine {
             initialization,
         } = step;
 
+        // The transient's floor: none on the circuit's nodes, and GMIN on each
+        // node only GMIN holds (a compact model's floating island, a node
+        // the operating point found with no DC path). Without it such a
+        // node's row is empty and every step's matrix is singular.
+        Self::stamp_nodal_gmin(circuit, matrix, 0.0);
         circuit.stamp_transient_linear_direct(matrix, rhs);
 
         // Evaluate independent sources at the end of this step. Voltage

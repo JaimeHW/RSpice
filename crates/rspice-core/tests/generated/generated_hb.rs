@@ -145,8 +145,9 @@ fn vbic_4t_et_gives_the_native_vbic_harmonics() {
 /// point, the transient and harmonic balance all hold them there, and the
 /// transistor conducts nothing: the collector sits at the supply and the
 /// base at the drive. Before, the operating point and the transient failed
-/// on the singular system while harmonic balance answered. Harmonic
-/// balance's own GMIN leaves `c` within 3e-9 V of the supply.
+/// on the singular system while harmonic balance answered, and shooting,
+/// whose steps took no floor, failed on every step's singular matrix.
+/// Harmonic balance's own GMIN leaves `c` within 3e-9 V of the supply.
 #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
 #[test]
 fn vbic_4t_et_default_card_gives_one_answer_in_every_analysis() {
@@ -178,6 +179,28 @@ fn vbic_4t_et_default_card_gives_one_answer_in_every_analysis() {
     assert!(
         c[1..].iter().all(|harmonic| harmonic.norm() <= 1e-9),
         "{c:?}"
+    );
+    let pss = engine()
+        .run_pss(
+            &netlist,
+            PssConfig::new(F0)
+                .with_points_per_period(512)
+                .with_tolerance(1e-9),
+        )
+        .unwrap_or_else(|error| panic!("shooting holds the open card: {error}"))
+        .result;
+    let output = pss
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("c"))
+        .expect("V(c)");
+    assert!(
+        pss.waveforms[output]
+            .values
+            .iter()
+            .all(|&value| (value - 3.0).abs() <= 1e-9),
+        "{:?}",
+        &pss.waveforms[output].values[..4]
     );
 }
 
