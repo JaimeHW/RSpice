@@ -1878,7 +1878,20 @@ impl HirModel {
     fn validate_expressions(&self, diagnostics: &mut Vec<IrDiagnostic>) {
         let known_nodes = self.known_node_names();
         let declared_branches = self.declared_branch_names();
-        let value_symbols = self.known_value_symbol_names();
+        let value_symbols = ValueSymbols {
+            known: self.known_value_symbol_names(),
+            indexed: self
+                .arrays
+                .iter()
+                .map(|array| array.name.clone())
+                .chain(
+                    self.parameters
+                        .iter()
+                        .filter(|parameter| !parameter.dimensions.is_empty())
+                        .map(|parameter| parameter.name.clone()),
+                )
+                .collect(),
+        };
         let discrete_inputs: HashSet<_> = self.discrete_inputs.iter().copied().collect();
         let discrete_selections: HashMap<_, _> = self
             .discrete_selections
@@ -1916,7 +1929,7 @@ impl HirModel {
         expression: &HirExpression,
         known_nodes: &HashSet<SmolStr>,
         declared_branches: &HashSet<SmolStr>,
-        value_symbols: &HashSet<SmolStr>,
+        value_symbols: &ValueSymbols,
         discrete_inputs: &HashSet<[VariableId; 2]>,
         discrete_selections: &HashMap<VariableId, &HirDiscreteSelection>,
     ) {
@@ -2033,7 +2046,12 @@ impl HirModel {
                     }
                 }
                 self.validate_expression_child(diagnostics, expression, "index", *index);
-                self.validate_array_access_target(diagnostics, expression, array, value_symbols);
+                self.validate_array_access_target(
+                    diagnostics,
+                    expression,
+                    array,
+                    &value_symbols.known,
+                );
                 if let Some(validity) = discrete_validity {
                     let value = self.arrays.iter().find(|a| a.name == *array);
                     let valid = self.arrays.iter().find(|a| a.name == *validity);
@@ -2094,14 +2112,9 @@ impl HirModel {
         diagnostics: &mut Vec<IrDiagnostic>,
         expression: &HirExpression,
         name: &SmolStr,
-        value_symbols: &HashSet<SmolStr>,
+        value_symbols: &ValueSymbols,
     ) {
-        if self.arrays.iter().any(|array| array.name == *name)
-            || self
-                .parameters
-                .iter()
-                .any(|parameter| parameter.name == *name && !parameter.dimensions.is_empty())
-        {
+        if value_symbols.indexed.contains(name) {
             diagnostics.push(IrDiagnostic::error(
                 CompilerPhase::HirValidation,
                 format!("HIR array identifier '{}' requires an index", name),
@@ -2110,7 +2123,7 @@ impl HirModel {
             return;
         }
 
-        if !value_symbols.contains(name) {
+        if !value_symbols.known.contains(name) {
             diagnostics.push(IrDiagnostic::error(
                 CompilerPhase::HirValidation,
                 format!("HIR unknown identifier '{}'", name),
@@ -3210,6 +3223,13 @@ impl HirModel {
             .map(|branch| branch.name.clone())
             .collect()
     }
+}
+
+/// The names an identifier expression may read, and those of them it may
+/// read only through an index: local arrays and array parameters.
+struct ValueSymbols {
+    known: HashSet<SmolStr>,
+    indexed: HashSet<SmolStr>,
 }
 
 /// Call name given to a discrete-domain expression that reached HIR lowering.
