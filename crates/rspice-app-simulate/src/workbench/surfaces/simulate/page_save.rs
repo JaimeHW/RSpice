@@ -10,11 +10,13 @@ mod groups;
 use egui::Ui;
 
 use crate::product::RunId;
+use crate::state::SimulationPage;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroupMembership, RunRetention, SavedOutputPrecision, SavedOutputStreaming,
 };
 use crate::workbench::app_state::Model;
+use crate::workbench::app_state::design_history::SetupParts;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, record_plan_refusal};
 use rspice_simulation::capture_ledger::CaptureLedger;
@@ -642,6 +644,7 @@ fn commit_save_policy(
         record_plan_refusal(cx, error);
         return false;
     }
+    let before = cx.model.setup_snapshot(SetupParts::SAVE_POLICY);
     let previous = cx.model.sim_setup.save_policy;
     cx.model.sim_setup.save_policy = policy;
     match cx
@@ -650,6 +653,8 @@ fn commit_save_policy(
         .commit_active_plan_configuration_change(detail)
     {
         Ok(receipt) => {
+            cx.model
+                .record_setup_change(SimulationPage::Save.label(), before);
             cx.model.record_plan_receipt(receipt.status_line());
             cx.runs.preflight.invalidate();
             true

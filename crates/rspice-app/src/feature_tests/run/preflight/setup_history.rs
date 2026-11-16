@@ -358,3 +358,20 @@ fn a_library_detached_on_the_models_page_is_one_step_put_back_exactly() {
         );
     });
 }
+
+// -------------------------------------------------------------------- save
+
+/// What is saved and how it streams, as the plan holds it.
+fn save_policy(app: &RSpiceApp) -> String {
+    format!("{:?}", app.state.model.sim_setup.save_policy)
+}
+
+/// A switch on the Save & streaming page is one step: Undo puts the policy
+/// back exactly, and Redo flips it again.
+#[test]
+fn a_save_policy_switch_is_one_step_put_back_exactly() {
+    let mut page = Page::open_on(app_with_a_moded_device("").0, SimulationPage::Save);
+    let before = save_policy(&page.app);
+    page.click("Permit live delivery for outputs that request it");
+    undo_and_redo(&mut page.app, "streaming switch", save_policy, before);
+}
