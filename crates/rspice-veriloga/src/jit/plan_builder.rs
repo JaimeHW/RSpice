@@ -3014,15 +3014,12 @@ impl AssignmentShadowIndex {
                 continue;
             }
 
-            let Some((base, raw_suffix)) = name_str.split_once('@') else {
+            let Some((base, axes)) = scalar_derivative_shadow(name_str) else {
                 continue;
             };
-            if base.is_empty() || base.contains('[') {
+            if base.contains('[') {
                 continue;
             }
-            let Some(axes) = derivative_shadow_axes_from_suffix(raw_suffix) else {
-                continue;
-            };
             scalar
                 .entry(base.to_string())
                 .or_default()
@@ -3931,6 +3928,26 @@ fn lower_canonical_shadow_program(
         axes,
         limits,
     )
+}
+
+/// The variable a scalar derivative shadow differentiates, and its axes.
+///
+/// The variable's own name can contain `@`: an analog function the compiler
+/// expands into statements (one with an `output` argument or a branching
+/// body) names its result `__fn<N>_<function>@result` and its locals
+/// `__fn<N>_<function>@local_<name>`. So the axes are the first `@` tail that
+/// parses as axes, not everything after the first `@`. Splitting at the first
+/// `@` read `__fn1_f@result@d0` as variable `__fn1_f` with the axis
+/// `result@d0`, found no such axis, and dropped the shadow: the postfix plan
+/// then never computed it and every derivative through the function read zero.
+fn scalar_derivative_shadow(name: &str) -> Option<(&str, Vec<CanonicalDerivativeAxis>)> {
+    name.match_indices('@').find_map(|(at, _)| {
+        let base = &name[..at];
+        if base.is_empty() {
+            return None;
+        }
+        derivative_shadow_axes_from_suffix(&name[at + 1..]).map(|axes| (base, axes))
+    })
 }
 
 pub(crate) fn derivative_shadow_axes_from_suffix(
@@ -5089,6 +5106,73 @@ endmodule
         assert!(derivative_shadow_axes_from_suffix("").is_none());
         assert!(derivative_shadow_axes_from_suffix("@").is_none());
         assert!(derivative_shadow_axes_from_suffix("not_an_axis").is_none());
+    }
+
+    /// A function with an `output` argument is expanded into statements whose
+    /// targets are named `__fn1_square@result` and `__fn1_square@local_v`.
+    const OUTPUT_ARGUMENT_FUNCTION: &str = r#"
+`include "disciplines.vams"
+module plan_output_function(p, n);
+  inout p, n;
+  electrical p, n;
+  real current, copy;
+  analog function real square;
+    input v;
+    output o;
+    real v, o;
+    begin
+      o = v;
+      square = 1.0e-3 * v * v;
+    end
+  endfunction
+  analog begin
+    current = square(V(p, n), copy);
+    I(p, n) <+ current;
+  end
+endmodule
+"#;
+
+    /// Every derivative shadow of an expanded function's result and locals is
+    /// computed by the postfix plan. Their names hold two `@`, and the plan
+    /// once split them at the first: it found no shadow of
+    /// `__fn1_square@result`, never computed one, and so stamped a zero
+    /// conductance for everything the function returned. MVSG's `calc_iq`
+    /// is such a function, and its operating point did not converge.
+    #[test]
+    fn an_expanded_function_keeps_its_derivative_shadows_in_the_postfix_plan() {
+        let (model, plan) = plan(OUTPUT_ARGUMENT_FUNCTION, "plan_output_function");
+        let planned = direct_assignment_targets(&plan);
+        for base in ["__fn1_square@result", "__fn1_square@local_v", "current"] {
+            let shadows: Vec<&SmolStr> = model
+                .variable_names
+                .iter()
+                .filter(|name| {
+                    scalar_derivative_shadow(name)
+                        .is_some_and(|(shadow_base, _)| shadow_base == base)
+                })
+                .collect();
+            assert!(
+                !shadows.is_empty(),
+                "the compiler allocates derivative shadows of '{base}': {:?}",
+                model.variable_names
+            );
+            for shadow in shadows {
+                assert!(
+                    planned.contains(&slot_of(&model, shadow)),
+                    "the postfix plan computes derivative shadow '{shadow}'"
+                );
+            }
+        }
+        assert_eq!(
+            scalar_derivative_shadow("__fn1_square@local_v@d0@d1")
+                .map(|(base, axes)| (base, axes.len())),
+            Some(("__fn1_square@local_v", 2))
+        );
+        assert_eq!(
+            scalar_derivative_shadow("current@d0").map(|(base, _)| base),
+            Some("current")
+        );
+        assert!(scalar_derivative_shadow("__fn1_square@result").is_none());
     }
 
     #[test]
