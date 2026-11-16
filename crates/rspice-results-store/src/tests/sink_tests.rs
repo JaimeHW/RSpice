@@ -238,3 +238,46 @@ fn a_segment_file_reopens_writable_for_the_run_that_resumes_it() {
     assert!(std::fs::read(&path).unwrap() == whole.into_io().unwrap().bytes());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A read the host cannot give memory for stops typed, naming the bytes it asked for, and a read
+/// the host can serve still succeeds.
+#[test]
+fn a_read_the_host_cannot_hold_is_refused_typed_with_its_bytes() {
+    let meta = sink::RunMeta::default();
+    let mut store = StoreSink::new(MemoryIo::new());
+    ResultSink::begin(&mut store, &schema(), &meta).unwrap();
+    for at in 0..1000_u32 {
+        let x = at as f64 * 1e-9;
+        store.row(x, &[x.sin(), at as f64]).unwrap();
+        let level = if at.is_multiple_of(2) {
+            sink::Logic::One
+        } else {
+            sink::Logic::Zero
+        };
+        let change = sink::EventChange {
+            signal: 1,
+            time: x,
+            sequence: 0,
+            value: sink::EventValue::Logic(level),
+            strength: 0,
+        };
+        store.events(&[change]).unwrap();
+    }
+    store.end(sink::RunStatus::Completed).unwrap();
+    let mut reader = SegmentReader::open(store.into_io().unwrap()).unwrap();
+    crate::error::read_budget::BYTES.with(|cell| cell.set(Some(1024)));
+    let rows = reader.read_x(0, 1000);
+    let events = reader.events(1, f64::NEG_INFINITY, f64::INFINITY);
+    let served = reader.read_slot(0, 0, 100);
+    crate::error::read_budget::BYTES.with(|cell| cell.set(None));
+    assert!(
+        matches!(rows, Err(StoreError::Allocation { bytes: 8000, .. })),
+        "{rows:?}"
+    );
+    assert!(
+        matches!(events, Err(StoreError::Allocation { .. })),
+        "{events:?}"
+    );
+    assert_eq!(served.unwrap().len(), 100);
+    assert_eq!(reader.read_x(0, 1000).unwrap().len(), 1000);
+}

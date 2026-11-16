@@ -845,7 +845,8 @@ impl<I: SegmentIo> SegmentReader<I> {
                 self.rows()
             )));
         }
-        let mut out = Vec::with_capacity(count);
+        let mut out = Vec::new();
+        crate::error::reserve(&mut out, count, "the rows read back from a results segment")?;
         let mut decoded = Vec::new();
         let mut index = self.chunk_containing(first);
         while out.len() < count {

@@ -35,6 +35,12 @@ pub enum StoreError {
     /// A resume named a point (`x`, as its bits) the segment holds no row at, so the segment
     /// cannot continue from it.
     NoRowAt { x_bits: u64 },
+    /// The host could not give a read the memory it asked for: `bytes` for `object`.
+    Allocation {
+        object: &'static str,
+        bytes: usize,
+        source: std::collections::TryReserveError,
+    },
 }
 
 impl StoreError {
@@ -44,6 +50,26 @@ impl StoreError {
             reason: reason.into(),
         }
     }
+}
+
+/// Reserve room for `additional` more items in `out`, or fail with the typed
+/// [`StoreError::Allocation`] naming the bytes they need.
+pub(crate) fn reserve<T>(
+    out: &mut Vec<T>,
+    additional: usize,
+    object: &'static str,
+) -> Result<(), StoreError> {
+    let bytes = additional.saturating_mul(std::mem::size_of::<T>());
+    let refused = |source| StoreError::Allocation {
+        object,
+        bytes,
+        source,
+    };
+    #[cfg(test)]
+    if let Some(source) = read_budget::refuses(bytes) {
+        return Err(refused(source));
+    }
+    out.try_reserve(additional).map_err(refused)
 }
 
 impl From<io::Error> for StoreError {
@@ -85,6 +111,10 @@ impl fmt::Display for StoreError {
                 write!(f, "event for signal {signal}: {reason}")
             }
             Self::Schema(reason) => write!(f, "results schema: {reason}"),
+            Self::Allocation { object, bytes, .. } => write!(
+                f,
+                "unable to allocate {object}: {bytes} bytes were needed to read the results store"
+            ),
             Self::OutOfRange(reason) => write!(f, "results read out of range: {reason}"),
             Self::WriterStopped => {
                 f.write_str("the results writer already stopped on an earlier error")
@@ -99,3 +129,25 @@ impl fmt::Display for StoreError {
 }
 
 impl std::error::Error for StoreError {}
+
+/// A per-thread limit on what one reservation may ask for, so a test can make the host refuse.
+#[cfg(test)]
+pub(crate) mod read_budget {
+    use std::cell::Cell;
+    use std::collections::TryReserveError;
+
+    thread_local! {
+        pub(crate) static BYTES: Cell<Option<usize>> = const { Cell::new(None) };
+    }
+
+    /// The host's refusal of a reservation of `bytes`, when the budget is smaller.
+    pub(super) fn refuses(bytes: usize) -> Option<TryReserveError> {
+        let budget = BYTES.with(Cell::get)?;
+        (bytes > budget).then(|| {
+            // A capacity overflow, the one refusal that can be made without allocating.
+            Vec::<u8>::new()
+                .try_reserve(usize::MAX)
+                .expect_err("no host has usize::MAX bytes to give")
+        })
+    }
+}

@@ -482,3 +482,24 @@ fn a_resume_whose_storage_fills_keeps_the_store_it_appended_to() {
     assert_eq!(reader.read_x(first_rows - 1, 1).unwrap()[0], 20e-6);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A read-back the host cannot give memory for ends the run with the typed allocation failure
+/// that names the bytes it needed, as a refusal while solving does, and not as a damaged store.
+#[test]
+fn a_read_back_the_host_cannot_hold_is_the_typed_allocation_failure() {
+    let source = Vec::<u8>::new()
+        .try_reserve(usize::MAX)
+        .expect_err("no host has usize::MAX bytes to give");
+    let error = super::store_error(
+        Path::new("out.rsr"),
+        rspice_results_store::StoreError::Allocation {
+            object: "the rows read back from a results segment",
+            bytes: 8_000_000_000,
+            source,
+        },
+    );
+    let details = error.details();
+    assert_eq!(details.code, "allocation_failed", "{error}");
+    assert_eq!(details.category, "resource_limit", "{error}");
+    assert!(error.to_string().contains("8000000000 bytes"), "{error}");
+}

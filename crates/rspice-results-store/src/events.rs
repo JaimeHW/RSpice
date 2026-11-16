@@ -533,6 +533,11 @@ pub(crate) fn decode_events(
     }
     let mut strengths = vec![0u8; count];
     codec::decode_bytes(blocks[3].2, bytes(blocks[3]), &mut strengths, base)?;
+    crate::error::reserve(
+        out,
+        count,
+        "the event changes read back from a results segment",
+    )?;
     let plane = kind.value_bytes() / 3;
     let bits = |part: usize, at: usize| {
         let start = (part * count + at) * plane;

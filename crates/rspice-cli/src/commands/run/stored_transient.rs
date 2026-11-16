@@ -1437,10 +1437,26 @@ pub(super) fn store_path_beside(output: &Path) -> PathBuf {
 }
 
 fn store_error(dir: &Path, error: StoreError) -> CliError {
-    CliError::output_error(
-        dir,
-        std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()),
-    )
+    match error {
+        // The host refused the memory a read asked for: the run's typed allocation failure, with
+        // the bytes it needed, as a refusal while solving is.
+        StoreError::Allocation {
+            object,
+            bytes,
+            source,
+        } => CliError::CoreSimulationError {
+            source: rspice_core::SimulationError::Allocation {
+                object,
+                bytes,
+                source,
+            },
+            analysis: Some("Transient".to_string()),
+        },
+        error => CliError::output_error(
+            dir,
+            std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()),
+        ),
+    }
 }
 
 /// The error a run that did not complete ends with. A run refused before solving, or stopped for
