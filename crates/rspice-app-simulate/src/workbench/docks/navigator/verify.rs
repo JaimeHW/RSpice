@@ -79,35 +79,14 @@ pub(in crate::workbench) fn verify(
     opened
 }
 
-/// One verification flow's row: what it is, what it holds, and its state,
-/// stated once. A problem leads the row with its mark; otherwise the row leads
-/// with the flow's neutral page glyph.
+/// One view's row: its name, what it holds, and its state, stated once. A
+/// problem leads the row with its mark.
 #[derive(Clone)]
 pub(super) struct VerificationFlowPresentation {
     pub(super) label: String,
     pub(super) detail: String,
     pub(super) status: String,
     pub(super) problem: Option<Problem>,
-    pub(super) glyph: &'static str,
-}
-
-pub(super) const fn verification_flow_label(page: VerificationPage) -> &'static str {
-    match page {
-        VerificationPage::Yield => "PVT & Monte Carlo",
-        VerificationPage::Corners => "Process corners",
-        VerificationPage::DeviceSafety => "Electrical SOA",
-        VerificationPage::Regression => "Regression",
-    }
-}
-
-/// The neutral glyph a flow row leads with when it reports no problem.
-const fn verification_flow_glyph(page: VerificationPage) -> &'static str {
-    match page {
-        VerificationPage::Yield => "M",
-        VerificationPage::Corners => "C",
-        VerificationPage::DeviceSafety => "S",
-        VerificationPage::Regression => "R",
-    }
 }
 
 pub(super) fn verification_flow_presentation(
@@ -116,7 +95,7 @@ pub(super) fn verification_flow_presentation(
 ) -> VerificationFlowPresentation {
     let active_run = model.simulation.active_run();
     match page {
-        VerificationPage::Yield => {
+        VerificationPage::MonteCarlo => {
             let evidence = active_run.and_then(|run| {
                 model
                     .simulation
@@ -142,16 +121,13 @@ pub(super) fn verification_flow_presentation(
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
             VerificationFlowPresentation {
-                label: evidence.map_or_else(
-                    || verification_flow_label(page).to_owned(),
-                    |(run, _)| format!("PVT & Monte Carlo · Run {}", run.id),
-                ),
+                label: page.label().to_owned(),
                 // The seed and the sampling are the inspector's; the row says
-                // how much of the run completed.
-                detail: evidence.map_or_else(String::new, |(_, provenance)| {
+                // which run it read and how much of it completed.
+                detail: evidence.map_or_else(String::new, |(run, provenance)| {
                     format!(
-                        "{} / {} samples",
-                        provenance.runs_completed, provenance.runs_requested
+                        "Run {} · {} / {} samples",
+                        run.id, provenance.runs_completed, provenance.runs_requested
                     )
                 }),
                 status: worst.map_or_else(
@@ -161,7 +137,6 @@ pub(super) fn verification_flow_presentation(
                 problem: worst
                     .is_some_and(|result| result.fail_count > 0)
                     .then_some(Problem::Warning),
-                glyph: verification_flow_glyph(page),
             }
         }
         VerificationPage::Corners => {
@@ -171,7 +146,7 @@ pub(super) fn verification_flow_presentation(
                 .and_then(|analysis| analysis.waveforms.first())
                 .map_or(0, |waveform| waveform.x.len());
             VerificationFlowPresentation {
-                label: verification_flow_label(page).to_owned(),
+                label: page.label().to_owned(),
                 detail: String::new(),
                 status: if point_count == 0 {
                     "not run".to_owned()
@@ -183,10 +158,9 @@ pub(super) fn verification_flow_presentation(
                 problem: result
                     .is_some_and(|analysis| !analysis.success)
                     .then_some(Problem::Warning),
-                glyph: verification_flow_glyph(page),
             }
         }
-        VerificationPage::DeviceSafety => {
+        VerificationPage::Checks => {
             let soa_evidence =
                 active_run.and_then(|run| verified_analysis(run, crate::state::AnalysisType::Soa));
             let has_evidence = soa_evidence.is_some();
@@ -196,15 +170,14 @@ pub(super) fn verification_flow_presentation(
                 soa_evidence.and_then(super::super::inspector::soa::analysis_soa_display)
             {
                 return VerificationFlowPresentation {
-                    label: verification_flow_label(page).to_owned(),
+                    label: page.label().to_owned(),
                     detail: "Worst device stress against its SOA limits".to_owned(),
                     status: verdict.label,
                     problem: verdict.problem,
-                    glyph: verification_flow_glyph(page),
                 };
             }
             VerificationFlowPresentation {
-                label: verification_flow_label(page).to_owned(),
+                label: page.label().to_owned(),
                 detail: if has_evidence {
                     "The SOA check ran, but its results are unavailable".to_owned()
                 } else {
@@ -216,10 +189,9 @@ pub(super) fn verification_flow_presentation(
                     "not run".to_owned()
                 },
                 problem: has_evidence.then_some(Problem::Warning),
-                glyph: verification_flow_glyph(page),
             }
         }
-        VerificationPage::Regression => {
+        VerificationPage::Reference => {
             let retained_runs = model
                 .simulation
                 .retained
@@ -233,7 +205,7 @@ pub(super) fn verification_flow_presentation(
                 .count();
             let ready = retained_runs >= 2;
             VerificationFlowPresentation {
-                label: verification_flow_label(page).to_owned(),
+                label: page.label().to_owned(),
                 detail: String::new(),
                 status: if ready {
                     format!("{retained_runs} runs")
@@ -241,7 +213,6 @@ pub(super) fn verification_flow_presentation(
                     "needs 2 runs".to_owned()
                 },
                 problem: None,
-                glyph: verification_flow_glyph(page),
             }
         }
     }

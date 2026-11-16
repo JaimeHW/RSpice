@@ -58,10 +58,10 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
         match page {
-            VerificationPage::Yield => yield_page(ui, cx),
             VerificationPage::Corners => corners(ui, cx),
-            VerificationPage::DeviceSafety => device_safety(ui, cx),
-            VerificationPage::Regression => regression(ui, cx),
+            VerificationPage::MonteCarlo => yield_page(ui, cx),
+            VerificationPage::Checks => device_safety(ui, cx),
+            VerificationPage::Reference => regression(ui, cx),
         }
     });
     regression_baseline_picker(&ctx, cx);

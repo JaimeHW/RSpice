@@ -104,7 +104,7 @@ fn verify_app(page: VerificationPage) -> RSpiceApp {
 }
 
 fn verify_monte_carlo() -> RSpiceApp {
-    let mut app = verify_app(VerificationPage::Yield);
+    let mut app = verify_app(VerificationPage::MonteCarlo);
     app.state.model.workspace.content.specs.push(SpecEntry {
         measurement: "gain".to_owned(),
         expression: String::new(),
@@ -157,7 +157,7 @@ fn verify_monte_carlo() -> RSpiceApp {
 }
 
 fn verify_yield_empty() -> RSpiceApp {
-    verify_app(VerificationPage::Yield)
+    verify_app(VerificationPage::MonteCarlo)
 }
 
 fn inspector_context() -> egui::Context {
@@ -415,8 +415,8 @@ fn the_verify_inspector_says_once_that_no_monte_carlo_ran() {
 fn the_verify_inspector_restates_nothing_the_other_pages_show() {
     for page in [
         VerificationPage::Corners,
-        VerificationPage::DeviceSafety,
-        VerificationPage::Regression,
+        VerificationPage::Checks,
+        VerificationPage::Reference,
     ] {
         let painted = simulate_text(&mut verify_app(page));
         assert_states(

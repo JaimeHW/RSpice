@@ -155,7 +155,7 @@ pub(super) fn regression(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         toolbar_actions.push(ToolbarAction::new("Remove orphaned rules"));
     }
     let output = PageToolbar {
-        title: "Regression",
+        title: VerificationPage::Reference.label(),
         runs: &runs,
         summary,
         actions: &toolbar_actions,

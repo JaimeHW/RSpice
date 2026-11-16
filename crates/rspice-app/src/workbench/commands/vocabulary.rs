@@ -405,7 +405,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
         rspice_app_results::workbench::documents::result_document::ResultViewer::Waves,
     )
     .key(),
-    SimulateCommand::Verify(VerificationPage::Yield).key(),
+    SimulateCommand::Verify(VerificationPage::Corners).key(),
     ModelsCommand::Page(ModelsPage::Models).key(),
     ModelsCommand::ModelCreateProjectCopy.key(),
     ModelsCommand::ModelEditor.key(),
@@ -697,9 +697,9 @@ static COMMAND_ORDER: &[CommandKey] = &[
     )
     .key(),
     ResultsCommand::EditSpecifications.key(),
-    SimulateCommand::Verify(VerificationPage::Corners).key(),
-    SimulateCommand::Verify(VerificationPage::DeviceSafety).key(),
-    SimulateCommand::Verify(VerificationPage::Regression).key(),
+    SimulateCommand::Verify(VerificationPage::MonteCarlo).key(),
+    SimulateCommand::Verify(VerificationPage::Checks).key(),
+    SimulateCommand::Verify(VerificationPage::Reference).key(),
     ModelsCommand::Page(ModelsPage::Symbols).key(),
     ModelsCommand::Page(ModelsPage::Corners).key(),
     ModelsCommand::Page(ModelsPage::Bins).key(),

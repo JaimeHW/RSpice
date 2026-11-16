@@ -44,7 +44,6 @@ pub(super) fn flow_row(ui: &mut Ui, flow: &VerificationFlowPresentation, selecte
         detail,
         status,
         problem,
-        glyph,
     } = flow;
     let t = Tokens::get(ui.ctx());
     let text_width = (ui.available_width() - FLOW_TEXT_LEFT - 9.0).max(1.0);
@@ -100,24 +99,15 @@ pub(super) fn flow_row(ui: &mut Ui, flow: &VerificationFlowPresentation, selecte
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    // The leading slot holds the flow's problem, in its own mark and colour,
-    // or the flow's neutral page glyph. There is no tinted disc behind either.
+    // The leading slot holds the view's problem, in its own mark and colour,
+    // and nothing when it has none. There is no tinted disc behind it.
     let lead = egui::pos2(rect.left() + 17.5, rect.top() + FLOW_LABEL_TOP + 6.5);
-    match problem {
-        Some(problem) => paint_problem_mark(
+    if let Some(problem) = problem {
+        paint_problem_mark(
             ui.painter(),
             egui::Rect::from_center_size(lead, egui::Vec2::splat(11.0)),
             *problem,
-        ),
-        None => {
-            ui.painter().text(
-                lead,
-                egui::Align2::CENTER_CENTER,
-                glyph,
-                theme::mono(tokens::FS_0, FontWeight::Medium),
-                t.color.text_dim,
-            );
-        }
+        );
     }
     let text_left = rect.left() + FLOW_TEXT_LEFT;
     let text_right = rect.right() - 9.0;

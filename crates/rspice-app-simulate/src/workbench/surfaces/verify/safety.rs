@@ -117,7 +117,7 @@ pub fn device_safety(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let toolbar_actions = [ToolbarAction::new("Edit SOA checks")];
     let summary = rows.as_deref().and_then(soa_summary);
     let output = PageToolbar {
-        title: "Electrical SOA",
+        title: VerificationPage::Checks.label(),
         runs: &runs,
         summary,
         actions: &toolbar_actions,

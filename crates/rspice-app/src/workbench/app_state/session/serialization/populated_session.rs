@@ -320,7 +320,7 @@ fn populate_workbench(
     state.project.project_dependency_selection = Some("models/afe.lib".to_owned());
     state.project.project_checkpoint_selection = Some("checkpoint-2".to_owned());
     state.project.library_cellview_page = LibraryCellviewPage::SymbolForm;
-    state.simulate.verification_page = VerificationPage::Corners;
+    state.simulate.verification_page = VerificationPage::Reference;
     state.simulate.simulation_page = SimulationPage::Outputs;
     state.simulate.verification.corner_compare_nominal = true;
     state.simulate.verification.regression_baseline_run =

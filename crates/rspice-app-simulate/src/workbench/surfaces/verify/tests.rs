@@ -1271,7 +1271,7 @@ fn empty_verify_pages_are_one_line_under_the_toolbar() {
 fn the_regression_page_is_one_table_and_the_selected_targets_detail() {
     use super::raster::{PAGE_WIDTH, page_geometry};
 
-    let geometry = page_geometry(regression_app(), VerificationPage::Regression);
+    let geometry = page_geometry(regression_app(), VerificationPage::Reference);
     let toolbar = geometry.one("toolbar").expect("toolbar");
     assert!(geometry.one("toolbar.summary").is_some());
     let head = geometry.one("table.head").expect("checks table");

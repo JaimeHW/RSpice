@@ -108,7 +108,7 @@ impl Default for SimulateState {
         Self {
             plan_removal_review: Default::default(),
             plan_removal_refusal: Default::default(),
-            verification_page: crate::state::VerificationPage::Yield,
+            verification_page: crate::state::VerificationPage::Corners,
             simulation_page: crate::state::SimulationPage::Analyses,
             verification: Default::default(),
             active_analysis: crate::workbench::state::default_analysis_index(),

@@ -36,7 +36,6 @@ use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_sheets::workbench::sheets::SheetsFeature;
 use rspice_app_simulate::workbench::simulate::SimulateFeature;
 use rspice_app_state::diagnostics::LogAnchor;
-use rspice_app_state::state::VerificationPage;
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
 use rspice_app_state::state::{CellViewRef, ViewType};
 use rspice_app_state::workbench::app_state::model::Model;
@@ -631,11 +630,6 @@ impl Host for RSpiceApp {
                 ProjectPage::Dependencies => "Dependency".to_owned(),
                 ProjectPage::Recovery => "Checkpoint".to_owned(),
             },
-            Workspace::Verify
-                if app.state.simulate.verification_page == VerificationPage::Yield =>
-            {
-                "Yield details".to_owned()
-            }
             Workspace::Verify => app.state.simulate.verification_page.label().to_owned(),
             Workspace::Netlist => match app.state.code.code_workspace.page {
                 rspice_app_code::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {

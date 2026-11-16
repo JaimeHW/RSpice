@@ -18,7 +18,7 @@ use rspice_app_state::state::VerificationPage;
 #[test]
 fn edit_specifications_pressed_mid_edit_opens_on_the_committed_limit() {
     let mut app = monte_carlo_app();
-    app.state.simulate.verification_page = VerificationPage::Yield;
+    app.state.simulate.verification_page = VerificationPage::MonteCarlo;
     let ctx = egui::Context::default();
     rspice_ui_kit::Theme::default().apply(&ctx);
     app.state.simulate.verification.yield_limit_draft = Some(YieldLimitDraft {

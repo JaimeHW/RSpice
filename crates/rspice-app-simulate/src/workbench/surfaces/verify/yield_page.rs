@@ -472,7 +472,7 @@ pub(super) fn yield_page(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         trials.is_some_and(|(_, unrecorded, _)| unrecorded) && rows.iter().any(YieldRow::has_bound);
     let actions = [ToolbarAction::new("Edit specifications")];
     let output = PageToolbar {
-        title: "Monte Carlo yield",
+        title: VerificationPage::MonteCarlo.label(),
         runs: &runs,
         summary,
         actions: &actions,

@@ -187,7 +187,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         SimulateCommand::Preflight,
         SimulateCommand::ManagePlans,
         SimulateCommand::Options,
-        SimulateCommand::Verify(VerificationPage::Yield),
+        SimulateCommand::Verify(VerificationPage::MonteCarlo),
     ] {
         assert!(
             command

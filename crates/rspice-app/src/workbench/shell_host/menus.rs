@@ -724,14 +724,14 @@ const VIEW_AS_MENU: &[MenuEntry] = &[
     MenuEntry::offered(viewer(ResultViewer::Manifest), "Dataset manifest").access('M'),
 ];
 
-/// Verify: the analyses run over a design to sign it off, each opening its
-/// Verify page, with the specification matrix they check against.
+/// Verify: its views in the order its navigator lists them, then the
+/// specification matrix they check against.
 const VERIFY_MENU: &[MenuEntry] = &[
-    simulate(SimulateCommand::Verify(VerificationPage::Yield)).access('M'),
     simulate(SimulateCommand::Verify(VerificationPage::Corners)).access('C'),
-    simulate(SimulateCommand::Verify(VerificationPage::DeviceSafety)).access('A'),
+    simulate(SimulateCommand::Verify(VerificationPage::MonteCarlo)).access('M'),
+    simulate(SimulateCommand::Verify(VerificationPage::Checks)).access('K'),
+    simulate(SimulateCommand::Verify(VerificationPage::Reference)).access('R'),
     results(ResultsCommand::EditSpecifications).access('S'),
-    simulate(SimulateCommand::Verify(VerificationPage::Regression)).access('R'),
 ];
 
 /// Tools: the libraries and models a design draws on, then the editors for

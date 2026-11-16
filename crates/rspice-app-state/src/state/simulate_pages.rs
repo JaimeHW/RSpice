@@ -5,29 +5,33 @@
 
 use serde::{Deserialize, Serialize};
 
+/// A view of the Verify workspace. Each has one name, [`Self::label`],
+/// wherever the reader meets it: the menu, the navigator, the palette, the
+/// view's toolbar and the inspector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum VerificationPage {
     #[default]
-    Yield,
     Corners,
-    DeviceSafety,
-    Regression,
+    MonteCarlo,
+    Checks,
+    Reference,
 }
 
 impl VerificationPage {
     pub const NAVIGATION: [Self; 4] = [
-        Self::Yield,
         Self::Corners,
-        Self::DeviceSafety,
-        Self::Regression,
+        Self::MonteCarlo,
+        Self::Checks,
+        Self::Reference,
     ];
 
+    /// The view's one name.
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Yield => "PVT & Monte Carlo verification",
-            Self::Corners => "Process-corner verification",
-            Self::DeviceSafety => "Safe-operating-area verification",
-            Self::Regression => "Golden regression comparison",
+            Self::Corners => "Corners",
+            Self::MonteCarlo => "Monte Carlo",
+            Self::Checks => "Checks",
+            Self::Reference => "Reference",
         }
     }
 }

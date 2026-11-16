@@ -532,7 +532,7 @@ pub(super) fn corners(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             }
         });
     let output = PageToolbar {
-        title: "Process corners",
+        title: VerificationPage::Corners.label(),
         runs: &runs,
         summary,
         actions: &toolbar_actions,

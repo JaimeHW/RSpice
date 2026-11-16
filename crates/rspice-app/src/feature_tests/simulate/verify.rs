@@ -237,6 +237,90 @@ fn soa_rows_put_violations_first_and_the_summary_counts_devices() {
     assert_eq!(soa_summary(&rows[3..]), None, "a clean run says nothing");
 }
 
+/// One name per view: the inspector's title and the view's toolbar title are
+/// both the view's label, the name its menu row, navigator row and palette
+/// entry carry too.
+#[test]
+fn the_inspector_and_the_toolbar_name_each_view_by_its_label() {
+    use rspice_app_simulate::workbench::surfaces::verify::raster::{
+        VerifyStage, page_input, page_pass,
+    };
+    use rspice_app_workbench::workbench::docks::inspector::header;
+
+    for page in VerificationPage::NAVIGATION {
+        let mut app = RSpiceApp::test_instance();
+        app.open(page);
+        let ctx = egui::Context::default();
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut headings = Vec::new();
+        for _ in 0..2 {
+            let (output, _) = page_pass(&ctx, page_input(Vec::new()), |ui| {
+                header(ui, &mut app);
+                app.draw(ui);
+            });
+            headings = output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit tree update")
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::Heading)
+                // The toolbar's heading carries its title as its value.
+                .map(|(_, node)| {
+                    (
+                        node.level(),
+                        node.label().or(node.value()).map(str::to_owned),
+                    )
+                })
+                .collect::<Vec<_>>();
+        }
+        let label = Some(page.label().to_owned());
+        assert!(
+            headings.contains(&(Some(2), label.clone())),
+            "{page:?}: the inspector's title among {headings:?}"
+        );
+        assert!(
+            headings.contains(&(None, label)),
+            "{page:?}: the toolbar's title among {headings:?}"
+        );
+    }
+}
+
+/// A stored session reopens on the Verify view it was left on, stored and
+/// read back the way the application does it.
+#[test]
+fn a_stored_session_reopens_on_its_verify_view() {
+    #[derive(Default)]
+    struct MemoryStorage(std::collections::HashMap<String, String>);
+
+    impl eframe::Storage for MemoryStorage {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_owned(), value);
+        }
+
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
+        }
+
+        fn flush(&mut self) {}
+    }
+
+    for page in VerificationPage::NAVIGATION {
+        let mut app = RSpiceApp::test_instance();
+        app.state.simulate.verification_page = page;
+        let mut storage = MemoryStorage::default();
+        app.state.store_session(&mut storage);
+        let restored = crate::workbench::app_state::AppState::restore_eframe_session(&storage)
+            .expect("RSpice restores a session it just stored");
+        assert_eq!(restored.simulate.verification_page, page);
+    }
+}
+
 /// Every seeded page opens with a 36 px toolbar whose title starts on the
 /// panel inset, then a table of 24 px head and rows directly under it, with
 /// every right-aligned column ending on one edge and nothing past the insets.
@@ -246,9 +330,9 @@ fn seeded_verify_pages_follow_the_table_grammar() {
     use rspice_app_simulate::workbench::surfaces::verify::raster::{PAGE_WIDTH, page_geometry};
 
     for (page, app) in [
-        (VerificationPage::Yield, monte_carlo_app()),
+        (VerificationPage::MonteCarlo, monte_carlo_app()),
         (VerificationPage::Corners, corner_app()),
-        (VerificationPage::DeviceSafety, soa_app()),
+        (VerificationPage::Checks, soa_app()),
     ] {
         let geometry = page_geometry(app, page);
         let toolbar = geometry.one("toolbar").expect("toolbar");

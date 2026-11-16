@@ -240,6 +240,53 @@ fn every_menu_row_has_its_own_access_key_in_every_context() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
+/// The Verify menu is its views in navigation order, each under its one name,
+/// then the specification matrix, every row with a letter of its own.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_verify_menu_lists_its_views_then_the_specification_matrix() {
+    let app = title_test_app();
+    let rows = menu_entries::resolve_menu_rows(
+        application_menu_entries(ApplicationMenu::Verify),
+        &app,
+        CommandPlatform::Desktop,
+        OperatingSystem::Windows,
+    )
+    .iter()
+    .map(|row| match row {
+        menu_entries::MenuRow::Command(row) => (
+            row.label.to_string(),
+            row.access
+                .expect("every Verify row has an access key")
+                .to_ascii_uppercase(),
+        ),
+        _ => panic!("the Verify menu holds only commands"),
+    })
+    .collect::<Vec<_>>();
+    let labels = rows
+        .iter()
+        .map(|(label, _)| label.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        [
+            "Corners",
+            "Monte Carlo",
+            "Checks",
+            "Reference",
+            "Specification matrix\u{2026}",
+        ]
+    );
+    assert_eq!(
+        labels[..4],
+        VerificationPage::NAVIGATION.map(VerificationPage::label)
+    );
+    let mut keys = rows.iter().map(|(_, key)| *key).collect::<Vec<_>>();
+    keys.sort_unstable();
+    keys.dedup();
+    assert_eq!(keys.len(), rows.len(), "{rows:?}");
+}
+
 /// Alt and a menu's letter opens that menu with its first row focused, from
 /// anywhere; on macOS it opens nothing.
 #[cfg(not(target_arch = "wasm32"))]

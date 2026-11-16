@@ -7,7 +7,7 @@
 
 use super::super::simulate::simulate_nav_meta;
 use super::super::verify::{
-    verification_coverage, verification_flow_label, verification_navigator_requires_scroll,
+    verification_coverage, verification_flow_presentation, verification_navigator_requires_scroll,
 };
 use super::{
     FLOW_DETAIL_TOP, FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, active_mc_sample_trail,
@@ -78,17 +78,14 @@ fn verification_flow_rows_match_the_mock_grid_without_text_collisions() {
 }
 
 #[test]
-fn verification_navigation_lists_every_view() {
-    assert_eq!(VerificationPage::NAVIGATION.len(), 4);
-    let labels = VerificationPage::NAVIGATION.map(verification_flow_label);
+fn verification_navigation_lists_every_view_by_its_label() {
+    let model = Model::session_start(PdkConfig::default(), None, restore_model_library_manager);
+    let labels =
+        VerificationPage::NAVIGATION.map(|page| verification_flow_presentation(&model, page).label);
+    assert_eq!(labels, ["Corners", "Monte Carlo", "Checks", "Reference"]);
     assert_eq!(
         labels,
-        [
-            "PVT & Monte Carlo",
-            "Process corners",
-            "Electrical SOA",
-            "Regression",
-        ]
+        VerificationPage::NAVIGATION.map(|page| page.label().to_owned())
     );
 }
 
@@ -197,10 +194,8 @@ fn the_device_safety_flow_states_the_retained_soa_verdict() {
     model.simulation.retained.runs = vec![run].into();
     model.simulation.view.active_run_idx = Some(0);
 
-    let flow = super::super::verify::verification_flow_presentation(
-        &model,
-        VerificationPage::DeviceSafety,
-    );
+    let flow =
+        super::super::verify::verification_flow_presentation(&model, VerificationPage::Checks);
     assert_eq!(flow.status, "9.1% margin");
 }
 

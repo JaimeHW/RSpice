@@ -111,10 +111,10 @@ impl SimulateCommand {
         Self::Page(SimulationPage::ConnectRules),
         Self::Page(SimulationPage::Solver),
         Self::Page(SimulationPage::Save),
-        Self::Verify(VerificationPage::Yield),
         Self::Verify(VerificationPage::Corners),
-        Self::Verify(VerificationPage::DeviceSafety),
-        Self::Verify(VerificationPage::Regression),
+        Self::Verify(VerificationPage::MonteCarlo),
+        Self::Verify(VerificationPage::Checks),
+        Self::Verify(VerificationPage::Reference),
     ];
 
     /// The commands that run but are not listed: none.
@@ -142,10 +142,10 @@ impl SimulateCommand {
             Self::Page(SimulationPage::ConnectRules) => CommandKey::new("simulation-connect-rules"),
             Self::Page(SimulationPage::Solver) => CommandKey::new("simulation-solver"),
             Self::Page(SimulationPage::Save) => CommandKey::new("simulation-save-policy"),
-            Self::Verify(VerificationPage::Yield) => CommandKey::new("yield"),
-            Self::Verify(VerificationPage::Corners) => CommandKey::new("corners"),
-            Self::Verify(VerificationPage::DeviceSafety) => CommandKey::new("device-safety"),
-            Self::Verify(VerificationPage::Regression) => CommandKey::new("regression"),
+            Self::Verify(VerificationPage::Corners) => CommandKey::new("verify-corners"),
+            Self::Verify(VerificationPage::MonteCarlo) => CommandKey::new("verify-monte-carlo"),
+            Self::Verify(VerificationPage::Checks) => CommandKey::new("verify-checks"),
+            Self::Verify(VerificationPage::Reference) => CommandKey::new("verify-reference"),
         }
     }
 
@@ -236,7 +236,7 @@ impl SimulateCommand {
                 NONE,
             ),
             Self::Verify(page) => (
-                verification_page_label(page),
+                page.label(),
                 "Verify",
                 navigates,
                 ShortcutContext::VerificationWorkspace,
@@ -268,15 +268,5 @@ const fn simulation_page_label(page: SimulationPage) -> &'static str {
         SimulationPage::ConnectRules => "Connect rules",
         SimulationPage::Solver => "Simulator options",
         SimulationPage::Save => "Save, streaming & retention policy",
-    }
-}
-
-/// What the command that opens the Verify workspace on `page` is called.
-const fn verification_page_label(page: VerificationPage) -> &'static str {
-    match page {
-        VerificationPage::Yield => "Monte Carlo yield",
-        VerificationPage::Corners => "Process corners",
-        VerificationPage::DeviceSafety => "Safe operating area",
-        VerificationPage::Regression => "Regression",
     }
 }

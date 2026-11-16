@@ -258,7 +258,7 @@ fn type_limit(
 #[test]
 fn a_limit_typed_into_its_cell_is_the_plans_on_enter() {
     let mut harness = monte_carlo_app();
-    harness.state.verification_page = VerificationPage::Yield;
+    harness.state.verification_page = VerificationPage::MonteCarlo;
     let plan_id = verification_plan_id(&harness.model).expect("default plan");
     let ctx = egui::Context::default();
     rspice_ui_kit::Theme::default().apply(&ctx);
@@ -389,7 +389,7 @@ fn histogram_bars_are_neutral_and_failing_bars_muted_error() {
 /// above it, and the table keeps the page's grammar.
 #[test]
 fn the_yield_page_draws_the_selected_histogram_under_the_table() {
-    let geometry = super::raster::page_geometry(monte_carlo_app(), VerificationPage::Yield);
+    let geometry = super::raster::page_geometry(monte_carlo_app(), VerificationPage::MonteCarlo);
     let rows = geometry.all("table.row");
     assert_eq!(rows.len(), 1);
     let split = geometry

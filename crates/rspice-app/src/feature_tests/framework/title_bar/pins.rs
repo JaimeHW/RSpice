@@ -484,11 +484,11 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
     (
         ApplicationMenu::Verify,
         &[
-            "Monte Carlo yield | yield |  | on",
-            "Process corners | corners |  | on",
-            "Safe operating area | device-safety |  | on",
+            "Corners | verify-corners |  | on",
+            "Monte Carlo | verify-monte-carlo |  | on",
+            "Checks | verify-checks |  | on",
+            "Reference | verify-reference |  | on",
             "Specification matrix… | specifications |  | on",
-            "Regression | regression |  | on",
         ],
     ),
     (

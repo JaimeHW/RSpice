@@ -476,7 +476,7 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
         assert!(listed.contains(&command.key()), "no menu lists {command:?}");
     }
     for command in [
-        SimulateCommand::Verify(VerificationPage::Yield),
+        SimulateCommand::Verify(VerificationPage::MonteCarlo),
         SimulateCommand::JobsManager,
     ] {
         assert!(listed.contains(&command.key()), "no menu lists {command:?}");

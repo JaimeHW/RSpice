@@ -26,7 +26,7 @@ pub(in crate::workbench) struct VerifyInspector<'a> {
 
 pub(in crate::workbench) fn verify(ui: &mut Ui, inspector: &VerifyInspector<'_>) {
     match inspector.page {
-        VerificationPage::Yield => yield_details(ui, inspector.model),
+        VerificationPage::MonteCarlo => yield_details(ui, inspector.model),
         VerificationPage::Corners => {
             let failed = inspector.model.simulation.active_run().and_then(|run| {
                 run.analyses.iter().find(|analysis| {
@@ -42,7 +42,7 @@ pub(in crate::workbench) fn verify(ui: &mut Ui, inspector: &VerifyInspector<'_>)
                 crate::ui::widgets::problem_line(ui, Problem::Failure, &message);
             }
         }
-        VerificationPage::DeviceSafety | VerificationPage::Regression => {}
+        VerificationPage::Checks | VerificationPage::Reference => {}
     }
 }
 

@@ -367,7 +367,7 @@ mod tests {
         );
         assert!(
             crate::workbench::commands::vocabulary::CommandRegistry
-                .default_bindings(SimulateCommand::Verify(VerificationPage::Yield).key())
+                .default_bindings(SimulateCommand::Verify(VerificationPage::MonteCarlo).key())
                 .is_empty()
         );
     }

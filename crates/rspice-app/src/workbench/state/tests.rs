@@ -404,10 +404,10 @@ fn verification_routes_are_the_exact_canonical_four() {
     assert_eq!(
         VerificationPage::NAVIGATION,
         [
-            VerificationPage::Yield,
             VerificationPage::Corners,
-            VerificationPage::DeviceSafety,
-            VerificationPage::Regression,
+            VerificationPage::MonteCarlo,
+            VerificationPage::Checks,
+            VerificationPage::Reference,
         ]
     );
 }
