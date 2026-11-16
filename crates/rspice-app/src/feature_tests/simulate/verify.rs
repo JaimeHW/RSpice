@@ -105,6 +105,79 @@ fn every_surface_that_names_the_workspace_reads_verify() {
     }
 }
 
+/// A wide run keeps Corners' worst-case summary in view: in a 1440 x 900
+/// window with both docks open, a twelve-point sweep scrolled to its last
+/// point still shows Min and Max beside Specification and Limit, every one
+/// of them inside the table.
+#[test]
+fn corners_keeps_its_summary_in_view_on_a_wide_run() {
+    use rspice_app_simulate::workbench::surfaces::verify::raster::{
+        PageGeometry, page_pass, seed_run_set,
+    };
+    use rspice_app_state::workbench::workspace::Workspace;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    seed_run_set(
+        &mut app.state.model,
+        &["TT", "SS", "FF"],
+        &[1.62, 1.98],
+        &[-40.0, 125.0],
+    );
+    app.state.workbench.activate(Workspace::Verify);
+    app.state.simulate.verification_page = VerificationPage::Corners;
+    let points = app
+        .state
+        .model
+        .simulation
+        .verification_sheet()
+        .expect("the sweep is judged")
+        .points
+        .len();
+    assert_eq!(points, 12);
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut window = |app: &mut RSpiceApp| -> PageGeometry {
+        let mut geometry = PageGeometry::default();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                ..Default::default()
+            };
+            geometry = page_pass(&ctx, input, |ui| eframe::App::ui(app, ui, &mut frame)).1;
+        }
+        geometry
+    };
+    let last = 4 + points - 1;
+    let opened = window(&mut app);
+    assert!(
+        opened.one(&format!("table.head.{last}")).is_none(),
+        "the run is wider than the page"
+    );
+    app.state.simulate.verification.corners_table.scroll_x = 1.0e5;
+    let scrolled = window(&mut app);
+    let table = scrolled.one("table.head").expect("the table's head");
+    for (column, head) in [
+        (0, "Specification"),
+        (1, "Limit"),
+        (2, "Min"),
+        (3, "Max"),
+        (last, "the last point"),
+    ] {
+        let cell = scrolled
+            .one(&format!("table.head.{column}"))
+            .unwrap_or_else(|| panic!("{head} scrolled out of view"));
+        assert!(
+            cell.left() >= table.left() - 0.5 && cell.right() <= table.right() + 0.5,
+            "{head} at {cell:?} is outside the table at {table:?}"
+        );
+    }
+}
+
 /// A stored session reopens on the Verify view it was left on, stored and
 /// read back the way the application does it.
 #[test]

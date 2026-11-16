@@ -30,9 +30,10 @@ use crate::workbench::framework::requests::SetFamilyFilter;
 use crate::workbench::simulate::commands::SimulateCommand;
 
 /// The plain arrangement's leading columns: Specification, Limit, Min, Max.
+/// All four stay put while the points scroll, as ADE Assembler's Detail view
+/// reads a specification's spread across the run before its corners: the
+/// worst case is the row's answer, so it never scrolls out of view.
 pub(super) const LEADING: usize = 4;
-/// Of them, the ones that stay put while the points scroll.
-const FROZEN: usize = 2;
 /// Least width of a point or specification column.
 const VALUE_COLUMN_MIN_W: f32 = 88.0;
 /// The word the nominal point's head starts with.
@@ -925,7 +926,7 @@ fn plain_table(
     let response = DataTable::new("verify.corners", &columns, rows.len())
         .state(state)
         .keys(&keys)
-        .freeze(FROZEN)
+        .freeze(LEADING)
         .bands(&heads.bands)
         .cell_selection()
         .max_height(ui.available_height())
