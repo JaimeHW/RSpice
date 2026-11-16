@@ -98,7 +98,6 @@ impl Engine {
                     breakpoints: &mut breakpoints,
                     tstop: step.tstop,
                     voltage_reltol: self.voltage_reltol(),
-                    voltage_abstol: self.voltage_abstol(),
                     current_abstol: self.current_abstol(),
                 },
                 sink: DynamicBreakpointSink {

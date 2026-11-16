@@ -2098,6 +2098,30 @@ impl TransmissionLine {
         self.launched_backward
     }
 
+    /// When a corner in a wave this line launched reaches the other port:
+    /// the accepted point before the newest plus the delay, if the slope of
+    /// either launched wave changed there, and if that is still ahead of the
+    /// newest point.
+    ///
+    /// A slope change counts when it is at least 0.99 of the larger slope plus
+    /// 1 V/s, as Xyce's TRA judges it (N_DEV_TRA.C:1393-1404): a wave starting
+    /// or ending a ramp, or reversing, has a corner; a smooth wave sampled
+    /// step by step does not. ngspice's TRA applies the same test with a
+    /// relative factor of 1 (traacct.c:84-117), which no ramp starting from a
+    /// flat wave passes, so it lets the far end of a line step over the corners
+    /// it receives.
+    pub fn launched_corner_arrival(&self) -> Option<Value> {
+        let arrival = |history: &DelayBuffer| {
+            let corner = history.last_corner()?;
+            let (slope_in, slope_out) = (corner.slope_in, corner.slope_out);
+            let turns =
+                (slope_out - slope_in).abs() >= 0.99 * slope_out.abs().max(slope_in.abs()) + 1.0;
+            let arrival = corner.time + self.td;
+            (turns && arrival > corner.newest).then_some(arrival)
+        };
+        arrival(&self.history_forward).or_else(|| arrival(&self.history_backward))
+    }
+
     /// Reset for new simulation
     pub fn reset(&mut self) {
         self.history_revision = self.history_revision.wrapping_add(1);

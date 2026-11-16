@@ -1006,8 +1006,8 @@ fn capture_transient_merit_rollback(
     }
 }
 
+use breakpoints::DynamicBreakpointSink;
 pub(in crate::engine) use breakpoints::{BreakpointWindow, SourceBreakpointGeometry};
-use breakpoints::{DynamicBreakpointSink, TlineArrivalEvent, TlineWaveChange};
 pub(in crate::engine) use checkpoint::CheckpointState;
 use checkpoint::{AcceptedTransientRuntime, CheckpointIdentity, CheckpointIntegrationState};
 pub(in crate::engine) use state_advanced_mos::Bsim4CompanionStep;
@@ -12279,7 +12279,6 @@ impl Engine {
                                 breakpoints: &mut breakpoints,
                                 tstop,
                                 voltage_reltol: self.voltage_reltol(),
-                                voltage_abstol: self.voltage_abstol(),
                                 current_abstol: self.current_abstol(),
                             },
                             sink: DynamicBreakpointSink {
@@ -13033,7 +13032,6 @@ impl Engine {
                         breakpoints: &mut breakpoints,
                         tstop,
                         voltage_reltol: self.voltage_reltol(),
-                        voltage_abstol: self.voltage_abstol(),
                         current_abstol: self.current_abstol(),
                     },
                     sink: DynamicBreakpointSink {

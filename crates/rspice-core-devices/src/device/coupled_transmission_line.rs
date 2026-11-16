@@ -353,15 +353,13 @@ impl CoupledTransmissionLine {
         }
     }
 
-    #[inline]
-    pub fn launched_modal_waves(&self) -> impl Iterator<Item = (Value, Value, Value)> + '_ {
-        self.modes.iter().map(|mode| {
-            (
-                mode.delay(),
-                mode.launched_forward_wave(),
-                mode.launched_backward_wave(),
-            )
-        })
+    /// When corners in the waves the modes launched reach the other ports,
+    /// one time per mode that has one
+    /// ([`TransmissionLine::launched_corner_arrival`]).
+    pub fn launched_corner_arrivals(&self) -> impl Iterator<Item = Value> + '_ {
+        self.modes
+            .iter()
+            .filter_map(TransmissionLine::launched_corner_arrival)
     }
 
     #[inline]

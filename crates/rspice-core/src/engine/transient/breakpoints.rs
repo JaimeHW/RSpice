@@ -53,26 +53,7 @@ impl SourceClockSink for BreakpointManager {
     }
 }
 
-/// A transmission-line arrival that may deserve a breakpoint.
-#[derive(Clone, Copy)]
-pub(super) struct TlineArrivalEvent {
-    pub event_time: Value,
-    pub delay: Value,
-    pub tstop: Value,
-}
-
-/// The wave change that decides whether the arrival matters, against the
-/// tolerances it is judged by.
-#[derive(Clone, Copy)]
-pub(super) struct TlineWaveChange {
-    pub previous_wave: Value,
-    pub current_wave: Value,
-    pub reltol: Value,
-    pub abstol: Value,
-}
-
-/// Where dynamically scheduled breakpoints accumulate, with the cap bookkeeping
-/// that goes with them.
+/// Where dynamically scheduled breakpoints accumulate.
 pub(super) struct DynamicBreakpointSink<'a> {
     pub pending_dynamic_breakpoints: &'a mut Vec<Value>,
 }
@@ -1489,59 +1470,6 @@ impl Engine {
             )?;
         }
         Self::check_source_breakpoint_collection(breakpoints, abort, max_points)
-    }
-
-    #[inline]
-    pub(super) fn wave_event_exceeds_tolerance(
-        previous: Value,
-        current: Value,
-        reltol: Value,
-        abstol: Value,
-    ) -> bool {
-        if !previous.is_finite() || !current.is_finite() {
-            return false;
-        }
-        let scale = previous.abs().max(current.abs());
-        let threshold = abstol.max(scale * reltol);
-        (current - previous).abs() > threshold
-    }
-
-    #[inline]
-    pub(super) fn maybe_schedule_tline_arrival_breakpoint(
-        breakpoints: &mut BreakpointManager,
-        arrival: TlineArrivalEvent,
-        wave: TlineWaveChange,
-        sink: DynamicBreakpointSink<'_>,
-    ) {
-        let DynamicBreakpointSink {
-            pending_dynamic_breakpoints,
-        } = sink;
-        let TlineWaveChange {
-            previous_wave,
-            current_wave,
-            reltol,
-            abstol,
-        } = wave;
-        let TlineArrivalEvent {
-            event_time,
-            delay,
-            tstop,
-        } = arrival;
-        if !Self::wave_event_exceeds_tolerance(previous_wave, current_wave, reltol, abstol) {
-            return;
-        }
-        if !(event_time.is_finite() && delay.is_finite() && delay > 0.0) {
-            return;
-        }
-
-        let arrival = event_time + delay;
-        if !(arrival.is_finite() && arrival > event_time && arrival <= tstop) {
-            return;
-        }
-
-        if breakpoints.add(arrival) {
-            pending_dynamic_breakpoints.push(arrival);
-        }
     }
 
     #[inline]

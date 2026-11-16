@@ -156,7 +156,6 @@ fn commit(
             breakpoints: &mut BreakpointManager::new(),
             tstop: 4e-9,
             voltage_reltol: 1e-3,
-            voltage_abstol: 1e-6,
             current_abstol: 1e-12,
         },
         DynamicBreakpointSink {

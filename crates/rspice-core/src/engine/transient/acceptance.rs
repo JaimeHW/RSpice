@@ -1174,7 +1174,6 @@ mod tests {
                     breakpoints: &mut BreakpointManager::new(),
                     tstop: 3e-9,
                     voltage_reltol: 1e-3,
-                    voltage_abstol: 1e-6,
                     current_abstol: 1e-12,
                 },
                 sink: DynamicBreakpointSink {

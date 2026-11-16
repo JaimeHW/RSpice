@@ -50,7 +50,6 @@ pub(super) struct ReactiveBreakpointScheduling<'a> {
     pub breakpoints: &'a mut BreakpointManager,
     pub tstop: Value,
     pub voltage_reltol: Value,
-    pub voltage_abstol: Value,
     pub current_abstol: Value,
 }
 
@@ -980,7 +979,6 @@ impl Engine {
             breakpoints,
             tstop,
             voltage_reltol,
-            voltage_abstol,
             current_abstol,
         } = scheduling;
         let AcceptedReactiveSnapshots {
@@ -1115,8 +1113,6 @@ impl Engine {
                 tl.commit_history_event(event.lines[idx].sample);
                 continue;
             }
-            let previous_forward = tl.launched_forward_wave();
-            let previous_backward = tl.launched_backward_wave();
             let v1 = Self::differential_voltage(accepted_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(accepted_solution, tl.node2_pos, tl.node2_neg);
             if tl.is_memoryless_two_port() {
@@ -1166,37 +1162,11 @@ impl Engine {
                     );
                 }
                 tl.compact_ltra_history_if_straight();
-            } else {
-                Self::maybe_schedule_tline_arrival_breakpoint(
+            } else if let Some(arrival) = tl.launched_corner_arrival() {
+                Self::schedule_dynamic_tline_breakpoint(
                     breakpoints,
-                    TlineArrivalEvent {
-                        event_time: accepted_time,
-                        delay: tl.delay(),
-                        tstop,
-                    },
-                    TlineWaveChange {
-                        previous_wave: previous_forward,
-                        current_wave: tl.launched_forward_wave(),
-                        reltol: voltage_reltol,
-                        abstol: voltage_abstol,
-                    },
-                    DynamicBreakpointSink {
-                        pending_dynamic_breakpoints,
-                    },
-                );
-                Self::maybe_schedule_tline_arrival_breakpoint(
-                    breakpoints,
-                    TlineArrivalEvent {
-                        event_time: accepted_time,
-                        delay: tl.delay(),
-                        tstop,
-                    },
-                    TlineWaveChange {
-                        previous_wave: previous_backward,
-                        current_wave: tl.launched_backward_wave(),
-                        reltol: voltage_reltol,
-                        abstol: voltage_abstol,
-                    },
+                    arrival,
+                    tstop,
                     DynamicBreakpointSink {
                         pending_dynamic_breakpoints,
                     },
@@ -1238,7 +1208,6 @@ impl Engine {
                 continue;
             }
 
-            let previous_mode_launches = tl.launched_modal_waves().collect::<Vec<_>>();
             let refs = coupled_tline_refs.get(idx).cloned().unwrap_or_default();
             let near_physical =
                 Self::differential_port_voltages(accepted_solution, &tl.near_nodes, tl.near_ref);
@@ -1259,43 +1228,11 @@ impl Engine {
                 &far_modal,
                 &far_modal_currents,
             );
-            for (
-                (delay, previous_forward, previous_backward),
-                (_, current_forward, current_backward),
-            ) in previous_mode_launches
-                .into_iter()
-                .zip(tl.launched_modal_waves())
-            {
-                Self::maybe_schedule_tline_arrival_breakpoint(
+            for arrival in tl.launched_corner_arrivals() {
+                Self::schedule_dynamic_tline_breakpoint(
                     breakpoints,
-                    TlineArrivalEvent {
-                        event_time: accepted_time,
-                        delay,
-                        tstop,
-                    },
-                    TlineWaveChange {
-                        previous_wave: previous_forward,
-                        current_wave: current_forward,
-                        reltol: voltage_reltol,
-                        abstol: voltage_abstol,
-                    },
-                    DynamicBreakpointSink {
-                        pending_dynamic_breakpoints,
-                    },
-                );
-                Self::maybe_schedule_tline_arrival_breakpoint(
-                    breakpoints,
-                    TlineArrivalEvent {
-                        event_time: accepted_time,
-                        delay,
-                        tstop,
-                    },
-                    TlineWaveChange {
-                        previous_wave: previous_backward,
-                        current_wave: current_backward,
-                        reltol: voltage_reltol,
-                        abstol: voltage_abstol,
-                    },
+                    arrival,
+                    tstop,
                     DynamicBreakpointSink {
                         pending_dynamic_breakpoints,
                     },
@@ -1909,7 +1846,6 @@ mod tests {
                 breakpoints: &mut BreakpointManager::new(),
                 tstop: 3e-9,
                 voltage_reltol: 1e-3,
-                voltage_abstol: 1e-6,
                 current_abstol: 1e-12,
             },
             DynamicBreakpointSink {

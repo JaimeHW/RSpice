@@ -7,6 +7,17 @@ struct Sample {
     slope: Value, // dv/dt at this point
 }
 
+/// A sample of a delay history and the slopes on either side of it
+/// ([`DelayBuffer::last_corner`]).
+#[derive(Debug, Clone, Copy)]
+pub(in crate::device::transmission_line) struct Corner {
+    pub(in crate::device::transmission_line) time: Value,
+    pub(in crate::device::transmission_line) slope_in: Value,
+    pub(in crate::device::transmission_line) slope_out: Value,
+    /// The time of the sample after it, the newest.
+    pub(in crate::device::transmission_line) newest: Value,
+}
+
 /// Circular buffer for storing time history with cubic Hermite interpolation
 ///
 /// Uses cubic Hermite splines for smooth C1-continuous interpolation,
@@ -206,6 +217,24 @@ impl DelayBuffer {
 
         // Interpolated value
         h00 * p0.value + h10 * dt * p0.slope + h01 * p1.value + h11 * dt * p1.slope
+    }
+
+    /// The newest sample but one, as a possible corner: its time, the slope
+    /// of the wave into it, the slope out of it, and the newest sample's time.
+    ///
+    /// `None` until two samples are held, or once a step longer than the
+    /// retained window has aged the earlier one out; a corner that old has
+    /// already arrived, since the window spans more than the delay.
+    pub(in crate::device::transmission_line) fn last_corner(&self) -> Option<Corner> {
+        let mut newest_first = self.data.iter().rev();
+        let out = newest_first.next()?;
+        let corner = newest_first.next()?;
+        Some(Corner {
+            time: corner.time,
+            slope_in: corner.slope,
+            slope_out: out.slope,
+            newest: out.time,
+        })
     }
 
     /// Clear the buffer

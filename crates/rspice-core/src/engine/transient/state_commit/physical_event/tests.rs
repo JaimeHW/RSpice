@@ -152,7 +152,6 @@ fn accept(
                 breakpoints: &mut BreakpointManager::new(),
                 tstop: 2.0,
                 voltage_reltol: 1e-11,
-                voltage_abstol: 1e-11,
                 current_abstol: 1e-13,
             },
             sink: DynamicBreakpointSink {
