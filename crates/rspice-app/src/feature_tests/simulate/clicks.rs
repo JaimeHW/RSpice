@@ -25,6 +25,7 @@ use rspice_app_simulate::workbench::surfaces::simulate::catalog::ANALYSIS_CATALO
 
 use crate::workbench::RSpiceApp;
 use rspice_app_state::state::SimulationPage;
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// A control as its accessibility tree published it: what it announces, and
 /// where it is.
@@ -910,6 +911,7 @@ fn a_readoption_is_drawn_by_the_frame_after_the_press() {
     library.apply(&mut draft, now_unix_ms);
 
     let mut studio = Studio::open(app, SimulationPage::Excitations, DESKTOP);
+    studio.app.state.workbench.activate(Workspace::Simulate);
     // The row and its Actions button both announce the reference; the button
     // is the narrower of the two, inside the row's last column.
     let press_actions = |studio: &mut Studio| {
@@ -964,5 +966,28 @@ fn a_readoption_is_drawn_by_the_frame_after_the_press() {
     assert!(
         !studio.announces(|announced| announced.starts_with("Re-adopt")),
         "the next frame's row holds the library's revision, so it offers no re-adoption"
+    );
+
+    // The re-adoption changed the source on the sheet and revealed it there,
+    // so Undo, pressed where the reveal took the reader, takes it back as the
+    // design edit it is.
+    assert_eq!(studio.app.state.workbench.workspace, Workspace::Design);
+    studio.app.execute_command_key(
+        rspice_app_workbench::workbench::framework::command_registry::ids::UNDO,
+    );
+    let params = studio
+        .app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .map(|component| component.params.clone())
+        .expect("the source");
+    assert!(
+        params.contains("freq=1k"),
+        "Undo restores the adopted card: {params}"
     );
 }
