@@ -31,6 +31,10 @@ pub enum AnalysisResultSourceDomain {
 /// `nominal` is decided where the run's reference point is known, not
 /// reconstructed later from the triple, because "nominal" means *this run's*
 /// reference process and temperature and not a fixed convention.
+///
+/// A run set that also sweeps a design variable or a source value solves
+/// several points that share one process, supply and temperature; the swept
+/// values are what tell those points apart, so the record keeps them too.
 #[derive(Debug, Clone)]
 pub struct AnalysisResultPvtPoint {
     process: String,
@@ -38,9 +42,58 @@ pub struct AnalysisResultPvtPoint {
     temperature_celsius: f64,
     corner_contract: Option<ContentDigest>,
     nominal: bool,
+    swept_values: Vec<AnalysisResultSweptValue>,
 }
 
-/// Two points are the same point when every recorded quantity is bit-identical.
+/// The kind of run-set axis a swept value was set by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisResultSweptAxis {
+    /// A design variable, written into the point's deck as a `.param` card.
+    Parameter,
+    /// An independent source's value, written into the point's deck.
+    Source,
+}
+
+/// One design-variable or source value a point was solved at, as the run set
+/// spelled it: `rload = 2k`.
+///
+/// Text, not a number, because the run set's value is what the deck was given
+/// and may be an expression; a number parsed back from it would name a value
+/// nobody wrote.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisResultSweptValue {
+    pub axis: AnalysisResultSweptAxis,
+    pub name: String,
+    pub value: String,
+}
+
+impl AnalysisResultSweptValue {
+    fn validate(&self) -> Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err(format!(
+                "attributed PVT point names a swept value {:?} with no name",
+                self.value
+            ));
+        }
+        if self
+            .name
+            .chars()
+            .chain(self.value.chars())
+            .any(char::is_control)
+        {
+            return Err(format!(
+                "attributed PVT point swept value {} = {:?} contains a control character",
+                self.name, self.value
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Two points are the same point when every recorded quantity is bit-identical
+/// and every swept value is the same text.
 ///
 /// Bitwise rather than numeric, so equality is a true equivalence and the
 /// record can be `Eq`. The constructor already refuses non-finite quantities,
@@ -52,6 +105,7 @@ impl PartialEq for AnalysisResultPvtPoint {
             && self.temperature_celsius.to_bits() == other.temperature_celsius.to_bits()
             && self.corner_contract == other.corner_contract
             && self.nominal == other.nominal
+            && self.swept_values == other.swept_values
     }
 }
 
@@ -91,12 +145,33 @@ impl AnalysisResultPvtPoint {
             temperature_celsius,
             corner_contract,
             nominal,
+            swept_values: Vec::new(),
         })
+    }
+
+    /// Record the design-variable and source values this point was solved at,
+    /// in the order the run set declares them. Every value must be named.
+    pub fn with_swept_values(
+        mut self,
+        swept_values: Vec<AnalysisResultSweptValue>,
+    ) -> Result<Self, String> {
+        for value in &swept_values {
+            value.validate()?;
+        }
+        self.swept_values = swept_values;
+        Ok(self)
     }
 
     #[must_use]
     pub fn process(&self) -> &str {
         &self.process
+    }
+
+    /// The design-variable and source values this point was solved at, in the
+    /// run set's declaration order. Empty for a point that swept neither.
+    #[must_use]
+    pub fn swept_values(&self) -> &[AnalysisResultSweptValue] {
+        &self.swept_values
     }
 
     /// The supply this point was solved at. `None` means the run declared no

@@ -88,6 +88,75 @@ fn a_family_member_survives_the_project_file() {
     assert!(plain.with_family_member(Some(unnamed)).is_err());
 }
 
+/// Two points of a design-variable sweep keep their swept values through the
+/// project file, exact text in declaration order, so they read back as the
+/// two points they were; a point that swept nothing writes no field, and a
+/// stored value with no name is refused.
+#[test]
+fn a_pvt_points_swept_values_survive_the_project_file() {
+    use rspice_results::provenance::{AnalysisResultSweptAxis, AnalysisResultSweptValue};
+    let swept = |cload: &str| {
+        vec![
+            AnalysisResultSweptValue {
+                axis: AnalysisResultSweptAxis::Parameter,
+                name: "CLOAD".to_owned(),
+                value: cload.to_owned(),
+            },
+            AnalysisResultSweptValue {
+                axis: AnalysisResultSweptAxis::Source,
+                name: "VBIAS".to_owned(),
+                value: "1.5".to_owned(),
+            },
+        ]
+    };
+    let point = |cload: &str| {
+        AnalysisResultPvtPoint::new("TT", Some(1.8), 27.0, None, false)
+            .and_then(|point| point.with_swept_values(swept(cload)))
+            .expect("the point builds")
+    };
+    let round_trip = |point: AnalysisResultPvtPoint| {
+        let provenance = state_provenance(AnalysisInstanceId::new(), None)
+            .expect("the provenance builds")
+            .with_pvt_point(Some(point));
+        let text = serde_json::to_string(&ProjectAnalysisResultProvenance::from(&provenance))
+            .expect("the provenance writes");
+        let read: ProjectAnalysisResultProvenance =
+            serde_json::from_str(&text).expect("the provenance reads");
+        read.validate().expect("the read provenance validates");
+        let restored = read.into_provenance().expect("the provenance restores");
+        assert_eq!(restored, provenance);
+        (text, restored)
+    };
+
+    let (text, small) = round_trip(point("2p"));
+    assert!(text.contains("\"swept_values\""), "{text}");
+    let (_, large) = round_trip(point("20p"));
+    let small = small.pvt_point().expect("the small point restores");
+    let large = large.pvt_point().expect("the large point restores");
+    assert_eq!(small.swept_values(), swept("2p").as_slice());
+    assert_ne!(small, large);
+
+    let plain = AnalysisResultPvtPoint::new("TT", Some(1.8), 27.0, None, true).unwrap();
+    let (text, _) = round_trip(plain);
+    assert!(!text.contains("swept_values"), "{text}");
+
+    let unnamed = vec![AnalysisResultSweptValue {
+        axis: AnalysisResultSweptAxis::Parameter,
+        name: " ".to_owned(),
+        value: "2p".to_owned(),
+    }];
+    let stored = ProjectAnalysisResultPvtPoint {
+        process: "TT".to_owned(),
+        supply_voltage: None,
+        temperature_celsius: 27.0,
+        corner_contract: None,
+        nominal: false,
+        swept_values: unnamed,
+    };
+    let error = stored.into_point().expect_err("an unnamed swept value");
+    assert!(error.contains("no name"), "{error}");
+}
+
 /// A project written before results named a transient state reads as it
 /// always did: every result in it was linearized at the operating point, and
 /// a result that names no state writes no field.

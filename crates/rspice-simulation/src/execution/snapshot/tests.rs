@@ -631,6 +631,86 @@ R1 out 0 1k\n\
     }
 }
 
+/// Two points of a design-variable sweep share their process, supply and
+/// temperature; the swept value is all that tells their results apart, so
+/// the attributed point keeps it exactly as the run set wrote it, and the two
+/// points are not the same point.
+#[test]
+fn a_run_set_parameter_sweep_attributes_each_point_its_own_value() {
+    use rspice_results::provenance::{AnalysisResultSweptAxis, AnalysisResultSweptValue};
+
+    let mut run = parts();
+    run.executable_netlist = "parameter axis\n\
+.param CLOAD=1p\n\
+V1 in 0 1\n\
+R1 in out 1k\n\
+C1 out 0 {CLOAD}\n\
+.op\n\
+.end\n"
+        .to_owned();
+    run.run_set = Some(global_parameter_run_set("CLOAD", &["2p", "20p"]));
+
+    let snapshot = PreparedRunSnapshot::new(run).expect("parameter Run Set prepares");
+    let points = snapshot
+        .tasks
+        .iter()
+        .map(|task| task.pvt_point().expect("each point's task is attributed"))
+        .collect::<Vec<_>>();
+    assert_eq!(points.len(), 2);
+    let swept = |value: &str| {
+        vec![AnalysisResultSweptValue {
+            axis: AnalysisResultSweptAxis::Parameter,
+            name: "CLOAD".to_owned(),
+            value: value.to_owned(),
+        }]
+    };
+    assert_eq!(points[0].swept_values(), swept("2p").as_slice());
+    assert_eq!(points[1].swept_values(), swept("20p").as_slice());
+    assert_eq!(points[0].process(), points[1].process());
+    assert_eq!(points[0].supply_voltage(), points[1].supply_voltage());
+    assert_eq!(
+        points[0].temperature_celsius().to_bits(),
+        points[1].temperature_celsius().to_bits()
+    );
+    assert_eq!(points[0].corner_contract(), points[1].corner_contract());
+    assert_ne!(points[0], points[1]);
+}
+
+/// A source axis's value is attributed as a source's, not a parameter's.
+#[test]
+fn a_run_set_source_sweep_attributes_each_point_its_source_value() {
+    use rspice_results::provenance::{AnalysisResultSweptAxis, AnalysisResultSweptValue};
+
+    let mut run = parts();
+    run.executable_netlist = "source axis\n\
+VBIAS out 0 DC 1 AC 1\n\
+R1 out 0 1k\n\
+.op\n\
+.end\n"
+        .to_owned();
+    run.run_set = Some(global_source_run_set("VBIAS", &["0.5", "1.5"]));
+
+    let snapshot = PreparedRunSnapshot::new(run).expect("source Run Set prepares");
+    let swept = snapshot
+        .tasks
+        .iter()
+        .map(|task| {
+            task.pvt_point()
+                .expect("each point's task is attributed")
+                .swept_values()
+                .to_vec()
+        })
+        .collect::<Vec<_>>();
+    let source = |value: &str| {
+        vec![AnalysisResultSweptValue {
+            axis: AnalysisResultSweptAxis::Source,
+            name: "VBIAS".to_owned(),
+            value: value.to_owned(),
+        }]
+    };
+    assert_eq!(swept, vec![source("0.5"), source("1.5")]);
+}
+
 #[test]
 fn global_run_set_refuses_an_analysis_with_a_nested_point_declaration() {
     let mut run = parts();

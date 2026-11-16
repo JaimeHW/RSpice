@@ -52,18 +52,40 @@ pub(super) fn temperature_point(
 
 /// The attribution a point's results carry: the process, supply and
 /// temperature it was solved at, the corner contract that bound its models,
-/// and whether it is the run's reference point.
+/// whether it is the run's reference point, and the design-variable and
+/// source values it was solved at — parameters first, then sources, each in
+/// the run set's declaration order and exactly as the deck was given them.
 pub(super) fn attributed_pvt_point(
     point: &PreparedPvtPoint,
     nominal: bool,
 ) -> Result<rspice_results::provenance::AnalysisResultPvtPoint, String> {
+    use rspice_results::provenance::{AnalysisResultSweptAxis, AnalysisResultSweptValue};
+    let swept = |axis, overrides: &[(String, String)]| {
+        overrides
+            .iter()
+            .map(move |(name, value)| AnalysisResultSweptValue {
+                axis,
+                name: name.clone(),
+                value: value.clone(),
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut swept_values = swept(
+        AnalysisResultSweptAxis::Parameter,
+        &point.parameter_overrides,
+    );
+    swept_values.extend(swept(
+        AnalysisResultSweptAxis::Source,
+        &point.source_overrides,
+    ));
     rspice_results::provenance::AnalysisResultPvtPoint::new(
         point.process.short_name(),
         point.voltage,
         point.temperature_celsius,
         point.corner_contract.as_ref().map(corner_contract_digest),
         nominal,
-    )
+    )?
+    .with_swept_values(swept_values)
 }
 
 /// Expand every task that is declared over the run set's PVT points into one

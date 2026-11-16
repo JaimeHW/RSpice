@@ -21,7 +21,7 @@ use rspice_results::noise::{NoiseContributorRow, NoiseSummary};
 use rspice_results::operating_point::{DcOpResult, OperatingPointValue};
 use rspice_results::provenance::{
     AnalysisResultFamilyMember, AnalysisResultProvenance, AnalysisResultPvtPoint,
-    AnalysisResultSourceDomain, AnalysisResultTransientState,
+    AnalysisResultSourceDomain, AnalysisResultSweptValue, AnalysisResultTransientState,
 };
 use rspice_results::result_digest::ResultDigestEncoding;
 use rspice_results::run::{ExecutionTarget, RunRetention, SimulationRun, SimulationRunLifecycle};
@@ -902,6 +902,10 @@ pub struct ProjectAnalysisResultPvtPoint {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corner_contract: Option<ContentDigest>,
     pub nominal: bool,
+    /// The design-variable and source values the point was solved at, in the
+    /// run set's declaration order. Absent for a point that swept neither.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub swept_values: Vec<AnalysisResultSweptValue>,
 }
 
 /// Bitwise, so a persisted point is `Eq` like the rest of the provenance wire
@@ -914,6 +918,7 @@ impl PartialEq for ProjectAnalysisResultPvtPoint {
             && self.temperature_celsius.to_bits() == other.temperature_celsius.to_bits()
             && self.corner_contract == other.corner_contract
             && self.nominal == other.nominal
+            && self.swept_values == other.swept_values
     }
 }
 
@@ -927,7 +932,8 @@ impl ProjectAnalysisResultPvtPoint {
             self.temperature_celsius,
             self.corner_contract,
             self.nominal,
-        )
+        )?
+        .with_swept_values(self.swept_values)
     }
 }
 
@@ -939,6 +945,7 @@ impl From<&AnalysisResultPvtPoint> for ProjectAnalysisResultPvtPoint {
             temperature_celsius: point.temperature_celsius(),
             corner_contract: point.corner_contract(),
             nominal: point.is_nominal(),
+            swept_values: point.swept_values().to_vec(),
         }
     }
 }
@@ -1398,7 +1405,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for PersistedField<T> {
 }
 
 /// The result-history schema this build writes, and the only one it reads.
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 46;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 47;
 
 fn analysis_type_key(analysis_type: AnalysisType) -> &'static str {
     match analysis_type {
