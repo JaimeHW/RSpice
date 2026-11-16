@@ -12,7 +12,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
-use rspice_core::circuit::DcBranchVoltageLoop;
+use rspice_core::circuit::{ConverterInsertion, DcBranchVoltageLoop};
 use rspice_core::engine::ModelBinCoverageGap;
 use rspice_simulation_contract::config::OpNodeInitialization;
 
@@ -70,6 +70,28 @@ pub struct EngineRefusal {
     pub tasks: Vec<RefusedTask>,
 }
 
+/// The converters a built deck inserts on its mixed boundaries, with every
+/// task whose deck inserts the same ones.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeckConverters {
+    /// In the order the build inserted them
+    /// (`CircuitData::converter_insertions`).
+    pub converters: Vec<ConverterInsertion>,
+    /// In dispatch order, each once.
+    pub tasks: Vec<RefusedTask>,
+}
+
+/// What building a run's decks says: what the engine refuses, and the
+/// converters the decks it built insert.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EngineCheck {
+    /// Each refusal once, with every task it refuses.
+    pub refusals: Vec<EngineRefusal>,
+    /// Each distinct set of converters once, in dispatch order. A deck with
+    /// no mixed boundary, or one the engine refused, adds none.
+    pub converters: Vec<DeckConverters>,
+}
+
 /// How far a pass over a run's decks has got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DeckBuildProgress {
@@ -117,6 +139,7 @@ enum DeckVerdict {
     Built {
         fatal_no_dc_path_nodes: Vec<String>,
         loops: Vec<DcBranchVoltageLoop>,
+        converters: Vec<ConverterInsertion>,
     },
     Refused(Vec<EngineRefusalKind>),
 }
@@ -141,18 +164,18 @@ impl PreparedRunSnapshot {
         &self,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Vec<EngineRefusal> {
-        self.engine_refusals_reporting(abort, &|_| {})
+        self.engine_check_reporting(abort, &|_| {}).refusals
     }
 
-    /// [`Self::engine_refusals`], telling `progress` how many distinct decks
-    /// it builds and each time it has built one. Empty when `abort` stopped
-    /// it.
-    pub fn engine_refusals_reporting(
+    /// [`Self::engine_refusals`], and the converters the decks the engine
+    /// built insert, telling `progress` how many distinct decks it builds and
+    /// each time it has built one. Empty when `abort` stopped it.
+    pub fn engine_check_reporting(
         &self,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
         progress: &dyn Fn(DeckBuildProgress),
-    ) -> Vec<EngineRefusal> {
-        let mut refusals: Vec<EngineRefusal> = Vec::new();
+    ) -> EngineCheck {
+        let mut check = EngineCheck::default();
 
         // Every deck every task dispatches, in dispatch order, so the pass can
         // say how many it builds before it builds the first. A recorded FFT
@@ -192,7 +215,7 @@ impl PreparedRunSnapshot {
         let mut installed = None;
         for (task, deck) in dispatched {
             if abort.is_aborted() {
-                return Vec::new();
+                return EngineCheck::default();
             }
             let key = (deck.source, deck.temperature.key());
             if let Entry::Vacant(unbuilt) = verdicts.entry(key) {
@@ -224,10 +247,15 @@ impl PreparedRunSnapshot {
             };
             let refused = refused_task(task);
             for kind in task_refusals(task, verdict) {
-                record(&mut refusals, kind, &refused);
+                record(&mut check.refusals, kind, &refused);
+            }
+            if let DeckVerdict::Built { converters, .. } = verdict
+                && !converters.is_empty()
+            {
+                record_converters(&mut check.converters, converters, &refused);
             }
         }
-        refusals
+        check
     }
 
     /// The deck one task's engine call builds, as the runner composes it: the
@@ -312,6 +340,7 @@ impl PreparedRunSnapshot {
             Ok(circuit) => Some(DeckVerdict::Built {
                 fatal_no_dc_path_nodes: circuit.fatal_no_dc_path_nodes().to_vec(),
                 loops: circuit.dc_branch_voltage_loops(),
+                converters: circuit.converter_insertions().to_vec(),
             }),
             Err(
                 rspice_core::SimulationError::Aborted
@@ -372,6 +401,7 @@ fn task_refusals(task: &PreparedTask, verdict: &DeckVerdict) -> Vec<EngineRefusa
         DeckVerdict::Built {
             fatal_no_dc_path_nodes,
             loops,
+            converters: _,
         } => {
             let checks_dc_bias = checks_dc_bias_before_solving(task);
             let mut refused = Vec::new();
@@ -451,6 +481,24 @@ fn refused_task(task: &PreparedTask) -> RefusedTask {
     RefusedTask {
         analysis: task.authored_instance_id,
         label: task.label.clone(),
+    }
+}
+
+fn record_converters(
+    sets: &mut Vec<DeckConverters>,
+    converters: &[ConverterInsertion],
+    task: &RefusedTask,
+) {
+    match sets.iter_mut().find(|set| set.converters == converters) {
+        Some(set) => {
+            if !set.tasks.contains(task) {
+                set.tasks.push(task.clone());
+            }
+        }
+        None => sets.push(DeckConverters {
+            converters: converters.to_vec(),
+            tasks: vec![task.clone()],
+        }),
     }
 }
 

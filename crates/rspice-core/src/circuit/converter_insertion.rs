@@ -256,6 +256,75 @@ impl ConverterInsertion {
     }
 }
 
+impl ConverterInsertion {
+    /// This converter as one row of a report, the cells in this order:
+    ///
+    /// 1. the boundary node, as the deck names it;
+    /// 2. the discrete port that meets it, or `-`;
+    /// 3. what it converts: `A→D`, `D→A` or `A↔D` between an analog node
+    ///    and a logic port, `A→R`, `R→A` or `A↔R` with a real one;
+    /// 4. the module that converts, and 5. its instance;
+    /// 6. what chose it: the `connectrules` block whose statement selected
+    ///    it, the rule set an HDL port no statement reaches converts with,
+    ///    `auto-bridge` or the template;
+    /// 7. the supply it converts against, or `-`;
+    /// 8. the parameters its connect statement set, or `-`.
+    ///
+    /// `rspice check --converters` prints these rows, and the app's
+    /// converter table shows the same cells.
+    pub fn report_row(&self) -> [String; 8] {
+        let set = self
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.source == ConverterSource::ConnectStatement)
+            .map(|parameter| format!("{parameter:#}"))
+            .collect::<Vec<_>>();
+        [
+            self.boundary.clone(),
+            self.port.clone().unwrap_or_else(|| "-".into()),
+            self.converts().to_owned(),
+            self.module.clone(),
+            self.instance.clone(),
+            match &self.rules {
+                ConverterSource::ConnectRule { block, .. } => block.clone(),
+                ConverterSource::RuleSet(name) => format!("{name}, no connect rule"),
+                ConverterSource::AutoBridge => "auto-bridge".into(),
+                rules => rules.to_string(),
+            },
+            self.supply
+                .as_ref()
+                .map_or_else(|| "-".into(), |supply| format!("{supply:#}")),
+            if set.is_empty() {
+                "-".into()
+            } else {
+                set.join(" ")
+            },
+        ]
+    }
+
+    /// What it converts, between the analog side (`A`) and a logic (`D`) or
+    /// real (`R`) port.
+    fn converts(&self) -> &'static str {
+        use ConverterKind as Kind;
+        match self.kind {
+            Kind::A2d | Kind::AdcBridge => "A\u{2192}D",
+            Kind::D2a | Kind::DacBridge => "D\u{2192}A",
+            Kind::Bidir | Kind::BidiBridge => "A\u{2194}D",
+            Kind::E2r | Kind::VToReal => "A\u{2192}R",
+            Kind::R2e | Kind::RealToV => "R\u{2192}A",
+            Kind::Rbidir => "A\u{2194}R",
+            Kind::Authored | Kind::Template => match (self.direction, self.supply.is_some()) {
+                (PortDirection::In, true) => "A\u{2192}D",
+                (PortDirection::Out, true) => "D\u{2192}A",
+                (PortDirection::InOut, true) => "A\u{2194}D",
+                (PortDirection::In, false) => "A\u{2192}R",
+                (PortDirection::Out, false) => "R\u{2192}A",
+                (PortDirection::InOut, false) => "A\u{2194}R",
+            },
+        }
+    }
+}
+
 impl CircuitData {
     /// Every converter the build inserted on a mixed boundary, in the order
     /// it inserted them.
@@ -280,6 +349,12 @@ fn si(value: f64, unit: &str) -> String {
         } else {
             "-inf".into()
         };
+    }
+    // A fraction of the supply has no unit, and a prefix on a bare number
+    // reads as one (`300 m`).
+    if unit.is_empty() {
+        let plain = format!("{value:.6}");
+        return plain.trim_end_matches('0').trim_end_matches('.').to_owned();
     }
     if value == 0.0 {
         return format!("0 {unit}");

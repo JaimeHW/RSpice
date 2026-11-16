@@ -29,10 +29,10 @@ pub(crate) use headless_tasks::small_signal_state_keyword;
 pub use snapshot::PreparedRunMetadata;
 pub(crate) use snapshot::bound_cards::BoundStateReader;
 pub use snapshot::{
-    AuthorizedRunDispatch, AuthorizedTaskDispatch, DeckBuildProgress, EngineRefusal,
-    EngineRefusalKind, ExecutionTargetCapabilities, PSS_SPECTRUM_ROLE, PreparationProgress,
-    PreparedRunSnapshot, PreparedTask, RefusedTask, ResolvedTaskDispatch, SavePolicy,
-    TouchstoneExportPolicy, result_source_domain,
+    AuthorizedRunDispatch, AuthorizedTaskDispatch, DeckBuildProgress, DeckConverters, EngineCheck,
+    EngineRefusal, EngineRefusalKind, ExecutionTargetCapabilities, PSS_SPECTRUM_ROLE,
+    PreparationProgress, PreparedRunSnapshot, PreparedTask, RefusedTask, ResolvedTaskDispatch,
+    SavePolicy, TouchstoneExportPolicy, result_source_domain,
 };
 pub(crate) use snapshot::{
     CornerVerilogARuntimes, ModelSourceIdentity, PreparedRunSet, RunSourceReceipt, RunnerParts,

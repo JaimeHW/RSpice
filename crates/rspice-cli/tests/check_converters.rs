@@ -47,15 +47,23 @@ fn each_converter_is_one_row_with_its_port_module_and_supply() {
             .to_ascii_lowercase()
     };
     let header = row("NODE");
-    for column in ["port", "dir", "module", "instance", "supply", "parameters"] {
+    for column in [
+        "port",
+        "dir",
+        "module",
+        "instance",
+        "rule",
+        "supply",
+        "parameters",
+    ] {
         assert!(header.contains(column), "{header}");
     }
     let input = row("din");
-    for cell in ["ainv.in", "input", "adc_bridge", "5 v"] {
+    for cell in ["ainv.in", "a\u{2192}d", "adc_bridge", "auto-bridge", "5 v"] {
         assert!(input.contains(cell), "{cell:?} in {input}");
     }
     let output = row("dout");
-    for cell in ["ainv.out", "output", "dac_bridge", "5 v"] {
+    for cell in ["ainv.out", "d\u{2192}a", "dac_bridge", "auto-bridge", "5 v"] {
         assert!(output.contains(cell), "{cell:?} in {output}");
     }
 }

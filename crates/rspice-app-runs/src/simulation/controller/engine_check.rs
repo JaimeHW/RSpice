@@ -27,8 +27,8 @@ use super::prepared_run::FrozenRunPreparation;
 use super::run_inputs::{RetainedRunInputs, RunInputIdentity, SourceFileAnswers};
 use super::*;
 use crate::simulation::execution::{
-    DeckBuildProgress, EngineRefusal, PreparationError, PreparationProgress, PreparedRunMetadata,
-    PreparedRunSnapshot,
+    DeckBuildProgress, DeckConverters, EngineCheck, EngineRefusal, PreparationError,
+    PreparationProgress, PreparedRunMetadata, PreparedRunSnapshot,
 };
 
 /// Which stage a pipeline is in, and how far it has got.
@@ -46,7 +46,7 @@ enum WorkerVerdict {
     NotPrepared(PreparationError),
     Checked {
         snapshot: Box<PreparedRunSnapshot>,
-        refusals: Vec<EngineRefusal>,
+        check: EngineCheck,
         source_files: SourceFileAnswers,
     },
 }
@@ -78,10 +78,12 @@ pub enum PreflightVerdict {
     /// Preparation refused the run.
     NotPrepared(PreparationError),
     /// The run was prepared, and retained when the outcome is current, and
-    /// the engine refused what `refusals` lists.
+    /// the engine refused what `refusals` lists. The decks it built insert
+    /// `converters`.
     Checked {
         metadata: Box<PreparedRunMetadata>,
         refusals: Vec<EngineRefusal>,
+        converters: Vec<DeckConverters>,
     },
     /// The worker ended without a verdict while the engine built the decks.
     NoVerdict,
@@ -134,12 +136,12 @@ impl SimulationController {
                     );
                     #[cfg(any(test, feature = "test-support"))]
                     hooks.enter("engine checking");
-                    let refusals = snapshot.engine_refusals_reporting(&cancel, &|progress| {
+                    let check = snapshot.engine_check_reporting(&cancel, &|progress| {
                         set_stage(&stage, PreflightStage::EngineChecking(progress));
                     });
                     WorkerVerdict::Checked {
                         snapshot: Box::new(snapshot),
-                        refusals,
+                        check,
                         source_files,
                     }
                 }
@@ -209,7 +211,7 @@ impl SimulationController {
             Some(WorkerVerdict::NotPrepared(error)) => PreflightVerdict::NotPrepared(error),
             Some(WorkerVerdict::Checked {
                 snapshot,
-                refusals,
+                check,
                 source_files,
             }) => {
                 let metadata = Box::new(snapshot.metadata());
@@ -225,7 +227,11 @@ impl SimulationController {
                     Ok(())
                 };
                 match retained {
-                    Ok(()) => PreflightVerdict::Checked { metadata, refusals },
+                    Ok(()) => PreflightVerdict::Checked {
+                        metadata,
+                        refusals: check.refusals,
+                        converters: check.converters,
+                    },
                     Err(error) => PreflightVerdict::NotPrepared(error),
                 }
             }

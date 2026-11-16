@@ -52,7 +52,7 @@ pub const STUDIO_BASELINES: [StudioBaseline; 10] = [
     StudioBaseline {
         name: "studio-connect-rules",
         page: SimulationPage::ConnectRules,
-        fingerprint: "d0768dfcb656207f67c5919fff6a61c30b819b7b11ba9ed181911a58ffc0ba66",
+        fingerprint: "96054158e90577d6208c71f3efce8bac1f7fd4559ab48ff58ea97da5edcb4889",
     },
     StudioBaseline {
         name: "studio-solver",

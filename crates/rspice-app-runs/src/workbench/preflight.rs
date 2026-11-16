@@ -203,7 +203,7 @@ pub fn start(state: &mut impl RunHost, controller: &mut SimulationController, qu
             Err(error) => report.blockers.push(preparation_issue(&error)),
         }
     }
-    conclude(state, controller, report, None, queue);
+    conclude(state, controller, report, Vec::new(), None, queue);
 }
 
 /// Whether the pass in flight, whose report is `report`, still checks the
@@ -306,12 +306,15 @@ pub fn poll(state: &mut impl RunHost, controller: &mut SimulationController) {
     else {
         return;
     };
+    let mut converters = Vec::new();
     match verdict {
         PreflightVerdict::NotPrepared(error) => report.blockers.push(preparation_issue(&error)),
         PreflightVerdict::Checked {
             mut metadata,
             refusals,
+            converters: built,
         } => {
+            converters = engine_refusals::checked_converters(state.model(), &built);
             report.advisories.extend(
                 std::mem::take(&mut metadata.advisories)
                     .into_iter()
@@ -340,7 +343,14 @@ pub fn poll(state: &mut impl RunHost, controller: &mut SimulationController) {
         state.model().active_plan_revision(),
     ) && (report.prepared.is_none() || controller.retained_run_is_current(state));
     if retained && unedited {
-        conclude(state, controller, report, inputs_at_press, queue);
+        conclude(
+            state,
+            controller,
+            report,
+            converters,
+            inputs_at_press,
+            queue,
+        );
     } else {
         if retained {
             // The run was retained as the one checked, but the design it was
@@ -402,6 +412,7 @@ fn conclude(
     state: &mut impl RunHost,
     controller: &mut SimulationController,
     report: PreflightReport,
+    converters: Vec<super::app_state::run_preflight::CheckedConverters>,
     inputs_at_press: Option<crate::product::ContentDigest>,
     queue: bool,
 ) {
@@ -448,6 +459,7 @@ fn conclude(
     // while the report they came from does, and that is part of what their
     // digest is taken over.
     state.runs_mut().preflight.report = Some(report.clone());
+    state.runs_mut().preflight.converters = converters;
     match inputs_at_press {
         Some(inputs_at_press) => state
             .model_mut()

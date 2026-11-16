@@ -14,7 +14,7 @@
 //! produced, the request that starts it, and where that report stands.
 
 use crate::state::model_library::ModelLibraryManager;
-use crate::state::{PreflightReport, ProjectWorkspace, SchematicState};
+use crate::state::{PreflightRemediation, PreflightReport, ProjectWorkspace, SchematicState};
 use rspice_app_state::workbench::app_state::design_checks::DesignCheckStatus;
 use rspice_app_state::workbench::app_state::model::{Model, SlotFacts};
 use rspice_app_state::workbench::app_state::sim_setup::SimSetupState;
@@ -197,6 +197,31 @@ pub struct PreflightDialogState {
     /// looks for the pass's verdict, so a verdict that lands in between
     /// authorizes nothing.
     pub check_cancel_requested: bool,
+    /// The converters the decks of [`Self::report`]'s run insert, as the
+    /// engine built them. Kept beside the report and dropped with it.
+    pub converters: Vec<CheckedConverters>,
+}
+
+/// The converters a set of the checked run's decks insert.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CheckedConverters {
+    /// The tasks whose decks insert them, as the run labels each.
+    pub tasks: Vec<String>,
+    pub converters: Vec<CheckedConverter>,
+}
+
+/// One converter a checked deck inserts, as the engine reports it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CheckedConverter {
+    /// `ConverterInsertion::report_row`, verbatim: the same cells
+    /// `rspice check --converters` prints.
+    pub cells: [String; 8],
+    /// Where the connect statement that chose it is written, `file:line`.
+    pub location: Option<String>,
+    /// Its supply and every parameter, each with where its value came from.
+    pub values: Vec<String>,
+    /// The drawn net it converts, or the deck when no drawing holds it.
+    pub net: PreflightRemediation,
 }
 
 /// What a pass decided in the frame that took the press, held until the
@@ -226,6 +251,7 @@ impl PreflightDialogState {
     /// operator action to a design edit that the workflow already refuses.
     pub fn invalidate(&mut self) {
         self.report = None;
+        self.converters.clear();
     }
 
     /// Ask the frame loop to run the governed preflight-and-queue pass.

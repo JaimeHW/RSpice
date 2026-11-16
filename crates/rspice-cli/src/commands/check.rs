@@ -869,62 +869,40 @@ fn output_json(result: &ValidationResult, converters: bool) -> Result<(), CliErr
     crate::console::json(&json, true)
 }
 
-/// One dense row per converter: the boundary net, the port that meets it,
-/// the port's direction, what converts and its instance, the supply, and the
+/// One dense row per converter, as [`ConverterInsertion::report_row`] states
+/// it: the boundary node, the port that meets it, what it converts, the
+/// module and its instance, the rule that chose it, the supply, and the
 /// parameters the connect statement set.
+///
+/// [`ConverterInsertion::report_row`]: rspice_core::circuit::ConverterInsertion::report_row
 fn output_converters(
     converters: &[(String, rspice_core::circuit::ConverterInsertion)],
 ) -> Result<(), CliError> {
-    use rspice_core::circuit::ConverterSource;
-    use rspice_core::xspice::PortDirection;
-
     if converters.is_empty() {
         return crate::console::line(format_args!("No converters inserted"));
     }
     let several_decks = converters.iter().any(|(deck, _)| *deck != converters[0].0);
-    let mut rows = vec![[
-        "NODE".to_owned(),
-        "PORT".to_owned(),
-        "DIR".to_owned(),
-        "MODULE".to_owned(),
-        "INSTANCE".to_owned(),
-        "SUPPLY".to_owned(),
-        "PARAMETERS".to_owned(),
-    ]];
+    let mut rows = vec![
+        [
+            "NODE",
+            "PORT",
+            "DIR",
+            "MODULE",
+            "INSTANCE",
+            "RULE",
+            "SUPPLY",
+            "PARAMETERS",
+        ]
+        .map(str::to_owned),
+    ];
     for (deck, converter) in converters {
-        let set = converter
-            .parameters
-            .iter()
-            .filter(|parameter| parameter.source == ConverterSource::ConnectStatement)
-            .map(|parameter| format!("{parameter:#}"))
-            .collect::<Vec<_>>();
-        rows.push([
-            if several_decks {
-                format!("[{deck}] {}", converter.boundary)
-            } else {
-                converter.boundary.clone()
-            },
-            converter.port.clone().unwrap_or_else(|| "-".into()),
-            match converter.direction {
-                PortDirection::In => "input",
-                PortDirection::Out => "output",
-                PortDirection::InOut => "inout",
-            }
-            .to_owned(),
-            converter.module.clone(),
-            converter.instance.clone(),
-            converter
-                .supply
-                .as_ref()
-                .map_or_else(|| "-".into(), |supply| format!("{supply:#}")),
-            if set.is_empty() {
-                "-".into()
-            } else {
-                set.join(" ")
-            },
-        ]);
+        let mut row = converter.report_row();
+        if several_decks {
+            row[0] = format!("[{deck}] {}", row[0]);
+        }
+        rows.push(row);
     }
-    let mut widths = [0usize; 7];
+    let mut widths = [0usize; 8];
     for row in &rows {
         for (width, cell) in widths.iter_mut().zip(row) {
             *width = (*width).max(cell.chars().count());

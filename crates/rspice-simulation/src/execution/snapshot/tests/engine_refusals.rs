@@ -342,8 +342,9 @@ fn a_corner_run_is_built_as_its_points_dispatch_it() {
     );
 
     let progress = std::cell::Cell::new(DeckBuildProgress::default());
-    let refusals =
-        snapshot.engine_refusals_reporting(&rspice_core::NoAbort, &|now| progress.set(now));
+    let refusals = snapshot
+        .engine_check_reporting(&rspice_core::NoAbort, &|now| progress.set(now))
+        .refusals;
 
     assert!(refusals.is_empty(), "{refusals:#?}");
     assert_eq!(

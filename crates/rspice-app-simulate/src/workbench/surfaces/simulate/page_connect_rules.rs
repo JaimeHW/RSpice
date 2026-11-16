@@ -7,6 +7,10 @@
 //! while a shipped set and a block the design declares are shown as written,
 //! a declared one opening its source. The run's block is stored with the
 //! plan's options and written into the deck as a `.CONNECTRULES` card.
+//!
+//! Below them, the converters the checked run's decks insert, one row each
+//! as the engine reports them (Virtuoso AMS's elaboration report of inserted
+//! connect modules), each selecting the net it converts on the schematic.
 
 use egui::{RichText, TextEdit, Ui, vec2};
 
@@ -18,6 +22,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, mono_input, name_control, select, select_mono_with_response, text_field,
 };
+use crate::workbench::app_state::run_preflight::CheckedConverter;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, record_plan_refusal};
 use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticRoute;
@@ -38,11 +43,108 @@ const DESIGN_DEFAULT_RULES: &str = "(design default)";
 /// [`ConnectRuleColumn::ALL`].
 const GRID: [f32; 9] = [0.11, 0.08, 0.12, 0.11, 0.11, 0.11, 0.11, 0.125, 0.125];
 
+/// The converter table's columns: [`CheckedConverter::cells`].
+const REPORT: [f32; 8] = [0.10, 0.10, 0.08, 0.09, 0.18, 0.11, 0.11, 0.23];
+
+const REPORT_LABELS: [&str; 8] = [
+    "Net",
+    "Port",
+    "Converts",
+    "Module",
+    "Instance",
+    "Rule",
+    "Supply",
+    "Set by statement",
+];
+
 pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let declared = declared_blocks(ui, cx);
     selection_card(ui, cx, &declared);
     ui.add_space(12.0);
     statements_card(ui, cx, &declared);
+    ui.add_space(12.0);
+    converters_card(ui, cx);
+}
+
+/// The converters the checked run's decks insert, one row each as the engine
+/// reports them; selecting one shows the net it converts.
+fn converters_card(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    let preflight = &cx.runs.preflight;
+    let sets = &preflight.converters;
+    let checked = preflight
+        .report
+        .as_ref()
+        .map(|report| report.project_revision);
+    let count: usize = sets.iter().map(|set| set.converters.len()).sum();
+    let status = checked.map(|revision| {
+        format!(
+            "{count} converter{} \u{b7} revision {revision}",
+            if count == 1 { "" } else { "s" }
+        )
+    });
+    let mut route = None;
+    card(
+        ui,
+        "Inserted converters",
+        status.as_deref().map(|status| (status, Tone::Neutral)),
+        |ui| {
+            if count > 0 {
+                ledger_head(ui, &REPORT, &REPORT_LABELS);
+            }
+            let several = sets.len() > 1;
+            for set in sets {
+                if several {
+                    ledger_group(ui, &set.tasks.join(", "));
+                }
+                for converter in &set.converters {
+                    let cells: Vec<(&str, Tone)> = converter
+                        .cells
+                        .iter()
+                        .map(|cell| (cell.as_str(), Tone::Neutral))
+                        .collect();
+                    let response = ledger_row(ui, &REPORT, &cells, false, RowPress::Taken)
+                        .on_hover_ui(|ui| converter_detail(ui, converter));
+                    if response.clicked() {
+                        route = Some(converter.net.clone());
+                    }
+                }
+            }
+            card_note(
+                ui,
+                match (checked, count) {
+                    (None, _) => {
+                        "Check the run to list the converters the engine inserts where an \
+                         analog node meets a digital port."
+                    }
+                    (Some(_), 0) => {
+                        "The checked decks insert no converter: no analog node meets a digital \
+                         port."
+                    }
+                    (Some(_), _) => {
+                        "As the engine inserts them when it builds the checked decks; rspice \
+                         check --converters prints the same rows for the deck. Select a row to \
+                         show its net on the schematic."
+                    }
+                },
+            );
+        },
+    );
+    if let Some(route) = route {
+        cx.model
+            .diagnostics
+            .request_route(DiagnosticRoute::Repair(route));
+    }
+}
+
+/// A converter's hover: where its rule is written, and every value with
+/// where it came from.
+fn converter_detail(ui: &mut Ui, converter: &CheckedConverter) {
+    if let Some(location) = &converter.location {
+        ui.label(cell_text(ui, &format!("statement at {location}"), false));
+    }
+    for value in &converter.values {
+        ui.label(cell_text(ui, value, true));
+    }
 }
 
 /// The design's own blocks, read from its sources once per source revision.

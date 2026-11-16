@@ -486,6 +486,56 @@ fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusa
     );
 }
 
+/// The pass keeps the converters the engine inserts beside its report, each
+/// as the row `rspice check --converters` prints for the deck and with the
+/// drawn net it converts, which selecting the row opens. Whatever drops the
+/// report drops them.
+#[test]
+fn a_checked_run_lists_the_converters_its_decks_insert_on_their_drawn_nets() {
+    let (mut app, top, _) = app_with_a_moded_device(TWO_RULE_BLOCKS);
+    let options = rspice_simulation_contract::options::SimulationOptions {
+        connect_rules: Some("High".to_owned()),
+        ..app.state.model.sim_setup.options.clone()
+    };
+    app.state.model.sim_setup.commit_options(&options);
+    app.state
+        .model
+        .sim_setup
+        .commit_active_plan_configuration_change("Updated simulation solver options.")
+        .expect("the plan takes the block");
+    app.invalidate_simulation_preflight();
+    start(&mut app.state, &mut app.simulation_controller, false);
+    app.settle_preflight();
+
+    let sets = &app.state.runs.preflight.converters;
+    assert_eq!(sets.len(), 1, "{sets:#?}");
+    let [converter] = sets[0].converters.as_slice() else {
+        panic!("one boundary, one converter: {sets:#?}");
+    };
+    let [net, port, converts, module, _, rule, supply, set] = &converter.cells;
+    assert!(net.eq_ignore_ascii_case("drv"), "{converter:#?}");
+    assert!(
+        port.to_ascii_lowercase().ends_with(".mode"),
+        "{converter:#?}"
+    );
+    assert_eq!(
+        [converts, module, rule, supply, set].map(String::as_str),
+        ["A\u{2192}D", "a2d", "High", "5 V", "-"],
+        "{converter:#?}"
+    );
+    let PreflightRemediation::Drawing {
+        cell_view,
+        object: rspice_app_state::state::DrawnObject::Net { name, .. },
+    } = &converter.net
+    else {
+        panic!("the row opens the drawn net: {converter:#?}");
+    };
+    assert_eq!((cell_view, name.as_str()), (&top, "drv"));
+
+    app.invalidate_simulation_preflight();
+    assert!(app.state.runs.preflight.converters.is_empty());
+}
+
 /// A cell `amp` behind one `VSS` port, drawn by `draw` with its return at
 /// (0, 30), placed once as `XAMP` in the configured root with `VSS` on
 /// ground. The root is left open, with an operating point in its plan.

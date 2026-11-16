@@ -17,7 +17,9 @@
 use std::sync::Arc;
 
 use rspice_design::connectivity::summary::DesignNet;
-use rspice_simulation::execution::{EngineRefusal, EngineRefusalKind, RefusedTask};
+use rspice_simulation::execution::{DeckConverters, EngineRefusal, EngineRefusalKind, RefusedTask};
+
+use crate::workbench::app_state::run_preflight::{CheckedConverter, CheckedConverters};
 use rspice_simulation_contract::options::SimulationOptions;
 use rspice_vocabulary::hierarchy_path::{InstancePath, ProbeTarget};
 
@@ -54,6 +56,35 @@ pub(super) fn engine_refusal_issues(
 
 /// The blocker for a build pass that ended without saying what the engine
 /// refuses. A run the pass could not speak for is not authorized.
+/// The converters the checked decks insert, each with the drawn net it
+/// converts.
+pub(super) fn checked_converters(model: &Model, sets: &[DeckConverters]) -> Vec<CheckedConverters> {
+    if sets.is_empty() {
+        return Vec::new();
+    }
+    let drawing = DrawnDesign::configured(model);
+    sets.iter()
+        .map(|set| CheckedConverters {
+            tasks: set.tasks.iter().map(|task| task.label.clone()).collect(),
+            converters: set
+                .converters
+                .iter()
+                .map(|converter| CheckedConverter {
+                    cells: converter.report_row(),
+                    location: converter.location.clone(),
+                    values: converter
+                        .supply
+                        .iter()
+                        .map(ToString::to_string)
+                        .chain(converter.parameters.iter().map(ToString::to_string))
+                        .collect(),
+                    net: drawing.node(&converter.boundary).1,
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 pub(super) fn no_verdict_issue() -> PreflightIssue {
     PreflightIssue {
         check: BUILD_CHECK.to_owned(),
