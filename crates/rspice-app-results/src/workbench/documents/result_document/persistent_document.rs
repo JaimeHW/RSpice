@@ -769,16 +769,7 @@ fn render_pane(
         ui.allocate_ui_with_layout(
             vec2(ui.available_width(), viewer_height),
             Layout::top_down(Align::Min),
-            |ui| {
-                render_pane_viewer(
-                    ui,
-                    state,
-                    run_controller,
-                    pane,
-                    viewer,
-                    is_active,
-                )
-            },
+            |ui| render_pane_viewer(ui, state, run_controller, pane, viewer, is_active),
         );
         activated_pane_id
     })

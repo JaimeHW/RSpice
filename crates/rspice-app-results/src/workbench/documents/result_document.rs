@@ -1579,11 +1579,7 @@ pub use rspice_results_ui::waveform::waveform_color;
 // ---------------------------------------------------------------------------
 
 /// Render the Results workspace center view (docbar + active viewer).
-pub fn show(
-    ui: &mut Ui,
-    state: &mut ResultsParts<'_>,
-    run_controller: &mut SimulationController,
-) {
+pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>, run_controller: &mut SimulationController) {
     results_keymap(ui, state);
     show_with_chrome(ui, state, run_controller, ResultChrome::Full);
     waves::marker_dialog::show(ui.ctx(), state);

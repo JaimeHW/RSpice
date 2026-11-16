@@ -3,11 +3,8 @@
 use super::*;
 use rspice_hardcopy_contract::sources::MAX_HARDCOPY_SOURCE_SET_MEMBERS;
 use rspice_results::{
-    analysis_result::AnalysisResult,
-    manifest::ManifestViewModel,
-    result_digest::ResultDigestEncoding,
-    run::SimulationRun,
-    waveform::RetainedWaveform,
+    analysis_result::AnalysisResult, manifest::ManifestViewModel,
+    result_digest::ResultDigestEncoding, run::SimulationRun, waveform::RetainedWaveform,
 };
 use rspice_vocabulary::product::{ObjectRevision, ProjectId};
 use uuid::Uuid;

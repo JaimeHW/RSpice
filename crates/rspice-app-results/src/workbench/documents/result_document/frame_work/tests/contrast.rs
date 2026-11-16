@@ -53,11 +53,7 @@ fn unreadable(viewer: ResultViewer, mut state: ResultsTestHost) -> Vec<String> {
                 },
                 |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        super::super::super::show(
-                            ui,
-                            &mut state.results_parts(),
-                            &mut controller,
-                        );
+                        super::super::super::show(ui, &mut state.results_parts(), &mut controller);
                     });
                 },
             ));

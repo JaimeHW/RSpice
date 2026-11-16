@@ -195,12 +195,7 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
     // last had.
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller| {
-            show(
-                ui,
-                state,
-                run_controller,
-                document_id,
-            )
+            show(ui, state, run_controller, document_id)
         })
     });
     let context = app
@@ -470,12 +465,7 @@ fn idle_frames_of_an_open_persistent_document_never_advance_the_data_version() {
     let (mut app, document_id) = persistent_transient_fixture();
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller| {
-            show(
-                ui,
-                state,
-                run_controller,
-                document_id,
-            )
+            show(ui, state, run_controller, document_id)
         })
     });
     let settled = app.state.model.simulation.view.data_version;
@@ -483,12 +473,7 @@ fn idle_frames_of_an_open_persistent_document_never_advance_the_data_version() {
     for frame in 0..4 {
         drive_frame(|ui| {
             super::with_surface_parts(&mut app, |state, run_controller| {
-                show(
-                    ui,
-                    state,
-                    run_controller,
-                    document_id,
-                )
+                show(ui, state, run_controller, document_id)
             })
         });
         assert_eq!(
@@ -506,12 +491,7 @@ fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection()
     let (mut app, document_id) = persistent_transient_fixture();
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller| {
-            show(
-                ui,
-                state,
-                run_controller,
-                document_id,
-            )
+            show(ui, state, run_controller, document_id)
         })
     });
     let analysis =
@@ -531,12 +511,7 @@ fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection()
     for frame in 0..3 {
         drive_frame(|ui| {
             super::with_surface_parts(&mut app, |state, run_controller| {
-                show(
-                    ui,
-                    state,
-                    run_controller,
-                    document_id,
-                )
+                show(ui, state, run_controller, document_id)
             })
         });
         assert!(
@@ -736,12 +711,7 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
     for _ in 0..3 {
         drive_frame(|ui| {
             super::with_surface_parts(&mut app, |state, run_controller| {
-                show(
-                    ui,
-                    state,
-                    run_controller,
-                    document_id,
-                )
+                show(ui, state, run_controller, document_id)
             })
         });
     }
@@ -1325,12 +1295,7 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
     let (mut app, document_id) = persistent_transient_fixture();
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller| {
-            show(
-                ui,
-                state,
-                run_controller,
-                document_id,
-            )
+            show(ui, state, run_controller, document_id)
         })
     });
     let pane = app
@@ -1385,12 +1350,7 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
     for frame in 0..3 {
         drive_frame(|ui| {
             super::with_surface_parts(&mut app, |state, run_controller| {
-                show(
-                    ui,
-                    state,
-                    run_controller,
-                    document_id,
-                )
+                show(ui, state, run_controller, document_id)
             })
         });
         assert!(
@@ -1510,12 +1470,7 @@ fn zooming_one_pane_of_a_saved_x_link_zooms_the_other() {
     reload(&mut app, document_id);
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller| {
-            show(
-                ui,
-                state,
-                run_controller,
-                document_id,
-            )
+            show(ui, state, run_controller, document_id)
         })
     });
     let page = projection(app.state.results_reads(), document_id)
@@ -1632,12 +1587,7 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
     let (mut app, document_id) = transient_fixture_with_layout("two-linked-panes");
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller| {
-            show(
-                ui,
-                state,
-                run_controller,
-                document_id,
-            )
+            show(ui, state, run_controller, document_id)
         })
     });
     let page = projection(app.state.results_reads(), document_id)
@@ -1666,12 +1616,7 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
     reload(&mut app, document_id);
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller| {
-            show(
-                ui,
-                state,
-                run_controller,
-                document_id,
-            )
+            show(ui, state, run_controller, document_id)
         })
     });
     let page = projection(app.state.results_reads(), document_id)

@@ -30,5 +30,8 @@ fn with_surface_parts<R>(
     app: &mut RSpiceApp,
     draw: impl FnOnce(&mut ResultsParts<'_>, &mut SimulationController) -> R,
 ) -> R {
-    draw(&mut app.state.results_parts(), &mut app.simulation_controller)
+    draw(
+        &mut app.state.results_parts(),
+        &mut app.simulation_controller,
+    )
 }

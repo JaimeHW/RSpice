@@ -21,9 +21,9 @@ use crate::workbench::commands::result_navigation::{
 use crate::workbench::documents::result_document::{
     ResultsParts, ResultsReads, add_pane_available, compare_availability, copy_cursor_text,
     cursor_jump_availability, family_available, fit_gesture_available, jump_cursor, linked_cursors,
-    open_create_document, open_dataset_browser, place_marker_at_cursor,
-    request_view_gesture, viewer_is_available, viewer_unavailability_reason,
-    zoom_gesture_available, zoom_previous, zoom_previous_available,
+    open_create_document, open_dataset_browser, place_marker_at_cursor, request_view_gesture,
+    viewer_is_available, viewer_unavailability_reason, zoom_gesture_available, zoom_previous,
+    zoom_previous_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;

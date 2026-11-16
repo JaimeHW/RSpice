@@ -62,10 +62,7 @@ pub const fn viewer_has_sheet_bar(viewer: ResultViewer) -> bool {
 }
 
 pub const fn viewer_has_structured_strip(viewer: ResultViewer) -> bool {
-    matches!(
-        viewer,
-        ResultViewer::Op | ResultViewer::Table
-    )
+    matches!(viewer, ResultViewer::Op | ResultViewer::Table)
 }
 
 pub fn compact_document_bar(
