@@ -152,6 +152,9 @@ pub enum ExitCode {
     ResultSchemaMismatch = 84,
     /// A materialized run disagrees with the plan that produced it
     MaterializationMismatch = 85,
+    /// The run stopped because its results storage filled; every row written
+    /// before the stop is kept and readable
+    StoppedStorageFull = 86,
 }
 
 impl From<ExitCode> for std::process::ExitCode {
@@ -183,6 +186,8 @@ pub enum FailureCategory {
     Compilation,
     /// Converting between result formats failed.
     Conversion,
+    /// A run stopped because its results storage filled, keeping what it wrote.
+    StorageFull,
 }
 
 impl FailureCategory {
@@ -197,6 +202,7 @@ impl FailureCategory {
             Self::Internal => "internal",
             Self::Compilation => "compilation",
             Self::Conversion => "conversion",
+            Self::StorageFull => "storage_full",
         }
     }
 
@@ -221,6 +227,7 @@ impl FailureCategory {
             "internal" => Self::Internal,
             "compilation" => Self::Compilation,
             "conversion" => Self::Conversion,
+            "storage_full" => Self::StorageFull,
             _ => return None,
         })
     }
@@ -270,6 +277,7 @@ pub const fn exit_code_for(category: FailureCategory) -> ExitCode {
         FailureCategory::Usage => ExitCode::MisuseOfCommand,
         FailureCategory::Verification => ExitCode::VerificationFailed,
         FailureCategory::Internal => ExitCode::InternalError,
+        FailureCategory::StorageFull => ExitCode::StoppedStorageFull,
         FailureCategory::Compilation | FailureCategory::Conversion => ExitCode::GeneralError,
     }
 }
@@ -398,6 +406,14 @@ pub enum CliError {
     #[error("Internal error: {message}")]
     InternalError { message: String },
 
+    /// A run stopped because its results storage filled. Every row written
+    /// before the stop stays in the store at `store`.
+    #[error("stopped: storage full, partial results kept: {message}")]
+    StorageFull {
+        message: String,
+        store: Option<PathBuf>,
+    },
+
     /// A failure already recorded in a run report, replayed as the process
     /// status.
     ///
@@ -471,6 +487,7 @@ impl CliError {
                 Category::Internal
             }
             CliError::VerilogAError { .. } => Category::Compilation,
+            CliError::StorageFull { .. } => Category::StorageFull,
             CliError::ConversionError { .. } => Category::Conversion,
             CliError::Reported { category, .. } => *category,
         }
@@ -646,6 +663,12 @@ impl CliError {
                 details
             }
             Self::InternalError { .. } => ErrorDetails::new("internal_error", category, false),
+            // The same run succeeds with more free space on the store's volume.
+            Self::StorageFull { store, .. } => {
+                let mut details = ErrorDetails::new("stopped_storage_full", category, true);
+                details.path = store.as_ref().map(|path| path.display().to_string());
+                details
+            }
             Self::Reported { details, .. } => (**details).clone(),
         };
         match self {
@@ -708,6 +731,18 @@ impl CliError {
     }
 
     /// Create an output I/O error with path context.
+    /// Writing an output failed because its volume, or the user's quota on it, is full.
+    pub fn is_storage_full(&self) -> bool {
+        matches!(
+            self,
+            CliError::OutputError { source, .. }
+                if matches!(
+                    source.kind(),
+                    std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded
+                )
+        )
+    }
+
     pub fn output_error(path: &Path, source: std::io::Error) -> Self {
         CliError::OutputError {
             path: path.to_path_buf(),

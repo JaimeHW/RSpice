@@ -13,9 +13,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use rspice_core::engine::{TransientResult, TransientStartupMode};
+use rspice_core::engine::{SinkTransient, TransientResult, TransientStartupMode};
 use rspice_core::netlist::OutputDirectiveKind;
-use rspice_core::result_sink::SinkReceipt;
+use rspice_core::result_sink::{SinkReceipt, SinkStop};
 use rspice_results_store::{
     FileIo, Manifest, Member, SegmentReader, SegmentState, StoreDir, StoreError, StoreSink,
 };
@@ -52,6 +52,8 @@ pub(super) struct StoredRows {
     /// `(device, parameter)` of each instance-parameter column.
     parameters: Vec<(String, String)>,
     receipt: SinkReceipt,
+    /// The storage filled and the run ended at its last whole chunk.
+    stopped: Option<SinkStop>,
 }
 
 /// A store directory, under a private name while its run is open.
@@ -60,9 +62,17 @@ struct RunStore {
 }
 
 /// Run the transient into a new store.
+///
+/// Before the first row, the store's volume must have room for at least the rows the run cannot
+/// avoid writing (`tstop` over the largest step, `max_step`), or the run is refused before it
+/// solves; a run whose likely size (`tstop` over the smaller of `max_step` and `tstep`) exceeds
+/// the free space only warns. While it runs, a write that would leave less free space than the
+/// segment needs to close stops it at that accepted point: the segment closes over every chunk
+/// written, and the run's outputs are written for what it kept before it ends as stopped.
 pub(super) fn run(
     ctx: &RunContext<'_>,
     tstop: f64,
+    tstep: f64,
     max_step: f64,
     startup_mode: TransientStartupMode,
     abort: &dyn rspice_core::AbortSignal,
@@ -76,7 +86,18 @@ pub(super) fn run(
             return Err(CliError::output_error(&segment, error));
         }
     };
-    let mut sink = StoreSink::new(io);
+    let free = free_space(&store.dir);
+    let mut sink = WatchedSink {
+        inner: StoreSink::new(WatchedIo {
+            io,
+            free: free.clone(),
+            full: false,
+        }),
+        free,
+        rows_needed: tstop / max_step,
+        rows_likely: tstop / max_step.min(tstep),
+        refused: None,
+    };
     let run = ctx.engine.run_tran_into_sink_with_startup_mode_and_abort(
         ctx.netlist,
         tstop,
@@ -85,18 +106,18 @@ pub(super) fn run(
         abort,
         &mut sink,
     );
-    let (shell, receipt) = match run {
+    let SinkTransient {
+        result: shell,
+        receipt,
+        stopped,
+    } = match run {
         Ok(done) => done,
-        Err(source) => {
-            store.discard();
-            return Err(CliError::CoreSimulationError {
-                source,
-                analysis: Some("Transient".to_string()),
-            });
-        }
+        Err(source) => return Err(stopped_run(ctx, store, &segment, &sink, source)),
     };
     let opened = sink
+        .inner
         .into_io()
+        .map(|io| io.io)
         .ok_or_else(|| StoreError::Io {
             kind: std::io::ErrorKind::Other,
             message: "the results segment was not closed".to_owned(),
@@ -135,6 +156,7 @@ pub(super) fn run(
             reader,
             targets,
             receipt,
+            stopped,
         },
     })
 }
@@ -186,11 +208,7 @@ fn slot_targets(
 impl StoredTransient {
     /// Read every row back into the result and complete the outputs that read whole waveforms
     /// (`.FFT`, lead power), after which it equals the in-memory run's.
-    pub(super) fn into_result(
-        mut self,
-        ctx: &RunContext<'_>,
-        tstop: f64,
-    ) -> Result<(TransientResult, StoredRows), CliError> {
+    pub(super) fn read_back(&mut self, ctx: &RunContext<'_>, tstop: f64) -> Result<(), CliError> {
         let rows = self.rows.rows();
         self.rows.fill(&mut self.shell, 0, rows)?;
         let parameters = std::mem::take(&mut self.rows.parameters);
@@ -224,8 +242,7 @@ impl StoredTransient {
             .map_err(|source| CliError::CoreSimulationError {
                 source,
                 analysis: Some("Transient".to_string()),
-            })?;
-        Ok((self.shell, self.rows))
+            })
     }
 
     /// How the outputs can read this run straight from its store, or `None` when they need it in
@@ -304,34 +321,110 @@ pub(crate) struct StoreRecord {
     pub(crate) events: u64,
     pub(crate) bytes: u64,
     pub(crate) digest: Option<String>,
+    /// Why the run stopped before completing, for a store a stopped run left.
+    pub(crate) stopped: Option<StoppedRecord>,
+}
+
+/// Where a run stopped and what it kept.
+#[derive(Debug, Clone)]
+pub(crate) struct StoppedRecord {
+    pub(crate) reason: &'static str,
+    pub(crate) at_x: Option<f64>,
+    pub(crate) rows_kept: u64,
+    pub(crate) bytes_kept: u64,
+}
+
+fn remember(record: StoreRecord) {
+    STORES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(record);
 }
 
 /// Every store the runs of this process left, in the order they finished.
 static STORES: std::sync::Mutex<Vec<StoreRecord>> = std::sync::Mutex::new(Vec::new());
 
 /// Leave `rows`' store beside `output` when `keep`, else delete it, and remember a store left.
+/// A run its storage stopped ends here as stopped, its outputs written for what it kept.
 pub(super) fn record_store(
-    rows: StoredRows,
+    mut rows: StoredRows,
     output: Option<&Path>,
     keep: bool,
 ) -> Result<(), CliError> {
     let receipt = rows.receipt();
+    if rows.stopped.is_some() {
+        let at = rows.last_time()?;
+        let free = free_space(&rows.store.dir)();
+        // A store that kept no row is not left behind.
+        let kept_at = rows.publish(output, keep && receipt.rows > 0)?;
+        return Err(storage_full(at, receipt, kept_at, free));
+    }
     if let Some(path) = rows.publish(output, keep)? {
         let record = StoreRecord {
             path,
             rows: receipt.rows,
             events: receipt.events,
             bytes: receipt.bytes,
-            digest: receipt
-                .digest
-                .map(|digest| digest.iter().map(|byte| format!("{byte:02x}")).collect()),
+            digest: receipt.digest.map(hex),
+            stopped: None,
         };
-        STORES
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(record);
+        remember(record);
     }
     Ok(())
+}
+
+/// The stop of a run that completed but whose outputs filled the disk as they were written: its
+/// store, which holds every row, is left beside `output`.
+pub(super) fn output_filled(
+    mut rows: StoredRows,
+    output: Option<&Path>,
+    error: &CliError,
+) -> CliError {
+    let receipt = rows.receipt();
+    let at = match rows.last_time() {
+        Ok(at) => at,
+        Err(failure) => return failure,
+    };
+    let free = free_space(&rows.store.dir)();
+    let kept_at = match rows.publish(output, true) {
+        Ok(path) => path,
+        Err(failure) => return failure,
+    };
+    let message = format!(
+        "the transient completed to t = {}, but writing its output filled the disk ({error}); \
+         all {} points are kept ({} bytes){}{}",
+        at.map_or_else(|| "0 s".to_owned(), crate::console::si_seconds),
+        receipt.rows,
+        receipt.bytes,
+        kept_at
+            .as_ref()
+            .map_or_else(String::new, |path| format!(" in {}", path.display())),
+        free.map_or_else(String::new, |free| format!("; {free} bytes free")),
+    );
+    if let Some(path) = &kept_at {
+        remember(StoreRecord {
+            path: path.clone(),
+            rows: receipt.rows,
+            events: receipt.events,
+            bytes: receipt.bytes,
+            digest: receipt.digest.map(hex),
+            stopped: Some(StoppedRecord {
+                reason: "output_disk_full",
+                at_x: at,
+                rows_kept: receipt.rows,
+                bytes_kept: receipt.bytes,
+            }),
+        });
+    }
+    CliError::StorageFull {
+        message,
+        store: kept_at,
+    }
+}
+
+/// A store digest as the run summary writes it.
+fn hex(digest: [u8; 32]) -> String {
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// The stores this process's runs left, by path.
@@ -416,6 +509,11 @@ fn probe_plan(
 impl StoredRows {
     pub(super) fn rows(&self) -> u64 {
         self.reader.rows()
+    }
+
+    /// The storage filled and the run ended at its last whole chunk, before its stop time.
+    pub(super) fn stopped(&self) -> bool {
+        self.stopped.is_some()
     }
 
     /// The time of the last row.
@@ -800,3 +898,310 @@ fn store_error(dir: &Path, error: StoreError) -> CliError {
         std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()),
     )
 }
+
+/// The error a run that did not complete ends with. A run refused before solving, or stopped for
+/// any reason but full storage, leaves nothing; one its storage stopped keeps its store, readable
+/// to its last whole chunk, beside where its output would have gone.
+fn stopped_run(
+    ctx: &RunContext<'_>,
+    store: RunStore,
+    segment: &Path,
+    sink: &WatchedSink,
+    source: rspice_core::SimulationError,
+) -> CliError {
+    use rspice_core::result_sink::SinkStop;
+    if let Some((needed, available)) = sink.refused {
+        store.discard();
+        return CliError::CoreSimulationError {
+            source: rspice_core::SimulationError::ResultSink(SinkStop::DiskFull {
+                needed: Some(needed),
+                available: Some(available),
+            }),
+            analysis: Some(format!(
+                "Transient, refused before solving: its results store needs at least {needed} \
+                 bytes for {:.0} rows on a volume with {available} bytes free",
+                sink.rows_needed.ceil()
+            )),
+        };
+    }
+    let filled = matches!(
+        source,
+        rspice_core::SimulationError::ResultSink(SinkStop::DiskFull { .. })
+    );
+    if !filled {
+        store.discard();
+        return CliError::CoreSimulationError {
+            source,
+            analysis: Some("Transient".to_string()),
+        };
+    }
+    let kept = FileIo::open(segment)
+        .map_err(StoreError::from)
+        .and_then(SegmentReader::open)
+        .and_then(|reader| {
+            store.save_manifest(&reader)?;
+            Ok(reader)
+        });
+    // A disk that filled before the segment held a readable chunk kept nothing.
+    let Ok(mut reader) = kept else {
+        let free = (sink.free)();
+        store.discard();
+        return storage_full(None, SinkReceipt::default(), None, free);
+    };
+    let rows = reader.rows();
+    let at = rows
+        .checked_sub(1)
+        .and_then(|last| reader.read_x(last, 1).ok())
+        .and_then(|x| x.first().copied());
+    let bytes = std::fs::metadata(segment).map_or(0, |meta| meta.len());
+    let output = ctx.resolve_output("tran").map(|resolved| resolved.path);
+    let kept_at = match store.publish(output.as_deref(), true) {
+        Ok(path) => path,
+        Err(error) => return error,
+    };
+    let receipt = SinkReceipt {
+        rows,
+        bytes,
+        ..SinkReceipt::default()
+    };
+    storage_full(at, receipt, kept_at, (sink.free)())
+}
+
+/// The stop of a run whose storage filled at `at`, with what `receipt` says it kept in the store
+/// at `kept_at`, remembered for the run summary.
+fn storage_full(
+    at: Option<f64>,
+    receipt: SinkReceipt,
+    kept_at: Option<PathBuf>,
+    free: Option<u64>,
+) -> CliError {
+    let (rows, bytes) = (receipt.rows, receipt.bytes);
+    let message = format!(
+        "the transient stopped at t = {} with {rows} points kept ({bytes} bytes){}{}",
+        at.map_or_else(|| "0 s".to_owned(), crate::console::si_seconds),
+        kept_at
+            .as_ref()
+            .map_or_else(String::new, |path| format!(" in {}", path.display())),
+        free.map_or_else(String::new, |free| format!("; {free} bytes free")),
+    );
+    if let Some(path) = &kept_at {
+        remember(StoreRecord {
+            path: path.clone(),
+            rows,
+            events: receipt.events,
+            bytes,
+            digest: receipt.digest.map(hex),
+            stopped: Some(StoppedRecord {
+                reason: "disk_full",
+                at_x: at,
+                rows_kept: rows,
+                bytes_kept: bytes,
+            }),
+        });
+    }
+    CliError::StorageFull {
+        message,
+        store: kept_at,
+    }
+}
+
+/// Free bytes on the store's volume, asked when the run begins and before each write that grows
+/// its segment.
+type FreeSpace = std::sync::Arc<dyn Fn() -> Option<u64> + Send + Sync>;
+
+fn free_space(dir: &Path) -> FreeSpace {
+    #[cfg(test)]
+    if let Some(quota) = tests::QUOTA.with(std::cell::Cell::get) {
+        return tests::quota(&dir.join(StoreDir::segment_name(0)), quota);
+    }
+    let dir = dir.to_path_buf();
+    std::sync::Arc::new(move || available_bytes(&dir))
+}
+
+/// Bytes an unprivileged writer may still use on the volume holding `path`.
+#[cfg(unix)]
+fn available_bytes(path: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: `path` is NUL-terminated and outlives the call, and `stat` is a writable `statvfs`
+    // that the call fills when it returns 0, the only case in which it is read.
+    let stat = unsafe {
+        if libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) != 0 {
+            return None;
+        }
+        stat.assume_init()
+    };
+    #[allow(clippy::unnecessary_cast)]
+    Some((stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64))
+}
+
+/// Bytes the calling user may still use on the volume holding `path`, quotas included.
+#[cfg(windows)]
+fn available_bytes(path: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    // A share's root is named with its trailing separator.
+    if wide.last() != Some(&u16::from(b'\\')) {
+        wide.push(u16::from(b'\\'));
+    }
+    wide.push(0);
+    let mut available = 0u64;
+    // SAFETY: `wide` is NUL-terminated and outlives the call, `available` is a writable `u64` the
+    // call fills when it succeeds, and the two totals it is not asked for are null.
+    let succeeded = unsafe {
+        windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut available,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    (succeeded != 0).then_some(available)
+}
+
+/// Without a free-space query, the operating system's own refusal of a write is the stop.
+#[cfg(not(any(unix, windows)))]
+fn available_bytes(_path: &Path) -> Option<u64> {
+    None
+}
+
+/// Free space a segment keeps for closing once a write was refused: its last index and `END`.
+const CLOSING_RESERVE: u64 = 1 << 20;
+
+/// A segment file that keeps room on its volume for the segment to close: a write that grows it
+/// past the free space less [`CLOSING_RESERVE`] fails as storage full. Every write after that is
+/// the writer closing the segment, which the reserve is for.
+struct WatchedIo {
+    io: FileIo,
+    free: FreeSpace,
+    full: bool,
+}
+
+impl rspice_results_store::SegmentIo for WatchedIo {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
+        self.io.read_at(offset, buf)
+    }
+
+    fn write_at(&mut self, offset: u64, data: &[u8]) -> std::io::Result<()> {
+        if !self.full {
+            let grows = (offset + data.len() as u64).saturating_sub(self.io.size()?);
+            if grows > 0
+                && (self.free)().is_some_and(|free| free < grows.saturating_add(CLOSING_RESERVE))
+            {
+                self.full = true;
+                return Err(std::io::ErrorKind::StorageFull.into());
+            }
+        }
+        let written = self.io.write_at(offset, data);
+        // The volume filled before the watch saw it: the writes closing the segment still try.
+        if written
+            .as_ref()
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::StorageFull)
+        {
+            self.full = true;
+        }
+        written
+    }
+
+    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
+        self.io.truncate(len)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.io.flush()
+    }
+
+    fn size(&self) -> std::io::Result<u64> {
+        self.io.size()
+    }
+}
+
+/// The store's sink with the disk preflight: when the run begins, the rows it cannot avoid
+/// writing must fit in the free space.
+struct WatchedSink {
+    inner: StoreSink<WatchedIo>,
+    free: FreeSpace,
+    /// The fewest rows the run can write: no step is longer than its largest.
+    rows_needed: f64,
+    /// The rows it likely writes.
+    rows_likely: f64,
+    /// `(bytes needed, bytes free)` when the preflight refused the run.
+    refused: Option<(u64, u64)>,
+}
+
+impl WatchedSink {
+    /// Bytes `rows` rows of `slots` values take in a segment at most: every value uncompressed,
+    /// plus 3.5 % for frames, indexes and summaries.
+    fn bytes(rows: f64, slots: usize) -> u64 {
+        let bytes = (rows.max(1.0) * (slots as f64 + 1.0) * 8.0 * 1.035).ceil();
+        if bytes.is_finite() && bytes < u64::MAX as f64 {
+            bytes as u64
+        } else {
+            u64::MAX
+        }
+    }
+}
+
+impl rspice_core::result_sink::ResultSink for WatchedSink {
+    fn begin(
+        &mut self,
+        schema: &rspice_core::result_sink::ResultSchema,
+        meta: &rspice_core::result_sink::RunMeta,
+    ) -> Result<(), rspice_core::result_sink::SinkStop> {
+        if let Some(free) = (self.free)() {
+            let needed = Self::bytes(self.rows_needed, schema.slots());
+            if needed > free {
+                self.refused = Some((needed, free));
+                return Err(rspice_core::result_sink::SinkStop::DiskFull {
+                    needed: Some(needed),
+                    available: Some(free),
+                });
+            }
+            let likely = Self::bytes(self.rows_likely, schema.slots());
+            if likely > free {
+                crate::observability::diagnostic(
+                    "results_store_space",
+                    None,
+                    format_args!(
+                        "Warning: this transient likely writes about {likely} bytes of results \
+                         and their volume has {free} bytes free; it stops, keeping what it \
+                         wrote, if the volume fills"
+                    ),
+                );
+            }
+        }
+        self.inner.begin(schema, meta)
+    }
+
+    #[inline]
+    fn row(&mut self, x: f64, values: &[f64]) -> Result<(), rspice_core::result_sink::SinkStop> {
+        self.inner.row(x, values)
+    }
+
+    fn amend_open_row(
+        &mut self,
+        row: u64,
+        column: u32,
+        value: f64,
+    ) -> Result<(), rspice_core::result_sink::SinkStop> {
+        self.inner.amend_open_row(row, column, value)
+    }
+
+    fn events(
+        &mut self,
+        changes: &[rspice_core::result_sink::EventChange],
+    ) -> Result<(), rspice_core::result_sink::SinkStop> {
+        self.inner.events(changes)
+    }
+
+    fn end(
+        &mut self,
+        status: rspice_core::result_sink::RunStatus,
+    ) -> Result<SinkReceipt, rspice_core::result_sink::SinkStop> {
+        self.inner.end(status)
+    }
+}
+
+#[cfg(test)]
+mod tests;

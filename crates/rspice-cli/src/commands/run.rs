@@ -673,7 +673,8 @@ fn ensure_cancellation_report(
 /// The JSON run summary's schema. Version 2 added `assertions` and
 /// `hdl_diagnostics`; version 3 added each run's `backends`; version 4 dropped
 /// `resource_limits.max_analysis_points`; version 5 added `stores`, the results
-/// stores the runs left beside their outputs; version 6 added
+/// stores the runs left beside their outputs, each with where the run stopped
+/// when its storage filled (`stopped`); version 6 added
 /// `error_details.bytes`, the size of an allocation the machine refused.
 const RUN_SUMMARY_SCHEMA_VERSION: u32 = 6;
 
@@ -754,6 +755,12 @@ fn write_run_summary(
                 "events": store.events,
                 "bytes": store.bytes,
                 "digest": store.digest,
+                "stopped": store.stopped.as_ref().map(|stopped| serde_json::json!({
+                    "reason": stopped.reason,
+                    "at_x": stopped.at_x,
+                    "rows_kept": stopped.rows_kept,
+                    "bytes_kept": stopped.bytes_kept,
+                })),
             })
         }).collect::<Vec<_>>(),
         "aborted": abort_reason.map(|reason| match reason {

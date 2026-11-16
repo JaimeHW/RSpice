@@ -2,7 +2,58 @@
 
 use super::{fft, lead_power};
 use crate::analysis::transient::TransientResult;
+use crate::result_sink::{
+    EventChange, ResultSchema, ResultSink, RunMeta, RunStatus, SinkReceipt, SinkStop,
+};
 use crate::{AbortSignal, Engine, Netlist, SimulationError, Value};
+
+/// A transient whose rows a result sink kept.
+#[derive(Debug)]
+pub struct SinkTransient {
+    /// Everything the run returns but its time and waveform columns, which are empty.
+    pub result: TransientResult,
+    /// What the sink kept.
+    pub receipt: SinkReceipt,
+    /// The sink ran out of disk or memory and the run ended at the accepted point whose row it
+    /// refused, before its stop time. Every row the sink took before is kept, and the sink was
+    /// ended as stopped.
+    pub stopped: Option<SinkStop>,
+}
+
+/// The caller's sink, remembering the first refusal of a row: the stop that ends the run.
+pub(super) struct StopLatch<'s> {
+    pub(super) sink: &'s mut dyn ResultSink,
+    pub(super) stop: Option<SinkStop>,
+}
+
+impl ResultSink for StopLatch<'_> {
+    fn begin(&mut self, schema: &ResultSchema, meta: &RunMeta) -> Result<(), SinkStop> {
+        self.sink.begin(schema, meta)
+    }
+
+    #[inline]
+    fn row(&mut self, x: f64, values: &[f64]) -> Result<(), SinkStop> {
+        let written = self.sink.row(x, values);
+        if let Err(stop) = &written
+            && self.stop.is_none()
+        {
+            self.stop = Some(stop.clone());
+        }
+        written
+    }
+
+    fn amend_open_row(&mut self, row: u64, column: u32, value: f64) -> Result<(), SinkStop> {
+        self.sink.amend_open_row(row, column, value)
+    }
+
+    fn events(&mut self, changes: &[EventChange]) -> Result<(), SinkStop> {
+        self.sink.events(changes)
+    }
+
+    fn end(&mut self, status: RunStatus) -> Result<SinkReceipt, SinkStop> {
+        self.sink.end(status)
+    }
+}
 
 impl Engine {
     /// Complete the outputs of a transient whose rows a result sink kept, once the caller has

@@ -72,11 +72,13 @@ fn a_transient_written_through_the_store_reads_back_as_the_in_memory_result() {
             .run_tran_with_startup_mode_and_abort(&netlist, tstop, max_step, startup, &NoAbort)
             .unwrap_or_else(|error| panic!("{label}: {error}"));
         let mut store = StoreSink::new(MemoryIo::new());
-        let (streamed, receipt) = engine
+        let run = engine
             .run_tran_into_sink_with_startup_mode_and_abort(
                 &netlist, tstop, max_step, startup, &NoAbort, &mut store,
             )
             .unwrap_or_else(|error| panic!("{label}: {error}"));
+        assert_eq!(run.stopped, None, "{label}");
+        let (streamed, receipt) = (run.result, run.receipt);
         assert!(
             streamed.time.is_empty(),
             "{label}: the rows went to the sink"
@@ -200,7 +202,7 @@ fn a_deck_whose_outputs_read_whole_waveforms_completes_them_from_the_rows_read_b
     );
 
     let mut store = StoreSink::new(MemoryIo::new());
-    let (mut shell, _) = engine
+    let mut shell = engine
         .run_tran_into_sink_with_startup_mode_and_abort(
             &netlist,
             4e-6,
@@ -209,7 +211,8 @@ fn a_deck_whose_outputs_read_whole_waveforms_completes_them_from_the_rows_read_b
             &NoAbort,
             &mut store,
         )
-        .unwrap();
+        .unwrap()
+        .result;
     assert!(shell.fft_results.is_empty() && shell.device_op_traces.is_empty());
     let mut reader = SegmentReader::open(store.into_io().unwrap()).unwrap();
     read_back(&mut shell, &mut reader);
@@ -233,4 +236,175 @@ fn a_deck_whose_outputs_read_whole_waveforms_completes_them_from_the_rows_read_b
         format!("{:?}", shell.fft_results),
         format!("{:?}", expected.fft_results)
     );
+}
+
+/// A sink that keeps rows in memory and refuses the `refuse`th as a full disk, counting any row
+/// offered after it.
+struct FillsAt {
+    kept: rspice_core::result_sink::VecSink,
+    refuse: usize,
+    refused_at: Option<f64>,
+    offered_after: usize,
+    ended: Option<rspice_core::result_sink::RunStatus>,
+}
+
+impl FillsAt {
+    fn new(refuse: usize) -> Self {
+        Self {
+            kept: rspice_core::result_sink::VecSink::new(),
+            refuse,
+            refused_at: None,
+            offered_after: 0,
+            ended: None,
+        }
+    }
+}
+
+impl rspice_core::result_sink::ResultSink for FillsAt {
+    fn begin(
+        &mut self,
+        schema: &rspice_core::result_sink::ResultSchema,
+        meta: &rspice_core::result_sink::RunMeta,
+    ) -> Result<(), rspice_core::result_sink::SinkStop> {
+        self.kept.begin(schema, meta)
+    }
+
+    fn row(&mut self, x: f64, values: &[f64]) -> Result<(), rspice_core::result_sink::SinkStop> {
+        let full = rspice_core::result_sink::SinkStop::DiskFull {
+            needed: None,
+            available: None,
+        };
+        if self.refused_at.is_some() {
+            self.offered_after += 1;
+            return Err(full);
+        }
+        if self.kept.x().len() == self.refuse {
+            self.refused_at = Some(x);
+            return Err(full);
+        }
+        self.kept.row(x, values)
+    }
+
+    fn amend_open_row(
+        &mut self,
+        row: u64,
+        column: u32,
+        value: f64,
+    ) -> Result<(), rspice_core::result_sink::SinkStop> {
+        self.kept.amend_open_row(row, column, value)
+    }
+
+    fn events(
+        &mut self,
+        changes: &[rspice_core::result_sink::EventChange],
+    ) -> Result<(), rspice_core::result_sink::SinkStop> {
+        self.kept.events(changes)
+    }
+
+    fn end(
+        &mut self,
+        status: rspice_core::result_sink::RunStatus,
+    ) -> Result<rspice_core::result_sink::SinkReceipt, rspice_core::result_sink::SinkStop> {
+        self.ended = Some(status.clone());
+        self.kept.end(status)
+    }
+}
+
+#[test]
+fn a_sink_out_of_disk_ends_the_run_at_the_refused_point_with_no_later_step_or_event() {
+    use rspice_core::result_sink::{RunStatus, SinkStop, StopReason};
+    // A clock through an adc bridge, an inverter and a dac: an event at every edge.
+    let netlist = Netlist::parse(
+        "clocked events\n\
+         vin a 0 pulse(0 3.3 0 0.1n 0.1n 1n 2n)\n\
+         a_adc [a] [d] adc\n\
+         a_inv d dn inv\n\
+         a_dac [dn] [drv] dac\n\
+         .model adc adc_bridge (in_low=0.8 in_high=2.0 rise_delay=1p fall_delay=1p)\n\
+         .model inv d_inverter (rise_delay=50p fall_delay=50p)\n\
+         .model dac dac_bridge (out_low=0 out_high=5 out_undef=2.5 t_rise=1p t_fall=1p)\n\
+         r1 drv out 1k\n\
+         c1 out 0 1p\n\
+         .tran 0.05n 100n\n\
+         .end\n",
+    )
+    .unwrap();
+    let engine = Engine::default();
+    let memory = engine
+        .run_tran_with_startup_mode_and_abort(
+            &netlist,
+            100e-9,
+            0.05e-9,
+            TransientStartupMode::OperatingPoint,
+            &NoAbort,
+        )
+        .unwrap();
+    let refuse = memory.time.len() / 2;
+    let mut sink = FillsAt::new(refuse);
+    let run = engine
+        .run_tran_into_sink_with_startup_mode_and_abort(
+            &netlist,
+            100e-9,
+            0.05e-9,
+            TransientStartupMode::OperatingPoint,
+            &NoAbort,
+            &mut sink,
+        )
+        .unwrap();
+    assert!(matches!(run.stopped, Some(SinkStop::DiskFull { .. })));
+    assert_eq!(sink.ended, Some(RunStatus::Stopped(StopReason::DiskFull)));
+    assert_eq!(run.receipt.rows, refuse as u64);
+    // The run took no step after the refused point: no row was offered after it.
+    assert_eq!(sink.offered_after, 0);
+    let stop = sink.refused_at.unwrap();
+    assert_eq!(stop.to_bits(), memory.time[refuse].to_bits());
+    assert_eq!(bits(sink.kept.x()), bits(&memory.time[..refuse]));
+    // Every event up to the refused point happened, as in the whole run, and none after it.
+    assert!(
+        memory
+            .digital_traces
+            .iter()
+            .any(|trace| trace.points.iter().any(|point| point.time > stop)),
+        "the whole run has events after the stop"
+    );
+    let until = |result: &TransientResult| {
+        result
+            .digital_traces
+            .iter()
+            .map(|trace| {
+                let points: Vec<_> = trace
+                    .points
+                    .iter()
+                    .filter(|point| point.time <= stop)
+                    .map(|point| (point.time.to_bits(), format!("{:?}", point.value)))
+                    .collect();
+                (trace.node_name.clone(), points)
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        run.result
+            .digital_traces
+            .iter()
+            .flat_map(|trace| &trace.points)
+            .all(|point| point.time <= stop)
+    );
+    assert_eq!(until(&run.result), until(&memory));
+
+    // Refused at its first row, the run stops there too, typed, with nothing kept.
+    let mut sink = FillsAt::new(0);
+    let run = engine
+        .run_tran_into_sink_with_startup_mode_and_abort(
+            &netlist,
+            100e-9,
+            0.05e-9,
+            TransientStartupMode::OperatingPoint,
+            &NoAbort,
+            &mut sink,
+        )
+        .unwrap();
+    assert!(matches!(run.stopped, Some(SinkStop::DiskFull { .. })));
+    assert_eq!(run.receipt.rows, 0);
+    assert_eq!(sink.offered_after, 0);
+    assert_eq!(sink.refused_at, Some(0.0));
 }

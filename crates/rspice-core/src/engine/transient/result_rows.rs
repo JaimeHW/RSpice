@@ -8,11 +8,17 @@
 //!
 //! The last row written stays readable: the sample hook publishes it, and a checkpoint taken
 //! where the published row was not the restart state carries it.
+//!
+//! A caller's sink that runs out of disk or memory refuses a row and keeps every row it took
+//! before. The run then ends at that accepted point, as it would at its stop time: the refusal is
+//! kept as the run's stop, every later row is dropped, and the time loop does not take another
+//! step.
 
 use crate::abort_signal::TransientRow;
 use crate::analysis::transient::{ObservedPoint, TransientResult};
 use crate::result_sink::{
-    ResultAxis, ResultSchema, ResultSignal, ResultSignalKind, ResultSink, RunMeta, VecSink,
+    ResultAxis, ResultSchema, ResultSignal, ResultSignalKind, ResultSink, RunMeta, SinkStop,
+    VecSink,
 };
 use crate::{SimulationError, Value};
 
@@ -150,6 +156,8 @@ pub(super) struct TransientRows<'s> {
     points: usize,
     /// The rows kept in memory have moved into the run's result.
     filled: bool,
+    /// The caller's sink refused a row for want of disk or memory: the run ends at that point.
+    stop: Option<SinkStop>,
 }
 
 impl<'s> TransientRows<'s> {
@@ -181,6 +189,7 @@ impl<'s> TransientRows<'s> {
             start: 0.0,
             points: 0,
             filled: false,
+            stop: None,
         }
     }
 
@@ -211,14 +220,18 @@ impl<'s> TransientRows<'s> {
         (&self.layout, &mut self.next)
     }
 
-    /// Write the gathered row as the accepted point at `time`.
+    /// Write the gathered row as the accepted point at `time`. Once the caller's sink stopped
+    /// the run, the row is dropped.
     #[inline]
     pub(super) fn push(&mut self, time: Value) -> Result<(), SimulationError> {
         let written = match &mut self.target {
             Target::Memory(sink) => sink.row(time, &self.next),
+            Target::External(_) if self.stop.is_some() => return Ok(()),
             Target::External(sink) => sink.row(time, &self.next),
         };
-        written.map_err(SimulationError::ResultSink)?;
+        if let Err(stop) = written {
+            return self.refused(stop);
+        }
         std::mem::swap(&mut self.row, &mut self.next);
         if self.points == 0 {
             self.start = time;
@@ -226,6 +239,25 @@ impl<'s> TransientRows<'s> {
         self.time = time;
         self.points += 1;
         Ok(())
+    }
+
+    /// A refusal for want of disk or memory is the run's stop; any other is its error.
+    #[cold]
+    fn refused(&mut self, stop: SinkStop) -> Result<(), SimulationError> {
+        match stop {
+            SinkStop::DiskFull { .. } | SinkStop::MemoryFull { .. }
+                if matches!(self.target, Target::External(_)) =>
+            {
+                self.stop = Some(stop);
+                Ok(())
+            }
+            stop => Err(SimulationError::ResultSink(stop)),
+        }
+    }
+
+    /// The caller's sink stopped the run: the time loop ends at the point whose row it refused.
+    pub(super) fn stopped(&self) -> bool {
+        self.stop.is_some()
     }
 
     /// Accepted points written so far.
@@ -326,6 +358,9 @@ impl<'s> TransientRows<'s> {
     }
 
     fn amend_first(&mut self, slot: usize, value: Value) -> Result<(), SimulationError> {
+        if self.stop.is_some() {
+            return Ok(());
+        }
         if self.points != 1 {
             return Err(SimulationError::Circuit(format!(
                 "row 0 can only be amended before row 1; the run has written {} rows",

@@ -20,6 +20,7 @@ use super::{
 use crate::abort_signal::{AbortSignal, DigitalEventCode, NoAbort, TransientDigitalBus};
 use crate::analysis::transient::EventOnlyNetKind;
 use integral_trace::TransientIntegralTrace;
+pub use sink_route::SinkTransient;
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
 use crate::circuit::SolutionDependentCompanionStep;
@@ -3595,6 +3596,11 @@ impl Engine {
     /// read the whole waveforms once the run ends, are left to the caller:
     /// [`Engine::finish_transient_from_rows`] completes them once the rows are
     /// read back.
+    ///
+    /// A sink that refuses a row for want of disk or memory stops the run at
+    /// that accepted point: the run returns as far as it got, with the stop,
+    /// and the sink is ended as stopped. A refusal before the first row, or
+    /// any other refusal, is the run's error.
     pub fn run_tran_into_sink_with_startup_mode_and_abort(
         &self,
         netlist: &Netlist,
@@ -3603,12 +3609,12 @@ impl Engine {
         startup_mode: TransientStartupMode,
         abort: &dyn AbortSignal,
         sink: &mut dyn crate::result_sink::ResultSink,
-    ) -> Result<(TransientResult, crate::result_sink::SinkReceipt), SimulationError> {
+    ) -> Result<SinkTransient, SimulationError> {
         use crate::result_sink::{ResultSink, RunStatus, SinkStop, StopReason};
         validate_transient_window(tstop, max_step)?;
         self.reset_convergence_quality();
         let engine = self.resolved_for_netlist(netlist);
-        let cell = std::cell::RefCell::new(sink);
+        let cell = std::cell::RefCell::new(sink_route::StopLatch { sink, stop: None });
         let shared: &std::cell::RefCell<dyn ResultSink + '_> = &cell;
         let outcome = engine
             .run_tran_resolved_with_resume(
@@ -3633,13 +3639,20 @@ impl Engine {
                 },
             )
             .map(|(result, _, _)| result);
-        let sink = cell.into_inner();
+        let sink_route::StopLatch { sink, stop } = cell.into_inner();
         match outcome {
             Ok(result) => {
-                let receipt = sink
-                    .end(RunStatus::Completed)
-                    .map_err(SimulationError::ResultSink)?;
-                Ok((result, receipt))
+                let status = match &stop {
+                    None => RunStatus::Completed,
+                    Some(SinkStop::MemoryFull { .. }) => RunStatus::Stopped(StopReason::MemoryFull),
+                    Some(_) => RunStatus::Stopped(StopReason::DiskFull),
+                };
+                let receipt = sink.end(status).map_err(SimulationError::ResultSink)?;
+                Ok(SinkTransient {
+                    result,
+                    receipt,
+                    stopped: stop,
+                })
             }
             Err(error) => {
                 let reason = match &error {
@@ -7930,7 +7943,9 @@ impl Engine {
                 }
             };
         }
-        while !transient_horizon_reached(self.config.spice_dialect, t, tstop) {
+        // A caller's sink out of disk or memory ends the run at the accepted point whose row it
+        // refused, before another step or event is taken.
+        while !rows.stopped() && !transient_horizon_reached(self.config.spice_dialect, t, tstop) {
             let attempt_top_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             mosfet_caps_valid = false;
             capacitor_accepted_states_valid = false;
@@ -13552,7 +13567,7 @@ impl Engine {
             total_tail_nanos += tail_phase_start.elapsed().as_nanos();
         }
 
-        if !transient_horizon_reached(self.config.spice_dialect, t, tstop) {
+        if !rows.stopped() && !transient_horizon_reached(self.config.spice_dialect, t, tstop) {
             log::error!(
                 "Transient terminated early at t={:.6e}s / {:.6e}s after {} step attempts",
                 t,
@@ -13706,7 +13721,9 @@ impl Engine {
         debug_assert_eq!(xyce_step_failure_count, 0);
         debug_assert_eq!(stale_accept_count, 0);
         debug_assert!(!circuit.xyce_core_trial_invalid());
+        // A run its sink stopped ends before the checkpoints still scheduled.
         if scheduled_checkpoint_cursor != scheduled_checkpoint_times.len()
+            && !rows.stopped()
             && !abort
                 .model_control()
                 .is_some_and(|control| control.is_finished())

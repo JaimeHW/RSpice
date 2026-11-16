@@ -46,7 +46,8 @@ impl StoreError {
 impl From<io::Error> for StoreError {
     fn from(error: io::Error) -> Self {
         match error.kind() {
-            io::ErrorKind::StorageFull => Self::DiskFull,
+            // A user's disk quota running out fills the disk as far as the run can tell.
+            io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => Self::DiskFull,
             io::ErrorKind::OutOfMemory => Self::MemoryFull,
             kind => Self::Io {
                 kind,

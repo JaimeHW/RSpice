@@ -8,16 +8,18 @@ use super::events_tests::{Step, event_schema, run};
 use super::support::{meta, mixed_schema, rows};
 use crate::{
     EventChange, EventValue, Logic, MemoryIo, RunStatus, RunWriter, SegmentIo, SegmentReader,
-    SegmentState, SegmentWriter, StoreError,
+    SegmentState, SegmentWriter, StopReason, StoreError,
 };
 
 /// A segment the test can read while the writer thread owns the I/O, optionally slow or with a
-/// size past which every write reports a full disk.
+/// size past which every write reports a full disk. With `reserve`, the writes after the first
+/// refusal go through, as on a volume that keeps room for the segment to close.
 #[derive(Clone, Default)]
 struct SharedIo {
     bytes: Arc<Mutex<MemoryIo>>,
     delay: Duration,
     limit: Option<u64>,
+    reserve: bool,
 }
 
 impl SharedIo {
@@ -35,6 +37,9 @@ impl SegmentIo for SharedIo {
             .limit
             .is_some_and(|limit| offset + data.len() as u64 > limit)
         {
+            if self.reserve {
+                self.limit = None;
+            }
             return Err(io::ErrorKind::StorageFull.into());
         }
         std::thread::sleep(self.delay);
@@ -212,13 +217,77 @@ fn a_full_disk_stops_the_writer_and_keeps_a_readable_prefix() {
         Err(StoreError::WriterStopped)
     );
     assert_eq!(writer.sync(), Err(StoreError::WriterStopped));
+    // With no room left to close the segment, ending the run reports the full disk again.
     assert_eq!(
-        writer.finish(RunStatus::Completed).err(),
-        Some(StoreError::WriterStopped)
+        writer
+            .finish(RunStatus::Stopped(StopReason::DiskFull))
+            .err(),
+        Some(StoreError::DiskFull)
     );
     let reader = SegmentReader::open(MemoryIo::from_bytes(io.snapshot())).unwrap();
     assert_eq!(reader.state(), &SegmentState::Recovered);
     assert!(reader.rows() > 0 && reader.rows() < 5000);
+}
+
+/// Write `steps` until the disk refuses one, then end the run with `status`.
+fn fill_then_end(io: SharedIo, steps: &[Step], status: RunStatus) -> Result<u64, StoreError> {
+    let mut writer = RunWriter::with_options(io, &event_schema(), &meta(), 64, NEVER).unwrap();
+    let mut failed = None;
+    for step in steps {
+        let pushed = writer
+            .push_row(step.x, &step.values)
+            .and_then(|()| writer.push_events(&step.changes));
+        if let Err(error) = pushed {
+            failed = Some(error);
+            break;
+        }
+    }
+    assert_eq!(failed, Some(StoreError::DiskFull));
+    writer.finish(status).map(|(receipt, _)| receipt.rows)
+}
+
+#[test]
+fn a_full_disk_with_room_to_close_ends_the_segment_over_its_whole_chunks() {
+    let (steps, _) = run(5000, 0, 24);
+    let io = SharedIo {
+        limit: Some(40_000),
+        reserve: true,
+        ..SharedIo::default()
+    };
+    let rows = fill_then_end(io.clone(), &steps, RunStatus::Stopped(StopReason::DiskFull)).unwrap();
+    let mut reader = SegmentReader::open(MemoryIo::from_bytes(io.snapshot())).unwrap();
+    assert!(matches!(
+        reader.state(),
+        SegmentState::Complete {
+            status: RunStatus::Stopped(StopReason::DiskFull),
+            ..
+        }
+    ));
+    assert_eq!(reader.rows(), rows);
+    assert!(rows > 0 && rows < 5000 && rows.is_multiple_of(64), "{rows}");
+    let x: Vec<f64> = steps[..rows as usize].iter().map(|step| step.x).collect();
+    assert_eq!(reader.read_x(0, rows as usize).unwrap(), x);
+    let last = &steps[rows as usize - 1];
+    assert_eq!(reader.read_slot(0, rows - 1, 1).unwrap(), [last.values[0]]);
+
+    // A run that says it completed is told its last rows did not fit; the segment still closes.
+    let io = SharedIo {
+        limit: Some(40_000),
+        reserve: true,
+        ..SharedIo::default()
+    };
+    assert_eq!(
+        fill_then_end(io.clone(), &steps, RunStatus::Completed),
+        Err(StoreError::DiskFull)
+    );
+    let reader = SegmentReader::open(MemoryIo::from_bytes(io.snapshot())).unwrap();
+    assert!(matches!(
+        reader.state(),
+        SegmentState::Complete {
+            status: RunStatus::Stopped(StopReason::DiskFull),
+            ..
+        }
+    ));
 }
 
 #[test]

@@ -124,7 +124,15 @@ mod threaded {
         Finish(Batch, RunStatus),
     }
 
-    type Outcome<I> = Result<(StoreReceipt, I), StoreError>;
+    /// How the writer thread ended.
+    enum Outcome<I> {
+        /// It wrote `END` with the status the run ended with.
+        Closed(StoreReceipt, I),
+        /// A full disk refused a write, and the segment closed over the chunks it already held,
+        /// `END` saying the run stopped there.
+        Full(StoreReceipt, I),
+        Failed(StoreError),
+    }
 
     /// The writer thread's ends of the channels.
     struct Thread<I: SegmentIo> {
@@ -139,21 +147,30 @@ mod threaded {
 
     impl<I: SegmentIo> Thread<I> {
         fn run(mut self) -> Outcome<I> {
-            match self.serve() {
+            let error = match self.serve() {
                 Ok((batch, status)) => match self.encoder.write_batch(&batch) {
-                    Ok(()) => self.encoder.finish(&status),
-                    Err(error) => {
-                        self.encoder.sync_after_stop();
-                        Err(error)
+                    Ok(()) => {
+                        return match self.encoder.finish(&status) {
+                            Ok((receipt, io)) => Outcome::Closed(receipt, io),
+                            Err(error) => Outcome::Failed(error),
+                        };
                     }
+                    Err(error) => error,
                 },
                 // Abandoned: the solve thread dropped the writer without finishing.
-                Err(StoreError::WriterStopped) => Err(StoreError::WriterStopped),
-                Err(error) => {
-                    self.encoder.sync_after_stop();
-                    Err(error)
+                Err(StoreError::WriterStopped) => {
+                    return Outcome::Failed(StoreError::WriterStopped);
                 }
+                Err(error) => error,
+            };
+            if matches!(error, StoreError::DiskFull) {
+                return match self.encoder.close_after_full() {
+                    Ok((receipt, io)) => Outcome::Full(receipt, io),
+                    Err(_) => Outcome::Failed(StoreError::DiskFull),
+                };
             }
+            self.encoder.sync_after_stop();
+            Outcome::Failed(error)
         }
 
         /// Apply messages in order until the last chunk arrives with the run's status.
@@ -204,6 +221,10 @@ mod threaded {
         sync_due: Arc<AtomicBool>,
         thread: Option<JoinHandle<Outcome<I>>>,
         stopped: bool,
+        /// The segment the writer thread closed after a full disk stopped it.
+        closed: Option<(StoreReceipt, I)>,
+        /// The error that stopped the writer thread, which `finish` reports again.
+        failure: Option<StoreError>,
     }
 
     impl<I: SegmentIo + Send + 'static> Threaded<I> {
@@ -248,6 +269,8 @@ mod threaded {
                 sync_due,
                 thread: Some(thread),
                 stopped: false,
+                closed: None,
+                failure: None,
             })
         }
 
@@ -260,18 +283,29 @@ mod threaded {
             self.work = None;
             match self.thread.take().map(JoinHandle::join) {
                 Some(Ok(outcome)) => outcome,
-                Some(Err(_)) => Err(StoreError::Io {
+                Some(Err(_)) => Outcome::Failed(StoreError::Io {
                     kind: std::io::ErrorKind::Other,
                     message: "the results store writer thread panicked".into(),
                 }),
-                None => Err(StoreError::WriterStopped),
+                None => Outcome::Failed(StoreError::WriterStopped),
             }
         }
 
-        /// The writer thread stopped: collect its error and refuse everything after.
+        /// The writer thread stopped: collect its error and refuse everything after. A segment it
+        /// closed after a full disk waits for `finish`.
         fn writer_error(&mut self) -> StoreError {
             self.stopped = true;
-            self.join().err().unwrap_or(StoreError::WriterStopped)
+            match self.join() {
+                Outcome::Full(receipt, io) => {
+                    self.closed = Some((receipt, io));
+                    StoreError::DiskFull
+                }
+                Outcome::Failed(error) => {
+                    self.failure = Some(error.clone());
+                    error
+                }
+                Outcome::Closed(..) => StoreError::WriterStopped,
+            }
         }
 
         fn send(&mut self, message: Message) -> Result<(), StoreError> {
@@ -390,12 +424,32 @@ mod threaded {
             self.send(Message::Sync(snapshot))
         }
 
+        /// Write the last chunk and `END` with `status`. After a full disk stopped the writer
+        /// thread, it closed the segment over the chunks it held: that is the receipt for a run
+        /// ended as stopped, and a run ended as completed is told the disk was full.
         pub(super) fn finish(mut self, status: RunStatus) -> Result<(StoreReceipt, I), StoreError> {
-            self.check()?;
-            self.hand_off_events()?;
-            let last = std::mem::replace(&mut self.open, Batch::new(0, 0));
-            self.send(Message::Finish(last, status))?;
-            self.join()
+            let stopped = matches!(status, RunStatus::Stopped(_));
+            let sent = if self.stopped {
+                Err(StoreError::WriterStopped)
+            } else {
+                self.hand_off_events().and_then(|()| {
+                    let last = std::mem::replace(&mut self.open, Batch::new(0, 0));
+                    self.send(Message::Finish(last, status))
+                })
+            };
+            if let Err(error) = sent {
+                return match self.closed.take() {
+                    Some(closed) if stopped => Ok(closed),
+                    Some(_) => Err(StoreError::DiskFull),
+                    None => Err(self.failure.take().unwrap_or(error)),
+                };
+            }
+            match self.join() {
+                Outcome::Closed(receipt, io) => Ok((receipt, io)),
+                Outcome::Full(receipt, io) if stopped => Ok((receipt, io)),
+                Outcome::Full(..) => Err(StoreError::DiskFull),
+                Outcome::Failed(error) => Err(error),
+            }
         }
     }
 

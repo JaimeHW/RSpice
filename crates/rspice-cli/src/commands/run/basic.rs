@@ -1032,6 +1032,7 @@ pub(super) fn run_transient(
         let stored = super::stored_transient::run(
             ctx,
             tstop,
+            tstep,
             internal_max_step,
             startup_mode,
             &crate::abort::ProgressAbort::new(&pb),
@@ -1079,6 +1080,11 @@ pub(super) enum TransientStore {
 
 /// Publish a transient whose rows are in a store, streaming them from it when the outputs allow
 /// and reading them back otherwise, then leave the store beside the output or delete it.
+///
+/// A run its storage stopped publishes what it kept, as a run that ended at its last kept row,
+/// and then ends as stopped; an output that cannot be written for the shortened run is a
+/// warning, since the stop is what the run reports. When writing the outputs fills the disk, the
+/// store keeps the rows the outputs could not take and the run ends as stopped the same way.
 fn finish_stored_transient(
     ctx: &RunContext<'_>,
     mut stored: super::stored_transient::StoredTransient,
@@ -1086,35 +1092,87 @@ fn finish_stored_transient(
     tstop: f64,
     store: TransientStore,
 ) -> Result<TransientOutcome, CliError> {
-    let plan = match store {
-        TransientStore::Streamed => stored.stream_plan(ctx, tstart)?,
-        TransientStore::ReadBack => None,
+    let stopped = stored.rows.stopped();
+    let tstop = if stopped {
+        stored.rows.last_time()?.unwrap_or(tstart)
+    } else {
+        tstop
     };
-    let (result, mut rows) = match plan {
-        Some(_) => (stored.shell, stored.rows),
-        None => stored.into_result(ctx, tstop)?,
+    // A run stopped before its first whole chunk kept nothing to publish.
+    let (published, written) = if stopped && stored.rows.rows() == 0 {
+        (None, Ok(()))
+    } else {
+        publish_stored_transient(ctx, &mut stored, tstart, tstop, store)
     };
-    let mut output = super::stored_transient::StoredOutput {
-        rows: &mut rows,
-        plan: plan.as_ref(),
-        published: None,
-    };
-    let finished =
-        finish_transient_outputs(ctx, &result, tstart, tstop, None, None, Some(&mut output));
-    let published = output.published.take();
-    match finished {
-        Ok(()) => {
-            super::stored_transient::record_store(rows, published.as_deref(), !ctx.args.no_store)?;
+    let super::stored_transient::StoredTransient { shell, rows } = stored;
+    let mut keep = !ctx.args.no_store;
+    match written {
+        Ok(()) => {}
+        Err(error) if stopped || error.is_storage_full() => {
+            crate::observability::diagnostic(
+                "results_store_output_incomplete",
+                None,
+                format_args!("Warning: the transient's outputs are incomplete: {error}"),
+            );
+            // The store is all that holds the rows the outputs did not take.
+            keep = true;
+            if !stopped {
+                return Err(super::stored_transient::output_filled(
+                    rows,
+                    published.as_deref(),
+                    &error,
+                ));
+            }
         }
         Err(error) => {
             let _ = rows.publish(None, false);
             return Err(error);
         }
     }
+    super::stored_transient::record_store(rows, published.as_deref(), keep)?;
     Ok(TransientOutcome {
-        result,
+        result: shell,
         post_results: None,
     })
+}
+
+/// Write a stored transient's outputs. Returns the output it was published to, which a failed
+/// write names too, and how writing went.
+fn publish_stored_transient(
+    ctx: &RunContext<'_>,
+    stored: &mut super::stored_transient::StoredTransient,
+    tstart: f64,
+    tstop: f64,
+    store: TransientStore,
+) -> (Option<std::path::PathBuf>, Result<(), CliError>) {
+    let plan = match store {
+        TransientStore::Streamed => stored.stream_plan(ctx, tstart),
+        TransientStore::ReadBack => Ok(None),
+    };
+    let plan = match plan {
+        Ok(plan) => plan,
+        Err(error) => return (None, Err(error)),
+    };
+    if plan.is_none()
+        && let Err(error) = stored.read_back(ctx, tstop)
+    {
+        return (None, Err(error));
+    }
+    let mut output = super::stored_transient::StoredOutput {
+        rows: &mut stored.rows,
+        plan: plan.as_ref(),
+        published: None,
+    };
+    let written = finish_transient_outputs(
+        ctx,
+        &stored.shell,
+        tstart,
+        tstop,
+        None,
+        None,
+        Some(&mut output),
+    );
+    (output.published, written)
 }
 
 pub(super) fn finish_transient_result(
